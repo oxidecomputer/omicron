@@ -231,7 +231,7 @@ mod test {
     use omicron_common::api::external::Vni;
     use omicron_common::api::internal::shared::PrivateIpConfig;
     use omicron_common::zpool_name::ZpoolName;
-    use omicron_generation_kinds::Generation;
+    use omicron_generation_kinds::{Generation, TargetReleaseGeneration};
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::ExternalIpUuid;
@@ -330,7 +330,7 @@ mod test {
             parent_blueprint_id: None,
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
-            target_release_minimum_generation: Generation::new(),
+            target_release_minimum_generation: TargetReleaseGeneration::new(),
             nexus_generation,
             external_networking_generation: Generation::new(),
             cockroachdb_fingerprint: String::new(),

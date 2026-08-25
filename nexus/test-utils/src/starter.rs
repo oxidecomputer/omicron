@@ -80,7 +80,7 @@ use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_debug_dropbox::DebugDropbox;
-use omicron_generation_kinds::Generation;
+use omicron_generation_kinds::{Generation, TargetReleaseGeneration};
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev;
 use omicron_test_utils::dev::TestTempDir;
@@ -835,7 +835,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             parent_blueprint_id: None,
             internal_dns_version: dns_config.generation,
             external_dns_version: Generation::new(),
-            target_release_minimum_generation: Generation::new(),
+            target_release_minimum_generation: TargetReleaseGeneration::new(),
             nexus_generation: Generation::new(),
             external_networking_generation: Generation::new(),
             cockroachdb_fingerprint: String::new(),

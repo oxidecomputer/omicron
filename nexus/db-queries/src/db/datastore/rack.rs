@@ -1099,6 +1099,7 @@ mod test {
     };
     use omicron_common::api::internal::shared::PrivateIpv4Config;
     use omicron_common::api::internal::shared::PrivateIpv6Config;
+    use omicron_generation_kinds::TargetReleaseGeneration;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::GenericUuid;
@@ -1127,7 +1128,8 @@ mod test {
                     parent_blueprint_id: None,
                     internal_dns_version: *Generation::new(),
                     external_dns_version: *Generation::new(),
-                    target_release_minimum_generation: *Generation::new(),
+                    target_release_minimum_generation:
+                        TargetReleaseGeneration::new(),
                     nexus_generation: *Generation::new(),
                     external_networking_generation: *Generation::new(),
                     cockroachdb_fingerprint: String::new(),

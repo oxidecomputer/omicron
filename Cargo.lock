@@ -8043,6 +8043,7 @@ dependencies = [
  "nexus-db-queries",
  "nexus-types",
  "omicron-common",
+ "omicron-generation-kinds",
  "omicron-rpaths",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",

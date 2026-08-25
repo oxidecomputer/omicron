@@ -9,7 +9,6 @@ use futures::StreamExt;
 use iddqd::IdOrdMap;
 use nexus_db_model::DbMetadataNexusState;
 use nexus_db_model::DnsGroup;
-use nexus_db_model::Generation;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::DataStoreDnsTest;
@@ -213,7 +212,7 @@ impl PlanningInputFromDb<'_> {
             ),
         };
         let tuf_repo = TufRepoPolicy {
-            target_release_generation: target_release.generation.0,
+            target_release_generation: target_release.generation(),
             description: target_release_desc,
         };
         // NOTE: We currently assume that only two generations are in play: the
@@ -223,9 +222,9 @@ impl PlanningInputFromDb<'_> {
         //
         // We may need to revisit this decision in the future. See that issue
         // for some discussion.
-        let old_repo = if let Some(prev) = target_release.generation.prev() {
+        let old_repo = if let Some(prev) = target_release.generation().prev() {
             let prev_release = datastore
-                .target_release_get_generation(opctx, Generation(prev))
+                .target_release_get_generation(opctx, prev)
                 .await
                 .internal_context("fetching previous target release")?;
             let description = if let Some(prev_release) = prev_release {

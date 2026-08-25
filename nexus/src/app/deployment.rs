@@ -40,7 +40,7 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_debug_dropbox::DepositHandle;
 use omicron_debug_dropbox::Producer;
-use omicron_generation_kinds::Generation;
+use omicron_generation_kinds::TargetReleaseGeneration;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -533,7 +533,7 @@ impl super::Nexus {
                     SetTargetReleaseIntent::RecoverFromMupdate => {
                         validate_can_set_target_release_for_mupdate_recovery(
                             &current_blueprint,
-                            *current_target_release.generation,
+                            current_target_release.generation(),
                             &new_system_version,
                             &self.log,
                         )
@@ -632,7 +632,7 @@ enum TargetReleaseChangeError {
 // it work the second time.
 fn validate_can_set_target_release_for_mupdate_recovery(
     current_blueprint: &Blueprint,
-    current_target_release_gen: Generation,
+    current_target_release_gen: TargetReleaseGeneration,
     proposed_new_version: &semver::Version,
     log: &Logger,
 ) -> Result<(), TargetReleaseChangeError> {
