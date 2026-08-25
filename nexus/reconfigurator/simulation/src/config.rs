@@ -7,7 +7,8 @@ use std::{collections::BTreeSet, fmt};
 use iddqd::IdOrdMap;
 use indexmap::IndexSet;
 use nexus_types::deployment::{Blueprint, BlueprintTarget};
-use omicron_common::api::external::{Generation, Name};
+use omicron_common::api::external::Name;
+use omicron_generation_kinds::Generation;
 use omicron_uuid_kinds::OmicronZoneUuid;
 
 use crate::{

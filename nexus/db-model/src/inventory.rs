@@ -55,7 +55,6 @@ use nexus_types::inventory::{
     Caboose, CockroachStatus, Collection, InternalDnsGenerationStatus,
     NvmeFirmware, PowerState, RotPage, RotSlot, TimeSync,
 };
-use omicron_common::api::external;
 use omicron_common::disk::DatasetName;
 use omicron_common::update::OmicronInstallManifestSource;
 use omicron_common::zpool_name::ZpoolName;
@@ -2767,7 +2766,7 @@ impl InvOmicronSledConfig {
     pub fn new(
         inv_collection_id: CollectionUuid,
         id: OmicronSledConfigUuid,
-        generation: external::Generation,
+        generation: omicron_generation_kinds::Generation,
         remove_mupdate_override: Option<MupdateOverrideUuid>,
         host_phase_2: HostPhase2DesiredSlots,
         measurements: BTreeSet<OmicronSingleMeasurement>,

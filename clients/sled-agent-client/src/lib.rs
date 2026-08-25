@@ -62,7 +62,7 @@ progenitor::generate_api!(
         FmdInventoryError = sled_agent_types_versions::latest::inventory::FmdInventoryError,
         FmdInventoryErrorKind = sled_agent_types_versions::latest::inventory::FmdInventoryErrorKind,
         FmdResource = sled_agent_types_versions::latest::inventory::FmdResource,
-        Generation = omicron_common::api::external::Generation,
+        Generation = omicron_generation_kinds::Generation,
         Hostname = omicron_common::api::external::Hostname,
         ImportExportPolicy = sled_agent_types_versions::latest::early_networking::ImportExportPolicy,
         Inventory = sled_agent_types_versions::latest::inventory::Inventory,

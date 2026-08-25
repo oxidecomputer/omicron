@@ -31,9 +31,9 @@ iddqd.workspace = true
 ipnetwork.workspace = true
 itertools.workspace = true
 macaddr.workspace = true
+omicron-generation-kinds.workspace = true
 omicron-ledger.workspace = true
 omicron-uuid-kinds.workspace = true
-oxide-generation = { workspace = true, features = ["daft01", "schemars08", "serde", "slog2", "std"] }
 oxnet.workspace = true
 proptest = { workspace = true, optional = true }
 rand.workspace = true
@@ -61,7 +61,6 @@ tufaceous-artifact.workspace = true
 camino-tempfile.workspace = true
 expectorate.workspace = true
 libc.workspace = true
-oxide-generation = { workspace = true, features = ["proptest1"] }
 proptest.workspace = true
 regress.workspace = true
 serde_urlencoded.workspace = true
@@ -70,4 +69,4 @@ tokio = { workspace = true, features = ["test-util"] }
 toml.workspace = true
 
 [features]
-testing = ["proptest", "test-strategy", "oxide-generation/proptest1"]
+testing = ["proptest", "test-strategy"]

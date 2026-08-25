@@ -48,7 +48,7 @@ impl TufRepoDescription {
     /// [`nexus_types::tuf_repo::TufRepoDescription`].
     pub fn new(
         description: nexus_types::tuf_repo::TufRepoDescription,
-        generation_added: external::Generation,
+        generation_added: omicron_generation_kinds::Generation,
     ) -> Result<Self, external::ByteCountRangeError> {
         let id = TypedUuid::new_v4().into();
         Ok(Self {
@@ -117,7 +117,7 @@ impl TufArtifactDescription {
     /// [`tufaceous_artifact::Artifact`].
     pub fn new(
         artifact: tufaceous_artifact::Artifact,
-        generation_added: external::Generation,
+        generation_added: omicron_generation_kinds::Generation,
     ) -> Result<Self, external::ByteCountRangeError> {
         let id = TypedUuid::new_v4().into();
         Ok(Self {
