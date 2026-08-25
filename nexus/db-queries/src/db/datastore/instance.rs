@@ -2381,6 +2381,7 @@ mod tests {
                     generation: Generation::new(),
                     state,
                     failure_reason,
+                    stop_for_update_disposition_generation: None,
                 },
             )
             .await
@@ -3178,6 +3179,7 @@ mod tests {
                     generation: Generation::new(),
                     state: VmmState::Running,
                     failure_reason: None,
+                    stop_for_update_disposition_generation: None,
                 },
             )
             .await
@@ -3240,6 +3242,7 @@ mod tests {
                     generation: Generation::new(),
                     state: VmmState::Running,
                     failure_reason: None,
+                    stop_for_update_disposition_generation: None,
                 },
             )
             .await
@@ -3337,6 +3340,7 @@ mod tests {
                     generation: Generation::new(),
                     state: VmmState::Stopped,
                     failure_reason: None,
+                    stop_for_update_disposition_generation: None,
                 },
             )
             .await
@@ -3377,6 +3381,7 @@ mod tests {
                     generation: Generation::new(),
                     state: VmmState::Running,
                     failure_reason: None,
+                    stop_for_update_disposition_generation: None,
                 },
             )
             .await
@@ -3477,6 +3482,7 @@ mod tests {
                     generation: Generation::new(),
                     state: VmmState::Running,
                     failure_reason: None,
+                    stop_for_update_disposition_generation: None,
                 },
             )
             .await
