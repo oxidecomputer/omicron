@@ -11,6 +11,7 @@ use nexus_lockstep_client::types::CurrentStatus;
 use nexus_lockstep_client::types::LastResult;
 use nexus_types::internal_api::background::*;
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
+use omicron_uuid_kinds::CollectionUuid;
 use slog::info;
 use std::time::Duration;
 
@@ -507,6 +508,70 @@ pub async fn run_tuf_artifact_replication_step(
     .unwrap();
     assert_eq!(status.last_run_counters.err(), 0);
     status
+}
+
+/// Run the inventory_collection background task and return the new collection's
+/// ID.
+///
+/// Panics on encountering an error, or if no collection ID was returned from
+/// the task.
+pub async fn run_inventory_collection(
+    lockstep_client: &ClientTestContext,
+) -> CollectionUuid {
+    let last_background_task =
+        activate_background_task(&lockstep_client, "inventory_collection")
+            .await;
+
+    let LastResult::Completed(last_result_completed) =
+        last_background_task.last
+    else {
+        panic!(
+            "unexpected {:?} returned from inventory_collection task",
+            last_background_task.last,
+        );
+    };
+
+    let details = last_result_completed.details;
+    if let Some(error) = details.get("error") {
+        panic!("inventory_collection task failed: {error}");
+    }
+    let Some(collection_id) =
+        details.get("collection_id").and_then(serde_json::Value::as_str)
+    else {
+        panic!("inventory_collection details have no collection_id: {details}");
+    };
+    collection_id.parse().expect("parsed collection_id as a CollectionUuid")
+}
+
+/// Run the inventory_loader background task and return the ID of the collection
+/// it has loaded.
+///
+/// Panics on encountering an error, or if there are no collections.
+pub async fn run_inventory_loader(
+    lockstep_client: &ClientTestContext,
+) -> CollectionUuid {
+    let last_background_task =
+        activate_background_task(&lockstep_client, "inventory_loader").await;
+
+    let LastResult::Completed(last_result_completed) =
+        last_background_task.last
+    else {
+        panic!(
+            "unexpected {:?} returned from inventory_loader task",
+            last_background_task.last,
+        );
+    };
+
+    let status = serde_json::from_value::<InventoryLoadStatus>(
+        last_result_completed.details,
+    )
+    .expect("parsed inventory_loader details as InventoryLoadStatus");
+    match status {
+        InventoryLoadStatus::Loaded { collection_id, .. } => collection_id,
+        InventoryLoadStatus::Error(_) | InventoryLoadStatus::NoCollections => {
+            panic!("inventory_loader did not load a collection: {status:?}")
+        }
+    }
 }
 
 /// Run the blueprint_loader background task
