@@ -5418,6 +5418,7 @@ async fn cmd_db_instance_info(
                     generation: _,
                     state: _,
                     failure_reason: _,
+                    stop_for_update_disposition_generation: _,
                 } = vmm;
                 VmmRow {
                     state: VmmStateRow::from(vmm),
@@ -8153,6 +8154,7 @@ fn prettyprint_vmm(
     const STATE: &'static str = "state";
     const FAILURE_REASON: &'static str = "  failure reason";
     const FAILURE_NOTE: &'static str = "  note";
+    const STOP_FOR_UPDATE: &'static str = "  marked to stop for sled update";
     const WIDTH: usize = const_max_len(&[
         ID,
         CREATED,
@@ -8166,6 +8168,7 @@ fn prettyprint_vmm(
         ADDRESS,
         FAILURE_REASON,
         FAILURE_NOTE,
+        STOP_FOR_UPDATE,
     ]);
 
     let width = std::cmp::max(width, Some(WIDTH)).unwrap_or(WIDTH);
@@ -8182,6 +8185,7 @@ fn prettyprint_vmm(
         generation,
         time_state_updated,
         failure_reason,
+        stop_for_update_disposition_generation,
     } = vmm;
 
     println!("{indent}{ID:>width$}: {id}");
@@ -8215,6 +8219,12 @@ fn prettyprint_vmm(
              non-NULL failure reason",
             "/!\\",
             width = indent.len(),
+        );
+    }
+    if let Some(ud_generation) = stop_for_update_disposition_generation {
+        let u_g = u64::from(ud_generation.0);
+        println!(
+            "{indent}{STOP_FOR_UPDATE:>width$}: update disposition generation {u_g}"
         );
     }
 
@@ -8313,6 +8323,7 @@ async fn cmd_db_vmm_list(
                 generation: _,
                 state: _,
                 failure_reason: _,
+                stop_for_update_disposition_generation: _,
             } = vmm;
             let sled = match sled {
                 Some(sled) => sled.serial_number(),
