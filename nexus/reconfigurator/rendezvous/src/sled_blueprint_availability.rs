@@ -319,7 +319,7 @@ mod tests {
     use async_bb8_diesel::AsyncSimpleConnection;
     use nexus_db_queries::db::pub_test_utils::TestDatabase;
     use nexus_db_queries::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
-    use omicron_common::api::external::Generation;
+    use omicron_generation_kinds::Generation;
     use omicron_test_utils::dev;
     use proptest::prelude::*;
     use proptest::proptest;

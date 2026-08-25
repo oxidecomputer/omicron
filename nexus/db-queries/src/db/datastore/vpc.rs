@@ -2986,7 +2986,7 @@ mod tests {
     use nexus_types::external_api::vpc;
     use nexus_types::identity::Asset;
     use omicron_common::api::external;
-    use omicron_common::api::external::Generation;
+    use omicron_generation_kinds::Generation;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::GenericUuid;

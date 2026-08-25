@@ -338,8 +338,8 @@ mod test {
         BlueprintZoneConfig, BlueprintZoneDisposition,
         BlueprintZoneImageSource, BlueprintZoneType, blueprint_zone_type,
     };
-    use omicron_common::api::external::Generation;
     use omicron_common::zpool_name::ZpoolName;
+    use omicron_generation_kinds::Generation;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use sled_agent_types::inventory::OmicronZoneDataset;

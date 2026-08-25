@@ -77,13 +77,13 @@ use omicron_common::address::{
     get_internal_dns_server_addresses,
 };
 use omicron_common::address::{Ipv6Subnet, NEXUS_TECHPORT_EXTERNAL_PORT};
-use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::{PrivateIpConfig, SledIdentifiers};
 use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
 };
 use omicron_common::disk::{DatasetKind, DatasetName};
 use omicron_ddm_admin_client::DdmError;
+use omicron_generation_kinds::Generation;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::RackUuid;
 use sled_agent_early_networking::EarlyNetworkSetup;
