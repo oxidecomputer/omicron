@@ -79,7 +79,28 @@ use std::num::Wrapping;
 use thiserror::Error;
 use uuid::Uuid;
 
-const MINIMUM_U2_COUNT: usize = 3;
+/// The fewest U.2 disks a sled may report before it can be included in the
+/// rack setup plan.
+///
+/// This can never be zero: every sled in the plan hosts an NTP zone, whose
+/// filesystem must live on one of the sled's U.2 pools.
+const MINIMUM_U2_COUNT: usize = 1;
+
+/// Returns whether a sled reports enough U.2 disks to be included in the rack
+/// setup plan.
+///
+/// Sleds whose inventory does not (yet) satisfy this check are not rejected;
+/// plan generation waits for them to report more disks. Disks are enumerated
+/// asynchronously as a sled boots, so this also keeps plan generation from
+/// acting on an incomplete snapshot of a sled's storage.
+fn sled_has_minimum_u2s(inventory: &Inventory) -> bool {
+    inventory
+        .disks
+        .iter()
+        .filter(|disk| matches!(disk.variant, DiskVariant::U2))
+        .count()
+        >= MINIMUM_U2_COUNT
+}
 
 /// Describes errors which may occur while generating a plan for services.
 #[derive(Error, Debug, SlogInlineError)]
@@ -272,13 +293,7 @@ impl ServicePlan {
                     BackoffError::transient(PlanError::SledApi(err))
                 })?;
 
-            if inventory
-                .disks
-                .iter()
-                .filter(|disk| matches!(disk.variant, DiskVariant::U2))
-                .count()
-                < MINIMUM_U2_COUNT
-            {
+            if !sled_has_minimum_u2s(&inventory) {
                 return Err(BackoffError::transient(
                     PlanError::SledInitialization("Awaiting disks".to_string()),
                 ));
@@ -1543,19 +1558,21 @@ mod tests {
         }
     }
 
-    fn test_sled_info() -> SledInfo {
+    /// Fabricates a `SledInfo` reporting `u2_count` U.2 disks. Each test sled
+    /// needs a distinct `sled_index`, which determines its subnet.
+    fn test_sled_info(sled_index: u16, u2_count: usize) -> SledInfo {
         let sled_id = SledUuid::new_v4();
-        let address = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0);
+        let address = Ipv6Addr::new(0xfd00, 0, 0, sled_index, 0, 0, 0, 0);
         let subnet = Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(address);
         let sled_address = get_sled_address(subnet);
         let is_scrimlet = true;
 
-        let disks: Vec<_> = (0..DISK_COUNT)
+        let disks: Vec<_> = (0..u2_count)
             .map(|i| sled_agent_types::inventory::InventoryDisk {
                 identity: DiskIdentity {
                     vendor: "vendor".to_string(),
                     model: "model".to_string(),
-                    serial: format!("test-{i}"),
+                    serial: format!("test-{sled_index}-{i}"),
                 },
                 variant: DiskVariant::U2,
                 slot: i as i64,
@@ -1598,6 +1615,18 @@ mod tests {
             },
             is_scrimlet,
         )
+    }
+
+    #[test]
+    fn single_u2_sled_is_admitted() {
+        // Compute-heavy sleds may carry a single U.2. Plan generation must
+        // accept such a sled's inventory rather than waiting indefinitely for
+        // more disks to appear.
+        let sled = test_sled_info(0, 1);
+        assert!(
+            sled_has_minimum_u2s(&sled.inventory),
+            "a sled with one U.2 should pass the inventory disk-count check"
+        );
     }
 
     #[test]
@@ -1713,7 +1742,7 @@ mod tests {
             .expect_err("Should have failed to create plan");
 
         // Try again, with a sled that has ten U.2 disks
-        let sleds = vec![test_sled_info()];
+        let sleds = vec![test_sled_info(0, DISK_COUNT)];
         let plan = ServicePlan::create_transient(&logctx.log, &config, sleds)
             .expect("Should have created plan");
 
@@ -1764,12 +1793,98 @@ mod tests {
         logctx.cleanup_successful();
     }
 
+    /// Asserts the per-sled properties a plan must uphold even when sleds
+    /// have a single U.2: an NTP zone on every sled, and CockroachDB zones on
+    /// distinct sleds (a sled cannot host two CockroachDB datasets unless it
+    /// has two pools).
+    fn assert_zones_spread_across_sleds(plan: &ServicePlan) {
+        let mut total_cockroach = 0;
+        for sled in &plan.all_sleds {
+            let ntp_count = sled
+                .config
+                .zones
+                .iter()
+                .filter(|zone| {
+                    matches!(
+                        zone.zone_type,
+                        BlueprintZoneType::InternalNtp(_)
+                            | BlueprintZoneType::BoundaryNtp(_)
+                    )
+                })
+                .count();
+            assert_eq!(
+                ntp_count, 1,
+                "expected exactly one NTP zone on sled {}",
+                sled.sled_id
+            );
+
+            let cockroach_count = sled
+                .config
+                .zones
+                .iter()
+                .filter(|zone| {
+                    matches!(zone.zone_type, BlueprintZoneType::CockroachDb(_))
+                })
+                .count();
+            assert!(
+                cockroach_count <= 1,
+                "expected at most one CockroachDB zone on sled {}, saw {}",
+                sled.sled_id,
+                cockroach_count
+            );
+            total_cockroach += cockroach_count;
+        }
+        assert_eq!(total_cockroach, COCKROACHDB_REDUNDANCY);
+    }
+
+    #[test]
+    fn test_plan_with_one_u2_per_sled() {
+        let logctx = test_setup_log("test_plan_with_one_u2_per_sled");
+
+        let (_dns_ips, config) = test_dns_ips_and_config();
+
+        // CockroachDB has the largest count of same-kind datasets, and
+        // same-kind datasets must land on distinct pools. With one pool per
+        // sled, the rack needs at least one sled per CockroachDB zone.
+        let sleds: Vec<_> = (0..COCKROACHDB_REDUNDANCY)
+            .map(|i| test_sled_info(u16::try_from(i).unwrap(), 1))
+            .collect();
+        let plan = ServicePlan::create_transient(&logctx.log, &config, sleds)
+            .expect("Should have created plan with one U.2 per sled");
+
+        assert_zones_spread_across_sleds(&plan);
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_plan_with_heterogeneous_u2_counts() {
+        let logctx = test_setup_log("test_plan_with_heterogeneous_u2_counts");
+
+        let (_dns_ips, config) = test_dns_ips_and_config();
+
+        // A mix of storage-heavy sleds and compute-heavy sleds carrying a
+        // single U.2.
+        let u2_counts = [DISK_COUNT, DISK_COUNT, 1, 1, 1];
+        let sleds: Vec<_> = u2_counts
+            .iter()
+            .enumerate()
+            .map(|(i, &count)| test_sled_info(u16::try_from(i).unwrap(), count))
+            .collect();
+        let plan = ServicePlan::create_transient(&logctx.log, &config, sleds)
+            .expect("Should have created plan with mixed U.2 counts");
+
+        assert_zones_spread_across_sleds(&plan);
+
+        logctx.cleanup_successful();
+    }
+
     #[test]
     fn test_last_allocated_subnet_ip_offset() {
         let logctx = test_setup_log("test_last_allocated_subnet_ip_offset");
 
         let (_dns_ips, config) = test_dns_ips_and_config();
-        let sled_info = vec![test_sled_info()];
+        let sled_info = vec![test_sled_info(0, DISK_COUNT)];
         let plan =
             ServicePlan::create_transient(&logctx.log, &config, sled_info)
                 .expect("should've created a plan");
