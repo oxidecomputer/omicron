@@ -34,7 +34,8 @@ use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::CockroachDbSettings;
-use nexus_types::deployment::OmicronZoneExternalSnatIp;
+use nexus_types::deployment::OmicronZoneExternalSnat;
+use nexus_types::deployment::OmicronZoneExternalSnatIpV6;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::SledDisk;
@@ -85,7 +86,7 @@ use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
 use sled_agent_types::inventory::NetworkInterface;
 use sled_agent_types::inventory::NetworkInterfaceKind;
 use sled_agent_types::inventory::OmicronZoneType;
-use sled_agent_types::inventory::SourceNatConfigGeneric;
+use sled_agent_types::inventory::SourceNatConfigV6;
 use sled_agent_types::inventory::ZoneKind;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
@@ -685,7 +686,7 @@ fn test_reuse_external_ips_from_expunged_zones() {
     println!("2 -> 3 (maximum Nexus):\n{}", diff.display());
 
     // Planning succeeded, but let's prove that we reused the IP address!
-    let expunged_ip = zone.zone_type.external_networking().unwrap().0.ip();
+    let expunged_ip = zone.zone_type.external_networking().unwrap().0[0].ip();
     let new_zone = blueprint3
         .sleds
         .values()
@@ -695,7 +696,9 @@ fn test_reuse_external_ips_from_expunged_zones() {
                 && zone
                     .zone_type
                     .external_networking()
-                    .map_or(false, |(ip, _)| expunged_ip == ip.ip())
+                    .map_or(false, |(ips, _)| {
+                        ips.iter().any(|ip| expunged_ip == ip.ip())
+                    })
         })
         .expect("couldn't find that the external IP was reused");
     println!(
@@ -887,9 +890,9 @@ fn test_reuse_external_dns_ips_from_expunged_zones() {
     let mut ips = blueprint3
         .in_service_zones()
         .filter_map(|(_id, zone)| {
-            zone.zone_type
-                .is_external_dns()
-                .then(|| zone.zone_type.external_networking().unwrap().0.ip())
+            zone.zone_type.is_external_dns().then(|| {
+                zone.zone_type.external_networking().unwrap().0[0].ip()
+            })
         })
         .collect::<Vec<IpAddr>>();
     ips.sort();
@@ -4111,15 +4114,17 @@ fn test_update_boundary_ntp() {
                         primary: true,
                         slot: 0,
                     },
-                    external_ip: OmicronZoneExternalSnatIp {
-                        id: ExternalIpUuid::new_v4(),
-                        snat_cfg: SourceNatConfigGeneric::new(
-                            IpAddr::V6(Ipv6Addr::LOCALHOST),
-                            0,
-                            0x4000 - 1,
-                        )
-                        .unwrap(),
-                    },
+                    external_ip: OmicronZoneExternalSnat::Ipv6Only(
+                        OmicronZoneExternalSnatIpV6 {
+                            id: ExternalIpUuid::new_v4(),
+                            snat_cfg: SourceNatConfigV6::new(
+                                Ipv6Addr::LOCALHOST,
+                                0,
+                                0x4000 - 1,
+                            )
+                            .unwrap(),
+                        },
+                    ),
                 },
             );
             Ok(())

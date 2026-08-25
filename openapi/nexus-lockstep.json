@@ -3134,7 +3134,12 @@
                 "type": "string"
               },
               "external_ip": {
-                "$ref": "#/components/schemas/OmicronZoneExternalSnatIp"
+                "description": "The source NAT configuration (one address per IP family).",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/OmicronZoneExternalSnat"
+                  }
+                ]
               },
               "nic": {
                 "description": "The service vNIC providing outbound connectivity using OPTE.",
@@ -3302,11 +3307,11 @@
               "dataset": {
                 "$ref": "#/components/schemas/OmicronZoneDataset"
               },
-              "dns_address": {
-                "description": "The address at which the external DNS server is reachable.",
+              "dns_addresses": {
+                "description": "The addresses at which the external DNS server is reachable.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/OmicronZoneExternalFloatingAddr"
+                    "$ref": "#/components/schemas/OmicronZoneExternalFloatingAddrs"
                   }
                 ]
               },
@@ -3331,7 +3336,7 @@
             },
             "required": [
               "dataset",
-              "dns_address",
+              "dns_addresses",
               "http_address",
               "nic",
               "type"
@@ -3405,11 +3410,11 @@
                   "format": "ip"
                 }
               },
-              "external_ip": {
-                "description": "The address at which the external nexus server is reachable.",
+              "external_ips": {
+                "description": "The addresses at which the external nexus server is reachable.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/OmicronZoneExternalFloatingIp"
+                    "$ref": "#/components/schemas/OmicronZoneExternalFloatingIps"
                   }
                 ]
               },
@@ -3452,7 +3457,7 @@
             },
             "required": [
               "external_dns_servers",
-              "external_ip",
+              "external_ips",
               "external_tls",
               "internal_address",
               "lockstep_port",
@@ -6643,6 +6648,27 @@
           "id"
         ]
       },
+      "OmicronZoneExternalFloatingAddrs": {
+        "title": "IdOrdMap",
+        "description": "A non-empty, bounded set of floating external addresses (IP + port) allocated to an external DNS zone.\n\nThis is the blueprint-layer analog of the sled-agent wire type `ExternalDnsAddrs`: it enforces the same non-empty, bounded invariant (via the shared `check_external_ip_count`), but each entry additionally carries its allocated `ExternalIpUuid`.",
+        "x-rust-type": {
+          "crate": "iddqd",
+          "parameters": [
+            {
+              "$ref": "#/components/schemas/OmicronZoneExternalFloatingAddr"
+            }
+          ],
+          "path": "iddqd::IdOrdMap",
+          "version": "*"
+        },
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/OmicronZoneExternalFloatingAddr"
+        },
+        "minItems": 1,
+        "maxItems": 16,
+        "uniqueItems": true
+      },
       "OmicronZoneExternalFloatingIp": {
         "description": "Floating external IP allocated to an Omicron-managed zone.\n\nThis is a slimmer `nexus_db_model::ExternalIp` that only stores the fields necessary for blueprint planning, and requires that the zone have a single IP.",
         "type": "object",
@@ -6660,15 +6686,125 @@
           "ip"
         ]
       },
-      "OmicronZoneExternalSnatIp": {
-        "description": "SNAT (outbound) external IP allocated to an Omicron-managed zone.\n\nThis is a slimmer `nexus_db_model::ExternalIp` that only stores the fields necessary for blueprint planning, and requires that the zone have a single IP.",
+      "OmicronZoneExternalFloatingIps": {
+        "title": "IdOrdMap",
+        "description": "A non-empty, bounded set of floating external IPs allocated to a Nexus zone.",
+        "x-rust-type": {
+          "crate": "iddqd",
+          "parameters": [
+            {
+              "$ref": "#/components/schemas/OmicronZoneExternalFloatingIp"
+            }
+          ],
+          "path": "iddqd::IdOrdMap",
+          "version": "*"
+        },
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/OmicronZoneExternalFloatingIp"
+        },
+        "minItems": 1,
+        "maxItems": 16,
+        "uniqueItems": true
+      },
+      "OmicronZoneExternalSnat": {
+        "description": "SNAT configuration for a boundary NTP zone in a blueprint.\n\nBoundary NTP reaches upstream servers via source NAT and needs a source address per IP version it wants to reach them on: at most one per family, and at least one overall. This is the blueprint-layer analog of the sled-agent wire type `ZoneSnatConfig`, but each entry additionally carries its allocated `ExternalIpUuid`.",
+        "oneOf": [
+          {
+            "description": "An IPv4 SNAT external IP allocated to an Omicron-managed zone.\n\nThe family-typed analog of [`OmicronZoneExternalSnatIp`], used in the variants of [`OmicronZoneExternalSnat`] so the enum can't hold an address of the wrong family.",
+            "type": "object",
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/ExternalIpUuid"
+              },
+              "snat_cfg": {
+                "$ref": "#/components/schemas/SourceNatConfigV4"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ipv4_only"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "snat_cfg",
+              "type"
+            ]
+          },
+          {
+            "description": "An IPv6 SNAT external IP allocated to an Omicron-managed zone.\n\nThe family-typed analog of [`OmicronZoneExternalSnatIp`], used in the variants of [`OmicronZoneExternalSnat`] so the enum can't hold an address of the wrong family.",
+            "type": "object",
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/ExternalIpUuid"
+              },
+              "snat_cfg": {
+                "$ref": "#/components/schemas/SourceNatConfigV6"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ipv6_only"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "snat_cfg",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "ipv4": {
+                "$ref": "#/components/schemas/OmicronZoneExternalSnatIpV4"
+              },
+              "ipv6": {
+                "$ref": "#/components/schemas/OmicronZoneExternalSnatIpV6"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "dual_stack"
+                ]
+              }
+            },
+            "required": [
+              "ipv4",
+              "ipv6",
+              "type"
+            ]
+          }
+        ]
+      },
+      "OmicronZoneExternalSnatIpV4": {
+        "description": "An IPv4 SNAT external IP allocated to an Omicron-managed zone.\n\nThe family-typed analog of [`OmicronZoneExternalSnatIp`], used in the variants of [`OmicronZoneExternalSnat`] so the enum can't hold an address of the wrong family.",
         "type": "object",
         "properties": {
           "id": {
             "$ref": "#/components/schemas/ExternalIpUuid"
           },
           "snat_cfg": {
-            "$ref": "#/components/schemas/SourceNatConfigGeneric"
+            "$ref": "#/components/schemas/SourceNatConfigV4"
+          }
+        },
+        "required": [
+          "id",
+          "snat_cfg"
+        ]
+      },
+      "OmicronZoneExternalSnatIpV6": {
+        "description": "An IPv6 SNAT external IP allocated to an Omicron-managed zone.\n\nThe family-typed analog of [`OmicronZoneExternalSnatIp`], used in the variants of [`OmicronZoneExternalSnat`] so the enum can't hold an address of the wrong family.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/ExternalIpUuid"
+          },
+          "snat_cfg": {
+            "$ref": "#/components/schemas/SourceNatConfigV6"
           }
         },
         "required": [
@@ -9736,34 +9872,6 @@
         },
         "type": "string",
         "format": "uuid"
-      },
-      "SourceNatConfigGeneric": {
-        "description": "An IP address and port range used for source NAT, i.e., making outbound network connections from guests or services.",
-        "type": "object",
-        "properties": {
-          "first_port": {
-            "description": "The first port used for source NAT, inclusive.",
-            "type": "integer",
-            "format": "uint16",
-            "minimum": 0
-          },
-          "ip": {
-            "description": "The external address provided to the instance or service.",
-            "type": "string",
-            "format": "ip"
-          },
-          "last_port": {
-            "description": "The last port used for source NAT, also inclusive.",
-            "type": "integer",
-            "format": "uint16",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "first_port",
-          "ip",
-          "last_port"
-        ]
       },
       "SourceNatConfigV4": {
         "description": "An IP address and port range used for source NAT, i.e., making outbound network connections from guests or services.",

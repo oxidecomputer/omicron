@@ -565,9 +565,11 @@ async fn check_external_dns(
     // what's in-service in the blueprint.
     let expected_nexus_addrs = blueprint
         .in_service_nexus_zones()
-        .filter_map(|(_sled_id, _zone_cfg, nexus_config)| {
-            (nexus_config.nexus_generation == active_generation)
-                .then_some(nexus_config.external_ip.ip)
+        .filter(|(_sled_id, _zone_cfg, nexus_config)| {
+            nexus_config.nexus_generation == active_generation
+        })
+        .flat_map(|(_sled_id, _zone_cfg, nexus_config)| {
+            nexus_config.external_ips.iter().map(|e| e.ip)
         })
         .collect::<BTreeSet<_>>();
 

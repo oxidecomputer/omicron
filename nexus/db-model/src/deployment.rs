@@ -60,8 +60,9 @@ use nexus_types::deployment::{
 use nexus_types::deployment::{BlueprintPhysicalDiskConfig, BlueprintSource};
 use nexus_types::deployment::{BlueprintZoneImageSource, blueprint_zone_type};
 use nexus_types::deployment::{
-    OmicronZoneExternalFloatingAddr, OmicronZoneExternalFloatingIp,
-    OmicronZoneExternalSnatIp,
+    OmicronZoneExternalFloatingAddr, OmicronZoneExternalFloatingAddrs,
+    OmicronZoneExternalFloatingIp, OmicronZoneExternalFloatingIps,
+    OmicronZoneExternalSnat, OmicronZoneExternalSnatIp,
 };
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX_LENGTH;
@@ -855,7 +856,7 @@ impl BpOmicronZone {
                     http_address,
                     // The external DNS address is stored in the
                     // `bp_omicron_zone_external_ip` table, not here.
-                    dns_address: _,
+                    dns_addresses: _,
                     nic,
                 },
             ) => {
@@ -901,7 +902,7 @@ impl BpOmicronZone {
                 lockstep_port,
                 // The external IP is stored in the
                 // `bp_omicron_zone_external_ip` table, not here.
-                external_ip: _,
+                external_ips: _,
                 nic,
                 external_tls,
                 external_dns_servers,
@@ -978,18 +979,7 @@ impl BpOmicronZone {
             nic_row.map(Into::into),
         )?;
 
-        // The external IP(s) for this zone live in the
-        // `bp_omicron_zone_external_ip` table. Until `BlueprintZoneType` can
-        // handle multiple IPs (#9288), we need zero or exactly one row here,
-        // for the zone types that have external networking.
-        //
-        // NOTE: This returns an error if `external_ip_rows` is empty. That's
-        // fine if the zone doesn't need external networking, so we only
-        // ?-propagate this inside the zone-specific code below.
-        let external_ip = BpOmicronZoneExternalIp::into_single(
-            external_ip_rows,
-            self.id.into(),
-        );
+        let zone_id = self.id.into();
 
         // NOTE: this is the *internal* DNS underlay address, held in
         // `second_service_ip` / `second_service_port`. External DNS's external
@@ -1011,8 +1001,11 @@ impl BpOmicronZone {
 
         let zone_type = match self.zone_type {
             ZoneType::BoundaryNtp => {
-                let external_ip = external_ip?;
-                let snat_cfg = external_ip.to_snat_config()?;
+                let external_ip =
+                    BpOmicronZoneExternalIp::into_boundary_ntp_snat(
+                        external_ip_rows,
+                        zone_id,
+                    )?;
                 BlueprintZoneType::BoundaryNtp(
                     blueprint_zone_type::BoundaryNtp {
                         address: primary_address,
@@ -1020,10 +1013,7 @@ impl BpOmicronZone {
                         dns_servers: ntp_dns_servers?,
                         domain: self.ntp_domain,
                         nic: nic?,
-                        external_ip: OmicronZoneExternalSnatIp {
-                            id: external_ip.external_ip_id.into(),
-                            snat_cfg,
-                        },
+                        external_ip,
                     },
                 )
             }
@@ -1064,15 +1054,16 @@ impl BpOmicronZone {
                 },
             ),
             ZoneType::ExternalDns => {
-                let external_ip = external_ip?;
+                let dns_addresses =
+                    BpOmicronZoneExternalIp::into_external_dns_addrs(
+                        external_ip_rows,
+                        zone_id,
+                    )?;
                 BlueprintZoneType::ExternalDns(
                     blueprint_zone_type::ExternalDns {
                         dataset: dataset?,
                         http_address: primary_address,
-                        dns_address: OmicronZoneExternalFloatingAddr {
-                            id: external_ip.external_ip_id.into(),
-                            addr: external_ip.to_floating_addr()?,
-                        },
+                        dns_addresses,
                         nic: nic?,
                     },
                 )
@@ -1099,16 +1090,17 @@ impl BpOmicronZone {
                 blueprint_zone_type::InternalNtp { address: primary_address },
             ),
             ZoneType::Nexus => {
-                let external_ip = external_ip?;
+                let external_ips =
+                    BpOmicronZoneExternalIp::into_nexus_external_ips(
+                        external_ip_rows,
+                        zone_id,
+                    )?;
                 BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                     internal_address: primary_address,
                     lockstep_port: *self.nexus_lockstep_port.ok_or_else(
                         || anyhow!("expected 'nexus_lockstep_port'"),
                     )?,
-                    external_ip: OmicronZoneExternalFloatingIp {
-                        id: external_ip.external_ip_id.into(),
-                        ip: external_ip.ip.ip(),
-                    },
+                    external_ips,
                     nic: nic?,
                     external_tls: self
                         .nexus_external_tls
@@ -1186,10 +1178,9 @@ pub struct BpOmicronZoneExternalIp {
 impl BpOmicronZoneExternalIp {
     /// Build the external IP child rows for a blueprint zone.
     ///
-    /// Returns one row per external IP. Today the in-memory `BlueprintZoneType`
-    /// only ever has at most one external IP per zone, so this returns at most
-    /// one row. In general though, the `bp_omicron_zone_external_ip` table can
-    /// store any number of rows per zone, so we're returning an array.
+    /// Returns one row per external IP: Nexus and external DNS may each have
+    /// several, and boundary NTP may have a source-NAT address per IP family
+    /// (with at least one address).
     pub fn for_zone(
         blueprint_id: BlueprintUuid,
         blueprint_zone: &BlueprintZoneConfig,
@@ -1198,43 +1189,52 @@ impl BpOmicronZoneExternalIp {
         let zone_id = blueprint_zone.id.into();
         match &blueprint_zone.zone_type {
             BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
-                external_ip,
+                external_ips,
                 ..
-            }) => vec![Self {
-                blueprint_id,
-                zone_id,
-                external_ip_id: external_ip.id.into(),
-                ip: IpNetwork::from(external_ip.ip),
-                port: None,
-                snat_first_port: None,
-                snat_last_port: None,
-            }],
-            BlueprintZoneType::ExternalDns(
-                blueprint_zone_type::ExternalDns { dns_address, .. },
-            ) => vec![Self {
-                blueprint_id,
-                zone_id,
-                external_ip_id: dns_address.id.into(),
-                ip: IpNetwork::from(dns_address.addr.ip()),
-                port: Some(SqlU16::from(dns_address.addr.port())),
-                snat_first_port: None,
-                snat_last_port: None,
-            }],
-            BlueprintZoneType::BoundaryNtp(
-                blueprint_zone_type::BoundaryNtp { external_ip, .. },
-            ) => {
-                let (first_port, last_port) =
-                    external_ip.snat_cfg.port_range_raw();
-                vec![Self {
+            }) => external_ips
+                .iter()
+                .map(|external_ip| Self {
                     blueprint_id,
                     zone_id,
                     external_ip_id: external_ip.id.into(),
-                    ip: IpNetwork::from(external_ip.snat_cfg.ip),
+                    ip: IpNetwork::from(external_ip.ip),
                     port: None,
-                    snat_first_port: Some(SqlU16::from(first_port)),
-                    snat_last_port: Some(SqlU16::from(last_port)),
-                }]
-            }
+                    snat_first_port: None,
+                    snat_last_port: None,
+                })
+                .collect(),
+            BlueprintZoneType::ExternalDns(
+                blueprint_zone_type::ExternalDns { dns_addresses, .. },
+            ) => dns_addresses
+                .iter()
+                .map(|dns_address| Self {
+                    blueprint_id,
+                    zone_id,
+                    external_ip_id: dns_address.id.into(),
+                    ip: IpNetwork::from(dns_address.addr.ip()),
+                    port: Some(SqlU16::from(dns_address.addr.port())),
+                    snat_first_port: None,
+                    snat_last_port: None,
+                })
+                .collect(),
+            BlueprintZoneType::BoundaryNtp(
+                blueprint_zone_type::BoundaryNtp { external_ip, .. },
+            ) => external_ip
+                .iter()
+                .map(|snat| {
+                    let (first_port, last_port) =
+                        snat.snat_cfg.port_range_raw();
+                    Self {
+                        blueprint_id,
+                        zone_id,
+                        external_ip_id: snat.id.into(),
+                        ip: IpNetwork::from(snat.snat_cfg.ip),
+                        port: None,
+                        snat_first_port: Some(SqlU16::from(first_port)),
+                        snat_last_port: Some(SqlU16::from(last_port)),
+                    }
+                })
+                .collect(),
             BlueprintZoneType::Clickhouse(_)
             | BlueprintZoneType::ClickhouseKeeper(_)
             | BlueprintZoneType::ClickhouseServer(_)
@@ -1247,28 +1247,59 @@ impl BpOmicronZoneExternalIp {
         }
     }
 
-    /// Collapse the external IP rows for a zone into exactly one.
-    ///
-    /// NOTE: This is a temporary method until the `BlueprintZoneType` variants
-    /// with external addresses can handle more than one EIP. Until then, these
-    /// zones must have exactly one external IP. This returns that single
-    /// address, or an error if there is any other number of rows.
-    fn into_single(
-        mut rows: Vec<Self>,
+    /// Reconstruct a Nexus zone's external IPs from its child rows.
+    fn into_nexus_external_ips(
+        rows: Vec<Self>,
         zone_id: OmicronZoneUuid,
-    ) -> anyhow::Result<Self> {
-        match rows.len() {
-            1 => Ok(rows.pop().expect("length checked to be 1")),
-            0 => bail!(
-                "zone {zone_id} has no external IP, \
-                 but its type requires one"
-            ),
-            n => bail!(
-                "zone {zone_id} has {n} external IPs, but only one is \
-                 supported until the in-memory blueprint type is widened \
-                 (#9288)"
-            ),
-        }
+    ) -> anyhow::Result<OmicronZoneExternalFloatingIps> {
+        let ips = rows
+            .into_iter()
+            .map(|row| OmicronZoneExternalFloatingIp {
+                id: row.external_ip_id.into(),
+                ip: row.ip.ip(),
+            })
+            .collect();
+        OmicronZoneExternalFloatingIps::new(ips).with_context(|| {
+            format!("zone {zone_id} has invalid Nexus external IPs")
+        })
+    }
+
+    /// Reconstruct an external DNS zone's addresses from its child rows.
+    fn into_external_dns_addrs(
+        rows: Vec<Self>,
+        zone_id: OmicronZoneUuid,
+    ) -> anyhow::Result<OmicronZoneExternalFloatingAddrs> {
+        let addrs = rows
+            .iter()
+            .map(|row| {
+                Ok(OmicronZoneExternalFloatingAddr {
+                    id: row.external_ip_id.into(),
+                    addr: row.to_floating_addr()?,
+                })
+            })
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        OmicronZoneExternalFloatingAddrs::new(addrs).with_context(|| {
+            format!("zone {zone_id} has invalid external DNS addresses")
+        })
+    }
+
+    /// Reconstruct a boundary NTP zone's SNAT configuration from its child rows.
+    fn into_boundary_ntp_snat(
+        rows: Vec<Self>,
+        zone_id: OmicronZoneUuid,
+    ) -> anyhow::Result<OmicronZoneExternalSnat> {
+        let snat_ips = rows
+            .iter()
+            .map(|row| {
+                Ok(OmicronZoneExternalSnatIp {
+                    id: row.external_ip_id.into(),
+                    snat_cfg: row.to_snat_config()?,
+                })
+            })
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        OmicronZoneExternalSnat::from_ips(snat_ips).with_context(|| {
+            format!("zone {zone_id} has invalid boundary NTP SNAT config")
+        })
     }
 
     /// Interpret this row as a boundary NTP source-NAT configuration.
