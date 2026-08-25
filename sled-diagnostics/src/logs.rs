@@ -520,12 +520,21 @@ impl LogsHandle {
                         // The time window was applied when oxlog listed the
                         // current log, but the rotated siblings found by this
                         // directory scan never went through that listing, so
-                        // test them against the same predicate.
-                        if logfile.is_file()
-                            && snapshot_file_in_window(
-                                logfile, mtime, date_range,
-                            )
-                        {
+                        // test them against the same predicate. ZFS snapshots
+                        // preserve the original file's timestamps, so testing
+                        // the snapshot copy is equivalent to testing the live
+                        // file.
+                        let in_window = date_range.is_none_or(|range| {
+                            let mut file = LogFile {
+                                path: logfile.to_owned(),
+                                size: None,
+                                modified: mtime,
+                                created: None,
+                            };
+                            file.read_created(&range);
+                            file.in_date_range(&range)
+                        });
+                        if logfile.is_file() && in_window {
                             write_log_to_zip(
                                 &self.log,
                                 service,
@@ -787,28 +796,6 @@ impl LogTimeWindow {
         let end = self.end.map(chrono_to_jiff).unwrap_or(jiff::Timestamp::MAX);
         Some(oxlog::DateRange::new(end, start))
     }
-}
-
-/// Applies the same per-file predicate oxlog uses at listing time to a log
-/// file discovered by scanning a snapshot directory. ZFS snapshots preserve
-/// the original file's timestamps, so testing the snapshot copy is
-/// equivalent to testing the live file.
-fn snapshot_file_in_window(
-    path: &Utf8Path,
-    mtime: Option<jiff::Timestamp>,
-    date_range: Option<oxlog::DateRange>,
-) -> bool {
-    let Some(range) = date_range else {
-        return true;
-    };
-    let mut file = LogFile {
-        path: path.to_owned(),
-        size: None,
-        modified: mtime,
-        created: None,
-    };
-    file.read_created(&range);
-    file.in_date_range(&range)
 }
 
 fn chrono_to_jiff(ts: DateTime<Utc>) -> jiff::Timestamp {
@@ -1110,29 +1097,6 @@ mod test {
                 .unwrap();
         assert!(file_at(0).in_date_range(&saturated));
         assert!(file_at(1_000_000_000).in_date_range(&saturated));
-    }
-
-    #[test]
-    fn test_snapshot_file_in_window() {
-        let ts = |secs| jiff::Timestamp::from_second(secs).unwrap();
-        let path = Utf8PathBuf::from("/nonexistent/t.log");
-
-        // No window: everything passes.
-        assert!(snapshot_file_in_window(&path, None, None));
-
-        // In-window and boundary mtimes are included, out-of-window mtimes
-        // excluded. The path does not exist, so the creation-time lookup
-        // yields nothing and this exercises the mtime-only fallback; the
-        // crtime-weakened end bound is covered by oxlog's own tests.
-        let range = Some(oxlog::DateRange::new(ts(200), ts(100)));
-        assert!(snapshot_file_in_window(&path, Some(ts(100)), range));
-        assert!(snapshot_file_in_window(&path, Some(ts(150)), range));
-        assert!(snapshot_file_in_window(&path, Some(ts(200)), range));
-        assert!(!snapshot_file_in_window(&path, Some(ts(99)), range));
-        assert!(!snapshot_file_in_window(&path, Some(ts(201)), range));
-
-        // A file we cannot stat has no mtime and is excluded.
-        assert!(!snapshot_file_in_window(&path, None, range));
     }
 
     #[test]
