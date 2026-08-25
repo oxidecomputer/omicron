@@ -10,7 +10,7 @@ use gateway_types::component::SpType;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
-use omicron_common::api::external::Generation;
+use omicron_generation_kinds::Generation;
 use omicron_uuid_kinds::AlertReceiverUuid;
 use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::BlueprintUuid;

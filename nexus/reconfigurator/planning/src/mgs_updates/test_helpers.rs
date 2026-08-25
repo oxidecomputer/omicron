@@ -26,7 +26,7 @@ use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::SpType;
 use nexus_types::tuf_repo::TufRepoDescription;
-use omicron_common::api::external::Generation;
+use omicron_generation_kinds::Generation;
 use omicron_uuid_kinds::SledUuid;
 use sled_agent_types::disk::M2Slot;
 use sled_agent_types::inventory::BootImageHeader;

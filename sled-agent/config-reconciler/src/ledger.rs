@@ -6,7 +6,7 @@
 
 use camino::Utf8PathBuf;
 use dropshot::HttpError;
-use omicron_common::api::external::Generation;
+use omicron_generation_kinds::Generation;
 use omicron_ledger as ledger;
 use omicron_ledger::Ledger;
 use sled_agent_types::artifact::ArtifactConfig;

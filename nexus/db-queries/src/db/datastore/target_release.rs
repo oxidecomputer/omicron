@@ -265,8 +265,7 @@ pub struct RecentTargetReleases {
     /// latest target_release generation when we fetched these releases
     /// (used to notice if a new target release has been set that could
     /// invalidate this information)
-    pub(crate) target_release_generation:
-        omicron_common::api::external::Generation,
+    pub(crate) target_release_generation: omicron_generation_kinds::Generation,
 }
 
 #[cfg(test)]

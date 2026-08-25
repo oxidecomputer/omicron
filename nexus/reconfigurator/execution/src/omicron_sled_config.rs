@@ -102,9 +102,9 @@ mod tests {
     use nexus_types::external_api::sled::SledState;
     use omicron_common::address::Ipv6Subnet;
     use omicron_common::address::REPO_DEPOT_PORT;
-    use omicron_common::api::external::Generation;
     use omicron_common::api::internal::shared::DatasetKind;
     use omicron_common::zpool_name::ZpoolName;
+    use omicron_generation_kinds::Generation;
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
