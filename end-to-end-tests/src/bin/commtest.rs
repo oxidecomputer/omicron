@@ -902,6 +902,8 @@ async fn launch_probes(
     // Probes are created sequentially so the first one drives the group
     // auto-create unambiguously, while later probes find the existing group
     // and add themselves as members.
+    let managed: Vec<String> =
+        (0..sleds.len()).map(|i| format!("probe{i}")).collect();
     for (i, sled) in sleds.into_iter().enumerate() {
         ensure_probe(oxide, i, sled, &multicast_groups).await?;
     }
@@ -917,14 +919,24 @@ async fn launch_probes(
     .into_inner()
     .items;
 
-    // Collect every probe's IPv4 external address. A probe replies to a
-    // multicast echo from its external address, and these also serve as the
-    // unicast test target set.
+    // Collect the IPv4 external address of each probe this run ensured. A
+    // probe replies to a multicast echo from its external address, and these
+    // also serve as the unicast test target set. The listing covers the whole
+    // project, so a probe someone else created there (manual testing shares
+    // the project) is skipped rather than counted as an expected member that
+    // never joined the groups and so never replies.
     //
     // TODO: the v4 filter is deliberate while the verification paths are
     // v4-only. Partition v4/v6 here when the v6 commtest bindings exist.
     let mut addrs = Vec::new();
     for probe in &probes {
+        if !managed.contains(&probe.name) {
+            println!(
+                "ignoring foreign probe {} in project {PROJECT_NAME}",
+                probe.name.as_str()
+            );
+            continue;
+        }
         for ext in &probe.external_ips {
             if let IpAddr::V4(ip) = ext.ip {
                 addrs.push(ip);
