@@ -1,0 +1,21 @@
+[
+  { "name": "basic get", "query": "get vm:cpu_busy", "accepted": true },
+  { "name": "relative timestamp", "query": "get link:bytes_sent | filter timestamp > @now() - 5m", "accepted": true },
+  { "name": "uuid and datum", "query": "get vm:cpu_busy | filter (project_id == \"45c937fb-5e99-4a86-a95b-22bf30bf1507\") && datum > 0.5", "accepted": true },
+  { "name": "alignment grouping and limit", "query": "get vm:cpu_busy | align mean_within(30s) | group_by [project_id], mean | last 10", "accepted": true },
+  { "name": "joined subqueries", "query": "{ get vm:cpu_busy | align mean_within(30s); get vm:memory_used | align mean_within(30s) } | join", "accepted": true },
+  { "name": "hex integer", "query": "get vm:cpu_busy | filter datum == 0xff", "accepted": true },
+  { "name": "escaped string", "query": "get vm:cpu_busy | filter name == \"line\\nvalue\"", "accepted": true },
+  { "name": "ipv4 literal", "query": "get vm:cpu_busy | filter address == \"192.0.2.1\"", "accepted": true },
+  { "name": "ipv6 literal", "query": "get vm:cpu_busy | filter address == \"2001:db8::1\"", "accepted": true },
+  { "name": "logical precedence", "query": "get vm:cpu_busy | filter !a == true || b == false && c == true ^ d == false", "accepted": true },
+  { "name": "nested subquery", "query": "{ { get vm:cpu_busy; get vm:memory_used } | join; get vm:cpu_busy } | join", "accepted": true },
+  { "name": "missing metric name", "query": "get vm", "accepted": false },
+  { "name": "missing get", "query": "filter datum > 0", "accepted": false },
+  { "name": "second get", "query": "get vm:cpu_busy | get vm:memory_used", "accepted": false },
+  { "name": "unknown alignment", "query": "get vm:cpu_busy | align unknown(30s)", "accepted": false },
+  { "name": "zero limit", "query": "get vm:cpu_busy | first 0", "accepted": false },
+  { "name": "regex integer", "query": "get vm:cpu_busy | filter name ~= 10", "accepted": false },
+  { "name": "unbalanced parenthesis", "query": "get vm:cpu_busy | filter (datum > 0", "accepted": false },
+  { "name": "unbalanced quote", "query": "get vm:cpu_busy | filter name == \"unterminated", "accepted": false }
+]

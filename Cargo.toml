@@ -135,7 +135,9 @@ members = [
     "oximeter/instruments",
     "oximeter/oximeter-macro-impl",
     "oximeter/oximeter",
+    "oximeter/oxql",
     "oximeter/oxql-types",
+    "oximeter/oxql-wasm",
     "oximeter/producer",
     "oximeter/producer-api",
     "oximeter/schema",
@@ -333,7 +335,9 @@ default-members = [
     "oximeter/instruments",
     "oximeter/oximeter-macro-impl",
     "oximeter/oximeter",
+    "oximeter/oxql",
     "oximeter/oxql-types",
+    "oximeter/oxql-wasm",
     "oximeter/producer",
     "oximeter/producer-api",
     "oximeter/schema",
@@ -729,6 +733,7 @@ oximeter-test-utils = { path = "oximeter/test-utils" }
 oximeter-timeseries-macro = { path = "oximeter/timeseries-macro" }
 oximeter-types = { path = "oximeter/types" }
 oximeter-types-versions = { path = "oximeter/types/versions" }
+oxql = { path = "oximeter/oxql" }
 oxql-types = { path = "oximeter/oxql-types" }
 p256 = "0.13"
 parallel-task-set = { path = "parallel-task-set" }
@@ -804,6 +809,7 @@ seq-macro = "0.3.6"
 serde = { version = "1.0", default-features = false, features = [ "derive", "rc" ] }
 serde_cbor = "0.11.2"
 serde_json = "1.0.145"
+serde-wasm-bindgen = "=0.6.5"
 serde_tokenstream = "0.2"
 serde_urlencoded = "0.7.1"
 serde_with = { version = "3.14.0", default-features = false, features = ["alloc", "macros"] }
@@ -899,6 +905,7 @@ unicode-width = "0.1.13"
 url = "2.5.4"
 usdt = "0.5.0"
 uuid = { version = "1.17.0", features = ["serde", "v4"] }
+wasm-bindgen = "=0.2.114"
 uzers = "0.12"
 vergen-gitcl = { version = "1.0.8" }
 walkdir = "2.5"

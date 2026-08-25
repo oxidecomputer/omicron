@@ -1,0 +1,17 @@
+[package]
+name = "oxql-wasm"
+version = "0.1.0"
+edition.workspace = true
+description = "WebAssembly bindings for the Oximeter Query Language"
+license = "MPL-2.0"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[lints]
+workspace = true
+
+[dependencies]
+oxql.workspace = true
+serde-wasm-bindgen.workspace = true
+wasm-bindgen.workspace = true

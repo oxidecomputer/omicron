@@ -44,6 +44,10 @@ workspace-members = [
     # Exclude omicron-generation-kinds for the same reason as
     # omicron-uuid-kinds above: it is a no-std crate.
     "omicron-generation-kinds",
+
+    # These crates must retain a small wasm32-compatible dependency graph.
+    "oxql",
+    "oxql-wasm",
 ]
 
 [final-excludes]

@@ -10568,6 +10568,7 @@ dependencies = [
  "oxide-tokio-rt",
  "oximeter",
  "oximeter-test-utils",
+ "oxql",
  "oxql-types",
  "parse-display",
  "peg",
@@ -10813,6 +10814,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxql"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "peg",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "oxql-types"
 version = "0.1.0"
 dependencies = [
@@ -10826,6 +10837,15 @@ dependencies = [
  "serde",
  "serde_json",
  "uuid",
+]
+
+[[package]]
+name = "oxql-wasm"
+version = "0.1.0"
+dependencies = [
+ "oxql",
+ "serde-wasm-bindgen",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -13714,6 +13734,17 @@ dependencies = [
  "array-init",
  "serde",
  "smallvec 0.6.14",
+]
+
+[[package]]
+name = "serde-wasm-bindgen"
+version = "0.6.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8302e169f0eddcc139c70f139d19d6467353af16f9fce27e8c30158036a1e16b"
+dependencies = [
+ "js-sys",
+ "serde",
+ "wasm-bindgen",
 ]
 
 [[package]]
