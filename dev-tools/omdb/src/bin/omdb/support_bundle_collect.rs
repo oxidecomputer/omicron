@@ -86,7 +86,8 @@ struct CollectArgs {
     since: Option<std::time::Duration>,
 
     /// Only collect time-bounded data (zone logs, ereports) older than
-    /// this age, e.g. "1h". Must be a smaller age than --since.
+    /// this age, e.g. "1h". Must be a smaller age than --since. Log files
+    /// that span this bound are included in full.
     #[clap(long, value_parser = humantime::parse_duration)]
     until: Option<std::time::Duration>,
 }

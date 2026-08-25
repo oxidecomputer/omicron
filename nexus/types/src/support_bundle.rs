@@ -106,6 +106,10 @@ impl fmt::Display for DisplayBundleData<'_> {
 /// Inclusive time bound applied bundle-wide to time-bounded categories
 /// (currently host-info logs and ereports).
 ///
+/// Ereports are filtered exactly. Zone logs are filtered at file
+/// granularity: a log file whose content overlaps the range is collected in
+/// full, so collected files can contain some content outside it.
+///
 /// `None` on either side means unbounded on that side. When both bounds are
 /// set, `start <= end` holds: construction and deserialization both reject
 /// inverted ranges, and persistence backstops the invariant with a database

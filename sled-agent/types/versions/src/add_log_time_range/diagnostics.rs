@@ -19,13 +19,18 @@ pub struct SledDiagnosticsLogsDownloadQueryParam {
     #[serde(default)]
     pub max_rotated: Option<usize>,
 
-    /// Lower bound (inclusive) on log file `mtime`. If absent, no lower
-    /// bound is applied.
+    /// Lower bound (inclusive) on collected log content. Files whose last
+    /// modification (`mtime`) predates this are excluded; a file's `mtime`
+    /// is the timestamp of its newest content, so excluded files contain no
+    /// data from the window. If absent, no lower bound is applied.
     #[serde(default)]
     pub start_time: Option<DateTime<Utc>>,
 
-    /// Upper bound (inclusive) on log file `mtime`. If absent, no upper
-    /// bound is applied.
+    /// Upper bound (inclusive) on collected log content. Files whose content
+    /// begins after this are excluded. Filtering is per-file: a file created
+    /// before this bound but still modified after it is included in full, so
+    /// the archive may contain data newer than this bound. If absent, no
+    /// upper bound is applied.
     #[serde(default)]
     pub end_time: Option<DateTime<Utc>>,
 }
