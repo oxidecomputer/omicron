@@ -116,6 +116,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::iter::{once, repeat, zip};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
+use std::sync::atomic::AtomicU16;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use transient_dns_server::TransientDnsServer;
@@ -936,6 +937,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             sled_id,
             sled_index,
             sim_mode,
+            SledCpuFamily::AmdMilan,
             &self.simulated_upstairs,
         )
         .await
@@ -1058,6 +1060,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             sled_id,
             sled_index,
             sim_mode,
+            SledCpuFamily::AmdMilan,
             &self.simulated_upstairs,
         )
         .await
@@ -1292,6 +1295,10 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             database: self.database.unwrap(),
             database_admin: self.database_admin.unwrap(),
             clickhouse: self.clickhouse.unwrap(),
+            next_sled_index: AtomicU16::new(
+                u16::try_from(self.sled_agents.len())
+                    .expect("sled agent count fits in a u16"),
+            ),
             sled_agents: self.sled_agents,
             oximeter: self.oximeter.unwrap(),
             producer: self.producer.unwrap(),
@@ -1894,13 +1901,15 @@ pub(crate) enum PopulateCrdb {
 /// Starts a simulated sled agent
 ///
 /// Note: you should probably use the `extra_sled_agents` macro parameter on
-/// `nexus_test` instead!
-pub async fn start_sled_agent(
+/// `nexus_test` instead! To start a sled agent partway through a test, use
+/// [`ControlPlaneTestContext::add_sled`].
+pub(crate) async fn start_sled_agent(
     log: Logger,
     nexus_address: SocketAddr,
     id: SledUuid,
     sled_index: u16,
     sim_mode: sim::SimMode,
+    cpu_family: SledCpuFamily,
     simulated_upstairs: &Arc<sim::SimulatedUpstairs>,
 ) -> Result<sim::Server, String> {
     // Generate a baseboard serial number that matches the SP configuration
@@ -1913,23 +1922,28 @@ pub async fn start_sled_agent(
         sim_mode,
         Some(nexus_address),
         sim::ZpoolConfig::None,
-        SledCpuFamily::AmdMilan,
+        cpu_family,
         Some(baseboard_serial),
     );
     start_sled_agent_with_config(log, &config, sled_index, simulated_upstairs)
         .await
 }
 
-pub async fn start_sled_agent_with_config(
+async fn start_sled_agent_with_config(
     log: Logger,
     config: &sim::Config,
     sled_index: u16,
     simulated_upstairs: &Arc<sim::SimulatedUpstairs>,
 ) -> Result<sim::Server, String> {
-    let server =
-        sim::Server::start(&config, &log, true, simulated_upstairs, sled_index)
-            .await
-            .map_err(|e| e.to_string())?;
+    let server = sim::Server::start(
+        &config,
+        &log,
+        sim::NexusRegistration::WaitForCompletion,
+        simulated_upstairs,
+        sled_index,
+    )
+    .await
+    .map_err(|e| format!("{e:#}"))?;
     Ok(server)
 }
 
