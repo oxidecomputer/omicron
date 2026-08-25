@@ -55,10 +55,12 @@ use crate::v50;
 // requests. It also should be enforced by the database or Neuxs, when we allow
 // operators control over which IPs DNS listens on, or which IP Pools Nexus
 // draws from. That's part of #10574.
-const MAX_ZONE_EXTERNAL_IPS: usize = 16;
+pub const MAX_ZONE_EXTERNAL_IPS: usize = 16;
 
-// Helper to check the length of an array of IPs / socket addrs.
-fn check_length(count: usize) -> Result<(), ZoneExternalAddrsError> {
+/// Helper to check the length of an array of IPs / socket addrs.
+pub fn check_external_ip_count(
+    count: usize,
+) -> Result<(), ZoneExternalAddrsError> {
     if count == 0 {
         return Err(ZoneExternalAddrsError::Empty);
     }
@@ -81,7 +83,7 @@ pub struct NexusExternalIps(
 impl NexusExternalIps {
     /// Construct from a list of IPs.
     pub fn new(ips: BTreeSet<IpAddr>) -> Result<Self, ZoneExternalAddrsError> {
-        check_length(ips.len())?;
+        check_external_ip_count(ips.len())?;
         Ok(Self(ips))
     }
 }
@@ -113,7 +115,7 @@ pub struct ExternalDnsAddrs(
 impl ExternalDnsAddrs {
     /// Construct from a list of addresses.
     pub fn new(addrs: Vec<SocketAddr>) -> Result<Self, ZoneExternalAddrsError> {
-        check_length(addrs.len())?;
+        check_external_ip_count(addrs.len())?;
         let mut inner = BTreeMap::new();
         for (ip, port) in addrs.iter().map(|addr| (addr.ip(), addr.port())) {
             if inner.insert(ip, port).is_some() {

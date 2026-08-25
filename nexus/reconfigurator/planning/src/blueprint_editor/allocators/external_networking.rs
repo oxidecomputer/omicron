@@ -179,12 +179,14 @@ impl ExternalNetworkingAllocator {
                     }
                 }
                 BlueprintZoneType::ExternalDns(dns) => {
-                    if !used_external_dns_ips.insert(dns.dns_address.addr.ip())
-                    {
-                        bail!(
-                            "duplicate external DNS external IP: {}",
-                            dns.dns_address.addr
-                        );
+                    for dns_address in dns.dns_addresses.iter() {
+                        if !used_external_dns_ips.insert(dns_address.addr.ip())
+                        {
+                            bail!(
+                                "duplicate external DNS external IP: {}",
+                                dns_address.addr
+                            );
+                        }
                     }
                     if let Some(ip) = dns.nic.ip_config.ipv4_addr() {
                         if !existing_external_dns_v4_ips.insert(*ip) {
@@ -200,12 +202,14 @@ impl ExternalNetworkingAllocator {
                 _ => (),
             }
 
-            if let Some((external_ip, nic)) = zone_type.external_networking() {
-                // For the test suite, ignore localhost.  It gets reused many
-                // times and that's okay.  We don't expect to see localhost
-                // outside the test suite.
-                if !external_ip.ip().is_loopback() {
-                    external_ip_alloc.mark_ip_used(&external_ip)?;
+            if let Some((external_ips, nic)) = zone_type.external_networking() {
+                for external_ip in external_ips {
+                    // For the test suite, ignore localhost.  It gets reused
+                    // many times and that's okay.  We don't expect to see
+                    // localhost outside the test suite.
+                    if !external_ip.ip().is_loopback() {
+                        external_ip_alloc.mark_ip_used(&external_ip)?;
+                    }
                 }
 
                 if !used_macs.insert(nic.mac) {
@@ -683,6 +687,7 @@ pub mod test {
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneImageSource;
     use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
+    use nexus_types::deployment::OmicronZoneExternalFloatingAddrs;
     use nexus_types::deployment::OmicronZoneExternalFloatingIp;
     use nexus_types::deployment::OmicronZoneExternalSnatIp;
     use nexus_types::deployment::blueprint_zone_type;
@@ -921,17 +926,20 @@ pub mod test {
                     blueprint_zone_type::ExternalDns {
                         dataset: OmicronZoneDataset { pool_name },
                         http_address: "[::1]:0".parse().unwrap(),
-                        dns_address: OmicronZoneExternalFloatingAddr {
-                            id: ExternalIpUuid::new_v4(),
-                            addr: SocketAddr::new(
-                                service_ip_pool
-                                    .iter()
-                                    .nth(index)
-                                    .unwrap()
-                                    .into(),
-                                0,
+                        dns_addresses:
+                            OmicronZoneExternalFloatingAddrs::from_single(
+                                OmicronZoneExternalFloatingAddr {
+                                    id: ExternalIpUuid::new_v4(),
+                                    addr: SocketAddr::new(
+                                        service_ip_pool
+                                            .iter()
+                                            .nth(index)
+                                            .unwrap()
+                                            .into(),
+                                        0,
+                                    ),
+                                },
                             ),
-                        },
                         nic: NetworkInterface {
                             id: Uuid::new_v4(),
                             kind: NetworkInterfaceKind::Service {
