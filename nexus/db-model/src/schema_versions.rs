@@ -28,7 +28,7 @@ pub static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
-        KnownVersion::new(296, "vmm-stopped-for-update-disposition-generation"),
+        KnownVersion::new(296, "vmm-stop-for-update-disposition-generation"),
         KnownVersion::new(295, "add-inv-sled-update-disposition"),
         KnownVersion::new(294, "external-service-ip-pool"),
         KnownVersion::new(293, "add-rendezvous-sled-bp-availability"),
