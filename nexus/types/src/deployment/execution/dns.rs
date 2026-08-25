@@ -9,7 +9,8 @@ use internal_dns_types::{
     config::DnsConfigBuilder,
     names::{ServiceName, ZONE_APEX_NAME},
 };
-use omicron_common::api::external::{Generation, Name};
+use omicron_common::api::external::Name;
+use omicron_generation_kinds::Generation;
 
 use crate::{
     deployment::{
