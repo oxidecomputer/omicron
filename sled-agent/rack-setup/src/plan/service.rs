@@ -82,12 +82,12 @@ use uuid::Uuid;
 /// The fewest U.2 disks a sled may report before it can be included in the
 /// rack setup plan.
 ///
-/// This can never be zero: every sled in the plan hosts an NTP zone, whose
-/// filesystem must live on one of the sled's U.2 pools.
+/// This can never be zero, because every sled in the plan hosts an NTP
+/// zone, whose filesystem must live on one of the sled's U.2 pools.
 const MINIMUM_U2_COUNT: usize = 1;
 
-/// Returns whether a sled reports enough U.2 disks to be included in the rack
-/// setup plan.
+/// Returns `true` if a sled reports enough U.2 disks to be included in the
+/// rack setup plan.
 ///
 /// Sleds whose inventory does not (yet) satisfy this check are not rejected;
 /// plan generation waits for them to report more disks. Disks are enumerated
