@@ -7670,47 +7670,23 @@ async fn start_sled_and_wait(
     cptestctx: &ControlPlaneTestContext,
     config: omicron_sled_agent::sim::Config,
 ) -> omicron_sled_agent::sim::Server {
-    let client = &cptestctx.external_client;
-
-    // List the number of sleds currently; we'll wait until this is one higher
-    // as evidence the simulated sled-agent is fully ready.
-    let items = objects_list_page_authz::<Sled>(&client, SLEDS_URL).await.items;
-
-    let initial_sled_count = items.len();
-
     let new_sled_agent_log =
         cptestctx.logctx.log.new(o!( "sled_id" => config.id.to_string() ));
 
     // We have to hold on to the new simulated sled-agent otherwise it will be
     // immediately dropped and shut down.
-    let agent = start_sled_agent_with_config(
+    //
+    // `start_sled_agent_with_config` uses
+    // `NexusRegistration::WaitForCompletion`, so Nexus knows about the sled
+    // once this returns.
+    start_sled_agent_with_config(
         new_sled_agent_log,
         &config,
         3,
         &cptestctx.first_sled_agent().simulated_upstairs,
     )
     .await
-    .expect("can start test sled-agent");
-
-    // Wait for Nexus to report that the new sled is present..
-    poll::wait_for_condition(
-        || async {
-            let items =
-                objects_list_page_authz::<Sled>(&client, SLEDS_URL).await.items;
-
-            if items.len() == initial_sled_count + 1 {
-                Ok(())
-            } else {
-                Err(CondCheckError::<()>::NotYet { status: None })
-            }
-        },
-        &Duration::from_secs(5),
-        &Duration::from_secs(60),
-    )
-    .await
-    .unwrap();
-
-    agent
+    .expect("can start test sled-agent")
 }
 
 #[nexus_test]

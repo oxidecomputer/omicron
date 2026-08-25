@@ -66,9 +66,9 @@ use omicron_common::address::DNS_OPTE_IPV4_SUBNET;
 use omicron_common::address::DNS_OPTE_IPV6_SUBNET;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
+use omicron_common::address::NEXUS_OPTE_IPV6_SUBNET;
 use omicron_common::address::NTP_OPTE_IPV4_SUBNET;
 use omicron_common::address::NTP_PORT;
-use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::UserId;
@@ -79,8 +79,11 @@ use omicron_common::api::internal::nexus::ProducerKind;
 use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_common::zpool_name::ZpoolName;
+use omicron_debug_dropbox::DebugDropbox;
+use omicron_generation_kinds::Generation;
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev;
+use omicron_test_utils::dev::TestTempDir;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ExternalIpUuid;
@@ -102,12 +105,13 @@ use sled_agent_types::inventory::HostPhase2DesiredSlots;
 use sled_agent_types::inventory::NetworkInterface;
 use sled_agent_types::inventory::NetworkInterfaceKind;
 use sled_agent_types::inventory::OmicronSledConfig;
+use sled_agent_types::inventory::OmicronSledUpdateDisposition;
 use sled_agent_types::inventory::OmicronZoneDataset;
 use sled_agent_types::inventory::SledCpuFamily;
 use sled_agent_types::inventory::SourceNatConfigGeneric;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use sled_agent_types::system_networking::WriteNetworkConfigRequest;
-use slog::{Logger, debug, error, o};
+use slog::{Logger, debug, error, info, o};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
@@ -175,6 +179,8 @@ pub struct ControlPlaneStarter<'a, N: NexusServer> {
     pub password: Option<String>,
 
     pub simulated_upstairs: Arc<sim::SimulatedUpstairs>,
+
+    debug_dropbox_dir: TestTempDir,
 }
 
 type StepInitFn<'a, N> = Box<
@@ -189,6 +195,8 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         let simulated_upstairs_log = logctx.log.new(o!(
             "component" => "omicron_sled_agent::sim::SimulatedUpstairs",
         ));
+
+        let debug_dropbox_dir = TestTempDir::new(&logctx.log);
 
         Self {
             config,
@@ -226,6 +234,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             simulated_upstairs: Arc::new(sim::SimulatedUpstairs::new(
                 simulated_upstairs_log,
             )),
+            debug_dropbox_dir,
         }
     }
 
@@ -594,7 +603,12 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                 .clone(),
         };
 
-        let nexus_internal = N::start_internal(&self.config, &log).await?;
+        let debug_dropbox =
+            DebugDropbox::for_tests(log, &self.debug_dropbox_dir.path())
+                .await
+                .expect("creating debug dropbox directory");
+        let nexus_internal =
+            N::start_internal(&self.config, &log, debug_dropbox).await?;
         let nexus_internal_addr =
             nexus_internal.get_http_server_internal_address();
         let internal_address = match nexus_internal_addr {
@@ -693,13 +707,28 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             .mac_addrs
             .next()
             .expect("ran out of MAC addresses");
-        let ip_config = PrivateIpConfig::new_ipv4(
-            NEXUS_OPTE_IPV4_SUBNET
-                .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1 + which)
+        let ip_config =
+            match config.deployment.dropshot_external.dropshot.bind_address {
+                SocketAddr::V4(_) => PrivateIpConfig::new_ipv4(
+                    NEXUS_OPTE_IPV4_SUBNET
+                        .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1 + which)
+                        .unwrap(),
+                    *NEXUS_OPTE_IPV4_SUBNET,
+                )
                 .unwrap(),
-            *NEXUS_OPTE_IPV4_SUBNET,
-        )
-        .unwrap();
+                SocketAddr::V6(_) => PrivateIpConfig::new_ipv6(
+                    NEXUS_OPTE_IPV6_SUBNET
+                        .nth(
+                            u128::try_from(
+                                NUM_INITIAL_RESERVED_IP_ADDRESSES + 1 + which,
+                            )
+                            .unwrap(),
+                        )
+                        .unwrap(),
+                    *NEXUS_OPTE_IPV6_SUBNET,
+                )
+                .unwrap(),
+            };
         self.blueprint_zones.push(BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id,
@@ -761,7 +790,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             .clone()
             .build_full_config_for_initial_generation();
 
-        slog::info!(log, "DNS population: {:#?}", dns_config);
+        info!(log, "DNS population: {:#?}", dns_config);
         dns_config_client.dns_config_put(&dns_config).await.expect(
             "Failed to send initial DNS records to internal DNS server",
         );
@@ -1007,6 +1036,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                     remove_mupdate_override: None,
                     host_phase_2: HostPhase2DesiredSlots::current_contents(),
                     measurements: BTreeSet::new(),
+                    update_disposition: OmicronSledUpdateDisposition::Available,
                 })
                 .await
                 .expect("Failed to configure sled agent {sled_id} with zones");
@@ -1289,6 +1319,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             silo_name: self.silo_name.unwrap(),
             user_name: self.user_name.unwrap(),
             password: self.password.unwrap(),
+            debug_dropbox_dir: self.debug_dropbox_dir,
         }
     }
 
@@ -1326,6 +1357,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         for (_, mut ddm) in self.ddm {
             ddm.cleanup().await.unwrap();
         }
+        self.debug_dropbox_dir.cleanup_successful();
         self.logctx.cleanup_successful();
     }
 
@@ -1908,10 +1940,15 @@ pub async fn start_sled_agent_with_config(
     sled_index: u16,
     simulated_upstairs: &Arc<sim::SimulatedUpstairs>,
 ) -> Result<sim::Server, String> {
-    let server =
-        sim::Server::start(&config, &log, true, simulated_upstairs, sled_index)
-            .await
-            .map_err(|e| e.to_string())?;
+    let server = sim::Server::start(
+        &config,
+        &log,
+        sim::NexusRegistration::WaitForCompletion,
+        simulated_upstairs,
+        sled_index,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
     Ok(server)
 }
 

@@ -66,6 +66,7 @@ use nexus_db_errors::OptionalError;
 use nexus_db_lookup::DataStoreConnection;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::CrucibleDataset;
+use nexus_db_model::DbSledBpAvailability;
 use nexus_db_model::DnsGroup;
 use nexus_db_model::DnsName;
 use nexus_db_model::DnsVersion;
@@ -152,8 +153,8 @@ use nexus_types::inventory::Collection;
 use nexus_types::inventory::CollectionDisplayCliFilter;
 use omicron_common::api::external;
 use omicron_common::api::external::DataPageParams;
-use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;
+use omicron_generation_kinds::Generation;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::DownstairsRegionUuid;
@@ -4659,11 +4660,13 @@ struct SledRow {
     role: &'static str,
     policy: SledPolicy,
     state: SledState,
+    #[tabled(rename = "BP AVAIL")]
+    bp_availability: &'static str,
     id: SledUuid,
 }
 
-impl From<Sled> for SledRow {
-    fn from(s: Sled) -> Self {
+impl SledRow {
+    fn new(s: Sled, bp_availability: Option<DbSledBpAvailability>) -> Self {
         SledRow {
             id: s.id(),
             serial: s.serial_number().to_string(),
@@ -4671,6 +4674,10 @@ impl From<Sled> for SledRow {
             role: if s.is_scrimlet() { "scrimlet" } else { "-" },
             policy: s.policy(),
             state: s.state().into(),
+            bp_availability: match bp_availability {
+                Some(state) => state.label(),
+                None => "(missing)",
+            },
         }
     }
 }
@@ -4700,7 +4707,19 @@ async fn cmd_db_sleds(
         .context("listing sleds")?;
     check_limit(&sleds, limit, || String::from("listing sleds"));
 
-    let rows = sleds.into_iter().map(|s| SledRow::from(s));
+    // Look up each sled's reconfigurator provisioning availability from the
+    // `rendezvous_sled_bp_availability` rendezvous table. A sled might not be
+    // present in the table (e.g. it was just added and the reconciliation task
+    // has not run yet), in which case it is rendered as `(missing)`.
+    let bp_availability = datastore
+        .rendezvous_sled_bp_availability_list_all_batched(opctx)
+        .await
+        .context("listing sled bp-availability rendezvous rows")?;
+
+    let rows = sleds.into_iter().map(|s| {
+        let state = bp_availability.get(&s.id()).map(|r| r.bp_availability());
+        SledRow::new(s, state)
+    });
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())
         .with(tabled::settings::Padding::new(1, 1, 0, 0))
@@ -5368,6 +5387,7 @@ async fn cmd_db_instance_info(
                     generation: _,
                     state: _,
                     failure_reason: _,
+                    stop_for_update_disposition_generation: _,
                 } = vmm;
                 VmmRow {
                     state: VmmStateRow::from(vmm),
@@ -8103,6 +8123,7 @@ fn prettyprint_vmm(
     const STATE: &'static str = "state";
     const FAILURE_REASON: &'static str = "  failure reason";
     const FAILURE_NOTE: &'static str = "  note";
+    const STOP_FOR_UPDATE: &'static str = "  marked to stop for sled update";
     const WIDTH: usize = const_max_len(&[
         ID,
         CREATED,
@@ -8116,6 +8137,7 @@ fn prettyprint_vmm(
         ADDRESS,
         FAILURE_REASON,
         FAILURE_NOTE,
+        STOP_FOR_UPDATE,
     ]);
 
     let width = std::cmp::max(width, Some(WIDTH)).unwrap_or(WIDTH);
@@ -8132,6 +8154,7 @@ fn prettyprint_vmm(
         generation,
         time_state_updated,
         failure_reason,
+        stop_for_update_disposition_generation,
     } = vmm;
 
     println!("{indent}{ID:>width$}: {id}");
@@ -8165,6 +8188,12 @@ fn prettyprint_vmm(
              non-NULL failure reason",
             "/!\\",
             width = indent.len(),
+        );
+    }
+    if let Some(ud_generation) = stop_for_update_disposition_generation {
+        let u_g = u64::from(ud_generation.0);
+        println!(
+            "{indent}{STOP_FOR_UPDATE:>width$}: update disposition generation {u_g}"
         );
     }
 
@@ -8263,6 +8292,7 @@ async fn cmd_db_vmm_list(
                 generation: _,
                 state: _,
                 failure_reason: _,
+                stop_for_update_disposition_generation: _,
             } = vmm;
             let sled = match sled {
                 Some(sled) => sled.serial_number(),

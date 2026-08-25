@@ -7,7 +7,7 @@ use std::sync::Arc;
 use anyhow::{Context, anyhow, bail};
 use nexus_inventory::CollectionBuilder;
 use nexus_types::deployment::UnstableReconfiguratorState;
-use omicron_common::api::external::Generation;
+use omicron_generation_kinds::Generation;
 use omicron_uuid_kinds::{CollectionUuid, ReconfiguratorSimStateUuid};
 use sync_ptr::SyncConstPtr;
 
@@ -147,6 +147,7 @@ impl SimState {
             planning_input,
             collections: self.system.all_collections().cloned().collect(),
             target_blueprint: self.system().target_blueprint(),
+            intended_target_blueprint: None,
             blueprints: self.system.all_blueprints().cloned().collect(),
             internal_dns: self
                 .system

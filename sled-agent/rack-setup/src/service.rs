@@ -92,13 +92,13 @@ use ntp_admin_client::{
     Client as NtpAdminClient, Error as NtpAdminError, types::TimeSync,
 };
 use omicron_common::address::{COCKROACH_ADMIN_PORT, NTP_ADMIN_PORT};
-use omicron_common::api::external::Generation;
 use omicron_common::api::internal::nexus::Certificate;
 use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
 };
 use omicron_common::disk::DatasetKind;
 use omicron_ddm_admin_client::DdmError;
+use omicron_generation_kinds::Generation;
 use omicron_ledger::{self as ledger};
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackUuid;
@@ -109,6 +109,7 @@ use sled_agent_client::{
     Client as SledAgentClient, Error as SledAgentError, types as SledAgentTypes,
 };
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
+use sled_agent_types::inventory::OmicronSledUpdateDisposition;
 use sled_agent_types::inventory::{
     ConfigReconcilerInventoryResult, HostPhase2DesiredSlots, OmicronSledConfig,
     OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
@@ -578,6 +579,7 @@ impl ServiceInner {
                     remove_mupdate_override: None,
                     host_phase_2: HostPhase2DesiredSlots::current_contents(),
                     measurements: Default::default(),
+                    update_disposition: OmicronSledUpdateDisposition::Available,
                 };
 
                 self.set_config_on_sled(*sled_address, sled_config).await?;
@@ -1629,8 +1631,9 @@ mod test {
             AZ_PREFIX_LENGTH, IpRange, Ipv6Subnet, RACK_PREFIX_LENGTH,
             SLED_PREFIX_LENGTH, get_sled_address,
         },
-        api::external::{AllowedSourceIps, ByteCount, Generation},
+        api::external::{AllowedSourceIps, ByteCount},
     };
+    use omicron_generation_kinds::Generation;
     use omicron_uuid_kinds::SledUuid;
     use oxnet::Ipv6Net;
     use sled_agent_types::disk::DiskIdentity;

@@ -242,7 +242,7 @@ mod tests {
     use nexus_types::deployment::BlueprintTarget;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneImageSource;
-    use omicron_common::api::external::Generation;
+    use omicron_generation_kinds::Generation;
     use omicron_test_utils::dev;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;

@@ -348,7 +348,7 @@ pub mod blueprint_zone_type {
     use crate::deployment::OmicronZoneExternalFloatingIp;
     use crate::deployment::OmicronZoneExternalSnatIp;
     use daft::Diffable;
-    use omicron_common::api::external::Generation;
+    use omicron_generation_kinds::Generation;
     use schemars::JsonSchema;
     use serde::Deserialize;
     use serde::Serialize;

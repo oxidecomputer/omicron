@@ -26,6 +26,7 @@ use omicron_common::api::external::UserId;
 use omicron_common::api::internal::nexus::Certificate;
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev;
+use omicron_test_utils::dev::TestTempDir;
 use omicron_test_utils::dev::poll;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_test_utils::dev::poll::wait_for_watch_channel_condition;
@@ -48,6 +49,7 @@ pub struct ControlPlaneBuilder<'a> {
     nextra_sled_agents: u16,
     tls_cert: Option<Certificate>,
     nexus_config: NexusConfig,
+    configure_second_nexus: bool,
 }
 
 impl<'a> ControlPlaneBuilder<'a> {
@@ -57,6 +59,7 @@ impl<'a> ControlPlaneBuilder<'a> {
             nextra_sled_agents: 0,
             tls_cert: None,
             nexus_config: load_test_config(),
+            configure_second_nexus: false,
         }
     }
 
@@ -67,6 +70,11 @@ impl<'a> ControlPlaneBuilder<'a> {
 
     pub fn with_tls_cert(mut self, tls_cert: Option<Certificate>) -> Self {
         self.tls_cert = tls_cert;
+        self
+    }
+
+    pub fn with_second_nexus_configured(mut self, do_configure: bool) -> Self {
+        self.configure_second_nexus = do_configure;
         self
     }
 
@@ -89,7 +97,7 @@ impl<'a> ControlPlaneBuilder<'a> {
             self.tls_cert,
             self.nextra_sled_agents,
             DEFAULT_SP_SIM_CONFIG.into(),
-            false,
+            self.configure_second_nexus,
         )
         .await
     }
@@ -125,6 +133,8 @@ pub struct ControlPlaneTestContext<N> {
     pub silo_name: Name,
     pub user_name: UserId,
     pub password: String,
+
+    pub(crate) debug_dropbox_dir: TestTempDir,
 }
 
 impl<N: NexusServer> ControlPlaneTestContext<N> {
@@ -164,6 +174,10 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
 
     pub fn wildcard_silo_dns_name(&self) -> String {
         format!("*.sys.{}", self.external_dns_zone_name)
+    }
+
+    pub fn debug_dropbox_path(&self) -> &Utf8Path {
+        self.debug_dropbox_dir.path()
     }
 
     /// Wait until at least one inventory collection has been inserted into the
@@ -332,6 +346,7 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         for (_, mut ddm) in self.ddm {
             ddm.cleanup().await.unwrap();
         }
+        self.debug_dropbox_dir.cleanup_successful();
         self.logctx.cleanup_successful();
     }
 }
