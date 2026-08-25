@@ -2136,6 +2136,43 @@ mod test {
     }
 
     #[test]
+    fn test_problems_target_recently_requested_stale_blueprint() {
+        let logctx = test_setup_log(
+            "test_problems_target_recently_requested_stale_blueprint",
+        );
+        let time_last_blueprint_created =
+            Utc::now() - STUCK_UPDATE_THRESHOLD - TimeDelta::seconds(10);
+        let blueprint = fake_blueprint(
+            &logctx.log,
+            &fake_target_version(),
+            time_last_blueprint_created,
+            true,
+        );
+
+        let checks = UpdateContactSupportChecksInput {
+            inventory: Arc::new(fake_collection_with_ids(
+                sled_id(),
+                healthy_zpools(),
+                healthy_services(),
+            )),
+            stuck_sagas: Ok(vec![]),
+            blueprint,
+            current_target_release: Some(TargetRelease {
+                time_requested: Utc::now(),
+                version: fake_target_version(),
+            }),
+            internal_update_status: empty_internal_update_status(),
+        };
+
+        // The stale blueprint alone would look stuck, but the recent target
+        // release request keeps the update "in progress", so there are no
+        // problems.
+        assert_eq!(checks.problems(), UpdateStatusProblems::default());
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
     fn test_problems_update_in_progress_not_stuck_is_not_a_problem() {
         let logctx = test_setup_log(
             "test_problems_update_in_progress_not_stuck_is_not_a_problem",
