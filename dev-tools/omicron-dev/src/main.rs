@@ -360,12 +360,12 @@ impl JborArgs {
 
         for n in 0..self.peer_routers.0 {
             let mgd_bgp_addr =
-                SocketAddr::new(Ipv4Addr::new(127, 0, n, 1).into(), 1049);
+                SocketAddr::new(Ipv4Addr::new(100, 64, 0, n + 1).into(), 1049);
 
             // Allocate the loopback IP for this peer router's BGP listener.
-            // 127.0.0.1 (n == 0) is always present and treated as a no-op by
-            // the manager; addresses for n > 0 are added to the interface and
-            // removed when the allocation is dropped.
+            // Unlike 127.x.x.x, these addresses (100.64.x.x) are not present
+            // by default, so the manager always adds them to lo0 and removes
+            // them when the allocation is dropped.
             let alloc = loopback_ip_mgr::LoopbackIpManager::allocate(
                 loopback_manager.clone(),
                 &[mgd_bgp_addr.ip()],
@@ -443,14 +443,16 @@ impl JborArgs {
             config.deployment.dropshot_lockstep.bind_address.set_port(0);
             config.deployment.techport_external_server_port = 0;
 
-            // Assign unique loopback IPs to this rack's pair of mgd BGP
+            // Assign unique non-loopback IPs to this rack's pair of mgd BGP
             // dispatchers so they can coexist with other rack instances and
-            // with the peer routers above.
+            // with the peer routers above. Using 100.64.x.x (RFC 6598) ensures
+            // the Nexus API (which rejects loopback addresses) can reference
+            // these as BGP peer addresses.
             let mut mgd_bgp_addrs = BTreeMap::new();
             mgd_bgp_addrs
-                .insert(SwitchSlot::Switch0, Ipv4Addr::new(127, 2, n, 0));
+                .insert(SwitchSlot::Switch0, Ipv4Addr::new(100, 64, n + 1, 0));
             mgd_bgp_addrs
-                .insert(SwitchSlot::Switch1, Ipv4Addr::new(127, 2, n, 1));
+                .insert(SwitchSlot::Switch1, Ipv4Addr::new(100, 64, n + 1, 1));
 
             println!("\nomicron-dev: setting up all services for rack {n}... ");
             let cptestctx =
