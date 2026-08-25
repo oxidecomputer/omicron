@@ -69,7 +69,6 @@ use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
 use omicron_common::address::NEXUS_OPTE_IPV6_SUBNET;
 use omicron_common::address::NTP_OPTE_IPV4_SUBNET;
 use omicron_common::address::NTP_PORT;
-use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::UserId;
@@ -80,6 +79,7 @@ use omicron_common::api::internal::nexus::ProducerKind;
 use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_common::zpool_name::ZpoolName;
+use omicron_generation_kinds::Generation;
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev;
 use omicron_uuid_kinds::BlueprintUuid;
@@ -103,6 +103,7 @@ use sled_agent_types::inventory::HostPhase2DesiredSlots;
 use sled_agent_types::inventory::NetworkInterface;
 use sled_agent_types::inventory::NetworkInterfaceKind;
 use sled_agent_types::inventory::OmicronSledConfig;
+use sled_agent_types::inventory::OmicronSledUpdateDisposition;
 use sled_agent_types::inventory::OmicronZoneDataset;
 use sled_agent_types::inventory::SledCpuFamily;
 use sled_agent_types::inventory::SourceNatConfigGeneric;
@@ -1023,6 +1024,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                     remove_mupdate_override: None,
                     host_phase_2: HostPhase2DesiredSlots::current_contents(),
                     measurements: BTreeSet::new(),
+                    update_disposition: OmicronSledUpdateDisposition::Available,
                 })
                 .await
                 .expect("Failed to configure sled agent {sled_id} with zones");

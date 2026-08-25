@@ -472,6 +472,7 @@ table! {
         state -> crate::enums::VmmStateEnum,
         cpu_platform -> crate::enums::VmmCpuPlatformEnum,
         failure_reason -> Nullable<crate::enums::VmmFailureReasonEnum>,
+        stop_for_update_disposition_generation -> Nullable<Int8>,
     }
 }
 joinable!(vmm -> sled (sled_id));
@@ -2133,6 +2134,7 @@ table! {
         host_phase_2_desired_slot_a -> Nullable<Text>,
         host_phase_2_desired_slot_b -> Nullable<Text>,
         measurements -> Nullable<Array<Text>>,
+        update_disposition -> crate::enums::InvSledUpdateDispositionEnum,
     }
 }
 

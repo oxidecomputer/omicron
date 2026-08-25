@@ -6,7 +6,7 @@
 
 use camino::Utf8PathBuf;
 use dropshot::HttpError;
-use omicron_common::api::external::Generation;
+use omicron_generation_kinds::Generation;
 use omicron_ledger as ledger;
 use omicron_ledger::Ledger;
 use sled_agent_types::artifact::ArtifactConfig;
@@ -692,6 +692,7 @@ mod tests {
     use sled_agent_types::disk::OmicronPhysicalDiskConfig;
     use sled_agent_types::inventory::HostPhase2DesiredContents;
     use sled_agent_types::inventory::HostPhase2DesiredSlots;
+    use sled_agent_types::inventory::OmicronSledUpdateDisposition;
     use sled_agent_types::inventory::OmicronZoneConfig;
     use sled_agent_types::inventory::OmicronZoneImageSource;
     use sled_agent_types::inventory::OmicronZoneType;
@@ -888,6 +889,7 @@ mod tests {
             remove_mupdate_override: None,
             host_phase_2: HostPhase2DesiredSlots::current_contents(),
             measurements: BTreeSet::new(),
+            update_disposition: OmicronSledUpdateDisposition::Available,
         }
     }
 
@@ -1091,6 +1093,7 @@ mod tests {
             remove_mupdate_override: None,
             host_phase_2: HostPhase2DesiredSlots::current_contents(),
             measurements: BTreeSet::new(),
+            update_disposition: OmicronSledUpdateDisposition::Available,
         };
 
         // The ledger task should reject this config due to a missing artifact.

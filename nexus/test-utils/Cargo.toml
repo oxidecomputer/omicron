@@ -42,6 +42,7 @@ nexus-types.workspace = true
 nexus-types-versions.workspace = true
 omicron-cockroach-admin.workspace = true
 omicron-common.workspace = true
+omicron-generation-kinds.workspace = true
 omicron-passwords.workspace = true
 omicron-sled-agent.workspace = true
 omicron-test-utils.workspace = true
