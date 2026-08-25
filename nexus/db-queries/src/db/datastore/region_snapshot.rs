@@ -16,8 +16,10 @@ use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
+use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupResult;
 use omicron_uuid_kinds::DatasetUuid;
+use slog::Logger;
 use uuid::Uuid;
 
 impl DataStore {
@@ -57,7 +59,7 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    pub async fn region_snapshot_remove(
+    pub async fn mark_region_snapshot_for_deletion(
         &self,
         dataset_id: DatasetUuid,
         region_id: Uuid,
@@ -67,14 +69,37 @@ impl DataStore {
 
         let conn = self.pool_connection_unauthorized().await?;
 
-        let result = diesel::delete(dsl::region_snapshot)
+        diesel::update(dsl::region_snapshot)
             .filter(dsl::dataset_id.eq(to_db_typed_uuid(dataset_id)))
             .filter(dsl::region_id.eq(region_id))
             .filter(dsl::snapshot_id.eq(snapshot_id))
+            .filter(dsl::deleting.eq(false))
+            .set(dsl::deleting.eq(true))
             .execute_async(&*conn)
             .await
-            .map(|_rows_deleted| ())
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server));
+            .map(|_| ())
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    pub async fn region_snapshot_remove(
+        &self,
+        log: &Logger,
+        dataset_id: DatasetUuid,
+        region_id: Uuid,
+        snapshot_id: Uuid,
+    ) -> DeleteResult {
+        use nexus_db_schema::schema::region_snapshot::dsl;
+
+        let conn = self.pool_connection_unauthorized().await?;
+
+        diesel::delete(dsl::region_snapshot)
+            .filter(dsl::dataset_id.eq(to_db_typed_uuid(dataset_id)))
+            .filter(dsl::region_id.eq(region_id))
+            .filter(dsl::snapshot_id.eq(snapshot_id))
+            .filter(dsl::deleting.eq(true))
+            .execute_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         // Whenever a region snapshot is hard-deleted, validate invariants for
         // all volumes
@@ -83,7 +108,34 @@ impl DataStore {
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
-        result
+        // The DELETE above should have removed the record - double check here.
+
+        let maybe_region_snapshot = dsl::region_snapshot
+            .filter(dsl::dataset_id.eq(to_db_typed_uuid(dataset_id)))
+            .filter(dsl::region_id.eq(region_id))
+            .filter(dsl::snapshot_id.eq(snapshot_id))
+            .select(RegionSnapshot::as_select())
+            .get_result_async(&*conn)
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        if maybe_region_snapshot.is_some() {
+            error!(
+                log,
+                "region snapshot not marked for deletion";
+                "dataset_id" => %dataset_id,
+                "region_id" => %region_id,
+                "snapshot_id" => %snapshot_id,
+            );
+
+            return Err(Error::internal_error(format!(
+                "region snapshot not marked for deletion: {dataset_id} \
+                {region_id} {snapshot_id}",
+            )));
+        }
+
+        Ok(())
     }
 
     /// Find region snapshots on expunged disks

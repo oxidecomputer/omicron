@@ -289,17 +289,19 @@ impl DataStore {
         Ok(dataset_and_regions)
     }
 
-    /// Deletes a set of regions.
+    /// Hard-deletes a set of regions marked for deletion.
     ///
     /// Also updates the storage usage on their corresponding datasets.
     pub async fn regions_hard_delete(
         &self,
-        _log: &Logger,
+        log: &Logger,
         region_ids: Vec<Uuid>,
     ) -> DeleteResult {
         if region_ids.is_empty() {
             return Ok(());
         }
+
+        use nexus_db_schema::schema::region::dsl;
 
         let conn = self.pool_connection_unauthorized().await?;
 
@@ -308,10 +310,9 @@ impl DataStore {
                 let region_ids = region_ids.clone();
 
                 async move {
-                    use nexus_db_schema::schema::region::dsl;
-
                     let dataset_ids: Vec<Uuid> = diesel::delete(dsl::region)
                         .filter(dsl::id.eq_any(region_ids))
+                        .filter(dsl::deleting.eq(true))
                         .returning(dsl::dataset_id)
                         .get_results_async(&conn)
                         .await?;
@@ -329,7 +330,32 @@ impl DataStore {
                 }
             })
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        // The DELETE above should have removed all the records - double check
+        // here. Don't do this in the transaction above: we want to free up all
+        // the resources we can with a region delete.
+
+        let non_deleted_regions: Vec<Uuid> = dsl::region
+            .filter(dsl::id.eq_any(region_ids))
+            .select(dsl::id)
+            .get_results_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        if !non_deleted_regions.is_empty() {
+            error!(
+                log,
+                "regions not marked for deletion";
+                "non_deleted_regions" => ?non_deleted_regions,
+            );
+
+            return Err(Error::internal_error(format!(
+                "regions not marked for deletion: {non_deleted_regions:?}"
+            )));
+        }
+
+        Ok(())
     }
 
     /// Return the total reserved size for all the regions allocated to a
@@ -544,6 +570,24 @@ impl DataStore {
             .select(Region::as_select())
             .load_async(&*conn)
             .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    pub async fn mark_region_for_deletion(
+        &self,
+        region_id: Uuid,
+    ) -> DeleteResult {
+        use nexus_db_schema::schema::region::dsl;
+
+        let conn = self.pool_connection_unauthorized().await?;
+
+        diesel::update(dsl::region)
+            .filter(dsl::id.eq(region_id))
+            .filter(dsl::deleting.eq(false))
+            .set(dsl::deleting.eq(true))
+            .execute_async(&*conn)
+            .await
+            .map(|_| ())
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 }

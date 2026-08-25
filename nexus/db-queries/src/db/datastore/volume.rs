@@ -1183,6 +1183,7 @@ impl DataStore {
         // of in soft_delete_volume_in_txn!) and their associated datasets
         let unfiltered_deleted_regions = region_dsl::region
             .filter(region_dsl::read_only.eq(false))
+            .filter(region_dsl::deleting.eq(true))
             // the volume may be hard deleted, so use a left join here
             .left_join(
                 volume_dsl::volume.on(region_dsl::volume_id.eq(volume_dsl::id)),
@@ -1473,6 +1474,28 @@ impl DataStore {
                     format!("could not find resource for {target}"),
                 )));
             };
+
+            // Mark the region for deletion
+            let region_id = region.id();
+
+            use nexus_db_schema::schema::region::dsl;
+
+            let updated_rows = diesel::update(dsl::region)
+                .filter(dsl::id.eq(region_id))
+                .filter(dsl::read_only.eq(false))
+                .filter(dsl::deleting.eq(false))
+                .set(dsl::deleting.eq(true))
+                .execute_async(conn)
+                .await?;
+
+            if updated_rows != 1 {
+                return Err(err.bail(
+                    SoftDeleteError::UnexpectedDatabaseUpdate(
+                        updated_rows,
+                        "setting deleting (region)".into(),
+                    ),
+                ));
+            }
 
             // Filter out regions that have any region-snapshots
             let region_snapshot_count: i64 = {

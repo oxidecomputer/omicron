@@ -1805,10 +1805,17 @@ mod test {
             .expect("allocation should succeed at boundary: extent_count_fits just fits");
 
         // Delete the regions so we can try again with one more extent
-        let region_ids = datasets_and_regions
+        let region_ids: Vec<Uuid> = datasets_and_regions
             .iter()
             .map(|(_dataset, region)| region.id())
             .collect();
+
+        for region_id in &region_ids {
+            datastore
+                .mark_region_for_deletion(*region_id)
+                .await
+                .expect("region cleanup should succeed");
+        }
 
         datastore
             .regions_hard_delete(&logctx.log, region_ids)

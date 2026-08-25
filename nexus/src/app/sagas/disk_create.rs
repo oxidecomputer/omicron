@@ -432,7 +432,12 @@ async fn sdc_alloc_regions_undo(
         .map(|(_, region)| region.id())
         .collect::<Vec<Uuid>>();
 
+    for region_id in &region_ids {
+        osagactx.datastore().mark_region_for_deletion(*region_id).await?;
+    }
+
     osagactx.datastore().regions_hard_delete(log, region_ids).await?;
+
     Ok(())
 }
 

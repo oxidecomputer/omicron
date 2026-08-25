@@ -614,10 +614,8 @@ mod test {
     ) {
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
-        let opctx = OpContext::for_tests(
-            cptestctx.logctx.log.clone(),
-            datastore.clone(),
-        );
+        let log = cptestctx.logctx.log.clone();
+        let opctx = OpContext::for_tests(log.clone(), datastore.clone());
 
         let starter = Arc::new(NoopStartSaga::new());
         let mut task = RegionSnapshotReplacementDetector::new(
@@ -768,7 +766,17 @@ mod test {
         // So delete it!
 
         datastore
+            .mark_region_snapshot_for_deletion(
+                region_snapshot_to_delete.dataset_id.into(),
+                region_snapshot_to_delete.region_id,
+                region_snapshot_to_delete.snapshot_id,
+            )
+            .await
+            .unwrap();
+
+        datastore
             .region_snapshot_remove(
+                &log,
                 region_snapshot_to_delete.dataset_id.into(),
                 region_snapshot_to_delete.region_id,
                 region_snapshot_to_delete.snapshot_id,

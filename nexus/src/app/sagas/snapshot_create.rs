@@ -492,7 +492,12 @@ async fn ssc_alloc_regions_undo(
         .map(|(_, region)| region.id())
         .collect::<Vec<Uuid>>();
 
+    for region_id in &region_ids {
+        osagactx.datastore().mark_region_for_deletion(*region_id).await?;
+    }
+
     osagactx.datastore().regions_hard_delete(log, region_ids).await?;
+
     Ok(())
 }
 
@@ -1524,9 +1529,24 @@ async fn ssc_start_running_snapshot_undo(
 
         osagactx
             .datastore()
-            .region_snapshot_remove(dataset.id(), region.id(), snapshot_id)
+            .mark_region_snapshot_for_deletion(
+                dataset.id(),
+                region.id(),
+                snapshot_id,
+            )
+            .await?;
+
+        osagactx
+            .datastore()
+            .region_snapshot_remove(
+                &log,
+                dataset.id(),
+                region.id(),
+                snapshot_id,
+            )
             .await?;
     }
+
     Ok(())
 }
 

@@ -314,6 +314,9 @@ async fn srrs_alloc_new_region_undo(
     // the case anyway.
     if let Some(dataset_and_region) = maybe_dataset_and_region {
         let (_, region) = dataset_and_region;
+
+        osagactx.datastore().mark_region_for_deletion(region.id()).await?;
+
         osagactx
             .datastore()
             .regions_hard_delete(log, vec![region.id()])

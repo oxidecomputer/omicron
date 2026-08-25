@@ -286,6 +286,7 @@ async fn svd_delete_crucible_snapshots(
 async fn svd_delete_crucible_snapshot_records(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
+    let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
 
     let crucible_resources_to_delete =
@@ -294,22 +295,19 @@ async fn svd_delete_crucible_snapshot_records(
     // Remove DB records
     let datasets_and_snapshots = osagactx
         .datastore()
-        .snapshots_to_delete(
-            &crucible_resources_to_delete,
-        )
+        .snapshots_to_delete(&crucible_resources_to_delete)
         .await
         .map_err(|e| {
             saga_action_failed(Error::internal_error(&format!(
-                "failed to get datasets_and_snapshots from crucible resources ({:?}): {:?}",
-                crucible_resources_to_delete,
-                e,
+                "failed to get datasets_and_snapshots from crucible resources \
+                ({crucible_resources_to_delete:?}): {e:?}",
             )))
         })?;
 
     for (_, region_snapshot) in datasets_and_snapshots {
         osagactx
             .datastore()
-            .region_snapshot_remove(
+            .mark_region_snapshot_for_deletion(
                 region_snapshot.dataset_id.into(),
                 region_snapshot.region_id,
                 region_snapshot.snapshot_id,
@@ -317,11 +315,28 @@ async fn svd_delete_crucible_snapshot_records(
             .await
             .map_err(|e| {
                 saga_action_failed(Error::internal_error(&format!(
-                    "failed to region_snapshot_remove {} {} {}: {:?}",
+                    "failed to mark region snapshot {} {} {}: {e:?}",
                     region_snapshot.dataset_id,
                     region_snapshot.region_id,
                     region_snapshot.snapshot_id,
-                    e,
+                )))
+            })?;
+
+        osagactx
+            .datastore()
+            .region_snapshot_remove(
+                log,
+                region_snapshot.dataset_id.into(),
+                region_snapshot.region_id,
+                region_snapshot.snapshot_id,
+            )
+            .await
+            .map_err(|e| {
+                saga_action_failed(Error::internal_error(&format!(
+                    "failed to remove region snapshot {} {} {}: {e:?}",
+                    region_snapshot.dataset_id,
+                    region_snapshot.region_id,
+                    region_snapshot.snapshot_id,
                 )))
             })?;
     }
