@@ -859,6 +859,7 @@ fn build_port_settings(
         LinkSettings {
             addrs,
             params: LinkCreate {
+                allow_ddm_traffic: false,
                 autoneg: uplink.autoneg,
                 kr: false, //NOTE: kr does not apply to user configurable links
                 fec,

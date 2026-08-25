@@ -103,6 +103,7 @@ use sled_agent_types::inventory::HostPhase2DesiredSlots;
 use sled_agent_types::inventory::NetworkInterface;
 use sled_agent_types::inventory::NetworkInterfaceKind;
 use sled_agent_types::inventory::OmicronSledConfig;
+use sled_agent_types::inventory::OmicronSledUpdateDisposition;
 use sled_agent_types::inventory::OmicronZoneDataset;
 use sled_agent_types::inventory::SledCpuFamily;
 use sled_agent_types::inventory::SourceNatConfigGeneric;
@@ -1047,6 +1048,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                     remove_mupdate_override: None,
                     host_phase_2: HostPhase2DesiredSlots::current_contents(),
                     measurements: BTreeSet::new(),
+                    update_disposition: OmicronSledUpdateDisposition::Available,
                 })
                 .await
                 .expect("Failed to configure sled agent {sled_id} with zones");
