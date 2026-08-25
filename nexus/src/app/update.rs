@@ -27,6 +27,7 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::TargetReleaseDescription;
 use nexus_types::external_api::update;
+use nexus_types::external_api::update::TargetRelease;
 use nexus_types::external_api::update::TufSignedRootRole;
 use nexus_types::identity::Asset;
 use nexus_types::internal_api::views as internal_views;
@@ -108,7 +109,7 @@ struct UpdateContactSupportChecksInput {
     stuck_sagas: Result<Vec<Saga>, Error>,
     blueprint: Arc<Blueprint>,
     // None when no target release has ever been set on the system.
-    current_target_version: Option<Version>,
+    current_target_release: Option<TargetRelease>,
     internal_update_status: internal_views::UpdateStatus,
 }
 
@@ -119,7 +120,7 @@ impl UpdateContactSupportChecksInput {
         let stuck_update_last_blueprint_created_time =
             match UpdateActivityState::new(
                 &self.blueprint,
-                self.current_target_version.as_ref(),
+                self.current_target_release.as_ref(),
             ) {
                 UpdateActivityState::Stuck => Some(self.blueprint.time_created),
                 UpdateActivityState::Idle | UpdateActivityState::InProgress => {
@@ -407,16 +408,37 @@ enum UpdateActivityState {
 impl UpdateActivityState {
     fn new(
         blueprint: &Blueprint,
-        current_target_version: Option<&Version>,
+        current_target_release: Option<&TargetRelease>,
     ) -> Self {
         // First, we determine if an update is not in progress.
-        if !is_update_in_progress(blueprint, current_target_version) {
+        if !is_update_in_progress(
+            blueprint,
+            current_target_release.map(|t| &t.version),
+        ) {
             return UpdateActivityState::Idle;
         }
 
-        // An update is considered "stuck" if it is in progress but the last
-        // created blueprint is older than `STUCK_UPDATE_THRESHOLD`.
-        if blueprint.time_created < Utc::now() - STUCK_UPDATE_THRESHOLD {
+        // An update is in progress. It is only considered "stuck" when there
+        // has been no forward progress within `STUCK_UPDATE_THRESHOLD`. This
+        // requires the last blueprint's creation time, and the he target
+        // release request time to be older than the threshold.
+        //
+        // We care about the target release request time because during a short
+        // window of time between a user requesting a new target release and the
+        // planner producing the first blueprint for it, the latest blueprint is
+        // still the one from the previous update (which could be pretty old).
+        // If a user happens to check the update status during that window, it
+        // could end up as a spurious "stuck" report.
+        let threshold = Utc::now() - STUCK_UPDATE_THRESHOLD;
+        let blueprint_stale = blueprint.time_created < threshold;
+        let target_release_old = match current_target_release {
+            Some(target_release) => target_release.time_requested < threshold,
+            // Unreachable in practice. With no target release the update is not
+            // in progress and we returned `Idle` above. Fall back to the
+            // blueprint-only check.
+            None => true,
+        };
+        if blueprint_stale && target_release_old {
             UpdateActivityState::Stuck
         } else {
             UpdateActivityState::InProgress
@@ -658,7 +680,7 @@ impl super::Nexus {
                 opctx,
                 inventory,
                 Arc::clone(&blueprint_target.blueprint),
-                target_release.as_ref().map(|t| &t.version),
+                target_release.as_ref(),
                 internal_status,
             )
             .await?;
@@ -691,13 +713,13 @@ impl super::Nexus {
         opctx: &OpContext,
         inventory: Arc<Collection>,
         blueprint: Arc<Blueprint>,
-        current_target_version: Option<&Version>,
+        current_target_release: Option<&TargetRelease>,
         internal_update_status: internal_views::UpdateStatus,
     ) -> Result<bool, Error> {
         // If an update is in progress but not stuck, the remaining checks
         // could fail mid-update and shouldn't trigger a contact-support
         // signal.
-        match UpdateActivityState::new(&blueprint, current_target_version) {
+        match UpdateActivityState::new(&blueprint, current_target_release) {
             UpdateActivityState::InProgress => {
                 info!(
                     opctx.log,
@@ -721,7 +743,7 @@ impl super::Nexus {
             // saga reporting for now.
             stuck_sagas: Ok(vec![]),
             blueprint,
-            current_target_version: current_target_version.cloned(),
+            current_target_release: current_target_release.cloned(),
             internal_update_status,
         };
 
@@ -1264,7 +1286,12 @@ mod test {
                     &opctx,
                     inventory,
                     blueprint,
-                    Some(&version),
+                    Some(&TargetRelease {
+                        // In this magical world no update ever takes more than
+                        // 10 hours
+                        time_requested: Utc::now() - TimeDelta::hours(10),
+                        version: version.clone(),
+                    }),
                     empty_internal_update_status(),
                 )
                 .await
@@ -1304,7 +1331,10 @@ mod test {
                     &opctx,
                     inventory,
                     blueprint,
-                    Some(&version),
+                    Some(&TargetRelease {
+                        time_requested: Utc::now() - TimeDelta::hours(10),
+                        version: version.clone(),
+                    }),
                     empty_internal_update_status(),
                 )
                 .await
@@ -1344,7 +1374,10 @@ mod test {
                     &opctx,
                     inventory,
                     blueprint,
-                    Some(&version),
+                    Some(&TargetRelease {
+                        time_requested: Utc::now() - TimeDelta::hours(10),
+                        version: version.clone(),
+                    }),
                     empty_internal_update_status(),
                 )
                 .await
@@ -1393,7 +1426,10 @@ mod test {
                     &opctx,
                     inventory,
                     blueprint,
-                    Some(&version),
+                    Some(&TargetRelease {
+                        time_requested: Utc::now() - TimeDelta::hours(10),
+                        version: version.clone(),
+                    }),
                     empty_internal_update_status(),
                 )
                 .await
@@ -1435,7 +1471,10 @@ mod test {
                     &opctx,
                     inventory,
                     blueprint,
-                    Some(&version),
+                    Some(&TargetRelease {
+                        time_requested: Utc::now() - TimeDelta::hours(10),
+                        version: version.clone(),
+                    }),
                     empty_internal_update_status(),
                 )
                 .await
@@ -1490,7 +1529,10 @@ mod test {
                     &opctx,
                     inventory,
                     blueprint,
-                    Some(&version),
+                    Some(&TargetRelease {
+                        time_requested: Utc::now() - TimeDelta::hours(10),
+                        version: version.clone(),
+                    }),
                     empty_internal_update_status(),
                 )
                 .await
@@ -1533,7 +1575,10 @@ mod test {
                     &opctx,
                     inventory,
                     blueprint,
-                    Some(&version),
+                    Some(&TargetRelease {
+                        time_requested: Utc::now() - TimeDelta::hours(10),
+                        version: version.clone(),
+                    }),
                     empty_internal_update_status(),
                 )
                 .await
@@ -1653,14 +1698,21 @@ mod test {
         );
         // Components are split across multiple non-initial versions and the
         // last step planned is older than `STUCK_UPDATE_THRESHOLD`, so the
-        // update is considered stuck and contact support is true.
+        // update is considered stuck and contact support is true. The target
+        // release was requested longer than when the blueprint was created,
+        // so it doesn't take precedence over.
         assert!(
             nexus
                 .contact_support(
                     &opctx,
                     inventory,
                     blueprint,
-                    Some(&version),
+                    Some(&TargetRelease {
+                        time_requested: Utc::now()
+                            - STUCK_UPDATE_THRESHOLD
+                            - TimeDelta::seconds(10),
+                        version: version.clone(),
+                    }),
                     empty_internal_update_status(),
                 )
                 .await
@@ -1700,15 +1752,19 @@ mod test {
 
         let inventory = Arc::new(collection);
         let version = fake_target_version();
+        let blueprint_creation_time =
+            Utc::now() - STUCK_UPDATE_THRESHOLD - TimeDelta::seconds(10);
         let blueprint = fake_blueprint(
             &cptestctx.logctx.log,
             &version,
-            Utc::now() - STUCK_UPDATE_THRESHOLD - TimeDelta::seconds(10),
+            blueprint_creation_time,
             true,
         );
         // Every health check is unhealthy: stuck saga, stuck update, stale
         // inventory, unhealthy zpools, and unhealthy SMF services, plus a
-        // missing sled. Contact support should be true.
+        // missing sled. Contact support should be true. The target release was
+        // requested longer than the stuck update threshold, so it doesn't reset
+        // the stuck "clock".
         let missing_sled_id = SledUuid::new_v4();
         assert!(
             nexus
@@ -1716,7 +1772,11 @@ mod test {
                     &opctx,
                     inventory,
                     blueprint,
-                    Some(&version),
+                    Some(&TargetRelease {
+                        time_requested: blueprint_creation_time
+                            - TimeDelta::seconds(10),
+                        version: version.clone(),
+                    }),
                     internal_update_status_with_missing_sleds(
                         [missing_sled_id],
                         [sled_id()],
@@ -1760,7 +1820,10 @@ mod test {
                     &opctx,
                     inventory,
                     blueprint,
-                    Some(&version),
+                    Some(&TargetRelease {
+                        time_requested: Utc::now() - TimeDelta::hours(10),
+                        version: version.clone(),
+                    }),
                     empty_internal_update_status(),
                 )
                 .await
@@ -1801,7 +1864,10 @@ mod test {
                     &opctx,
                     inventory,
                     blueprint,
-                    Some(&version),
+                    Some(&TargetRelease {
+                        time_requested: Utc::now() - TimeDelta::hours(10),
+                        version: version.clone(),
+                    }),
                     internal_update_status_with_missing_sleds(
                         [missing_sled_id],
                         [sled_id()],
@@ -1840,7 +1906,10 @@ mod test {
 
         let prev_version: Version =
             "8.0.0-0.ci+gitprev0000000".parse().unwrap();
-        let target_release = fake_target_version();
+        let target_release = TargetRelease {
+            time_requested: Utc::now(),
+            version: fake_target_version(),
+        };
         // The whole blueprint is on `prev_version`, which differs from the
         // current target `target_release` we pass below — that's what makes
         // `BlueprintTargetReleaseStatus::new` return `FoundDifferentVersion`
@@ -1853,6 +1922,64 @@ mod test {
             false,
         );
 
+        assert!(
+            !nexus
+                .contact_support(
+                    &opctx,
+                    inventory,
+                    blueprint,
+                    Some(&target_release),
+                    empty_internal_update_status(),
+                )
+                .await
+                .unwrap()
+        );
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_contact_support_target_recently_requested_stale_blueprint(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let opctx = fake_opctx(cptestctx);
+        // Unhealthy system: if the health checks ran, contact support would be
+        // true.
+        insert_fake_collection(
+            cptestctx,
+            &opctx,
+            unhealthy_zpools(),
+            unhealthy_services(),
+        )
+        .await;
+        let inventory = Arc::new(
+            nexus
+                .datastore()
+                .inventory_get_latest_collection(&opctx)
+                .await
+                .unwrap()
+                .unwrap(),
+        );
+
+        // The blueprint is entirely on `prev_version` (from the previous
+        // update) and was created well over `STUCK_UPDATE_THRESHOLD` ago. It
+        // differs from the current target release below, so
+        // `is_update_in_progress` returns true.
+        let prev_version: Version =
+            "8.0.0-0.ci+gitprev0000000".parse().unwrap();
+        let blueprint = fake_blueprint(
+            &cptestctx.logctx.log,
+            &prev_version,
+            Utc::now() - STUCK_UPDATE_THRESHOLD - TimeDelta::minutes(5),
+            false,
+        );
+
+        // The target release was requested just now, so even though the latest
+        // blueprint is stale, the update is considered in progress (not stuck)
+        // and contact support should be false.
+        let target_release = TargetRelease {
+            time_requested: Utc::now(),
+            version: fake_target_version(),
+        };
         assert!(
             !nexus
                 .contact_support(
@@ -1885,7 +2012,10 @@ mod test {
             )),
             stuck_sagas: Ok(vec![]),
             blueprint,
-            current_target_version: Some(fake_target_version()),
+            current_target_release: Some(TargetRelease {
+                time_requested: Utc::now() - TimeDelta::hours(10),
+                version: fake_target_version(),
+            }),
             internal_update_status: empty_internal_update_status(),
         };
         assert_eq!(checks.problems(), UpdateStatusProblems::default());
@@ -1914,7 +2044,10 @@ mod test {
             )),
             stuck_sagas: Ok(vec![saga]),
             blueprint,
-            current_target_version: Some(fake_target_version()),
+            current_target_release: Some(TargetRelease {
+                time_requested: Utc::now() - TimeDelta::hours(10),
+                version: fake_target_version(),
+            }),
             internal_update_status: empty_internal_update_status(),
         };
 
@@ -1947,7 +2080,10 @@ mod test {
             )),
             stuck_sagas: Err(err),
             blueprint,
-            current_target_version: Some(fake_target_version()),
+            current_target_release: Some(TargetRelease {
+                time_requested: Utc::now() - TimeDelta::hours(10),
+                version: fake_target_version(),
+            }),
             internal_update_status: empty_internal_update_status(),
         };
 
@@ -1980,7 +2116,11 @@ mod test {
             )),
             stuck_sagas: Ok(vec![]),
             blueprint,
-            current_target_version: Some(fake_target_version()),
+            current_target_release: Some(TargetRelease {
+                time_requested: time_last_blueprint_created
+                    - TimeDelta::minutes(5),
+                version: fake_target_version(),
+            }),
             internal_update_status: empty_internal_update_status(),
         };
 
@@ -2015,7 +2155,10 @@ mod test {
             )),
             stuck_sagas: Ok(vec![]),
             blueprint,
-            current_target_version: Some(fake_target_version()),
+            current_target_release: Some(TargetRelease {
+                time_requested: Utc::now() - TimeDelta::hours(10),
+                version: fake_target_version(),
+            }),
             internal_update_status: empty_internal_update_status(),
         };
         assert_eq!(checks.problems(), UpdateStatusProblems::default());
@@ -2045,7 +2188,10 @@ mod test {
             inventory: Arc::new(collection),
             stuck_sagas: Ok(vec![]),
             blueprint,
-            current_target_version: Some(fake_target_version()),
+            current_target_release: Some(TargetRelease {
+                time_requested: Utc::now() - TimeDelta::hours(10),
+                version: fake_target_version(),
+            }),
             internal_update_status: empty_internal_update_status(),
         };
 
@@ -2082,7 +2228,10 @@ mod test {
             )),
             stuck_sagas: Ok(vec![]),
             blueprint,
-            current_target_version: Some(fake_target_version()),
+            current_target_release: Some(TargetRelease {
+                time_requested: Utc::now() - TimeDelta::hours(10),
+                version: fake_target_version(),
+            }),
             internal_update_status: empty_internal_update_status(),
         };
 
@@ -2125,7 +2274,10 @@ mod test {
             inventory: Arc::new(collection),
             stuck_sagas: Ok(vec![]),
             blueprint,
-            current_target_version: Some(fake_target_version()),
+            current_target_release: Some(TargetRelease {
+                time_requested: Utc::now() - TimeDelta::hours(10),
+                version: fake_target_version(),
+            }),
             internal_update_status: empty_internal_update_status(),
         };
 
@@ -2199,7 +2351,10 @@ mod test {
             inventory: Arc::new(collection),
             stuck_sagas: Ok(vec![]),
             blueprint,
-            current_target_version: Some(fake_target_version()),
+            current_target_release: Some(TargetRelease {
+                time_requested: Utc::now() - TimeDelta::hours(10),
+                version: fake_target_version(),
+            }),
             internal_update_status: empty_internal_update_status(),
         };
 
@@ -2254,7 +2409,10 @@ mod test {
             inventory: Arc::new(collection),
             stuck_sagas: Ok(vec![]),
             blueprint,
-            current_target_version: Some(fake_target_version()),
+            current_target_release: Some(TargetRelease {
+                time_requested: Utc::now() - TimeDelta::hours(10),
+                version: fake_target_version(),
+            }),
             internal_update_status: empty_internal_update_status(),
         };
 
@@ -2287,7 +2445,10 @@ mod test {
             inventory: Arc::new(collection),
             stuck_sagas: Ok(vec![]),
             blueprint,
-            current_target_version: Some(fake_target_version()),
+            current_target_release: Some(TargetRelease {
+                time_requested: Utc::now() - TimeDelta::hours(10),
+                version: fake_target_version(),
+            }),
             internal_update_status: empty_internal_update_status(),
         };
 
@@ -2323,7 +2484,10 @@ mod test {
             inventory: Arc::new(collection),
             stuck_sagas: Ok(vec![]),
             blueprint,
-            current_target_version: Some(fake_target_version()),
+            current_target_release: Some(TargetRelease {
+                time_requested: Utc::now() - TimeDelta::hours(10),
+                version: fake_target_version(),
+            }),
             internal_update_status: empty_internal_update_status(),
         };
 
@@ -2373,7 +2537,10 @@ mod test {
             inventory: Arc::new(collection),
             stuck_sagas: Ok(vec![]),
             blueprint,
-            current_target_version: Some(fake_target_version()),
+            current_target_release: Some(TargetRelease {
+                time_requested: Utc::now() - TimeDelta::hours(10),
+                version: fake_target_version(),
+            }),
             internal_update_status: empty_internal_update_status(),
         };
 
@@ -2419,7 +2586,10 @@ mod test {
             )),
             stuck_sagas: Ok(vec![saga]),
             blueprint,
-            current_target_version: Some(fake_target_version()),
+            current_target_release: Some(TargetRelease {
+                time_requested: Utc::now() - TimeDelta::hours(10),
+                version: fake_target_version(),
+            }),
             internal_update_status: empty_internal_update_status(),
         };
 
@@ -2477,7 +2647,11 @@ mod test {
             inventory: Arc::new(collection),
             stuck_sagas: Ok(vec![saga]),
             blueprint,
-            current_target_version: Some(fake_target_version()),
+            current_target_release: Some(TargetRelease {
+                time_requested: time_last_blueprint_created
+                    - TimeDelta::minutes(5),
+                version: fake_target_version(),
+            }),
             internal_update_status: internal_update_status_with_missing_sleds(
                 [missing_sled_id],
                 [sled_id],
@@ -2547,7 +2721,10 @@ mod test {
             )),
             stuck_sagas: Ok(vec![]),
             blueprint,
-            current_target_version: Some(fake_target_version()),
+            current_target_release: Some(TargetRelease {
+                time_requested: Utc::now() - TimeDelta::hours(10),
+                version: fake_target_version(),
+            }),
             internal_update_status: internal_update_status_with_missing_sleds(
                 [missing_sled_id],
                 [healthy_sled_id],
