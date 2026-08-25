@@ -22,6 +22,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_db_queries::db::queries::disk::MAX_DISKS_PER_INSTANCE;
+use nexus_lockstep_client::types::LastResult;
 use nexus_test_interface::NexusServer;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
@@ -918,6 +919,7 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
         original_sled,
         src_propolis_id,
         migration_id,
+        sled_agent_client::SimulatedMigrationResult::Success,
     )
     .await;
 
@@ -1238,6 +1240,7 @@ async fn test_instance_migrate_target_finishes_first(
         original_sled,
         src_propolis_id,
         migration_id,
+        sled_agent_client::SimulatedMigrationResult::Success,
     )
     .await;
 
@@ -1577,6 +1580,7 @@ async fn test_instance_migrate_v2p_and_routes(
         original_sled_id,
         src_propolis_id,
         migration_id,
+        sled_agent_client::SimulatedMigrationResult::Success,
     )
     .await;
     vmm_simulate_on_sled(cptestctx, nexus, original_sled_id, src_propolis_id)
@@ -1775,6 +1779,7 @@ async fn test_instance_migration_compatible_cpu_platforms(
         original_sled,
         src_propolis_id,
         migration_id,
+        sled_agent_client::SimulatedMigrationResult::Success,
     )
     .await;
 
@@ -2154,6 +2159,217 @@ async fn test_instance_failed_by_instance_watcher_can_be_restarted(
 
     // Now, the instance should be deleteable.
     expect_instance_delete_ok(&client, instance_name).await;
+}
+
+// Reproducer for one way to get to a bad InstanceStateComputer combination.
+#[nexus_test(extra_sled_agents = 1)]
+async fn test_instance_watcher_survives_failed_migration_target_vmm_leftover(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    use nexus_db_model::{Migration, MigrationState};
+    async fn migration_fetch(
+        cptestctx: &ControlPlaneTestContext,
+        migration_id: Uuid,
+    ) -> Migration {
+        use nexus_db_schema::schema::migration::dsl;
+
+        let datastore =
+            cptestctx.server.server_context().nexus.datastore().clone();
+        let db_state = dsl::migration
+            .filter(dsl::id.eq(migration_id))
+            .select(Migration::as_select())
+            .get_results_async::<Migration>(
+                &*datastore.pool_connection_for_tests().await.unwrap(),
+            )
+            .await
+            .unwrap();
+
+        info!(&cptestctx.logctx.log, "refetched migration info from db";
+                "migration" => ?db_state);
+
+        db_state.into_iter().next().unwrap()
+    }
+
+    let client = &cptestctx.external_client;
+    let lockstep_client = &cptestctx.lockstep_client;
+    let apictx = &cptestctx.server.server_context();
+    let nexus = &apictx.nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+    let instance_name = "unfinished-business";
+
+    let default_sled_id = cptestctx.first_sled_id();
+    let other_sled_id = cptestctx.second_sled_id();
+
+    create_project_and_pool(&client).await;
+    let instance_url = get_instance_url(instance_name);
+    let instance = nexus_test_utils::resource_helpers::create_instance_with(
+        client,
+        PROJECT_NAME,
+        instance_name,
+        &instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+        Vec::<instance::InstanceDiskAttachment>::new(),
+        Vec::<ExternalIpCreate>::new(),
+        true,
+        Some(InstanceAutoRestartPolicy::Never),
+        None,
+        Vec::new(),
+    )
+    .await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+
+    instance_simulate(nexus, &instance_id).await;
+    let instance_next = instance_get(&client, &instance_url).await;
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
+
+    let sled_info = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("running instance should have a sled");
+    let original_sled = sled_info.sled_id;
+    let dst_sled_id = if original_sled == default_sled_id {
+        other_sled_id
+    } else {
+        default_sled_id
+    };
+
+    let migrate_url = format!("/instances/{}/migrate", instance_id);
+    NexusRequest::new(
+        RequestBuilder::new(lockstep_client, Method::POST, &migrate_url)
+            .body(Some(&InstanceMigrateRequest { dst_sled_id }))
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<Instance>()
+    .unwrap();
+
+    let info = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("instance should be on a sled");
+    let src_propolis_id = info.propolis_id;
+    let dst_propolis_id =
+        info.dst_propolis_id.expect("instance should have a migration target");
+    let migration_id = {
+        let (.., authz_instance) = LookupPath::new(&opctx, datastore)
+            .instance_id(instance_id.into_untyped_uuid())
+            .lookup_for(nexus_db_queries::authz::Action::Read)
+            .await
+            .unwrap();
+        datastore
+            .instance_refetch(&opctx, &authz_instance)
+            .await
+            .unwrap()
+            .migration_id
+            .expect("started migration must have a migration id")
+    };
+
+    // The source will report the migration as failed. The target is driven only
+    // as far as Migrating and then left there, modeling a destination sled that
+    // is slow to notice the failure.
+    instance_simulate_migration_source(
+        cptestctx,
+        nexus,
+        original_sled,
+        src_propolis_id,
+        migration_id,
+        sled_agent_client::SimulatedMigrationResult::Failure,
+    )
+    .await;
+    vmm_single_step_on_sled(cptestctx, nexus, original_sled, src_propolis_id)
+        .await;
+    vmm_single_step_on_sled(cptestctx, nexus, original_sled, src_propolis_id)
+        .await;
+    vmm_single_step_on_sled(cptestctx, nexus, dst_sled_id, dst_propolis_id)
+        .await;
+    vmm_single_step_on_sled(cptestctx, nexus, dst_sled_id, dst_propolis_id)
+        .await;
+
+    let migration = migration_fetch(cptestctx, migration_id).await;
+    assert_eq!(migration.source_state, MigrationState::IN_PROGRESS);
+    assert_eq!(migration.target_state, MigrationState::IN_PROGRESS);
+
+    // Finishing the source's simulated transitions makes it report the
+    // migration as failed and resume the guest.
+    vmm_simulate_on_sled(cptestctx, nexus, original_sled, src_propolis_id)
+        .await;
+
+    // While a migration ID is set, the instance is Migrating. It only goes back
+    // to Running once the update saga for the failed migration has run and
+    // cleared the migration IDs. So waiting for Running here is effectively
+    // also waiting for the saga.
+    instance_wait_for_state(client, instance_id, InstanceState::Running).await;
+    let migration = migration_fetch(cptestctx, migration_id).await;
+    assert_eq!(migration.source_state, MigrationState::FAILED);
+    assert_eq!(migration.target_state, MigrationState::IN_PROGRESS);
+
+    // The update saga cleared the instance's pointer to the target VMM, but it
+    // only tears down VMMs that have already shut down -- and as far as the
+    // database knows, this one is still migrating. So the target VMM's row
+    // should still exist with the Migrating state, and with nothing pointing at
+    // it.
+    let target_vmm = datastore
+        .vmm_fetch(&opctx, &dst_propolis_id)
+        .await
+        .expect("target VMM row should be live after the failed migration");
+    assert_eq!(target_vmm.state, nexus_db_model::VmmState::Migrating);
+
+    // Stopping the instance moves its record to NoVmm. The database now holds a
+    // VMM row that still exists, for an instance that says it has no VMM at
+    // all.
+    instance_post(&client, instance_name, InstanceOp::Stop).await;
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
+
+    let target_vmm = datastore
+        .vmm_fetch(&opctx, &dst_propolis_id)
+        .await
+        .expect("target VMM row should still be live after the stop");
+    assert_eq!(target_vmm.state, nexus_db_model::VmmState::Migrating);
+
+    // This then panics in InstanceStateComputer::compute_state with
+    // (NoVmm, Some(Migrating)).
+    let task = nexus_test_utils::background::activate_background_task(
+        lockstep_client,
+        "instance_watcher",
+    )
+    .await;
+    let LastResult::Completed(last_result) = task.last else {
+        panic!(
+            "instance watcher activation should have completed; \
+             got {:?}",
+            task.last
+        );
+    };
+    let details = &last_result.details;
+    assert_eq!(
+        details["total_instances"], 1,
+        "exactly the leftover target VMM should have been checked; \
+         details: {details:#}"
+    );
+    assert_eq!(
+        details["failed_checks"],
+        serde_json::json!({}),
+        "the leftover target VMM's check should not have failed; \
+         details: {details:#}"
+    );
+    assert_eq!(
+        details["incomplete_checks"],
+        serde_json::json!({}),
+        "the leftover target VMM's check should have completed; \
+         details: {details:#}"
+    );
+    assert_eq!(
+        details["update_sagas_queued"], 0,
+        "re-reporting the VMM's current state should not queue an update \
+         saga; details: {details:#}"
+    );
 }
 
 // Verified that instances currently on Expunged sleds are marked as failed.
@@ -2890,6 +3106,7 @@ async fn test_instance_metrics_with_migration(
         original_sled,
         src_propolis_id,
         migration_id,
+        sled_agent_client::SimulatedMigrationResult::Success,
     )
     .await;
     vmm_single_step_on_sled(cptestctx, nexus, original_sled, src_propolis_id)
@@ -9888,6 +10105,7 @@ async fn instance_simulate_migration_source(
     sled_id: SledUuid,
     propolis_id: PropolisUuid,
     migration_id: Uuid,
+    result: sled_agent_client::SimulatedMigrationResult,
 ) {
     info!(
         &cptestctx.logctx.log,
@@ -9895,14 +10113,12 @@ async fn instance_simulate_migration_source(
         "propolis_id" => %propolis_id,
         "sled_id" => %sled_id,
         "migration_id" => %migration_id,
+        "result" => ?result,
     );
     let sa = nexus.sled_client(&sled_id).await.unwrap();
     sa.vmm_simulate_migration_source(
         propolis_id,
-        sled_agent_client::SimulateMigrationSource {
-            migration_id,
-            result: sled_agent_client::SimulatedMigrationResult::Success,
-        },
+        sled_agent_client::SimulateMigrationSource { migration_id, result },
     )
     .await;
 }

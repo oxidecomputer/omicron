@@ -109,7 +109,13 @@ impl SimInstanceInner {
                 self.queue_graceful_stop();
             }
             SimulatedMigrationResult::Failure => {
-                todo!("finish this part when we actuall need it...")
+                // Mirror real Propolis's behavior for a failed migration out of
+                // this sled: report the migration as Error, and resume the
+                // source VM on this sled.
+                self.queue_migration_update(migration_update(
+                    propolis_client::types::MigrationState::Error,
+                ));
+                self.queue_propolis_state(PropolisInstanceState::Running);
             }
         }
     }
