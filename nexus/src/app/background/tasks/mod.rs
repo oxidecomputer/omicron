@@ -31,6 +31,7 @@ pub mod instance_updater;
 pub mod instance_watcher;
 pub mod inventory_collection;
 pub mod inventory_load;
+pub mod local_storage_delete;
 pub mod lookup_region_port;
 pub mod metrics_producer_gc;
 pub mod multicast;

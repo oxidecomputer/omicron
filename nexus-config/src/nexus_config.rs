@@ -477,6 +477,8 @@ pub struct BackgroundTaskConfig {
     pub audit_log_cleanup: AuditLogCleanupConfig,
     /// configuration for populate switch ports task
     pub populate_switch_ports: PopulateSwitchPortsConfig,
+    /// configuration for local storage delete task
+    pub local_storage_delete: LocalStorageDeleteConfig,
 }
 
 #[serde_as]
@@ -1086,6 +1088,14 @@ pub struct TrustQuorumConfig {
     pub period_secs: Duration,
 }
 
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LocalStorageDeleteConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
 /// Configuration for a nexus server
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct PackageConfig {
@@ -1376,6 +1386,7 @@ mod test {
             audit_log_cleanup.retention_days = 90
             audit_log_cleanup.max_deleted_per_activation = 10000
             populate_switch_ports.period_secs = 31
+            local_storage_delete.period_secs = 30
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -1656,6 +1667,10 @@ mod test {
                         populate_switch_ports: PopulateSwitchPortsConfig {
                             period_secs: Duration::from_secs(31),
                         },
+                        local_storage_delete:
+                            LocalStorageDeleteConfig {
+                                period_secs: Duration::from_secs(30),
+                            },
                     },
                     multicast: MulticastConfig { enabled: false },
                     default_region_allocation_strategy:
@@ -1772,6 +1787,7 @@ mod test {
             audit_log_cleanup.retention_days = 90
             audit_log_cleanup.max_deleted_per_activation = 10000
             populate_switch_ports.period_secs = 31
+            local_storage_delete.period_secs = 30
 
             [default_region_allocation_strategy]
             type = "random"

@@ -6,12 +6,16 @@
 
 use crate::http_testing::NexusRequest;
 use dropshot::test_util::ClientTestContext;
+use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::DataStore;
 use nexus_lockstep_client::types::BackgroundTask;
 use nexus_lockstep_client::types::CurrentStatus;
 use nexus_lockstep_client::types::LastResult;
 use nexus_types::internal_api::background::*;
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use slog::info;
+use slog::o;
+use std::sync::Arc;
 use std::time::Duration;
 
 /// Given the name of a background task, wait for it to complete if it's
@@ -580,4 +584,105 @@ pub async fn run_blueprint_rendezvous(lockstep_client: &ClientTestContext) {
         last_result_completed.details,
     )
     .unwrap();
+}
+
+/// Run the local_storage_delete background task, and assert that there are no
+/// reported errors.
+pub async fn run_local_storage_delete(internal_client: &ClientTestContext) {
+    let status = run_local_storage_delete_return_status(internal_client).await;
+    assert!(status.errors.is_empty());
+}
+
+/// Run the local_storage_delete background task and return the status.
+pub async fn run_local_storage_delete_return_status(
+    internal_client: &ClientTestContext,
+) -> LocalStorageDeleteStatus {
+    let last_background_task =
+        activate_background_task(&internal_client, "local_storage_delete")
+            .await;
+
+    let LastResult::Completed(last_result_completed) =
+        last_background_task.last
+    else {
+        panic!(
+            "unexpected {:?} returned from volume_delete task",
+            last_background_task.last,
+        );
+    };
+
+    serde_json::from_value::<LocalStorageDeleteStatus>(
+        last_result_completed.details,
+    )
+    .unwrap()
+}
+
+pub async fn wait_for_all_local_storage_deletes(
+    datastore: &Arc<DataStore>,
+    lockstep_client: &ClientTestContext,
+) {
+    wait_for_all_local_storage_deletes_impl(datastore, lockstep_client, false)
+        .await
+}
+
+pub async fn wait_for_all_local_storage_deletes_errors_ok(
+    datastore: &Arc<DataStore>,
+    lockstep_client: &ClientTestContext,
+) {
+    wait_for_all_local_storage_deletes_impl(datastore, lockstep_client, true)
+        .await
+}
+
+async fn wait_for_all_local_storage_deletes_impl(
+    datastore: &Arc<DataStore>,
+    lockstep_client: &ClientTestContext,
+    errors_ok: bool,
+) {
+    wait_for_condition(
+        || {
+            let datastore = datastore.clone();
+            let opctx = OpContext::for_tests(
+                lockstep_client.client_log.new(o!()),
+                datastore.clone(),
+            );
+
+            async move {
+                // Trigger the local storage delete background task. Bail out of
+                // this loop only when there's no more allocations to clean up.
+                //
+                // Be careful not to check if the background tasks performed any
+                // actions: the fixed point that we're waiting for is for all
+                // resources to be cleaned up.
+
+                if errors_ok {
+                    let _ =
+                        run_local_storage_delete_return_status(lockstep_client)
+                            .await;
+                } else {
+                    run_local_storage_delete(lockstep_client).await;
+                }
+
+                let disks_requiring_work = datastore
+                    .deleted_disks_with_undeleted_local_storage(&opctx)
+                    .await
+                    .unwrap();
+
+                if !disks_requiring_work.is_empty() {
+                    info!(
+                        &lockstep_client.client_log,
+                        "wait_for_all_local_storage_deletes: {} disks \
+                        requiring work left",
+                        disks_requiring_work.len(),
+                    );
+
+                    return Err(CondCheckError::<()>::NotYet { status: None });
+                }
+
+                Ok(())
+            }
+        },
+        &std::time::Duration::from_millis(50),
+        &std::time::Duration::from_secs(260),
+    )
+    .await
+    .expect("all deletes finished");
 }
