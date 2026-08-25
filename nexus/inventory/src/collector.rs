@@ -725,6 +725,7 @@ mod test {
     use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
     use sled_agent_types::inventory::HostPhase2DesiredSlots;
     use sled_agent_types::inventory::OmicronSledConfig;
+    use sled_agent_types::inventory::OmicronSledUpdateDisposition;
     use sled_agent_types::inventory::OmicronZoneConfig;
     use sled_agent_types::inventory::OmicronZoneImageSource;
     use sled_agent_types::inventory::OmicronZoneType;
@@ -748,6 +749,7 @@ mod test {
             remove_mupdate_override,
             host_phase_2,
             measurements,
+            update_disposition,
         } = config;
 
         swriteln!(s, "        generation: {generation}");
@@ -755,6 +757,7 @@ mod test {
             s,
             "        remove_mupdate_override: {remove_mupdate_override:?}"
         );
+        swriteln!(s, "        update_disposition: {update_disposition:?}");
         {
             let HostPhase2DesiredSlots { slot_a, slot_b } = host_phase_2;
             swriteln!(s, "        host_phase_2.slot_a: {slot_a:?}");
@@ -974,10 +977,15 @@ mod test {
             SledCpuFamily::AmdMilan,
         );
 
-        let agent =
-            sim::Server::start(&config, &log, false, &simulated_upstairs, 0)
-                .await
-                .unwrap();
+        let agent = sim::Server::start(
+            &config,
+            &log,
+            sim::NexusRegistration::Background,
+            &simulated_upstairs,
+            0,
+        )
+        .await
+        .unwrap();
 
         // Pretend to put some zones onto this sled.  We don't need to test this
         // exhaustively here because there are builder tests that exercise a
@@ -1007,6 +1015,7 @@ mod test {
                 remove_mupdate_override: None,
                 host_phase_2: HostPhase2DesiredSlots::current_contents(),
                 measurements: BTreeSet::new(),
+                update_disposition: OmicronSledUpdateDisposition::Available,
             })
             .await
             .expect("failed to write initial zone version to fake sled agent");

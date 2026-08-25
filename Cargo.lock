@@ -8944,6 +8944,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "omicron-debug-dropbox"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/omicron-debug-dropbox?rev=eb13fc7a0031261dd51a14a30a133155460f5c0a#eb13fc7a0031261dd51a14a30a133155460f5c0a"
+dependencies = [
+ "camino",
+ "derive_more 2.1.1",
+ "slog",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
 name = "omicron-deployment-graph"
 version = "0.1.0"
 dependencies = [
@@ -9925,6 +9938,8 @@ dependencies = [
  "daft",
  "data-encoding",
  "der 0.7.10",
+ "derive_more 2.1.1",
+ "derive_more-impl",
  "digest 0.10.7",
  "digest 0.11.3",
  "dof 0.3.0",
@@ -10766,10 +10781,14 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "camino",
+ "camino-tempfile",
  "chrono",
  "clap",
  "glob",
+ "illumos-nvpair",
+ "illumos-nvpair-sys",
  "jiff",
+ "libc",
  "omicron-workspace-hack",
  "rayon",
  "sigpipe",
@@ -14248,6 +14267,7 @@ dependencies = [
  "dropshot",
  "either",
  "expectorate",
+ "filetime",
  "futures",
  "glob",
  "iddqd",
@@ -14255,8 +14275,10 @@ dependencies = [
  "installinator-common",
  "key-manager",
  "key-manager-types",
+ "libc",
  "ntp-admin-client",
  "omicron-common",
+ "omicron-debug-dropbox",
  "omicron-generation-kinds",
  "omicron-ledger",
  "omicron-test-utils",
@@ -14285,6 +14307,7 @@ dependencies = [
  "tokio",
  "trust-quorum-types",
  "tufaceous-artifact 0.2.0",
+ "walkdir",
  "xshell",
  "zone",
 ]

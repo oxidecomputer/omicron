@@ -89,11 +89,13 @@ mod tests {
     use nexus_types::deployment::BlueprintPhysicalDiskConfig;
     use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
     use nexus_types::deployment::BlueprintSledUpdateDisposition;
+    use nexus_types::deployment::BlueprintSledUpdateDispositionKind;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneImageSource;
     use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::deployment::LastAllocatedSubnetIpOffset;
+    use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::external_api::sled::SledPolicy;
     use nexus_types::external_api::sled::SledProvisionPolicy;
@@ -262,7 +264,12 @@ mod tests {
 
         let sled_config = BlueprintSledConfig {
             state: SledState::Active,
-            update_disposition: BlueprintSledUpdateDisposition::initial(),
+            update_disposition: BlueprintSledUpdateDisposition {
+                generation: Generation::new().next(),
+                kind: BlueprintSledUpdateDispositionKind::Evacuating {
+                    policy: ReconfiguratorDisruptionPolicy::Terminate,
+                },
+            },
             subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
             last_allocated_ip_subnet_offset:
                 LastAllocatedSubnetIpOffset::initial(),

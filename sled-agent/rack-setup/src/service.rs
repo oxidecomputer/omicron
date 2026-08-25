@@ -109,6 +109,7 @@ use sled_agent_client::{
     Client as SledAgentClient, Error as SledAgentError, types as SledAgentTypes,
 };
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
+use sled_agent_types::inventory::OmicronSledUpdateDisposition;
 use sled_agent_types::inventory::{
     ConfigReconcilerInventoryResult, HostPhase2DesiredSlots, OmicronSledConfig,
     OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
@@ -578,6 +579,7 @@ impl ServiceInner {
                     remove_mupdate_override: None,
                     host_phase_2: HostPhase2DesiredSlots::current_contents(),
                     measurements: Default::default(),
+                    update_disposition: OmicronSledUpdateDisposition::Available,
                 };
 
                 self.set_config_on_sled(*sled_address, sled_config).await?;

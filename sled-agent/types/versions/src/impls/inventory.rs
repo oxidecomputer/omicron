@@ -28,11 +28,11 @@ use crate::latest::inventory::{
     ManifestNonBootInventory, MupdateOverrideBootInventory,
     MupdateOverrideInventory, MupdateOverrideNonBootInventory,
     NetworkInterface, OmicronFileSourceResolverInventory, OmicronSledConfig,
-    OmicronZoneConfig, OmicronZoneImageSource, OmicronZoneType,
-    OmicronZonesConfig, RemoveMupdateOverrideBootSuccessInventory,
-    RemoveMupdateOverrideInventory, SingleMeasurementInventory,
-    SourceNatConfig, SourceNatConfigGeneric, SourceNatConfigV4,
-    SourceNatConfigV6, SvcEnabledNotOnlineState, SvcState,
+    OmicronSledUpdateDisposition, OmicronZoneConfig, OmicronZoneImageSource,
+    OmicronZoneType, OmicronZonesConfig,
+    RemoveMupdateOverrideBootSuccessInventory, RemoveMupdateOverrideInventory,
+    SingleMeasurementInventory, SourceNatConfig, SourceNatConfigGeneric,
+    SourceNatConfigV4, SourceNatConfigV6, SvcEnabledNotOnlineState, SvcState,
     SvcsEnabledNotOnline, ZoneArtifactInventory, ZoneKind, ZpoolHealth,
 };
 
@@ -878,6 +878,7 @@ impl Default for OmicronSledConfig {
             remove_mupdate_override: None,
             host_phase_2: HostPhase2DesiredSlots::current_contents(),
             measurements: BTreeSet::new(),
+            update_disposition: OmicronSledUpdateDisposition::Available,
         }
     }
 }
