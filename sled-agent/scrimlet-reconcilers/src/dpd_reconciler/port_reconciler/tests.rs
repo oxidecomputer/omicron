@@ -77,6 +77,7 @@ fn dpd_port_settings(
         DpdLinkSettings {
             addrs,
             params: DpdLinkCreate {
+                allow_ddm_traffic: false,
                 autoneg,
                 fec,
                 kr: false,
@@ -450,6 +451,7 @@ fn plan_rejects_multi_link_dpd_port() {
     let link0 = DpdLinkId(0);
     let link1 = DpdLinkId(1);
     let link_params = DpdLinkCreate {
+        allow_ddm_traffic: false,
         autoneg: true,
         fec: None,
         kr: false,
@@ -546,12 +548,14 @@ struct ArbitraryPortSettings {
         0..=4,
     ))]
     addrs: BTreeSet<UplinkAddressConfig>,
+    allow_ddm_traffic: bool,
 }
 
 impl ArbitraryPortSettings {
     fn to_dpd_settings(&self, port_id: &PortId) -> DpdPortSettings {
         DpdPortSettings::from(&DiffablePortSettings {
             port_id: port_id.0.clone(),
+            allow_ddm_traffic: self.allow_ddm_traffic,
             autoneg: self.autoneg,
             tx_eq: self.tx_eq,
             fec: self.fec,
@@ -827,7 +831,14 @@ fn diffable_to_port_config(
     port_id: &PortId,
     config: &ArbitraryPortSettings,
 ) -> PortConfig {
-    let ArbitraryPortSettings { autoneg, tx_eq, fec, speed, addrs } = config;
+    let ArbitraryPortSettings {
+        autoneg,
+        tx_eq,
+        fec,
+        speed,
+        addrs,
+        allow_ddm_traffic,
+    } = config;
     PortConfig {
         addresses: addrs.into_iter().copied().collect(),
         switch,
@@ -836,12 +847,12 @@ fn diffable_to_port_config(
         uplink_port_fec: *fec,
         autoneg: *autoneg,
         tx_eq: *tx_eq,
+        allow_ddm_traffic: *allow_ddm_traffic,
 
         // Fields that aren't involved in dpd configuration
         routes: Vec::new(),
         bgp_peers: Vec::new(),
         lldp: None,
-        allow_ddm_traffic: false,
     }
 }
 

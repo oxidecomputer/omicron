@@ -104,15 +104,15 @@ pub mod firewall_rules {
 }
 
 pub mod multicast {
-    pub use crate::v49::multicast::ClearMcast2Phys;
-    pub use crate::v49::multicast::ClearMcastForwarding;
-    pub use crate::v49::multicast::Mcast2PhysMapping;
-    pub use crate::v49::multicast::McastFilterMode;
-    pub use crate::v49::multicast::McastForwardingEntry;
-    pub use crate::v49::multicast::McastForwardingNextHop;
-    pub use crate::v49::multicast::McastReplication;
-    pub use crate::v49::multicast::McastSourceFilter;
-    pub use crate::v49::multicast::MulticastGroupCfg;
+    pub use crate::v50::multicast::ClearMcast2Phys;
+    pub use crate::v50::multicast::ClearMcastForwarding;
+    pub use crate::v50::multicast::Mcast2PhysMapping;
+    pub use crate::v50::multicast::McastFilterMode;
+    pub use crate::v50::multicast::McastForwardingEntry;
+    pub use crate::v50::multicast::McastForwardingNextHop;
+    pub use crate::v50::multicast::McastReplication;
+    pub use crate::v50::multicast::McastSourceFilter;
+    pub use crate::v50::multicast::MulticastGroupCfg;
 }
 
 pub mod instance {
@@ -187,13 +187,10 @@ pub mod inventory {
 
     pub use crate::v12::inventory::HealthMonitorInventory;
 
-    pub use crate::v14::inventory::ConfigReconcilerInventoryStatus;
     pub use crate::v14::inventory::OmicronFileSourceResolverInventory;
     pub use crate::v14::inventory::OmicronSingleMeasurement;
-    pub use crate::v14::inventory::OmicronSledConfig;
     pub use crate::v14::inventory::ReconciledSingleMeasurement;
 
-    pub use crate::v16::inventory::ConfigReconcilerInventory;
     pub use crate::v16::inventory::SingleMeasurementInventory;
 
     pub use crate::v24::inventory::InventoryZpool;
@@ -209,13 +206,18 @@ pub mod inventory {
     pub use crate::v40::inventory::FmdInventoryErrorKind;
     pub use crate::v40::inventory::FmdResource;
 
-    pub use crate::v46::inventory::Inventory;
     pub use crate::v46::inventory::Svc;
     pub use crate::v46::inventory::SvcEnabledNotOnline;
     pub use crate::v46::inventory::SvcEnabledNotOnlineState;
     pub use crate::v46::inventory::SvcState;
     pub use crate::v46::inventory::SvcsEnabledNotOnline;
     pub use crate::v46::inventory::SvcsEnabledNotOnlineResult;
+
+    pub use crate::v49::inventory::ConfigReconcilerInventory;
+    pub use crate::v49::inventory::ConfigReconcilerInventoryStatus;
+    pub use crate::v49::inventory::Inventory;
+    pub use crate::v49::inventory::OmicronSledConfig;
+    pub use crate::v49::inventory::OmicronSledUpdateDisposition;
 
     pub use crate::impls::inventory::FmdHostCaseDisplay;
     pub use crate::impls::inventory::FmdInventoryDisplay;
@@ -236,8 +238,8 @@ pub mod inventory {
 pub mod probes {
     pub use crate::v10::probes::ExternalIp;
     pub use crate::v10::probes::IpKind;
-    pub use crate::v50::probes::ProbeCreate;
-    pub use crate::v50::probes::ProbeSet;
+    pub use crate::v51::probes::ProbeCreate;
+    pub use crate::v51::probes::ProbeSet;
 }
 
 pub mod rot {

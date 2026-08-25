@@ -250,6 +250,7 @@ mod api_impl {
     use sled_agent_types::inventory::MupdateOverrideInventory;
     use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
     use sled_agent_types::inventory::OmicronSledConfig;
+    use sled_agent_types::inventory::OmicronSledUpdateDisposition;
     use sled_agent_types::inventory::SledCpuFamily;
     use sled_agent_types::inventory::SledRole;
     use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
@@ -359,6 +360,7 @@ mod api_impl {
                     slot_b: HostPhase2DesiredContents::CurrentContents,
                 },
                 measurements: BTreeSet::new(),
+                update_disposition: OmicronSledUpdateDisposition::Available,
             };
 
             Ok(HttpResponseOk(Inventory {

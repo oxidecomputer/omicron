@@ -15,6 +15,7 @@ use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use regex::Regex;
+use std::collections::BTreeSet;
 use std::sync::LazyLock;
 
 /// Describes a source of debug data
@@ -33,11 +34,10 @@ pub(crate) struct Source {
 /// Describes debug data to be archived from within some `Source`.
 ///
 /// Rules specify a path within the source where the files are found (e.g.,
-/// "var/svc/log") and a pattern for specifying files within that directory that
-/// should be covered by the rule (e.g., "*.log").  The rule is applied across
-/// several sources (in this case: illumos zones).  A rule might cover "all the
-/// files in a given cores dataset" or "the rotated SMF log files for a given
-/// zone".
+/// "var/svc/log") and which files within that path should be included.
+/// The rule is applied across several sources (in this case: illumos zones).  A
+/// rule might cover "all the files in a given cores dataset" or "the rotated
+/// SMF log files for a given zone".
 ///
 /// It may be easiest to understand this by example.  See [`ALL_RULES`] for all
 /// of the rules.
@@ -59,8 +59,8 @@ pub(crate) struct Rule {
     /// identifies the path to a directory within a source's input directory
     /// that contains the data described by this rule
     pub directory: Utf8PathBuf,
-    /// describes which files within `directory` are identified by this rule
-    regex: Regex,
+    /// describes how to scan for files within `directory`
+    pub(crate) scanning: RuleScanning,
     /// configures whether the original files associated with this rule should
     /// be deleted once they're archived
     ///
@@ -71,20 +71,28 @@ pub(crate) struct Rule {
     pub naming: &'static (dyn NamingRule + Send + Sync),
 }
 
-impl Rule {
-    /// Returns true if this rule specifies that the given `filename` should be
-    /// archived
-    pub(crate) fn include_file(&self, filename: &Filename) -> bool {
-        self.regex.is_match(filename.as_ref())
-    }
-}
-
 impl IdOrdItem for Rule {
     type Key<'a> = &'static str;
     fn key(&self) -> Self::Key<'_> {
         self.label
     }
     id_upcast!();
+}
+
+/// Describes how to scan `Rule::directory` for files to archive
+pub(crate) enum RuleScanning {
+    /// Archive files directly in `directory` whose names match the
+    /// `include_files_matching` regex
+    Flat { include_files_matching: Regex },
+    /// Archive files in immediate subdirectories of `directory`, skipping
+    /// subdirectories named in `exclude_subdirs`
+    Nested {
+        /// outputs should go in this subdirectory of the source's output
+        /// directory
+        output_subdir: Filename,
+        /// subdirectories with these names are not scanned at all
+        exclude_subdirs: BTreeSet<Filename>,
+    },
 }
 
 /// Describes what Sources a rule can be applied to
@@ -114,12 +122,32 @@ static VAR_ADM: &str = "var/adm";
 ///   (rules should not specify overlapping files)
 /// * that all rules are covered by the test data
 pub(crate) static ALL_RULES: LazyLock<IdOrdMap<Rule>> = LazyLock::new(|| {
+    // unwrap(): DEBUG_DROPBOX_PATH is a path under `/`.  We should never fail
+    // to strip the leading '/'.
+    let debug_dropbox: Utf8PathBuf =
+        Utf8Path::new(omicron_debug_dropbox::DEBUG_DROPBOX_PATH)
+            .strip_prefix("/")
+            .unwrap()
+            .to_owned();
+    assert!(debug_dropbox.is_relative());
+    // unwrap() (x2): the debug dropbox path is always a valid name
+    let debug_dropbox_basename =
+        Filename::try_from(debug_dropbox.file_name().unwrap().to_string())
+            .unwrap();
+    // unwrap(): the dropbox's reserved producer name is the name of a directory
+    // that the dropbox itself creates, so it cannot contain a slash.
+    let debug_dropbox_reserved = Filename::try_from(String::from(
+        omicron_debug_dropbox::RESERVED_PRODUCER_NAME,
+    ))
+    .unwrap();
     let rules = [
         Rule {
             label: "process core files",
             rule_scope: RuleScope::CoresDirectory,
             directory: ".".parse().unwrap(),
-            regex: "^.*$".parse().unwrap(),
+            scanning: RuleScanning::Flat {
+                include_files_matching: "^.*$".parse().unwrap(),
+            },
             delete_original: true,
             naming: &NameIdentity,
         },
@@ -127,7 +155,9 @@ pub(crate) static ALL_RULES: LazyLock<IdOrdMap<Rule>> = LazyLock::new(|| {
             label: "live SMF log files",
             rule_scope: RuleScope::ZoneMutable,
             directory: VAR_SVC_LOG.parse().unwrap(),
-            regex: "^.*\\.log$".parse().unwrap(),
+            scanning: RuleScanning::Flat {
+                include_files_matching: "^.*\\.log$".parse().unwrap(),
+            },
             delete_original: false,
             naming: &NameLiveLogFile,
         },
@@ -135,7 +165,9 @@ pub(crate) static ALL_RULES: LazyLock<IdOrdMap<Rule>> = LazyLock::new(|| {
             label: "live syslog files",
             rule_scope: RuleScope::ZoneMutable,
             directory: VAR_ADM.parse().unwrap(),
-            regex: "^messages$".parse().unwrap(),
+            scanning: RuleScanning::Flat {
+                include_files_matching: "^messages$".parse().unwrap(),
+            },
             delete_original: false,
             naming: &NameLiveLogFile,
         },
@@ -143,7 +175,9 @@ pub(crate) static ALL_RULES: LazyLock<IdOrdMap<Rule>> = LazyLock::new(|| {
             label: "rotated SMF log files",
             rule_scope: RuleScope::ZoneAlways,
             directory: VAR_SVC_LOG.parse().unwrap(),
-            regex: "^.*\\.log.[0-9]+$".parse().unwrap(),
+            scanning: RuleScanning::Flat {
+                include_files_matching: "^.*\\.log.[0-9]+$".parse().unwrap(),
+            },
             delete_original: true,
             naming: &NameRotatedLogFile,
         },
@@ -151,9 +185,22 @@ pub(crate) static ALL_RULES: LazyLock<IdOrdMap<Rule>> = LazyLock::new(|| {
             label: "rotated syslog files",
             rule_scope: RuleScope::ZoneAlways,
             directory: VAR_ADM.parse().unwrap(),
-            regex: "^messages\\.[0-9]+$".parse().unwrap(),
+            scanning: RuleScanning::Flat {
+                include_files_matching: "^messages\\.[0-9]+$".parse().unwrap(),
+            },
             delete_original: true,
             naming: &NameRotatedLogFile,
+        },
+        Rule {
+            label: "debug dropbox",
+            rule_scope: RuleScope::ZoneAlways,
+            directory: debug_dropbox,
+            scanning: RuleScanning::Nested {
+                output_subdir: debug_dropbox_basename,
+                exclude_subdirs: BTreeSet::from([debug_dropbox_reserved]),
+            },
+            delete_original: true,
+            naming: &NameDropbox,
         },
     ];
 
@@ -228,29 +275,18 @@ impl NamingRule for NameRotatedLogFile {
         lister: &dyn FileLister,
         output_directory: &Utf8Path,
     ) -> Result<Filename, anyhow::Error> {
-        let filename_base = match source_file_name.as_ref().rsplit_once('.') {
-            Some((base, _extension)) => base,
-            None => source_file_name.as_ref(),
-        };
+        let filename_base = source_file_name.strip_extension();
 
-        let mtime_as_seconds =
-            source_file_mtime.unwrap_or_else(|| Utc::now()).timestamp();
-        for i in 0..MAX_COLLIDING_FILENAMES {
-            let rv =
-                format!("{filename_base}.{}", mtime_as_seconds + i64::from(i));
-            let dest = output_directory.join(&rv);
-            if !lister.file_exists(&dest)? {
-                // unwrap(): we started with a valid `Filename` and did not add
-                // any slashes here.
-                return Ok(Filename::try_from(rv).unwrap());
-            }
-        }
-
-        Err(anyhow!(
-            "failed to choose archive file name for file {source_file_name:?} \
-             because there are too many files with colliding names (at least \
-             {MAX_COLLIDING_FILENAMES})"
-        ))
+        choose_unused_filename(
+            source_file_name,
+            source_file_mtime,
+            lister,
+            output_directory,
+            |mtime_as_seconds, i| {
+                filename_base
+                    .with_numeric_suffix(mtime_as_seconds + i64::from(i))
+            },
+        )
     }
 }
 
@@ -294,4 +330,59 @@ impl NamingRule for NameIdentity {
     ) -> Result<Filename, anyhow::Error> {
         Ok(source_file_name.clone())
     }
+}
+
+/// `NamingRule` that's used for files from the debug dropbox
+pub(crate) struct NameDropbox;
+impl NamingRule for NameDropbox {
+    fn archived_file_name(
+        &self,
+        source_file_name: &Filename,
+        source_file_mtime: Option<DateTime<Utc>>,
+        lister: &dyn FileLister,
+        output_directory: &Utf8Path,
+    ) -> Result<Filename, anyhow::Error> {
+        choose_unused_filename(
+            source_file_name,
+            source_file_mtime,
+            lister,
+            output_directory,
+            |mtime_as_seconds, i| {
+                source_file_name
+                    .with_numeric_suffix(mtime_as_seconds)
+                    .with_numeric_suffix(i64::from(i))
+            },
+        )
+    }
+}
+
+/// Chooses a name in `output_directory` that's not already used
+///
+/// `make_candidate` is invoked with the source file's `mtime` (as a Unix
+/// timestamp) and a counter that starts at zero.  It returns the candidate
+/// name to try.  This function returns the first candidate that does not
+/// already exist, giving up after `MAX_COLLIDING_FILENAMES` attempts.  If the
+/// source file has no `mtime`, the current time is used instead.
+fn choose_unused_filename(
+    source_file_name: &Filename,
+    source_file_mtime: Option<DateTime<Utc>>,
+    lister: &dyn FileLister,
+    output_directory: &Utf8Path,
+    make_candidate: impl Fn(i64, u16) -> Filename,
+) -> Result<Filename, anyhow::Error> {
+    let mtime_as_seconds =
+        source_file_mtime.unwrap_or_else(|| Utc::now()).timestamp();
+    for i in 0..MAX_COLLIDING_FILENAMES {
+        let rv = make_candidate(mtime_as_seconds, i);
+        let dest = output_directory.join(rv.as_ref());
+        if !lister.file_exists(&dest)? {
+            return Ok(rv);
+        }
+    }
+
+    Err(anyhow!(
+        "failed to choose archive file name for file {source_file_name:?} \
+         because there are too many files with colliding names (at least \
+         {MAX_COLLIDING_FILENAMES})"
+    ))
 }

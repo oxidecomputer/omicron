@@ -7850,7 +7850,7 @@
         "type": "object",
         "properties": {
           "datasets": {
-            "title": "IdOrdMapAsMap",
+            "title": "IdOrdMap",
             "x-rust-type": {
               "crate": "iddqd",
               "parameters": [
@@ -7861,13 +7861,14 @@
               "path": "iddqd::IdOrdMap",
               "version": "*"
             },
-            "type": "object",
-            "additionalProperties": {
+            "type": "array",
+            "items": {
               "$ref": "#/components/schemas/DatasetConfig"
-            }
+            },
+            "uniqueItems": true
           },
           "disks": {
-            "title": "IdOrdMapAsMap",
+            "title": "IdOrdMap",
             "x-rust-type": {
               "crate": "iddqd",
               "parameters": [
@@ -7878,28 +7879,17 @@
               "path": "iddqd::IdOrdMap",
               "version": "*"
             },
-            "type": "object",
-            "additionalProperties": {
+            "type": "array",
+            "items": {
               "$ref": "#/components/schemas/OmicronPhysicalDiskConfig"
-            }
+            },
+            "uniqueItems": true
           },
           "generation": {
             "$ref": "#/components/schemas/Generation"
           },
           "host_phase_2": {
-            "default": {
-              "slot_a": {
-                "type": "current_contents"
-              },
-              "slot_b": {
-                "type": "current_contents"
-              }
-            },
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/HostPhase2DesiredSlots"
-              }
-            ]
+            "$ref": "#/components/schemas/HostPhase2DesiredSlots"
           },
           "measurements": {
             "type": "array",
@@ -7916,8 +7906,11 @@
               }
             ]
           },
+          "update_disposition": {
+            "$ref": "#/components/schemas/OmicronSledUpdateDisposition"
+          },
           "zones": {
-            "title": "IdOrdMapAsMap",
+            "title": "IdOrdMap",
             "x-rust-type": {
               "crate": "iddqd",
               "parameters": [
@@ -7928,18 +7921,29 @@
               "path": "iddqd::IdOrdMap",
               "version": "*"
             },
-            "type": "object",
-            "additionalProperties": {
+            "type": "array",
+            "items": {
               "$ref": "#/components/schemas/OmicronZoneConfig"
-            }
+            },
+            "uniqueItems": true
           }
         },
         "required": [
           "datasets",
           "disks",
           "generation",
+          "host_phase_2",
           "measurements",
+          "update_disposition",
           "zones"
+        ]
+      },
+      "OmicronSledUpdateDisposition": {
+        "description": "Controls a sled's availability for VMM provisioning.\n\nThis is a simplified version of `BlueprintSledUpdateDisposition`. The blueprint version of this type includes information describing _how_ the sled should be evacuated as well as blueprint-specific metadata. From sled-agent itself, we only need to know the high-level state; we use this to determine whether or not to accept new VMM registration requests.",
+        "type": "string",
+        "enum": [
+          "available",
+          "evacuating"
         ]
       },
       "OmicronZoneConfig": {
@@ -8864,14 +8868,6 @@
                 "$ref": "#/components/schemas/NetworkInterface"
               }
             ]
-          },
-          "multicast_groups": {
-            "description": "Multicast groups the probe's OPTE port should subscribe to during zone provisioning. Each entry carries a `group_ip` and an optional source filter (for SSM), matching the instance multicast join. An empty list (the default) requests no subscriptions.",
-            "default": [],
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/InstanceMulticastMembership"
-            }
           }
         },
         "required": [

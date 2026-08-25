@@ -101,10 +101,12 @@ pub mod v46;
 pub mod v47;
 #[path = "allow_ddm_traffic/mod.rs"]
 pub mod v48;
-#[path = "mcast_m2p_forwarding/mod.rs"]
+#[path = "add_update_disposition/mod.rs"]
 pub mod v49;
-#[path = "probe_multicast_groups/mod.rs"]
+#[path = "mcast_m2p_forwarding/mod.rs"]
 pub mod v50;
+#[path = "probe_multicast_groups/mod.rs"]
+pub mod v51;
 #[path = "add_probe_put_endpoint/mod.rs"]
 pub mod v6;
 #[path = "multicast_support/mod.rs"]
