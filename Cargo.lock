@@ -8222,6 +8222,7 @@ dependencies = [
  "nexus-config",
  "nexus-db-queries",
  "nexus-lockstep-client",
+ "nexus-reconfigurator-planning",
  "nexus-test-interface",
  "nexus-types",
  "nexus-types-versions",
