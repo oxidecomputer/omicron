@@ -33,10 +33,10 @@ use nexus_db_model::{
 use nexus_types::external_api::update::TufRepoUploadStatus;
 use omicron_common::api::external::{
     self, ByteCountRangeError, CreateResult, DataPageParams, DeleteResult,
-    Generation, ListResultVec, LookupResult, LookupType, ResourceType,
-    UpdateResult,
+    ListResultVec, LookupResult, LookupType, ResourceType, UpdateResult,
 };
 use omicron_common::api::external::{Error, InternalContext};
+use omicron_generation_kinds::Generation;
 use omicron_uuid_kinds::{GenericUuid, TufRepoUuid};
 use semver::Version;
 use sled_agent_types::artifact::ArtifactConfig;

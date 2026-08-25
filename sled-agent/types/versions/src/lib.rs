@@ -101,8 +101,10 @@ pub mod v46;
 pub mod v47;
 #[path = "allow_ddm_traffic/mod.rs"]
 pub mod v48;
-#[path = "add_log_time_range/mod.rs"]
+#[path = "add_update_disposition/mod.rs"]
 pub mod v49;
+#[path = "add_log_time_range/mod.rs"]
+pub mod v50;
 #[path = "add_probe_put_endpoint/mod.rs"]
 pub mod v6;
 #[path = "multicast_support/mod.rs"]

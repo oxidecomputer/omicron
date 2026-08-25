@@ -62,6 +62,7 @@ nexus-lockstep-client.workspace = true
 nexus-types.workspace = true
 nix = { workspace = true, features = ["signal"] }
 omicron-common.workspace = true
+omicron-generation-kinds.workspace = true
 omicron-ledger.workspace = true
 omicron-ddm-admin-client.workspace = true
 omicron-uuid-kinds.workspace = true

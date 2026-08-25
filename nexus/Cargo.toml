@@ -80,6 +80,7 @@ nexus-test-interface.workspace = true
 ntp-admin-client.workspace = true
 num-integer.workspace = true
 omicron-cockroach-metrics.workspace = true
+omicron-generation-kinds.workspace = true
 openssl.workspace = true
 oximeter-client.workspace = true
 oximeter-db = { workspace = true, default-features = false, features = [
@@ -193,6 +194,7 @@ nexus-fm = { workspace = true, features = ["testing"] }
 nexus-lockstep-client.workspace = true
 nexus-test-utils.workspace = true
 nexus-test-utils-macros.workspace = true
+omicron-generation-kinds.workspace = true
 omicron-sled-agent.workspace = true
 omicron-test-utils.workspace = true
 openapi-lint.workspace = true

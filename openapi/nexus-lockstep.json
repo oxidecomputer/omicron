@@ -7344,7 +7344,7 @@
             "description": "what `reassignment_generation` was when this recovery started",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Generation"
+                "$ref": "#/components/schemas/SagaReassignmentGeneration"
               }
             ]
           }
@@ -9307,7 +9307,7 @@
             "description": "generation number for the saga reassignment\n\nThis gets bumped whenever a saga reassignment operation completes that may have re-assigned us some sagas.  It's used to keep track of when we've recovered all sagas that could be assigned to us.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Generation"
+                "$ref": "#/components/schemas/SagaReassignmentGeneration"
               }
             ]
           },
@@ -9328,7 +9328,7 @@
             "description": "\"saga reassignment generation number\" that was \"caught up to\" by the last recovery pass\n\nThis is used with `reassignment_generation` to help us know when we've recovered all the sagas that may have been assigned to us during a given reassignment pass.  See `reassignment_done()` for details.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Generation"
+                "$ref": "#/components/schemas/SagaReassignmentGeneration"
               }
             ]
           },
@@ -9369,6 +9369,17 @@
           "recovered_reassignment_generation",
           "sagas_pending"
         ]
+      },
+      "SagaReassignmentGeneration": {
+        "description": "Generation numbers stored in the database, used for optimistic concurrency control",
+        "x-rust-type": {
+          "crate": "omicron-generation-kinds",
+          "path": "omicron_generation_kinds::SagaReassignmentGeneration",
+          "version": "*"
+        },
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0
       },
       "SagaResultsPage": {
         "description": "A single page of results",

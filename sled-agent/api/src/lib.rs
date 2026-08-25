@@ -22,7 +22,7 @@ use omicron_common::api::internal::{
 use sled_agent_types_versions::{
     latest, v1, v4, v6, v7, v9, v10, v11, v12, v14, v16, v17, v18, v20, v22,
     v24, v25, v26, v28, v29, v30, v31, v32, v33, v34, v37, v39, v40, v41, v42,
-    v43, v47, v48,
+    v43, v46, v47, v48,
 };
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 use slog_error_chain::InlineErrorChain;
@@ -39,7 +39,8 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
-    (49, ADD_LOG_TIME_RANGE),
+    (50, ADD_LOG_TIME_RANGE),
+    (49, ADD_UPDATE_DISPOSITION),
     (48, ALLOW_DDM_TRAFFIC),
     (47, BGP_PEER_SRC_ADDR),
     (46, MODIFY_SVC_STATE_ENUM),
@@ -374,12 +375,26 @@ pub trait SledAgentApi {
     #[endpoint {
         method = PUT,
         path = "/omicron-config",
-        versions = VERSION_MEASUREMENTS..,
+        versions = VERSION_ADD_UPDATE_DISPOSITION..,
     }]
     async fn omicron_config_put(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<latest::inventory::OmicronSledConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        operation_id = "omicron_config_put",
+        method = PUT,
+        path = "/omicron-config",
+        versions = VERSION_MEASUREMENTS..VERSION_ADD_UPDATE_DISPOSITION,
+    }]
+    async fn omicron_config_put_v14(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v14::inventory::OmicronSledConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let body = body.map(latest::inventory::OmicronSledConfig::from);
+        Self::omicron_config_put(rqctx, body).await
+    }
 
     #[endpoint {
         operation_id = "omicron_config_put",
@@ -392,9 +407,8 @@ pub trait SledAgentApi {
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<v11::inventory::OmicronSledConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let body =
-            body.try_map(latest::inventory::OmicronSledConfig::try_from)?;
-        Self::omicron_config_put(rqctx, body).await
+        let body = body.try_map(v14::inventory::OmicronSledConfig::try_from)?;
+        Self::omicron_config_put_v14(rqctx, body).await
     }
 
     #[endpoint {
@@ -1161,11 +1175,25 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/inventory",
-        versions = VERSION_MODIFY_SVC_STATE_ENUM..,
+        versions = VERSION_ADD_UPDATE_DISPOSITION..,
     }]
     async fn inventory(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<latest::inventory::Inventory>, HttpError>;
+
+    /// Fetch basic information about this sled
+    #[endpoint {
+        operation_id = "inventory",
+        method = GET,
+        path = "/inventory",
+        versions = VERSION_MODIFY_SVC_STATE_ENUM..VERSION_ADD_UPDATE_DISPOSITION,
+    }]
+    async fn inventory_v46(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v46::inventory::Inventory>, HttpError> {
+        let HttpResponseOk(inventory) = Self::inventory(rqctx).await?;
+        Ok(HttpResponseOk(inventory.into()))
+    }
 
     /// Fetch basic information about this sled
     #[endpoint {
@@ -1177,7 +1205,7 @@ pub trait SledAgentApi {
     async fn inventory_v43(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<v43::inventory::Inventory>, HttpError> {
-        let HttpResponseOk(inventory) = Self::inventory(rqctx).await?;
+        let HttpResponseOk(inventory) = Self::inventory_v46(rqctx).await?;
         inventory.try_into().map_err(HttpError::from).map(HttpResponseOk)
     }
 

@@ -22,7 +22,7 @@ use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::blueprint_zone_type;
-use omicron_common::api::external::Generation;
+use omicron_generation_kinds::Generation;
 use omicron_test_utils::dev::poll::CondCheckError;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_uuid_kinds::OmicronZoneUuid;
