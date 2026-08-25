@@ -41,6 +41,9 @@ use nexus_types::external_api::multicast::{
 use nexus_types::internal_api::params::InstanceMigrateRequest;
 
 use nexus_types_versions::latest::instance::Instance;
+use omicron_common::address::{
+    MAX_SOURCE_IPS_PER_GROUP, MAX_SOURCE_IPS_PER_MEMBER,
+};
 use omicron_common::api::external::{
     ByteCount, IdentityMetadataCreateParams, Nullable,
 };
@@ -376,7 +379,7 @@ async fn test_multicast_group_attach_conflicts(
 }
 
 #[nexus_test]
-async fn test_multicast_group_attach_limits(
+async fn test_multicast_group_attach_multiple(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
@@ -389,14 +392,8 @@ async fn test_multicast_group_attach_limits(
     )
     .await;
 
-    // Group names for implicit groups (implicitly created when first member joins)
-    let group_names = [
-        "limit-test-group-0",
-        "limit-test-group-1",
-        "limit-test-group-2",
-        "limit-test-group-3",
-        "limit-test-group-4",
-    ];
+    let group_names =
+        ["limit-test-group-0", "limit-test-group-1", "limit-test-group-2"];
 
     // Create instance first (groups will be implicitly created when attached)
     let instance = instance_for_multicast_groups(
@@ -408,8 +405,8 @@ async fn test_multicast_group_attach_limits(
     )
     .await;
 
-    // Attach instance to 3 groups (implicitly creates each group)
-    let multicast_group_names = &group_names[0..3];
+    // Attach instance to multiple groups (implicitly creates each group)
+    let multicast_group_names = &group_names;
     for group_name in multicast_group_names {
         multicast_group_attach(
             cptestctx,
@@ -584,29 +581,23 @@ async fn test_multicast_concurrent_operations(
     // Wait for final state to be consistent (should still have 2 members)
     wait_for_member_count(client, "concurrent-test-group", 2).await;
 
-    // Concurrent operations during reconciler processing
-
-    // Start a member addition and immediately follow with another operation
-    // This tests handling of operations that arrive while reconciler is processing
-    let rapid_ops_future = async {
-        multicast_group_attach(
-            cptestctx,
-            PROJECT_NAME,
-            "concurrent-instance-3",
-            "concurrent-test-group",
-        )
-        .await;
-        // Don't wait for reconciler; immediately do another operation
-        multicast_group_detach(
-            client,
-            PROJECT_NAME,
-            "concurrent-instance-4",
-            "concurrent-test-group",
-        )
-        .await;
-    };
-
-    rapid_ops_future.await;
+    // Back-to-back operations without waiting for reconciler between them.
+    // Tests that the reconciler handles state changes that arrive while it
+    // is still processing a previous batch.
+    multicast_group_attach(
+        cptestctx,
+        PROJECT_NAME,
+        "concurrent-instance-3",
+        "concurrent-test-group",
+    )
+    .await;
+    multicast_group_detach(
+        client,
+        PROJECT_NAME,
+        "concurrent-instance-4",
+        "concurrent-test-group",
+    )
+    .await;
 
     // Wait for system to reach consistent final state (should have 2 members)
     wait_for_member_count(client, "concurrent-test-group", 2).await;
@@ -896,6 +887,98 @@ async fn test_multicast_migration_scenarios(
         .await
         .expect("Group should exist in DPD after migration");
 
+    // Verify sled-agent state after migration: the target sled should
+    // have the VMM subscription and M2P mapping. The source sled should
+    // not have any subscription for the old propolis.
+    {
+        let datastore = nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
+
+        let external_group = datastore
+            .multicast_group_lookup_by_ip(&opctx, multicast_ip)
+            .await
+            .expect("Should look up multicast group by IP");
+
+        let underlay_group_id = external_group
+            .underlay_group_id
+            .expect("Active group should have underlay_group_id");
+
+        let underlay_group = datastore
+            .underlay_multicast_group_fetch(&opctx, underlay_group_id)
+            .await
+            .expect("Should fetch underlay group");
+
+        let underlay_ipv6 = match underlay_group.multicast_ip.ip() {
+            IpAddr::V6(v6) => v6,
+            other => {
+                panic!("Expected IPv6 underlay address, got {other}")
+            }
+        };
+
+        // Target sled should have the VMM subscription after the
+        // reconciler pushes it via verify_members. Poll because the
+        // reconciler may still be propagating state to the sled-agent.
+        let post_info = nexus
+            .active_instance_info(&instance1_id, None)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let target_agent = cptestctx
+            .sled_agents
+            .iter()
+            .find(|sa| sa.sled_agent_id() == target_sled)
+            .unwrap()
+            .sled_agent();
+
+        wait_for_condition_with_reconciler(
+            &cptestctx.lockstep_client,
+            || async {
+                let groups = target_agent.multicast_groups.lock().unwrap();
+                let has_sub =
+                    groups.get(&post_info.propolis_id).map_or(false, |g| {
+                        g.iter().any(|m| m.group_ip == multicast_ip)
+                    });
+                if has_sub {
+                    Ok(())
+                } else {
+                    Err(CondCheckError::<()>::NotYet { status: None })
+                }
+            },
+            &POLL_INTERVAL,
+            &POLL_TIMEOUT,
+        )
+        .await
+        .expect("Target sled should have VMM subscription after migration");
+
+        // Target sled should have M2P mapping.
+        wait_for_condition_with_reconciler(
+            &cptestctx.lockstep_client,
+            || async {
+                let m2p = target_agent.m2p_mappings.lock().unwrap();
+                if m2p.contains(&(multicast_ip, underlay_ipv6)) {
+                    Ok(())
+                } else {
+                    Err(CondCheckError::<()>::NotYet { status: None })
+                }
+            },
+            &POLL_INTERVAL,
+            &POLL_TIMEOUT,
+        )
+        .await
+        .expect("Target sled should have M2P mapping after migration");
+
+        // TODO: assert the source sled no longer holds a multicast
+        // subscription for the old propolis_id. On real hardware,
+        // VMM teardown (release_opte_ports -> PortTicket::release_inner)
+        // clears it. The sim does not model per-propolis cleanup on
+        // unregister for any of the networking maps (external_ips,
+        // attached_subnets, multicast_groups).
+    }
+
     // Case: Concurrent migrations
 
     let group2_name = "concurrent-migration-group";
@@ -911,7 +994,9 @@ async fn test_multicast_migration_scenarios(
         group2_name,
     )
     .await;
+
     wait_for_group_active(client, group2_name).await;
+
     multicast_group_attach(
         cptestctx,
         project_name,
@@ -1181,6 +1266,129 @@ async fn test_source_ips_preserved_on_instance_restart(
     wait_for_group_deleted(cptestctx, &expected_group_name).await;
 }
 
+/// Test the per-group source IP union cap on the up-front join check.
+///
+/// Eight members with disjoint full-size source filters fill the union to
+/// exactly [`MAX_SOURCE_IPS_PER_GROUP`]. A ninth member adding one fresh
+/// source is rejected with a 400. A repeat join that swaps one member's full
+/// filter for a fresh one still passes because that member's stored sources
+/// are excluded from the union it is measured against.
+#[nexus_test]
+async fn test_source_union_cap_enforced_on_join(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let project_name = "union-cap-project";
+
+    ops::join3(
+        create_default_ip_pools(client),
+        create_project(client, project_name),
+        create_multicast_ip_pool_with_range(
+            client,
+            "union-cap-ssm-pool",
+            (232, 82, 0, 1),
+            (232, 82, 0, 100),
+        ),
+    )
+    .await;
+
+    let ssm_ip = "232.82.0.10";
+    let filling_members = MAX_SOURCE_IPS_PER_GROUP / MAX_SOURCE_IPS_PER_MEMBER;
+    let names: Vec<String> =
+        (0..=filling_members).map(|i| format!("union-cap-inst-{i}")).collect();
+    for name in &names {
+        instance_for_multicast_groups(
+            cptestctx,
+            project_name,
+            name,
+            false,
+            &[],
+        )
+        .await;
+    }
+
+    // Disjoint full-size source lists per member, 10.<member>.0.<i>.
+    let sources = |member: usize| -> Vec<IpAddr> {
+        (0..MAX_SOURCE_IPS_PER_MEMBER)
+            .map(|i| format!("10.{member}.0.{}", i + 1).parse().unwrap())
+            .collect()
+    };
+    let join_url = |name: &str| {
+        format!(
+            "/v1/instances/{name}/multicast-groups/{ssm_ip}?project={project_name}"
+        )
+    };
+
+    for (member, name) in names.iter().take(filling_members).enumerate() {
+        let joined: MulticastGroupMember = put_upsert(
+            client,
+            &join_url(name),
+            &InstanceMulticastGroupJoin {
+                source_ips: Some(sources(member)),
+                ip_version: None,
+            },
+        )
+        .await;
+        assert_eq!(
+            joined.source_ips.len(),
+            MAX_SOURCE_IPS_PER_MEMBER,
+            "Received a truncated source list on an in-cap join"
+        );
+    }
+
+    // The union now sits at exactly the cap, so one fresh source from a new
+    // member overflows it.
+    let overflow_body = InstanceMulticastGroupJoin {
+        source_ips: Some(vec!["10.99.0.1".parse().unwrap()]),
+        ip_version: None,
+    };
+    let error = NexusRequest::new(
+        RequestBuilder::new(
+            client,
+            Method::PUT,
+            &join_url(&names[filling_members]),
+        )
+        .body(Some(&overflow_body))
+        .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Should reject a join that overflows the source union cap");
+    let error_body: serde_json::Value =
+        serde_json::from_slice(&error.body).unwrap();
+    let message = error_body["message"].as_str().unwrap_or("");
+    assert!(
+        message.contains("per-group cap"),
+        "Received unexpected join rejection message: {message}"
+    );
+
+    // A repeat join replaces the member's filter, so swapping one full list
+    // for a fresh one keeps the union at the cap and passes.
+    let swap: Vec<IpAddr> = (0..MAX_SOURCE_IPS_PER_MEMBER)
+        .map(|i| format!("10.99.1.{}", i + 1).parse().unwrap())
+        .collect();
+    let swapped: MulticastGroupMember = put_upsert(
+        client,
+        &join_url(&names[0]),
+        &InstanceMulticastGroupJoin {
+            source_ips: Some(swap),
+            ip_version: None,
+        },
+    )
+    .await;
+    assert_eq!(
+        swapped.source_ips.len(),
+        MAX_SOURCE_IPS_PER_MEMBER,
+        "Received a merged source list instead of a replacement"
+    );
+
+    let name_refs: Vec<&str> = names.iter().map(String::as_str).collect();
+    cleanup_instances(cptestctx, client, project_name, &name_refs).await;
+    let expected_group_name = format!("mcast-{}", ssm_ip.replace('.', "-"));
+    wait_for_group_deleted(cptestctx, &expected_group_name).await;
+}
+
 /// Test that source_ips are preserved when instance is reconfigured with multicast_groups.
 ///
 /// This verifies that when an instance already has a membership with source_ips
@@ -1324,6 +1532,38 @@ async fn test_source_ips_preserved_on_instance_reconfigure(
     .execute()
     .await
     .expect("Should reconfigure instance with multicast_groups");
+
+    // Reconfiguration must enforce the same per-member source-list shape
+    // checks as the direct join and create paths. In particular, duplicate
+    // sources must not reach the datastore upsert.
+    let invalid_update_body = serde_json::json!({
+        "ncpus": 2,
+        "memory": 4294967296_u64,
+        "boot_disk": null,
+        "auto_restart_policy": null,
+        "cpu_platform": null,
+        "enable_jumbo_frames": false,
+        "multicast_groups": [
+            { "group": ssm_ip, "source_ips": [source_ip, source_ip] },
+        ]
+    });
+    let invalid_update = NexusRequest::new(
+        RequestBuilder::new(client, Method::PUT, &update_url)
+            .body(Some(&invalid_update_body))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Duplicate reconfiguration sources should fail");
+    let invalid_update_error: serde_json::Value =
+        serde_json::from_slice(&invalid_update.body).unwrap();
+    let invalid_update_message =
+        invalid_update_error["message"].as_str().unwrap_or("");
+    assert!(
+        invalid_update_message.contains("duplicate source IP"),
+        "Received unexpected source validation error: {invalid_update_message}"
+    );
 
     // Wait for ASM group to be created
     wait_for_group_active(client, &asm_group_name).await;
@@ -1948,14 +2188,13 @@ async fn test_multicast_ipv6_lifecycle(cptestctx: &ControlPlaneTestContext) {
     instance_wait_for_state(client, instance_id, InstanceState::Running).await;
     wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
 
-    let member_joined = wait_for_member_state(
+    wait_for_member_state(
         cptestctx,
         group_name,
         instance.identity.id,
         nexus_db_model::MulticastGroupMemberState::Joined,
     )
     .await;
-    assert_eq!(member_joined.state, "Joined");
 
     // Stop the instance - member should transition to "Left"
     let stop_url =
@@ -1974,14 +2213,13 @@ async fn test_multicast_ipv6_lifecycle(cptestctx: &ControlPlaneTestContext) {
     instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
     wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
 
-    let member_left = wait_for_member_state(
+    wait_for_member_state(
         cptestctx,
         group_name,
         instance.identity.id,
         nexus_db_model::MulticastGroupMemberState::Left,
     )
     .await;
-    assert_eq!(member_left.state, "Left");
 
     // Delete the instance - this should delete the group since it's the only member
     cleanup_instances(cptestctx, client, project_name, &["ipv6-instance"])
