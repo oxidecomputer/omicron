@@ -1456,7 +1456,7 @@ pub mod test {
     use nexus_types::internal_api::params as nexus_params;
     use nexus_types::internal_api::params::DnsRecord;
     use omicron_common::api::external::Error;
-    use omicron_common::api::external::Generation;
+    use omicron_generation_kinds::Generation;
     use omicron_test_utils::dev::poll;
     use std::net::SocketAddr;
     use std::sync::atomic::AtomicU64;

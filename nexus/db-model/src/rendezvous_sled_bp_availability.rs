@@ -8,7 +8,7 @@ use anyhow::{Context, bail};
 use chrono::{DateTime, Utc};
 use iddqd::{IdOrdItem, id_upcast};
 use nexus_db_schema::schema::rendezvous_sled_bp_availability;
-use omicron_common::api::external::Generation;
+use omicron_generation_kinds::Generation;
 use omicron_uuid_kinds::BlueprintKind;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::SledKind;

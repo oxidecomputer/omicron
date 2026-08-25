@@ -1397,7 +1397,7 @@ mod test {
     ) -> (TransientDnsServer, ExternalHttpClient) {
         use internal_dns_types::config::DnsConfigParams;
         use internal_dns_types::config::DnsConfigZone;
-        use omicron_common::api::external::Generation;
+        use omicron_generation_kinds::Generation;
 
         let dns =
             TransientDnsServer::new(log).await.expect("DNS server must start");

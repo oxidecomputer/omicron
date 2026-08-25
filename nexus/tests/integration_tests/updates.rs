@@ -1276,6 +1276,12 @@ async fn test_debug_files(cptestctx: &ControlPlaneTestContext) {
 #[nexus_test(configure_second_nexus = true)]
 async fn test_stock_planner(cptestctx: &ControlPlaneTestContext) {
     let nexus_client = cptestctx.lockstep_client();
+    // We need an inventory collection available to do this.
+    cptestctx
+        .wait_for_at_least_one_inventory_collection(
+            std::time::Duration::from_secs(60),
+        )
+        .await;
     let _blueprint =
         nexus_client.blueprint_regenerate().await.unwrap_or_else(|error| {
             panic!(

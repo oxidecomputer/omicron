@@ -70,7 +70,7 @@ fn assert_contains(haystack: &str, needle: &str) {
 /// DNS-mismatch tests.  The zone contents don't matter; the test only needs
 /// the entry to compare unequal to a perturbed copy.
 fn make_dns_entry(
-    generation: omicron_common::api::external::Generation,
+    generation: omicron_generation_kinds::Generation,
 ) -> internal_dns_types::config::DnsConfigParams {
     internal_dns_types::config::DnsConfigParams {
         generation,
@@ -304,7 +304,7 @@ fn blueprint_mismatch() {
 /// in its contents, loading fails with an explicit error.
 #[test]
 fn internal_dns_mismatch() {
-    use omicron_common::api::external::Generation;
+    use omicron_generation_kinds::Generation;
 
     let state = base_state("multi_load_internal_dns_mismatch");
     // The example builder doesn't populate DNS, so insert a minimal entry
@@ -340,7 +340,7 @@ fn internal_dns_mismatch() {
 /// Same as the internal-DNS mismatch test above, but for external DNS.
 #[test]
 fn external_dns_mismatch() {
-    use omicron_common::api::external::Generation;
+    use omicron_generation_kinds::Generation;
 
     let state = base_state("multi_load_external_dns_mismatch");
     let mut with_dns = state.clone();

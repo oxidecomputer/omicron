@@ -7,7 +7,7 @@ use std::sync::Arc;
 use anyhow::{Context, anyhow, bail};
 use nexus_inventory::CollectionBuilder;
 use nexus_types::deployment::UnstableReconfiguratorState;
-use omicron_common::api::external::Generation;
+use omicron_generation_kinds::Generation;
 use omicron_uuid_kinds::{CollectionUuid, ReconfiguratorSimStateUuid};
 use sync_ptr::SyncConstPtr;
 

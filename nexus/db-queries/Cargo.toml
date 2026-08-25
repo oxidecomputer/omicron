@@ -32,6 +32,7 @@ ipnetwork.workspace = true
 itertools.workspace = true
 macaddr.workspace = true
 nonempty.workspace = true
+omicron-generation-kinds.workspace = true
 oxnet.workspace = true
 paste.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
@@ -77,7 +78,6 @@ sled-hardware-types.workspace = true
 trust-quorum-types.workspace = true
 omicron-cockroach-metrics.workspace = true
 omicron-common.workspace = true
-omicron-generation-kinds.workspace = true
 omicron-passwords.workspace = true
 omicron-uuid-kinds.workspace = true
 oximeter.workspace = true
