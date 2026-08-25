@@ -9141,7 +9141,7 @@
             "properties": {
               "src_addr": {
                 "nullable": true,
-                "description": "Optional local IP address to bind when establishing outbound TCP connections to this peer. If `None`, the OS selects the source address.",
+                "description": "Source IP address to use when initiating the BGP session with the peer. If not provided, an address is selected automatically.",
                 "default": null,
                 "type": "string",
                 "format": "ip"
