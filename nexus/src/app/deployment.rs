@@ -1115,7 +1115,7 @@ pub fn blueprint_debug_filename(
         BlueprintDebugAction::TargetIntent => "target-intent",
         BlueprintDebugAction::Target => "target",
     };
-    let time_str = blueprint.time_created.format("%Y%m%dT%H%MZ");
+    let time_str = blueprint.time_created.format("%Y%m%dT%H%M%SZ");
     format!("{time_str}-{action_str}-{}.json", blueprint.id)
 }
 
