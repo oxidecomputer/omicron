@@ -5,6 +5,7 @@
 //! Target-independent parser for the Oximeter Query Language.
 
 mod ast;
+mod completion;
 mod grammar;
 
 use std::collections::BTreeSet;
@@ -14,6 +15,10 @@ use peg::str::LineCol;
 use serde::Serialize;
 
 pub const MAX_QUERY_LEN: usize = 4096;
+
+pub use completion::{
+    CompletionContext, CompletionSite, ReplacementSpan, completion_context,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -57,6 +62,7 @@ pub fn parse(source: &str) -> ParseResult {
             referenced_timeseries: query
                 .all_timeseries_names()
                 .into_iter()
+                .map(|name| name.value.clone())
                 .collect::<BTreeSet<_>>()
                 .into_iter()
                 .collect(),

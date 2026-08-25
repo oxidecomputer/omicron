@@ -1,0 +1,17 @@
+[
+  { "source": "get ", "expectedSite": "timeseries", "expectedNames": [] },
+  { "source": "get hardware_component:", "expectedSite": "timeseries", "expectedNames": ["hardware_component:"] },
+  { "source": "get hardware_component:fan_speed ", "expectedSite": "none", "expectedNames": ["hardware_component:fan_speed"] },
+  { "source": "get hardware_component:fan_speed | ", "expectedSite": "table-operation", "expectedNames": ["hardware_component:fan_speed"] },
+  { "source": "get hardware_component:fan_speed | filter ", "expectedSite": "filter-identifier", "expectedNames": ["hardware_component:fan_speed"] },
+  { "source": "get hardware_component:fan_speed | filter chassis_kind == ", "expectedSite": "filter-literal", "expectedNames": ["hardware_component:fan_speed"] },
+  { "source": "get hardware_component:fan_speed | filter chassis_kind == 'foo'", "expectedSite": "none", "expectedNames": ["hardware_component:fan_speed"] },
+  { "source": "get hardware_component:fan_speed | filter chassis_kind == \"foo\"", "expectedSite": "none", "expectedNames": ["hardware_component:fan_speed"] },
+  { "source": "get hardware_component:fan_speed | filter chassis_kind == 'a | b; c' || sl", "expectedSite": "filter-identifier", "expectedNames": ["hardware_component:fan_speed"] },
+  { "source": "get hardware_component:fan_speed | align mean_", "expectedSite": "alignment-method", "expectedNames": ["hardware_component:fan_speed"] },
+  { "source": "get hardware_component:fan_speed | group_by [sl", "expectedSite": "group-field", "expectedNames": ["hardware_component:fan_speed"] },
+  { "source": "get hardware_component:fan_speed | group_by [sled_id], ", "expectedSite": "reducer", "expectedNames": ["hardware_component:fan_speed"] },
+  { "source": "{ get hardware_component:fan_speed; get sled_data_link:bytes_sent } | filter ", "expectedSite": "filter-identifier", "expectedNames": ["hardware_component:fan_speed", "sled_data_link:bytes_sent"] },
+  { "source": "{ get hardware_component:fan_speed | filter sl; get sled_data_link:bytes_sent } | join", "expectedSite": "none", "expectedNames": ["hardware_component:fan_speed", "sled_data_link:bytes_sent"] },
+  { "source": "{ get hardware_component:fan_speed; get sled_data_link:bytes_sent | filter li", "expectedSite": "filter-identifier", "expectedNames": ["sled_data_link:bytes_sent"] }
+]

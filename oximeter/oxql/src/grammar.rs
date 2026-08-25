@@ -486,9 +486,15 @@ peg::parser! {
             / "~=" { Comparison::Like }
 
         pub rule timeseries_name() -> TimeseriesName
-            = target_name:ident_impl() ":" metric_name:ident_impl()
+            = start:position!()
+              target_name:ident_impl() ":" metric_name:ident_impl()
+              end:position!()
         {
-            format!("{target_name}:{metric_name}")
+            TimeseriesName {
+                value: format!("{target_name}:{metric_name}"),
+                start,
+                end,
+            }
         }
 
         rule get_delim() = quiet!{ _? "," _? }
@@ -568,15 +574,20 @@ peg::parser! {
         /// Queries always start with a "get" operation, and may be followed by
         /// any number of other timeseries transformations
         pub rule query() -> Query
-            = ops:(basic_table_op() / grouped_table_op()) ++ query_delim()
+            = start:position!()
+              ops:(basic_table_op() / grouped_table_op()) ++ query_delim()
+              end:position!()
         {?
-            let query = Query { ops };
+            let query = Query { ops, start, end };
             if query.all_gets_at_query_start() {
                 Ok(query)
             } else {
                 Err("every subquery must start with a `get` operation")
             }
         }
+
+        pub rule document() -> Query
+            = _? query:query() _? { query }
 
         rule grouped_table_op_delim() = quiet!{ _? ";" _? }
         rule query_delim() = quiet!{ _? "|" _? }

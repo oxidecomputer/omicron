@@ -4,11 +4,18 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 
-pub(crate) type TimeseriesName = String;
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct TimeseriesName {
+    pub(crate) value: String,
+    pub(crate) start: usize,
+    pub(crate) end: usize,
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Query {
     pub(crate) ops: Vec<TableOp>,
+    pub(crate) start: usize,
+    pub(crate) end: usize,
 }
 
 impl Query {
@@ -32,15 +39,15 @@ impl Query {
         valid(&self.ops)
     }
 
-    pub(crate) fn all_timeseries_names(self) -> Vec<String> {
-        fn collect(query: Query, output: &mut Vec<String>) {
-            for op in query.ops {
+    pub(crate) fn all_timeseries_names(&self) -> Vec<&TimeseriesName> {
+        fn collect<'a>(query: &'a Query, output: &mut Vec<&'a TimeseriesName>) {
+            for op in &query.ops {
                 match op {
                     TableOp::Basic(BasicTableOp::Get(name)) => {
                         output.push(name)
                     }
                     TableOp::Grouped(grouped) => {
-                        for query in grouped.ops {
+                        for query in &grouped.ops {
                             collect(query, output);
                         }
                     }
@@ -52,6 +59,20 @@ impl Query {
         let mut output = Vec::new();
         collect(self, &mut output);
         output
+    }
+
+    pub(crate) fn innermost_query_at(&self, offset: usize) -> &Self {
+        for op in &self.ops {
+            let TableOp::Grouped(grouped) = op else {
+                continue;
+            };
+            for query in &grouped.ops {
+                if query.start <= offset && offset <= query.end {
+                    return query.innermost_query_at(offset);
+                }
+            }
+        }
+        self
     }
 }
 
