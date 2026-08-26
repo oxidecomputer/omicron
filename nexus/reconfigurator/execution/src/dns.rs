@@ -358,7 +358,8 @@ mod test {
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_generation_kinds::{
-        Generation, SledConfigGeneration, TargetReleaseGeneration,
+        Generation, NexusGeneration, SledConfigGeneration,
+        TargetReleaseGeneration,
     };
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::BlueprintUuid;
@@ -582,7 +583,7 @@ mod test {
                     nic,
                     external_tls,
                     external_dns_servers,
-                    nexus_generation: Generation::new(),
+                    nexus_generation: NexusGeneration::new(),
                 })
             }
             OmicronZoneType::Oximeter { address } => {
@@ -711,7 +712,7 @@ mod test {
             internal_dns_version: initial_dns_generation,
             external_dns_version: Generation::new(),
             target_release_minimum_generation: TargetReleaseGeneration::new(),
-            nexus_generation: Generation::new(),
+            nexus_generation: NexusGeneration::new(),
             external_networking_generation: Generation::new(),
             cockroachdb_fingerprint: String::new(),
             clickhouse_cluster_config: None,

@@ -2102,7 +2102,7 @@
             "description": "The generation of the active group of Nexuses\n\nIf a Nexus instance notices it has a nexus_generation less than this value, it will start to quiesce in preparation for handing off control to the newer generation (see: RFD 588).",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Generation"
+                "$ref": "#/components/schemas/NexusGeneration"
               }
             ]
           },
@@ -2472,7 +2472,7 @@
             "description": "The Nexus generation number\n\nSee [`Blueprint::nexus_generation`].",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Generation"
+                "$ref": "#/components/schemas/NexusGeneration"
               }
             ]
           },
@@ -3431,7 +3431,7 @@
                 "description": "Generation number for this Nexus zone. This is used to coordinate handoff between old and new Nexus instances during updates. See RFD 588.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/Generation"
+                    "$ref": "#/components/schemas/NexusGeneration"
                   }
                 ]
               },
@@ -6516,6 +6516,17 @@
         "description": "Password hashes must be in PHC (Password Hashing Competition) string format.  Passwords must be hashed with Argon2id.  Password hashes may be rejected if the parameters appear not to be secure enough.",
         "type": "string"
       },
+      "NexusGeneration": {
+        "description": "Generation numbers stored in the database, used for optimistic concurrency control",
+        "x-rust-type": {
+          "crate": "omicron-generation-kinds",
+          "path": "omicron_generation_kinds::NexusGeneration",
+          "version": "*"
+        },
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0
+      },
       "NexusGenerationBumpWaitingOn": {
         "oneOf": [
           {
@@ -7853,7 +7864,7 @@
                 ]
               },
               "value": {
-                "$ref": "#/components/schemas/Generation"
+                "$ref": "#/components/schemas/NexusGeneration"
               }
             },
             "required": [
@@ -10622,7 +10633,7 @@
                 ]
               },
               "zone_generation": {
-                "$ref": "#/components/schemas/Generation"
+                "$ref": "#/components/schemas/NexusGeneration"
               }
             },
             "required": [

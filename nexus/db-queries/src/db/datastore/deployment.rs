@@ -1583,7 +1583,7 @@ impl DataStore {
         let external_dns_version = *blueprint_row.external_dns_version;
         let target_release_minimum_generation =
             blueprint_row.target_release_minimum_generation.into();
-        let nexus_generation = *blueprint_row.nexus_generation;
+        let nexus_generation = blueprint_row.nexus_generation.into();
         let external_networking_generation =
             *blueprint_row.external_networking_generation;
         let cockroachdb_fingerprint = blueprint_row.cockroachdb_fingerprint;
@@ -3133,6 +3133,7 @@ fn insert_target_query(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use omicron_generation_kinds::NexusGeneration;
 
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::pub_test_utils::helpers::create_service_ip_pool;
@@ -5245,7 +5246,7 @@ mod tests {
                 nic: nic.clone(),
                 external_tls: false,
                 external_dns_servers: Vec::new(),
-                nexus_generation: Generation::new(),
+                nexus_generation: NexusGeneration::new(),
             }),
             image_source: BlueprintZoneImageSource::InstallDataset,
         };

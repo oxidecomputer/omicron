@@ -66,7 +66,7 @@ use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_generation_kinds::{
-    SledConfigGenerationKind, TargetReleaseGenerationKind,
+    NexusGenerationKind, SledConfigGenerationKind, TargetReleaseGenerationKind,
     UpdateDispositionGenerationKind,
 };
 use omicron_uuid_kinds::{
@@ -98,7 +98,7 @@ pub struct Blueprint {
     pub comment: String,
     pub target_release_minimum_generation:
         DbTypedGeneration<TargetReleaseGenerationKind>,
-    pub nexus_generation: Generation,
+    pub nexus_generation: DbTypedGeneration<NexusGenerationKind>,
     pub source: DbBpSource,
     pub external_networking_generation: Generation,
 }
@@ -120,7 +120,7 @@ impl From<&'_ nexus_types::deployment::Blueprint> for Blueprint {
             target_release_minimum_generation: bp
                 .target_release_minimum_generation
                 .into(),
-            nexus_generation: Generation(bp.nexus_generation),
+            nexus_generation: bp.nexus_generation.into(),
             source: DbBpSource::from(&bp.source),
             external_networking_generation: Generation(
                 bp.external_networking_generation,
@@ -139,7 +139,7 @@ impl From<Blueprint> for nexus_types::deployment::BlueprintMetadata {
             target_release_minimum_generation: value
                 .target_release_minimum_generation
                 .into(),
-            nexus_generation: *value.nexus_generation,
+            nexus_generation: value.nexus_generation.into(),
             cockroachdb_fingerprint: value.cockroachdb_fingerprint,
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::from_optional_string(
@@ -724,7 +724,7 @@ pub struct BpOmicronZone {
 
     pub image_source: DbBpZoneImageSource,
     pub image_artifact_sha256: Option<ArtifactHash>,
-    pub nexus_generation: Option<Generation>,
+    pub nexus_generation: Option<DbTypedGeneration<NexusGenerationKind>>,
     pub nexus_lockstep_port: Option<SqlU16>,
 }
 
@@ -942,7 +942,7 @@ impl BpOmicronZone {
                         .collect(),
                 );
                 bp_omicron_zone.nexus_generation =
-                    Some(Generation::from(*nexus_generation));
+                    Some((*nexus_generation).into());
             }
             BlueprintZoneType::Oximeter(blueprint_zone_type::Oximeter {
                 address,
@@ -1151,9 +1151,10 @@ impl BpOmicronZone {
                         .into_iter()
                         .map(|i| i.ip())
                         .collect(),
-                    nexus_generation: *self.nexus_generation.ok_or_else(
-                        || anyhow!("expected 'nexus_generation'"),
-                    )?,
+                    nexus_generation: self
+                        .nexus_generation
+                        .ok_or_else(|| anyhow!("expected 'nexus_generation'"))?
+                        .into(),
                 })
             }
             ZoneType::Oximeter => {

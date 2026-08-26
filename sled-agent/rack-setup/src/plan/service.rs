@@ -51,7 +51,7 @@ use omicron_common::policy::{
     SINGLE_NODE_CLICKHOUSE_REDUNDANCY,
 };
 use omicron_generation_kinds::{
-    Generation, SledConfigGeneration, TargetReleaseGeneration,
+    Generation, NexusGeneration, SledConfigGeneration, TargetReleaseGeneration,
 };
 use omicron_uuid_kinds::{
     BlueprintUuid, DatasetUuid, ExternalIpUuid, GenericUuid, OmicronZoneUuid,
@@ -648,7 +648,7 @@ impl ServicePlan {
                                 .external_certificates
                                 .is_empty(),
                             external_dns_servers: config.dns_servers.clone(),
-                            nexus_generation: Generation::new(),
+                            nexus_generation: NexusGeneration::new(),
                         },
                     ),
                     filesystem_pool,
@@ -994,7 +994,7 @@ impl ServicePlan {
             // external DNS (including creating the recovery silo).
             external_dns_version: Generation::new(),
             target_release_minimum_generation: TargetReleaseGeneration::new(),
-            nexus_generation: Generation::new(),
+            nexus_generation: NexusGeneration::new(),
             external_networking_generation: Generation::new(),
             // Nexus will fill in the CockroachDB values during initialization.
             cockroachdb_fingerprint: String::new(),
