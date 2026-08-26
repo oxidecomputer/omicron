@@ -17,6 +17,7 @@ use nexus_types::internal_api::background::LocalStorageDeleteStatus;
 use serde_json::json;
 use sled_agent_client::types::LocalStorageDatasetDeleteRequest;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
 
 pub struct LocalStorageDeleter {
@@ -123,8 +124,9 @@ impl LocalStorageDeleter {
 
             Err(e) => {
                 let s = format!(
-                    "error calling sled_client_ext for allocation {}: {e}",
+                    "error calling sled_client_ext for allocation {}: {}",
                     allocation.id(),
+                    InlineErrorChain::new(&e),
                 );
 
                 error!(log, "{s}");
@@ -138,8 +140,10 @@ impl LocalStorageDeleter {
             Ok(_) => DeleteResult::Deleted,
 
             Err(e) => {
-                let s =
-                    format!("error sending local_storage_dataset_delete: {e}");
+                let s = format!(
+                    "error sending local_storage_dataset_delete: {}",
+                    InlineErrorChain::new(&e),
+                );
 
                 error!(log, "{s}");
                 status.errors.push(s);
