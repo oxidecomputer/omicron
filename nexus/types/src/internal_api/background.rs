@@ -843,6 +843,64 @@ pub enum InventoryLoadStatus {
     },
 }
 
+/// The status of a `blueprint_loader` background task activation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub enum BlueprintLoaderStatus {
+    /// Reading the current target blueprint from the database failed. The
+    /// previously-loaded blueprint is left in place, and the loader will retry
+    /// the next time it is activated.
+    Error(String),
+
+    /// The target blueprint's ID matches the previously loaded blueprint, but
+    /// its contents differ.
+    ///
+    /// Blueprints are immutable, so this is an invariant violation. The
+    /// previously-loaded blueprint is left in place, and the loader will retry
+    /// the next time it is activated.
+    ImmutableBlueprintChanged { target_id: BlueprintUuid },
+
+    /// The target blueprint was loaded successfully.
+    Loaded(BlueprintLoaded),
+}
+
+/// Details about a successful `blueprint_loader` activation.
+///
+/// Part of the [`BlueprintLoaderStatus::Loaded`] variant.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct BlueprintLoaded {
+    /// Information about the target blueprint.
+    pub target: BlueprintTarget,
+
+    /// The time the blueprint was created.
+    pub time_created: DateTime<Utc>,
+
+    /// The outcome relative to the previously-loaded target blueprint.
+    pub outcome: BlueprintLoadOutcome,
+}
+
+/// What a successful `blueprint_loader` activation found relative to the
+/// previously loaded target.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub enum BlueprintLoadOutcome {
+    /// This is the first blueprint loaded since Nexus started; watchers were
+    /// notified.
+    FirstTarget { time_found: DateTime<Utc> },
+
+    /// The target blueprint changed; it was loaded and watchers were notified.
+    Updated { time_found: DateTime<Utc> },
+
+    /// The target blueprint was the same, but execution of it was enabled or
+    /// disabled (the new value is in [`BlueprintLoaded::target`]); it was
+    /// loaded and watchers were notified.
+    EnabledChanged { time_found: DateTime<Utc> },
+
+    /// The target blueprint is identical to what was already loaded; watchers
+    /// were not notified.
+    ///
+    /// This is the common case for periodic activations.
+    Unchanged,
+}
+
 /// The status of a `blueprint_planner` background task activation.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub enum BlueprintPlannerStatus {

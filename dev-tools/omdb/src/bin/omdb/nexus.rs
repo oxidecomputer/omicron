@@ -57,6 +57,9 @@ use nexus_types::internal_api::background::AbandonedVmmReaperStatus;
 use nexus_types::internal_api::background::AttachedSubnetManagerStatus;
 use nexus_types::internal_api::background::AuditLogCleanupStatus;
 use nexus_types::internal_api::background::AuditLogTimeoutIncompleteStatus;
+use nexus_types::internal_api::background::BlueprintLoadOutcome;
+use nexus_types::internal_api::background::BlueprintLoaded;
+use nexus_types::internal_api::background::BlueprintLoaderStatus;
 use nexus_types::internal_api::background::BlueprintPlannerStatus;
 use nexus_types::internal_api::background::BlueprintRendezvousStats;
 use nexus_types::internal_api::background::BlueprintRendezvousStatus;
@@ -1655,30 +1658,56 @@ fn print_task_blueprint_executor(details: &serde_json::Value) {
 }
 
 fn print_task_blueprint_loader(details: &serde_json::Value) {
-    #[derive(Deserialize)]
-    struct BlueprintLoaderStatus {
-        target_id: Uuid,
-        time_created: DateTime<Utc>,
-        status: String,
-        enabled: bool,
-    }
-
     match serde_json::from_value::<BlueprintLoaderStatus>(details.clone()) {
         Err(error) => eprintln!(
             "warning: failed to interpret task details: {:?}: {:?}",
             error, details
         ),
-        Ok(status) => {
-            println!("    target blueprint: {}", status.target_id);
+        Ok(BlueprintLoaderStatus::Error(error)) => {
+            println!("    task did not complete successfully: {error}");
+        }
+        Ok(BlueprintLoaderStatus::ImmutableBlueprintChanged { target_id }) => {
+            println!("    target blueprint: {target_id}");
+            println!(
+                "    status:           target blueprint unchanged (error)"
+            );
+            println!(
+                "    error:            blueprint {target_id} changed, but \
+                 blueprints are supposed to be immutable"
+            );
+        }
+        Ok(BlueprintLoaderStatus::Loaded(BlueprintLoaded {
+            target,
+            time_created,
+            outcome,
+        })) => {
+            let enabled = target.enabled;
+            println!("    target blueprint: {}", target.target_id);
             println!(
                 "    execution:        {}",
-                if status.enabled { "enabled" } else { "disabled" }
+                if enabled { "enabled" } else { "disabled" }
             );
             println!(
                 "    created at:       {}",
-                humantime::format_rfc3339_millis(status.time_created.into())
+                humantime::format_rfc3339_millis(time_created.into())
             );
-            println!("    status:           {}", status.status);
+            let status = match outcome {
+                BlueprintLoadOutcome::FirstTarget { .. } => {
+                    "first target blueprint"
+                }
+                BlueprintLoadOutcome::Updated { .. } => {
+                    "target blueprint updated"
+                }
+                BlueprintLoadOutcome::EnabledChanged { .. } => {
+                    if enabled {
+                        "target blueprint enabled"
+                    } else {
+                        "target blueprint disabled"
+                    }
+                }
+                BlueprintLoadOutcome::Unchanged => "target blueprint unchanged",
+            };
+            println!("    status:           {status}");
         }
     }
 }
