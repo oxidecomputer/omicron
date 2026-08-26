@@ -1286,8 +1286,6 @@ mod test {
                     inventory,
                     blueprint,
                     Some(&TargetRelease {
-                        // In this magical world no update ever takes more than
-                        // 10 hours
                         time_requested: Utc::now() - TimeDelta::hours(10),
                         version: version.clone(),
                     }),
@@ -1331,7 +1329,7 @@ mod test {
                     inventory,
                     blueprint,
                     Some(&TargetRelease {
-                        time_requested: Utc::now() - TimeDelta::hours(10),
+                        time_requested: Utc::now(),
                         version: version.clone(),
                     }),
                     empty_internal_update_status(),
@@ -1374,7 +1372,7 @@ mod test {
                     inventory,
                     blueprint,
                     Some(&TargetRelease {
-                        time_requested: Utc::now() - TimeDelta::hours(10),
+                        time_requested: Utc::now(),
                         version: version.clone(),
                     }),
                     empty_internal_update_status(),
@@ -1426,7 +1424,7 @@ mod test {
                     inventory,
                     blueprint,
                     Some(&TargetRelease {
-                        time_requested: Utc::now() - TimeDelta::hours(10),
+                        time_requested: Utc::now(),
                         version: version.clone(),
                     }),
                     empty_internal_update_status(),
@@ -1471,7 +1469,7 @@ mod test {
                     inventory,
                     blueprint,
                     Some(&TargetRelease {
-                        time_requested: Utc::now() - TimeDelta::hours(10),
+                        time_requested: Utc::now(),
                         version: version.clone(),
                     }),
                     empty_internal_update_status(),
@@ -1529,7 +1527,7 @@ mod test {
                     inventory,
                     blueprint,
                     Some(&TargetRelease {
-                        time_requested: Utc::now() - TimeDelta::hours(10),
+                        time_requested: Utc::now(),
                         version: version.clone(),
                     }),
                     empty_internal_update_status(),
@@ -1575,7 +1573,7 @@ mod test {
                     inventory,
                     blueprint,
                     Some(&TargetRelease {
-                        time_requested: Utc::now() - TimeDelta::hours(10),
+                        time_requested: Utc::now(),
                         version: version.clone(),
                     }),
                     empty_internal_update_status(),
@@ -1863,7 +1861,7 @@ mod test {
                     inventory,
                     blueprint,
                     Some(&TargetRelease {
-                        time_requested: Utc::now() - TimeDelta::hours(10),
+                        time_requested: Utc::now(),
                         version: version.clone(),
                     }),
                     internal_update_status_with_missing_sleds(
@@ -2011,7 +2009,7 @@ mod test {
             stuck_sagas: Ok(vec![]),
             blueprint,
             current_target_release: Some(TargetRelease {
-                time_requested: Utc::now() - TimeDelta::hours(10),
+                time_requested: Utc::now(),
                 version: fake_target_version(),
             }),
             internal_update_status: empty_internal_update_status(),
@@ -2043,7 +2041,7 @@ mod test {
             stuck_sagas: Ok(vec![saga]),
             blueprint,
             current_target_release: Some(TargetRelease {
-                time_requested: Utc::now() - TimeDelta::hours(10),
+                time_requested: Utc::now(),
                 version: fake_target_version(),
             }),
             internal_update_status: empty_internal_update_status(),
@@ -2079,7 +2077,7 @@ mod test {
             stuck_sagas: Err(err),
             blueprint,
             current_target_release: Some(TargetRelease {
-                time_requested: Utc::now() - TimeDelta::hours(10),
+                time_requested: Utc::now(),
                 version: fake_target_version(),
             }),
             internal_update_status: empty_internal_update_status(),
@@ -2224,7 +2222,7 @@ mod test {
             stuck_sagas: Ok(vec![]),
             blueprint,
             current_target_release: Some(TargetRelease {
-                time_requested: Utc::now() - TimeDelta::hours(10),
+                time_requested: Utc::now(),
                 version: fake_target_version(),
             }),
             internal_update_status: empty_internal_update_status(),
@@ -2264,7 +2262,7 @@ mod test {
             stuck_sagas: Ok(vec![]),
             blueprint,
             current_target_release: Some(TargetRelease {
-                time_requested: Utc::now() - TimeDelta::hours(10),
+                time_requested: Utc::now(),
                 version: fake_target_version(),
             }),
             internal_update_status: empty_internal_update_status(),
@@ -2310,7 +2308,7 @@ mod test {
             stuck_sagas: Ok(vec![]),
             blueprint,
             current_target_release: Some(TargetRelease {
-                time_requested: Utc::now() - TimeDelta::hours(10),
+                time_requested: Utc::now(),
                 version: fake_target_version(),
             }),
             internal_update_status: empty_internal_update_status(),
@@ -2387,7 +2385,7 @@ mod test {
             stuck_sagas: Ok(vec![]),
             blueprint,
             current_target_release: Some(TargetRelease {
-                time_requested: Utc::now() - TimeDelta::hours(10),
+                time_requested: Utc::now(),
                 version: fake_target_version(),
             }),
             internal_update_status: empty_internal_update_status(),
@@ -2445,7 +2443,7 @@ mod test {
             stuck_sagas: Ok(vec![]),
             blueprint,
             current_target_release: Some(TargetRelease {
-                time_requested: Utc::now() - TimeDelta::hours(10),
+                time_requested: Utc::now(),
                 version: fake_target_version(),
             }),
             internal_update_status: empty_internal_update_status(),
@@ -2481,7 +2479,7 @@ mod test {
             stuck_sagas: Ok(vec![]),
             blueprint,
             current_target_release: Some(TargetRelease {
-                time_requested: Utc::now() - TimeDelta::hours(10),
+                time_requested: Utc::now(),
                 version: fake_target_version(),
             }),
             internal_update_status: empty_internal_update_status(),
@@ -2520,7 +2518,7 @@ mod test {
             stuck_sagas: Ok(vec![]),
             blueprint,
             current_target_release: Some(TargetRelease {
-                time_requested: Utc::now() - TimeDelta::hours(10),
+                time_requested: Utc::now(),
                 version: fake_target_version(),
             }),
             internal_update_status: empty_internal_update_status(),
@@ -2573,7 +2571,7 @@ mod test {
             stuck_sagas: Ok(vec![]),
             blueprint,
             current_target_release: Some(TargetRelease {
-                time_requested: Utc::now() - TimeDelta::hours(10),
+                time_requested: Utc::now(),
                 version: fake_target_version(),
             }),
             internal_update_status: empty_internal_update_status(),
@@ -2622,7 +2620,7 @@ mod test {
             stuck_sagas: Ok(vec![saga]),
             blueprint,
             current_target_release: Some(TargetRelease {
-                time_requested: Utc::now() - TimeDelta::hours(10),
+                time_requested: Utc::now(),
                 version: fake_target_version(),
             }),
             internal_update_status: empty_internal_update_status(),
@@ -2757,7 +2755,7 @@ mod test {
             stuck_sagas: Ok(vec![]),
             blueprint,
             current_target_release: Some(TargetRelease {
-                time_requested: Utc::now() - TimeDelta::hours(10),
+                time_requested: Utc::now(),
                 version: fake_target_version(),
             }),
             internal_update_status: internal_update_status_with_missing_sleds(
