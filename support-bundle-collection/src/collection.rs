@@ -11,7 +11,10 @@
 //!
 //! This layer never reads the `support_bundle` table, never transfers
 //! data to a sled-agent's bundle storage endpoints, and never polls
-//! bundle state. Those responsibilities belong to the caller.
+//! bundle state. Those responsibilities belong to the caller, as does
+//! filling in default time-range bounds: the selection is collected
+//! exactly as given, so a selection without a start bound collects
+//! unbounded history.
 
 use crate::cache::Cache;
 use crate::perfetto;
@@ -62,18 +65,9 @@ impl BundleCollection {
         resolver: Resolver,
         log: slog::Logger,
         opctx: OpContext,
-        mut data_selection: BundleDataSelection,
+        data_selection: BundleDataSelection,
         bundle: BundleInfo,
     ) -> Self {
-        // Every time-bounded category (zone logs, ereports) reads the
-        // bundle-wide time range from this selection. A selection without
-        // a start bound would collect unbounded history, so bound this
-        // collection run to the default lookback. The stored selection is
-        // not modified.
-        data_selection.ensure_start_bound(
-            omicron_common::now_db_precision(),
-            BundleDataSelection::DEFAULT_LOOKBACK,
-        );
         Self {
             datastore,
             resolver,

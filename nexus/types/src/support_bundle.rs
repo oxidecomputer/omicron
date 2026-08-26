@@ -106,9 +106,9 @@ impl fmt::Display for DisplayBundleData<'_> {
 /// Inclusive time bound applied bundle-wide to time-bounded categories
 /// (currently host-info logs and ereports).
 ///
-/// Ereports are filtered exactly. Zone logs are filtered at file
-/// granularity: a log file whose content overlaps the range is collected in
-/// full, so collected files can contain some content outside it.
+/// Ereports have a single timestamp, and are filtered exactly.
+/// Zone logs are created within an interval of time, and the time bound
+/// includes a log file if it overlaps with this interval.
 ///
 /// `None` on either side means unbounded on that side. When both bounds are
 /// set, `start <= end` holds: construction and deserialization both reject
@@ -169,8 +169,7 @@ impl TryFrom<UncheckedBundleTimeRange> for BundleTimeRange {
 /// because each BundleData determines its own category.
 ///
 /// `time_range`, when set, bounds every time-bounded category's collection
-/// (host-info logs and ereports). Stored as one field here rather than
-/// copied into per-category filters.
+/// (host-info logs and ereports).
 #[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct BundleDataSelection {
     // Ordered so iteration (and therefore display output) is deterministic.
@@ -179,8 +178,13 @@ pub struct BundleDataSelection {
 }
 
 impl BundleDataSelection {
-    /// The default collection lookback, applied when a selection does not
-    /// specify a start bound for its time range.
+    /// The default collection lookback, filled in for a selection that does
+    /// not specify a start bound for its time range.
+    ///
+    /// This is applied (via [`Self::ensure_start_bound`]) where a selection
+    /// enters the system: when Nexus persists it at bundle creation, or by
+    /// omdb immediately before an unpersisted collection. Collection itself
+    /// uses the selection exactly as given.
     pub const DEFAULT_LOOKBACK: chrono::Days = chrono::Days::new(7);
 
     /// Creates an empty selection with no data categories.
@@ -189,20 +193,14 @@ impl BundleDataSelection {
     }
 
     /// Returns a selection containing all default data categories
-    /// (i.e. "collect everything") with a bundle-wide time window covering
-    /// the default lookback.
+    /// (i.e. "collect everything") with no explicit time range.
     pub fn all() -> Self {
-        let mut selection = Self::new()
+        Self::new()
             .with_reconfigurator()
             .with_all_sleds()
             .with_sled_cubby_info()
             .with_sp_dumps()
-            .with_ereports(EreportFilters::new());
-        selection.ensure_start_bound(
-            omicron_common::now_db_precision(),
-            Self::DEFAULT_LOOKBACK,
-        );
-        selection
+            .with_ereports(EreportFilters::new())
     }
 
     /// Ensures the bundle-wide time range has a start bound.

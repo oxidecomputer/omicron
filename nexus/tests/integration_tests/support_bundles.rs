@@ -739,8 +739,8 @@ async fn test_support_bundle_zone_log_time_range(
     assert_eq!(logs.len(), 1, "expected 1 in-window log, got: {logs:?}");
     assert!(logs.iter().any(|l| l.ends_with("fake-svc.log.30-days-old")));
 
-    // A window with no bounds does not collect unbounded history: the
-    // collector fills in the default lookback as the start bound, so the
+    // A window with no bounds does not collect unbounded history: bundle
+    // creation fills in the default lookback as the start bound, so the
     // 30-day log stays excluded.
     let logs = collect_zone_logs_with_range(
         &cptestctx,

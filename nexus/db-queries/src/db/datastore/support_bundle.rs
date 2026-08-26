@@ -300,7 +300,7 @@ impl DataStore {
     async fn support_bundle_create_impl<I>(
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
-        data_selection: BundleDataSelection,
+        mut data_selection: BundleDataSelection,
         insert: I,
     ) -> Result<SupportBundle, CreateError>
     where
@@ -311,6 +311,16 @@ impl DataStore {
             -> BoxFuture<'a, Result<SupportBundle, DbError>>,
         I: Clone + Send + Sync,
     {
+        // Every persisted selection carries a start bound for its time range,
+        // so the stored record reflects the window collection will use and
+        // collection never sees an unbounded lookback. Callers' explicit
+        // bounds are preserved; only a missing start is filled in. Stamping
+        // outside the transaction keeps the bound stable across retries.
+        data_selection.ensure_start_bound(
+            omicron_common::now_db_precision(),
+            BundleDataSelection::DEFAULT_LOOKBACK,
+        );
+
         let err = OptionalError::new();
         self.transaction_retry_wrapper("support_bundle_create")
             .transaction(&conn, |conn| {
@@ -1481,13 +1491,17 @@ mod test {
             .support_bundle_data_selection_get(&opctx, &authz_bundle)
             .await
             .expect("Should be able to query data selection");
-        // TODO(#10062): Once support_bundle_create takes a BundleDataSelection
-        // parameter, this should assert that the selection we read back is
-        // exactly equal to what we passed in.
+        // The read-back selection is the one we passed in, plus the default
+        // start bound that creation stamps onto every persisted selection
+        // (see test_create_stamps_default_start_bound for the full contract).
         assert_ne!(
             selection,
             BundleDataSelection::new(),
             "Data selection should exist before delete"
+        );
+        assert!(
+            selection.time_range().is_some_and(|range| range.start().is_some()),
+            "Persisted selection should carry a start bound"
         );
 
         datastore
@@ -1507,6 +1521,88 @@ mod test {
             .support_bundle_data_selection_get(&opctx, &authz_bundle)
             .await
             .expect_err("Data selection should not exist after bundle delete");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_create_stamps_default_start_bound() {
+        let logctx =
+            dev::test_setup_log("test_create_stamps_default_start_bound");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let _test_sled = create_sled_and_zpools(&datastore, &opctx, 2).await;
+        let this_nexus_id = OmicronZoneUuid::new_v4();
+
+        // A selection persisted without a time range comes back with the
+        // default start bound stamped at creation; everything else is
+        // unchanged.
+        let windowless = BundleDataSelection::all();
+        assert!(windowless.time_range().is_none());
+        let bundle = datastore
+            .support_bundle_create(
+                &opctx,
+                SupportBundleCreateParams {
+                    reason: "windowless selection",
+                    nexus_id: this_nexus_id,
+                    user_comment: None,
+                    data_selection: windowless.clone(),
+                },
+            )
+            .await
+            .expect("Should be able to create bundle");
+        let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
+        let mut selection = datastore
+            .support_bundle_data_selection_get(&opctx, &authz_bundle)
+            .await
+            .expect("Should be able to query data selection");
+        let range = selection
+            .time_range()
+            .expect("persisted selection should have a time range");
+        assert!(
+            range.start().is_some(),
+            "persisted selection should carry a start bound"
+        );
+        assert!(range.end().is_none(), "no end bound was supplied");
+        selection.set_time_range(None);
+        assert_eq!(
+            selection, windowless,
+            "creation should change nothing but the time range"
+        );
+
+        // A selection with explicit bounds round-trips exactly: supplied
+        // bounds always win over the default.
+        let now = omicron_common::now_db_precision();
+        let bounded = BundleDataSelection::all().with_time_range(
+            nexus_types::support_bundle::BundleTimeRange::new(
+                Some(now - chrono::Duration::hours(2)),
+                Some(now - chrono::Duration::hours(1)),
+            )
+            .expect("valid range"),
+        );
+        let bundle = datastore
+            .support_bundle_create(
+                &opctx,
+                SupportBundleCreateParams {
+                    reason: "bounded selection",
+                    nexus_id: this_nexus_id,
+                    user_comment: None,
+                    data_selection: bounded.clone(),
+                },
+            )
+            .await
+            .expect("Should be able to create bundle");
+        let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
+        let selection = datastore
+            .support_bundle_data_selection_get(&opctx, &authz_bundle)
+            .await
+            .expect("Should be able to query data selection");
+        assert_eq!(
+            selection, bounded,
+            "explicit bounds should round-trip unmodified"
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();

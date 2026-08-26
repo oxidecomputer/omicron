@@ -115,7 +115,7 @@ impl CollectArgs {
 
         // Both flags are ages relative to now: --since is the oldest data
         // to include (the window's start), --until the newest (its end).
-        // Without --since, the collector fills in its default lookback,
+        // Without --since, `collect` fills in the default lookback,
         // anchored to the end bound when one is given.
         let now = omicron_common::now_db_precision();
         let age_to_timestamp = |flag: &str, age: std::time::Duration| {
@@ -182,12 +182,21 @@ impl CollectArgs {
         let bundle_log = log.new(slog::o!("bundle" => bundle.id.to_string()));
         eprintln!("Collecting support bundle {}", bundle.id);
 
+        // Nexus-created bundles get their default lookback stamped when the
+        // selection is persisted; omdb collects immediately without
+        // persisting, so fill a missing start bound here instead.
+        let mut data_selection = self.data_selection()?;
+        data_selection.ensure_start_bound(
+            omicron_common::now_db_precision(),
+            BundleDataSelection::DEFAULT_LOOKBACK,
+        );
+
         let collection = Arc::new(BundleCollection::new(
             datastore,
             resolver,
             bundle_log,
             opctx,
-            self.data_selection()?,
+            data_selection,
             bundle,
         ));
 
