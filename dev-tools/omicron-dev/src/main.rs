@@ -111,6 +111,11 @@ impl RunAllArgs {
         // Print out basic information about what was started.
         // NOTE: The stdout strings here are not intended to be stable, but they
         // are used by the test suite.
+        println!(
+            "omicron-dev: debug dropbox:          {}",
+            cptestctx.debug_dropbox_path()
+        );
+
         let addr = cptestctx.external_client.bind_address;
         println!("omicron-dev: nexus external API:     {:?}", addr);
         println!(
@@ -135,7 +140,7 @@ impl RunAllArgs {
         );
         println!(
             "omicron-dev: cockroachdb directory:  {}",
-            cptestctx.database.temp_dir().display()
+            cptestctx.database.temp_dir()
         );
         println!(
             "omicron-dev: clickhouse native addr: {}",

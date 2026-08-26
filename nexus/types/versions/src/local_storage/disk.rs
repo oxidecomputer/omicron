@@ -105,7 +105,7 @@ impl TryFrom<omicron_common::api::external::Disk>
             snapshot_id: new.snapshot_id,
             image_id: new.image_id,
             size: new.size,
-            block_size: new.block_size,
+            block_size: new.block_size.into(),
             state: new.state,
             device_path: new.device_path,
             disk_type: match new.disk_type {
@@ -148,7 +148,7 @@ impl From<v2025_11_20_00::disk::Disk> for omicron_common::api::external::Disk {
             snapshot_id: old.snapshot_id,
             image_id: old.image_id,
             size: old.size,
-            block_size: old.block_size,
+            block_size: old.block_size.into(),
             state: old.state,
             device_path: old.device_path,
             disk_type: old.disk_type.into(),

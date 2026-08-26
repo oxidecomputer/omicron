@@ -4,9 +4,9 @@
 
 use std::collections::HashMap;
 
-use omicron_common::disk::DiskIdentity;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sled_agent_types::disk::DiskIdentity;
 use sled_hardware_types::Baseboard;
 use slog::{Logger, info};
 
@@ -51,6 +51,33 @@ impl std::fmt::Display for DendriteAsic {
             }
         )
     }
+}
+
+/// Whether physical or virtual NICs are present in the system.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum DataLinks {
+    /// Virtual NICs are present. This is the case for development environments,
+    /// or any Oxide sled running outside of a rack.
+    Virtual { devices: Vec<String> },
+    /// Physical NICs are present, with device names like `cxgbeN`. This is the
+    /// case for Oxide compute sleds running inside of a rack.
+    Physical,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum ExternalDisks {
+    Hardcoded {
+        /// Use the provided file-backed vdevs
+        vdevs: Vec<String>,
+
+        /// Inject these raw disks during device polling
+        disks: Vec<UnparsedDisk>,
+    },
+
+    /// Detect physical external disks connected to the sled.
+    DetectPhysical,
 }
 
 /// Configuration for forcing a sled to run as a Scrimlet or compute Sled
@@ -332,7 +359,7 @@ enum TofinoView {
 pub struct HardwareView {
     tofino: TofinoView,
     disks: HashMap<DiskIdentity, UnparsedDisk>,
-    baseboard: Option<Baseboard>,
+    baseboard: Baseboard,
     online_processor_count: u32,
     usable_physical_pages: u64,
     usable_physical_ram_bytes: u64,
@@ -341,7 +368,7 @@ pub struct HardwareView {
 
 impl HardwareView {
     pub fn baseboard(&self) -> Baseboard {
-        self.baseboard.as_ref().cloned().unwrap_or_else(|| Baseboard::unknown())
+        self.baseboard.clone()
     }
 
     pub fn cpu_family(&self) -> sled_hardware_types::SledCpuFamily {

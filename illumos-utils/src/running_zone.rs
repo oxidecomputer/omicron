@@ -12,7 +12,7 @@ use crate::addrobj::{
 use crate::contract;
 use crate::dladm::Etherstub;
 use crate::link::{Link, VnicAllocator};
-use crate::opte::{Port, PortTicket};
+use crate::opte::{Port, PortInfo, PortTicket};
 use crate::zone::Zones;
 use crate::zone::{AddressRequest, ROUTE};
 use crate::zpool::{PathInPool, ZpoolOrRamdisk};
@@ -20,7 +20,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::Utf8TempDir;
 use debug_ignore::DebugIgnore;
 use ipnetwork::IpNetwork;
-use omicron_common::address::{AZ_PREFIX, Ipv6Subnet};
+use omicron_common::address::{AZ_PREFIX_LENGTH, Ipv6Subnet};
 use omicron_common::backoff;
 use omicron_common::resolvable_files::ResolvableFileSource;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -476,7 +476,8 @@ impl RunningZone {
         gateway: Ipv6Addr,
     ) -> Result<(), RunCommandError> {
         // Route to the underlay AZ's /48 by deriving it from the gateway IP.
-        let underlay_az: Ipv6Subnet<AZ_PREFIX> = Ipv6Subnet::new(gateway);
+        let underlay_az: Ipv6Subnet<AZ_PREFIX_LENGTH> =
+            Ipv6Subnet::new(gateway);
         self.run_cmd([
             ROUTE,
             "add",
@@ -493,6 +494,10 @@ impl RunningZone {
     /// Return references to the OPTE ports for this zone.
     pub fn opte_ports(&self) -> impl Iterator<Item = &Port> {
         self.inner.opte_ports()
+    }
+
+    pub fn opte_port_info(&self) -> impl Iterator<Item = PortInfo> {
+        self.inner.opte_port_info()
     }
 
     /// Remove the OPTE ports on this zone from the port manager.
@@ -749,6 +754,15 @@ impl InstalledZone {
     /// Returns references to the OPTE ports for this zone.
     pub fn opte_ports(&self) -> impl Iterator<Item = &Port> {
         self.opte_ports.iter().map(|(port, _)| port)
+    }
+
+    /// Returns references to the OPTE ports and metadata for this zone.
+    pub fn opte_port_info(&self) -> impl Iterator<Item = PortInfo> {
+        self.opte_ports.iter().map(|(port, ticket)| PortInfo {
+            port: port.clone(),
+            nic_id: ticket.id(),
+            nic_kind: ticket.kind(),
+        })
     }
 
     /// Returns the filesystem path to the zone's root in the GZ.

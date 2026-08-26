@@ -21,14 +21,16 @@ http.workspace = true
 libc.workspace = true
 nexus-config.workspace = true
 omicron-common.workspace = true
+omicron-debug-dropbox.workspace = true
 oxide-tokio-rt.workspace = true
 pem.workspace = true
+port-file.workspace = true
 regex.workspace = true
-ring.workspace = true
 rustls.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 slog.workspace = true
 subprocess.workspace = true
-tempfile.workspace = true
 thiserror.workspace = true
 tar.workspace = true
 tokio = { workspace = true, features = ["full"] }
@@ -46,7 +48,6 @@ slog-error-chain.workspace = true
 chrono.workspace = true
 expectorate.workspace = true
 gethostname.workspace = true
-serde.workspace = true
 
 [features]
 seed-gen = ["dep:filetime"]

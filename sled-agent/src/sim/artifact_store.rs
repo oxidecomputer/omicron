@@ -13,11 +13,11 @@ use dropshot::{
     Body, ConfigDropshot, FreeformBody, HttpError, HttpResponseOk, HttpServer,
     Path, RequestContext, ServerBuilder,
 };
-use omicron_common::api::external::Generation;
+use omicron_generation_kinds::Generation;
 use repo_depot_api::*;
-use tokio::sync::{OwnedSemaphorePermit, Semaphore, watch};
+use tokio::sync::{AcquireError, OwnedSemaphorePermit, Semaphore, watch};
 
-use crate::artifact_store::{ArtifactStore, DatasetsManager};
+use crate::artifact_store::{ArtifactStore, DatasetsManager, Error};
 
 // Semaphore mostly uses usize but in `acquire_many` it unfortunately uses u32.
 const MAX_PERMITS: u32 = u32::MAX >> 3;
@@ -27,9 +27,13 @@ pub struct SimArtifactStorage {
     // We simulate the two M.2s with two separate temporary directories.
     dirs: Arc<[Utf8TempDir; 2]>,
 
-    // Semaphore to keep track of how many copy requests are in flight, and to
-    // be able to await on their completion. Used in integration tests.
-    copy_semaphore: Arc<Semaphore>,
+    // Semaphore to keep track of how many writes are in flight, and to be
+    // able to await on their completion. Used to wait for copies to complete
+    // in integration tests and to wait for writes to complete finish before
+    // dropping sled-agent, to avoid a race condition where files are moved
+    // to their final path while the drop implementation for `Utf8TempDir` is
+    // running.
+    write_semaphore: Arc<Semaphore>,
 
     // Watch channel to be able to await on the delete reconciler completing in
     // integration tests.
@@ -39,27 +43,39 @@ pub struct SimArtifactStorage {
 impl SimArtifactStorage {
     pub(super) fn new() -> SimArtifactStorage {
         SimArtifactStorage {
-            dirs: Arc::new([
-                camino_tempfile::tempdir().unwrap(),
-                camino_tempfile::tempdir().unwrap(),
-            ]),
-            copy_semaphore: Arc::new(
-                const { Semaphore::const_new(MAX_PERMITS as usize) },
-            ),
+            dirs: Arc::new(std::array::from_fn(|_| {
+                camino_tempfile::Builder::new()
+                    .prefix("artifact-store")
+                    .tempdir()
+                    .unwrap()
+            })),
+            write_semaphore: Arc::new(Semaphore::new(MAX_PERMITS as usize)),
             delete_done: watch::Sender::new(0u32.into()),
         }
     }
 }
 
 impl DatasetsManager for SimArtifactStorage {
+    type PermitError = Error;
+
     async fn artifact_storage_paths(
         &self,
     ) -> impl Iterator<Item = camino::Utf8PathBuf> + '_ {
         self.dirs.iter().map(|tempdir| tempdir.path().to_owned())
     }
 
-    async fn copy_permit(&self) -> Option<OwnedSemaphorePermit> {
-        Some(self.copy_semaphore.clone().acquire_owned().await.unwrap())
+    async fn write_permit(
+        &self,
+    ) -> Result<Option<OwnedSemaphorePermit>, Error> {
+        match self.write_semaphore.clone().acquire_owned().await {
+            Ok(permit) => Ok(Some(permit)),
+            Err(err) => {
+                let _err: AcquireError = err;
+                // `ArtifactStore::stop_writers` was called and the semaphore is
+                // closed, so claim that no update datasets are available.
+                Err(Error::NoUpdateDataset)
+            }
+        }
     }
 
     fn signal_delete_done(&self, generation: Generation) {
@@ -98,15 +114,25 @@ impl ArtifactStore<SimArtifactStorage> {
         self.storage.dirs.iter().map(|p| p.path())
     }
 
-    pub async fn wait_for_copy_tasks(&self) {
-        // Acquire a permit for MAX_PERMITS, which requires that all copy tasks
+    pub async fn wait_for_writers(&self) {
+        // Acquire a permit for MAX_PERMITS, which requires that all write tasks
         // have dropped their permits. Then immediately drop it.
-        let _permit = self
-            .storage
-            .copy_semaphore
-            .acquire_many(MAX_PERMITS)
-            .await
-            .unwrap();
+        let _permit_or_closed =
+            self.storage.write_semaphore.acquire_many(MAX_PERMITS).await;
+    }
+
+    /// Waits for all current writers to complete, then closes the semaphore to
+    /// disallow any new writers from starting.
+    ///
+    /// This cannot take an owned `self` because it would require moving this
+    /// struct out of an `Arc`.
+    pub async fn stop_writers(&self) {
+        // Acquire a permit for MAX_PERMITS, which requires that all write
+        // tasks have dropped their permits. While holding the permit, close the
+        // semaphore to prevent any new write tasks from starting.
+        let _permit_or_closed =
+            self.storage.write_semaphore.acquire_many(MAX_PERMITS).await;
+        self.storage.write_semaphore.close();
     }
 
     pub fn subscribe_delete_done(&self) -> watch::Receiver<Generation> {

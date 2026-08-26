@@ -15,7 +15,7 @@ use chrono::Utc;
 use clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership;
 use cockroach_admin_types::node::InternalNodeId;
 use gateway_client::types::SpComponentCaboose;
-use gateway_client::types::SpState;
+use gateway_types::component::SpState;
 use iddqd::IdOrdMap;
 use nexus_types::inventory::Caboose;
 use nexus_types::inventory::CabooseFound;
@@ -36,9 +36,8 @@ use nexus_types::inventory::TimeSync;
 use nexus_types::inventory::Zpool;
 use omicron_cockroach_metrics::CockroachMetric;
 use omicron_cockroach_metrics::PrometheusMetrics;
-use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::CollectionKind;
-use sled_agent_types::inventory::Baseboard;
+use sled_agent_types::disk::M2Slot;
 use sled_agent_types::inventory::Inventory;
 use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
@@ -245,7 +244,7 @@ impl CollectionBuilder {
         });
 
         match sp_state.rot {
-            gateway_client::types::RotState::V2 {
+            gateway_types::rot::RotState::V2 {
                 active,
                 pending_persistent_boot_preference,
                 persistent_boot_preference,
@@ -273,9 +272,7 @@ impl CollectionBuilder {
                         }
                     });
             }
-            gateway_client::types::RotState::CommunicationFailed {
-                message,
-            } => {
+            gateway_types::rot::RotState::CommunicationFailed { message } => {
                 self.found_error(InventoryError::from(anyhow!(
                     "MGS {:?}: reading RoT state for {:?}: {}",
                     source,
@@ -283,7 +280,7 @@ impl CollectionBuilder {
                     message
                 )));
             }
-            gateway_client::types::RotState::V3 {
+            gateway_types::rot::RotState::V3 {
                 active,
                 pending_persistent_boot_preference,
                 persistent_boot_preference,
@@ -625,24 +622,10 @@ impl CollectionBuilder {
     ) -> Result<(), anyhow::Error> {
         let sled_id = inventory.sled_id;
 
-        let baseboard_id = match inventory.baseboard {
-            Baseboard::Pc { .. } => None,
-            Baseboard::Gimlet { identifier, model, .. } => {
-                Some(Self::normalize_item(
-                    &mut self.baseboards,
-                    BaseboardId {
-                        serial_number: identifier,
-                        part_number: model,
-                    },
-                ))
-            }
-            Baseboard::Unknown => {
-                self.found_error(InventoryError::from(anyhow!(
-                    "sled {sled_id}: reported unknown baseboard",
-                )));
-                None
-            }
-        };
+        let baseboard_id = Some(Self::normalize_item(
+            &mut self.baseboards,
+            inventory.baseboard_id,
+        ));
 
         // Socket addresses come through the OpenAPI spec as strings, which
         // means they don't get validated when everything else does.  This
@@ -678,6 +661,7 @@ impl CollectionBuilder {
             smf_services_enabled_not_online: inventory
                 .smf_services_enabled_not_online,
             reference_measurements: inventory.reference_measurements,
+            fmd: inventory.fmd,
         };
 
         self.sleds
@@ -792,11 +776,11 @@ mod test {
     use crate::examples::representative;
     use base64::Engine;
     use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-    use gateway_client::types::PowerState;
-    use gateway_client::types::RotState;
     use gateway_client::types::SpComponentCaboose;
-    use gateway_client::types::SpState;
+    use gateway_types::component::PowerState;
+    use gateway_types::component::SpState;
     use gateway_types::rot::RotSlot;
+    use gateway_types::rot::RotState;
     use nexus_types::inventory::Caboose;
     use nexus_types::inventory::CabooseWhich;
     use nexus_types::inventory::RotPage;
@@ -852,7 +836,7 @@ mod test {
         let time_before = now_db_precision();
         let Representative {
             builder,
-            sleds: [sled1_bb, sled2_bb, sled3_bb, sled4_bb],
+            sleds: [sled1_bb, sled2_bb, sled3_bb, sled4_bb, sled5_bb, sled6_bb],
             switch,
             psc,
             sled_agents:
@@ -875,27 +859,25 @@ mod test {
         // no RoT information.
         assert_eq!(
             collection.errors.iter().map(|e| e.to_string()).collect::<Vec<_>>(),
-            [
-                "MGS \"fake MGS 1\": reading RoT state for BaseboardId \
+            ["MGS \"fake MGS 1\": reading RoT state for BaseboardId \
                 { part_number: \"model1\", serial_number: \"s2\" }: test suite \
-                injected error",
-                "sled 5c5b4cf9-3e13-45fd-871c-f177d6537510: reported unknown \
-                baseboard"
-            ]
+                injected error",]
         );
 
         // Verify the baseboard ids found.
-        let expected_baseboards =
-            &[&sled1_bb, &sled2_bb, &sled3_bb, &sled4_bb, &switch, &psc];
+        let expected_baseboards = &[
+            &sled1_bb, &sled2_bb, &sled3_bb, &sled4_bb, &sled5_bb, &sled6_bb,
+            &switch, &psc,
+        ];
         for bb in expected_baseboards {
             assert!(collection.baseboards.contains(*bb));
         }
         assert_eq!(collection.baseboards.len(), expected_baseboards.len());
 
         // Verify the stuff that's easy to verify for all SPs: timestamps.
-        // There will be one more baseboard than SP because of the one added for
-        // the extra sled agent.
-        assert_eq!(collection.sps.len() + 1, collection.baseboards.len());
+        // There will be three more baseboards than SPs: one for each of the
+        // three sled agents whose baseboards weren't also reported via an SP.
+        assert_eq!(collection.sps.len() + 3, collection.baseboards.len());
         for (bb, sp) in collection.sps.iter() {
             assert!(collection.time_started <= sp.time_collected);
             assert!(sp.time_collected <= collection.time_done);
@@ -1200,21 +1182,16 @@ mod test {
             collection.sled_agents.get(&sled_agent_id_extra).unwrap();
         let sled4_bb = sled4_agent.baseboard_id.as_ref().unwrap();
         assert_eq!(sled4_bb.serial_number, "s4");
-        assert!(
-            collection
-                .sled_agents
-                .get(&sled_agent_id_pc)
-                .unwrap()
-                .baseboard_id
-                .is_none()
+        let pc_agent = collection.sled_agents.get(&sled_agent_id_pc).unwrap();
+        assert_eq!(
+            pc_agent.baseboard_id.as_ref().unwrap().serial_number,
+            "fellofftruck1"
         );
-        assert!(
-            collection
-                .sled_agents
-                .get(&sled_agent_id_unknown)
-                .unwrap()
-                .baseboard_id
-                .is_none()
+        let unknown_agent =
+            collection.sled_agents.get(&sled_agent_id_unknown).unwrap();
+        assert_eq!(
+            unknown_agent.baseboard_id.as_ref().unwrap().serial_number,
+            "test"
         );
     }
 

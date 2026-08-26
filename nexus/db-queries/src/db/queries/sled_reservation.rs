@@ -13,17 +13,19 @@ use diesel::sql_types;
 use nexus_db_model::SledCpuFamily;
 use nexus_db_schema::enums::AffinityPolicyEnum;
 use nexus_db_schema::enums::SledCpuFamilyEnum;
+use nexus_db_schema::enums::SledResourceVmmStateEnum;
 use nonempty::NonEmpty;
 use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::DiskUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
-use uuid::Uuid;
 
 #[derive(Debug, Clone)]
 pub struct LocalStorageAllocation {
-    pub disk_id: Uuid,
+    /// The virtual disk requiring this allocation
+    pub disk_id: DiskUuid,
     pub local_storage_unencrypted_dataset_allocation_id: DatasetUuid,
     pub required_dataset_size: i64,
     pub local_storage_unencrypted_dataset_id: DatasetUuid,
@@ -274,6 +276,35 @@ pub fn sled_find_targets_query(
     query.query()
 }
 
+pub const SLED_HAS_SPACE_SENTINEL: &'static str = "SLED_HAS_SPACE";
+pub const SLED_HAS_SPACE_SENTINEL_REASON: &'static str =
+    "sled target does not have the available hardware resources";
+
+pub const BANNED_SLEDS_SENTINEL: &'static str = "BANNED_SLEDS";
+pub const BANNED_SLEDS_SENTINEL_REASON: &'static str =
+    "sled target hosts another instance in anti-affinity group";
+
+pub const REQUIRED_SLEDS_SENTINEL: &'static str = "REQUIRED_SLEDS";
+pub const REQUIRED_SLEDS_SENTINEL_REASON: &'static str =
+    "sled target does not host another instance in affinity group";
+
+/// The sled insert query will return a sentinel (using the pattern of an
+/// erroneous cast of a string into a bool) if the insert is no longer valid due
+/// to three of the conditions related to a sled's available hardware resources,
+/// or affinity rules.
+pub const SLED_INSERT_QUERY_SENTINELS: [&'static str; 3] =
+    [SLED_HAS_SPACE_SENTINEL, BANNED_SLEDS_SENTINEL, REQUIRED_SLEDS_SENTINEL];
+
+/// Turn the returned sentinel into a human-readable error
+pub fn sentinel_to_reason(sentinel: &'static str) -> &'static str {
+    match sentinel {
+        SLED_HAS_SPACE_SENTINEL => SLED_HAS_SPACE_SENTINEL_REASON,
+        BANNED_SLEDS_SENTINEL => BANNED_SLEDS_SENTINEL_REASON,
+        REQUIRED_SLEDS_SENTINEL => REQUIRED_SLEDS_SENTINEL_REASON,
+        _ => sentinel,
+    }
+}
+
 /// Attempts to:
 ///
 /// 1. Insert a sled_resource_vmm record, if it is still a valid reservation
@@ -397,21 +428,51 @@ pub fn sled_insert_resource_query(
     //     allocation records with the existing ones and test each zpool.
     //   - the rendezvous local storage dataset is not tombstoned or marked
     //     no_provision
+    //
+    // In addition, use the "cast error string to bool" pattern to provide an
+    // error to the caller indicating what failed.
 
-    query
-        .sql(
-            "INSERT_VALID AS (
+    query.sql(
+        "INSERT_VALID AS (
               SELECT 1
               WHERE
-                  EXISTS(SELECT 1 FROM sled_has_space) AND
-                  NOT(EXISTS(SELECT 1 FROM banned_sleds WHERE sled_id = ",
-        )
-        .param()
-        .bind::<sql_types::Uuid, _>(resource.sled_id.into_untyped_uuid())
-        .sql(")) AND (EXISTS(SELECT 1 FROM required_sleds WHERE sled_id = ")
-        .param()
-        .bind::<sql_types::Uuid, _>(resource.sled_id.into_untyped_uuid())
-        .sql(") OR NOT EXISTS (SELECT 1 FROM required_sleds))");
+                  ",
+    );
+
+    query.true_or_cast_error(
+        |query| {
+            query.sql("EXISTS(SELECT 1 FROM sled_has_space)");
+        },
+        SLED_HAS_SPACE_SENTINEL,
+    );
+    query.sql(" AND ");
+
+    query.true_or_cast_error(
+        |query| {
+            query
+                .sql("NOT(EXISTS(SELECT 1 FROM banned_sleds WHERE sled_id = ")
+                .param()
+                .bind::<sql_types::Uuid, _>(
+                    resource.sled_id.into_untyped_uuid(),
+                )
+                .sql("))");
+        },
+        BANNED_SLEDS_SENTINEL,
+    );
+    query.sql(" AND ");
+
+    query.true_or_cast_error(
+        |query| {
+            query
+                .sql("(EXISTS(SELECT 1 FROM required_sleds WHERE sled_id = ")
+                .param()
+                .bind::<sql_types::Uuid, _>(
+                    resource.sled_id.into_untyped_uuid(),
+                )
+                .sql(") OR NOT EXISTS (SELECT 1 FROM required_sleds))");
+        },
+        REQUIRED_SLEDS_SENTINEL,
+    );
 
     match local_storage_allocation_required {
         LocalStorageAllocationRequired::No => {}
@@ -542,7 +603,23 @@ pub fn sled_insert_resource_query(
                             .into_untyped_uuid(),
                     );
 
-                query.sql(")");
+                query.sql(") AND (");
+
+                // and the disk must still be attached and not be deleted
+
+                query
+                    .sql(
+                        "SELECT time_deleted IS NULL AND attach_instance_id = ",
+                    )
+                    .param()
+                    .bind::<sql_types::Uuid, _>(instance_id)
+                    .sql(" FROM DISK WHERE ID = ")
+                    .param()
+                    .bind::<sql_types::Uuid, _>(
+                        allocation.disk_id.into_untyped_uuid(),
+                    );
+
+                query.sql(") ");
 
                 if index != (allocations.len() - 1) {
                     query.sql(" AND ");
@@ -602,7 +679,7 @@ pub fn sled_insert_resource_query(
                 query
                     .sql("WHEN ")
                     .param()
-                    .bind::<sql_types::Uuid, _>(*disk_id)
+                    .bind::<sql_types::Uuid, _>(disk_id.into_untyped_uuid())
                     .sql(" THEN ")
                     .param()
                     .bind::<sql_types::Uuid, _>(
@@ -617,7 +694,9 @@ pub fn sled_insert_resource_query(
             for (index, allocation) in allocations.iter().enumerate() {
                 let LocalStorageAllocation { disk_id, .. } = allocation;
 
-                query.param().bind::<sql_types::Uuid, _>(*disk_id);
+                query
+                    .param()
+                    .bind::<sql_types::Uuid, _>(disk_id.into_untyped_uuid());
 
                 if index != (allocations.len() - 1) {
                     query.sql(",");
@@ -773,23 +852,46 @@ pub fn sled_insert_resource_query(
     }
 
     // Finally, perform the INSERT if it's still valid.
-    query.sql("
-        INSERT INTO sled_resource_vmm (id, sled_id, hardware_threads, rss_ram, reservoir_ram, instance_id)
+    query
+        .sql(
+            "
+        INSERT INTO sled_resource_vmm (
+          id,
+          sled_id,
+          hardware_threads,
+          rss_ram,
+          reservoir_ram,
+          instance_id,
+          state
+        )
         SELECT
-            ").param().sql(",
-            ").param().sql(",
-            ").param().sql(",
-            ").param().sql(",
-            ").param().sql(",
-            ").param().sql("
+            ",
+        )
+        .param()
+        .sql(",")
+        .param()
+        .sql(",")
+        .param()
+        .sql(",")
+        .param()
+        .sql(",")
+        .param()
+        .sql(",")
+        .param()
+        .sql(",")
+        .param()
+        .sql(
+            "
         WHERE EXISTS(SELECT 1 FROM insert_valid)
-    ")
-    .bind::<sql_types::Uuid, _>(resource.id.into_untyped_uuid())
-    .bind::<sql_types::Uuid, _>(resource.sled_id.into_untyped_uuid())
-    .bind::<sql_types::BigInt, _>(resource.resources.hardware_threads)
-    .bind::<sql_types::BigInt, _>(resource.resources.rss_ram)
-    .bind::<sql_types::BigInt, _>(resource.resources.reservoir_ram)
-    .bind::<sql_types::Uuid, _>(instance_id);
+    ",
+        )
+        .bind::<sql_types::Uuid, _>(resource.id.into_untyped_uuid())
+        .bind::<sql_types::Uuid, _>(resource.sled_id.into_untyped_uuid())
+        .bind::<sql_types::BigInt, _>(resource.resources.hardware_threads)
+        .bind::<sql_types::BigInt, _>(resource.resources.rss_ram)
+        .bind::<sql_types::BigInt, _>(resource.resources.reservoir_ram)
+        .bind::<sql_types::Uuid, _>(instance_id)
+        .bind::<SledResourceVmmStateEnum, _>(resource.state);
 
     query.query()
 }
@@ -797,6 +899,7 @@ pub fn sled_insert_resource_query(
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::db::datastore::sled::SledReservationReason;
     use crate::db::explain::ExplainableAsync;
     use crate::db::model;
     use crate::db::pub_test_utils::TestDatabase;
@@ -891,6 +994,7 @@ mod test {
                     external::ByteCount::from_gibibytes_u32(0),
                 ),
             ),
+            SledReservationReason::Start.into(),
         );
 
         // with no local storage
@@ -911,7 +1015,7 @@ mod test {
             &LocalStorageAllocationRequired::Yes {
                 allocations: nonempty![
                     LocalStorageAllocation {
-                        disk_id: Uuid::nil(),
+                        disk_id: DiskUuid::nil(),
                         local_storage_unencrypted_dataset_allocation_id:
                             DatasetUuid::nil(),
                         required_dataset_size: 64 * 1024 * 1024 * 1024,
@@ -921,7 +1025,7 @@ mod test {
                         sled_id: SledUuid::nil(),
                     },
                     LocalStorageAllocation {
-                        disk_id: Uuid::nil(),
+                        disk_id: DiskUuid::nil(),
                         local_storage_unencrypted_dataset_allocation_id:
                             DatasetUuid::nil(),
                         required_dataset_size: 128 * 1024 * 1024 * 1024,
@@ -963,6 +1067,7 @@ mod test {
                     external::ByteCount::from_gibibytes_u32(0),
                 ),
             ),
+            SledReservationReason::Start.into(),
         );
 
         let query = sled_insert_resource_query(
@@ -980,7 +1085,7 @@ mod test {
             &resource,
             &LocalStorageAllocationRequired::Yes {
                 allocations: nonempty![LocalStorageAllocation {
-                    disk_id: Uuid::nil(),
+                    disk_id: DiskUuid::nil(),
                     local_storage_unencrypted_dataset_allocation_id:
                         DatasetUuid::nil(),
                     required_dataset_size: 128 * 1024 * 1024 * 1024,
@@ -1001,7 +1106,7 @@ mod test {
             &LocalStorageAllocationRequired::Yes {
                 allocations: nonempty![
                     LocalStorageAllocation {
-                        disk_id: Uuid::nil(),
+                        disk_id: DiskUuid::nil(),
                         local_storage_unencrypted_dataset_allocation_id:
                             DatasetUuid::nil(),
                         required_dataset_size: 128 * 1024 * 1024 * 1024,
@@ -1011,7 +1116,7 @@ mod test {
                         sled_id: SledUuid::nil(),
                     },
                     LocalStorageAllocation {
-                        disk_id: Uuid::nil(),
+                        disk_id: DiskUuid::nil(),
                         local_storage_unencrypted_dataset_allocation_id:
                             DatasetUuid::nil(),
                         required_dataset_size: 256 * 1024 * 1024 * 1024,

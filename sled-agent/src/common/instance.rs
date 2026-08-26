@@ -5,14 +5,14 @@
 //! Describes the states of VM instances.
 
 use chrono::{DateTime, Utc};
-use omicron_common::api::external::Generation;
-use omicron_common::api::internal::nexus::{
-    MigrationRuntimeState, MigrationState, SledVmmState, VmmRuntimeState,
-    VmmState,
-};
+use omicron_generation_kinds::Generation;
 use propolis_client::types::{
     InstanceMigrationStatus, InstanceState as PropolisApiState,
     InstanceStateMonitorResponse, MigrationState as PropolisMigrationState,
+};
+use sled_agent_types::instance::{
+    MigrationRuntimeState, MigrationState, SledVmmState, VmmRuntimeState,
+    VmmState,
 };
 use uuid::Uuid;
 
@@ -336,7 +336,7 @@ mod test {
     use super::*;
 
     use chrono::Utc;
-    use omicron_common::api::external::Generation;
+    use omicron_generation_kinds::Generation;
     use propolis_client::types::InstanceState as Observed;
     use uuid::Uuid;
 

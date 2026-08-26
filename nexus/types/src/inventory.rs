@@ -14,15 +14,14 @@ use chrono::DateTime;
 use chrono::Utc;
 use clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership;
 use daft::Diffable;
-pub use gateway_client::types::PowerState;
-pub use gateway_client::types::RotImageError;
+pub use gateway_types::component::PowerState;
 pub use gateway_types::component::SpType;
+pub use gateway_types::rot::RotImageError;
 pub use gateway_types::rot::RotSlot;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use omicron_common::api::external::ByteCount;
-use omicron_common::disk::M2Slot;
 pub use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
@@ -32,9 +31,13 @@ use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
+use sled_agent_types::disk::M2Slot;
+use sled_agent_types_versions::latest::disk::DiskIdentity;
 use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventory;
 use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventoryResult;
 use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventoryStatus;
+use sled_agent_types_versions::latest::inventory::FmdInventory;
+use sled_agent_types_versions::latest::inventory::FmdInventoryError;
 use sled_agent_types_versions::latest::inventory::InventoryDataset;
 use sled_agent_types_versions::latest::inventory::InventoryDisk;
 use sled_agent_types_versions::latest::inventory::InventoryZpool;
@@ -45,7 +48,7 @@ use sled_agent_types_versions::latest::inventory::SingleMeasurementInventory;
 use sled_agent_types_versions::latest::inventory::SledCpuFamily;
 use sled_agent_types_versions::latest::inventory::SledRole;
 use sled_agent_types_versions::latest::inventory::SvcsEnabledNotOnlineResult;
-use sled_agent_types_versions::latest::inventory::ZpoolHealth;
+pub use sled_agent_types_versions::latest::inventory::ZpoolHealth;
 use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -282,6 +285,61 @@ impl Collection {
             .map(|membership| membership.clone())
     }
 
+    /// Return all zpools across all sleds whose health is not `Online`,
+    /// grouped by the id of the sled that reported them. Sleds with no
+    /// unhealthy zpools are omitted.
+    pub fn unhealthy_zpools(&self) -> BTreeMap<SledUuid, Vec<&Zpool>> {
+        self.sled_agents
+            .iter()
+            .filter_map(|sled_agent| {
+                let unhealthy: Vec<&Zpool> = sled_agent
+                    .zpools
+                    .iter()
+                    .filter(|z| match z.health {
+                        ZpoolHealth::Online => false,
+                        ZpoolHealth::Degraded
+                        | ZpoolHealth::Faulted
+                        | ZpoolHealth::Offline
+                        | ZpoolHealth::Removed
+                        | ZpoolHealth::Unavailable => true,
+                    })
+                    .collect();
+                if unhealthy.is_empty() {
+                    None
+                } else {
+                    Some((sled_agent.sled_id, unhealthy))
+                }
+            })
+            .collect()
+    }
+
+    /// Return per-sled SMF service status for any sled that reports an issue:
+    /// either an enabled service not in the `online` state, or a failure to
+    /// determine status (`svcs` command error or data unavailable). Sleds
+    /// reporting no issues on this dimension are omitted.
+    pub fn enabled_smf_services_not_online(
+        &self,
+    ) -> BTreeMap<SledUuid, &SvcsEnabledNotOnlineResult> {
+        self.sled_agents
+            .iter()
+            .filter_map(|sled_agent| {
+                match &sled_agent.smf_services_enabled_not_online {
+                    SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(svcs)
+                        if svcs.is_empty() =>
+                    {
+                        None
+                    }
+                    SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(_)
+                    | SvcsEnabledNotOnlineResult::SvcsCmdError(_)
+                    | SvcsEnabledNotOnlineResult::DataUnavailable => Some((
+                        sled_agent.sled_id,
+                        &sled_agent.smf_services_enabled_not_online,
+                    )),
+                }
+            })
+            .collect()
+    }
+
     /// Return a type which can be used to display a collection in a
     /// human-readable format.
     ///
@@ -290,6 +348,16 @@ impl Collection {
     pub fn display(&self) -> CollectionDisplay<'_> {
         CollectionDisplay::new(self)
     }
+}
+
+impl IdOrdItem for Collection {
+    type Key<'a> = CollectionUuid;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.id
+    }
+
+    id_upcast!();
 }
 
 /// Caboose contents found during a collection
@@ -537,7 +605,7 @@ pub struct PhysicalDisk {
     // InventoryDisk and PhysicalDisk? The types are structurally the same, but
     // maybe the separation is useful to indicate that a `PhysicalDisk` doesn't
     // always show up in the inventory.
-    pub identity: omicron_common::disk::DiskIdentity,
+    pub identity: DiskIdentity,
     pub variant: PhysicalDiskKind,
     pub slot: i64,
     pub firmware: PhysicalDiskFirmware,
@@ -561,7 +629,9 @@ impl From<InventoryDisk> for PhysicalDisk {
 }
 
 /// A zpool reported by a sled agent.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize,
+)]
 pub struct Zpool {
     pub time_collected: DateTime<Utc>,
     pub id: ZpoolUuid,
@@ -649,6 +719,7 @@ pub struct SledAgent {
     pub file_source_resolver: OmicronFileSourceResolverInventory,
     pub smf_services_enabled_not_online: SvcsEnabledNotOnlineResult,
     pub reference_measurements: IdOrdMap<SingleMeasurementInventory>,
+    pub fmd: Result<FmdInventory, FmdInventoryError>,
 }
 
 impl IdOrdItem for SledAgent {
@@ -692,7 +763,7 @@ pub struct InternalDnsGenerationStatus {
     /// Zone ID of the internal DNS server contacted
     pub zone_id: OmicronZoneUuid,
     /// Generation number of the DNS configuration
-    pub generation: omicron_common::api::external::Generation,
+    pub generation: omicron_generation_kinds::Generation,
 }
 
 impl IdOrdItem for InternalDnsGenerationStatus {

@@ -4,16 +4,12 @@
 
 //! API description for the Oximeter producer server.
 
-// Copyright 2026 Oxide Computer Company
-
 use dropshot::HttpError;
 use dropshot::HttpResponseOk;
 use dropshot::Path;
 use dropshot::RequestContext;
 use oximeter_types_versions::latest::producer::ProducerIdPathParams;
-// ProducerResults is imported from oximeter-types rather than oximeter-types-versions because
-// it is a fundamental type shared across all oximeter API versions and is unlikely to change.
-use oximeter_types::types::ProducerResults;
+use oximeter_types_versions::latest::types::ProducerResults;
 
 #[dropshot::api_description]
 pub trait ProducerApi {

@@ -1,7 +1,10 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 use std::net::SocketAddr;
 
 use omicron_common::api::external::Hostname;
-use omicron_common::api::internal::nexus::VmmRuntimeState;
 use omicron_common::api::internal::shared::DelegatedZvol;
 use omicron_common::api::internal::shared::DhcpConfig;
 use omicron_uuid_kinds::InstanceUuid;
@@ -13,6 +16,7 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use crate::v1::instance::InstanceMetadata;
+use crate::v1::instance::VmmRuntimeState;
 use crate::v1::instance::VmmSpec;
 use crate::v7::instance::InstanceMulticastMembership;
 use crate::v10::inventory::NetworkInterface;

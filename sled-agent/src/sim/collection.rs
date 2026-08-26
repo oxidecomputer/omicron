@@ -371,11 +371,11 @@ mod test {
     use chrono::Utc;
     use dropshot::test_util::LogContext;
     use futures::channel::mpsc::Receiver;
-    use omicron_common::api::external::Generation;
-    use omicron_common::api::internal::nexus::SledVmmState;
-    use omicron_common::api::internal::nexus::VmmRuntimeState;
-    use omicron_common::api::internal::nexus::VmmState;
+    use omicron_generation_kinds::Generation;
     use omicron_test_utils::dev::test_setup_log;
+    use sled_agent_types::instance::SledVmmState;
+    use sled_agent_types::instance::VmmRuntimeState;
+    use sled_agent_types::instance::VmmState;
     use sled_agent_types::instance::VmmStateRequested;
 
     fn make_instance(

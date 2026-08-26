@@ -39,7 +39,8 @@ sled-agent-types.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true
 tokio.workspace = true
-update-engine.workspace = true
+oxide-update-engine.workspace = true
+oxide-update-engine-types.workspace = true
 uuid.workspace = true
 
 # See omicron-rpaths for more about the "pq-sys" dependency.  This is needed
@@ -48,6 +49,10 @@ uuid.workspace = true
 pq-sys = "*"
 
 omicron-workspace-hack.workspace = true
+
+[target.'cfg(target_os = "illumos")'.dependencies]
+# See omicron-rpaths for more about the "fmd-adm-sys" dependency.
+fmd-adm-sys.workspace = true
 
 [dev-dependencies]
 async-bb8-diesel.workspace = true
@@ -62,5 +67,8 @@ nexus-reconfigurator-preparation.workspace = true
 nexus-inventory.workspace = true
 nexus-test-utils.workspace = true
 nexus-test-utils-macros.workspace = true
+omicron-generation-kinds.workspace = true
 omicron-nexus.workspace = true
 omicron-test-utils.workspace = true
+serde_json.workspace = true
+steno.workspace = true

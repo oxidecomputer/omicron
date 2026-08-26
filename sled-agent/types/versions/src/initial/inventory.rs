@@ -16,17 +16,15 @@ use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use omicron_common::address::NUM_SOURCE_NAT_PORTS;
 use omicron_common::api::external::ByteCount;
-use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::Vni;
-use omicron_common::disk::{
-    DatasetConfig, DatasetName, DiskVariant, M2Slot, OmicronPhysicalDiskConfig,
-};
+use omicron_common::disk::DatasetName;
 use omicron_common::snake_case_result;
 use omicron_common::snake_case_result::SnakeCaseResult;
 use omicron_common::update::OmicronInstallManifestSource;
 use omicron_common::zpool_name::ZpoolName;
+use omicron_generation_kinds::Generation;
 use omicron_uuid_kinds::{
     DatasetUuid, InternalZpoolUuid, MupdateOverrideUuid, OmicronZoneUuid,
     PhysicalDiskUuid, SledUuid, ZpoolUuid,
@@ -35,19 +33,68 @@ use oxnet::IpNet;
 use schemars::schema::{Schema, SchemaObject};
 use schemars::{JsonSchema, r#gen::SchemaGenerator};
 use serde::{Deserialize, Serialize};
-// Export these types for convenience -- this way, dependents don't have to
+// Export this type for convenience -- this way, dependents don't have to
 // depend on sled-hardware-types.
-pub use sled_hardware_types::{Baseboard, SledCpuFamily};
+pub use sled_hardware_types::SledCpuFamily;
 use strum::EnumIter;
 use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
+use super::disk::DatasetConfig;
+use super::disk::DiskIdentity;
+use super::disk::DiskVariant;
+use super::disk::M2Slot;
+use super::disk::OmicronPhysicalDiskConfig;
 use crate::impls::inventory::SourceNatConfigError;
+
+/// Describes properties that should uniquely identify a Gimlet.
+///
+/// This is the frozen, original form of the baseboard as published by Sled
+/// Agent API versions 1 through 39. Newer versions report a [`BaseboardId`]
+/// instead. The `Unknown` variant is retained here solely to preserve the
+/// blessed schema of these older versions; it is no longer produced.
+///
+/// [`BaseboardId`]: sled_hardware_types::BaseboardId
+#[derive(
+    Clone,
+    Debug,
+    PartialOrd,
+    Ord,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum Baseboard {
+    Gimlet { identifier: String, model: String, revision: u32 },
+
+    Unknown,
+
+    Pc { identifier: String, model: String },
+}
+
+impl From<sled_hardware_types::Baseboard> for Baseboard {
+    fn from(value: sled_hardware_types::Baseboard) -> Self {
+        match value {
+            sled_hardware_types::Baseboard::Gimlet {
+                identifier,
+                model,
+                revision,
+            } => Baseboard::Gimlet { identifier, model, revision },
+            sled_hardware_types::Baseboard::Pc { identifier, model } => {
+                Baseboard::Pc { identifier, model }
+            }
+        }
+    }
+}
 
 /// Identifies information about disks which may be attached to Sleds.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct InventoryDisk {
-    pub identity: omicron_common::disk::DiskIdentity,
+    pub identity: DiskIdentity,
     pub variant: DiskVariant,
     pub slot: i64,
     // Today we only have NVMe disks so we embedded the firmware metadata here.
@@ -130,7 +177,13 @@ pub enum HostPhase2DesiredContents {
     /// Set the phase 2 slot to the given artifact.
     ///
     /// The artifact will come from an unpacked and distributed TUF repo.
-    Artifact { hash: ArtifactHash },
+    Artifact {
+        // Tufaceous v2 introduces a new JSON schema for `ArtifactHash` that is
+        // wire-compatible but perceived as different by drift. Continue using
+        // the old schema in this API version.
+        #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
+        hash: ArtifactHash,
+    },
 }
 
 /// Describes the desired contents for both host phase 2 slots.
@@ -179,6 +232,10 @@ pub struct BootPartitionContents {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
 pub struct BootPartitionDetails {
     pub header: BootImageHeader,
+    // Tufaceous v2 introduces a new JSON schema for `ArtifactHash` that is
+    // wire-compatible but perceived as different by drift. Continue using the
+    // old schema in this API version.
+    #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
     pub artifact_hash: ArtifactHash,
     pub artifact_size: usize,
 }
@@ -333,6 +390,10 @@ pub struct ZoneArtifactInventory {
     pub expected_size: u64,
 
     /// The expected digest of the file's contents.
+    // Tufaceous v2 introduces a new JSON schema for `ArtifactHash` that is
+    // wire-compatible but perceived as different by drift. Continue using the
+    // old schema in this API version.
+    #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
     pub expected_hash: ArtifactHash,
 
     /// The status of the artifact.
@@ -496,7 +557,13 @@ pub enum OmicronZoneImageSource {
     ///
     /// This originates from TUF repos uploaded to Nexus which are then
     /// replicated out to all sleds.
-    Artifact { hash: ArtifactHash },
+    Artifact {
+        // Tufaceous v2 introduces a new JSON schema for `ArtifactHash` that is
+        // wire-compatible but perceived as different by drift. Continue using
+        // the old schema in this API version.
+        #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
+        hash: ArtifactHash,
+    },
 }
 
 impl OmicronZoneImageSource {

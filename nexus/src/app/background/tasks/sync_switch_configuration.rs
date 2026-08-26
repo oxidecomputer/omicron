@@ -3,133 +3,41 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Background task for propagating user provided switch configurations
-//! to relevant management daemons (dendrite, mgd, sled-agent, etc.)
+//! to the bootstore via sled-agent
 
 use crate::app::{
-    background::{
-        LoadedTargetBlueprint,
-        tasks::networking::{api_to_dpd_port_settings, build_mgd_clients},
-    },
-    dpd_clients, switch_zone_address_mappings,
+    background::LoadedTargetBlueprint, switch_zone_address_mappings,
 };
-use oxnet::{IpNet, Ipv4Net, Ipv6Net};
-use slog::{Logger, o};
 
 use internal_dns_resolver::Resolver;
-use ipnetwork::IpNetwork;
-use nexus_db_model::{
-    AddressLotBlock, BgpConfig, BootstoreConfig, INFRA_LOT, LoopbackAddress,
-    NETWORK_KEY, SwitchLinkSpeed,
-};
+use nexus_db_model::{BootstoreConfig, NETWORK_KEY};
 use tokio::sync::watch;
-use uuid::Uuid;
 
 use crate::app::background::BackgroundTask;
 use display_error_chain::DisplayErrorChain;
-use dpd_client::{Client as DpdClient, types as DpdTypes};
 use futures::FutureExt;
 use futures::future::BoxFuture;
-use mg_admin_client::types::{
-    AddStaticRoute4Request, AddStaticRoute6Request, ApplyRequest,
-    BestpathFanoutRequest, BgpPeerConfig, CheckerSource,
-    DeleteStaticRoute4Request, DeleteStaticRoute6Request,
-    ImportExportPolicy4 as MgImportExportPolicy4,
-    ImportExportPolicy6 as MgImportExportPolicy6, Ipv4UnicastConfig,
-    Ipv6UnicastConfig, JitterRange, ShaperSource, StaticRoute4,
-    StaticRoute4List, StaticRoute6, StaticRoute6List, UnnumberedBgpPeerConfig,
-};
-use nexus_db_queries::{
-    context::OpContext,
-    db::{DataStore, datastore::SwitchPortSettingsCombinedResult},
-};
-use nexus_types::external_api::networking;
-use nexus_types::identity::{Asset, Resource};
-use omicron_common::OMICRON_DPD_TAG;
+use nexus_db_queries::{context::OpContext, db::DataStore};
+use nexus_types::identity::Asset;
+use nexus_types::internal_api::background::IncompleteBootstoreConfigReport;
+use nexus_types::internal_api::background::SwitchPortSettingsManagerStatus;
 use omicron_common::{
     address::{Ipv6Subnet, get_sled_address},
-    api::external::{DataPageParams, Name},
+    api::external::DataPageParams,
 };
-use rdb_types::{Prefix, Prefix4, Prefix6};
 use serde_json::json;
-use sled_agent_client::types::HostPortConfig;
-use sled_agent_types::early_networking::BfdPeerConfig;
-use sled_agent_types::early_networking::BgpConfig as SledBgpConfig;
-use sled_agent_types::early_networking::BgpPeerConfig as SledBgpPeerConfig;
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
-use sled_agent_types::early_networking::ImportExportPolicy;
-use sled_agent_types::early_networking::InvalidIpAddrError;
-use sled_agent_types::early_networking::LldpAdminStatus;
-use sled_agent_types::early_networking::LldpPortConfig;
-use sled_agent_types::early_networking::MaxPathConfig;
-use sled_agent_types::early_networking::PortConfig;
 use sled_agent_types::early_networking::RackNetworkConfig;
-use sled_agent_types::early_networking::RouteConfig as SledRouteConfig;
-use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
-use sled_agent_types::early_networking::TxEqConfig;
-use sled_agent_types::early_networking::UplinkAddress;
-use sled_agent_types::early_networking::UplinkAddressConfig;
+use sled_agent_types::system_networking::BlueprintExternalNetworkingConfig;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use sled_agent_types::system_networking::WriteNetworkConfigRequest;
 use slog_error_chain::InlineErrorChain;
 use std::{
-    collections::{HashMap, HashSet, hash_map::Entry},
+    collections::{HashMap, HashSet},
     hash::Hash,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    str::FromStr,
-    sync::{Arc, LazyLock},
+    sync::Arc,
 };
-
-const DPD_TAG: Option<&'static str> = Some(OMICRON_DPD_TAG);
-static PHY0: LazyLock<Name> =
-    LazyLock::new(|| "phy0".parse().expect("phy0 is a valid Name"));
-
-// This is more of an implementation detail of the BGP implementation. It
-// defines the maximum time the peering engine will wait for external messages
-// before breaking to check for shutdown conditions.
-const BGP_SESSION_RESOLUTION: u64 = 100;
-
-// This is the default RIB Priority used for static routes.  This mirrors
-// the const defined in maghemite in rdb/src/lib.rs.
-const DEFAULT_RIB_PRIORITY_STATIC: u8 = 1;
-
-/// Convenience struct for holding both v4 and v6 static route delete requests.
-#[derive(Debug)]
-struct DeleteStaticRouteRequest {
-    v4: DeleteStaticRoute4Request,
-    v6: DeleteStaticRoute6Request,
-}
-impl Default for DeleteStaticRouteRequest {
-    fn default() -> Self {
-        Self {
-            v4: DeleteStaticRoute4Request {
-                routes: StaticRoute4List { list: Vec::default() },
-            },
-            v6: DeleteStaticRoute6Request {
-                routes: StaticRoute6List { list: Vec::default() },
-            },
-        }
-    }
-}
-
-/// Convenience struct for holding both v4 and v6 static route add requests.
-#[derive(Debug)]
-struct AddStaticRouteRequest {
-    v4: AddStaticRoute4Request,
-    v6: AddStaticRoute6Request,
-}
-impl Default for AddStaticRouteRequest {
-    fn default() -> Self {
-        Self {
-            v4: AddStaticRoute4Request {
-                routes: StaticRoute4List { list: Vec::default() },
-            },
-            v6: AddStaticRoute6Request {
-                routes: StaticRoute6List { list: Vec::default() },
-            },
-        }
-    }
-}
 
 pub struct SwitchPortSettingsManager {
     datastore: Arc<DataStore>,
@@ -145,165 +53,6 @@ impl SwitchPortSettingsManager {
     ) -> Self {
         Self { datastore, resolver, rx_blueprint }
     }
-
-    async fn switch_ports(
-        &mut self,
-        opctx: &OpContext,
-        log: &slog::Logger,
-    ) -> Result<Vec<nexus_db_model::SwitchPort>, serde_json::Value> {
-        let port_list = match self
-            .datastore
-            .switch_port_list(opctx, &DataPageParams::max_page())
-            .await
-        {
-            Ok(port_list) => port_list,
-            Err(e) => {
-                error!(
-                    &log,
-                    "failed to enumerate switch ports";
-                    "error" => format!("{:#}", e)
-                );
-                return Err(json!({
-                    "error":
-                        format!(
-                            "failed enumerate switch ports: \
-                                {:#}",
-                            e
-                        )
-                }));
-            }
-        };
-        Ok(port_list)
-    }
-
-    async fn changes(
-        &mut self,
-        port_list: Vec<nexus_db_model::SwitchPort>,
-        opctx: &OpContext,
-        log: &slog::Logger,
-    ) -> Result<
-        Vec<(SwitchSlot, nexus_db_model::SwitchPort, PortSettingsChange)>,
-        serde_json::Value,
-    > {
-        let mut changes = Vec::new();
-        for port in port_list {
-            let switch_slot = SwitchSlot::from(port.switch_slot);
-            let id = match port.port_settings_id {
-                Some(id) => id,
-                _ => {
-                    changes.push((
-                        switch_slot,
-                        port,
-                        PortSettingsChange::Clear,
-                    ));
-                    continue;
-                }
-            };
-
-            info!(
-                log,
-                "fetching switch port settings";
-                "switch_slot" => ?switch_slot,
-                "port" => ?port,
-            );
-
-            let settings = match self
-                .datastore
-                .switch_port_settings_get(opctx, &id.into())
-                .await
-            {
-                Ok(settings) => settings,
-                Err(e) => {
-                    error!(
-                        &log,
-                        "failed to get switch port settings";
-                        "switch_port_settings_id" => ?id,
-                        "error" => format!("{:#}", e)
-                    );
-                    return Err(json!({
-                        "error":
-                            format!(
-                                "failed to get switch port settings: \
-                                    {:#}",
-                                e
-                            )
-                    }));
-                }
-            };
-
-            changes.push((
-                switch_slot,
-                port,
-                PortSettingsChange::Apply(Box::new(settings)),
-            ));
-        }
-        Ok(changes)
-    }
-
-    async fn db_loopback_addresses(
-        &mut self,
-        opctx: &OpContext,
-    ) -> Result<
-        HashSet<(SwitchSlot, IpAddr)>,
-        omicron_common::api::external::Error,
-    > {
-        let values = self
-            .datastore
-            .loopback_address_list(opctx, &DataPageParams::max_page())
-            .await?;
-
-        let mut set: HashSet<(SwitchSlot, IpAddr)> = HashSet::new();
-
-        // TODO: are we doing anything special with anycast addresses at the moment?
-        for LoopbackAddress { switch_slot, address, .. } in values.iter() {
-            set.insert((SwitchSlot::from(*switch_slot), address.ip()));
-        }
-
-        Ok(set)
-    }
-
-    async fn bfd_peer_configs_from_db(
-        &mut self,
-        opctx: &OpContext,
-    ) -> Result<Vec<BfdPeerConfig>, omicron_common::api::external::Error> {
-        let db_data = self
-            .datastore
-            .bfd_session_list(opctx, &DataPageParams::max_page())
-            .await?;
-
-        let mut result = Vec::new();
-        for spec in db_data.into_iter() {
-            let config = BfdPeerConfig {
-                local: spec.local.map(|x| x.ip()),
-                remote: spec.remote.ip(),
-                detection_threshold: spec
-                    .detection_threshold
-                    .0
-                    .try_into()
-                    .map_err(|_| {
-                        omicron_common::api::external::Error::InternalError {
-                            internal_message: format!(
-                                "db_bfd_peer_configs: detection threshold \
-                                 overflow: {}",
-                                spec.detection_threshold.0,
-                            ),
-                        }
-                    })?,
-                required_rx: spec.required_rx.0.into(),
-                mode: spec.mode.into(),
-                switch: spec.switch_slot.into(),
-            };
-            result.push(config);
-        }
-
-        Ok(result)
-    }
-}
-
-#[derive(Debug)]
-enum PortSettingsChange {
-    Apply(Box<SwitchPortSettingsCombinedResult>),
-    Clear,
 }
 
 impl BackgroundTask for SwitchPortSettingsManager {
@@ -330,13 +79,15 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 },
             };
 
+            let mut status = SwitchPortSettingsManagerStatus::default();
+
             // TODO: https://github.com/oxidecomputer/omicron/issues/3090
             // Here we're iterating over racks because that's technically the correct thing to do,
             // but our logic for pulling switch ports and their related configurations
             // *isn't* per-rack, so that's something we'll need to revisit in the future.
             for rack in &racks {
                 let rack_id = rack.id().to_string();
-                let log = log.new(o!("rack_id" => rack_id));
+                let log = log.new(slog::o!("rack_id" => rack_id));
 
                 // lookup switch zones via DNS
                 // TODO https://github.com/oxidecomputer/omicron/issues/5201
@@ -357,948 +108,71 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 // build sled agent clients for sleds that are connected to the switches
                 let scrimlet_sled_agent_clients = build_sled_agent_clients(&mappings, &log);
 
-                // TODO https://github.com/oxidecomputer/omicron/issues/5201
-                let dpd_clients = match
-                    dpd_clients(&self.resolver, &log).await
-                {
-                    Ok(mappings) => mappings,
-                    Err(e) => {
-                        error!(
-                            log,
-                            "failed to resolve addresses for Dendrite";
-                            "error" => %e);
-                        continue;
-                    },
-                };
-
-                // TODO https://github.com/oxidecomputer/omicron/issues/5201
-                // build mgd clients
-                let mgd_clients = build_mgd_clients(mappings, &log, &self.resolver).await;
-
-                let port_list = match self.switch_ports(opctx, &log).await {
-                    Ok(value) => value,
-                    Err(e) => {
-                        error!(log, "failed to generate switchports for rack"; "error" => %e);
-                        continue;
-                    },
-                };
-
-                //
-                // calculate and apply switch port changes
-                //
-
-                let changes = match self.changes(port_list, opctx, &log).await {
-                    Ok(value) => value,
-                    Err(e) => {
-                        error!(log, "failed to generate changeset for switchport settings"; "error" => %e);
-                        continue;
-                    },
-                };
-
-                apply_switch_port_changes(&dpd_clients, &changes, &log).await;
-
-                //
-                // calculate and apply routing changes
-                //
-
-                // get the static routes on each switch
-                let current_static_routes =
-                    static_routes_on_switch(&mgd_clients, &log).await;
-                info!(&log, "retrieved existing routes"; "routes" => ?current_static_routes);
-
-                // generate the complete set of static routes that should be on a given switch
-                let desired_static_routes = static_routes_in_db(&log, &changes);
-                info!(&log, "retrieved desired routes"; "routes" => ?desired_static_routes);
-
-                // diff the current and desired routes.
-                // Add what is missing from current, remove what is not present in desired.
-                let routes_to_add = static_routes_to_add(
-                    &desired_static_routes,
-                    &current_static_routes,
-                    &log,
-                );
-                info!(&log, "calculated static routes to add"; "routes" => ?routes_to_add);
-
-                let routes_to_del = static_routes_to_del(
-                    current_static_routes,
-                    desired_static_routes,
-                );
-                info!(&log, "calculated static routes to delete"; "routes" => ?routes_to_del);
-
-                // delete the unneeded routes first, just in case there is a conflicting route for
-                // one we need to add
-                if !routes_to_del.is_empty() {
-                    info!(&log, "deleting static routes"; "routes" => ?routes_to_del);
-                    delete_static_routes(&mgd_clients, routes_to_del, &log).await;
-                }
-
-                // add the new routes
-                if !routes_to_add.is_empty() {
-                    info!(&log, "adding static routes"; "routes" => ?routes_to_add);
-                    add_static_routes(&mgd_clients, routes_to_add, &log).await;
-                }
-
-
-                //
-                // calculate and apply loopback address changes
-                //
-
-                info!(&log, "checking for changes to loopback addresses");
-                match self.db_loopback_addresses(opctx).await {
-                    Ok(desired_loopback_addresses) => {
-                        let current_loopback_addresses = switch_loopback_addresses(&dpd_clients, &log).await;
-
-                        let loopbacks_to_add: Vec<(SwitchSlot, IpAddr)> = desired_loopback_addresses
-                            .difference(&current_loopback_addresses)
-                            .map(|i| (i.0, i.1))
-                            .collect();
-                        let loopbacks_to_del: Vec<(SwitchSlot, IpAddr)> = current_loopback_addresses
-                            .difference(&desired_loopback_addresses)
-                            .map(|i| (i.0, i.1))
-                            .collect();
-
-                        if !loopbacks_to_del.is_empty() {
-                            info!(&log, "deleting loopback addresses"; "addresses" => ?loopbacks_to_del);
-                            delete_loopback_addresses_from_switch(&loopbacks_to_del, &dpd_clients, &log).await;
-                        }
-
-                        if !loopbacks_to_add.is_empty() {
-                            info!(&log, "adding loopback addresses"; "addresses" => ?loopbacks_to_add);
-                            add_loopback_addresses_to_switch(&loopbacks_to_add, dpd_clients, &log).await;
-                        }
-                    },
-                    Err(e) => {
-                        error!(
-                            log,
-                            "error fetching loopback addresses from db, skipping loopback config";
-                            "error" => %DisplayErrorChain::new(&e)
-                        );
-                    },
-                };
-
-                //
-                // calculate and apply switch zone SMF changes
-                //
-                let uplinks = uplinks(&changes, &log);
-
-                // yeet the messages
-                for (switch_slot, config) in &uplinks {
-                    let client: &sled_agent_client::Client =
-                        match scrimlet_sled_agent_clients.get(switch_slot) {
-                            Some(client) => client,
-                            None => {
-                                error!(log, "sled-agent client is missing, cannot send updates"; "switch_slot" => ?switch_slot);
-                                continue;
-                            },
-                        };
-
-                    info!(
-                        &log,
-                        "applying SMF config uplink updates to switch zone";
-                        "switch_slot" => ?switch_slot,
-                        "config" => ?config,
-                    );
-                    if let Err(e) = client
-                        .uplink_ensure(&sled_agent_client::types::SwitchPorts {
-                            uplinks: config.clone(),
-                        })
-                        .await
-                    {
-                        error!(
-                            log,
-                            "error while applying smf updates to switch zone";
-                            "switch_slot" => ?switch_slot,
-                            "error" => %DisplayErrorChain::new(&e)
-                        );
-                    }
-                }
-
-                //
-                // calculate and apply BGP changes
-                //
-
-                // build a list of desired settings for each switch
-                let mut desired_bgp_configs: HashMap<
-                        SwitchSlot, (ApplyRequest, BestpathFanoutRequest)
-                        > = HashMap::new();
-
-                // we currently only support one bgp config per switch
-                let mut switch_bgp_config: HashMap<SwitchSlot, (Uuid, BgpConfig)> = HashMap::new();
-
-                // Prefixes are associated to BgpConfig via the config id
-                let mut bgp_announce_prefixes: HashMap<Uuid, Vec<Prefix>> = HashMap::new();
-
-                for (switch_slot, port, change) in &changes {
-                    let PortSettingsChange::Apply(settings) = change else {
-                        continue;
-                    };
-
-                    // desired peer configurations for a given switch port
-                    let mut peers: HashMap<String, Vec<BgpPeerConfig>> = HashMap::new();
-                    let mut unnumbered_peers: HashMap<String, Vec<UnnumberedBgpPeerConfig>> = HashMap::new();
-
-                    for peer in &settings.bgp_peers {
-                        let bgp_config_id = peer.bgp_config_id();
-                        let port_settings_id = peer.port_settings_id();
-                        let interface_name = peer.interface_name();
-                        let peer = peer.as_bgp_peer();
-
-                        // since we only have one bgp config per switch, we only need to fetch it once
-                        let bgp_config = match switch_bgp_config.entry(*switch_slot) {
-                            Entry::Occupied(occupied_entry) => {
-                                let (existing_id, existing_config) = occupied_entry.get().clone();
-                                // verify peers don't have differing configs
-                                if existing_id != bgp_config_id {
-                                    // should we flag the switch and not do *any* updates to it?
-                                    // with the logic as-is, it will skip the config for this port and move on
-                                    error!(
-                                        log,
-                                        "peers do not have matching asn (only one asn allowed per switch)";
-                                        "switch_slot" => ?switch_slot,
-                                        "first_config_id" => ?existing_id,
-                                        "second_config_id" => ?bgp_config_id,
-                                    );
-                                    break;
-                                }
-                                existing_config
-                            },
-                            Entry::Vacant(vacant_entry) => {
-                                // get the bgp config for this peer
-                                let config = match self
-                                    .datastore
-                                    .bgp_config_get(opctx, &bgp_config_id.into())
-                                    .await
-                                {
-                                    Ok(config) => config,
-                                    Err(e) => {
-                                        error!(
-                                            log,
-                                            "error while fetching bgp peer config from db";
-                                            "switch_slot" => ?switch_slot,
-                                            "port_name" => %port.port_name,
-                                            "error" => %DisplayErrorChain::new(&e)
-                                        );
-                                        continue;
-                                    },
-                                };
-                                vacant_entry.insert((bgp_config_id, config.clone()));
-                                config
-                            },
-                        };
-
-                        //
-                        // build a list of prefixes from the announcements in the bgp config
-                        //
-
-                        // Same thing as above, check to see if we've already built the announce set,
-                        // if so we'll skip this step
-                        #[allow(clippy::map_entry)]
-                        if !bgp_announce_prefixes.contains_key(&bgp_config.bgp_announce_set_id) {
-                            let announcements = match self
-                                .datastore
-                                .bgp_announcement_list(
-                                    opctx,
-                                    &networking::BgpAnnounceSetSelector {
-                                        announce_set: bgp_config
-                                            .bgp_announce_set_id
-                                            .into(),
-                                    },
-                                )
-                                .await
-                            {
-                                Ok(a) => a,
-                                Err(e) => {
-                                    error!(
-                                        log,
-                                        "error while fetching bgp announcements from db";
-                                        "switch_slot" => ?switch_slot,
-                                        "bgp_announce_set_id" => %bgp_config.bgp_announce_set_id,
-                                        "error" => %DisplayErrorChain::new(&e)
-                                    );
-                                    continue;
-                                },
-                            };
-
-                            let mut prefixes: Vec<Prefix> = vec![];
-
-                            for announcement in &announcements {
-                                match announcement.network.ip() {
-                                    IpAddr::V4(value) => {
-                                        let prefix = Prefix4 { value, length: announcement.network.prefix() };
-                                        prefixes.push(Prefix::V4(prefix));
-                                    },
-                                    IpAddr::V6(value) => {
-                                        let prefix = Prefix6 { value, length: announcement.network.prefix() };
-                                        prefixes.push(Prefix::V6(prefix));
-                                    },
-                                };
-                            }
-                            bgp_announce_prefixes.insert(bgp_config.bgp_announce_set_id, prefixes);
-                        }
-
-                        //TODO consider awaiting in parallel and joining
-                        let communities = match self.datastore.communities_for_peer(
-                            opctx,
-                            port_settings_id,
-                            interface_name,
-                            peer.addr,
-                        ).await {
-                            Ok(cs) => cs,
-                            Err(e) => {
-                                error!(log,
-                                    "failed to get communities for peer";
-                                    "peer" => ?peer,
-                                    "error" => %DisplayErrorChain::new(&e)
-                                );
-                                return json!({
-                                    "error":
-                                        format!(
-                                            "failed to get port settings for peer {:?}: {}",
-                                            peer,
-                                            DisplayErrorChain::new(&e)
-                                        )
-                                });
-                            }
-                        };
-
-                        let allow_import = match self.datastore.allow_import_for_peer(
-                            opctx,
-                            port_settings_id,
-                            interface_name,
-                            peer.addr,
-                        ).await {
-                            Ok(cs) => cs,
-                            Err(e) => {
-                                error!(log,
-                                    "failed to get peer allowed imports";
-                                    "peer" => ?peer,
-                                    "error" => %DisplayErrorChain::new(&e)
-                                );
-                                return json!({
-                                    "error":
-                                        format!(
-                                            "failed to get allowed imports peer {:?}: {}",
-                                            peer,
-                                            DisplayErrorChain::new(&e)
-                                        )
-                                });
-                            }
-                        };
-
-                        let import_policy4 = match &allow_import {
-                            Some(list) => {
-                                MgImportExportPolicy4::Allow(list
-                                    .clone()
-                                    .into_iter()
-                                    .filter_map(|x|
-                                        match x.prefix {
-                                            IpNetwork::V4(p) =>  Some(
-                                                Prefix4{
-                                                    length: p.prefix(),
-                                                    value: p.ip(),
-                                                }
-                                            ),
-                                            IpNetwork::V6(_) =>  None,
-                                        }
-                                    )
-                                    .collect()
-                                )
-                            }
-                            None => MgImportExportPolicy4::NoFiltering,
-                        };
-
-                        let import_policy6 = match &allow_import {
-                            Some(list) => {
-                                MgImportExportPolicy6::Allow(list
-                                    .clone()
-                                    .into_iter()
-                                    .filter_map(|x|
-                                        match x.prefix {
-                                            IpNetwork::V6(p) =>  Some(
-                                                Prefix6{
-                                                    length: p.prefix(),
-                                                    value: p.ip(),
-                                                }
-                                            ),
-                                            IpNetwork::V4(_) =>  None,
-                                        }
-                                    )
-                                    .collect()
-                                )
-                            }
-                            None => MgImportExportPolicy6::NoFiltering,
-                        };
-
-                        let allow_export = match self.datastore.allow_export_for_peer(
-                            opctx,
-                            port_settings_id,
-                            interface_name,
-                            peer.addr,
-                        ).await {
-                            Ok(cs) => cs,
-                            Err(e) => {
-                                error!(log,
-                                    "failed to get peer allowed exportss";
-                                    "peer" => ?peer,
-                                    "error" => %DisplayErrorChain::new(&e),
-                                );
-                                return json!({
-                                    "error":
-                                        format!(
-                                            "failed to get allowed exports peer {:?}: {}",
-                                            peer,
-                                            DisplayErrorChain::new(&e)
-                                        )
-                                });
-                            }
-                        };
-
-                        let export_policy4 = match &allow_export {
-                            Some(list) => {
-                                MgImportExportPolicy4::Allow(list
-                                    .clone()
-                                    .into_iter()
-                                    .filter_map(|x|
-                                        match x.prefix {
-                                            IpNetwork::V4(p) =>  Some(
-                                                Prefix4{
-                                                    length: p.prefix(),
-                                                    value: p.ip(),
-                                                }
-                                            ),
-                                            IpNetwork::V6(_) => None,
-                                        }
-                                    )
-                                    .collect()
-                                )
-                            }
-                            None => MgImportExportPolicy4::NoFiltering,
-                        };
-
-                        let export_policy6 = match &allow_export {
-                            Some(list) => {
-                                MgImportExportPolicy6::Allow(list
-                                    .clone()
-                                    .into_iter()
-                                    .filter_map(|x|
-                                        match x.prefix {
-                                            IpNetwork::V6(p) =>  Some(
-                                                Prefix6{
-                                                    length: p.prefix(),
-                                                    value: p.ip(),
-                                                }
-                                            ),
-                                            IpNetwork::V4(_) => None,
-                                        }
-                                    )
-                                    .collect()
-                                )
-                            }
-                            None => MgImportExportPolicy6::NoFiltering,
-                        };
-
-                        match peer.addr {
-                            // Numbered peer - identified by address
-                            RouterPeerType::Numbered { ip } => {
-                                // now that the peer passes the above validations, add it to the list for configuration
-                                let peer_config = BgpPeerConfig {
-                                    name: format!("{ip}"),
-                                    host: format!("{ip}:179"),
-                                    hold_time: peer.hold_time.into(),
-                                    idle_hold_time: peer.idle_hold_time.into(),
-                                    delay_open: peer.delay_open.into(),
-                                    connect_retry: peer.connect_retry.into(),
-                                    keepalive: peer.keepalive.into(),
-                                    resolution: BGP_SESSION_RESOLUTION,
-                                    passive: false,
-                                    remote_asn: peer.remote_asn,
-                                    min_ttl: peer.min_ttl,
-                                    md5_auth_key: peer.md5_auth_key.clone(),
-                                    multi_exit_discriminator: peer.multi_exit_discriminator,
-                                    local_pref: peer.local_pref,
-                                    enforce_first_as: peer.enforce_first_as,
-                                    communities: communities.into_iter().map(|c| c.community.0).collect(),
-                                    ipv4_unicast: Some(Ipv4UnicastConfig{
-                                        nexthop: None,
-                                        import_policy: import_policy4,
-                                        export_policy: export_policy4,
-                                    }),
-                                    ipv6_unicast: Some(Ipv6UnicastConfig{
-                                        nexthop: None,
-                                        import_policy: import_policy6,
-                                        export_policy: export_policy6,
-                                    }),
-                                    vlan_id: peer.vlan_id,
-                                    //TODO plumb these out to the external API
-                                    connect_retry_jitter: Some(JitterRange {
-                                        max: 1.0,
-                                        min: 0.75,
-                                    }),
-                                    deterministic_collision_resolution: false,
-                                    idle_hold_jitter: None,
-                                    src_port: None,
-                                    src_addr: None,
-                                };
-
-                                // update the stored vec if it exists, create a new on if it doesn't exist
-                                match peers.entry(port.port_name.clone().to_string()) {
-                                    Entry::Occupied(mut occupied_entry) => {
-                                        occupied_entry.get_mut().push(peer_config);
-                                    },
-                                    Entry::Vacant(vacant_entry) => {
-                                        vacant_entry.insert(vec![peer_config]);
-                                    },
-                                }
-                            }
-                            // Unnumbered peer - identified by interface
-                            RouterPeerType::Unnumbered { router_lifetime } => {
-                                let peer_config = UnnumberedBgpPeerConfig {
-                                    name: format!("unnumbered-{}", port.port_name),
-                                    interface: format!("tfport{}_0", port.port_name),
-                                    hold_time: peer.hold_time.into(),
-                                    idle_hold_time: peer.idle_hold_time.into(),
-                                    delay_open: peer.delay_open.into(),
-                                    connect_retry: peer.connect_retry.into(),
-                                    keepalive: peer.keepalive.into(),
-                                    resolution: BGP_SESSION_RESOLUTION,
-                                    passive: false,
-                                    remote_asn: peer.remote_asn,
-                                    min_ttl: peer.min_ttl,
-                                    md5_auth_key: peer.md5_auth_key.clone(),
-                                    multi_exit_discriminator: peer.multi_exit_discriminator,
-                                    local_pref: peer.local_pref,
-                                    enforce_first_as: peer.enforce_first_as,
-                                    communities: communities.into_iter().map(|c| c.community.0).collect(),
-                                    ipv4_unicast: Some(Ipv4UnicastConfig{
-                                        nexthop: None,
-                                        import_policy: import_policy4,
-                                        export_policy: export_policy4,
-                                    }),
-                                    ipv6_unicast: Some(Ipv6UnicastConfig{
-                                        nexthop: None,
-                                        import_policy: import_policy6,
-                                        export_policy: export_policy6,
-                                    }),
-                                    vlan_id: peer.vlan_id,
-                                    connect_retry_jitter: Some(JitterRange {
-                                        max: 1.0,
-                                        min: 0.75,
-                                    }),
-                                    deterministic_collision_resolution: false,
-                                    idle_hold_jitter: None,
-                                    router_lifetime: router_lifetime.as_u16(),
-                                    src_port: None,
-                                    src_addr: None,
-                                };
-
-                                // update the stored vec if it exists, create a new on if it doesn't exist
-                                match unnumbered_peers.entry(port.port_name.clone().to_string()) {
-                                    Entry::Occupied(mut occupied_entry) => {
-                                        occupied_entry.get_mut().push(peer_config);
-                                    },
-                                    Entry::Vacant(vacant_entry) => {
-                                        vacant_entry.insert(vec![peer_config]);
-                                    },
-                                }
-                            }
-                        }
-                    }
-
-                    let (config_id, request_bgp_config) = match switch_bgp_config.get(switch_slot) {
-                        Some(config) => config,
-                        None => {
-                            info!(log, "no bgp config found for switch, skipping."; "switch" => ?switch_slot);
-                            continue;
-                        },
-                    };
-
-                    let request_prefixes = match bgp_announce_prefixes.get(
-                        &request_bgp_config.bgp_announce_set_id) {
-                        Some(prefixes) => prefixes,
-                        None => {
-                            error!(
-                                log,
-                                "no prefixes to announce found for bgp config";
-                                "switch" => ?switch_slot,
-                                "announce_set_id" => ?request_bgp_config.bgp_announce_set_id,
-                                "bgp_config_id" => ?config_id,
-                            );
-                            continue;
-                        },
-                    };
-
-                    match desired_bgp_configs.entry(*switch_slot) {
-                        Entry::Occupied(mut occupied_entry) => {
-                            let (config, _) = occupied_entry.get_mut();
-                            // peers are the only per-port part of the config.
-                            config.peers.extend(peers);
-                            config.unnumbered_peers.extend(unnumbered_peers);
-                        }
-                        Entry::Vacant(vacant_entry) => {
-                            let apply_request = ApplyRequest {
-                                    asn: *request_bgp_config.asn,
-                                    peers,
-                                    unnumbered_peers,
-                                    originate: request_prefixes.clone(),
-                                    checker: request_bgp_config.checker.as_ref().map(|code| CheckerSource{
-                                        asn: *request_bgp_config.asn,
-                                        code: code.clone(),
-                                    }),
-                                    shaper: request_bgp_config.shaper.as_ref().map(|code| ShaperSource{
-                                        asn: *request_bgp_config.asn,
-                                        code: code.clone(),
-                                    }),
-                                };
-
-                            let fanout = match std::num::NonZeroU8::new(*request_bgp_config.max_paths) {
-                                Some(v) => v,
-                                None => {
-                                    error!(
-                                        log,
-                                        "Bgp config max_paths was set to zero! Configuring with default value of 1!";
-                                        "switch" => ?switch_slot,
-                                        "bgp_config_id" => ?config_id,
-                                    );
-                                    std::num::NonZeroU8::MIN
-                                },
-                            };
-
-                            let fanout_request = BestpathFanoutRequest { fanout };
-
-                            vacant_entry.insert((apply_request, fanout_request));
-                        }
-                    }
-                }
-
-                for (switch_slot, (config, fanout)) in &desired_bgp_configs {
-                    let client = match mgd_clients.get(switch_slot) {
-                        Some(client) => client,
-                        None => {
-                            error!(log, "no mgd client found for switch"; "switch_slot" => ?switch_slot);
-                            continue;
-                        },
-                    };
-                    info!(
-                        &log,
-                        "applying bgp config";
-                        "switch_slot" => ?switch_slot,
-                        "config" => ?config,
-                    );
-                    if let Err(e) = client.bgp_apply_v2(config).await {
-                        error!(log, "error while applying bgp configuration"; "error" => ?e);
-                    }
-
-                    if let Err(e) = client.update_bestpath_fanout(fanout).await {
-                        error!(log, "error while updating bestpath fanout"; "error" => ?e);
-                    }
-                }
-
                 //
                 // calculate and apply bootstore changes
                 //
 
-                // build the desired bootstore config from the records we've fetched
-                let subnet = match rack.rack_subnet {
-                    Some(IpNetwork::V6(subnet)) => subnet.into(),
-                    Some(IpNetwork::V4(_)) => {
-                        error!(log, "rack subnet must be ipv6"; "rack" => ?rack);
-                        continue;
-                    },
-                    None => {
-                        error!(log, "rack subnet not set"; "rack" => ?rack);
-                        continue;
-                    }
-                };
-
-                // TODO: is this correct? Do we place the BgpConfig for both switches in a single Vec to send to the bootstore?
-                let mut bgp: Vec<SledBgpConfig> = switch_bgp_config.iter().filter_map(|(_location, (_id, config))| {
-                    let announcements = bgp_announce_prefixes
-                        .get(&config.bgp_announce_set_id)
-                        .expect("bgp config is present but announce set is not populated")
-                        .iter()
-                        .map(|prefix| {
-                            match prefix {
-                                Prefix::V4(prefix4) => {
-                                    let net = Ipv4Net::new(prefix4.value, prefix4.length)
-                                        .expect("Prefix4 and Ipv4Net's value types have diverged");
-                                    IpNet::V4(net)
-                                },
-                                Prefix::V6(prefix6) => {
-                                    let net = Ipv6Net::new(prefix6.value, prefix6.length)
-                                        .expect("Prefix6 and Ipv6Net's value types have diverged");
-                                    IpNet::V6(net)
-                                },
-                            }
-                        }).collect();
-
-                    let max_paths = match MaxPathConfig::new(*config.max_paths)
-                    {
-                        Ok(max_paths) => max_paths,
-                        Err(err) => {
-                            // This should be impossible - our db constraints
-                            // should ensure legal values.
-                            error!(
-                                log,
-                                "database contains illegal max_paths value";
-                                InlineErrorChain::new(&err),
-                            );
-                            return None;
-                        }
-                    };
-
-                    Some(SledBgpConfig {
-                        asn: config.asn.0,
-                        originate: announcements,
-                        checker: config.checker.clone(),
-                        shaper: config.shaper.clone(),
-                        max_paths,
-                    })
-                }).collect();
-
-                bgp.dedup();
-
-                let mut ports: Vec<PortConfig> = vec![];
-
-                for (switch_slot, port, change) in &changes {
-                    let PortSettingsChange::Apply(info) = change else {
-                        continue;
-                    };
-
-                    let peer_configs = match self.datastore.bgp_peer_configs(opctx, *switch_slot, port.port_name.to_string()).await {
-                        Ok(v) => v,
-                        Err(e) => {
-                            error!(
-                                log,
-                                "failed to fetch bgp peer config for switch port";
-                                "switch_slot" => ?switch_slot,
-                                "port" => &port.port_name.to_string(),
-                                "error" => %DisplayErrorChain::new(&e)
-                            );
-                            continue;
-                        },
-                    };
-
-                    // TODO https://github.com/oxidecomputer/omicron/issues/3062
-                    let tx_eq = if let Some(c) = info.tx_eq.get(0) {
-                        Some(TxEqConfig {
-                            pre1: c.pre1,
-                            pre2: c.pre2,
-                            main: c.main,
-                            post2: c.post2,
-                            post1: c.post1,
-                        })
-                    } else {
-                        None
-                    };
-
-                    let bgp_peers = match peer_configs
-                        .into_iter()
-                        .map(SledBgpPeerConfig::try_from)
-                        .collect::<Result<_, _>>()
-                    {
-                        Ok(bgp_peers) => bgp_peers,
-                        Err(err) => {
-                            error!(
-                                log,
-                                "failed to convert database peer configs to \
-                                 API peer configs";
-                                "switch_slot" => ?switch_slot,
-                                "port" => &port.port_name.to_string(),
-                                InlineErrorChain::new(&err),
-                            );
-                            continue;
-                        }
-                    };
-
-                    let addresses = match info
-                        .addresses
-                        .iter()
-                        .map(|a| {
-                             let address = UplinkAddress::try_from_ip_net_treating_unspecified_as_addrconf(a.address)?;
-                             Ok(UplinkAddressConfig {
-                                 address,
-                                 vlan_id: a.vlan_id
-                             })
-                        })
-                        .collect::<Result<_, InvalidIpAddrError>>()
-                    {
-                        Ok(addresses) => addresses,
-                        Err(err) => {
-                            error!(
-                                log,
-                                "failed to convert database uplink addresses \
-                                 to API uplink addresses";
-                                "switch_slot" => ?switch_slot,
-                                "port" => &port.port_name.to_string(),
-                                InlineErrorChain::new(&err),
-                            );
-                            continue;
-                        }
-                    };
-
-                    let mut port_config = PortConfig {
-                        addresses,
-                        autoneg: info
-                            .links
-                            .get(0) //TODO breakout support
-                            .map(|l| l.autoneg)
-                            .unwrap_or(false),
-                        bgp_peers,
-                        port: port.port_name.to_string(),
-                        routes: info
-                            .routes
-                            .iter()
-                            .map(|r| SledRouteConfig {
-                                destination: r.dst.into(),
-                                nexthop: r.gw.ip(),
-                                vlan_id: r.vid.map(|x| x.0),
-                                rib_priority: r.rib_priority.map(|x| x.0),
-                            })
-                            .collect(),
-                        switch: *switch_slot,
-                        uplink_port_fec: info
-                            .links
-                            .get(0) //TODO https://github.com/oxidecomputer/omicron/issues/3062
-                            .map(|l| l.fec.map(|fec| fec.into()))
-                            .unwrap_or(None),
-                        uplink_port_speed: info
-                            .links
-                            .get(0) //TODO https://github.com/oxidecomputer/omicron/issues/3062
-                            .map(|l| l.speed)
-                            .unwrap_or(SwitchLinkSpeed::Speed100G)
-                            .into(),
-			lldp: info
-			    .link_lldp
-			    .get(0) //TODO https://github.com/oxidecomputer/omicron/issues/3062
-			    .map(|c|  LldpPortConfig {
-				status: match c.enabled {
-				    true => LldpAdminStatus::Enabled,
-				    false=> LldpAdminStatus::Disabled,
-				},
-				port_id: c.link_name.clone().map(|p| p.to_string()),
-				port_description: c.link_description.clone(),
-				chassis_id: c.chassis_id.clone(),
-				system_name: c.system_name.clone(),
-				system_description: c.system_description.clone(),
-				management_addrs:c.management_ip.map(|a| vec![a.ip()]),
-			    }),
-			    tx_eq,
-		    }
-                    ;
-
-                    for peer in port_config.bgp_peers.iter_mut() {
-                        peer.communities = match self
-                            .datastore
-                            .communities_for_peer(
-                                opctx,
-                                port.port_settings_id.unwrap(),
-                                &PHY0, //TODO https://github.com/oxidecomputer/omicron/issues/3062
-                                peer.addr,
-                            ).await {
-                                Ok(cs) => cs.iter().map(|c| c.community.0).collect(),
-                                Err(e) => {
-                                    error!(log,
-                                        "failed to get communities for peer";
-                                        "peer" => ?peer,
-                                        "error" => %DisplayErrorChain::new(&e)
-                                    );
-                                    continue;
-                                }
-                            };
-
-                        //TODO consider awaiting in parallel and joining
-                        let allow_import = match self.datastore.allow_import_for_peer(
-                            opctx,
-                            port.port_settings_id.unwrap(),
-                            &PHY0, //TODO https://github.com/oxidecomputer/omicron/issues/3062
-                            peer.addr,
-                        ).await {
-                            Ok(cs) => cs,
-                            Err(e) => {
-                                error!(log,
-                                    "failed to get peer allowed imports";
-                                    "peer" => ?peer,
-                                    "error" => %DisplayErrorChain::new(&e)
-                                );
-                                continue;
-                            }
-                        };
-
-                        peer.allowed_import = match allow_import {
-                            Some(list) =>  ImportExportPolicy::Allow(
-                                list.clone().into_iter().map(|x| x.prefix.into()).collect()
-                            ),
-                            None => ImportExportPolicy::NoFiltering,
-                        };
-
-                        let allow_export = match self.datastore.allow_export_for_peer(
-                            opctx,
-                            port.port_settings_id.unwrap(),
-                            &PHY0, //TODO https://github.com/oxidecomputer/omicron/issues/3062
-                            peer.addr,
-                        ).await {
-                            Ok(cs) => cs,
-                            Err(e) => {
-                                error!(log,
-                                    "failed to get peer allowed exports";
-                                    "peer" => ?peer,
-                                    "error" => %DisplayErrorChain::new(&e)
-                                );
-                                continue;
-                            }
-                        };
-
-                        peer.allowed_export = match allow_export {
-                            Some(list) =>  ImportExportPolicy::Allow(
-                                list.clone().into_iter().map(|x| x.prefix.into()).collect()
-                            ),
-                            None => ImportExportPolicy::NoFiltering,
-                        };
-                    }
-                    ports.push(port_config);
-                }
-
-                let blocks = match self.datastore.address_lot_blocks_by_name(opctx, INFRA_LOT.into()).await {
-                    Ok(blocks) => blocks,
+                let input = match nexus_switch_config_preparation::read_and_assemble(
+                    &self.datastore,
+                    opctx,
+                    &log,
+                    rack.rack_subnet,
+                )
+                .await
+                {
+                    Ok(input) => input,
                     Err(e) => {
-                        error!(log, "error while fetching address lot blocks from db"; "error" => %e);
-                        continue;
-                    },
-                };
-
-                // currently there should only be one block assigned. If there is more than one
-                // block, grab the first one and emit a warning.
-                if blocks.len() > 1 {
-                    warn!(log, "more than one block assigned to infra lot"; "blocks" => ?blocks);
-                }
-
-                let (infra_ip_first, infra_ip_last)= match blocks.get(0) {
-                    Some(AddressLotBlock{ first_address, last_address, ..}) => {
-                        (first_address.ip(), last_address.ip())
-                    },
-                    None => {
-                        error!(log, "no blocks assigned to infra lot");
-                        continue;
-                    },
-                }
-                ;
-
-
-                let bfd = match self.bfd_peer_configs_from_db(opctx).await {
-                    Ok(bfd) => bfd,
-                    Err(e) => {
-                        error!(log, "error fetching bfd config from db"; "error" => %e);
+                        error!(
+                            log,
+                            "failed to read bootstore network config; \
+                             skipping rack";
+                            "error" => InlineErrorChain::new(&e),
+                        );
                         continue;
                     }
                 };
 
-                let service_zone_nat_entries = match self
+                let rack_network_config =
+                    match nexus_switch_config::build_rack_network_config(
+                        input,
+                    ) {
+                        Ok(rack_network_config) => rack_network_config,
+                        Err(report) => {
+                            error!(
+                                log,
+                                "incomplete bootstore network config; \
+                                 skipping rack";
+                                "problems" => %report,
+                            );
+                            status.incomplete_bootstore_configs.push(
+                                IncompleteBootstoreConfigReport {
+                                    rack_id: rack.id(),
+                                    problems: report
+                                        .problems
+                                        .iter()
+                                        .map(|problem| problem.to_string())
+                                        .collect(),
+                                },
+                            );
+                            continue;
+                        }
+                    };
+
+                let (
+                    blueprint_external_networking_generation,
+                    service_zone_nat_entries,
+                ) = match self
                     .rx_blueprint
                     .borrow_and_update()
                     .clone()
-                    .map(|bp| bp.blueprint.to_service_zone_nat_entries())
+                    .map(|bp| bp.blueprint.to_service_zone_nat_entries().map(
+                        |entries| (
+                            bp.blueprint.external_networking_generation,
+                            entries,
+                        )
+                    ))
                 {
-                    Some(Ok(entries)) => entries,
+                    Some(Ok((generation, entries))) => (generation, entries),
                     Some(Err(err)) => {
                         error!(
                             log,
@@ -1314,17 +188,23 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     }
                 };
 
-                let desired_config = SystemNetworkingConfig {
-                    rack_network_config: RackNetworkConfig {
-                        rack_subnet: subnet,
-                        infra_ip_first,
-                        infra_ip_last,
-                        ports,
-                        bgp,
-                        bfd,
-                    },
-                    service_zone_nat_entries: Some(service_zone_nat_entries),
+                // The construction here is slightly weird - we start with
+                // `blueprint_external_networking_config: None` and then
+                // immediately fill it in. This gives us a non-optional
+                // reference to the config we supplied, which we need below to
+                // call `does_bootstore_need_update()`.
+                let mut desired_config = SystemNetworkingConfig {
+                    rack_network_config,
+                    blueprint_external_networking_config: None,
                 };
+                let desired_blueprint_networking_config = &*desired_config
+                    .blueprint_external_networking_config
+                    .insert(
+                        BlueprintExternalNetworkingConfig {
+                            blueprint_external_networking_generation,
+                            service_zone_nat_entries,
+                        },
+                    );
 
                 // bootstore_needs_update is a boolean value that determines
                 // whether or not we need to increment the bootstore version and
@@ -1353,37 +233,12 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             .and_then(|envelope| envelope.deserialize_body())
                         {
                             Ok(config) => {
-                                let SystemNetworkingConfig {
-                                    rack_network_config: current_rnc,
-                                    service_zone_nat_entries: current_nat,
-                                } = &config;
-                                let SystemNetworkingConfig {
-                                    rack_network_config: desired_rnc,
-                                    service_zone_nat_entries: desired_nat,
-                                } = &desired_config;
-
-                                let rnc_differs = {
-                                    !hashset_eq(current_rnc.bgp.clone(), desired_rnc.bgp.clone()) ||
-                                    !hashset_eq(current_rnc.bfd.clone(), desired_rnc.bfd.clone()) ||
-                                    !hashset_eq(current_rnc.ports.clone(), desired_rnc.ports.clone()) ||
-                                    current_rnc.rack_subnet != desired_rnc.rack_subnet ||
-                                    current_rnc.infra_ip_first != desired_rnc.infra_ip_first ||
-                                    current_rnc.infra_ip_last != desired_rnc.infra_ip_last
-                                };
-
-                                let nat_differs = current_nat != desired_nat;
-
-                                if rnc_differs || nat_differs {
-                                    info!(
-                                        log,
-                                        "system network config has changed";
-                                        "old" => ?config,
-                                        "new" => ?desired_config,
-                                    );
-                                    true
-                                } else {
-                                    false
-                                }
+                                does_bootstore_need_update(
+                                    &config,
+                                    &desired_config.rack_network_config,
+                                    desired_blueprint_networking_config,
+                                    &log,
+                                )
                             },
                             Err(e) => {
                                 error!(
@@ -1530,290 +385,26 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     }
                 }
             }
-            json!({})
+            // TODO: we have some early returns in this task. We should instead
+            // collect all problems and return them in the response.
+            //
+            // As part of that, we should move the body into an
+            // `activate_impl(...)` function which returns a
+            // `SwitchPortManagerStatus`. That'll force us to not do early
+            // returns.
+            json!(status)
         }
         .boxed()
     }
 }
 
-fn hashset_eq<T>(left: Vec<T>, right: Vec<T>) -> bool
+fn hashset_eq<T>(left: &[T], right: &[T]) -> bool
 where
     T: Hash + Eq,
 {
-    let left = left.into_iter().collect::<HashSet<T>>();
-    let right = right.into_iter().collect::<HashSet<T>>();
+    let left = left.iter().collect::<HashSet<&T>>();
+    let right = right.iter().collect::<HashSet<&T>>();
     left == right
-}
-
-/// Ensure that a loopback address is created.
-///
-/// loopback_ipv\[46\]_create are not idempotent (see
-/// oxidecomputer/dendrite#343), but this wrapper function is. Call this
-/// from sagas instead.
-async fn ensure_loopback_created(
-    log: &slog::Logger,
-    client: &DpdClient,
-    address: IpAddr,
-    tag: &str,
-) -> Result<(), serde_json::Value> {
-    let result = match &address {
-        IpAddr::V4(a) => {
-            client
-                .loopback_ipv4_create(&DpdTypes::Ipv4Entry {
-                    addr: *a,
-                    tag: tag.into(),
-                })
-                .await
-        }
-        IpAddr::V6(a) => {
-            client
-                .loopback_ipv6_create(&DpdTypes::Ipv6Entry {
-                    addr: *a,
-                    tag: tag.into(),
-                })
-                .await
-        }
-    };
-
-    match result {
-        Ok(_) => {
-            info!(log, "created loopback address"; "address" => ?address);
-            Ok(())
-        }
-        Err(e) => match e.status() {
-            Some(http::StatusCode::CONFLICT) => {
-                info!(log, "loopback address already created"; "address" => ?address);
-
-                Ok(())
-            }
-
-            _ => Err(json!({
-            "error":
-                format!(
-                    "failed to create loopback address: \
-                        {:#}",
-                    e
-                )})),
-        },
-    }
-}
-
-/// Ensure that a loopback address is deleted.
-///
-/// loopback_ipv\[46\]_delete are not idempotent (see
-/// oxidecomputer/dendrite#343), but this wrapper function is. Call this
-/// from sagas instead.
-async fn ensure_loopback_deleted(
-    log: &slog::Logger,
-    client: &DpdClient,
-    address: IpAddr,
-) -> Result<(), serde_json::Value> {
-    let result = match &address {
-        IpAddr::V4(a) => client.loopback_ipv4_delete(&a).await,
-        IpAddr::V6(a) => client.loopback_ipv6_delete(&a).await,
-    };
-
-    match result {
-        Ok(_) => {
-            info!(log, "deleted loopback address"; "address" => ?address);
-            Ok(())
-        }
-        Err(e) => match e.status() {
-            Some(http::StatusCode::NOT_FOUND) => {
-                info!(log, "loopback address already deleted"; "address" => ?address);
-
-                Ok(())
-            }
-
-            _ => Err(json!({
-            "error":
-                format!(
-                    "failed to deleted loopback address: \
-                        {:#}",
-                    e
-                )})),
-        },
-    }
-}
-
-async fn add_loopback_addresses_to_switch(
-    loopbacks_to_add: &[(SwitchSlot, IpAddr)],
-    dpd_clients: HashMap<SwitchSlot, dpd_client::Client>,
-    log: &slog::Logger,
-) {
-    for (switch_slot, address) in loopbacks_to_add {
-        let client = match dpd_clients.get(switch_slot) {
-            Some(v) => v,
-            None => {
-                error!(log, "dpd_client is missing, cannot create loopback addresses"; "switch_slot" => ?switch_slot);
-                continue;
-            }
-        };
-
-        if let Err(e) =
-            ensure_loopback_created(log, client, *address, OMICRON_DPD_TAG)
-                .await
-        {
-            error!(log, "error while creating loopback address"; "error" => %e);
-        };
-    }
-}
-
-async fn delete_loopback_addresses_from_switch(
-    loopbacks_to_del: &[(SwitchSlot, IpAddr)],
-    dpd_clients: &HashMap<SwitchSlot, dpd_client::Client>,
-    log: &slog::Logger,
-) {
-    for (switch_slot, address) in loopbacks_to_del {
-        let client = match dpd_clients.get(switch_slot) {
-            Some(v) => v,
-            None => {
-                error!(log, "dpd_client is missing, cannot delete loopback addresses"; "switch_slot" => ?switch_slot);
-                continue;
-            }
-        };
-
-        if let Err(e) = ensure_loopback_deleted(log, client, *address).await {
-            error!(log, "error while deleting loopback address"; "error" => %e);
-        };
-    }
-}
-
-async fn switch_loopback_addresses(
-    dpd_clients: &HashMap<SwitchSlot, dpd_client::Client>,
-    log: &slog::Logger,
-) -> HashSet<(SwitchSlot, IpAddr)> {
-    let mut current_loopback_addresses: HashSet<(SwitchSlot, IpAddr)> =
-        HashSet::new();
-
-    for (switch_slot, client) in dpd_clients {
-        let ipv4_loopbacks = match client.loopback_ipv4_list().await {
-            Ok(v) => v,
-            Err(e) => {
-                error!(
-                    log,
-                    "error fetching ipv4 loopback addresses from switch";
-                    "switch_slot" => ?switch_slot,
-                    "error" => %e,
-                );
-                continue;
-            }
-        };
-
-        let ipv6_loopbacks = match client.loopback_ipv6_list().await {
-            Ok(v) => v,
-            Err(e) => {
-                error!(
-                    log,
-                    "error fetching ipv6 loopback addresses from switch";
-                    "switch_slot" => ?switch_slot,
-                    "error" => %e,
-                );
-                continue;
-            }
-        };
-
-        for entry in ipv4_loopbacks.iter() {
-            current_loopback_addresses
-                .insert((*switch_slot, IpAddr::V4(entry.addr)));
-        }
-
-        for entry in ipv6_loopbacks.iter().filter(|x| x.tag == OMICRON_DPD_TAG)
-        {
-            current_loopback_addresses
-                .insert((*switch_slot, IpAddr::V6(entry.addr)));
-        }
-    }
-    current_loopback_addresses
-}
-
-fn uplinks(
-    changes: &[(SwitchSlot, nexus_db_model::SwitchPort, PortSettingsChange)],
-    log: &slog::Logger,
-) -> HashMap<SwitchSlot, Vec<HostPortConfig>> {
-    let mut uplinks: HashMap<SwitchSlot, Vec<HostPortConfig>> = HashMap::new();
-    for (switch_slot, port, change) in changes {
-        let PortSettingsChange::Apply(config) = change else {
-            continue;
-        };
-
-        let lldp = if config.link_lldp.is_empty() {
-            None
-        } else {
-            let x = &config.link_lldp[0];
-            Some(LldpPortConfig {
-                status: if x.enabled {
-                    LldpAdminStatus::Enabled
-                } else {
-                    LldpAdminStatus::Disabled
-                },
-                port_id: x.link_name.clone().map(|p| p.to_string()),
-                port_description: x.link_description.clone(),
-                chassis_id: x.chassis_id.clone(),
-                system_name: x.system_name.clone(),
-                system_description: x.system_description.clone(),
-                management_addrs: x.management_ip.map(|a| {
-                    let ip: oxnet::IpNet = a.into();
-                    vec![ip.addr()]
-                }),
-            })
-        };
-
-        let tx_eq = if let Some(c) = config.tx_eq.get(0) {
-            Some(TxEqConfig {
-                pre1: c.pre1,
-                pre2: c.pre2,
-                main: c.main,
-                post2: c.post2,
-                post1: c.post1,
-            })
-        } else {
-            None
-        };
-
-        let addrs = match config
-            .addresses
-            .iter()
-            .map(|a| {
-                 let address = UplinkAddress::try_from_ip_net_treating_unspecified_as_addrconf(a.address)?;
-                 Ok(UplinkAddressConfig {
-                     address,
-                     vlan_id: a.vlan_id
-                 })
-            })
-            .collect::<Result<_, InvalidIpAddrError>>()
-        {
-            Ok(addresses) => addresses,
-            Err(err) => {
-                error!(
-                    log,
-                    "failed to convert database uplink addresses to \
-                     API uplink addresses";
-                    "switch_slot" => ?switch_slot,
-                    "port" => &port.port_name.to_string(),
-                    InlineErrorChain::new(&err),
-                );
-                continue;
-            }
-        };
-
-        let config = HostPortConfig {
-            port: port.port_name.to_string(),
-            addrs,
-            lldp,
-            tx_eq,
-        };
-
-        match uplinks.entry(*switch_slot) {
-            Entry::Occupied(mut occupied_entry) => {
-                occupied_entry.get_mut().push(config);
-            }
-            Entry::Vacant(vacant_entry) => {
-                vacant_entry.insert(vec![config]);
-            }
-        }
-    }
-    uplinks
 }
 
 fn build_sled_agent_clients(
@@ -1836,570 +427,461 @@ fn build_sled_agent_clients(
     sled_agent_clients
 }
 
-#[derive(PartialEq, Eq, Hash, Debug)]
-struct SwitchStaticRouteV4 {
-    nexthop: Ipv4Addr,
-    prefix: Prefix4,
-    vlan: Option<u16>,
-    priority: u8,
-}
-
-#[derive(PartialEq, Eq, Hash, Debug)]
-struct SwitchStaticRouteV6 {
-    nexthop: Ipv6Addr,
-    prefix: Prefix6,
-    vlan: Option<u16>,
-    priority: u8,
-}
-
-#[derive(PartialEq, Eq, Hash, Debug)]
-enum SwitchStaticRoute {
-    V4(SwitchStaticRouteV4),
-    V6(SwitchStaticRouteV6),
-}
-
-type SwitchStaticRoutes = HashSet<SwitchStaticRoute>;
-
-fn static_routes_to_del(
-    current_static_routes: HashMap<SwitchSlot, SwitchStaticRoutes>,
-    desired_static_routes: HashMap<SwitchSlot, SwitchStaticRoutes>,
-) -> HashMap<SwitchSlot, DeleteStaticRouteRequest> {
-    let mut routes_to_del: HashMap<SwitchSlot, DeleteStaticRouteRequest> =
-        HashMap::new();
-
-    // find routes to remove
-    for (switch_slot, routes_on_switch) in &current_static_routes {
-        if let Some(routes_wanted) = desired_static_routes.get(switch_slot) {
-            let mut result = DeleteStaticRouteRequest::default();
-            // if it's on the switch but not desired (in our db), it should be removed
-            let stale_routes = routes_on_switch.difference(routes_wanted);
-            for r in stale_routes.into_iter() {
-                match r {
-                    SwitchStaticRoute::V4(x) => {
-                        result.v4.routes.list.push(StaticRoute4 {
-                            nexthop: x.nexthop,
-                            prefix: x.prefix,
-                            vlan_id: x.vlan,
-                            rib_priority: x.priority,
-                        })
-                    }
-                    SwitchStaticRoute::V6(x) => {
-                        result.v6.routes.list.push(StaticRoute6 {
-                            nexthop: x.nexthop,
-                            prefix: x.prefix,
-                            vlan_id: x.vlan,
-                            rib_priority: x.priority,
-                        })
+// Helper to decide whether we should update the replicated bootstore.
+//
+// `current_contents` are the most-recently-written bootstore contents; it
+// contains both a rack network config and a blueprint external networking
+// config.
+//
+// `desired_rack_network_config` and `desired_blueprint_networking_config` are
+// what this activation of this background task believes the current
+// configuration should be.
+//
+// At a high level, there are three general possibilities:
+//
+// 1. Our desired configs match `current_contents`. (Easy and common case: we
+//    return `false`.)
+// 2. Our desired configs are different from `current_contents`, but we're
+//    operating on stale data (i.e., data older than what was used to produce
+//    `current_contents`). This can occur if another Nexus executed this same
+//    task with a different and slightly-newer view of the world; e.g., if the
+//    target blueprint recently changed, that Nexus had loaded the change, and
+//    we haven't yet. We must return `false` in this case to avoid overwriting
+//    new data with our stale data.
+// 3. Our desired config is different from `current_contents` and we are not
+//    operating on stale data. We return `true`.
+//
+// Today, we only partially handle case 2. We store generation numbers that
+// allow us to detect a stale `desired_blueprint_networking_config`, but we have
+// no way of detecting a stale `desired_rack_network_config`. If
+// `desired_blueprint_networking_config` is not stale and either desired config
+// is different from `current_contents`, we'll return true.
+fn does_bootstore_need_update(
+    current_contents: &SystemNetworkingConfig,
+    desired_rack_network_config: &RackNetworkConfig,
+    desired_blueprint_networking_config: &BlueprintExternalNetworkingConfig,
+    log: &slog::Logger,
+) -> bool {
+    // We should make our decision based on four boolean values: "is the config
+    // different" and "is our desired config based on out of date information"
+    // for each of our two desired configs. Define a couple of enums here to use
+    // instead of `bool` for clarity distinguishing between "are we looking at
+    // staleness" or "are we looking at whether there have been changes".
+    macro_rules! named_bool_yes_no {
+        ($newtype:ident) => {
+            #[derive(Clone, Copy)]
+            enum $newtype {
+                Yes,
+                No,
+            }
+            impl $newtype {
+                fn as_bool(self) -> bool {
+                    match self {
+                        Self::Yes => true,
+                        Self::No => false,
                     }
                 }
             }
-            routes_to_del.insert(*switch_slot, result);
-        } else {
-            // if no desired routes are present, all routes on this switch should be deleted
-            let mut result = DeleteStaticRouteRequest::default();
-            for r in routes_on_switch {
-                match r {
-                    SwitchStaticRoute::V4(x) => {
-                        result.v4.routes.list.push(StaticRoute4 {
-                            nexthop: x.nexthop,
-                            prefix: x.prefix,
-                            vlan_id: x.vlan,
-                            rib_priority: x.priority,
-                        })
-                    }
-                    SwitchStaticRoute::V6(x) => {
-                        result.v6.routes.list.push(StaticRoute6 {
-                            nexthop: x.nexthop,
-                            prefix: x.prefix,
-                            vlan_id: x.vlan,
-                            rib_priority: x.priority,
-                        })
-                    }
-                }
-            }
-            routes_to_del.insert(*switch_slot, result);
         };
     }
+    named_bool_yes_no!(DesiredConfigOutOfDate);
+    named_bool_yes_no!(ConfigChanged);
 
-    // filter out switches with no routes to remove
-    let routes_to_del = routes_to_del
-        .into_iter()
-        .filter(|(_location, request)| {
-            !(request.v4.routes.list.is_empty()
-                && request.v6.routes.list.is_empty())
-        })
-        .collect();
+    // Compute staleness and "are there changes" for
+    // `desired_blueprint_networking_config`.
+    let (is_blueprint_out_of_date, is_blueprint_different) =
+        if let Some(current_blueprint_networking_config) =
+            current_contents.blueprint_external_networking_config.as_ref()
+        {
+            let BlueprintExternalNetworkingConfig {
+                blueprint_external_networking_generation: current_gen,
+                service_zone_nat_entries: current_nat,
+            } = current_blueprint_networking_config;
 
-    routes_to_del
-}
+            let BlueprintExternalNetworkingConfig {
+                blueprint_external_networking_generation: desired_gen,
+                service_zone_nat_entries: desired_nat,
+            } = desired_blueprint_networking_config;
 
-#[allow(clippy::type_complexity)]
-fn static_routes_to_add(
-    desired_static_routes: &HashMap<SwitchSlot, SwitchStaticRoutes>,
-    current_static_routes: &HashMap<SwitchSlot, SwitchStaticRoutes>,
-    log: &slog::Logger,
-) -> HashMap<SwitchSlot, AddStaticRouteRequest> {
-    let mut routes_to_add: HashMap<SwitchSlot, AddStaticRouteRequest> =
-        HashMap::new();
-
-    // find routes to add
-    for (switch_slot, routes_wanted) in desired_static_routes {
-        let routes_on_switch = match current_static_routes.get(&switch_slot) {
-            Some(routes) => routes,
-            None => {
+            // This check must be "strictly less than", not "<=". It's very
+            // possible the blueprint config has not changed (i.e., we'd expect
+            // equal generation numbers) but the rack network config (checked
+            // below) has. We're only out of date if we know we're strictly
+            // older than what's in the bootstore.
+            let is_blueprint_out_of_date = if desired_gen < current_gen {
                 warn!(
-                    &log,
-                    "no discovered routes from switch. it is possible that an earlier api call failed.";
-                    "switch_slot" => ?switch_slot,
+                    log, "our loaded blueprint generation is out of date";
+                    "bootstore-gen" => current_gen,
+                    "our-blueprint-gen" => desired_gen,
                 );
-                continue;
-            }
-        };
-        let mut result = AddStaticRouteRequest::default();
-        let missing_routes = routes_wanted.difference(routes_on_switch);
-        for r in missing_routes.into_iter() {
-            match r {
-                SwitchStaticRoute::V4(x) => {
-                    result.v4.routes.list.push(StaticRoute4 {
-                        nexthop: x.nexthop,
-                        prefix: x.prefix,
-                        vlan_id: x.vlan,
-                        rib_priority: x.priority,
-                    })
-                }
-                SwitchStaticRoute::V6(x) => {
-                    result.v6.routes.list.push(StaticRoute6 {
-                        nexthop: x.nexthop,
-                        prefix: x.prefix,
-                        vlan_id: x.vlan,
-                        rib_priority: x.priority,
-                    })
-                }
-            }
-        }
-
-        routes_to_add.insert(*switch_slot, result);
-    }
-
-    // filter out switches with no routes to add
-    let routes_to_add = routes_to_add
-        .into_iter()
-        .filter(|(_location, request)| {
-            !(request.v4.routes.list.is_empty()
-                && request.v6.routes.list.is_empty())
-        })
-        .collect();
-
-    routes_to_add
-}
-
-fn static_routes_in_db(
-    log: &Logger,
-    changes: &[(SwitchSlot, nexus_db_model::SwitchPort, PortSettingsChange)],
-) -> HashMap<SwitchSlot, SwitchStaticRoutes> {
-    let mut routes_from_db: HashMap<SwitchSlot, SwitchStaticRoutes> =
-        HashMap::new();
-
-    for (switch_slot, _port, change) in changes {
-        // we only need to check for ports that have a configuration present. No config == no routes.
-        let PortSettingsChange::Apply(settings) = change else {
-            continue;
-        };
-        let mut routes = HashSet::new();
-        for route in &settings.routes {
-            // convert to appropriate types for comparison and insertion
-
-            match (route.gw.ip(), route.dst.ip()) {
-                (IpAddr::V4(nexthop), IpAddr::V4(dst)) => {
-                    // TODO: https://github.com/oxidecomputer/omicron/issues/9801
-                    // This is a workaround until we have bootstore type versioning.
-                    // We want to stop using `None` as a sentinel value for DEFAULT,
-                    // and instead want to use an enum to more accurately represent what
-                    // is happening.
-                    let priority = match route.rib_priority {
-                        Some(v) => v.0,
-                        None => DEFAULT_RIB_PRIORITY_STATIC,
-                    };
-                    routes.insert(SwitchStaticRoute::V4(SwitchStaticRouteV4 {
-                        nexthop,
-                        prefix: Prefix4 {
-                            value: dst,
-                            length: route.dst.prefix(),
-                        },
-                        vlan: route.vid.map(|x| x.0),
-                        priority,
-                    }));
-                }
-                (IpAddr::V6(nexthop), IpAddr::V6(dst)) => {
-                    // TODO: https://github.com/oxidecomputer/omicron/issues/9801
-                    // This is a workaround until we have bootstore type versioning.
-                    // We want to stop using `None` as a sentinel value for DEFAULT,
-                    // and instead want to use an enum to more accurately represent what
-                    // is happening.
-                    let priority = match route.rib_priority {
-                        Some(v) => v.0,
-                        None => DEFAULT_RIB_PRIORITY_STATIC,
-                    };
-                    routes.insert(SwitchStaticRoute::V6(SwitchStaticRouteV6 {
-                        nexthop,
-                        prefix: Prefix6 {
-                            value: dst,
-                            length: route.dst.prefix(),
-                        },
-                        vlan: route.vid.map(|x| x.0),
-                        priority,
-                    }));
-                }
-                (nexthop, dst) => {
-                    error!(log, "encountered route with ip version mismatch";
-                        "nexthop" => nexthop.to_string(),
-                        "destination" => dst.to_string(),
-                    );
-                }
-            };
-        }
-
-        match routes_from_db.entry(*switch_slot) {
-            Entry::Occupied(mut occupied_entry) => {
-                occupied_entry.get_mut().extend(routes);
-            }
-            Entry::Vacant(vacant_entry) => {
-                vacant_entry.insert(routes);
-            }
-        }
-    }
-    routes_from_db
-}
-
-// apply changes for each port
-// if we encounter an error, we log it and keep going instead of bailing
-async fn apply_switch_port_changes(
-    dpd_clients: &HashMap<SwitchSlot, dpd_client::Client>,
-    changes: &[(SwitchSlot, nexus_db_model::SwitchPort, PortSettingsChange)],
-    log: &slog::Logger,
-) {
-    for (switch_slot, switch_port, change) in changes {
-        let client = match dpd_clients.get(&switch_slot) {
-            Some(client) => client,
-            None => {
-                error!(
-                    &log,
-                    "no DPD client for switch switch_slot";
-                    "switch_location" => ?switch_slot
-                );
-                continue;
-            }
-        };
-
-        let port_name = switch_port.port_name.clone();
-
-        let dpd_port_id = match DpdTypes::PortId::from_str(port_name.as_str()) {
-            Ok(port_id) => port_id,
-            Err(e) => {
-                error!(
-                    &log,
-                    "failed to parse switch port id";
-                    "db_switch_port_name" => ?switch_port.port_name,
-                    "switch_location" => ?switch_slot,
-                    "error" => format!("{:#}", e)
-                );
-                continue;
-            }
-        };
-
-        let mut config_on_switch =
-            match client.port_settings_get(&dpd_port_id, DPD_TAG).await {
-                Ok(v) => v,
-                Err(e) => {
-                    error!(
-                        log,
-                        "failed to retrieve port setttings from switch";
-                        "switch_port_id" => ?port_name,
-                        "switch_location" => ?switch_slot,
-                        "error" => format!("{:#}", e)
-                    );
-                    continue;
-                }
+                DesiredConfigOutOfDate::Yes
+            } else {
+                DesiredConfigOutOfDate::No
             };
 
-        // dont consider link local addresses in change computation
-        for lnk in config_on_switch.links.values_mut() {
-            lnk.addrs.retain(|x| match x {
-                IpAddr::V6(addr) => !addr.is_unicast_link_local(),
-                _ => true,
-            })
+            let is_blueprint_different = if current_nat != desired_nat {
+                ConfigChanged::Yes
+            } else {
+                ConfigChanged::No
+            };
+
+            (is_blueprint_out_of_date, is_blueprint_different)
+        } else {
+            // If the bootstore has no blueprint config, we have no way of
+            // detecting stale data; we have to assume it's not stale, because
+            // there's definitely been a change we need to write!
+            (DesiredConfigOutOfDate::No, ConfigChanged::Yes)
+        };
+
+    // Compute staleness and "are there changes" for
+    // `desired_rack_network_config`.
+    //
+    // TODO-correctness We have no way of computing staleness! We must always
+    // assume `desired_rack_network_config` is not out of date.
+    let is_network_config_out_of_date = DesiredConfigOutOfDate::No;
+    let is_network_config_different = {
+        let RackNetworkConfig {
+            rack_subnet: current_subnet,
+            infra_ip_first: current_infra_ip_first,
+            infra_ip_last: current_infra_ip_last,
+            ports: current_ports,
+            bgp: current_bgp,
+            bfd: current_bfd,
+        } = &current_contents.rack_network_config;
+
+        let RackNetworkConfig {
+            rack_subnet: desired_subnet,
+            infra_ip_first: desired_infra_ip_first,
+            infra_ip_last: desired_infra_ip_last,
+            ports: desired_ports,
+            bgp: desired_bgp,
+            bfd: desired_bfd,
+        } = desired_rack_network_config;
+
+        let rnc_differs = !hashset_eq(current_bgp, desired_bgp)
+            || !hashset_eq(current_bfd, desired_bfd)
+            || !hashset_eq(current_ports.as_slice(), desired_ports.as_slice())
+            || current_subnet != desired_subnet
+            || current_infra_ip_first != desired_infra_ip_first
+            || current_infra_ip_last != desired_infra_ip_last;
+
+        if rnc_differs { ConfigChanged::Yes } else { ConfigChanged::No }
+    };
+
+    match (
+        is_blueprint_out_of_date,
+        is_network_config_out_of_date,
+        is_blueprint_different,
+        is_network_config_different,
+    ) {
+        // If either config is out of date, we must not make changes to avoid
+        // overwriting newer data. A future task activation will load a
+        // different (and newer) set of desired config.
+        (DesiredConfigOutOfDate::Yes, _, _, _)
+        | (_, DesiredConfigOutOfDate::Yes, _, _) => {
+            warn!(
+                log, "skipping bootstore update due to stale data";
+                "is_blueprint_out_of_date" =>
+                    is_blueprint_out_of_date.as_bool(),
+                "is_blueprint_different" =>
+                    is_blueprint_different.as_bool(),
+                "is_network_config_out_of_date" =>
+                    is_network_config_out_of_date.as_bool(),
+                "is_network_config_different" =>
+                    is_network_config_different.as_bool(),
+            );
+            false
         }
 
-        info!(
-            log,
-            "retrieved port settings from switch";
-            "switch_port_id" => ?port_name,
-            "settings" => ?config_on_switch,
-        );
+        // If neither config is out of date, has either changed? If so, we do
+        // need to write new bootstore contents.
+        (
+            DesiredConfigOutOfDate::No,
+            DesiredConfigOutOfDate::No,
+            ConfigChanged::Yes,
+            _,
+        )
+        | (
+            DesiredConfigOutOfDate::No,
+            DesiredConfigOutOfDate::No,
+            _,
+            ConfigChanged::Yes,
+        ) => {
+            info!(
+                log, "will update bootstore with new contents";
+                "is_network_config_out_of_date" =>
+                    is_network_config_out_of_date.as_bool(),
+                "is_network_config_different" =>
+                    is_network_config_different.as_bool(),
+            );
+            true
+        }
 
-        match change {
-            PortSettingsChange::Apply(settings) => {
-                let dpd_port_settings = match api_to_dpd_port_settings(
-                    &settings,
-                ) {
-                    Ok(settings) => settings,
-                    Err(e) => {
-                        error!(
-                            &log,
-                            "failed to convert switch port settings";
-                            "switch_port_id" => ?port_name,
-                            "switch_location" => ?switch_slot,
-                            "switch_port_settings_id" => ?settings.settings.id(),
-                            "error" => format!("{:#}", e)
-                        );
-                        continue;
-                    }
-                };
-
-                if config_on_switch.into_inner() == dpd_port_settings {
-                    info!(
-                        &log,
-                        "port settings up to date, skipping";
-                        "switch_port_id" => ?port_name,
-                        "switch_location" => ?switch_slot,
-                        "switch_port_settings_id" => ?settings.settings.id(),
-                    );
-                    continue;
-                }
-
-                // apply settings via dpd client
-                info!(
-                    &log,
-                    "applying settings to switch port";
-                    "switch_location" => ?switch_slot,
-                    "port_id" => ?dpd_port_id,
-                    "settings" => ?dpd_port_settings,
-                );
-                match client
-                    .port_settings_apply(
-                        &dpd_port_id,
-                        DPD_TAG,
-                        &dpd_port_settings,
-                    )
-                    .await
-                {
-                    Ok(_) => {}
-                    Err(e) => {
-                        error!(
-                            &log,
-                            "failed to apply switch port settings";
-                            "switch_port_id" => ?port_name,
-                            "switch_location" => ?switch_slot,
-                            "error" => format!("{:#}", e)
-                        );
-                    }
-                }
-            }
-            PortSettingsChange::Clear => {
-                // clear settings via dpd client
-                info!(
-                    &log,
-                    "clearing switch port settings";
-                    "switch_location" => ?switch_slot,
-                    "port_id" => ?dpd_port_id,
-                );
-
-                if config_on_switch.into_inner().links.is_empty() {
-                    info!(
-                        &log,
-                        "port settings up to date, skipping";
-                        "switch_port_id" => ?port_name,
-                        "switch_location" => ?switch_slot,
-                    );
-                    continue;
-                }
-
-                match client.port_settings_clear(&dpd_port_id, DPD_TAG).await {
-                    Ok(_) => {}
-                    Err(e) => {
-                        error!(
-                            &log,
-                            "failed to clear switch port settings";
-                            "switch_port_id" => ?port_name,
-                            "switch_location" => ?switch_slot,
-                            "error" => format!("{:#}", e)
-                        );
-                    }
-                }
-            }
+        // The most common case in practice: our desired config is not out of
+        // date, but also hasn't changed since the last task activation. We
+        // don't need to write anything to the bootstore; it's up to date.
+        (
+            DesiredConfigOutOfDate::No,
+            DesiredConfigOutOfDate::No,
+            ConfigChanged::No,
+            ConfigChanged::No,
+        ) => {
+            info!(log, "will not update bootstore: it is up to date");
+            false
         }
     }
 }
 
-async fn static_routes_on_switch(
-    mgd_clients: &HashMap<SwitchSlot, mg_admin_client::Client>,
-    log: &slog::Logger,
-) -> HashMap<SwitchSlot, SwitchStaticRoutes> {
-    let mut routes_on_switch = HashMap::new();
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use iddqd::IdOrdMap;
+    use omicron_common::api::external::Vni;
+    use omicron_generation_kinds::Generation;
+    use omicron_test_utils::dev::test_setup_log;
+    use sled_agent_types::early_networking::PortConfig;
+    use sled_agent_types::early_networking::UplinkPorts;
+    use sled_agent_types::inventory::SourceNatConfigGeneric;
+    use sled_agent_types::system_networking::ServiceZoneNatEntries;
+    use sled_agent_types::system_networking::ServiceZoneNatEntry;
+    use sled_agent_types::system_networking::ServiceZoneNatKind;
 
-    for (switch_slot, client) in mgd_clients {
-        let v4_static_routes = match client.static_list_v4_routes().await {
-            Ok(routes) => routes.into_inner(),
-            Err(e) => {
-                error!(
-                    &log,
-                    "unable to retrieve v4 routes from switch";
-                    "error" => e.to_string(),
-                    "switch_location" => ?switch_slot,
-                );
-                continue;
-            }
-        };
-        let v6_static_routes = match client.static_list_v6_routes().await {
-            Ok(routes) => routes.into_inner(),
-            Err(e) => {
-                error!(
-                    &log,
-                    "unable to retrieve v6 routes from switch";
-                    "error" => e.to_string(),
-                    "switch_location" => ?switch_slot,
-                );
-                continue;
-            }
-        };
-
-        let routes: Vec<_> =
-            v4_static_routes.into_iter().chain(v6_static_routes).collect();
-
-        let mut flattened = HashSet::new();
-        for (destination, paths) in &routes {
-            for p in paths.iter() {
-                match p.nexthop {
-                    IpAddr::V4(addr) => {
-                        let Ok(dst) = destination.parse() else {
-                            error!(
-                                log,
-                                "failed to parse static route destination: \
-                                 {destination}"
-                            );
-                            continue;
-                        };
-                        flattened.insert(SwitchStaticRoute::V4(
-                            SwitchStaticRouteV4 {
-                                nexthop: addr,
-                                prefix: dst,
-                                vlan: p.vlan_id,
-                                priority: p.rib_priority,
-                            },
-                        ));
-                    }
-                    IpAddr::V6(addr) => {
-                        let Ok(dst) = destination.parse() else {
-                            error!(
-                                log,
-                                "failed to parse static route destination: \
-                                 {destination}"
-                            );
-                            continue;
-                        };
-                        flattened.insert(SwitchStaticRoute::V6(
-                            SwitchStaticRouteV6 {
-                                nexthop: addr,
-                                prefix: dst,
-                                vlan: p.vlan_id,
-                                priority: p.rib_priority,
-                            },
-                        ));
-                    }
-                };
-            }
+    fn make_rack_network_config(rack_subnet: &str) -> RackNetworkConfig {
+        RackNetworkConfig {
+            rack_subnet: rack_subnet.parse().unwrap(),
+            infra_ip_first: "172.20.15.21".parse().unwrap(),
+            infra_ip_last: "172.20.15.22".parse().unwrap(),
+            // `UplinkPorts` must be non-empty -- use a single placeholder port.
+            ports: UplinkPorts::new(vec![PortConfig::empty_for_tests("qsfp0")])
+                .expect("placeholder port list is non-empty"),
+            bgp: vec![],
+            bfd: vec![],
         }
-        routes_on_switch.insert(*switch_slot, flattened);
     }
-    routes_on_switch
-}
 
-async fn delete_static_routes(
-    mgd_clients: &HashMap<SwitchSlot, mg_admin_client::Client>,
-    routes_to_del: HashMap<SwitchSlot, DeleteStaticRouteRequest>,
-    log: &slog::Logger,
-) {
-    for (switch_slot, request) in routes_to_del {
-        let client = match mgd_clients.get(&switch_slot) {
-            Some(client) => client,
-            None => {
-                error!(
-                    &log,
-                    "mgd client not found for switch slot";
-                    "switch_slot" => ?switch_slot,
-                );
-                continue;
-            }
-        };
-
-        info!(
-            &log,
-            "removing static routes";
-            "switch_slot" => ?switch_slot,
-            "request" => ?request,
-        );
-        if let Err(e) = client.static_remove_v4_route(&request.v4).await {
-            error!(
-                &log,
-                "failed to delete v4 routes from mgd";
-                "switch_slot" => ?switch_slot,
-                "request" => ?request,
-                "error" => format!("{:#}", e)
-            );
-        };
-        if let Err(e) = client.static_remove_v6_route(&request.v6).await {
-            error!(
-                &log,
-                "failed to delete v6 routes from mgd";
-                "switch_slot" => ?switch_slot,
-                "request" => ?request,
-                "error" => format!("{:#}", e)
-            );
-        };
+    fn make_nat_entries(nexus_external_ip: &str) -> ServiceZoneNatEntries {
+        ServiceZoneNatEntries::try_from(
+            [
+                ServiceZoneNatEntry {
+                    zone_id: "00000000-0000-0000-0000-000000000001"
+                        .parse()
+                        .unwrap(),
+                    sled_underlay_ip: "fd00:1122:3344:101::1".parse().unwrap(),
+                    nic_mac: "A8:40:25:FF:80:00".parse().unwrap(),
+                    vni: Vni::SERVICES_VNI,
+                    kind: ServiceZoneNatKind::BoundaryNtp {
+                        snat_cfg: SourceNatConfigGeneric::new(
+                            "172.20.26.1".parse().unwrap(),
+                            0,
+                            16383,
+                        )
+                        .expect("valid snat cfg"),
+                    },
+                },
+                ServiceZoneNatEntry {
+                    zone_id: "00000000-0000-0000-0000-000000000002"
+                        .parse()
+                        .unwrap(),
+                    sled_underlay_ip: "fd00:1122:3344:102::1".parse().unwrap(),
+                    nic_mac: "A8:40:25:FF:80:01".parse().unwrap(),
+                    vni: Vni::SERVICES_VNI,
+                    kind: ServiceZoneNatKind::ExternalDns {
+                        external_ip: "172.20.26.2".parse().unwrap(),
+                    },
+                },
+                ServiceZoneNatEntry {
+                    zone_id: "00000000-0000-0000-0000-000000000003"
+                        .parse()
+                        .unwrap(),
+                    sled_underlay_ip: "fd00:1122:3344:103::1".parse().unwrap(),
+                    nic_mac: "A8:40:25:FF:80:02".parse().unwrap(),
+                    vni: Vni::SERVICES_VNI,
+                    kind: ServiceZoneNatKind::Nexus {
+                        external_ip: nexus_external_ip.parse().unwrap(),
+                    },
+                },
+            ]
+            .into_iter()
+            .collect::<IdOrdMap<_>>(),
+        )
+        .expect("valid service zone NAT entries")
     }
-}
 
-async fn add_static_routes(
-    mgd_clients: &HashMap<SwitchSlot, mg_admin_client::Client>,
-    routes_to_add: HashMap<SwitchSlot, AddStaticRouteRequest>,
-    log: &slog::Logger,
-) {
-    for (switch_slot, request) in routes_to_add {
-        let client = match mgd_clients.get(&switch_slot) {
-            Some(client) => client,
-            None => {
-                error!(
-                    &log,
-                    "mgd client not found for switch slot";
-                    "switch_slot" => ?switch_slot,
-                );
-                continue;
-            }
-        };
+    fn make_blueprint_config(
+        generation: u32,
+        service_zone_nat_entries: ServiceZoneNatEntries,
+    ) -> BlueprintExternalNetworkingConfig {
+        BlueprintExternalNetworkingConfig {
+            blueprint_external_networking_generation: Generation::from_u32(
+                generation,
+            ),
+            service_zone_nat_entries,
+        }
+    }
 
-        info!(
-            &log,
-            "adding static routes";
-            "switch_slot" => ?switch_slot,
-            "request" => ?request,
+    fn make_system_networking_config(
+        rnc: RackNetworkConfig,
+        blueprint: Option<BlueprintExternalNetworkingConfig>,
+    ) -> SystemNetworkingConfig {
+        SystemNetworkingConfig {
+            rack_network_config: rnc,
+            blueprint_external_networking_config: blueprint,
+        }
+    }
+
+    #[test]
+    fn bootstore_update_when_current_has_no_blueprint_config() {
+        let logctx = test_setup_log(
+            "bootstore_update_when_current_has_no_blueprint_config",
         );
-        if let Err(e) = client.static_add_v4_route(&request.v4).await {
-            error!(
-                &log,
-                "failed to add v4 routes to mgd";
-                "switch_slot" => ?switch_slot,
-                "request" => ?request,
-                "error" => format!("{:#}", e)
-            );
-        };
-        if let Err(e) = client.static_add_v6_route(&request.v6).await {
-            error!(
-                &log,
-                "failed to add v6 routes to mgd";
-                "switch_slot" => ?switch_slot,
-                "request" => ?request,
-                "error" => format!("{:#}", e)
-            );
-        };
+
+        let rnc = make_rack_network_config("fd00:1122:3344:100::/56");
+        let current = make_system_networking_config(rnc.clone(), None);
+        let desired_blueprint =
+            make_blueprint_config(1, make_nat_entries("172.20.26.3"));
+
+        assert!(does_bootstore_need_update(
+            &current,
+            &rnc,
+            &desired_blueprint,
+            &logctx.log,
+        ));
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn bootstore_no_update_when_desired_blueprint_is_strictly_older() {
+        let logctx = test_setup_log(
+            "bootstore_no_update_when_desired_blueprint_is_strictly_older",
+        );
+
+        let rnc = make_rack_network_config("fd00:1122:3344:100::/56");
+        let current = make_system_networking_config(
+            rnc.clone(),
+            Some(make_blueprint_config(5, make_nat_entries("172.20.26.3"))),
+        );
+
+        // Intentionally use different NAT entries here; confirm that we do not
+        // report needing an update because the generation here (2) is stale
+        // (current is 5).
+        let desired_blueprint =
+            make_blueprint_config(2, make_nat_entries("172.20.26.4"));
+
+        assert!(!does_bootstore_need_update(
+            &current,
+            &rnc,
+            &desired_blueprint,
+            &logctx.log,
+        ));
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn bootstore_update_when_desired_blueprint_is_newer_and_nat_differs() {
+        let logctx = test_setup_log(
+            "bootstore_update_when_desired_blueprint_is_newer_and_nat_differs",
+        );
+
+        let rnc = make_rack_network_config("fd00:1122:3344:100::/56");
+        let current = make_system_networking_config(
+            rnc.clone(),
+            Some(make_blueprint_config(2, make_nat_entries("172.20.26.3"))),
+        );
+        let desired_blueprint =
+            make_blueprint_config(5, make_nat_entries("172.20.26.4"));
+
+        assert!(does_bootstore_need_update(
+            &current,
+            &rnc,
+            &desired_blueprint,
+            &logctx.log,
+        ));
+
+        logctx.cleanup_successful();
+    }
+
+    // Pins the "just-transitioned to tracking generation" case explicitly
+    // noted in the comment inside `does_bootstore_need_update()`: at gen=1,
+    // the bootstore may have been written with stale NAT entries by a Nexus
+    // that pre-dates this generation field. Equal gens with different NATs
+    // must still trigger an update so the correct gen=1 value gets written.
+    //
+    // With the current implementation the test would still pass with any
+    // generation (1 isn't special), but we only need to test that we handle
+    // this case for generation 1. We never expect a blueprint to have different
+    // NAT entries without bumping the associated generation number.
+    #[test]
+    fn bootstore_update_when_blueprints_equal_and_nat_differs_at_gen_1() {
+        let logctx = test_setup_log(
+            "bootstore_update_when_blueprints_equal_and_nat_differs_at_gen_1",
+        );
+
+        let rnc = make_rack_network_config("fd00:1122:3344:100::/56");
+        let current = make_system_networking_config(
+            rnc.clone(),
+            Some(make_blueprint_config(1, make_nat_entries("172.20.26.3"))),
+        );
+        let desired_blueprint =
+            make_blueprint_config(1, make_nat_entries("172.20.26.4"));
+
+        assert!(does_bootstore_need_update(
+            &current,
+            &rnc,
+            &desired_blueprint,
+            &logctx.log,
+        ));
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn bootstore_update_when_nat_matches_but_rnc_differs() {
+        let logctx =
+            test_setup_log("bootstore_update_when_nat_matches_but_rnc_differs");
+
+        let nat = make_nat_entries("172.20.26.3");
+        let current_rnc = make_rack_network_config("fd00:1122:3344:100::/56");
+        let desired_rnc = make_rack_network_config("fd00:1122:3344:200::/56");
+        let desired_blueprint = make_blueprint_config(3, nat);
+
+        let current = make_system_networking_config(
+            current_rnc,
+            Some(desired_blueprint.clone()),
+        );
+
+        assert!(does_bootstore_need_update(
+            &current,
+            &desired_rnc,
+            &desired_blueprint,
+            &logctx.log,
+        ));
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn bootstore_no_update_when_everything_matches() {
+        let logctx =
+            test_setup_log("bootstore_no_update_when_everything_matches");
+
+        let rnc = make_rack_network_config("fd00:1122:3344:100::/56");
+        let nat = make_nat_entries("172.20.26.3");
+        let desired_blueprint = make_blueprint_config(3, nat);
+
+        let current = make_system_networking_config(
+            rnc.clone(),
+            Some(desired_blueprint.clone()),
+        );
+
+        assert!(!does_bootstore_need_update(
+            &current,
+            &rnc,
+            &desired_blueprint,
+            &logctx.log,
+        ));
+
+        logctx.cleanup_successful();
     }
 }

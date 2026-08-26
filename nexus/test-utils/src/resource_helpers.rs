@@ -18,7 +18,9 @@ use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_test_interface::NexusServer;
 use nexus_types::deployment::Blueprint;
 use nexus_types::external_api::affinity;
-use nexus_types::external_api::affinity::{AffinityGroup, AntiAffinityGroup};
+use nexus_types::external_api::affinity::{
+    AffinityGroup, AffinityPolicy, AntiAffinityGroup, FailureDomain,
+};
 use nexus_types::external_api::certificate;
 use nexus_types::external_api::certificate::Certificate;
 use nexus_types::external_api::device::{
@@ -33,6 +35,9 @@ use nexus_types::external_api::floating_ip::FloatingIp;
 use nexus_types::external_api::hardware::Baseboard;
 use nexus_types::external_api::image;
 use nexus_types::external_api::instance;
+use nexus_types::external_api::instance::{
+    InstanceAutoRestartPolicy, InstanceCpuCount,
+};
 use nexus_types::external_api::internet_gateway;
 use nexus_types::external_api::internet_gateway::{
     InternetGateway, InternetGatewayIpAddress, InternetGatewayIpPool,
@@ -42,6 +47,7 @@ use nexus_types::external_api::ip_pool::{
     IpPool, IpPoolRange, IpRange, IpVersion,
 };
 use nexus_types::external_api::multicast;
+use nexus_types::external_api::path_params;
 use nexus_types::external_api::policy;
 use nexus_types::external_api::project;
 use nexus_types::external_api::project::Project;
@@ -56,29 +62,20 @@ use nexus_types::external_api::vpc;
 use nexus_types::external_api::vpc::{Vpc, VpcRouter, VpcSubnet};
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params as internal_params;
-use omicron_common::api::external::AffinityPolicy;
+use nexus_types_versions::latest::instance::Instance;
+use nexus_types_versions::latest::instance::InstanceCpuPlatform;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::FailureDomain;
-use omicron_common::api::external::Generation;
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_common::api::external::Instance;
-use omicron_common::api::external::InstanceAutoRestartPolicy;
-use omicron_common::api::external::InstanceCpuCount;
-use omicron_common::api::external::InstanceCpuPlatform;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::RouteDestination;
 use omicron_common::api::external::RouteTarget;
 use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::UserId;
-use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetKind;
 use omicron_common::disk::DatasetName;
-use omicron_common::disk::DatasetsConfig;
-use omicron_common::disk::DiskIdentity;
-use omicron_common::disk::SharedDatasetConfig;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_sled_agent::sim::SledAgent;
 use omicron_test_utils::dev::poll::CondCheckError;
@@ -92,6 +89,10 @@ use omicron_uuid_kinds::ZpoolUuid;
 use oxnet::IpNet;
 use oxnet::Ipv4Net;
 use oxnet::Ipv6Net;
+use sled_agent_types::disk::DatasetConfig;
+use sled_agent_types::disk::DiskIdentity;
+use sled_agent_types::disk::OmicronPhysicalDiskConfig;
+use sled_agent_types::disk::SharedDatasetConfig;
 use sled_agent_types::inventory::ZpoolHealth;
 use slog::debug;
 use std::collections::BTreeMap;
@@ -291,16 +292,18 @@ pub async fn create_ip_pool(
     pool_name: &str,
     ip_range: Option<IpRange>,
 ) -> (IpPool, IpPoolRange) {
-    let pool_params = ip_pool::IpPoolCreate::new(
-        IdentityMetadataCreateParams {
+    let pool_params = ip_pool::IpPoolCreate {
+        identity: IdentityMetadataCreateParams {
             name: pool_name.parse().unwrap(),
             description: String::from("an ip pool"),
         },
-        ip_range
+        ip_version: ip_range
             .as_ref()
             .map(|r| r.version())
             .unwrap_or_else(ip_pool::IpVersion::v4),
-    );
+        pool_type: ip_pool::IpPoolType::Unicast,
+        assignment: ip_pool::IpPoolAssignment::Silos,
+    };
     let pool = object_create(client, "/v1/system/ip-pools", &pool_params).await;
 
     let ip_range = ip_range.unwrap_or_else(|| {
@@ -329,15 +332,17 @@ pub async fn create_multicast_ip_pool(
     let pool = object_create(
         client,
         "/v1/system/ip-pools",
-        &ip_pool::IpPoolCreate::new_multicast(
-            IdentityMetadataCreateParams {
+        &ip_pool::IpPoolCreate {
+            identity: IdentityMetadataCreateParams {
                 name: pool_name.parse().unwrap(),
                 description: String::from("a multicast ip pool"),
             },
-            ip_range
+            ip_version: ip_range
                 .map(|r| r.version())
                 .unwrap_or_else(|| ip_pool::IpVersion::V4),
-        ),
+            pool_type: ip_pool::IpPoolType::Multicast,
+            assignment: ip_pool::IpPoolAssignment::Silos,
+        },
     )
     .await;
 
@@ -939,6 +944,7 @@ pub async fn create_instance_with(
             auto_restart_policy,
             anti_affinity_groups: Vec::new(),
             multicast_groups,
+            enable_jumbo_frames: false,
         },
     )
     .await
@@ -961,6 +967,31 @@ where
     object_create_error(client, &url, body, status).await
 }
 
+pub async fn attach_disk_to_instance(
+    client: &ClientTestContext,
+    project_name: &str,
+    instance_name: &str,
+    disk_name: &str,
+) {
+    let url = format!(
+        "/v1/instances/{instance_name}/disks/attach?project={project_name}",
+    );
+
+    let body = path_params::DiskPath {
+        disk: disk_name.to_string().try_into().unwrap(),
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &url)
+            .body(Some(&body))
+            .expect_status(Some(StatusCode::ACCEPTED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+}
+
 pub async fn create_affinity_group(
     client: &ClientTestContext,
     project_name: &str,
@@ -968,7 +999,7 @@ pub async fn create_affinity_group(
 ) -> AffinityGroup {
     object_create(
         &client,
-        format!("/v1/affinity-groups?project={}", &project_name).as_str(),
+        format!("/v1/affinity-groups?project={}", project_name).as_str(),
         &affinity::AffinityGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: group_name.parse().unwrap(),
@@ -988,7 +1019,7 @@ pub async fn create_anti_affinity_group(
 ) -> AntiAffinityGroup {
     object_create(
         &client,
-        format!("/v1/anti-affinity-groups?project={}", &project_name).as_str(),
+        format!("/v1/anti-affinity-groups?project={}", project_name).as_str(),
         &affinity::AntiAffinityGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: group_name.parse().unwrap(),
@@ -1008,7 +1039,7 @@ pub async fn create_vpc(
 ) -> Vpc {
     object_create(
         &client,
-        format!("/v1/vpcs?project={}", &project_name).as_str(),
+        format!("/v1/vpcs?project={}", project_name).as_str(),
         &vpc::VpcCreate {
             identity: IdentityMetadataCreateParams {
                 name: vpc_name.parse().unwrap(),
@@ -1033,7 +1064,7 @@ pub async fn create_vpc_with_error(
         RequestBuilder::new(
             client,
             Method::POST,
-            format!("/v1/vpcs?project={}", &project_name).as_str(),
+            format!("/v1/vpcs?project={}", project_name).as_str(),
         )
         .body(Some(&vpc::VpcCreate {
             identity: IdentityMetadataCreateParams {
@@ -1087,7 +1118,7 @@ pub async fn create_router(
 ) -> VpcRouter {
     NexusRequest::objects_post(
         &client,
-        format!("/v1/vpc-routers?project={}&vpc={}", &project_name, &vpc_name)
+        format!("/v1/vpc-routers?project={}&vpc={}", project_name, vpc_name)
             .as_str(),
         &vpc::VpcRouterCreate {
             identity: IdentityMetadataCreateParams {
@@ -1117,7 +1148,7 @@ pub async fn create_route(
         &client,
         format!(
             "/v1/vpc-router-routes?project={}&vpc={}&router={}",
-            &project_name, &vpc_name, &router_name
+            project_name, vpc_name, router_name
         )
         .as_str(),
         &vpc::RouterRouteCreate {
@@ -1154,7 +1185,7 @@ pub async fn create_route_with_error(
             Method::POST,
             format!(
                 "/v1/vpc-router-routes?project={}&vpc={}&router={}",
-                &project_name, &vpc_name, &router_name
+                project_name, vpc_name, router_name
             )
             .as_str(),
         )
@@ -1186,7 +1217,7 @@ pub async fn create_internet_gateway(
         &client,
         format!(
             "/v1/internet-gateways?project={}&vpc={}",
-            &project_name, &vpc_name
+            project_name, vpc_name
         )
         .as_str(),
         &vpc::VpcRouterCreate {
@@ -1215,7 +1246,7 @@ pub async fn delete_internet_gateway(
         &client,
         format!(
             "/v1/internet-gateways/{}?project={}&vpc={}&cascade={}",
-            &internet_gateway_name, &project_name, &vpc_name, cascade
+            internet_gateway_name, project_name, vpc_name, cascade
         )
         .as_str(),
     )
@@ -1600,9 +1631,18 @@ pub struct TestDataset {
 
 pub struct TestZpool {
     pub id: ZpoolUuid,
+    pub physical_disk_id: PhysicalDiskUuid,
     pub size: ByteCount,
     datasets: Vec<TestDataset>,
     pub health: ZpoolHealth,
+}
+
+fn test_disk_identity(physical_disk_id: PhysicalDiskUuid) -> DiskIdentity {
+    DiskIdentity {
+        vendor: "test-vendor".into(),
+        serial: format!("totally-unique-serial: {}", physical_disk_id),
+        model: "test-model".into(),
+    }
 }
 
 impl TestZpool {
@@ -1737,7 +1777,6 @@ impl<'a> Iterator for ZpoolIterator<'a> {
 pub struct DiskTest<'a, N: NexusServer> {
     cptestctx: &'a ControlPlaneTestContext<N>,
     sleds: BTreeMap<SledUuid, PerSledDiskState>,
-    generation: Generation,
 }
 
 impl<'a, N: NexusServer> DiskTest<'a, N> {
@@ -1770,33 +1809,12 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                 .collect(),
         };
 
-        // ControlPlaneTestContext sets up initial configs; find the max
-        // generation of all our sleds and use that as the base for any new
-        // configs we produce.
-        let generation = cptestctx
-            .all_sled_agents()
-            .filter_map(|agent| {
-                if input_sleds.contains(&agent.sled_agent.id) {
-                    Some(agent
-                    .sled_agent
-                    .datasets_config_list()
-                    .expect(
-                        "dataset config populated by ControlPlaneTestContext",
-                    )
-                    .generation)
-                } else {
-                    None
-                }
-            })
-            .max()
-            .expect("at least one sled specified");
-
         let mut sleds = BTreeMap::new();
         for sled_id in input_sleds {
             sleds.insert(sled_id, PerSledDiskState { zpools: vec![] });
         }
 
-        let mut disk_test = Self { cptestctx, sleds, generation };
+        let mut disk_test = Self { cptestctx, sleds };
 
         for sled_id in
             disk_test.sleds.keys().cloned().collect::<Vec<SledUuid>>()
@@ -1805,7 +1823,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                 disk_test.add_zpool_with_datasets(sled_id).await;
             }
         }
-        disk_test.propagate_datasets_to_sleds().await;
+        disk_test.propagate_storage_to_sleds().await;
 
         disk_test
     }
@@ -1833,7 +1851,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
     ///
     /// Does not inform sled agents to use these pools.
     ///
-    /// See: [Self::propagate_datasets_to_sleds] if you want to send this
+    /// See: [Self::propagate_storage_to_sleds] if you want to send this
     /// configuration to a simulated sled agent.
     pub async fn add_zpool_with_datasets(&mut self, sled_id: SledUuid) {
         self.add_sized_zpool_with_datasets(
@@ -1847,7 +1865,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
     ///
     /// Does not inform sled agents to use these pools.
     ///
-    /// See: [Self::propagate_datasets_to_sleds] if you want to send this
+    /// See: [Self::propagate_storage_to_sleds] if you want to send this
     /// configuration to a simulated sled agent.
     pub async fn add_sized_zpool_with_datasets(
         &mut self,
@@ -1878,13 +1896,13 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
         .await
     }
 
-    /// Propagate the dataset configuration to all Sled Agents.
-    // TODO: Ideally, we should do the following:
-    // Also call a similar method to invoke the "omicron_physical_disks_ensure" API. Right now,
-    // we aren't calling this at all for the simulated sled agent, which only works because
-    // the simulated sled agent simply treats this as a stored config, rather than processing it
-    // to actually provide a different view of storage.
-    pub async fn propagate_datasets_to_sleds(&mut self) {
+    /// Propagate the disk and dataset configuration to all Sled Agents.
+    ///
+    /// For each sled, this merges the disks and datasets we created into the
+    /// sled's current `OmicronSledConfig` (leaving zones and any other
+    /// contents intact, including preexisting disks and datasets!) and sends
+    /// the updated config at the next generation.
+    pub async fn propagate_storage_to_sleds(&mut self) {
         let cptestctx = self.cptestctx;
 
         for (sled_id, PerSledDiskState { zpools }) in &self.sleds {
@@ -1899,35 +1917,33 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                         None
                     }
                 })
-                .expect("Cannot find sled");
+                .expect("found sled");
 
-            // Configure the Sled to use all datasets we created
-            let datasets = zpools
-                .iter()
-                .flat_map(|zpool| zpool.datasets.iter().map(|d| (zpool.id, d)))
-                .map(|(zpool_id, TestDataset { id, kind })| {
-                    (
-                        *id,
-                        DatasetConfig {
-                            id: *id,
-                            name: DatasetName::new(
-                                ZpoolName::new_external(zpool_id),
-                                kind.clone(),
-                            ),
-                            inner: SharedDatasetConfig::default(),
-                        },
-                    )
-                })
-                .collect();
+            // Add all disks and datasets we created to the sled config.
+            let mut sled_config =
+                sled_agent.omicron_sled_config().unwrap_or_default();
+            for zpool in zpools {
+                sled_config.disks.insert_overwrite(OmicronPhysicalDiskConfig {
+                    identity: test_disk_identity(zpool.physical_disk_id),
+                    id: zpool.physical_disk_id,
+                    pool_id: zpool.id,
+                });
+                for TestDataset { id, kind } in &zpool.datasets {
+                    sled_config.datasets.insert_overwrite(DatasetConfig {
+                        id: *id,
+                        name: DatasetName::new(
+                            ZpoolName::new_external(zpool.id),
+                            kind.clone(),
+                        ),
+                        inner: SharedDatasetConfig::default(),
+                    });
+                }
+            }
 
-            self.generation = self.generation.next();
-            let generation = self.generation;
-            let dataset_config = DatasetsConfig { generation, datasets };
-            let res = sled_agent.datasets_ensure(dataset_config).expect(
-                "Should have been able to ensure datasets, but could not.
-                     Did someone else already attempt to ensure datasets?",
-            );
-            assert!(!res.has_error());
+            sled_config.generation = sled_config.generation.next();
+            sled_agent
+                .set_omicron_config(sled_config)
+                .expect("successfully updated sled config");
         }
     }
 
@@ -1958,7 +1974,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
     ///
     /// Does not inform sled agents to use these pools.
     ///
-    /// See: [Self::propagate_datasets_to_sleds] if you want to send
+    /// See: [Self::propagate_storage_to_sleds] if you want to send
     /// this configuration to a simulated sled agent.
     pub async fn add_zpool_with_datasets_ext(
         &mut self,
@@ -1975,16 +1991,13 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
         // disk, zpool, and dataset, all contained within one another.
         let zpool = TestZpool {
             id: zpool_id,
+            physical_disk_id,
             size: ByteCount::from_gibibytes_u32(gibibytes),
             datasets,
             health: zpool_health,
         };
 
-        let disk_identity = DiskIdentity {
-            vendor: "test-vendor".into(),
-            serial: format!("totally-unique-serial: {}", physical_disk_id),
-            model: "test-model".into(),
-        };
+        let disk_identity = test_disk_identity(physical_disk_id);
 
         let physical_disk_request =
             nexus_types::internal_api::params::PhysicalDiskPutRequest {
@@ -2093,7 +2106,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                 );
 
                 match result {
-                    Ok(None) => Err(CondCheckError::NotYet),
+                    Ok(None) => Err(CondCheckError::NotYet { status: None }),
                     Ok(Some(c)) => {
                         let all_zpools = c
                             .sled_agents
@@ -2106,11 +2119,11 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                         if all_zpools.contains(&zpool.id) {
                             Ok(())
                         } else {
-                            Err(CondCheckError::NotYet)
+                            Err(CondCheckError::NotYet { status: None })
                         }
                     }
                     Err(Error::ServiceUnavailable { .. }) => {
-                        Err(CondCheckError::NotYet)
+                        Err(CondCheckError::NotYet { status: None })
                     }
                     Err(error) => Err(CondCheckError::Failed(error)),
                 }
@@ -2203,6 +2216,11 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
     /// _not_ clean up crucible resources on an expunged disk (due to the "gone"
     /// check that it performs), but it's useful for tests to be able to assert
     /// all crucible resources are cleaned up.
+    ///
+    /// Note that this only affects this `DiskTest`'s in-memory state; if the
+    /// zpool's disk and datasets were previously propagated to a sled's
+    /// config, they remain there ([Self::propagate_storage_to_sleds] only
+    /// adds entries, it never removes them).
     pub async fn remove_zpool(&mut self, zpool_id: ZpoolUuid) {
         for sled in self.sleds.values_mut() {
             sled.zpools.retain(|zpool| zpool.id != zpool_id);

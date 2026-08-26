@@ -4,12 +4,17 @@
 
 //! Configuration of the deployment system
 
+use anyhow::Context;
+use anyhow::anyhow;
+use anyhow::bail;
+use iddqd::IdOrdMap;
 use nexus_db_model::TargetReleaseSource;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::planner::PlannerRng;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
+use nexus_reconfigurator_preparation::reconfigurator_state_assemble;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintArtifactVersion;
 use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
@@ -21,6 +26,7 @@ use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
+use nexus_types::deployment::UnstableReconfiguratorState;
 use nexus_types::external_api::update;
 use nexus_types::internal_api::views::UpdateStatus;
 use nexus_types::inventory::Collection;
@@ -32,6 +38,12 @@ use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
+use omicron_debug_dropbox::DepositHandle;
+use omicron_debug_dropbox::Producer;
+use omicron_generation_kinds::TargetReleaseGeneration;
+use omicron_uuid_kinds::BlueprintUuid;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SledUuid;
 use slog::Logger;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
@@ -41,6 +53,7 @@ use uuid::Uuid;
 
 /// Common structure for collecting information that the planner needs
 struct PlanningContext {
+    target: BlueprintTarget,
     planning_input: PlanningInput,
     creator: String,
     inventory: Option<Collection>,
@@ -99,6 +112,39 @@ impl super::Nexus {
         self.db_datastore.blueprint_target_get_current(opctx).await
     }
 
+    async fn assemble_state_for_new_target(
+        &self,
+        opctx: &OpContext,
+        new_target: BlueprintTarget,
+    ) -> Result<UnstableReconfiguratorState, anyhow::Error> {
+        let planning_context = self.blueprint_planning_context(opctx).await?;
+        let inventory = planning_context.inventory.ok_or_else(|| {
+            Error::internal_error("no recent inventory collection found")
+        })?;
+        let datastore = self.datastore();
+        let blueprint = self
+            .blueprint_view(opctx, *new_target.target_id.as_untyped_uuid())
+            .await?;
+        let blueprint_id = blueprint.id;
+        // Currently, this can only be used on systems that already have a
+        // target blueprint set, so this blueprint must have a parent.
+        let Some(parent_id) = blueprint.parent_blueprint_id else {
+            bail!("desired blueprint has no parent");
+        };
+        let parent =
+            self.blueprint_view(opctx, *parent_id.as_untyped_uuid()).await?;
+        reconfigurator_state_assemble(
+            opctx,
+            datastore,
+            planning_context.planning_input,
+            IdOrdMap::from_iter([inventory]),
+            IdOrdMap::from_iter([parent, blueprint]),
+            planning_context.target,
+            Some(blueprint_id),
+        )
+        .await
+    }
+
     pub async fn blueprint_target_set(
         &self,
         opctx: &OpContext,
@@ -110,12 +156,37 @@ impl super::Nexus {
             time_made_target: chrono::Utc::now(),
         };
 
-        self.db_datastore
-            .blueprint_target_set_current(opctx, new_target)
-            .await?;
+        // Use `SetTargetDebugWriter` to write out debugging files related to
+        // this operation.  All of this is best-effort.
+        let debug_dropbox_writer = SetTargetDebugWriter::new(
+            &opctx.log,
+            &self.debug_dropbox_reconfigurator,
+            self.assemble_state_for_new_target(opctx, new_target).await,
+        )
+        .write_intent(BlueprintDebugAction::TargetIntent)
+        .await;
 
-        // We have a new target: trigger the background task to load this
-        // blueprint.
+        if let Err(error) = self
+            .db_datastore
+            .blueprint_target_set_current(opctx, new_target)
+            .await
+        {
+            // Try to cancel the dropbox deposit.  This information is
+            // useless now.  It's not a problem if this doesn't work.
+            debug_dropbox_writer.cancel().await;
+            return Err(error);
+        }
+
+        // We've got a new target.
+        //
+        // There's no point in failing after this, whatever happens.
+        //
+        // Write a second Reconfigurator state file reflecting the new target.
+        debug_dropbox_writer
+            .write_committed(new_target, BlueprintDebugAction::Target)
+            .await;
+
+        // Trigger the background task to load this blueprint.
         self.background_tasks
             .activate(&self.background_tasks.task_blueprint_loader);
 
@@ -133,6 +204,9 @@ impl super::Nexus {
             time_made_target: chrono::Utc::now(),
         };
 
+        // We don't need to create or archive a Reconfigurator state file here
+        // because one would have been created when this blueprint was made the
+        // target in the first place.
         self.db_datastore
             .blueprint_target_set_current_enabled(opctx, new_target)
             .await?;
@@ -149,10 +223,10 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
     ) -> Result<PlanningContext, Error> {
-        let creator = self.id.to_string();
+        let creator = format!("nexus {}", self.id);
         let datastore = self.datastore();
 
-        let (_, parent_blueprint) =
+        let (target, parent_blueprint) =
             self.db_datastore.blueprint_target_get_current_full(opctx).await?;
 
         // Load up the planner config from the db directly (rather than from,
@@ -189,7 +263,7 @@ impl super::Nexus {
                 "fetching latest inventory collection for blueprint planner",
             )?;
 
-        Ok(PlanningContext { planning_input, creator, inventory })
+        Ok(PlanningContext { target, planning_input, creator, inventory })
     }
 
     async fn blueprint_add(
@@ -227,7 +301,69 @@ impl super::Nexus {
             ))
         })?;
 
-        self.blueprint_add(&opctx, &blueprint).await?;
+        // Assemble a Reconfigurator state file that we can archive for future
+        // debugging.  This is best-effort.
+        let parent = Blueprint::clone(
+            planning_context.planning_input.parent_blueprint(),
+        );
+        let maybe_debug = reconfigurator_state_assemble(
+            opctx,
+            self.datastore(),
+            planning_context.planning_input,
+            IdOrdMap::from_iter([inventory]),
+            IdOrdMap::from_iter([parent, blueprint.clone()]),
+            planning_context.target,
+            None,
+        )
+        .await
+        .and_then(|s| {
+            serde_json::to_string(&s)
+                .context("serializing Reconfigurator state file")
+        })
+        .map_err(|error| {
+            Error::internal_error(&format!(
+                "error assembling Reconfigurator state: {}",
+                InlineErrorChain::new(&*error),
+            ))
+        });
+
+        let archive_deposit = match maybe_debug {
+            Err(error) => Err(error),
+            Ok(debug_str) => {
+                let debug_name = blueprint_debug_filename(
+                    &blueprint,
+                    BlueprintDebugAction::Plan,
+                );
+                self.debug_dropbox_reconfigurator
+                    .deposit_file(&debug_name, &debug_str)
+                    .await
+                    .map_err(|error| {
+                        Error::internal_error(&format!(
+                            "error saving Reconfigurator state: {}",
+                            InlineErrorChain::new(&error),
+                        ))
+                    })
+            }
+        };
+
+        if let Err(error) = &archive_deposit {
+            warn!(
+                &opctx.log,
+                "failed to archive debug file for new blueprint";
+                "blueprint_id" => %blueprint.id,
+                InlineErrorChain::new(error),
+            );
+        }
+
+        if let Err(error) = self.blueprint_add(&opctx, &blueprint).await {
+            // Try to cancel the dropbox deposit.  This information is
+            // useless now.  It's not a problem if this doesn't work.
+            if let Ok(deposit) = archive_deposit {
+                deposit.cancel_and_attempt_delete().await;
+            }
+            return Err(error);
+        }
+
         Ok(blueprint)
     }
 
@@ -236,6 +372,15 @@ impl super::Nexus {
         opctx: &OpContext,
         blueprint: Blueprint,
     ) -> Result<(), Error> {
+        // We do not save a Reconfigurator state file for import.  The only
+        // reason to do so is for the historical record to contain this specific
+        // blueprint.  If it's made the target, the record will contain another
+        // state file for that operation and that will contain the blueprint.
+        // If not, it's not that important.  (We could generate one anyway, but
+        // most of the state in the state file would be useless: most of it is
+        // oriented around understanding a planning decision, but the state we
+        // would construct would not be associated with planning this
+        // blueprint.)
         let _ = self.blueprint_add(&opctx, &blueprint).await?;
         Ok(())
     }
@@ -314,31 +459,70 @@ impl super::Nexus {
                 // the version cannot be downgraded). These are enforced by
                 // `validate_can_set_target_release_for_update()`.
                 //
-                // If they're attempting to recover from a mupdate, the only
-                // requirement we enforce is that there is at least one sled
-                // that is waiting for mupdate recovery. If there isn't, there's
-                // no reason to attempt to recover from a mupdate. If there is,
-                // we don't do any further version checking, because a mupdate
-                // is by design going outside the bounds of the update system.
-                // It's possible support has intentionally mupdated the system
-                // to a version that wouldn't normally be allowed by the update
-                // system, and we have to provide a way to notify the system of
-                // that change. (A benign example that has come up in practice
-                // is: system is mupdated to version N. Operator sets the target
-                // release with `RecoverFromMupdate` intent, but accidentally
-                // sets it to version N+1. The sleds remain in the "waiting for
-                // mupdate recovery" state, because N+1 doesn't match the
-                // software deployed, but the thing the operator needs to do now
-                // is set the target release with `RecoverFromMupdate` intent to
-                // version N. From Nexus's point of view this looks like a
-                // version downgrade, but it's not: we're still trying to
-                // recover from a mupdate.)
-                let current_version = self
-                    .datastore()
-                    .tuf_repo_get_version(&opctx, &tuf_repo_id)
-                    .await?;
+                // If they're attempting to recover from a mupdate, we enforce
+                // that this looks like a reasonable thing to do, but it's hard
+                // for us to check this exactly. We allow this operation to
+                // proceed in two cases:
+                //
+                // 1. Any sled is waiting for mupdate recovery - we allow the
+                //    operation to proceed with no checks on the proposed new
+                //    version - we have to trust the operator that it matches
+                //    whatever those sled(s) are waiting for. If they get it
+                //    wrong, the sleds will still stay in the "waiting for
+                //    recovery" state, and the operator can try this again with
+                //    the correct version.
+                // 2. All sleds are already running the proposed new version,
+                //    but the blueprint minimum target release generation is
+                //    ahead of the current target release generation. This
+                //    happens when a mupdate _to the current version_ on any
+                //    sled has occurred: Reconfigurator notices the mupdate,
+                //    bumping the minimum target release generation, and does a
+                //    no-op conversion to artifacts from the current target
+                //    release.
+                //
+                // An alternative implementation to handle the case of 2 would
+                // be to check: is the blueprint minimum target release
+                // generation ahead of the current target release generation AND
+                // is the operator attempting to recover to the same version
+                // that's already the target release. In a "correctly mupdated"
+                // system (i.e., one or more sleds have been mupdated to the
+                // same version as the rest of the rack, not during a live
+                // update), this should be equivalent to the check we do. It
+                // would behave differently in "incorrectly mupdated" cases,
+                // though. For example:
+                //
+                // 1. System is in the middle of a live update from release A to
+                //    release B.
+                // 2. A sled is mupdated to release B. (This is incorrect and
+                //    potentially wildly dangerous! But mupdates are an escape
+                //    hatch and we have no way of preventing it other than
+                //    documentation and processes.)
+                // 3. Reconfigurator notices the mupdate and bumps the minimum
+                //    target release generation, and pauses the update as a
+                //    result.
+                // 4. Reconfigurator performs a no-op conversion of this sled,
+                //    updating all its components to artifacts sourced from
+                //    release B. (No-op conversion is _not_ paused by the
+                //    blueprint's minimum target release generation being ahead
+                //    of the current target release.)
+                //
+                // If the operator attempts to use this endpoint to set the
+                // target release to B, what should we do? In the current
+                // implementation, we'll check all artifact versions in the
+                // blueprint, find some on A and some on B, and therefore reject
+                // the request. In the alternative implementation proposed
+                // above, we would allow the request, which would unpause the
+                // update. It seems safer to _reject_ the request, even though
+                // that leaves the update wedged without support intervention,
+                // because the system is in an illegal state that required
+                // support intervention in the first place (mupdating a single
+                // sled in the middle of a live update).
                 let validation_result = match intent {
                     SetTargetReleaseIntent::Update => {
+                        let current_version = self
+                            .datastore()
+                            .tuf_repo_get_version(&opctx, &tuf_repo_id)
+                            .await?;
                         validate_can_set_target_release_for_update(
                             &current_blueprint,
                             &current_version,
@@ -349,7 +533,9 @@ impl super::Nexus {
                     SetTargetReleaseIntent::RecoverFromMupdate => {
                         validate_can_set_target_release_for_mupdate_recovery(
                             &current_blueprint,
-                            &current_version,
+                            current_target_release.generation(),
+                            &new_system_version,
+                            &self.log,
                         )
                     }
                 };
@@ -387,6 +573,16 @@ enum TargetReleaseChangeError {
     #[error("no evidence a mupdate has occurred - recovery not needed")]
     NoMupdateRecoveryNeeded,
     #[error(
+        "mupdate recovery required, but specified version \
+         {proposed_new_version} does not match the version of \
+         components deployed on sled {sled_id} ({version_found})"
+    )]
+    MupdateRecoveryToWrongVersion {
+        sled_id: SledUuid,
+        version_found: BlueprintArtifactVersion,
+        proposed_new_version: semver::Version,
+    },
+    #[error(
         "a support-driven recovery (mupdate) has occurred and \
          must be cleared first"
     )]
@@ -413,55 +609,109 @@ enum TargetReleaseChangeError {
 // release to recover from a mupdate.
 //
 // We must be very generous here, as discussed at our call site in
-// `target_release_update()` above. We only reject this request if there are no
-// sleds waiting for recovery from a mupdate. Because of this, this function
-// does not take any arguments about the proposed system version (unlike
-// `validate_can_set_target_release_for_update()`). Mupdate can bypass all our
-// typical version ordering requirements, so we have to allow recovery to the
-// _actual_ version it installed, regardless of what we currently have on the
-// system.
+// `target_release_update()` above. We only reject this request if there is no
+// evidence that we need to recover from a mupdate, or if we have enough
+// information to know the operator is trying to recover to an incorrect
+// version. Evidence we consider:
+//
+// 1. Are any sleds waiting for mupdate recovery (either they have a mupdate
+//    override in place, or they have components sourced to the install
+//    dataset / both OS slots set to "current contents")?
+// 2. If there are no sleds waiting for mupdate recovery, we still need to allow
+//    recovery to proceed if (a) the blueprint's minimum target release
+//    generation is higher than the current target release's generation and (b)
+//    all current zones / OS images have sources matching the proposed target
+//    version. This case coincides with an individual sled being mupdated _to
+//    the same target release as the rest of the system_; see
+//    <https://github.com/oxidecomputer/omicron/issues/10917> for more details.
+//
+// This check is inherently racy: a sled could have just been mupdated but we
+// haven't yet noticed. There isn't much we can do about that, but it seems
+// quite unlikely (the same human would generally be doing both of these
+// operations) and the operator should be able to retry this operation and have
+// it work the second time.
 fn validate_can_set_target_release_for_mupdate_recovery(
     current_blueprint: &Blueprint,
-    current_target_version: &semver::Version,
+    current_target_release_gen: TargetReleaseGeneration,
+    proposed_new_version: &semver::Version,
+    log: &Logger,
 ) -> Result<(), TargetReleaseChangeError> {
-    let current_target_version = current_target_version.to_string();
+    let min_target_release_gen_is_ahead_of_actual_target_release_gen =
+        current_blueprint.target_release_minimum_generation
+            > current_target_release_gen;
 
-    // Check sled configs first.
-    for (_, sled_config) in current_blueprint.active_sled_configs() {
-        match SledUpdateStatus::new(sled_config, &current_target_version) {
-            SledUpdateStatus::HasUnresolvedMupdate(_) => {
-                // We don't care how we found the unresolved mupdate; the fact
-                // that it exists means we're done.
-                return Ok(());
+    // Check whether all components already match `proposed_new_version`.
+    match BlueprintTargetReleaseStatus::new(
+        current_blueprint,
+        proposed_new_version,
+    ) {
+        BlueprintTargetReleaseStatus::AllComponentsMatchTargetRelease => {
+            if min_target_release_gen_is_ahead_of_actual_target_release_gen {
+                // All components are on the proposed new version, but we need
+                // to allow recovery to catch up to the min target release
+                // generation specified in the blueprint.
+                info!(
+                    log,
+                    "allowing target release to be set for mupdate recovery: \
+                     all components are on the proposed new version, but the \
+                     blueprint minimum target release generation is ahead of \
+                     the current target release generation";
+                    "proposed_version" => %proposed_new_version,
+                    "blueprint_min_target_release_gen" =>
+                        %current_blueprint.target_release_minimum_generation,
+                    "current_target_release_gen" => %current_target_release_gen,
+                );
+                Ok(())
+            } else {
+                // All components are on the proposed new version and there is
+                // no need to bump the target release generation - we don't need
+                // to recover.
+                Err(TargetReleaseChangeError::NoMupdateRecoveryNeeded)
             }
-
-            // No evidence of a mupdate; move on to the next sled.
-            SledUpdateStatus::PreviousUpdatePending
-            | SledUpdateStatus::RunningCurrentVersion => continue,
+        }
+        BlueprintTargetReleaseStatus::WaitingForMupdateToBeCleared {
+            how,
+            sled_id,
+        } => {
+            // At least one sled is waiting for a mupdate to be cleared;
+            // recovery is allowed.
+            info!(
+                log,
+                "allowing target release to be set for mupdate recovery: \
+                 found a sled that is waiting for a mupdate to be cleared";
+                "mupdate_detected_how" => ?how,
+                "sled_id" => %sled_id,
+            );
+            Ok(())
+        }
+        BlueprintTargetReleaseStatus::FoundDifferentVersion {
+            sled_id,
+            version_found,
+        } => {
+            // There are two obvious ways to get here:
+            //
+            // 1. No mupdate has happened, and the operator has called this
+            //    endpoint erroneously
+            // 2. A mupdate to the current target release has happened, but the
+            //    operator has called this endpoint with the wrong version
+            //
+            // We'll key off of
+            // `min_target_release_gen_is_ahead_of_actual_target_release_gen` to
+            // try to guess which case we're in: if it does look like a mupdate
+            // has happened that needs to be recovered from, we'll return an
+            // error noting that we think we're in case 2. Otherwise, it looks
+            // like we're in case 1 and no mupdate recovery is needed.
+            if min_target_release_gen_is_ahead_of_actual_target_release_gen {
+                Err(TargetReleaseChangeError::MupdateRecoveryToWrongVersion {
+                    sled_id,
+                    version_found,
+                    proposed_new_version: proposed_new_version.clone(),
+                })
+            } else {
+                Err(TargetReleaseChangeError::NoMupdateRecoveryNeeded)
+            }
         }
     }
-
-    // Confirm all zones have converted to running out of known artifacts. As
-    // noted above, if any are still running from the install dataset, we
-    // haven't recovered from the mupdate.
-    for (_, zone_config) in current_blueprint.in_service_zones() {
-        match &zone_config.image_source {
-            BlueprintZoneImageSource::InstallDataset => {
-                return Ok(());
-            }
-            BlueprintZoneImageSource::Artifact { .. } => continue,
-        }
-    }
-
-    // No sleds have a mupdate override and all zones are configured to use
-    // artifact sources - there hasn't been a mupdate.
-    //
-    // This check is inherently racy: a sled could have just been mupdated but
-    // we haven't yet noticed. There isn't much we can do about that, but it
-    // seems quite unlikely (the same human would generally be doing both of
-    // these operations) and the operator should be able to retry this operation
-    // and have it work the second time.
-    Err(TargetReleaseChangeError::NoMupdateRecoveryNeeded)
 }
 
 // Helper for `validate_target_release_change_allowed_for_update()` below that
@@ -521,6 +771,134 @@ fn validate_update_version_number_ordering(
     Ok(())
 }
 
+/// Status of the blueprint relative to a specified target release version
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum BlueprintTargetReleaseStatus {
+    /// All sled and zone configs match the specified target release version; no
+    /// evidence of a mupdate.
+    AllComponentsMatchTargetRelease,
+    /// At least one sled or zone shows evidence of a mupdate that must be
+    /// cleared.
+    WaitingForMupdateToBeCleared {
+        how: SledMupdateDetectedHow,
+        sled_id: SledUuid,
+    },
+    /// At least one sled or zone is not on the specified target release
+    /// version (and no mupdate evidence was found).
+    FoundDifferentVersion {
+        sled_id: SledUuid,
+        version_found: BlueprintArtifactVersion,
+    },
+}
+
+impl BlueprintTargetReleaseStatus {
+    // Check the blueprint against a specified target release version.
+    //
+    // Returned statuses are prioritized:
+    //
+    // 1. If any sleds are waiting for a mupdate to be cleared,
+    //    `WaitingForMupdateToBeCleared { .. }` will be returned
+    // 2. Otherwise, if we find any components at a version other than
+    //    `version_to_check`, `FoundDifferentVersion { .. }` will be returned
+    // 3. Otherwise, `AllComponentsMatchTargetRelease` will be returned.
+    //
+    // We don't attempt to check Hubris components:
+    //
+    // * They don't have the same API versioning restrictions that require
+    //   strict single-stepped upgrades.
+    // * We don't keep the desired state of all Hubris components in the
+    //   blueprint anyway.
+    pub(super) fn new(
+        current_blueprint: &Blueprint,
+        version_to_check: &semver::Version,
+    ) -> Self {
+        let mut found_mupdate = None;
+        let mut found_different_version = None;
+
+        // Blueprint artifact versions are stored as strings, not
+        // `semver::Version`s. Here we're only looking at zone and OS versions,
+        // which are guaranteed to match the system version, but we still need
+        // to convert the `semver::Version` we got to a string for comparison.
+        let version_to_check = version_to_check.to_string();
+
+        // Check sled configs first.
+        for (sled_id, sled_config) in current_blueprint.active_sled_configs() {
+            match SledUpdateStatus::new(sled_config, &version_to_check) {
+                SledUpdateStatus::HasUnresolvedMupdate(how) => {
+                    found_mupdate.get_or_insert((how, sled_id));
+                }
+                SledUpdateStatus::FoundDifferentVersion { os_version } => {
+                    found_different_version
+                        .get_or_insert((sled_id, os_version));
+                }
+                SledUpdateStatus::VersionMatches => {
+                    // This sled is okay; move on to the next.
+                }
+            }
+        }
+
+        // Now check zone configs.
+        for (sled_id, zone_config) in current_blueprint.in_service_zones() {
+            match &zone_config.image_source {
+                // When a zone's image source is the install dataset, the sled
+                // has never been updated by reconfigurator and is still in the
+                // initial state left by the manufacturing mupdate.
+                BlueprintZoneImageSource::InstallDataset => {
+                    found_mupdate.get_or_insert_with(|| {
+                        (
+                            SledMupdateDetectedHow::VersionIsInstallDataset,
+                            sled_id,
+                        )
+                    });
+                }
+                BlueprintZoneImageSource::Artifact { version, .. } => {
+                    match version {
+                        BlueprintArtifactVersion::Available { version: v } => {
+                            if v.as_str() != version_to_check {
+                                found_different_version.get_or_insert_with(
+                                    || (sled_id, version.clone()),
+                                );
+                            }
+                        }
+                        // This shouldn't happen; it means we have an artifact
+                        // source in the blueprint that doesn't match a known
+                        // artifact in the database. Should we instead load all
+                        // the artifacts in the current target release and check
+                        // hashes?
+                        //
+                        // For now, record this as "not the version we're
+                        // checking for".
+                        BlueprintArtifactVersion::Unknown => {
+                            found_different_version.get_or_insert_with(|| {
+                                (sled_id, version.clone())
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Prioritize "found a mupdate" > "found a wrong version" > "ok"
+        match (found_mupdate, found_different_version) {
+            (Some((how, sled_id)), _) => {
+                BlueprintTargetReleaseStatus::WaitingForMupdateToBeCleared {
+                    how,
+                    sled_id,
+                }
+            }
+            (None, Some((sled_id, version_found))) => {
+                BlueprintTargetReleaseStatus::FoundDifferentVersion {
+                    sled_id,
+                    version_found,
+                }
+            }
+            (None, None) => {
+                BlueprintTargetReleaseStatus::AllComponentsMatchTargetRelease
+            }
+        }
+    }
+}
+
 // Check whether we should allow an operator to change the current target
 // release to start a new system update.
 //
@@ -553,105 +931,38 @@ fn validate_can_set_target_release_for_update(
         &log,
     )?;
 
-    // Convert this to a string; comparing "system version as a string" to
-    // "artifact version as a string" below feels bad, but is maybe fine? The
-    // artifact versions are loaded from the DB by joining against a table that
-    // populates them as the system version that contained them.
-    let current_target_version = current_target_version.to_string();
-
-    // Check sled configs first.
-    for (sled_id, sled_config) in current_blueprint.active_sled_configs() {
-        match SledUpdateStatus::new(sled_config, &current_target_version) {
-            SledUpdateStatus::HasUnresolvedMupdate(how) => {
-                warn!(
-                    log,
-                    "cannot start update: mupdate detected";
-                    "sled_id" => %sled_id,
-                    "mupdated_detected_how" => ?how,
-                );
-                return Err(
-                    TargetReleaseChangeError::WaitingForMupdateToBeCleared,
-                );
-            }
-            SledUpdateStatus::PreviousUpdatePending => {
-                warn!(
-                    log,
-                    "cannot start update: host OS update not complete";
-                    "sled_id" => %sled_id,
-                );
-                return Err(TargetReleaseChangeError::PreviousUpdateInProgress);
-            }
-            SledUpdateStatus::RunningCurrentVersion => {
-                // This sled is okay to update; move on to the next.
-            }
+    match BlueprintTargetReleaseStatus::new(
+        current_blueprint,
+        current_target_version,
+    ) {
+        // When all components are on the current target release it means no
+        // mupdate is detected
+        BlueprintTargetReleaseStatus::AllComponentsMatchTargetRelease => Ok(()),
+        BlueprintTargetReleaseStatus::WaitingForMupdateToBeCleared {
+            how,
+            sled_id,
+        } => {
+            warn!(
+                log,
+                "cannot start update: mupdate detected";
+                "sled_id" => %sled_id,
+                "mupdated_detected_how" => ?how,
+            );
+            Err(TargetReleaseChangeError::WaitingForMupdateToBeCleared)
+        }
+        BlueprintTargetReleaseStatus::FoundDifferentVersion {
+            sled_id,
+            version_found,
+        } => {
+            warn!(
+                log,
+                "cannot start update: previous update not complete";
+                "sled_id" => %sled_id,
+                "version_found" => %version_found,
+            );
+            Err(TargetReleaseChangeError::PreviousUpdateInProgress)
         }
     }
-
-    // Now check zone configs.
-    for (sled_id, zone_config) in current_blueprint.in_service_zones() {
-        match &zone_config.image_source {
-            BlueprintZoneImageSource::InstallDataset => {
-                // A mupdate has occurred; we must not allow an update.
-                warn!(
-                    log,
-                    "cannot start update: zone image source is install dataset";
-                    "sled_id" => %sled_id,
-                    "zone_id" => %zone_config.id,
-                );
-                return Err(
-                    TargetReleaseChangeError::WaitingForMupdateToBeCleared,
-                );
-            }
-            BlueprintZoneImageSource::Artifact { version, .. } => {
-                match version {
-                    BlueprintArtifactVersion::Available { version } => {
-                        if version.as_str() != current_target_version {
-                            // We found a zone not yet on the current target
-                            // version; the previous upgrade is not yet
-                            // complete.
-                            warn!(
-                                log,
-                                "cannot start update: \
-                                 zone image source is out of date";
-                                "sled_id" => %sled_id,
-                                "zone_id" => %zone_config.id,
-                                "zone_version" => %version,
-                            );
-                            return Err(TargetReleaseChangeError::PreviousUpdateInProgress);
-                        }
-                    }
-                    BlueprintArtifactVersion::Unknown => {
-                        // This shouldn't happen; it means we have an artifact
-                        // source in the blueprint that doesn't match a known
-                        // artifact in the database. Should we instead load all
-                        // the artifacts in the current target release and check
-                        // hashes?
-                        //
-                        // For now, treat this as "not the current version".
-                        warn!(
-                            log,
-                            "cannot start update: \
-                             zone image source version is unknown";
-                            "sled_id" => %sled_id,
-                            "zone_id" => %zone_config.id,
-                        );
-                        return Err(
-                            TargetReleaseChangeError::PreviousUpdateInProgress,
-                        );
-                    }
-                }
-            }
-        }
-    }
-
-    // All the sled and zone configs match the current target version; it's okay
-    // to proceed with an update. We don't attempt to check Hubris components:
-    //
-    // * They don't have the same API versioning restrictions that require
-    //   strict single-stepped upgrades.
-    // * We don't keep the desired state of all Hubris components in the
-    //   blueprint anyway.
-    Ok(())
 }
 
 // Ways in which a [`BlueprintSledConfig`] can indicate the sled has been
@@ -659,34 +970,32 @@ fn validate_can_set_target_release_for_update(
 //
 // (Does not count the zones _within_ a `BlueprintSledConfig`; those are checked
 // elsewhere.)
-#[derive(Debug, Clone, Copy)]
-enum SledMupdateDetectedHow {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum SledMupdateDetectedHow {
     RemoveMupdateOverridePresent,
     BootDiskContents,
+    VersionIsInstallDataset,
 }
 
 // Status of any update or mupdate on a sled, not considering its zones, based
-// on the current target version.
+// on a provided version to check against.
 enum SledUpdateStatus {
     // The sled has been mupdated and is waiting on mupdate recovery.
     HasUnresolvedMupdate(SledMupdateDetectedHow),
 
     // The sled is not waiting on mupdate recovery, but is not running the
-    // current target version.
-    PreviousUpdatePending,
+    // specified target version.
+    FoundDifferentVersion { os_version: BlueprintArtifactVersion },
 
-    // The sled is not waiting on mupdate recovery and is running the current
+    // The sled is not waiting on mupdate recovery and is running the specified
     // target version.
-    RunningCurrentVersion,
+    VersionMatches,
 }
 
 impl SledUpdateStatus {
     // Determine the [`SledUpdateStatus`] of the given sled based on its config
-    // and the current target version.
-    fn new(
-        sled_config: &BlueprintSledConfig,
-        current_target_version: &str,
-    ) -> Self {
+    // and a version to check.
+    fn new(sled_config: &BlueprintSledConfig, version_to_check: &str) -> Self {
         // Is the planner currently trying to remove a mupdate override from
         // this sled?
         if sled_config.remove_mupdate_override.is_some() {
@@ -708,9 +1017,9 @@ impl SledUpdateStatus {
         // `InstallDataset`. (Zone checks are performed elsewhere.)
 
         // If both OS slots are set to `CurrentContents`, we've been mupdated.
-        // Otherwise, we consider this sled to be running the current target
-        // version if either slot matches. Ideally we'd only check the slot that
-        // is supposed to be booting, but blueprints don't currently track that
+        // Otherwise, we consider this sled to be running `version_to_check` if
+        // either slot matches. Ideally we'd only check the slot that is
+        // supposed to be booting, but blueprints don't currently track that
         // (maybe they should?).
         //
         // This is not as precise as we'd like, but in practice is unlikely to
@@ -719,7 +1028,8 @@ impl SledUpdateStatus {
         // still booting out of an old slot), there will be many zones present
         // that are not yet updated.
         let mut num_slots_with_current_contents = 0;
-        let mut found_current_version_in_either_slot = false;
+        let mut found_version_to_check_in_either_slot = false;
+        let mut found_different_version = BlueprintArtifactVersion::Unknown;
         for slot in
             [&sled_config.host_phase_2.slot_a, &sled_config.host_phase_2.slot_b]
         {
@@ -731,10 +1041,12 @@ impl SledUpdateStatus {
                     version,
                     ..
                 } => match version {
-                    BlueprintArtifactVersion::Available { version } => {
-                        if version.as_str() == current_target_version {
-                            found_current_version_in_either_slot = true;
+                    BlueprintArtifactVersion::Available { version: v } => {
+                        if v.as_str() == version_to_check {
+                            found_version_to_check_in_either_slot = true;
                             break;
+                        } else {
+                            found_different_version = version.clone();
                         }
                     }
                     BlueprintArtifactVersion::Unknown => {
@@ -744,22 +1056,331 @@ impl SledUpdateStatus {
                         // it's not the current version and not evidence of a
                         // mupdate, though, so we treat it just like any other
                         // "not current version".
+                        //
+                        // We initialize `found_different_version` to
+                        // `Unknown`; if both slots are unknown, we leave it in
+                        // that state. If either slot is known, we'll update it
+                        // in the `::Available` branch above.
                     }
                 },
             }
         }
 
-        // As noted above, but now condensed: if we found the current version in
-        // either slot, we assume this sled is updated. If we instead found
+        // As noted above, but now condensed: if we found the version to check
+        // in either slot, we assume this sled is updated. If we instead found
         // `CurrentContents` in both slots, this sled has been mupdated. Any
         // other combination means the sled has not been mupdated but also isn't
-        // running the current version; i.e., it's still waiting on an update.
-        if found_current_version_in_either_slot {
-            Self::RunningCurrentVersion
+        // running the version we're checking for.
+        if found_version_to_check_in_either_slot {
+            Self::VersionMatches
         } else if num_slots_with_current_contents == 2 {
             Self::HasUnresolvedMupdate(SledMupdateDetectedHow::BootDiskContents)
         } else {
-            Self::PreviousUpdatePending
+            Self::FoundDifferentVersion { os_version: found_different_version }
+        }
+    }
+}
+
+/// Describes why a Reconfigurator state file is being created by Nexus
+///
+/// This is used to name the resulting file.
+#[derive(Debug, Clone, Copy)]
+pub enum BlueprintDebugAction {
+    /// the autoplanner generated this blueprint and will try to make it the
+    /// target
+    AutoplanIntent,
+    /// the autoplanner generated this blueprint and made it the target
+    Autoplan,
+    /// someone explicitly ran the planner using the Nexus internal API
+    /// (likely a person running `omdb`)
+    Plan,
+    /// someone explicitly requested to set the target blueprint using the Nexus
+    /// internal API (likely a person running `omdb`) and the system will try to
+    /// make this the new target
+    TargetIntent,
+    /// someone explicitly set the target blueprint using the Nexus internal API
+    /// (likely a person running `omdb`) and the system made it the new target
+    Target,
+}
+
+/// Returns the filename for a debug dropbox file related to blueprint planning
+pub fn blueprint_debug_filename(
+    blueprint: &Blueprint,
+    action: BlueprintDebugAction,
+) -> String {
+    let action_str = match action {
+        BlueprintDebugAction::AutoplanIntent => "autoplan-intent",
+        BlueprintDebugAction::Autoplan => "autoplan",
+        BlueprintDebugAction::Plan => "plan",
+        BlueprintDebugAction::TargetIntent => "target-intent",
+        BlueprintDebugAction::Target => "target",
+    };
+    let time_str = blueprint.time_created.format("%Y%m%dT%H%M%SZ");
+    format!("{time_str}-{action_str}-{}.json", blueprint.id)
+}
+
+/// Typestate-based helper to manage writing out two Reconfigurator state files
+/// as part of setting a new target blueprint: the first is an "intent" file and
+/// the second is a "committed" file.
+///
+/// The typestates prevent this from being misused in obvious ways (e.g.,
+/// writing commit file without having tried to write the intent file).
+/// However, there are various other kinds of failures here, including
+/// caller errors.  All of these get swallowed because we don't want them to
+/// prevent the consumer from doing whatever it's trying to do.
+// This is currently used in two places.  The main reasons to factor it
+// separately are to encapsulate the awkward best-effort logic and to be able to
+// test the intent file behavior.  The latter is otherwise difficult to
+// orchestrate in either of the two consumers.
+#[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
+pub enum SetTargetDebugWriter<'a> {
+    /// We're ready to write the intent file.
+    Ready(SetTargetDebugWriterReady<'a>),
+    /// We've encountered an error and will be ignoring subsequent operations.
+    Failed(anyhow::Error),
+}
+
+/// internal state of SetTargetDebugWriter when we haven't encountered an error
+#[derive(Debug)]
+pub struct SetTargetDebugWriterReady<'a> {
+    log: &'a Logger,
+    producer: &'a Producer,
+    intent_state: UnstableReconfiguratorState,
+    intended_blueprint_id: BlueprintUuid,
+    intent_state_str: String,
+}
+
+impl<'a> SetTargetDebugWriterReady<'a> {
+    fn new(
+        log: &'a Logger,
+        producer: &'a Producer,
+        maybe_intent_state: Result<UnstableReconfiguratorState, anyhow::Error>,
+    ) -> Result<SetTargetDebugWriterReady<'a>, anyhow::Error> {
+        let intent_state = match maybe_intent_state {
+            Ok(intent_state) => intent_state,
+            Err(error) => return Err(error),
+        };
+
+        let Some(intended_blueprint_id) =
+            intent_state.intended_target_blueprint
+        else {
+            bail!("intent_state does not have an intended_target_blueprint");
+        };
+
+        if !intent_state.blueprints.contains_key(&intended_blueprint_id) {
+            bail!(
+                "intent_state's intended_target_blueprint is missing \
+                 from `blueprints`"
+            );
+        }
+
+        let intent_state_str = serde_json::to_string(&intent_state)
+            .context("serializing intent Reconfigurator state file")?;
+
+        Ok(SetTargetDebugWriterReady {
+            log,
+            producer,
+            intent_state,
+            intended_blueprint_id,
+            intent_state_str,
+        })
+    }
+}
+
+impl<'a> SetTargetDebugWriter<'a> {
+    pub fn new(
+        log: &'a Logger,
+        producer: &'a Producer,
+        intent_state: Result<UnstableReconfiguratorState, anyhow::Error>,
+    ) -> SetTargetDebugWriter<'a> {
+        match SetTargetDebugWriterReady::new(log, producer, intent_state) {
+            Ok(ready) => SetTargetDebugWriter::Ready(ready),
+            Err(error) => {
+                error!(
+                    log,
+                    "failed to assemble SetTarget debug files";
+                    InlineErrorChain::new(&*error),
+                );
+                SetTargetDebugWriter::Failed(error)
+            }
+        }
+    }
+
+    pub async fn write_intent(
+        self,
+        intent_reason: BlueprintDebugAction,
+    ) -> SetTargetDebugWriterPhase2<'a> {
+        match self {
+            SetTargetDebugWriter::Failed(error) => {
+                return SetTargetDebugWriterPhase2::Failed(error);
+            }
+            SetTargetDebugWriter::Ready(SetTargetDebugWriterReady {
+                log,
+                producer,
+                intent_state,
+                intended_blueprint_id,
+                intent_state_str,
+            }) => {
+                // unwrap(): we checked in `new` that this was present.
+                let blueprint = intent_state
+                    .blueprints
+                    .get(&intended_blueprint_id)
+                    .unwrap();
+                let name = blueprint_debug_filename(blueprint, intent_reason);
+
+                match producer.deposit_file(&name, &intent_state_str).await {
+                    Ok(intent_deposit) => {
+                        info!(
+                            &log,
+                            "saved intent debug file";
+                            "filename" => name
+                        );
+
+                        SetTargetDebugWriterPhase2::Ready {
+                            log,
+                            producer,
+                            intent_state,
+                            intent_deposit,
+                        }
+                    }
+                    Err(error) => {
+                        warn!(
+                            log,
+                            "failed to save SetTarget intent file";
+                            InlineErrorChain::new(&error),
+                        );
+
+                        SetTargetDebugWriterPhase2::Failed(anyhow!(error))
+                    }
+                }
+            }
+        }
+    }
+
+    #[cfg(test)]
+    pub fn error(&self) -> Option<&anyhow::Error> {
+        match self {
+            SetTargetDebugWriter::Ready { .. } => None,
+            SetTargetDebugWriter::Failed(error) => Some(error),
+        }
+    }
+}
+
+#[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
+pub enum SetTargetDebugWriterPhase2<'a> {
+    /// We're ready to write the commit file.
+    Ready {
+        log: &'a Logger,
+        producer: &'a Producer,
+        intent_state: UnstableReconfiguratorState,
+        intent_deposit: DepositHandle,
+    },
+
+    /// We've encountered an error and will be ignoring subsequent operations.
+    // The specific error is only used for tests.  Rather than sprinkle
+    // `cfg(test)` around all the bookkeeping, we just allow this to be
+    // dead_code in non-test builds.
+    Failed(#[cfg_attr(not(test), expect(dead_code))] anyhow::Error),
+}
+
+impl<'a> SetTargetDebugWriterPhase2<'a> {
+    #[cfg(test)]
+    pub fn error(&self) -> Option<&anyhow::Error> {
+        match self {
+            SetTargetDebugWriterPhase2::Ready { .. } => None,
+            SetTargetDebugWriterPhase2::Failed(error) => Some(error),
+        }
+    }
+
+    pub async fn cancel(self) {
+        if let SetTargetDebugWriterPhase2::Ready {
+            log, intent_deposit, ..
+        } = self
+        {
+            debug!(&log, "attempting to remove intent file after failure");
+            intent_deposit.cancel_and_attempt_delete().await;
+            warn!(&log, "attempted to remove intent file after failure");
+        }
+    }
+
+    pub async fn write_committed(
+        self,
+        new_target: BlueprintTarget,
+        commit_reason: BlueprintDebugAction,
+    ) {
+        // If we previously failed, do nothing now.
+        let SetTargetDebugWriterPhase2::Ready {
+            log,
+            producer,
+            intent_state,
+            intent_deposit,
+        } = self
+        else {
+            return;
+        };
+
+        // Compute the committed state based on the intended state.
+        //
+        // The only difference is that the intended target blueprint has become
+        // the real target blueprint.
+        let committed_state = UnstableReconfiguratorState {
+            intended_target_blueprint: None,
+            target_blueprint: new_target,
+            ..intent_state
+        };
+
+        let Some(blueprint) = committed_state
+            .blueprints
+            .get(&committed_state.target_blueprint.target_id)
+        else {
+            // This should be impossible  That's because the new target_id
+            // *should* be the one that was previously the intended target id,
+            // and we checked in `SetTargetDebugWriterReady::new()` that that
+            // blueprint was present.  However, it's conceivable for the caller
+            // to give us a different target blueprint here.  That's not good or
+            // right, but our job is to save a state file matching whatever they
+            // told us -- if we can.
+            error!(
+                log,
+                "caller setting target to a blueprint different from previous \
+                 intended target and it is not also being saved";
+                "blueprint_id" => %committed_state.target_blueprint.target_id,
+            );
+            return;
+        };
+        let name = blueprint_debug_filename(&blueprint, commit_reason);
+        let committed_str = match serde_json::to_string(&committed_state) {
+            Ok(s) => s,
+            Err(error) => {
+                error!(
+                    &log,
+                    "failed to serialize committed debug state";
+                    InlineErrorChain::new(&error),
+                    "filename" => name,
+                );
+                return;
+            }
+        };
+
+        match producer.deposit_file(&name, &committed_str).await {
+            Ok(_deposit) => {
+                // We successfully deposited the "commit" state.
+                // Make a best-effort to cancel the intended state file.
+                intent_deposit.cancel_and_attempt_delete().await;
+                info!(&log, "saved committed debug state"; "filename" => name);
+            }
+            Err(error) => {
+                // We failed to deposit the "commit" state.  Log the error and
+                // keep the intended state around.  There's nothing more to do.
+                error!(
+                    &log,
+                    "failed to save committed debug state";
+                    InlineErrorChain::new(&error),
+                    "filename" => name,
+                );
+            }
         }
     }
 }
@@ -767,10 +1388,13 @@ impl SledUpdateStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Utc;
     use nexus_reconfigurator_planning::example::example;
     use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
+    use omicron_test_utils::dev::dropbox::TestDropbox;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::MupdateOverrideUuid;
+    use reconfigurator_cli::test_utils::ReconfiguratorCliTestState;
     use tufaceous_artifact::ArtifactHash;
     use tufaceous_artifact::ArtifactVersion;
 
@@ -1119,19 +1743,42 @@ mod tests {
         // all components are on that version.
         let current_version: semver::Version =
             "16.2.0-0.ci+git544f608e05a".parse().unwrap();
-        let blueprint = make_blueprint_matching_system_version(
-            log,
-            TEST_NAME,
-            &current_version,
-        );
 
-        // The blueprint described a system on a known version; i.e., no
-        // evidence of a mupdate. We should not be able to set the target
-        // release for mupdate recovery.
+        // Construct a blueprint with a bumped
+        // `target_release_minimum_generation`, returning that and the previous
+        // generation.
+        let (current_target_release_gen, blueprint) = {
+            let mut bp = make_blueprint_matching_system_version(
+                log,
+                TEST_NAME,
+                &current_version,
+            );
+            let initial_gen = bp.target_release_minimum_generation;
+            bp.target_release_minimum_generation =
+                bp.target_release_minimum_generation.next();
+            (initial_gen, bp)
+        };
+
+        // The version we'll propose for mupdate recovery. This test exercises
+        // the "whole system" mupdate paths, not the special case where we're
+        // trying to recover to the same version that's already deployed (that's
+        // covered by
+        // test_target_release_for_mupdate_recovery_after_noop_conversion
+        // below), so any version that's different from `current_version` is
+        // fine.
+        let proposed_recovery_version: semver::Version =
+            "17.0.0-0.ci+git0123456789a".parse().unwrap();
+
+        // The blueprint described a system on a known version _and_ the current
+        // target release gen matches the blueprint's minimum; i.e., no evidence
+        // of a mupdate. We should not be able to set the target release for
+        // mupdate recovery.
         assert_eq!(
             validate_can_set_target_release_for_mupdate_recovery(
                 &blueprint,
-                &current_version
+                blueprint.target_release_minimum_generation,
+                &proposed_recovery_version,
+                log,
             ),
             Err(TargetReleaseChangeError::NoMupdateRecoveryNeeded)
         );
@@ -1178,16 +1825,342 @@ mod tests {
             ("sled with OS mupdate", bp_os_mupdate),
             ("zone set to install dataset", bp_zone_mupdate),
         ] {
-            assert_eq!(
-                validate_can_set_target_release_for_mupdate_recovery(
-                    &blueprint,
-                    &current_version,
+            // We should detect these sleds that need mupdate recovery whether
+            // or not the blueprint min target release generation is ahead of
+            // the current target release generation; try both.
+            for (gen_description, generation) in [
+                (
+                    "generation behind blueprint minimum",
+                    current_target_release_gen,
                 ),
-                Ok(()),
-                "should find evidence of mupdate in blueprint: {description}"
-            );
+                (
+                    "generation caught up to blueprint minimum",
+                    blueprint.target_release_minimum_generation,
+                ),
+            ] {
+                assert_eq!(
+                    validate_can_set_target_release_for_mupdate_recovery(
+                        &blueprint,
+                        generation,
+                        &proposed_recovery_version,
+                        log,
+                    ),
+                    Ok(()),
+                    "should find evidence of mupdate in blueprint: \
+                     {description} ({gen_description})"
+                );
+            }
         }
 
         logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_target_release_for_mupdate_recovery_after_noop_conversion() {
+        static TEST_NAME: &str =
+            "test_target_release_for_mupdate_recovery_after_noop_conversion";
+        let logctx = test_setup_log(TEST_NAME);
+        let log = &logctx.log;
+
+        // Setup: start with an arbitrary system version and a blueprint where
+        // all components are on that version.
+        let current_version: semver::Version =
+            "16.2.0-0.ci+git544f608e05a".parse().unwrap();
+        let mut blueprint = make_blueprint_matching_system_version(
+            log,
+            TEST_NAME,
+            &current_version,
+        );
+
+        let different_version: semver::Version =
+            "17.0.0-0.ci+git0123456789a".parse().unwrap();
+        let initial_target_release_generation =
+            blueprint.target_release_minimum_generation;
+
+        // The blueprint described a system on a known version; i.e., no
+        // evidence of a mupdate. We should not be able to set the target
+        // release for mupdate recovery, whether to the current version or a
+        // different version.
+        assert_eq!(
+            validate_can_set_target_release_for_mupdate_recovery(
+                &blueprint,
+                initial_target_release_generation,
+                &current_version,
+                log,
+            ),
+            Err(TargetReleaseChangeError::NoMupdateRecoveryNeeded)
+        );
+        assert_eq!(
+            validate_can_set_target_release_for_mupdate_recovery(
+                &blueprint,
+                initial_target_release_generation,
+                &different_version,
+                log,
+            ),
+            Err(TargetReleaseChangeError::NoMupdateRecoveryNeeded)
+        );
+
+        // Bump the min target release generation in the blueprint, but do _not_
+        // change any of the component versions: this is consistent with one or
+        // more sleds being mupdated to `current_version`, the planner clearing
+        // that mupdate and no-op converting all components to `current_version`
+        // artifacts.
+        blueprint.target_release_minimum_generation =
+            blueprint.target_release_minimum_generation.next();
+
+        // Attempting to mupdate recover to a _different_ version should fail,
+        // regardless of the current target release generation: no sled is
+        // showing evidence of a mupdate, so we only allow mupdate recovery to a
+        // version that matches all configured component sources.
+        let expected_err =
+            TargetReleaseChangeError::MupdateRecoveryToWrongVersion {
+                // Our checks always return the first sled with a problem, which
+                // in this case just means "the first sled".
+                sled_id: blueprint.active_sled_configs().next().unwrap().0,
+                proposed_new_version: different_version.clone(),
+                version_found: BlueprintArtifactVersion::Available {
+                    version: ArtifactVersion::new(current_version.to_string())
+                        .unwrap(),
+                },
+            };
+        assert_eq!(
+            validate_can_set_target_release_for_mupdate_recovery(
+                &blueprint,
+                initial_target_release_generation,
+                &different_version,
+                log,
+            ),
+            Err(expected_err),
+        );
+        assert_eq!(
+            validate_can_set_target_release_for_mupdate_recovery(
+                &blueprint,
+                blueprint.target_release_minimum_generation,
+                &different_version,
+                log,
+            ),
+            Err(TargetReleaseChangeError::NoMupdateRecoveryNeeded)
+        );
+
+        // But mupdate recovery to the correct current version should succeed if
+        // the blueprint is ahead of the current target release generation.
+        assert_eq!(
+            validate_can_set_target_release_for_mupdate_recovery(
+                &blueprint,
+                initial_target_release_generation,
+                &current_version,
+                log,
+            ),
+            Ok(())
+        );
+
+        // Correct version, but blueprint target release generation is no
+        // longer ahead of the current target release generation: no recovery
+        // needed.
+        assert_eq!(
+            validate_can_set_target_release_for_mupdate_recovery(
+                &blueprint,
+                blueprint.target_release_minimum_generation,
+                &current_version,
+                log,
+            ),
+            Err(TargetReleaseChangeError::NoMupdateRecoveryNeeded)
+        );
+
+        logctx.cleanup_successful();
+    }
+
+    /// Verifies the helper for writing Reconfigurator state files
+    #[tokio::test]
+    async fn test_debug_files() {
+        let logctx = test_setup_log("test_debug_files");
+        let log = &logctx.log;
+
+        // Set up a simulated system whose initial state we can work with.
+        let mut sim = ReconfiguratorCliTestState::new("test_debug_files", &log);
+        sim.load_example().expect("loading example system");
+        let initial_state =
+            sim.current_state().to_serializable().expect("initial state");
+        let blueprint = sim.run_planner().expect("expected new blueprint");
+
+        // Case: it's an error to provide an initial state that doesn't have the
+        // intended blueprint field set.
+        let test_dropbox = TestDropbox::new(log.clone()).await;
+        let intent_state = initial_state.clone();
+        let helper = SetTargetDebugWriter::new(
+            log,
+            test_dropbox.producer(),
+            Ok(intent_state),
+        );
+        let error = helper.error().unwrap();
+        println!("found error: {error:#}");
+        assert!(format!("{error:#}").contains("intended_target_blueprint"));
+
+        // We should still be able to invoke `write_intent()`, and then either
+        // `cancel()` or `write_committed`.  In this case, we'll check
+        // `cancel()`.  The dropbox should be empty even before we cancel.
+        let helper =
+            helper.write_intent(BlueprintDebugAction::TargetIntent).await;
+        assert!(test_dropbox.new_reader().load_new::<()>().is_empty());
+        helper.cancel().await;
+        test_dropbox.cleanup_successful();
+
+        // Case: it's an error to provide an initial state referencing a
+        // blueprint that isn't in `blueprints`.
+        let test_dropbox = TestDropbox::new(log.clone()).await;
+        let mut intent_state = initial_state.clone();
+        intent_state.intended_target_blueprint = Some(blueprint.id);
+        let helper = SetTargetDebugWriter::new(
+            log,
+            test_dropbox.producer(),
+            Ok(intent_state),
+        );
+        let error = helper.error().unwrap();
+        println!("found error: {error:#}");
+        assert!(format!("{error:#}").contains("intended_target_blueprint"));
+
+        // As above, we should still be able to invoke `write_intent()`, and
+        // then either `cancel()` or `write_committed`.  In this case, we'll
+        // check `write_committed()`.  The dropbox should be empty even after
+        // that.
+        let helper =
+            helper.write_intent(BlueprintDebugAction::TargetIntent).await;
+        helper
+            .write_committed(
+                BlueprintTarget {
+                    target_id: blueprint.id,
+                    enabled: false,
+                    time_made_target: Utc::now(),
+                },
+                BlueprintDebugAction::Target,
+            )
+            .await;
+        assert!(test_dropbox.new_reader().load_new::<()>().is_empty());
+        test_dropbox.cleanup_successful();
+
+        // The remaining test cases assume a valid intended state.
+        let mut intent_state = initial_state.clone();
+        intent_state.intended_target_blueprint = Some(blueprint.id);
+        intent_state
+            .blueprints
+            .insert_unique((*blueprint).clone())
+            .expect("new blueprint");
+
+        test_debug_files_success(log, &intent_state).await;
+        test_debug_files_cancel(log, &intent_state).await;
+        test_debug_files_intent_fail(log, &intent_state).await;
+
+        logctx.cleanup_successful();
+    }
+
+    /// Test case: happy path (writing "intent" file followed by "commit" file)
+    async fn test_debug_files_success(
+        log: &Logger,
+        intent_state: &UnstableReconfiguratorState,
+    ) {
+        let test_dropbox = TestDropbox::new(log.clone()).await;
+        let producer = test_dropbox.producer();
+        let mut reader = test_dropbox.new_reader();
+
+        // No files ought to have been created yet.
+        let files = reader.load_new::<UnstableReconfiguratorState>();
+        assert!(files.is_empty());
+
+        // Write the intent file and verify it.
+        let helper =
+            SetTargetDebugWriter::new(log, producer, Ok(intent_state.clone()));
+        assert!(helper.error().is_none());
+        let helper =
+            helper.write_intent(BlueprintDebugAction::TargetIntent).await;
+
+        let files = reader.load_new::<UnstableReconfiguratorState>();
+        assert_eq!(files.len(), 1);
+        let file = files.into_iter().next().expect("non-empty Vec");
+        assert_eq!(file, *intent_state);
+        assert_eq!(0, reader.count_removed());
+
+        // Write the commit file and verify it.
+        let now = Utc::now();
+        let new_target = BlueprintTarget {
+            target_id: intent_state.intended_target_blueprint.unwrap(),
+            enabled: intent_state.target_blueprint.enabled,
+            time_made_target: now,
+        };
+        helper.write_committed(new_target, BlueprintDebugAction::Target).await;
+
+        let files = reader.load_new::<UnstableReconfiguratorState>();
+        assert_eq!(files.len(), 1);
+        let file = files.into_iter().next().expect("non-empty Vec");
+
+        let expected_state = UnstableReconfiguratorState {
+            target_blueprint: new_target,
+            intended_target_blueprint: None,
+            ..intent_state.clone()
+        };
+        assert_eq!(file, expected_state);
+
+        // The intent file ought to have been removed.
+        assert_eq!(1, reader.count_removed());
+        test_dropbox.cleanup_successful();
+    }
+
+    /// Test case: cancel writing new "set target" debug file after writing the
+    /// intent file
+    async fn test_debug_files_cancel(
+        log: &Logger,
+        intent_state: &UnstableReconfiguratorState,
+    ) {
+        let test_dropbox = TestDropbox::new(log.clone()).await;
+        let producer = test_dropbox.producer();
+        let mut reader = test_dropbox.new_reader();
+
+        // No files ought to have been created yet.
+        let files = reader.load_new::<UnstableReconfiguratorState>();
+        assert!(files.is_empty());
+
+        // Write the intent file and verify it.
+        let helper =
+            SetTargetDebugWriter::new(log, producer, Ok(intent_state.clone()));
+        assert!(helper.error().is_none());
+        let helper =
+            helper.write_intent(BlueprintDebugAction::TargetIntent).await;
+
+        let files = reader.load_new::<UnstableReconfiguratorState>();
+        assert_eq!(files.len(), 1);
+        let file = files.into_iter().next().expect("non-empty Vec");
+        assert_eq!(file, *intent_state);
+
+        // Case: cancel.  This is what we'd do if we failed to make the new
+        // blueprint the target.  There should be nothing new in the dropbox and
+        // the previous file ought to have been removed.
+        helper.cancel().await;
+        let files = reader.load_new::<UnstableReconfiguratorState>();
+        assert!(files.is_empty());
+        assert_eq!(1, reader.count_removed());
+
+        test_dropbox.cleanup_successful();
+    }
+
+    /// Test case: exercise failure to write the intent file
+    async fn test_debug_files_intent_fail(
+        log: &Logger,
+        intent_state: &UnstableReconfiguratorState,
+    ) {
+        let test_dropbox = TestDropbox::new(log.clone()).await;
+        let (dir, producer) = test_dropbox.into_parts();
+
+        // Delete the directory so that the write below will fail.
+        dir.cleanup_successful();
+
+        // Attempt to write the intent file and verify the error.
+        let helper =
+            SetTargetDebugWriter::new(log, &producer, Ok(intent_state.clone()));
+        assert!(helper.error().is_none());
+        let helper =
+            helper.write_intent(BlueprintDebugAction::TargetIntent).await;
+        let error = helper.error().unwrap();
+        let message = InlineErrorChain::new(&**error).to_string();
+        println!("found error: {message}");
+        assert!(message.contains("I/O error"));
     }
 }

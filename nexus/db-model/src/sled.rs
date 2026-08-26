@@ -16,13 +16,17 @@ use nexus_types::{
     external_api::{hardware, sled as sled_types},
     identity::Asset,
     internal_api::params,
+    inventory,
 };
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::RackKind;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::SledUuid;
 use sled_agent_types::inventory::SledRole;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
-use uuid::Uuid;
+use std::sync::Arc;
 
 /// Baseboard information about a sled.
 ///
@@ -56,7 +60,7 @@ pub struct Sled {
     time_deleted: Option<DateTime<Utc>>,
     pub rcgen: Generation,
 
-    pub rack_id: Uuid,
+    pub rack_id: DbTypedUuid<RackKind>,
 
     is_scrimlet: bool,
     serial_number: String,
@@ -121,6 +125,10 @@ impl Sled {
         &self.serial_number
     }
 
+    pub fn revision(&self) -> u32 {
+        self.revision.into()
+    }
+
     pub fn part_number(&self) -> &str {
         &self.part_number
     }
@@ -139,22 +147,54 @@ impl Sled {
     pub fn time_modified(&self) -> DateTime<Utc> {
         self.identity.time_modified
     }
-}
 
-impl From<Sled> for sled_types::Sled {
-    fn from(sled: Sled) -> Self {
-        Self {
-            identity: sled.identity(),
-            rack_id: sled.rack_id,
+    pub fn rack_id(&self) -> RackUuid {
+        self.rack_id.into()
+    }
+
+    pub fn into_baseboard(self) -> hardware::Baseboard {
+        hardware::Baseboard {
+            serial: self.serial_number,
+            part: self.part_number,
+            revision: self.revision.into(),
+        }
+    }
+
+    /// Converts `self` to a [`nexus_types::external_api::sled::Sled`].
+    ///
+    /// The current inventory collection is consulted to determine the sled's
+    /// last observed physical location.
+    pub fn to_external_api(
+        self,
+        inv: &Option<Arc<inventory::Collection>>,
+    ) -> sled_types::Sled {
+        let slot = inv.as_ref().and_then(|inv| {
+            // TODO(eliza): it's quite sad that we must clone the serial and
+            // part number strings out of the `sled` just to perform this
+            // lookup against the inventory, but sadly, `BaseboardId` and
+            // `Baseboard` are different types, so we cannot just make the
+            // `Baseboard` and borrow it into the lookup. 'twould be nice to
+            // figure out a nicer way of doing this.
+            let bbid = sled_hardware_types::BaseboardId {
+                serial_number: self.serial_number.clone(),
+                part_number: self.part_number.clone(),
+            };
+            let sp = inv.sps.get(&bbid)?;
+            Some(sp.sp_slot)
+        });
+        sled_types::Sled {
+            identity: self.identity(),
+            rack_id: self.rack_id.into_untyped_uuid(),
+            slot,
             baseboard: hardware::Baseboard {
-                serial: sled.serial_number,
-                part: sled.part_number,
-                revision: *sled.revision,
+                serial: self.serial_number,
+                part: self.part_number,
+                revision: self.revision.into(),
             },
-            policy: sled.policy.into(),
-            state: sled.state.into(),
-            usable_hardware_threads: sled.usable_hardware_threads.0,
-            usable_physical_ram: *sled.usable_physical_ram,
+            policy: self.policy.into(),
+            state: self.state.into(),
+            usable_hardware_threads: self.usable_hardware_threads.0,
+            usable_physical_ram: *self.usable_physical_ram,
         }
     }
 }
@@ -226,7 +266,7 @@ impl DatastoreCollectionConfig<super::Zpool> for Sled {
 pub struct SledUpdate {
     id: SledUuid,
 
-    pub rack_id: Uuid,
+    pub rack_id: DbTypedUuid<RackKind>,
 
     is_scrimlet: bool,
     serial_number: String,
@@ -257,12 +297,12 @@ impl SledUpdate {
         repo_depot_port: u16,
         baseboard: SledBaseboard,
         hardware: SledSystemHardware,
-        rack_id: Uuid,
+        rack_id: RackUuid,
         sled_agent_gen: Generation,
     ) -> Self {
         Self {
             id,
-            rack_id,
+            rack_id: rack_id.into(),
             is_scrimlet: hardware.is_scrimlet,
             serial_number: baseboard.serial_number,
             part_number: baseboard.part_number,

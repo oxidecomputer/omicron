@@ -17,6 +17,8 @@ mod lockstep_api;
 mod populate;
 mod saga_interface;
 
+use crate::internal_api::params::ServiceIpPoolConfig;
+use crate::internal_api::params::ServiceIpPoolError;
 pub use app::Nexus;
 pub use app::test_interfaces::TestInterfaces;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -24,6 +26,7 @@ use context::ApiContext;
 use context::ServerContext;
 use dropshot::ConfigDropshot;
 use external_api::http_entrypoints::external_api;
+use iddqd::IdOrdMap;
 use internal_api::http_entrypoints::internal_api;
 use lockstep_api::http_entrypoints::lockstep_api;
 use nexus_config::NexusConfig;
@@ -34,31 +37,32 @@ use nexus_db_queries::db;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::blueprint_zone_type;
-use nexus_types::internal_api::params::ExternalPortDiscovery;
 use nexus_types::internal_api::params::InitialTrustQuorumConfig;
 use nexus_types::internal_api::params::{
     PhysicalDiskPutRequest, ZpoolPutRequest,
 };
 use nexus_types::inventory::Collection;
-use omicron_common::FileKv;
 use omicron_common::address::IpRange;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::{ProducerEndpoint, ProducerKind};
 use omicron_common::api::internal::shared::AllowedSourceIps;
 use omicron_common::disk::DatasetKind;
+use omicron_debug_dropbox::DebugDropbox;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use oximeter::types::ProducerRegistry;
 use oximeter_producer::Server as ProducerServer;
+use sled_agent_types::early_networking::PortConfig;
 use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::early_networking::SwitchSlot;
+use sled_agent_types::early_networking::UplinkPorts;
 use sled_hardware_types::BaseboardId;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeSet;
-use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV6};
 use std::sync::Arc;
+use strum::IntoEnumIterator;
 use tokio::sync::watch;
 use uuid::Uuid;
 
@@ -83,6 +87,7 @@ impl InternalServer {
     pub async fn start(
         config: &NexusConfig,
         log: &Logger,
+        debug_dropbox: DebugDropbox,
     ) -> Result<InternalServer, String> {
         let log = log.new(o!("name" => config.deployment.id.to_string()));
         info!(log, "setting up nexus server");
@@ -93,6 +98,7 @@ impl InternalServer {
             config.deployment.rack_id,
             ctxlog,
             &config,
+            debug_dropbox,
         )
         .await?;
 
@@ -189,10 +195,12 @@ impl Server {
         let opctx = apictx.context.nexus.opctx_for_service_balancer();
         apictx.context.nexus.await_rack_initialization(&opctx).await;
 
-        // While we've started our internal server, we need to wait until we've
-        // definitely implemented our source IP allowlist for making requests to
-        // the external server we're about to start.
-        apictx.context.nexus.await_ip_allowlist_plumbing().await;
+        // Make a best-effort attempt to push the IP allowlist as firewall rules
+        // to sled-agents before starting the external server. Because OPTE has
+        // a default-deny policy, Nexus will be unreachable until this succeeds;
+        // the background task that propagates service firewall rules will keep
+        // retrying if this attempt fails.
+        apictx.context.nexus.activate_service_firewall_propagation();
 
         // Wait until Nexus has determined if sagas are supposed to be quiesced.
         // This is not strictly necessary.  The goal here is to prevent 503
@@ -321,8 +329,10 @@ impl nexus_test_interface::NexusServer for Server {
     async fn start_internal(
         config: &NexusConfig,
         log: &Logger,
+        debug_dropbox: DebugDropbox,
     ) -> Result<InternalServer, String> {
-        let internal_server = InternalServer::start(config, &log).await?;
+        let internal_server =
+            InternalServer::start(config, &log, debug_dropbox).await?;
         internal_server.apictx.context.nexus.wait_for_populate().await.unwrap();
         Ok(internal_server)
     }
@@ -394,28 +404,89 @@ impl nexus_test_interface::NexusServer for Server {
             .await
             .unwrap();
 
+        // In the real rack init handoff, the `rack_network_config` will contain
+        // at least one configured port, and handoff will only complete
+        // successfully if the `populate_switch_ports` background task has
+        // completed successfully to populate the corresponding qsfp* values in
+        // the `switch_port` table. We could block here until that task
+        // activates successfully, contacting whatever `dpd` instance has been
+        // stood up for this test, but in the interest of streamlining this
+        // handoff (which happens for _every_ Nexus test, including those
+        // completely uninterested in switch port interaction), we'll insert a
+        // single qsfp0 for each switch to the db directly.
+        for which_switch in SwitchSlot::iter() {
+            match datastore
+                .switch_port_create(
+                    &opctx,
+                    config.deployment.rack_id,
+                    which_switch,
+                    nexus_db_model::Name("qsfp0".parse().unwrap()),
+                )
+                .await
+            {
+                // We're racing with the background task - it may have already
+                // contacted dpd and inserted qsfp0. That's fine.
+                Ok(_) | Err(Error::ObjectAlreadyExists { .. }) => (),
+                Err(err) => panic!(
+                    "failed to insert qsfp0 for {which_switch:?}: {}",
+                    InlineErrorChain::new(&err)
+                ),
+            }
+        }
+
         // Allocation of initial external IP addresses is a little funny.  In
         // a real system, it'd be allocated by RSS and provided with the rack
         // initialization request (which we're about to simulate).  RSS also
         // provides information about the external IP pool ranges available for
         // system services.  But here, we fake up IP pool ranges based on the
         // external addresses of services that we start or mock.
-        let internal_services_ip_pool_ranges = blueprint
-            .in_service_zones()
-            .filter_map(|(_, zc)| match &zc.zone_type {
-                BlueprintZoneType::BoundaryNtp(
-                    blueprint_zone_type::BoundaryNtp { external_ip, .. },
-                ) => Some(IpRange::from(external_ip.snat_cfg.ip)),
-                BlueprintZoneType::ExternalDns(
-                    blueprint_zone_type::ExternalDns { dns_address, .. },
-                ) => Some(IpRange::from(dns_address.addr.ip())),
-                BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
-                    external_ip,
-                    ..
-                }) => Some(IpRange::from(external_ip.ip)),
-                _ => None,
-            })
-            .collect();
+        let (ipv4_service_ranges, ipv6_service_ranges): (Vec<_>, Vec<_>) =
+            blueprint
+                .in_service_zones()
+                .filter_map(|(_, zc)| match &zc.zone_type {
+                    BlueprintZoneType::BoundaryNtp(
+                        blueprint_zone_type::BoundaryNtp {
+                            external_ip, ..
+                        },
+                    ) => Some(IpRange::from(external_ip.snat_cfg.ip)),
+                    BlueprintZoneType::ExternalDns(
+                        blueprint_zone_type::ExternalDns {
+                            dns_address, ..
+                        },
+                    ) => Some(IpRange::from(dns_address.addr.ip())),
+                    BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
+                        external_ip,
+                        ..
+                    }) => Some(IpRange::from(external_ip.ip)),
+                    _ => None,
+                })
+                .partition(|r| r.is_ipv4());
+
+        // Create configuration from the _non-empty_ ranges. The
+        // `ServiceIpPoolConfig` validates there's at least one range.
+        let mut service_ip_pools = IdOrdMap::new();
+        match ServiceIpPoolConfig::new(
+            "ipv4-service-pool".parse().unwrap(),
+            String::new(),
+            ipv4_service_ranges,
+        ) {
+            Ok(p) => service_ip_pools.insert_unique(p).unwrap(),
+            Err(ServiceIpPoolError::EmptyRanges) => {}
+            Err(ServiceIpPoolError::MixedIpVersions) => {
+                unreachable!("partitioned above")
+            }
+        }
+        match ServiceIpPoolConfig::new(
+            "ipv6-service-pool".parse().unwrap(),
+            String::new(),
+            ipv6_service_ranges,
+        ) {
+            Ok(p) => service_ip_pools.insert_unique(p).unwrap(),
+            Err(ServiceIpPoolError::EmptyRanges) => {}
+            Err(ServiceIpPoolError::MixedIpVersions) => {
+                unreachable!("partitioned above")
+            }
+        }
 
         internal_server
             .apictx
@@ -429,23 +500,11 @@ impl nexus_test_interface::NexusServer for Server {
                     physical_disks,
                     zpools,
                     crucible_datasets,
-                    internal_services_ip_pool_ranges,
+                    service_ip_pools,
                     certs,
                     internal_dns_zone_config,
                     external_dns_zone_name: external_dns_zone_name.to_owned(),
                     recovery_silo,
-                    external_port_count: ExternalPortDiscovery::Static(
-                        HashMap::from([
-                            (
-                                SwitchSlot::Switch0,
-                                vec!["qsfp0".parse().unwrap()],
-                            ),
-                            (
-                                SwitchSlot::Switch1,
-                                vec!["qsfp0".parse().unwrap()],
-                            ),
-                        ]),
-                    ),
                     rack_network_config: RackNetworkConfig {
                         rack_subnet: "fd00:1122:3344:0100::/56"
                             .parse()
@@ -456,11 +515,17 @@ impl nexus_test_interface::NexusServer for Server {
                         infra_ip_last: std::net::IpAddr::V4(
                             Ipv4Addr::UNSPECIFIED,
                         ),
-                        ports: Vec::new(),
+                        // `UplinkPorts` must be non-empty; this test harness
+                        // doesn't exercise uplinks, so use a placeholder port.
+                        ports: UplinkPorts::new(vec![
+                            PortConfig::empty_for_tests("qsfp0"),
+                        ])
+                        .expect("placeholder port list is non-empty"),
                         bgp: Vec::new(),
                         bfd: Vec::new(),
                     },
                     allowed_source_ips: AllowedSourceIps::Any,
+                    external_jumbo_frames_opt_in_enabled: false,
                     // Insert a fake trust quorum config such that existing
                     // sleds will never be present.
                     //
@@ -621,22 +686,13 @@ impl nexus_test_interface::NexusServer for Server {
 }
 
 /// Run an instance of the Nexus server.
-pub async fn run_server(config: &NexusConfig) -> Result<(), String> {
-    use slog::Drain;
-    let (drain, registration) = slog_dtrace::with_drain(
-        config.pkg.log.to_logger("nexus").map_err(|message| {
-            format!("initializing logger: {}", InlineErrorChain::new(&message))
-        })?,
-    );
-    let log = slog::Logger::root(drain.fuse(), slog::o!(FileKv));
-    if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
-        let msg = format!("failed to register DTrace probes: {}", e);
-        error!(log, "{}", msg);
-        return Err(msg);
-    } else {
-        debug!(log, "registered DTrace probes");
-    }
-    let internal_server = InternalServer::start(config, &log).await?;
+pub async fn run_server(
+    config: &NexusConfig,
+    log: slog::Logger,
+    debug_dropbox: DebugDropbox,
+) -> Result<(), String> {
+    let internal_server =
+        InternalServer::start(config, &log, debug_dropbox).await?;
     let server = Server::start(internal_server).await?;
     server.wait_for_finish().await
 }

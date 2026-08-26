@@ -63,7 +63,12 @@ swap_device_size_gb = 256
 # $ dladm show-phys -p -o LINK
 # data_link = "igb0"
 
-data_links = ["net0", "net1"]
+[external_disks]
+kind = "detect_physical"
+
+[data_links]
+kind = "virtual"
+devices = ["net0", "net1"]
 
 [dropshot]
 default_request_body_max_bytes = 1048576
@@ -78,3 +83,4 @@ if_exists = "append"
 resolve = { which = "ipcc" }
 attest = { which = "ipcc" }
 roots = ["/usr/share/oxide/idcerts/staging.pem", "/usr/share/oxide/idcerts/production.pem"]
+enforce = "Enforced"

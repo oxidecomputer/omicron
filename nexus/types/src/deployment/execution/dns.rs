@@ -9,7 +9,8 @@ use internal_dns_types::{
     config::DnsConfigBuilder,
     names::{ServiceName, ZONE_APEX_NAME},
 };
-use omicron_common::api::external::{Generation, Name};
+use omicron_common::api::external::Name;
+use omicron_generation_kinds::Generation;
 
 use crate::{
     deployment::{
@@ -155,9 +156,7 @@ pub fn blueprint_internal_dns_config(
         dns_builder.host_zone_switch(
             scrimlet.id(),
             switch_zone_ip,
-            overrides.dendrite_port(scrimlet.id()),
-            overrides.mgs_port(scrimlet.id()),
-            overrides.mgd_port(scrimlet.id()),
+            overrides.host_switch_zone_ports(scrimlet.id()),
         )?;
     }
 
@@ -232,7 +231,7 @@ pub fn blueprint_external_dns_config<'a>(
             let name = format!("ns{}", idx + 1);
             zone_records.push(DnsRecord::Ns(format!(
                 "{}.{}",
-                &name, external_dns_zone_name
+                name, external_dns_zone_name
             )));
             (name, vec![record])
         })

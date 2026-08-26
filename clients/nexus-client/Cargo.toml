@@ -13,6 +13,7 @@ futures.workspace = true
 iddqd.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
+omicron-generation-kinds.workspace = true
 omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
 oxnet.workspace = true
@@ -22,6 +23,7 @@ reqwest = { workspace = true, features = ["rustls", "stream"] }
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sled-agent-types-versions.workspace = true
 sled-agent-types.workspace = true
 slog.workspace = true
 uuid.workspace = true

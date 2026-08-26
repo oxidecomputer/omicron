@@ -12,10 +12,11 @@ blueprint  3f00b694-1b16-4aaa-8f78-e6b3a527b434
 parent:    06c88262-f435-410e-ba98-101bed41ec27
 
   sled: 711ac7f8-d19e-4572-bdb9-e9b50f6e362a
-    state:::::::::::::   active
-    config generation:   2
-    subnet::::::::::::   fd00:1122:3344:103::/64
-    last allocated IP:   fd00:1122:3344:103::11
+    state::::::::::::::   active
+    update disposition:   available (generation 1)
+    config generation::   2
+    subnet:::::::::::::   fd00:1122:3344:103::/64
+    last allocated IP::   fd00:1122:3344:103::11
 
     host phase 2 contents:
     ------------------------
@@ -147,10 +148,11 @@ parent:    06c88262-f435-410e-ba98-101bed41ec27
 
 
   sled: 9dc50690-f9bf-4520-bf80-051d0f465c2c
-    state:::::::::::::   active
-    config generation:   2
-    subnet::::::::::::   fd00:1122:3344:102::/64
-    last allocated IP:   fd00:1122:3344:102::10
+    state::::::::::::::   active
+    update disposition:   available (generation 1)
+    config generation::   2
+    subnet:::::::::::::   fd00:1122:3344:102::/64
+    last allocated IP::   fd00:1122:3344:102::10
 
     host phase 2 contents:
     ------------------------
@@ -279,10 +281,11 @@ parent:    06c88262-f435-410e-ba98-101bed41ec27
 
 
   sled: a88790de-5962-4871-8686-61c1fd5b7094
-    state:::::::::::::   active
-    config generation:   2
-    subnet::::::::::::   fd00:1122:3344:101::/64
-    last allocated IP:   fd00:1122:3344:101::10
+    state::::::::::::::   active
+    update disposition:   available (generation 1)
+    config generation::   2
+    subnet:::::::::::::   fd00:1122:3344:101::/64
+    last allocated IP::   fd00:1122:3344:101::10
 
     host phase 2 contents:
     ------------------------
@@ -418,13 +421,14 @@ parent:    06c88262-f435-410e-ba98-101bed41ec27
     read from::   SingleNode
 
  METADATA:
-    created by:::::::::::::   test suite
-    created at:::::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::::   (none)
-    internal DNS version:::   1
-    external DNS version:::   1
-    target release min gen:   1
-    nexus gen::::::::::::::   1
+    created by::::::::::::::   test suite
+    created at::::::::::::::   <REDACTED_TIMESTAMP>
+    comment:::::::::::::::::   (none)
+    internal DNS version::::   1
+    external DNS version::::   1
+    target release min gen::   1
+    nexus gen:::::::::::::::   1
+    external networking gen:   2
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -445,6 +449,7 @@ to:   blueprint 366b0b68-d80e-4bc1-abd3-dc69837847e0
  MODIFIED SLEDS:
 
   sled 711ac7f8-d19e-4572-bdb9-e9b50f6e362a (active, config generation 2 -> 3):
+    update disposition:   available (generation 1) (unchanged)
 
     measurements:
     ---------------------------
@@ -630,10 +635,11 @@ blueprint  366b0b68-d80e-4bc1-abd3-dc69837847e0
 parent:    3f00b694-1b16-4aaa-8f78-e6b3a527b434
 
   sled: 711ac7f8-d19e-4572-bdb9-e9b50f6e362a
-    state:::::::::::::   active
-    config generation:   3
-    subnet::::::::::::   fd00:1122:3344:103::/64
-    last allocated IP:   fd00:1122:3344:103::11
+    state::::::::::::::   active
+    update disposition:   available (generation 1)
+    config generation::   3
+    subnet:::::::::::::   fd00:1122:3344:103::/64
+    last allocated IP::   fd00:1122:3344:103::11
 
     host phase 2 contents:
     ------------------------
@@ -765,10 +771,11 @@ parent:    3f00b694-1b16-4aaa-8f78-e6b3a527b434
 
 
   sled: 9dc50690-f9bf-4520-bf80-051d0f465c2c
-    state:::::::::::::   active
-    config generation:   2
-    subnet::::::::::::   fd00:1122:3344:102::/64
-    last allocated IP:   fd00:1122:3344:102::10
+    state::::::::::::::   active
+    update disposition:   available (generation 1)
+    config generation::   2
+    subnet:::::::::::::   fd00:1122:3344:102::/64
+    last allocated IP::   fd00:1122:3344:102::10
 
     host phase 2 contents:
     ------------------------
@@ -897,10 +904,11 @@ parent:    3f00b694-1b16-4aaa-8f78-e6b3a527b434
 
 
   sled: a88790de-5962-4871-8686-61c1fd5b7094
-    state:::::::::::::   active
-    config generation:   2
-    subnet::::::::::::   fd00:1122:3344:101::/64
-    last allocated IP:   fd00:1122:3344:101::10
+    state::::::::::::::   active
+    update disposition:   available (generation 1)
+    config generation::   2
+    subnet:::::::::::::   fd00:1122:3344:101::/64
+    last allocated IP::   fd00:1122:3344:101::10
 
     host phase 2 contents:
     ------------------------
@@ -1036,26 +1044,19 @@ parent:    3f00b694-1b16-4aaa-8f78-e6b3a527b434
     read from::   SingleNode
 
  METADATA:
-    created by:::::::::::::   reconfigurator-cli
-    created at:::::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::::   (none)
-    internal DNS version:::   1
-    external DNS version:::   1
-    target release min gen:   1
-    nexus gen::::::::::::::   1
+    created by::::::::::::::   reconfigurator-cli
+    created at::::::::::::::   <REDACTED_TIMESTAMP>
+    comment:::::::::::::::::   (none)
+    internal DNS version::::   1
+    external DNS version::::   1
+    target release min gen::   1
+    nexus gen:::::::::::::::   1
+    external networking gen:   3
 
  PENDING MGS-MANAGED UPDATES: 0
 
 blueprint source: edited directly with reconfigurator-cli
 
-
-
-
-> # Set the add_zones_with_mupdate_override planner config to ensure that zone
-> # adds happen despite zone image sources not being Artifact.
-> set planner-config --add-zones-with-mupdate-override true
-planner config updated:
-*   add zones with mupdate override:   false -> true
 
 
 
@@ -1065,16 +1066,13 @@ INFO skipping noop image source check for all sleds, reason: no target release i
 generated blueprint 9c998c1d-1a7b-440a-ae0c-40f781dea6e2 based on parent blueprint 366b0b68-d80e-4bc1-abd3-dc69837847e0
 blueprint source: planner with report:
 planning report:
-planner config:
-    add zones with mupdate override:   true
-
 * zone adds and updates are blocked:
   - sleds have deployment units with image sources not set to Artifact:
     - sled 711ac7f8-d19e-4572-bdb9-e9b50f6e362a: 15 zones
     - sled 9dc50690-f9bf-4520-bf80-051d0f465c2c: 15 zones
     - sled a88790de-5962-4871-8686-61c1fd5b7094: 15 zones
 
-* adding zones despite being blocked, because: planner config `add_zones_with_mupdate_override` is true, target release generation is 1
+* adding zones despite being blocked, because: target release generation is 1
 * discretionary zones placed:
   * external_dns zone on sled 711ac7f8-d19e-4572-bdb9-e9b50f6e362a from source install dataset
 * zone updates waiting on discretionary zones
@@ -1090,6 +1088,7 @@ to:   blueprint 9c998c1d-1a7b-440a-ae0c-40f781dea6e2
  MODIFIED SLEDS:
 
   sled 711ac7f8-d19e-4572-bdb9-e9b50f6e362a (active, config generation 3 -> 4):
+    update disposition:   available (generation 1) (unchanged)
 
     measurements:
     ---------------------------
@@ -1275,10 +1274,11 @@ blueprint  9c998c1d-1a7b-440a-ae0c-40f781dea6e2
 parent:    366b0b68-d80e-4bc1-abd3-dc69837847e0
 
   sled: 711ac7f8-d19e-4572-bdb9-e9b50f6e362a
-    state:::::::::::::   active
-    config generation:   4
-    subnet::::::::::::   fd00:1122:3344:103::/64
-    last allocated IP:   fd00:1122:3344:103::12
+    state::::::::::::::   active
+    update disposition:   available (generation 1)
+    config generation::   4
+    subnet:::::::::::::   fd00:1122:3344:103::/64
+    last allocated IP::   fd00:1122:3344:103::12
 
     host phase 2 contents:
     ------------------------
@@ -1413,10 +1413,11 @@ parent:    366b0b68-d80e-4bc1-abd3-dc69837847e0
 
 
   sled: 9dc50690-f9bf-4520-bf80-051d0f465c2c
-    state:::::::::::::   active
-    config generation:   2
-    subnet::::::::::::   fd00:1122:3344:102::/64
-    last allocated IP:   fd00:1122:3344:102::10
+    state::::::::::::::   active
+    update disposition:   available (generation 1)
+    config generation::   2
+    subnet:::::::::::::   fd00:1122:3344:102::/64
+    last allocated IP::   fd00:1122:3344:102::10
 
     host phase 2 contents:
     ------------------------
@@ -1545,10 +1546,11 @@ parent:    366b0b68-d80e-4bc1-abd3-dc69837847e0
 
 
   sled: a88790de-5962-4871-8686-61c1fd5b7094
-    state:::::::::::::   active
-    config generation:   2
-    subnet::::::::::::   fd00:1122:3344:101::/64
-    last allocated IP:   fd00:1122:3344:101::10
+    state::::::::::::::   active
+    update disposition:   available (generation 1)
+    config generation::   2
+    subnet:::::::::::::   fd00:1122:3344:101::/64
+    last allocated IP::   fd00:1122:3344:101::10
 
     host phase 2 contents:
     ------------------------
@@ -1684,28 +1686,26 @@ parent:    366b0b68-d80e-4bc1-abd3-dc69837847e0
     read from::   SingleNode
 
  METADATA:
-    created by:::::::::::::   reconfigurator-sim
-    created at:::::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::::   (none)
-    internal DNS version:::   1
-    external DNS version:::   1
-    target release min gen:   1
-    nexus gen::::::::::::::   1
+    created by::::::::::::::   reconfigurator-sim
+    created at::::::::::::::   <REDACTED_TIMESTAMP>
+    comment:::::::::::::::::   (none)
+    internal DNS version::::   1
+    external DNS version::::   1
+    target release min gen::   1
+    nexus gen:::::::::::::::   1
+    external networking gen:   4
 
  PENDING MGS-MANAGED UPDATES: 0
 
 blueprint source: planner with report:
 planning report:
-planner config:
-    add zones with mupdate override:   true
-
 * zone adds and updates are blocked:
   - sleds have deployment units with image sources not set to Artifact:
     - sled 711ac7f8-d19e-4572-bdb9-e9b50f6e362a: 15 zones
     - sled 9dc50690-f9bf-4520-bf80-051d0f465c2c: 15 zones
     - sled a88790de-5962-4871-8686-61c1fd5b7094: 15 zones
 
-* adding zones despite being blocked, because: planner config `add_zones_with_mupdate_override` is true, target release generation is 1
+* adding zones despite being blocked, because: target release generation is 1
 * discretionary zones placed:
   * external_dns zone on sled 711ac7f8-d19e-4572-bdb9-e9b50f6e362a from source install dataset
 * zone updates waiting on discretionary zones
@@ -1727,6 +1727,7 @@ to:   blueprint 2ac8c740-444d-42ff-8d66-9812a7e51288
  MODIFIED SLEDS:
 
   sled 9dc50690-f9bf-4520-bf80-051d0f465c2c (active, config generation 2 -> 3):
+    update disposition:   available (generation 1) (unchanged)
 
     measurements:
     ---------------------------

@@ -22,8 +22,8 @@ use nexus_types::inventory::RotPageWhich;
 use nexus_types::inventory::SpType;
 use omicron_cockroach_metrics::CockroachClusterAdminClient;
 use omicron_common::address::NTP_ADMIN_PORT;
-use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use sled_agent_types::disk::M2Slot;
 use sled_agent_types::inventory::OmicronZoneType;
 use sled_agent_types::inventory::ZoneKind;
 use slog::Logger;
@@ -154,7 +154,7 @@ impl<'a> Collector<'a> {
             // First, fetch the state of the SP.  If that fails, report the
             // error but continue.
             let result =
-                client.sp_get(&sp.type_, sp.slot).await.with_context(|| {
+                client.sp_get(&sp.typ, sp.slot).await.with_context(|| {
                     format!(
                         "MGS {:?}: fetching state of SP {:?}",
                         client.baseurl(),
@@ -172,7 +172,7 @@ impl<'a> Collector<'a> {
             // Record the state that we found.
             let Some(baseboard_id) = in_progress.found_sp_state(
                 client.baseurl(),
-                sp.type_,
+                sp.typ,
                 sp.slot,
                 sp_state,
             ) else {
@@ -186,13 +186,13 @@ impl<'a> Collector<'a> {
             // collected already. Generally, we'd only get here for the first
             // MGS client.  Assuming that one succeeds, the other(s) will skip
             // this loop.
-            if matches!(sp.type_, SpType::Sled) {
+            if matches!(sp.typ, SpType::Sled) {
                 if !in_progress
                     .found_host_phase_1_active_slot_already(&baseboard_id)
                 {
                     let result = client
                         .sp_component_active_slot_get(
-                            &sp.type_,
+                            &sp.typ,
                             sp.slot,
                             SpComponent::HOST_CPU_BOOT_FLASH.const_as_str(),
                         )
@@ -256,7 +256,7 @@ impl<'a> Collector<'a> {
 
                     let result = client
                         .host_phase_1_flash_hash_calculate_with_timeout(
-                            sp.type_,
+                            sp.typ,
                             sp.slot,
                             phase1_slot,
                             PHASE1_HASH_TIMEOUT,
@@ -313,9 +313,7 @@ impl<'a> Collector<'a> {
                 };
 
                 let result = client
-                    .sp_component_caboose_get(
-                        &sp.type_, sp.slot, component, slot,
-                    )
+                    .sp_component_caboose_get(&sp.typ, sp.slot, component, slot)
                     .await
                     .with_context(|| {
                         format!(
@@ -362,12 +360,12 @@ impl<'a> Collector<'a> {
 
                 let result = match which {
                     RotPageWhich::Cmpa => client
-                        .sp_rot_cmpa_get(&sp.type_, sp.slot, component)
+                        .sp_rot_cmpa_get(&sp.typ, sp.slot, component)
                         .await
                         .map(|response| response.into_inner().base64_data),
                     RotPageWhich::CfpaActive => client
                         .sp_rot_cfpa_get(
-                            &sp.type_,
+                            &sp.typ,
                             sp.slot,
                             component,
                             &GetCfpaParams { slot: RotCfpaSlot::Active },
@@ -376,7 +374,7 @@ impl<'a> Collector<'a> {
                         .map(|response| response.into_inner().base64_data),
                     RotPageWhich::CfpaInactive => client
                         .sp_rot_cfpa_get(
-                            &sp.type_,
+                            &sp.typ,
                             sp.slot,
                             component,
                             &GetCfpaParams { slot: RotCfpaSlot::Inactive },
@@ -385,7 +383,7 @@ impl<'a> Collector<'a> {
                         .map(|response| response.into_inner().base64_data),
                     RotPageWhich::CfpaScratch => client
                         .sp_rot_cfpa_get(
-                            &sp.type_,
+                            &sp.typ,
                             sp.slot,
                             component,
                             &GetCfpaParams { slot: RotCfpaSlot::Scratch },
@@ -472,7 +470,7 @@ impl<'a> Collector<'a> {
         );
 
         let maybe_ident = client.inventory().await.with_context(|| {
-            format!("Sled Agent {:?}: inventory", &sled_agent_url)
+            format!("Sled Agent {:?}: inventory", sled_agent_url)
         });
         let inventory = match maybe_ident {
             Ok(inventory) => inventory.into_inner(),
@@ -547,7 +545,7 @@ impl<'a> Collector<'a> {
         );
 
         let maybe_ident = client.timesync().await.with_context(|| {
-            format!("Sled Agent {:?}: timesync", &sled_agent_url)
+            format!("Sled Agent {:?}: timesync", sled_agent_url)
         });
         let timesync = match maybe_ident {
             Ok(timesync) => nexus_types::inventory::TimeSync {
@@ -589,7 +587,7 @@ impl<'a> Collector<'a> {
         );
 
         let res = client.keeper_cluster_membership().await.with_context(|| {
-            format!("Clickhouse Keeper {:?}: inventory", &client.baseurl())
+            format!("Clickhouse Keeper {:?}: inventory", client.baseurl())
         });
 
         match res {
@@ -718,8 +716,8 @@ mod test {
     use iddqd::id_ord_map;
     use nexus_types::inventory::Collection;
     use omicron_cockroach_metrics::CockroachClusterAdminClient;
-    use omicron_common::api::external::Generation;
     use omicron_common::zpool_name::ZpoolName;
+    use omicron_generation_kinds::SledConfigGeneration;
     use omicron_sled_agent::sim;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::SledUuid;
@@ -727,6 +725,7 @@ mod test {
     use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
     use sled_agent_types::inventory::HostPhase2DesiredSlots;
     use sled_agent_types::inventory::OmicronSledConfig;
+    use sled_agent_types::inventory::OmicronSledUpdateDisposition;
     use sled_agent_types::inventory::OmicronZoneConfig;
     use sled_agent_types::inventory::OmicronZoneImageSource;
     use sled_agent_types::inventory::OmicronZoneType;
@@ -750,6 +749,7 @@ mod test {
             remove_mupdate_override,
             host_phase_2,
             measurements,
+            update_disposition,
         } = config;
 
         swriteln!(s, "        generation: {generation}");
@@ -757,6 +757,7 @@ mod test {
             s,
             "        remove_mupdate_override: {remove_mupdate_override:?}"
         );
+        swriteln!(s, "        update_disposition: {update_disposition:?}");
         {
             let HostPhase2DesiredSlots { slot_a, slot_b } = host_phase_2;
             swriteln!(s, "        host_phase_2.slot_a: {slot_a:?}");
@@ -972,15 +973,19 @@ mod test {
             sled_id,
             sim::SimMode::Auto,
             None,
-            None,
             sim::ZpoolConfig::None,
             SledCpuFamily::AmdMilan,
         );
 
-        let agent =
-            sim::Server::start(&config, &log, false, &simulated_upstairs, 0)
-                .await
-                .unwrap();
+        let agent = sim::Server::start(
+            &config,
+            &log,
+            sim::NexusRegistration::Background,
+            &simulated_upstairs,
+            0,
+        )
+        .await
+        .unwrap();
 
         // Pretend to put some zones onto this sled.  We don't need to test this
         // exhaustively here because there are builder tests that exercise a
@@ -994,7 +999,7 @@ mod test {
         let zone_address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0);
         client
             .omicron_config_put(&OmicronSledConfig {
-                generation: Generation::from(3),
+                generation: SledConfigGeneration::from_u32(3),
                 disks: IdOrdMap::default(),
                 datasets: IdOrdMap::default(),
                 zones: id_ord_map! {
@@ -1010,6 +1015,7 @@ mod test {
                 remove_mupdate_override: None,
                 host_phase_2: HostPhase2DesiredSlots::current_contents(),
                 measurements: BTreeSet::new(),
+                update_disposition: OmicronSledUpdateDisposition::Available,
             })
             .await
             .expect("failed to write initial zone version to fake sled agent");

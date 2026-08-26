@@ -16,8 +16,8 @@ SELECT
 FROM
   ereport
 WHERE
-  (ereport.marked_seen_in IS NULL) AND (ereport.time_deleted IS NULL)
+  ((ereport.marked_seen_in IS NULL) AND (ereport.time_deleted IS NULL)) AND ereport.class = ANY ($1)
 ORDER BY
   ereport.restart_id ASC, ereport.ena ASC
 LIMIT
-  $1
+  $2

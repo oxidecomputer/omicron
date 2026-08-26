@@ -68,7 +68,7 @@ impl OsoInitBuilder {
         info!(self.log, "registering Oso class"; "class" => &c.name);
         let name = c.name.clone();
         let new_element = self.class_names.insert(name.clone());
-        ensure!(new_element, "Oso class was already registered: {:?}", &name);
+        ensure!(new_element, "Oso class was already registered: {:?}", name);
         self.oso
             .register_class(c)
             .with_context(|| format!("registering Oso class {:?}", name))?;
@@ -108,6 +108,7 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
         Database::get_polar_class(),
         DnsConfig::get_polar_class(),
         Fleet::get_polar_class(),
+        FmConfig::get_polar_class(),
         Inventory::get_polar_class(),
         IpPoolList::get_polar_class(),
         VpcList::get_polar_class(),
@@ -116,6 +117,7 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
         QuiesceState::get_polar_class(),
         SiloCertificateList::get_polar_class(),
         SiloGroupList::get_polar_class(),
+        SiloImageList::get_polar_class(),
         SiloIdentityProviderList::get_polar_class(),
         SiloUserList::get_polar_class(),
         SiloUserSessionList::get_polar_class(),
@@ -157,6 +159,8 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
         SiloImage::init(),
         // Fleet-level resources
         AddressLot::init(),
+        BgpConfig::init(),
+        BgpAnnounceSet::init(),
         Blueprint::init(),
         LoopbackAddress::init(),
         Certificate::init(),

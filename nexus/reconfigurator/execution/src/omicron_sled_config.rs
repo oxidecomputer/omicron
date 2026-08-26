@@ -88,29 +88,29 @@ mod tests {
     use nexus_types::deployment::BlueprintMeasurements;
     use nexus_types::deployment::BlueprintPhysicalDiskConfig;
     use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
+    use nexus_types::deployment::BlueprintSledUpdateDisposition;
+    use nexus_types::deployment::BlueprintSledUpdateDispositionKind;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneImageSource;
     use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::deployment::LastAllocatedSubnetIpOffset;
+    use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::external_api::sled::SledPolicy;
     use nexus_types::external_api::sled::SledProvisionPolicy;
     use nexus_types::external_api::sled::SledState;
     use omicron_common::address::Ipv6Subnet;
     use omicron_common::address::REPO_DEPOT_PORT;
-    use omicron_common::api::external::Generation;
     use omicron_common::api::internal::shared::DatasetKind;
-    use omicron_common::disk::CompressionAlgorithm;
-    use omicron_common::disk::DatasetsConfig;
-    use omicron_common::disk::DiskIdentity;
-    use omicron_common::disk::OmicronPhysicalDisksConfig;
     use omicron_common::zpool_name::ZpoolName;
+    use omicron_generation_kinds::{Generation, SledConfigGeneration};
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::ZpoolUuid;
-    use sled_agent_types::inventory::OmicronZonesConfig;
+    use sled_agent_types::disk::CompressionAlgorithm;
+    use sled_agent_types::disk::DiskIdentity;
     use sled_agent_types::inventory::SledRole;
     use std::net::Ipv6Addr;
     use std::net::SocketAddr;
@@ -133,8 +133,9 @@ mod tests {
             _ => panic!("Unexpected address type for sled agent (wanted IPv6)"),
         };
         let sim_sled_agent = &cptestctx.sled_agents[0].sled_agent();
-        let sim_sled_agent_config_generation =
-            sim_sled_agent.omicron_zones_list().generation;
+        let sim_sled_agent_config_generation = sim_sled_agent
+            .omicron_sled_config()
+            .map_or(SledConfigGeneration::new(), |config| config.generation);
 
         let sleds_by_id = id_ord_map! {
             Sled::new(
@@ -177,7 +178,7 @@ mod tests {
         disks
             .insert_unique(BlueprintPhysicalDiskConfig {
                 disposition: BlueprintPhysicalDiskDisposition::Expunged {
-                    as_of_generation: Generation::new(),
+                    as_of_generation: SledConfigGeneration::new(),
                     ready_for_cleanup: false,
                 },
                 identity: DiskIdentity {
@@ -247,7 +248,7 @@ mod tests {
         zones
             .insert_unique(BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::Expunged {
-                    as_of_generation: Generation::new(),
+                    as_of_generation: SledConfigGeneration::new(),
                     ready_for_cleanup: false,
                 },
                 id: OmicronZoneUuid::new_v4(),
@@ -263,6 +264,12 @@ mod tests {
 
         let sled_config = BlueprintSledConfig {
             state: SledState::Active,
+            update_disposition: BlueprintSledUpdateDisposition {
+                generation: Generation::new().next(),
+                kind: BlueprintSledUpdateDispositionKind::Evacuating {
+                    policy: ReconfiguratorDisruptionPolicy::Terminate,
+                },
+            },
             subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
             last_allocated_ip_subnet_offset:
                 LastAllocatedSubnetIpOffset::initial(),
@@ -284,48 +291,9 @@ mod tests {
 
         // Observe the latest configuration stored on the simulated sled agent,
         // and verify that this output matches the input.
-        //
-        // TODO-cleanup Simulated sled-agent should report a unified
-        // `OmicronSledConfig`.
-        let observed_disks =
-            sim_sled_agent.omicron_physical_disks_list().unwrap();
-        let observed_datasets = sim_sled_agent.datasets_config_list().unwrap();
-        let observed_zones = sim_sled_agent.omicron_zones_list();
-
+        let observed_config = sim_sled_agent.omicron_sled_config().unwrap();
         let in_service_config =
             sled_config.clone().into_in_service_sled_config();
-        assert_eq!(
-            observed_disks,
-            OmicronPhysicalDisksConfig {
-                generation: in_service_config.generation,
-                disks: in_service_config.disks.into_iter().collect(),
-            }
-        );
-        assert_eq!(
-            observed_datasets,
-            DatasetsConfig {
-                generation: in_service_config.generation,
-                datasets: in_service_config
-                    .datasets
-                    .into_iter()
-                    .map(|d| (d.id, d))
-                    .collect(),
-            }
-        );
-        assert_eq!(
-            observed_zones,
-            OmicronZonesConfig {
-                generation: in_service_config.generation,
-                zones: in_service_config.zones.into_iter().collect(),
-            }
-        );
-
-        // We expect to see each single in-service item we supplied as input.
-        assert_eq!(observed_disks.disks.len(), 1);
-        assert_eq!(observed_disks.disks[0].id, disk_id);
-        assert_eq!(observed_datasets.datasets.len(), 1);
-        assert!(observed_datasets.datasets.contains_key(&dataset_id));
-        assert_eq!(observed_zones.zones.len(), 1);
-        assert_eq!(observed_zones.zones[0].id, zone_id);
+        assert_eq!(observed_config, in_service_config);
     }
 }

@@ -17,6 +17,7 @@
 //! Operations that list or modify artifacts or the configuration are called by
 //! Nexus and handled by the Sled Agent API.
 
+use std::convert::Infallible;
 use std::future::Future;
 use std::io::{ErrorKind, Write};
 use std::net::SocketAddrV6;
@@ -33,7 +34,7 @@ use dropshot::{
 };
 use futures::{Stream, TryStreamExt};
 use omicron_common::address::REPO_DEPOT_PORT;
-use omicron_common::api::external::Generation;
+use omicron_generation_kinds::Generation;
 use omicron_ledger::Ledger;
 use repo_depot_api::*;
 use sha2::{Digest, Sha256};
@@ -231,7 +232,10 @@ macro_rules! log_and_store {
     };
 }
 
-impl<T: DatasetsManager> ArtifactStore<T> {
+impl<T: DatasetsManager> ArtifactStore<T>
+where
+    Error: From<T::PermitError>,
+{
     /// Get the current [`ArtifactConfig`].
     pub(crate) fn get_config(&self) -> Option<ArtifactConfig> {
         self.config.borrow().clone()
@@ -371,6 +375,7 @@ impl<T: DatasetsManager> ArtifactStore<T> {
         let mut writer = ArtifactWriter::new(self.log.clone(), sha256);
         let mut last_error = None;
         for mountpoint in self.storage.artifact_storage_paths().await {
+            let write_permit = self.storage.write_permit().await?;
             let temp_dir = mountpoint.join(TEMP_SUBDIR);
             if let Err(err) = tokio::fs::create_dir(&temp_dir).await {
                 if err.kind() != ErrorKind::AlreadyExists {
@@ -380,7 +385,7 @@ impl<T: DatasetsManager> ArtifactStore<T> {
                     continue;
                 }
             }
-            writer.add_path(mountpoint, temp_dir);
+            writer.add_path(mountpoint, temp_dir, write_permit);
         }
         if writer.write_tasks.is_empty() {
             Err(last_error.unwrap_or(Error::NoUpdateDataset))
@@ -411,7 +416,6 @@ impl<T: DatasetsManager> ArtifactStore<T> {
     ) -> Result<(), Error> {
         // Check that there's no conflict before we send the upstream request.
         let writer = self.writer(sha256, generation).await?;
-        let permit = self.storage.copy_permit().await;
 
         let client = repo_depot_client::Client::new_with_client(
             depot_base_url,
@@ -433,7 +437,6 @@ impl<T: DatasetsManager> ArtifactStore<T> {
         let log = self.log.clone();
         let base_url = depot_base_url.to_owned();
         tokio::task::spawn(async move {
-            let _permit = permit;
             let stream = response.into_inner().into_inner().map_err(|err| {
                 Error::DepotCopy {
                     sha256,
@@ -599,19 +602,25 @@ async fn delete_reconciler<T: DatasetsManager>(
 /// simulated sled agent, and this module's unit tests have different ways of
 /// keeping track of the datasets on the system.
 pub trait DatasetsManager: Clone + Send + Sync + 'static {
+    type PermitError;
+
     fn artifact_storage_paths(
         &self,
     ) -> impl Future<Output = impl Iterator<Item = Utf8PathBuf> + Send + '_> + Send;
 
     #[expect(async_fn_in_trait)]
-    async fn copy_permit(&self) -> Option<OwnedSemaphorePermit> {
-        None
+    async fn write_permit(
+        &self,
+    ) -> Result<Option<OwnedSemaphorePermit>, Self::PermitError> {
+        Ok(None)
     }
 
     fn signal_delete_done(&self, _generation: Generation) {}
 }
 
 impl DatasetsManager for InternalDisksReceiver {
+    type PermitError = Infallible;
+
     async fn artifact_storage_paths(
         &self,
     ) -> impl Iterator<Item = Utf8PathBuf> + '_ {
@@ -638,7 +647,12 @@ impl ArtifactWriter {
         }
     }
 
-    fn add_path(&mut self, mountpoint: Utf8PathBuf, temp_dir: Utf8PathBuf) {
+    fn add_path(
+        &mut self,
+        mountpoint: Utf8PathBuf,
+        temp_dir: Utf8PathBuf,
+        write_permit: Option<OwnedSemaphorePermit>,
+    ) {
         let log = self.log.clone();
         let path = mountpoint.join(self.sha256.to_string());
         let atomic_file = AtomicFile::new_with_tmpdir(
@@ -650,6 +664,7 @@ impl ArtifactWriter {
         let expected = self.sha256;
         self.senders.push(tx);
         self.write_tasks.spawn_blocking(move || {
+            let _write_permit = write_permit;
             let moved_path = path.clone();
             atomic_file
                 .write(|file| {
@@ -856,6 +871,12 @@ pub enum Error {
     NotInConfig { sha256: ArtifactHash, generation: Generation },
 }
 
+impl From<Infallible> for Error {
+    fn from(source: Infallible) -> Self {
+        match source {}
+    }
+}
+
 impl From<Error> for HttpError {
     fn from(err: Error) -> HttpError {
         let message = InlineErrorChain::new(&err).to_string();
@@ -897,6 +918,7 @@ impl From<Error> for HttpError {
 #[cfg(test)]
 mod test {
     use std::collections::BTreeSet;
+    use std::convert::Infallible;
     use std::sync::Arc;
 
     use bytes::Bytes;
@@ -904,7 +926,7 @@ mod test {
     use camino_tempfile::Utf8TempDir;
     use futures::stream::{self, StreamExt};
     use hex_literal::hex;
-    use omicron_common::api::external::Generation;
+    use omicron_generation_kinds::Generation;
     use omicron_test_utils::dev::test_setup_log;
     use sled_agent_types::artifact::ArtifactConfig;
     use tokio::io::AsyncReadExt;
@@ -945,6 +967,8 @@ mod test {
     }
 
     impl DatasetsManager for TestBackend {
+        type PermitError = Infallible;
+
         async fn artifact_storage_paths(
             &self,
         ) -> impl Iterator<Item = camino::Utf8PathBuf> + '_ {

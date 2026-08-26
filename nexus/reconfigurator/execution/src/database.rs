@@ -72,6 +72,7 @@ mod test {
     use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
     use nexus_types::deployment::BlueprintMeasurements;
     use nexus_types::deployment::BlueprintSledConfig;
+    use nexus_types::deployment::BlueprintSledUpdateDisposition;
     use nexus_types::deployment::BlueprintSource;
     use nexus_types::deployment::BlueprintTarget;
     use nexus_types::deployment::BlueprintZoneConfig;
@@ -87,11 +88,13 @@ mod test {
     use nexus_types::external_api::sled::SledState;
     use omicron_common::address::Ipv6Subnet;
     use omicron_common::api::external::Error;
-    use omicron_common::api::external::Generation;
     use omicron_common::api::external::MacAddr;
     use omicron_common::api::external::Vni;
     use omicron_common::api::internal::shared::PrivateIpConfig;
     use omicron_common::zpool_name::ZpoolName;
+    use omicron_generation_kinds::{
+        Generation, SledConfigGeneration, TargetReleaseGeneration,
+    };
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::ExternalIpUuid;
@@ -165,10 +168,11 @@ mod test {
             sled_id,
             BlueprintSledConfig {
                 state: SledState::Active,
+                update_disposition: BlueprintSledUpdateDisposition::initial(),
                 subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
                 last_allocated_ip_subnet_offset:
                     LastAllocatedSubnetIpOffset::initial(),
-                sled_agent_generation: Generation::new(),
+                sled_agent_generation: SledConfigGeneration::new(),
                 zones,
                 disks: IdOrdMap::new(),
                 datasets: IdOrdMap::new(),
@@ -186,8 +190,9 @@ mod test {
             parent_blueprint_id: None,
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
-            target_release_minimum_generation: Generation::new(),
+            target_release_minimum_generation: TargetReleaseGeneration::new(),
             nexus_generation: top_level_nexus_generation,
+            external_networking_generation: Generation::new(),
             cockroachdb_fingerprint: String::new(),
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
@@ -258,7 +263,7 @@ mod test {
                 (
                     expunged_nexus,
                     BlueprintZoneDisposition::Expunged {
-                        as_of_generation: Generation::new(),
+                        as_of_generation: SledConfigGeneration::new(),
                         ready_for_cleanup: true,
                     },
                     Generation::new(),

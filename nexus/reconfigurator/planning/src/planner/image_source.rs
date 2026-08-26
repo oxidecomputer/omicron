@@ -19,14 +19,14 @@ use nexus_types::{
     },
     inventory::Collection,
 };
-use omicron_common::api::external::TufArtifactMeta;
+use omicron_generation_kinds::SledConfigGeneration;
 use omicron_uuid_kinds::{MupdateOverrideUuid, OmicronZoneUuid, SledUuid};
 use sled_agent_types::inventory::{
     BootPartitionContents, BootPartitionDetails, ManifestBootInventory,
     ZoneKind,
 };
 use slog::{debug, info, o, warn};
-use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact::{Artifact, ArtifactHash};
 
 use crate::blueprint_builder::{BlueprintBuilder, Error};
 
@@ -75,6 +75,44 @@ impl NoopConvertInfo {
                     .expect("sled IDs are unique");
                 continue;
             };
+
+            let Some(last_reconciliation) = &inv_sled.last_reconciliation
+            else {
+                sleds
+                    .insert_unique(NoopConvertSledInfo {
+                        sled_id,
+                        status: NoopConvertSledStatus::Ineligible(
+                            NoopConvertSledIneligibleReason::NoLastReconciliation,
+                        ),
+                    })
+                    .expect("sled IDs are unique");
+                continue;
+            };
+
+            let parent_bp_gen = blueprint
+                .current_sled_incoming_sled_agent_generation(sled_id)?;
+            let inventory_gen =
+                last_reconciliation.last_reconciled_config.generation;
+            // If the inventory's reported generation is behind the blueprint,
+            // then the inventory is stale. We should not:
+            //
+            // * clear the "will remove mupdate override" field in the blueprint
+            // * noop convert any sleds to Artifact image sources based on this
+            //   inventory
+            if inventory_gen < parent_bp_gen {
+                sleds
+                    .insert_unique(NoopConvertSledInfo {
+                        sled_id,
+                        status: NoopConvertSledStatus::Ineligible(
+                            NoopConvertSledIneligibleReason::InventoryStale {
+                                parent_bp_gen,
+                                inventory_gen,
+                            },
+                        ),
+                    })
+                    .expect("sled IDs are unique");
+                continue;
+            }
 
             let zone_manifest = match &inv_sled
                 .file_source_resolver
@@ -339,6 +377,10 @@ impl NoopConvertSledStatus {
                 // be logged at different levels. Hence this mess.
                 match reason {
                     NoopConvertSledIneligibleReason::NotInInventory
+                    | NoopConvertSledIneligibleReason::NoLastReconciliation
+                    | NoopConvertSledIneligibleReason::InventoryStale {
+                        ..
+                    }
                     | NoopConvertSledIneligibleReason::MupdateOverride {
                         ..
                     } => {
@@ -451,6 +493,16 @@ pub(crate) enum NoopConvertSledIneligibleReason {
     /// This sled is missing from inventory.
     NotInInventory,
 
+    /// This sled doesn't have a last reconciliation.
+    NoLastReconciliation,
+
+    /// The inventory is stale, as indicated by its generation number: it has an
+    /// older generation for this sled than the parent blueprint.
+    InventoryStale {
+        parent_bp_gen: SledConfigGeneration,
+        inventory_gen: SledConfigGeneration,
+    },
+
     /// An error occurred retrieving the sled's install dataset zone manifest.
     ManifestError { message: String },
 
@@ -490,6 +542,17 @@ impl fmt::Display for NoopConvertSledIneligibleReason {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NotInInventory => write!(f, "sled not found in inventory"),
+            Self::NoLastReconciliation => {
+                write!(f, "sled doesn't have a last reconciled config")
+            }
+            Self::InventoryStale { parent_bp_gen, inventory_gen } => {
+                write!(
+                    f,
+                    "inventory stale: inventory reported generation \
+                     ({inventory_gen}) that is older than the \
+                     generation in the parent blueprint ({parent_bp_gen})",
+                )
+            }
             Self::ManifestError { message } => {
                 write!(f, "error retrieving zone manifest: {}", message)
             }
@@ -522,7 +585,7 @@ impl NoopConvertZoneInfo {
     fn new(
         zone: &BlueprintZoneConfig,
         zone_manifest: &ManifestBootInventory,
-        artifacts_by_hash: &HashMap<ArtifactHash, &TufArtifactMeta>,
+        artifacts_by_hash: &HashMap<ArtifactHash, &Artifact>,
     ) -> Self {
         let file_name = zone.kind().artifact_in_install_dataset();
 
@@ -690,7 +753,7 @@ impl NoopConvertHostPhase2Slots {
     fn new(
         current: BlueprintHostPhase2DesiredSlots,
         contents: Option<&BootPartitionContents>,
-        artifacts_by_hash: &HashMap<ArtifactHash, &TufArtifactMeta>,
+        artifacts_by_hash: &HashMap<ArtifactHash, &Artifact>,
     ) -> Self {
         Self {
             slot_a: NoopConvertHostPhase2Contents::new(
@@ -734,7 +797,7 @@ impl NoopConvertHostPhase2Contents {
     fn new(
         current: BlueprintHostPhase2DesiredContents,
         details: Option<&Result<BootPartitionDetails, String>>,
-        artifacts_by_hash: &HashMap<ArtifactHash, &TufArtifactMeta>,
+        artifacts_by_hash: &HashMap<ArtifactHash, &Artifact>,
     ) -> Self {
         match current {
             BlueprintHostPhase2DesiredContents::Artifact { version, hash } => {
@@ -754,7 +817,7 @@ impl NoopConvertHostPhase2Contents {
                             artifacts_by_hash.get(&details.artifact_hash)
                         {
                             let version = BlueprintArtifactVersion::Available {
-                                version: meta.id.version.clone(),
+                                version: meta.version.clone(),
                             };
                             let desired =
                                 BlueprintHostPhase2DesiredContents::Artifact {
@@ -897,7 +960,7 @@ impl NoopConvertMeasurements {
     fn new(
         current: BlueprintMeasurements,
         measurement_manifest: Result<&ManifestBootInventory, &String>,
-        artifacts_by_hash: &HashMap<ArtifactHash, &TufArtifactMeta>,
+        artifacts_by_hash: &HashMap<ArtifactHash, &Artifact>,
     ) -> Self {
         use NoopConvertMeasurementsIneligibleReason as IneligibleReason;
 
@@ -920,7 +983,7 @@ impl NoopConvertMeasurements {
                     {
                         artifacts.insert(BlueprintSingleMeasurement {
                             version: BlueprintArtifactVersion::Available {
-                                version: meta.id.version.clone(),
+                                version: meta.version.clone(),
                             },
                             hash: meta.hash,
                         });

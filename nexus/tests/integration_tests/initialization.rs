@@ -8,6 +8,7 @@ use nexus_config::InternalDns;
 use nexus_test_interface::NexusServer;
 use nexus_test_utils::{ControlPlaneStarter, load_test_config};
 use omicron_common::address::MGS_PORT;
+use omicron_debug_dropbox::DebugDropbox;
 use sled_agent_types::early_networking::SwitchSlot;
 use std::collections::HashMap;
 use tokio::time::Duration;
@@ -59,11 +60,16 @@ async fn test_nexus_boots_before_cockroach() {
     };
     let nexus_config = starter.config.clone();
     let nexus_log = log.clone();
+    let dropbox = DebugDropbox::for_tests_noop(&log);
     let nexus_handle = tokio::task::spawn(async move {
         info!(nexus_log, "Test: Trying to start Nexus (internal)");
-        omicron_nexus::Server::start_internal(&nexus_config, &nexus_log)
-            .await
-            .unwrap();
+        omicron_nexus::Server::start_internal(
+            &nexus_config,
+            &nexus_log,
+            dropbox,
+        )
+        .await
+        .unwrap();
         info!(nexus_log, "Test: Started Nexus (internal)");
     });
 
@@ -137,11 +143,16 @@ async fn test_nexus_boots_before_dendrite() {
     };
     let nexus_config = starter.config.clone();
     let nexus_log = log.clone();
+    let dropbox = DebugDropbox::for_tests_noop(&log);
     let nexus_handle = tokio::task::spawn(async move {
         info!(nexus_log, "Test: Trying to start Nexus (internal)");
-        omicron_nexus::Server::start_internal(&nexus_config, &nexus_log)
-            .await
-            .unwrap();
+        omicron_nexus::Server::start_internal(
+            &nexus_config,
+            &nexus_log,
+            dropbox,
+        )
+        .await
+        .unwrap();
         info!(nexus_log, "Test: Started Nexus (internal)");
     });
 
@@ -157,6 +168,11 @@ async fn test_nexus_boots_before_dendrite() {
     starter.start_mgd(SwitchSlot::Switch0).await;
     starter.start_mgd(SwitchSlot::Switch1).await;
     info!(log, "Started mgd");
+
+    info!(log, "Starting ddm");
+    starter.start_ddm(SwitchSlot::Switch0).await;
+    starter.start_ddm(SwitchSlot::Switch1).await;
+    info!(log, "Started ddm");
 
     info!(log, "Populating internal DNS records");
     starter
@@ -197,6 +213,8 @@ async fn nexus_schema_test_setup(
     starter.start_dendrite(SwitchSlot::Switch1).await;
     starter.start_mgd(SwitchSlot::Switch0).await;
     starter.start_mgd(SwitchSlot::Switch1).await;
+    starter.start_ddm(SwitchSlot::Switch0).await;
+    starter.start_ddm(SwitchSlot::Switch1).await;
     starter.populate_internal_dns().await;
 }
 

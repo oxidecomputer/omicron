@@ -1,0 +1,56 @@
+UPDATE
+  ip_pool
+SET
+  assignment = $1, time_modified = now()
+WHERE
+  id = $2
+  AND time_deleted IS NULL
+  AND assignment = $3
+  AND (
+      SELECT
+        CAST(
+          IF(
+            EXISTS(
+              SELECT
+                1
+              FROM
+                external_ip
+              WHERE
+                ip_pool_id = $4 AND external_ip.is_service AND time_deleted IS NULL
+              LIMIT
+                1
+            ),
+            1 / 0,
+            1
+          )
+            AS BOOL
+        )
+    )
+  AND CAST(
+      IF(
+        EXISTS(SELECT 1 FROM external_service_ip_pool WHERE ip_pool_id = $5),
+        'assigned-to-services',
+        'TRUE'
+      )
+        AS BOOL
+    )
+  AND CAST(
+      IF(
+        (SELECT count(1) FROM ip_pool WHERE time_deleted IS NULL AND assignment = $6 LIMIT 2) >= 2,
+        '1',
+        $7
+      )
+        AS INT8
+    )
+    = 1
+RETURNING
+  id,
+  name,
+  description,
+  time_created,
+  time_modified,
+  time_deleted,
+  ip_version,
+  rcgen,
+  assignment,
+  pool_type

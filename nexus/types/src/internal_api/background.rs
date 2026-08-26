@@ -10,11 +10,12 @@ use gateway_types::component::SpType;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
-use omicron_common::api::external::Generation;
+use omicron_generation_kinds::Generation;
 use omicron_uuid_kinds::AlertReceiverUuid;
 use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SitrepUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
@@ -272,21 +273,31 @@ pub struct SupportBundleCleanupReport {
 
 /// Identifies what we could or could not store within a support bundle.
 ///
-/// This struct will get emitted as part of the background task infrastructure.
+/// This struct describes facts known by the end of bundle collection: the
+/// set of steps that ran and what they produced. Post-collection facts
+/// (such as whether the bundle was successfully activated in the database)
+/// live on [`SupportBundleActivationReport`], which wraps this struct.
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct SupportBundleCollectionReport {
     pub bundle: SupportBundleUuid,
 
-    /// True iff the bundle was successfully made 'active' in the database.
-    pub activated_in_db_ok: bool,
-
     /// All steps taken, alongside their timing information, when collecting the
     /// bundle.
     pub steps: Vec<SupportBundleCollectionStep>,
+}
 
-    /// Status of ereport collection, or `None` if no ereports were requested
-    /// for this support bundle.
-    pub ereports: Option<SupportBundleEreportStatus>,
+/// Pairs a [`SupportBundleCollectionReport`] with facts known only after
+/// collection finishes, such as whether the bundle was successfully made
+/// 'active' in the database.
+///
+/// This is what the Nexus support-bundle-collector background task emits as
+/// its `collection_report`.
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SupportBundleActivationReport {
+    pub collection: SupportBundleCollectionReport,
+
+    /// True iff the bundle was successfully made 'active' in the database.
+    pub activated_in_db_ok: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -295,6 +306,13 @@ pub struct SupportBundleCollectionStep {
     pub start: DateTime<Utc>,
     pub end: DateTime<Utc>,
     pub status: SupportBundleCollectionStepStatus,
+
+    /// Optional structured payload from the step. Steps that have only
+    /// pass/fail semantics leave this `None`; steps that can partially
+    /// succeed or want to surface counts/errors serialize their detail
+    /// struct here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub details: Option<serde_json::Value>,
 }
 
 impl SupportBundleCollectionStep {
@@ -311,7 +329,7 @@ impl SupportBundleCollectionStep {
     pub const STEP_SPAWN_SLEDS: &'static str = "spawn steps to query all sleds";
 }
 
-#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub enum SupportBundleCollectionStepStatus {
     Ok,
     Skipped,
@@ -347,12 +365,7 @@ pub struct SupportBundleEreportStatus {
 
 impl SupportBundleCollectionReport {
     pub fn new(bundle: SupportBundleUuid) -> Self {
-        Self {
-            bundle,
-            activated_in_db_ok: false,
-            steps: vec![],
-            ereports: None,
-        }
+        Self { bundle, steps: vec![] }
     }
 }
 
@@ -618,6 +631,105 @@ pub struct BlueprintRendezvousStats {
     pub crucible_dataset: CrucibleDatasetsRendezvousStats,
     pub local_storage_dataset: DatasetsRendezvousStats,
     pub local_storage_unencrypted_dataset: DatasetsRendezvousStats,
+    pub sled_blueprint_availability: SledBlueprintAvailabilityRendezvousStats,
+}
+
+/// Stats for a sled availability rendezvous run.
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize,
+)]
+pub struct SledBlueprintAvailabilityRendezvousStats {
+    /// Number of sleds recorded as available for provisioning.
+    ///
+    /// This can be a fresh row or an update at a newer generation; the
+    /// availability value itself may be unchanged.
+    pub num_marked_available: usize,
+
+    /// Number of sleds recorded as unavailable for provisioning.
+    ///
+    /// This can be a fresh row or an update at a newer generation; the
+    /// availability value itself may be unchanged.
+    pub num_marked_unavailable: usize,
+
+    /// Number of sleds whose row was left as-is.
+    ///
+    /// This can be for any of the following reasons:
+    ///
+    /// * The blueprint's update generation wasn't newer.
+    /// * The row is already in a terminal state (while the blueprint still
+    ///   lists the sled as active).
+    /// * A concurrent Nexus won the write.
+    pub num_unchanged: usize,
+
+    /// Number of active sleds whose stored row and blueprint entry together
+    /// violate the generation invariant (equal generation but different
+    /// availability, indicating a planner bug). These rows are left untouched.
+    pub num_invariant_violations: usize,
+
+    /// Number of sleds newly moved to the terminal `decommissioned` state.
+    pub num_decommissioned: usize,
+
+    /// Number of decommissioned sleds in the blueprint whose row was already a
+    /// tombstone (possibly written by a concurrent Nexus during this pass).
+    pub num_already_decommissioned: usize,
+
+    /// Number of active rows for sleds the target blueprint doesn't mention.
+    /// These are left untouched.
+    ///
+    /// This can only happen if this Nexus is acting on a stale blueprint that
+    /// predates a sled another Nexus already recorded.
+    pub num_not_in_blueprint: usize,
+
+    /// Number of decommissioned rows for sleds the target blueprint doesn't
+    /// mention. These are terminal tombstones and are left untouched.
+    ///
+    /// Today the blueprint never prunes decommissioned sleds, so this is
+    /// expected to be zero; once it does, this becomes the steady state for
+    /// every pruned sled.
+    pub num_decommissioned_not_in_blueprint: usize,
+}
+
+impl slog::KV for SledBlueprintAvailabilityRendezvousStats {
+    fn serialize(
+        &self,
+        _record: &slog::Record,
+        serializer: &mut dyn slog::Serializer,
+    ) -> slog::Result {
+        let Self {
+            num_marked_available,
+            num_marked_unavailable,
+            num_unchanged,
+            num_invariant_violations,
+            num_decommissioned,
+            num_already_decommissioned,
+            num_not_in_blueprint,
+            num_decommissioned_not_in_blueprint,
+        } = *self;
+        serializer
+            .emit_usize("num_marked_available".into(), num_marked_available)?;
+        serializer.emit_usize(
+            "num_marked_unavailable".into(),
+            num_marked_unavailable,
+        )?;
+        serializer.emit_usize("num_unchanged".into(), num_unchanged)?;
+        serializer.emit_usize(
+            "num_invariant_violations".into(),
+            num_invariant_violations,
+        )?;
+        serializer
+            .emit_usize("num_decommissioned".into(), num_decommissioned)?;
+        serializer.emit_usize(
+            "num_already_decommissioned".into(),
+            num_already_decommissioned,
+        )?;
+        serializer
+            .emit_usize("num_not_in_blueprint".into(), num_not_in_blueprint)?;
+        serializer.emit_usize(
+            "num_decommissioned_not_in_blueprint".into(),
+            num_decommissioned_not_in_blueprint,
+        )?;
+        Ok(())
+    }
 }
 
 /// Stats for the rendezvous table that stores Crucible datasets
@@ -961,6 +1073,8 @@ pub struct SpEreportIngesterStatus {
     /// the config file.
     pub disabled: bool,
     pub sps: Vec<SpEreporterStatus>,
+    /// Total number of present SPs discovered via ignition.
+    pub sps_found: usize,
     pub sps_not_present: usize,
     pub errors: Vec<String>,
 }
@@ -987,6 +1101,35 @@ pub struct EreporterStatus {
     pub errors: Vec<String>,
 }
 
+/// The status of a `fm_config_loader` background task activation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub enum FmConfigLoadStatus {
+    /// An error occurred querying the database.
+    Error(String),
+
+    /// The latest config override in the database could not be converted to
+    /// the domain type. The previously loaded config (or the default, if no
+    /// config was previously loaded) is still in effect.
+    LatestConfigInvalid {
+        /// What's wrong with it?
+        error: String,
+        fallback: CurrentFmConfig,
+    },
+
+    /// A fault management configuration was loaded (as of `time_loaded`).
+    Loaded(CurrentFmConfig),
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct CurrentFmConfig {
+    /// The current configuration.
+    pub config: crate::fm::FmConfigView,
+    /// The time at which the current config was loaded.
+    pub time_loaded: DateTime<Utc>,
+    /// Whether the config was updated in this activation.
+    pub updated: bool,
+}
+
 /// The status of a `fm_sitrep_loader` background task activation.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub enum SitrepLoadStatus {
@@ -1000,24 +1143,80 @@ pub enum SitrepLoadStatus {
     Loaded { version: crate::fm::SitrepVersion, time_loaded: DateTime<Utc> },
 }
 
-/// Per-child-table GC statistics, used by [`SitrepGcStatus`].
-#[derive(
-    Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq,
-)]
-pub struct ChildTableGcStats {
-    pub rows_deleted: usize,
-    pub batches: usize,
-}
-
 /// The status of a `fm_sitrep_gc` background task activation.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct SitrepGcStatus {
     pub orphaned_sitreps_deleted: usize,
     pub sitrep_metadata_batches: usize,
     pub batch_size: u32,
     /// Per-child-table statistics, keyed by table name.
-    pub child_tables: BTreeMap<String, ChildTableGcStats>,
+    pub child_tables: BTreeMap<String, fm_sitrep_gc::ChildTableGcStats>,
     pub errors: Vec<String>,
+}
+
+pub mod fm_sitrep_gc {
+    use super::*;
+
+    /// Per-child-table GC statistics, used by [`SitrepGcStatus`].
+    #[derive(
+        Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq,
+    )]
+    pub struct ChildTableGcStats {
+        pub rows_deleted: usize,
+        pub batches: usize,
+    }
+}
+
+/// The status of a `fm_sitrep_history_pruner` background task activation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub enum SitrepHistoryPrunerStatus {
+    /// The FM config has not yet been loaded from the database, so the pruning
+    /// task is waiting for the config to be available.
+    WaitingForConfig,
+    /// The pruning task has activated normally.
+    Activated {
+        /// The configuration values used for this pruning pass.
+        cfg: crate::fm::FmConfig,
+        /// The maximum number of history table entries deleted per query.
+        batch_size: u32,
+        /// Tracks how many sitreps were deleted during this activation.
+        pruned: fm_sitrep_history_pruner::SitrepsPruned,
+        /// The outcome of this activation (i.e. why it ended, and the last
+        /// observed history table count).
+        outcome: fm_sitrep_history_pruner::Outcome,
+    },
+}
+
+pub mod fm_sitrep_history_pruner {
+    use super::*;
+
+    #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+    pub struct SitrepsPruned {
+        /// The number of batched delete queries executed by this activation.
+        pub batches: usize,
+        /// The total number of history table entries deleted by this
+        /// activation, across all batches.
+        pub total: usize,
+        /// The range of sitrep versions deleted by this activation
+        /// (oldest..=newest), if any were deleted.
+        pub versions: Option<std::ops::RangeInclusive<u32>>,
+    }
+
+    /// Describes how a `fm_sitrep_history_pruner` activation ended.
+    #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+    pub enum Outcome {
+        /// The history table was already within the limit (with `count`
+        /// entries), so nothing was deleted.
+        NotPruned { count: u64 },
+        /// Entries were pruned from the history table, which is now within
+        /// the limit (with `count` entries remaining). The details of what
+        /// was pruned are recorded in [`SitrepsPruned`].
+        Pruned { count: u64 },
+        /// A pruning query failed. Any batches that completed before the
+        /// error still happened, and are recorded in
+        /// [`SitrepsPruned`].
+        Error(String),
+    }
 }
 
 /// The status of a `fm_analysis` background task activation.
@@ -1025,22 +1224,42 @@ pub struct SitrepGcStatus {
 pub struct FmAnalysisStatus {
     pub parent_sitrep_id: Option<SitrepUuid>,
     pub inv_collection_id: Option<CollectionUuid>,
+    /// Ereport classes that *this* Nexus's diagnosis engine consumes
+    /// (per `nexus_fm::diagnosis::known_ereport_classes`). Recorded here so
+    /// an operator interpreting the activation outcome can see what the
+    /// loader was configured to surface — e.g. whether `RanAnalysis`
+    /// produced no new ereports because the set is empty vs. because
+    /// nothing matched.
+    pub known_classes: Vec<String>,
     pub outcome: fm_analysis::Outcome,
+    /// Errors encountered during analysis which did *not* prevent the analysis
+    /// step from completing.
+    pub warnings: Vec<String>,
 }
 
 pub mod fm_analysis {
     use super::*;
-    use crate::fm::analysis_reports;
+    use crate::fm::FmConfigSource;
+    use std::num::{NonZeroU32, NonZeroU64};
 
     #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
     pub struct PreparationStatus {
-        pub errors: Vec<String>,
-        pub report: analysis_reports::InputReport,
+        /// Errors encountered during the preparation step which did *not*
+        /// prevent the analysis step from completing.
+        pub warnings: Vec<String>,
     }
 
     #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
     #[allow(clippy::large_enum_variant)]
     pub enum Outcome {
+        /// The task is disabled by config.
+        Disabled(FmConfigSource),
+
+        /// Fault management analysis was not performed, as the fault
+        /// management configuration has not yet been loaded from the
+        /// database.
+        WaitingForConfig,
+
         /// Fault management analysis was not performed, as no inventory
         /// collection has been loaded.
         WaitingForInventory,
@@ -1068,8 +1287,23 @@ pub mod fm_analysis {
     pub struct AnalysisStatus {
         pub start_time: DateTime<Utc>,
         pub end_time: DateTime<Utc>,
-        pub report: crate::fm::analysis_reports::AnalysisReport,
         pub outcome: AnalysisOutcome,
+        pub capacity: Option<SitrepCapacity>,
+    }
+
+    #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+    pub struct SitrepCapacity {
+        pub count: u64,
+        pub limit: NonZeroU32,
+    }
+
+    impl SitrepCapacity {
+        // NOTE(eliza): this _could_ be implemented as a float to get a couple
+        // decimal places, but I don't really think we need to be that precise,
+        // and matching on ranges nicely is cute...
+        pub fn usage_percent(&self) -> u64 {
+            self.count.saturating_mul(100) / NonZeroU64::from(self.limit)
+        }
     }
 
     #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -1080,6 +1314,10 @@ pub mod fm_analysis {
         /// Analysis produced a sitrep identical to the current sitrep,
         /// so we threw it away and did nothing.
         Unchanged,
+
+        /// Analysis produced a new sitrep, but the sitrep limit has been
+        /// reached, so it was not written to the database.
+        LimitReached { limit: NonZeroU32 },
 
         /// Analysis produced a new sitrep, but we failed to make it
         /// the current sitrep.
@@ -1104,6 +1342,21 @@ pub struct FmRendezvousStatus {
         fm_rendezvous::OpStatus<fm_rendezvous::SupportBundleCreationStatus>,
     pub ereport_marking:
         fm_rendezvous::OpStatus<fm_rendezvous::EreportMarkingStatus>,
+    pub alert_marker_gc: fm_rendezvous::OpStatus<fm_rendezvous::MarkerGcStatus>,
+    pub support_bundle_marker_gc:
+        fm_rendezvous::OpStatus<fm_rendezvous::MarkerGcStatus>,
+}
+
+impl FmRendezvousStatus {
+    /// Returns `true` if any operation in this activation observed that the
+    /// task's sitrep is older than the current sitrep in the database.
+    ///
+    /// If a new operation that uses `SitrepGuardedInsert` is added to the
+    /// rendezvous task, its stale-sitrep flag should be included here.
+    pub fn stale_sitrep_detected(&self) -> bool {
+        self.alerts.details.stale_sitrep
+            || self.support_bundles.details.stale_sitrep
+    }
 }
 
 pub mod fm_rendezvous {
@@ -1133,20 +1386,55 @@ pub mod fm_rendezvous {
         pub current_sitrep_alerts_requested: usize,
         /// The number of alerts created by this activation.
         pub alerts_created: usize,
+        /// The number of alerts that were already created by an earlier
+        /// activation (the `SitrepGuardedInsert` short-circuited on the
+        /// `rendezvous_alert_created` marker).
+        pub alerts_already_existed: usize,
+        /// If `true`, the activation aborted early because the
+        /// `SitrepGuardedInsert` guard detected that the rendezvous task's
+        /// sitrep is older than the current sitrep in the database. The
+        /// remaining alert requests for this activation were skipped; a
+        /// fresher activation will retry them.
+        pub stale_sitrep: bool,
         /// Errors that occurred during this activation.
         pub errors: Vec<String>,
     }
 
     #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
     pub struct SupportBundleCreationStatus {
-        /// The total number of support bundles requested by the current sitrep.
+        /// The number of support bundle requests in the current sitrep.
         pub total_bundles_requested: usize,
-        /// The total number of support bundles which were *first* requested in the
-        /// current sitrep.
+        /// Of those, the number which were *first* requested in the current
+        /// sitrep (rather than carried forward from an ancestor).
         pub current_sitrep_bundles_requested: usize,
         /// The number of support bundles created by this activation.
         pub bundles_created: usize,
+        /// The number of support bundles that were already created by an
+        /// earlier activation (the `SitrepGuardedInsert` short-circuited on
+        /// the `rendezvous_support_bundle_created` marker).
+        pub bundles_already_existed: usize,
+        /// If `true`, the activation aborted early because the
+        /// `SitrepGuardedInsert` guard detected that the rendezvous task's
+        /// sitrep is older than the current sitrep in the database. The
+        /// remaining bundle requests for this activation were skipped; a
+        /// fresher activation will retry them.
+        pub stale_sitrep: bool,
         /// Errors that occurred during this activation.
+        pub errors: Vec<String>,
+    }
+
+    /// Per-activation statistics for a `rendezvous_*_created` marker-table
+    /// GC sweep.
+    ///
+    /// Used for both `rendezvous_alert_created` and
+    /// `rendezvous_support_bundle_created` since the shape is identical.
+    #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+    pub struct MarkerGcStatus {
+        /// Number of marker rows deleted by this activation's sweep.
+        pub rows_deleted: usize,
+        /// Number of pages the sweep executed.
+        pub batches: usize,
+        /// Errors from this activation's sweep.
         pub errors: Vec<String>,
     }
 
@@ -1253,6 +1541,44 @@ pub struct AuditLogCleanupStatus {
     pub error: Option<String>,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SwitchPortPopulatorStatusKind {
+    /// A previous activation of this task had already populated the ports for
+    /// this switch.
+    PreviouslyPopulated,
+
+    /// We successfully populated the ports of this switch.
+    Populated { num_ports: usize },
+}
+
+/// The status of a `populate_switch_ports` background task activation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SwitchPortPopulatorStatus {
+    /// Result of populating switch 0's ports, if any.
+    pub switch0: Result<SwitchPortPopulatorStatusKind, String>,
+    /// Result of populating switch 1's ports, if any.
+    pub switch1: Result<SwitchPortPopulatorStatusKind, String>,
+}
+
+/// The status of a `sync_switch_configuration` background task activation.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SwitchPortSettingsManagerStatus {
+    /// Racks skipped because a complete bootstore network config could not be
+    /// built from their switch port settings.
+    pub incomplete_bootstore_configs: Vec<IncompleteBootstoreConfigReport>,
+}
+
+/// A rack that `sync_switch_configuration` skipped because its bootstore network
+/// config could not be built completely.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct IncompleteBootstoreConfigReport {
+    /// The rack that was skipped.
+    pub rack_id: RackUuid,
+    /// The list of problems encountered.
+    pub problems: Vec<String>,
+}
+
 /// The status of a `session_cleanup` background task activation.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct SessionCleanupStatus {
@@ -1264,6 +1590,25 @@ pub struct SessionCleanupStatus {
     pub limit: u32,
     /// Errors encountered during this activation.
     pub error: Option<String>,
+}
+
+/// Status of the background task pushing service firewall rules.
+#[derive(Default, Deserialize, Serialize)]
+pub struct ServiceFirewallRuleStatus {
+    /// An error encountered looking firewall rules up in the database.
+    pub lookup_error: Option<String>,
+    /// Errors encountered pushing the set of rules to each sled.
+    pub sled_push_errors: Option<BTreeMap<SledUuid, String>>,
+}
+
+/// Status of the `PhysicalDiskAdoption` background task
+#[derive(Debug, Default, Deserialize, Serialize)]
+pub struct PhysicalDiskAdoptionStatus {
+    /// The number of physical disks added during this activation
+    pub disks_added: usize,
+
+    /// Errors encountered during this activation
+    pub errors: Vec<String>,
 }
 
 #[cfg(test)]

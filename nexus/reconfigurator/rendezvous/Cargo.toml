@@ -11,11 +11,13 @@ omicron-rpaths.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+iddqd.workspace = true
 nexus-db-queries.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
 serde.workspace = true
+sled-agent-types.workspace = true
 slog.workspace = true
 
 # See omicron-rpaths for more about the "pq-sys" dependency.  This is needed
@@ -31,6 +33,7 @@ diesel.workspace = true
 nexus-db-model.workspace = true
 nexus-db-queries = { workspace = true, features = ["testing"] }
 nexus-db-schema.workspace = true
+omicron-generation-kinds.workspace = true
 omicron-test-utils.workspace = true
 proptest.workspace = true
 test-strategy.workspace = true

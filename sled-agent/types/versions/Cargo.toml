@@ -17,8 +17,10 @@ chrono.workspace = true
 daft.workspace = true
 iddqd.workspace = true
 indent_write.workspace = true
+ipnetwork.workspace = true
 itertools.workspace = true
 omicron-common.workspace = true
+omicron-generation-kinds.workspace = true
 omicron-ledger.workspace = true
 omicron-passwords.workspace = true
 omicron-uuid-kinds.workspace = true
@@ -44,6 +46,7 @@ uuid.workspace = true
 
 [dev-dependencies]
 assert_matches.workspace = true
+expectorate.workspace = true
 omicron-common = { workspace = true, features = ["testing"] }
 omicron-test-utils.workspace = true
 proptest.workspace = true

@@ -15,12 +15,16 @@ use nexus_db_errors::TransactionError;
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::IncompleteNetworkInterface;
 use nexus_db_model::IpPool;
+use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
 use nexus_types::deployment::BlueprintZoneConfig;
+use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::OmicronZoneExternalIp;
+use nexus_types::deployment::OperatorNexusConfig;
+use nexus_types::deployment::UpstreamNtpConfig;
 use nexus_types::external_api::instance::PrivateIpStackCreate;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_common::api::external::IpVersion;
 use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -36,42 +40,157 @@ use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeSet;
 use std::net::IpAddr;
 
-impl DataStore {
-    /// Return the set of external IPs configured for our external DNS servers
-    /// when the rack was set up.
-    ///
-    /// We should have explicit storage for the external IPs on which we run
-    /// external DNS that an operator can update. Today, we do not: whatever
-    /// external DNS IPs are provided at rack setup time are the IPs we use
-    /// forever. (Fixing this is tracked by
-    /// <https://github.com/oxidecomputer/omicron/issues/8255>.)
-    pub async fn external_dns_external_ips_specified_by_rack_setup(
-        &self,
-        opctx: &OpContext,
-    ) -> Result<BTreeSet<IpAddr>, Error> {
-        // We can _implicitly_ determine the set of external DNS IPs provided
-        // during rack setup by examining the current target blueprint and
-        // looking at the IPs of all of its external DNS zones. We _must_
-        // include expunged zones as well as in-service zones: during an update,
-        // we'll create a blueprint that expunges an external DNS zone, waits
-        // for it to go away, then wants to reassign that zone's external IP to
-        // a new external DNS zone. But because we are scanning expunged zones,
-        // we also have to allow for duplicates - this isn't an error and is
-        // expected if we've performed more than one update, at least until we
-        // start pruning old expunged zones out of the blueprint (tracked by
-        // https://github.com/oxidecomputer/omicron/issues/5552).
-        //
-        // Because we can't (yet) change external DNS IPs, we don't have to
-        // worry about the current blueprint changing between when we read it
-        // and when we calculate the set of external DNS IPs: the set will be
-        // identical for all blueprints back to the original one created by RSS.
-        //
-        // We don't really need to load the entire blueprint here, but it's easy
-        // and ideally this code will be deleted in relatively short order.
-        let (_target, blueprint) =
-            self.blueprint_target_get_current_full(opctx).await?;
+/// External networking configuration for Oxide-managed services, extracted from
+/// the a blueprint at `PlanningInput` construction time.
+///
+/// These values are fleet-scoped today and lifted from the parent blueprint
+/// because we don't yet have operator-updatable storage for them. Tracked by
+///
+/// - <https://github.com/oxidecomputer/omicron/issues/8255> (external DNS
+///   configurability)
+/// - <https://github.com/oxidecomputer/omicron/issues/10574> (per-service IP
+///   pool assignment)
+/// - <https://github.com/oxidecomputer/omicron/issues/3732> (upstream NTP /
+///   DNS server lists).
+#[derive(Debug, Clone, Default)]
+pub struct ExternalServiceNetworkingConfig {
+    /// External IPs that external DNS zones listen on.
+    pub external_dns_external_ips: BTreeSet<IpAddr>,
+    /// Upstream NTP servers used by boundary NTP zones.
+    pub upstream_ntp_servers: Vec<String>,
+    /// Resolver search-suffix for boundary NTP zones.
+    //
+    // NOTE: This is always None today. See
+    // https://github.com/oxidecomputer/omicron/issues/10588.
+    pub upstream_ntp_domain: Option<String>,
+    /// Upstream DNS servers used by boundary NTP zones to resolve upstream
+    /// NTP server names, and provided to Nexus as its external DNS servers.
+    pub upstream_dns_servers: Vec<IpAddr>,
+    /// Whether Nexus serves its external API over TLS.
+    pub nexus_external_tls: bool,
+}
 
-        Ok(blueprint.all_external_dns_external_ips())
+impl DataStore {
+    /// Extract the external networking configuration for services from a
+    /// blueprint.
+    ///
+    /// This is a transitional facility: today the only persisted home for
+    /// these values is the current target blueprint (we copy them forward
+    /// from RSS into every blueprint). The values here are read out by
+    /// `PlanningInputFromDb` so the planner doesn't have to reach back into
+    /// the parent blueprint via `Blueprint::upstream_ntp_config()` /
+    /// `operator_nexus_config()` on every planning run.
+    ///
+    /// This method should be deleted once operators can update these
+    /// settings directly via the API; see the issues referenced on
+    /// [`ExternalServiceNetworkingConfig`].
+    pub fn blueprint_external_service_networking_config(
+        blueprint: &Blueprint,
+    ) -> Result<ExternalServiceNetworkingConfig, Error> {
+        let (upstream_ntp_servers, upstream_ntp_domain, upstream_dns_servers) =
+            match Self::blueprint_upstream_ntp_config(&blueprint) {
+                Some(cfg) => (
+                    cfg.ntp_servers.to_vec(),
+                    cfg.domain.map(String::from),
+                    cfg.dns_servers.to_vec(),
+                ),
+                None => {
+                    return Err(Error::internal_error(
+                        "Rack setup appears not to have provided an upstream \
+                    NTP configuration, which should be impossible",
+                    ));
+                }
+            };
+
+        let nexus_external_tls =
+            Self::blueprint_operator_nexus_config(&blueprint)
+                .map(|cfg| cfg.external_tls)
+                .unwrap_or(false);
+
+        Ok(ExternalServiceNetworkingConfig {
+            external_dns_external_ips: blueprint
+                .all_external_dns_external_ips(),
+            upstream_ntp_servers,
+            upstream_ntp_domain,
+            upstream_dns_servers,
+            nexus_external_tls,
+        })
+    }
+
+    /// Extract the operator-specified configuration of Nexus from the provided
+    /// blueprint.
+    ///
+    /// This information should be operator-configurable, but currently is not:
+    /// we carry it forward from rack setup time onward from blueprint to
+    /// blueprint. Fixing this is
+    /// <https://github.com/oxidecomputer/omicron/issues/3732> for the upstream
+    /// DNS servers. There's no issue specifically to track modifying whether
+    /// Nexus serves the API over TLS.
+    ///
+    /// Returns `None` if this blueprint contains no Nexus zones from which we
+    /// can infer the configuration. (This should only be the case for test
+    /// blueprints - real systems always deploy at least one Nexus zone).
+    ///
+    /// NOTE: This method is public only for tests outside this crate.
+    pub fn blueprint_operator_nexus_config(
+        blueprint: &Blueprint,
+    ) -> Option<OperatorNexusConfig<'_>> {
+        // The Nexus config can't be changed, so it's fine to use
+        // `find()` here and include searching both in-service and expunged
+        // zones. (Real racks will always have at least one in-service Nexus
+        // zone - the one calling this code - but some tests create blueprints
+        // without any.)
+        blueprint
+            .all_in_service_and_expunged_zones(
+                BlueprintExpungedZoneAccessReason::NexusExternalConfig,
+            )
+            .find_map(|(_sled_id, zone)| match &zone.zone_type {
+                BlueprintZoneType::Nexus(nexus_config) => {
+                    Some(OperatorNexusConfig {
+                        external_tls: nexus_config.external_tls,
+                        external_dns_servers: nexus_config
+                            .external_dns_servers
+                            .as_slice(),
+                    })
+                }
+                _ => None,
+            })
+    }
+
+    /// Extract the configuration of upstream NTP settings (needed to configure
+    /// boundary NTP zones) from the provided blueprint.
+    ///
+    /// This information should be operator-configurable, but currently is not:
+    /// we carry it forward from rack setup time onward from blueprint to
+    /// blueprint. Fixing this is
+    /// <https://github.com/oxidecomputer/omicron/issues/3732>.
+    ///
+    /// Returns `None` if this blueprint contains no boundary NTP zones from
+    /// which we can infer the upstream configuration. (This should only be the
+    /// case for test blueprints - real systems always deploy at least one
+    /// boundary NTP zone).
+    fn blueprint_upstream_ntp_config(
+        blueprint: &Blueprint,
+    ) -> Option<UpstreamNtpConfig<'_>> {
+        // The upstream NTP config can't be changed, so it's fine to use
+        // `find()` here and include searching both in-service and expunged
+        // zones. (Real racks will always have at least one in-service boundary
+        // NTP zone, but some test or test systems may have 0 if they have only
+        // a single sled and that sled's boundary NTP zone is being upgraded.)
+        blueprint
+            .all_in_service_and_expunged_zones(
+                BlueprintExpungedZoneAccessReason::BoundaryNtpUpstreamConfig,
+            )
+            .find_map(|(_sled_id, zone)| match &zone.zone_type {
+                BlueprintZoneType::BoundaryNtp(ntp_config) => {
+                    Some(UpstreamNtpConfig {
+                        ntp_servers: ntp_config.ntp_servers.as_slice(),
+                        dns_servers: ntp_config.dns_servers.as_slice(),
+                        domain: ntp_config.domain.as_deref(),
+                    })
+                }
+                _ => None,
+            })
     }
 
     pub(super) async fn ensure_zone_external_networking_allocated_on_connection(
@@ -80,12 +199,6 @@ impl DataStore {
         opctx: &OpContext,
         zones_to_allocate: impl Iterator<Item = &BlueprintZoneConfig>,
     ) -> Result<(), TransactionError<Error>> {
-        // Looking up the service pool IDs requires an opctx; we'll do this at
-        // most once inside the loop below, when we first encounter an address
-        // of the same IP version.
-        let mut v4_pool = None;
-        let mut v6_pool = None;
-
         for z in zones_to_allocate {
             let Some((external_ip, nic)) = z.zone_type.external_networking()
             else {
@@ -100,29 +213,26 @@ impl DataStore {
                 "nic" => format!("{nic:?}"),
             ));
 
-            // Get existing pool or look it up and cache it.
-            let version = external_ip.ip_version();
-            let pool_ref = match version {
-                IpVersion::V4 => &mut v4_pool,
-                IpVersion::V6 => &mut v6_pool,
-            };
-            let pool = match pool_ref {
-                Some(p) => p,
-                None => {
-                    let new = self
-                        .ip_pools_service_lookup(opctx, version.into())
-                        .await?
-                        .1;
-                    *pool_ref = Some(new);
-                    pool_ref.as_ref().unwrap()
-                }
-            };
+            // Look up the system-service pool containing this address, if any.
+            let (_authz_pool, db_pool) = self
+                .ip_pool_fetch_containing_address_for_services_on_connection(
+                    opctx,
+                    conn,
+                    external_ip.ip(),
+                )
+                .await
+                .map_err(|e| {
+                    Self::map_external_ip_not_found_for_zone_error(
+                        e,
+                        external_ip.ip(),
+                    )
+                })?;
 
             // Actually ensure the IP address.
             let kind = z.zone_type.kind();
             self.ensure_external_service_ip(
                 conn,
-                pool,
+                &db_pool,
                 kind,
                 z.id,
                 external_ip,
@@ -303,9 +413,6 @@ impl DataStore {
         log: &Logger,
     ) -> Result<bool, TransactionError<Error>> {
         // See the comment in is_external_ip_already_allocated().
-        //
-        // TODO-completeness: Ensure this works for dual-stack Omicron service
-        // zone NICs. See https://github.com/oxidecomputer/omicron/issues/9313.
         if cfg!(any(test, feature = "testing")) {
             match (
                 nic.ip_config.ipv4_addr().map(|ip| ip.is_loopback()),
@@ -539,6 +646,7 @@ impl DataStore {
 mod tests {
     use super::*;
     use crate::db::pub_test_utils::TestDatabase;
+    use crate::db::pub_test_utils::helpers::create_service_ip_pool;
     use crate::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
     use anyhow::Context as _;
     use async_bb8_diesel::AsyncSimpleConnection;
@@ -566,12 +674,15 @@ mod tests {
     use omicron_common::address::IpRangeIter;
     use omicron_common::address::Ipv4Range;
     use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
+    use omicron_common::address::NEXUS_OPTE_IPV6_SUBNET;
     use omicron_common::address::NTP_OPTE_IPV4_SUBNET;
     use omicron_common::address::NUM_SOURCE_NAT_PORTS;
-    use omicron_common::api::external::Generation;
     use omicron_common::api::external::MacAddr;
     use omicron_common::api::external::Vni;
+    use omicron_common::api::internal::shared::PrivateIpv4Config;
+    use omicron_common::api::internal::shared::PrivateIpv6Config;
     use omicron_common::zpool_name::ZpoolName;
+    use omicron_generation_kinds::Generation;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::ExternalIpUuid;
     use omicron_uuid_kinds::ZpoolUuid;
@@ -636,13 +747,28 @@ mod tests {
                 id: ExternalIpUuid::new_v4(),
                 ip: external_ips.next().expect("exhausted external_ips"),
             };
-            let nexus_private_ip_config = PrivateIpConfig::new_ipv4(
-                NEXUS_OPTE_IPV4_SUBNET
-                    .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES)
-                    .unwrap(),
-                *NEXUS_OPTE_IPV4_SUBNET,
-            )
-            .unwrap();
+            // Give Nexus a dual-stack NIC so we have a way to exercise the
+            // paths allocating / handling those addresses. External DNS and NTP
+            // are still single-stack IPv4.
+            let nexus_private_ip_config = PrivateIpConfig::DualStack {
+                v4: PrivateIpv4Config::new(
+                    NEXUS_OPTE_IPV4_SUBNET
+                        .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES)
+                        .unwrap(),
+                    *NEXUS_OPTE_IPV4_SUBNET,
+                )
+                .unwrap(),
+                v6: PrivateIpv6Config::new(
+                    NEXUS_OPTE_IPV6_SUBNET
+                        .nth(
+                            u128::try_from(NUM_INITIAL_RESERVED_IP_ADDRESSES)
+                                .unwrap(),
+                        )
+                        .unwrap(),
+                    *NEXUS_OPTE_IPV6_SUBNET,
+                )
+                .unwrap(),
+            };
             let nexus_nic = NetworkInterface {
                 id: Uuid::new_v4(),
                 kind: NetworkInterfaceKind::Service {
@@ -735,15 +861,18 @@ mod tests {
             opctx: &OpContext,
             datastore: &DataStore,
         ) {
-            let (ip_pool, db_pool) = datastore
-                .ip_pools_service_lookup(&opctx, IpVersion::V4.into())
-                .await
-                .expect("failed to find service IP pool");
+            let service_pool = create_service_ip_pool(
+                opctx,
+                datastore,
+                "oxide-service-pool-v4",
+                omicron_common::api::external::IpVersion::V4,
+            )
+            .await;
             datastore
                 .ip_pool_add_range(
                     &opctx,
-                    &ip_pool,
-                    &db_pool,
+                    &service_pool.authz_pool,
+                    &service_pool.db_pool,
                     &self.external_ips_range,
                 )
                 .await
@@ -932,14 +1061,13 @@ mod tests {
             assert_eq!(db_dns_nics[0].subnet_id, DNS_VPC_SUBNET.id());
             assert_eq!(*db_dns_nics[0].mac, self.dns_nic.mac);
             assert_eq!(
-                db_nexus_nics[0].ipv4,
-                self.nexus_nic.ip_config.ipv4_addr().copied().map(Into::into),
+                db_dns_nics[0].ipv4,
+                self.dns_nic.ip_config.ipv4_addr().copied().map(Into::into),
             );
             assert_eq!(
-                db_nexus_nics[0].ipv6,
-                self.nexus_nic.ip_config.ipv6_addr().copied().map(Into::into),
+                db_dns_nics[0].ipv6,
+                self.dns_nic.ip_config.ipv6_addr().copied().map(Into::into),
             );
-            assert!(db_nexus_nics[0].ipv6.is_none());
             assert_eq!(*db_dns_nics[0].slot, self.dns_nic.slot);
             assert_eq!(db_dns_nics[0].primary, self.dns_nic.primary);
 
@@ -960,14 +1088,13 @@ mod tests {
             assert_eq!(db_ntp_nics[0].subnet_id, NTP_VPC_SUBNET.id());
             assert_eq!(*db_ntp_nics[0].mac, self.ntp_nic.mac);
             assert_eq!(
-                db_nexus_nics[0].ipv4,
-                self.nexus_nic.ip_config.ipv4_addr().copied().map(Into::into),
+                db_ntp_nics[0].ipv4,
+                self.ntp_nic.ip_config.ipv4_addr().copied().map(Into::into),
             );
             assert_eq!(
-                db_nexus_nics[0].ipv6,
-                self.nexus_nic.ip_config.ipv6_addr().copied().map(Into::into),
+                db_ntp_nics[0].ipv6,
+                self.ntp_nic.ip_config.ipv6_addr().copied().map(Into::into),
             );
-            assert!(db_nexus_nics[0].ipv6.is_none());
             assert_eq!(*db_ntp_nics[0].slot, self.ntp_nic.slot);
             assert_eq!(db_ntp_nics[0].primary, self.ntp_nic.primary);
         }
@@ -1236,22 +1363,23 @@ mod tests {
                 as &dyn Fn(OmicronZoneUuid, &mut NetworkInterface) -> String,
             // non-matching IP
             &|zone_id, nic| {
-                // Take the last IP still in the subnet.
-                if let Some(subnet) = nic.ip_config.ipv4_subnet() {
-                    let new =
-                        PrivateIpConfig::new_ipv4(subnet.last_addr(), *subnet)
-                            .unwrap();
-                    nic.ip_config = new;
-                } else if let Some(subnet) = nic.ip_config.ipv6_subnet() {
-                    let new =
-                        PrivateIpConfig::new_ipv6(subnet.last_addr(), *subnet)
-                            .unwrap();
-                    nic.ip_config = new;
-                } else {
-                    todo!(
-                        "See https://github.com/oxidecomputer/omicron/issues/9313"
-                    );
-                }
+                // Take the last address in each family's subnet.
+                let ipv4 = nic.ip_config.ipv4_subnet().map(|subnet| {
+                    PrivateIpv4Config::new(subnet.last_addr(), *subnet).unwrap()
+                });
+                let ipv6 = nic.ip_config.ipv6_subnet().map(|subnet| {
+                    PrivateIpv6Config::new(subnet.last_addr(), *subnet).unwrap()
+                });
+                nic.ip_config = match (ipv4, ipv6) {
+                    (Some(v4), None) => PrivateIpConfig::V4(v4),
+                    (None, Some(v6)) => PrivateIpConfig::V6(v6),
+                    (Some(v4), Some(v6)) => {
+                        PrivateIpConfig::DualStack { v4, v6 }
+                    }
+                    (None, None) => {
+                        unreachable!("a NIC always has an IPv4 or IPv6 subnet")
+                    }
+                };
                 format!("zone {zone_id} already has 1 non-matching NIC")
             },
         ] {
@@ -1428,6 +1556,7 @@ mod tests {
             ExampleSystemBuilder::new(&opctx.log, TEST_NAME)
                 .external_dns_count(0)
                 .expect("external DNS count can be 0")
+                .boundary_ntp_count(1)
                 .build();
 
         // Insert the example system's initial empty blueprint and the one we
@@ -1449,10 +1578,10 @@ mod tests {
                 .external_dns_ips()
                 .is_empty()
         );
-        let external_dns_ips = datastore
-            .external_dns_external_ips_specified_by_rack_setup(opctx)
-            .await
-            .expect("got external DNS IPs");
+        let external_dns_ips =
+            DataStore::blueprint_external_service_networking_config(&bp1)
+                .expect("got service networking config")
+                .external_dns_external_ips;
         assert_eq!(external_dns_ips, BTreeSet::new());
 
         // Extend the external IP policy to allow for external DNS.
@@ -1474,7 +1603,10 @@ mod tests {
             }
 
             let mut input_builder = example_system.input.into_builder();
-            input_builder.policy_mut().external_ips = policy_builder.build();
+            input_builder
+                .policy_mut()
+                .external_service_networking
+                .external_ips = policy_builder.build();
             input_builder.build()
         };
 
@@ -1516,10 +1648,10 @@ mod tests {
             .blueprint_target_set_current(opctx, make_bp_target(bp2.id))
             .await
             .expect("made bp2 the target");
-        let external_dns_ips = datastore
-            .external_dns_external_ips_specified_by_rack_setup(opctx)
-            .await
-            .expect("got external DNS IPs");
+        let external_dns_ips =
+            DataStore::blueprint_external_service_networking_config(&bp2)
+                .expect("got service networking config")
+                .external_dns_external_ips;
         assert_eq!(external_dns_ips, expected_ips);
 
         // Create a new blueprint that expunges two of those zones.
@@ -1557,13 +1689,123 @@ mod tests {
             .blueprint_target_set_current(opctx, make_bp_target(bp3.id))
             .await
             .expect("made bp3 the target");
-        let external_dns_ips = datastore
-            .external_dns_external_ips_specified_by_rack_setup(opctx)
-            .await
-            .expect("got external DNS IPs");
+        let external_dns_ips =
+            DataStore::blueprint_external_service_networking_config(&bp3)
+                .expect("got service networking config")
+                .external_dns_external_ips;
         assert_eq!(external_dns_ips, expected_ips);
 
         // Clean up.
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Verify that upstream NTP and operator Nexus configuration are pulled
+    // through every blueprint from rack setup onwards. The `BlueprintBuilder`
+    // carries existing boundary NTP and Nexus zones forward unchanged, so a
+    // new blueprint based on a populated parent should expose the same
+    // upstream values when read back through the datastore.
+    #[tokio::test]
+    async fn test_upstream_config_propagates_across_blueprints() {
+        const TEST_NAME: &str =
+            "test_upstream_config_propagates_across_blueprints";
+
+        let make_bp_target = |blueprint_id| BlueprintTarget {
+            target_id: blueprint_id,
+            enabled: false,
+            time_made_target: Utc::now(),
+        };
+
+        let logctx = dev::test_setup_log(TEST_NAME);
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // The example system, when configured to create boundary NTP zones,
+        // populates them with non-empty upstream NTP servers, an upstream
+        // DNS server, and a domain; and creates Nexus zones with
+        // `external_tls: false`. So the values we read back through the
+        // datastore should match what the example system stamped into the
+        // blueprint.
+        let (example_system, bp1) =
+            ExampleSystemBuilder::new(&opctx.log, TEST_NAME)
+                .boundary_ntp_count(2)
+                .build();
+
+        let bp0 = &example_system.initial_blueprint;
+        for bp in [bp0, &bp1] {
+            datastore.blueprint_insert(opctx, bp).await.expect("inserted bp");
+            datastore
+                .blueprint_target_set_current(opctx, make_bp_target(bp.id))
+                .await
+                .expect("made bp the target");
+        }
+
+        // Capture the upstream config from the initial target blueprint.
+        let initial =
+            DataStore::blueprint_external_service_networking_config(&bp1)
+                .expect("got config from initial blueprint");
+
+        // Sanity check: confirm the example system actually populated the
+        // upstream values, otherwise the propagation test below would pass
+        // trivially.
+        assert!(
+            !initial.upstream_ntp_servers.is_empty(),
+            "example system should populate upstream NTP servers"
+        );
+        assert!(
+            !initial.upstream_dns_servers.is_empty(),
+            "example system should populate upstream DNS servers"
+        );
+        assert!(
+            initial.upstream_ntp_domain.is_some(),
+            "example system should populate upstream NTP domain"
+        );
+
+        // Build a new blueprint based on the current target, with no edits.
+        // The existing boundary NTP and Nexus zones carry forward unchanged.
+        let bp2 = BlueprintBuilder::new_based_on(
+            &opctx.log,
+            &bp1,
+            TEST_NAME,
+            PlannerRng::from_entropy(),
+        )
+        .expect("created builder")
+        .build(BlueprintSource::Test);
+
+        datastore.blueprint_insert(opctx, &bp2).await.expect("inserted bp2");
+        datastore
+            .blueprint_target_set_current(opctx, make_bp_target(bp2.id))
+            .await
+            .expect("made bp2 the target");
+
+        // Re-read the config from the new target blueprint and verify it
+        // matches the initial values.
+        let propagated =
+            DataStore::blueprint_external_service_networking_config(&bp2)
+                .expect("got config from second blueprint");
+
+        assert_eq!(
+            initial.upstream_ntp_servers, propagated.upstream_ntp_servers,
+            "upstream NTP servers should propagate"
+        );
+        assert_eq!(
+            initial.upstream_ntp_domain, propagated.upstream_ntp_domain,
+            "upstream NTP domain should propagate"
+        );
+        assert_eq!(
+            initial.upstream_dns_servers, propagated.upstream_dns_servers,
+            "upstream DNS servers should propagate"
+        );
+        assert_eq!(
+            initial.nexus_external_tls, propagated.nexus_external_tls,
+            "Nexus external_tls should propagate"
+        );
+        assert_eq!(
+            initial.external_dns_external_ips,
+            propagated.external_dns_external_ips,
+            "external DNS IPs should propagate"
+        );
+
         db.terminate().await;
         logctx.cleanup_successful();
     }

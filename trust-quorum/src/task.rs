@@ -981,6 +981,7 @@ mod tests {
     };
     use crate::proxy::ProxyError;
     use assert_matches::assert_matches;
+    use attest_mock::MockData;
     use camino::Utf8PathBuf;
     use dropshot::test_util::{LogContext, log_prefix_for_test};
     use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
@@ -1071,7 +1072,10 @@ mod tests {
             }],
         };
         // Write out the log document to the filesystem
-        let out = attest_mock::log::mock(attest_log_doc).unwrap();
+        let out = attest_mock::MockLog::from_document(attest_log_doc)
+            .unwrap()
+            .to_bytes()
+            .unwrap();
         std::fs::write(dir.join("log.bin"), &out).unwrap();
 
         let corim_doc = attest_mock::corim::Document {
@@ -1094,7 +1098,10 @@ mod tests {
             ],
         };
 
-        let corim = attest_mock::corim::mock(corim_doc).unwrap();
+        let corim = attest_mock::MockCorim::from_document(corim_doc)
+            .unwrap()
+            .to_bytes()
+            .unwrap();
         std::fs::write(dir.join("corim.cbor"), &corim).unwrap();
     }
 
@@ -1265,7 +1272,9 @@ mod tests {
                         if node_indexes.contains(&i) {
                             let Some(rs) = h.load_rack_secret(epoch).await?
                             else {
-                                return Err(CondCheckError::NotYet);
+                                return Err(CondCheckError::NotYet {
+                                    status: None,
+                                });
                             };
                             if secret.is_none() {
                                 secret = Some(rs.clone());
@@ -1322,7 +1331,7 @@ mod tests {
                 if count == num_nodes {
                     Ok(())
                 } else {
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             },
             &poll_interval,
@@ -1374,7 +1383,7 @@ mod tests {
                     tokio::time::pause();
                     tokio::time::advance(RECONNECT_TIME).await;
                     tokio::time::resume();
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             },
             &poll_interval,
@@ -1429,7 +1438,7 @@ mod tests {
                     tokio::time::pause();
                     tokio::time::advance(RECONNECT_TIME).await;
                     tokio::time::resume();
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             },
             &poll_interval,
@@ -1479,12 +1488,12 @@ mod tests {
         wait_for_condition(
             async || {
                 let Ok(Some(s)) = coordinator.coordinator_status().await else {
-                    return Err(CondCheckError::<()>::NotYet);
+                    return Err(CondCheckError::<()>::NotYet { status: None });
                 };
                 if s.acked_prepares.len() == num_nodes {
                     Ok(())
                 } else {
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             },
             &poll_interval,
@@ -1569,12 +1578,12 @@ mod tests {
         wait_for_condition(
             async || {
                 let Ok(Some(s)) = coordinator.coordinator_status().await else {
-                    return Err(CondCheckError::<()>::NotYet);
+                    return Err(CondCheckError::<()>::NotYet { status: None });
                 };
                 if s.acked_prepares.len() == num_nodes - 1 {
                     Ok(())
                 } else {
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             },
             &poll_interval,
@@ -1626,7 +1635,7 @@ mod tests {
                 ) {
                     Ok(())
                 } else {
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             },
             &poll_interval,
@@ -1696,12 +1705,12 @@ mod tests {
         wait_for_condition(
             async || {
                 let Ok(Some(s)) = coordinator.coordinator_status().await else {
-                    return Err(CondCheckError::<()>::NotYet);
+                    return Err(CondCheckError::<()>::NotYet { status: None });
                 };
                 if s.acked_prepares.len() == num_nodes {
                     Ok(())
                 } else {
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             },
             &poll_interval,
@@ -1768,7 +1777,7 @@ mod tests {
                 if acked == num_nodes {
                     Ok(())
                 } else {
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             },
             &poll_interval,
@@ -1791,12 +1800,12 @@ mod tests {
         wait_for_condition(
             async || {
                 let Ok(Some(s)) = coordinator.coordinator_status().await else {
-                    return Err(CondCheckError::<()>::NotYet);
+                    return Err(CondCheckError::<()>::NotYet { status: None });
                 };
                 if s.acked_prepares.len() == num_nodes - 1 {
                     Ok(())
                 } else {
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             },
             &poll_interval,
@@ -1823,7 +1832,7 @@ mod tests {
                 if acked == num_nodes - 1 {
                     Ok(())
                 } else {
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             },
             &poll_interval,
@@ -1909,12 +1918,12 @@ mod tests {
         wait_for_condition(
             async || {
                 let Ok(Some(s)) = coordinator.coordinator_status().await else {
-                    return Err(CondCheckError::<()>::NotYet);
+                    return Err(CondCheckError::<()>::NotYet { status: None });
                 };
                 if s.acked_prepares.len() == num_nodes {
                     Ok(())
                 } else {
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             },
             &poll_interval,
@@ -1941,7 +1950,7 @@ mod tests {
                 if acked == num_nodes {
                     Ok(())
                 } else {
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             },
             &poll_interval,
@@ -1998,12 +2007,12 @@ mod tests {
         wait_for_condition(
             async || {
                 let Ok(Some(s)) = coordinator.coordinator_status().await else {
-                    return Err(CondCheckError::<()>::NotYet);
+                    return Err(CondCheckError::<()>::NotYet { status: None });
                 };
                 if s.acked_prepares.len() == num_nodes {
                     Ok(())
                 } else {
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             },
             &poll_interval,
@@ -2039,7 +2048,7 @@ mod tests {
                 if acked == num_nodes {
                     Ok(())
                 } else {
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             },
             &poll_interval,
@@ -2132,7 +2141,7 @@ mod tests {
                 if count == num_nodes - 1 {
                     Ok(())
                 } else {
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             },
             &poll_interval,
@@ -2163,7 +2172,7 @@ mod tests {
                 if count == num_nodes {
                     Ok(())
                 } else {
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             },
             &poll_interval,
@@ -2223,7 +2232,7 @@ mod tests {
                 if count == num_nodes {
                     Ok(())
                 } else {
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             },
             &poll_interval,
@@ -2283,12 +2292,12 @@ mod tests {
         wait_for_condition(
             async || {
                 let Ok(Some(s)) = coordinator.coordinator_status().await else {
-                    return Err(CondCheckError::<()>::NotYet);
+                    return Err(CondCheckError::<()>::NotYet { status: None });
                 };
                 if s.acked_prepares.len() == num_nodes {
                     Ok(())
                 } else {
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             },
             &poll_interval,
@@ -2406,12 +2415,12 @@ mod tests {
         wait_for_condition(
             async || {
                 let Ok(status) = proxy.status(destination.clone()).await else {
-                    return Err(CondCheckError::<()>::NotYet);
+                    return Err(CondCheckError::<()>::NotYet { status: None });
                 };
                 if matches!(status, NodeStatus { .. }) {
                     Ok(())
                 } else {
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             },
             &poll_interval,

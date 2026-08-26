@@ -16,10 +16,7 @@ use futures::StreamExt;
 use illumos_utils::zfs::DatasetProperties;
 use illumos_utils::zfs::DestroyDatasetError;
 use illumos_utils::zfs::DestroyDatasetErrorVariant;
-use omicron_common::disk::CompressionAlgorithm;
-use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetName;
-use omicron_common::disk::SharedDatasetConfig;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use omicron_uuid_kinds::ZpoolUuid;
@@ -33,6 +30,9 @@ use sled_agent_config_reconciler::NestedDatasetDestroyError;
 use sled_agent_config_reconciler::NestedDatasetEnsureError;
 use sled_agent_config_reconciler::NestedDatasetListError;
 use sled_agent_config_reconciler::NestedDatasetMountError;
+use sled_agent_types::disk::CompressionAlgorithm;
+use sled_agent_types::disk::DatasetConfig;
+use sled_agent_types::disk::SharedDatasetConfig;
 use sled_agent_types::support_bundle::BUNDLE_FILE_NAME;
 use sled_agent_types::support_bundle::BUNDLE_TMP_FILE_NAME;
 use sled_agent_types::support_bundle::NESTED_DATASET_NOT_FOUND;
@@ -296,7 +296,13 @@ impl LocalStorage for sim::Storage {
         // This gives us a local clone of the datasets config; we call
         // `remove(dataset_id)` below to avoid having to also clone the dataset
         // config we want to return.
-        let mut config = self.lock().datasets_config_list()?;
+        //
+        // TODO-cleanup Why do we return an HTTP "not found" in one case and a
+        // separate `DatasetNotFound` in the other case? We have a test that
+        // cares about the difference.
+        let mut config = self.lock().omicron_sled_config().ok_or(
+            HttpError::for_not_found(None, "No control plane datasets".into()),
+        )?;
         config.datasets.remove(dataset_id).ok_or(Error::DatasetNotFound)
     }
 
@@ -1110,16 +1116,15 @@ mod tests {
     use hyper::header::{
         ACCEPT_RANGES, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE,
     };
-    use omicron_common::disk::DatasetConfig;
+    use iddqd::id_ord_map;
     use omicron_common::disk::DatasetKind;
     use omicron_common::disk::DatasetName;
-    use omicron_common::disk::DatasetsConfig;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use sha2::Sha256;
+    use sled_agent_types::disk::DatasetConfig;
     use sled_agent_types::inventory::ZpoolHealth;
-    use std::collections::BTreeMap;
     use uuid::Uuid;
     use zip::ZipWriter;
     use zip::write::SimpleFileOptions;
@@ -1155,25 +1160,20 @@ mod tests {
             dataset_id: DatasetUuid,
             kind: DatasetKind,
         ) {
-            let result = self
-                .storage_test_harness
-                .lock()
-                .datasets_ensure(DatasetsConfig {
-                    datasets: BTreeMap::from([(
-                        dataset_id,
-                        DatasetConfig {
-                            id: dataset_id,
-                            name: DatasetName::new(
-                                ZpoolName::new_external(self.zpool_id),
-                                kind,
-                            ),
-                            inner: Default::default(),
-                        },
-                    )]),
-                    ..Default::default()
-                })
-                .expect("Failed to ensure datasets");
-            assert!(!result.has_error(), "{result:?}");
+            let mut storage = self.storage_test_harness.lock();
+            let mut config = storage.omicron_sled_config().unwrap_or_default();
+            config.generation = config.generation.next();
+            config.datasets = id_ord_map! {
+                DatasetConfig {
+                    id: dataset_id,
+                    name: DatasetName::new(
+                        ZpoolName::new_external(self.zpool_id),
+                        kind,
+                    ),
+                    inner: Default::default(),
+                },
+            };
+            storage.set_omicron_config(config).expect("set config");
         }
 
         fn is_nested_dataset_mounted(

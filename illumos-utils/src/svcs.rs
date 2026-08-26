@@ -101,7 +101,8 @@ impl SvcsResult {
                         | SvcState::Disabled
                         | SvcState::Offline
                         | SvcState::Online
-                        | SvcState::Uninitialized => {
+                        | SvcState::Uninitialized
+                        | SvcState::Unrecognized => {
                             let fmri = if let Some(fmri) = svc.next() {
                                 fmri.to_string()
                             } else {
@@ -161,19 +162,26 @@ impl SvcsResult {
             .into_iter()
             .filter_map(|svc| {
                 let state = match svc.state {
-                    SvcState::Uninitialized => {
-                        SvcEnabledNotOnlineState::Uninitialized
-                    }
                     SvcState::Offline => SvcEnabledNotOnlineState::Offline,
                     SvcState::Degraded => SvcEnabledNotOnlineState::Degraded,
                     SvcState::Maintenance => {
                         SvcEnabledNotOnlineState::Maintenance
                     }
-                    // legacy_run is included here because this state doesn't
+                    SvcState::Unrecognized => {
+                        SvcEnabledNotOnlineState::Unrecognized
+                    }
+                    // `legacy_run` is excluded here because this state doesn't
                     // really say anything about whether a service is running or
                     // not. It just states that this is a service that isn't
-                    // managed by SMF
+                    // managed by SMF.
+                    //
+                    // `svcs -x` treats `uninitialized` as a "running" state,
+                    // and does not include it in the list of services it
+                    // returns, so we exclude it as well.
+                    // More detail in
+                    // https://github.com/oxidecomputer/omicron/issues/10316
                     SvcState::Online
+                    | SvcState::Uninitialized
                     | SvcState::Disabled
                     | SvcState::LegacyRun => return None,
                 };
@@ -194,7 +202,14 @@ impl SvcsResult {
 }
 
 fn parse_svc_state(state: &str) -> Option<SvcState> {
-    match state {
+    // Per `man svcs`, an asterisk (*) is appended to the state of instances
+    // that are in transition from one state to another. For now we will
+    // consider the service state to be in the state that it reports even if it
+    // is transitioning to something else.
+    let svc_state =
+        if let Some(s) = state.strip_suffix('*') { s } else { state };
+
+    match svc_state {
         "uninitialized" => Some(SvcState::Uninitialized),
         "offline" => Some(SvcState::Offline),
         "online" => Some(SvcState::Online),
@@ -202,6 +217,9 @@ fn parse_svc_state(state: &str) -> Option<SvcState> {
         "maintenance" => Some(SvcState::Maintenance),
         "disabled" => Some(SvcState::Disabled),
         "legacy_run" => Some(SvcState::LegacyRun),
+        // Per `man svcs`, absent or unrecognized states are denoted by a
+        // question mark (?) character.
+        "?" => Some(SvcState::Unrecognized),
         _ => None,
     }
 }
@@ -437,6 +455,44 @@ disabled       svc:/network/tcpkey:default                      global
     }
 
     #[test]
+    fn test_svc_parse_in_transition_and_unrecognized() {
+        let output = r#"online*        svc:/milestone/sysconfig:default                 global
+?              svc:/site/fake-service:default                   global
+disabled       svc:/network/tcpkey:default                      global
+"#;
+
+        let log = log();
+        let result = SvcsResult::parse(&log, output.as_bytes());
+
+        assert_eq!(result.services.len(), 3);
+        assert_eq!(result.errors.len(), 0);
+        assert_eq!(
+            result.services[0],
+            Svc {
+                fmri: "svc:/milestone/sysconfig:default".to_string(),
+                zone: "global".to_string(),
+                state: SvcState::Online,
+            }
+        );
+        assert_eq!(
+            result.services[1],
+            Svc {
+                fmri: "svc:/site/fake-service:default".to_string(),
+                zone: "global".to_string(),
+                state: SvcState::Unrecognized,
+            }
+        );
+        assert_eq!(
+            result.services[2],
+            Svc {
+                fmri: "svc:/network/tcpkey:default".to_string(),
+                zone: "global".to_string(),
+                state: SvcState::Disabled,
+            }
+        );
+    }
+
+    #[test]
     fn test_to_enabled_not_online() {
         let mk_svc = |i: usize, state: SvcState| Svc {
             fmri: format!("svc:/site/fake-service-{i}:default"),
@@ -462,6 +518,7 @@ disabled       svc:/network/tcpkey:default                      global
             mk_svc(7, SvcState::Maintenance),
             mk_svc(8, SvcState::Maintenance),
             mk_svc(9, SvcState::Uninitialized),
+            mk_svc(10, SvcState::Unrecognized),
         ];
         let result = SvcsResult {
             services,
@@ -478,7 +535,7 @@ disabled       svc:/network/tcpkey:default                      global
                 mk_e_not_o_svc(3, SvcEnabledNotOnlineState::Degraded),
                 mk_e_not_o_svc(7, SvcEnabledNotOnlineState::Maintenance),
                 mk_e_not_o_svc(8, SvcEnabledNotOnlineState::Maintenance),
-                mk_e_not_o_svc(9, SvcEnabledNotOnlineState::Uninitialized),
+                mk_e_not_o_svc(10, SvcEnabledNotOnlineState::Unrecognized),
             ]
         );
     }

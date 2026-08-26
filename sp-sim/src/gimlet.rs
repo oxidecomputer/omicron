@@ -48,7 +48,7 @@ use gateway_messages::{ComponentDetails, Message, MgsError, StartupOptions};
 use gateway_messages::{DiscoverResponse, IgnitionState, PowerState};
 use gateway_messages::{MessageKind, version};
 use gateway_types::component::SpState;
-use omicron_common::disk::M2Slot;
+use sled_agent_types::disk::M2Slot;
 use slog::{Logger, debug, error, info, warn};
 use slog_error_chain::InlineErrorChain;
 use std::cell::Cell;
@@ -1449,6 +1449,17 @@ impl SpHandler for Handler {
             "persist" => persist,
         );
         self.update_state.component_set_active_slot(component, slot, persist)
+    }
+
+    fn component_get_persistent_slot(
+        &mut self,
+        component: SpComponent,
+    ) -> std::result::Result<u16, SpError> {
+        debug!(
+            &self.log, "asked for component persistent slot";
+            "component" => ?component,
+        );
+        self.update_state.component_get_persistent_slot(component)
     }
 
     fn component_action(

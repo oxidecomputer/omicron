@@ -22,21 +22,35 @@ ntp_servers = [
 # External DNS server IP Addresses; e.g., "1.1.1.1", "9.9.9.9".
 dns_servers = []
 
-# Ranges of the service IP pool which may be used for internal services.
-#
-# Elements of this list should be of the form:
-#
-#    { first = "first_ip", last = "last_ip" }
-#
-# where `last_ip` is equal to or higher than `first_ip`; e.g.,
-#
-#    { first = "172.20.26.1", last = "172.20.26.10" }
-internal_services_ip_pool_ranges = []
-
 # List of sleds to initialize.
 #
 # Confirm this list contains all expected sleds before continuing!
 bootstrap_sleds = []
+
+# When true, end users may opt in to jumbo frames (8500 byte MTU) on the primary
+# interface of an instance, and control plane services with external-facing OPTE
+# NICs are brought up with an 8500 byte MTU. Operators can also toggle this at
+# runtime via the Nexus `/v1/system/networking/settings` endpoint after rack
+# initialization.
+external_jumbo_frames_opt_in_enabled = false
+
+# The IP pools from which addresses are assigned to externally-facing services
+# (external DNS, Nexus, and boundary NTP).
+#
+# Specify one pool per `[[service_ip_pools]]` stanza; copy the stanza to define
+# more than one pool (e.g. an IPv4 pool and an IPv6 pool). All ranges within a
+# single pool must be of the same IP version. Each range has the form
+# `{ first = "first_ip", last = "last_ip" }`, where `last_ip` is equal to or
+# higher than `first_ip`. For example, a pool with two ranges:
+#
+#     ranges = [
+#         { first = "1.1.1.1", last = "1.1.1.10" },
+#         { first = "1.1.1.20", last = "1.1.1.30" },
+#     ]
+[[service_ip_pools]]
+name = ""
+description = ""
+ranges = []
 
 # Allowlist of source IPs that can make requests to user-facing services.
 #
@@ -148,6 +162,9 @@ infra_ip_last = ""
         # (optional). Defaults to allowing all prefixes. Use an empty list to
         # indicate that no prefixes are allowed.
         # allowed_export = []
+
+        # The source address to use for the BGP session (optional).
+        # src_addr = ""
 
         # Associate a VLAN ID with this BGP session (optional).
         # vlan_id = 0

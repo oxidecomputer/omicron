@@ -10,11 +10,11 @@ use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership;
 use clickhouse_admin_types::keeper::KeeperId;
-use gateway_client::types::PowerState;
-use gateway_client::types::RotState;
 use gateway_client::types::SpComponentCaboose;
-use gateway_client::types::SpState;
+use gateway_types::component::PowerState;
+use gateway_types::component::SpState;
 use gateway_types::rot::RotSlot;
+use gateway_types::rot::RotState;
 use iddqd::id_ord_map;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::InternalDnsGenerationStatus;
@@ -25,13 +25,9 @@ use nexus_types::inventory::ZpoolName;
 use omicron_cockroach_metrics::MetricValue;
 use omicron_cockroach_metrics::PrometheusMetrics;
 use omicron_common::api::external::ByteCount;
-use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetKind;
 use omicron_common::disk::DatasetName;
-use omicron_common::disk::DiskVariant;
-use omicron_common::disk::M2Slot;
-use omicron_common::disk::OmicronPhysicalDiskConfig;
-use omicron_common::disk::SharedDatasetConfig;
+use omicron_generation_kinds::{GenericGeneration, SledConfigGeneration};
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -45,12 +41,18 @@ use sled_agent_resolvable_files_examples::NON_BOOT_PATHS;
 use sled_agent_resolvable_files_examples::NON_BOOT_UUID;
 use sled_agent_resolvable_files_examples::WriteInstallDatasetContext;
 use sled_agent_resolvable_files_examples::dataset_missing_error;
-use sled_agent_types::inventory::Baseboard;
+use sled_agent_types::disk::DatasetConfig;
+use sled_agent_types::disk::DiskIdentity;
+use sled_agent_types::disk::DiskVariant;
+use sled_agent_types::disk::M2Slot;
+use sled_agent_types::disk::OmicronPhysicalDiskConfig;
+use sled_agent_types::disk::SharedDatasetConfig;
 use sled_agent_types::inventory::BootImageHeader;
 use sled_agent_types::inventory::BootPartitionDetails;
 use sled_agent_types::inventory::ConfigReconcilerInventory;
 use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+use sled_agent_types::inventory::FmdInventory;
 use sled_agent_types::inventory::HostPhase2DesiredSlots;
 use sled_agent_types::inventory::Inventory;
 use sled_agent_types::inventory::InventoryDataset;
@@ -58,6 +60,7 @@ use sled_agent_types::inventory::InventoryDisk;
 use sled_agent_types::inventory::InventoryZpool;
 use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
 use sled_agent_types::inventory::OmicronSledConfig;
+use sled_agent_types::inventory::OmicronSledUpdateDisposition;
 use sled_agent_types::inventory::OmicronZonesConfig;
 use sled_agent_types::inventory::OrphanedDataset;
 use sled_agent_types::inventory::SingleMeasurementInventory;
@@ -405,31 +408,40 @@ pub fn representative() -> Representative {
     // Convert these to `OmicronSledConfig`s. We'll start with empty disks and
     // datasets for now, and add to them below for sled14.
     let mut sled14 = OmicronSledConfig {
-        generation: sled14.generation,
+        generation: SledConfigGeneration::from_untyped_generation(
+            sled14.generation,
+        ),
         disks: Default::default(),
         datasets: Default::default(),
         zones: sled14.zones.into_iter().collect(),
         remove_mupdate_override: None,
         host_phase_2: HostPhase2DesiredSlots::current_contents(),
         measurements: Default::default(),
+        update_disposition: OmicronSledUpdateDisposition::Available,
     };
     let sled16 = OmicronSledConfig {
-        generation: sled16.generation,
+        generation: SledConfigGeneration::from_untyped_generation(
+            sled16.generation,
+        ),
         disks: Default::default(),
         datasets: Default::default(),
         zones: sled16.zones.into_iter().collect(),
         remove_mupdate_override: None,
         host_phase_2: HostPhase2DesiredSlots::current_contents(),
         measurements: Default::default(),
+        update_disposition: OmicronSledUpdateDisposition::Available,
     };
     let sled17 = OmicronSledConfig {
-        generation: sled17.generation,
+        generation: SledConfigGeneration::from_untyped_generation(
+            sled17.generation,
+        ),
         disks: Default::default(),
         datasets: Default::default(),
         zones: sled17.zones.into_iter().collect(),
         remove_mupdate_override: None,
         host_phase_2: HostPhase2DesiredSlots::current_contents(),
         measurements: Default::default(),
+        update_disposition: OmicronSledUpdateDisposition::Evacuating,
     };
 
     // Create iterator producing fixed IDs.
@@ -466,7 +478,7 @@ pub fn representative() -> Representative {
     let disks = vec![
         // Let's say we have one manufacturer for our M.2...
         InventoryDisk {
-            identity: omicron_common::disk::DiskIdentity {
+            identity: DiskIdentity {
                 vendor: "macrohard".to_string(),
                 model: "box".to_string(),
                 serial: "XXIV".to_string(),
@@ -481,7 +493,7 @@ pub fn representative() -> Representative {
         },
         // ... and a couple different vendors for our U.2s
         InventoryDisk {
-            identity: omicron_common::disk::DiskIdentity {
+            identity: DiskIdentity {
                 vendor: "memetendo".to_string(),
                 model: "swatch".to_string(),
                 serial: "0001".to_string(),
@@ -495,7 +507,7 @@ pub fn representative() -> Representative {
             slot_firmware_versions: vec![Some("EXAMP1".to_string())],
         },
         InventoryDisk {
-            identity: omicron_common::disk::DiskIdentity {
+            identity: DiskIdentity {
                 vendor: "memetendo".to_string(),
                 model: "swatch".to_string(),
                 serial: "0002".to_string(),
@@ -509,7 +521,7 @@ pub fn representative() -> Representative {
             slot_firmware_versions: vec![Some("EXAMP1".to_string())],
         },
         InventoryDisk {
-            identity: omicron_common::disk::DiskIdentity {
+            identity: DiskIdentity {
                 vendor: "tony".to_string(),
                 model: "craystation".to_string(),
                 serial: "5".to_string(),
@@ -571,10 +583,9 @@ pub fn representative() -> Representative {
             "fake sled agent 1",
             sled_agent(
                 sled_agent_id_basic,
-                Baseboard::Gimlet {
-                    identifier: String::from("s1"),
-                    model: String::from("model1"),
-                    revision: 0,
+                BaseboardId {
+                    part_number: String::from("model1"),
+                    serial_number: String::from("s1"),
                 },
                 SledRole::Gimlet,
                 disks,
@@ -606,11 +617,7 @@ pub fn representative() -> Representative {
             "fake sled agent 4",
             sled_agent(
                 sled_agent_id_extra,
-                Baseboard::Gimlet {
-                    identifier: sled4_bb.serial_number.clone(),
-                    model: sled4_bb.part_number.clone(),
-                    revision: 0,
-                },
+                (*sled4_bb).clone(),
                 SledRole::Scrimlet,
                 vec![],
                 vec![],
@@ -627,20 +634,20 @@ pub fn representative() -> Representative {
         )
         .unwrap();
 
-    // Now report a different sled as though it were a PC.  It'd be unlikely to
-    // see a mix of real Oxide hardware and PCs in the same deployment, but this
-    // exercises different code paths.
+    // Now report a couple more sleds with their own distinct baseboards.
     let sled_agent_id_pc =
         "c4a5325b-e852-4747-b28a-8aaa7eded8a0".parse().unwrap();
+
+    let sled5_bb = Arc::new(BaseboardId {
+        part_number: String::from("fellofftruck"),
+        serial_number: String::from("fellofftruck1"),
+    });
     builder
         .found_sled_inventory(
             "fake sled agent 5",
             sled_agent(
                 sled_agent_id_pc,
-                Baseboard::Pc {
-                    identifier: String::from("fellofftruck1"),
-                    model: String::from("fellofftruck"),
-                },
+                (*sled5_bb).clone(),
                 SledRole::Gimlet,
                 vec![],
                 vec![],
@@ -665,18 +672,20 @@ pub fn representative() -> Representative {
         )
         .unwrap();
 
-    // Finally, report a sled with unknown baseboard information.  This should
-    // look the same as the PC as far as inventory is concerned but let's verify
-    // it.
+    // Finally, report one more sled with its own baseboard.
     let sled_agent_id_unknown =
         "5c5b4cf9-3e13-45fd-871c-f177d6537510".parse().unwrap();
 
+    let sled6_bb = Arc::new(BaseboardId {
+        part_number: "test".to_string(),
+        serial_number: "test".to_string(),
+    });
     builder
         .found_sled_inventory(
             "fake sled agent 6",
             sled_agent(
                 sled_agent_id_unknown,
-                Baseboard::Unknown,
+                (*sled6_bb).clone(),
                 SledRole::Gimlet,
                 vec![],
                 vec![],
@@ -737,7 +746,7 @@ pub fn representative() -> Representative {
 
     Representative {
         builder,
-        sleds: [sled1_bb, sled2_bb, sled3_bb, sled4_bb],
+        sleds: [sled1_bb, sled2_bb, sled3_bb, sled4_bb, sled5_bb, sled6_bb],
         switch: switch1_bb,
         psc: psc_bb,
         sled_agents: [
@@ -751,7 +760,7 @@ pub fn representative() -> Representative {
 
 pub struct Representative {
     pub builder: CollectionBuilder,
-    pub sleds: [Arc<BaseboardId>; 4],
+    pub sleds: [Arc<BaseboardId>; 6],
     pub switch: Arc<BaseboardId>,
     pub psc: Arc<BaseboardId>,
     pub sled_agents: [SledUuid; 4],
@@ -760,7 +769,7 @@ pub struct Representative {
 impl Representative {
     pub fn new(
         builder: CollectionBuilder,
-        sleds: [Arc<BaseboardId>; 4],
+        sleds: [Arc<BaseboardId>; 6],
         switch: Arc<BaseboardId>,
         psc: Arc<BaseboardId>,
         sled_agents: [SledUuid; 4],
@@ -1033,7 +1042,7 @@ pub fn file_source_resolver(
 #[expect(clippy::too_many_arguments)]
 pub fn sled_agent(
     sled_id: SledUuid,
-    baseboard: Baseboard,
+    baseboard_id: BaseboardId,
     sled_role: SledRole,
     disks: Vec<InventoryDisk>,
     zpools: Vec<InventoryZpool>,
@@ -1097,8 +1106,31 @@ pub fn sled_agent(
         result: ConfigReconcilerInventoryResult::Ok,
     });
 
+    // Synthesize a representative FMD payload: a single faulted resource
+    // diagnosed by a single case. This keeps the per-table-population test
+    // happy and gives downstream golden-output tests something to render.
+    let case_id = omicron_uuid_kinds::FmdHostCaseUuid::new_v4();
+    let resource_id = omicron_uuid_kinds::FmdResourceUuid::new_v4();
+    let mut fmd_cases = iddqd::IdOrdMap::new();
+    fmd_cases.insert_overwrite(sled_agent_types::inventory::FmdHostCase {
+        uuid: case_id,
+        code: "PCIEX-8000-DJ".to_string(),
+        url: "http://illumos.org/msg/PCIEX-8000-DJ".to_string(),
+        event: Some(serde_json::json!({"class": "fault.io.pci.bus"})),
+    });
+    let mut fmd_resources = iddqd::IdOrdMap::new();
+    fmd_resources.insert_overwrite(sled_agent_types::inventory::FmdResource {
+        uuid: resource_id,
+        fmri: "dev:////pci@af,0/pci1022,1483@3,5".to_string(),
+        case_id,
+        faulty: true,
+        unusable: false,
+        invisible: false,
+    });
+    let fmd = Ok(FmdInventory { cases: fmd_cases, resources: fmd_resources });
+
     Inventory {
-        baseboard,
+        baseboard_id,
         reservoir_size: ByteCount::from(1024),
         sled_role,
         sled_agent_address: "[::1]:56792".parse().unwrap(),
@@ -1115,5 +1147,6 @@ pub fn sled_agent(
         file_source_resolver,
         smf_services_enabled_not_online,
         reference_measurements,
+        fmd,
     }
 }

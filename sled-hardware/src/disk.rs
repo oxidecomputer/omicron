@@ -6,10 +6,11 @@ use camino::{Utf8Path, Utf8PathBuf};
 use illumos_utils::fstyp::Fstyp;
 use illumos_utils::zpool::Api;
 use illumos_utils::zpool::Zpool;
-use omicron_common::disk::{DiskIdentity, DiskVariant};
 use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::ZpoolUuid;
 use serde::{Deserialize, Serialize};
+use sled_agent_types::disk::DiskIdentity;
+use sled_agent_types::disk::DiskVariant;
 use slog::Logger;
 use slog::{info, warn};
 use slog_error_chain::SlogInlineError;
@@ -60,6 +61,8 @@ pub enum PooledDiskError {
     CannotFormatM2NotImplemented,
     #[error(transparent)]
     NvmeFormatAndResize(#[from] NvmeFormattingError),
+    #[error("synthetic disks do not have a devfs path")]
+    SyntheticDiskNoDevfsPath,
 }
 
 /// A partition (or 'slice') of a disk.
@@ -283,7 +286,6 @@ impl UnparsedDisk {
 pub struct PooledDisk {
     pub paths: DiskPaths,
     pub slot: i64,
-    pub variant: DiskVariant,
     pub identity: DiskIdentity,
     pub is_boot_disk: bool,
     pub partitions: Vec<Partition>,
@@ -327,7 +329,6 @@ impl PooledDisk {
         Ok(Self {
             paths: unparsed_disk.paths,
             slot: unparsed_disk.slot,
-            variant: unparsed_disk.variant,
             identity: unparsed_disk.identity,
             is_boot_disk: unparsed_disk.is_boot_disk,
             partitions,

@@ -5,9 +5,10 @@
 use std::collections::HashMap;
 
 use crate::disk::{DiskPaths, Partition, PooledDiskError, UnparsedDisk};
-use crate::{HardwareView, SledMode};
-use omicron_common::disk::{DiskIdentity, DiskVariant};
+use crate::{ExternalDisks, HardwareView, SledMode};
 use omicron_uuid_kinds::ZpoolUuid;
+use sled_agent_types::disk::DiskIdentity;
+use sled_agent_types::disk::DiskVariant;
 use sled_hardware_types::{Baseboard, SledCpuFamily};
 use slog::Logger;
 use tokio::sync::watch;
@@ -33,7 +34,7 @@ impl HardwareManager {
     pub fn new(
         _log: &Logger,
         _sled_mode: SledMode,
-        _nonsled_observed_disks: Vec<UnparsedDisk>,
+        _external_disks: ExternalDisks,
     ) -> Result<Self, String> {
         unimplemented!("Accessing hardware unsupported on non-illumos");
     }

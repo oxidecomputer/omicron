@@ -16,12 +16,19 @@ use ipnetwork::IpNetwork;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_model::DbSwitchSlot;
+use nexus_db_model::DbTypedUuid;
+use nexus_db_model::to_db_typed_uuid;
+use nexus_types::external_api::networking as networking_types;
 use omicron_common::api::external;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::RackUuid;
+use omicron_uuid_kinds::SwitchPortSettingsKind;
+use omicron_uuid_kinds::SwitchPortSettingsUuid;
 use sled_agent_types::early_networking::SwitchSlot;
 use uuid::Uuid;
 
@@ -47,7 +54,7 @@ impl DataStore {
     async fn lldp_config_id_get(
         &self,
         opctx: &OpContext,
-        rack_id: Uuid,
+        rack_id: RackUuid,
         switch_slot: SwitchSlot,
         port_name: Name,
     ) -> LookupResult<Uuid> {
@@ -59,26 +66,33 @@ impl DataStore {
         let conn = self.pool_connection_authorized(opctx).await?;
 
         let switch_slot = DbSwitchSlot::from(switch_slot);
-        let port_settings_id: Uuid = switch_port_dsl::switch_port
-            .filter(switch_port::rack_id.eq(rack_id))
-            .filter(switch_port::switch_slot.eq(switch_slot))
-            .filter(switch_port::port_name.eq(port_name.to_string()))
-            .select(switch_port::port_settings_id)
-            .limit(1)
-            .first_async::<Option<Uuid>>(&*conn)
-            .await
-            .map_err(|_| {
-                Error::not_found_by_name(ResourceType::SwitchPort, &port_name)
-            })?
-            .ok_or(Error::invalid_value(
-                "settings",
-                "switch port not yet configured".to_string(),
-            ))?;
+        let port_settings_id: SwitchPortSettingsUuid =
+            switch_port_dsl::switch_port
+                .filter(switch_port::rack_id.eq(to_db_typed_uuid(rack_id)))
+                .filter(switch_port::switch_slot.eq(switch_slot))
+                .filter(switch_port::port_name.eq(port_name.to_string()))
+                .select(switch_port::port_settings_id)
+                .limit(1)
+                .first_async::<Option<DbTypedUuid<SwitchPortSettingsKind>>>(
+                    &*conn,
+                )
+                .await
+                .map_err(|_| {
+                    Error::not_found_by_name(
+                        ResourceType::SwitchPort,
+                        &port_name,
+                    )
+                })?
+                .ok_or(Error::invalid_value(
+                    "settings",
+                    "switch port not yet configured".to_string(),
+                ))?
+                .into();
 
         let lldp_id: Uuid = config_dsl::switch_port_settings_link_config
             .filter(
                 switch_port_settings_link_config::port_settings_id
-                    .eq(port_settings_id),
+                    .eq(to_db_typed_uuid(port_settings_id)),
             )
             .select(switch_port_settings_link_config::lldp_link_config_id)
             .limit(1)
@@ -87,7 +101,7 @@ impl DataStore {
             .map_err(|_| {
                 Error::not_found_by_id(
                     ResourceType::SwitchPortSettings,
-                    &port_settings_id,
+                    &port_settings_id.into_untyped_uuid(),
                 )
             })?
             .ok_or(Error::invalid_value(
@@ -102,10 +116,10 @@ impl DataStore {
     pub async fn lldp_config_get(
         &self,
         opctx: &OpContext,
-        rack_id: Uuid,
+        rack_id: RackUuid,
         switch_slot: SwitchSlot,
         port_name: Name,
-    ) -> LookupResult<external::LldpLinkConfig> {
+    ) -> LookupResult<networking_types::LldpLinkConfig> {
         use nexus_db_schema::schema::lldp_link_config;
         use nexus_db_schema::schema::lldp_link_config::dsl;
 
@@ -142,10 +156,10 @@ impl DataStore {
     pub async fn lldp_config_update(
         &self,
         opctx: &OpContext,
-        rack_id: Uuid,
+        rack_id: RackUuid,
         switch_slot: SwitchSlot,
         port_name: Name,
-        config: external::LldpLinkConfig,
+        config: networking_types::LldpLinkConfig,
     ) -> UpdateResult<()> {
         use nexus_db_schema::schema::lldp_link_config::dsl;
 

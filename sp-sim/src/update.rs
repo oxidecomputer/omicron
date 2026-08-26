@@ -8,6 +8,7 @@ use std::mem;
 use std::time::Duration;
 use std::time::Instant;
 
+use crate::ROT_STAGING_DEVEL_SIGN;
 use crate::SIM_GIMLET_BOARD;
 use crate::SIM_ROT_BOARD;
 use crate::SIM_SIDECAR_BOARD;
@@ -25,10 +26,10 @@ use gateway_messages::UpdateId;
 use gateway_messages::UpdateInProgressStatus;
 use hubtools::RawHubrisImage;
 use nexus_types::inventory::Caboose;
-use omicron_common::disk::M2Slot;
 use sha2::Sha256;
 use sha3::Digest;
 use sha3::Sha3_256;
+use sled_agent_types::disk::M2Slot;
 use tokio::sync::mpsc;
 
 pub(crate) struct SimSpUpdate {
@@ -90,9 +91,6 @@ impl SimSpUpdate {
         const ROT_GITC1: &str = "edededed";
         const ROT_VERS0: &str = "0.0.4";
         const ROT_VERS1: &str = "0.0.3";
-        // staging/devel key signature
-        const ROT_STAGING_DEVEL_SIGN: &str =
-            "11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf";
 
         const STAGE0_GITC0: &str = "ddddddddd";
         const STAGE0_GITC1: &str = "dadadadad";
@@ -684,6 +682,23 @@ impl SimSpUpdate {
             SpComponent::HOST_CPU_BOOT_FLASH => Ok(self.phase1_active_slot),
 
             _ => Err(SpError::RequestUnsupportedForComponent),
+        }
+    }
+
+    pub(crate) fn component_get_persistent_slot(
+        &mut self,
+        component: SpComponent,
+    ) -> Result<u16, SpError> {
+        match component {
+            SpComponent::ROT => Ok(rot_slot_id_to_u16(
+                self.rot_state
+                    .pending_persistent_boot_preference
+                    .unwrap_or(self.rot_state.persistent_boot_preference),
+            )),
+
+            // For other components, we don't simulate separate
+            // persistent/active slots (yet?), so just return the active slot
+            _ => self.component_get_active_slot(component),
         }
     }
 }

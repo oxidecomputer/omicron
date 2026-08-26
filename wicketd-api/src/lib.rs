@@ -2,45 +2,38 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use bootstrap_agent_lockstep_client::types::RackOperationStatus;
+use bootstrap_agent_lockstep_types::RackOperationStatus;
 use dropshot::HttpError;
 use dropshot::HttpResponseOk;
 use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Path;
 use dropshot::RequestContext;
-use dropshot::StreamingBody;
 use dropshot::TypedBody;
 use gateway_client::types::IgnitionCommand;
-use omicron_common::update::ArtifactId;
-use omicron_uuid_kinds::RackInitUuid;
-use omicron_uuid_kinds::RackResetUuid;
 use schemars::JsonSchema;
 use semver::Version;
 use serde::Deserialize;
 use serde::Serialize;
-use sled_hardware_types::Baseboard;
+use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::net::Ipv6Addr;
-use tufaceous_artifact::ArtifactHashId;
+use wicket_common::artifact::ArtifactId;
 use wicket_common::inventory::RackV1Inventory;
 use wicket_common::inventory::SpIdentifier;
 use wicket_common::inventory::SpType;
+use wicket_common::multirack_setup::CurrentMultirackJoinUserConfig;
+use wicket_common::multirack_setup::MultirackJoinConfigBaseUserInput;
 use wicket_common::preflight_check;
-use wicket_common::rack_setup::BgpAuthKey;
-use wicket_common::rack_setup::BgpAuthKeyId;
 use wicket_common::rack_setup::CurrentRssUserConfigInsensitive;
 use wicket_common::rack_setup::GetBgpAuthKeyInfoResponse;
-use wicket_common::rack_setup::PutRssUserConfigInsensitive;
 use wicket_common::rack_update::AbortUpdateOptions;
 use wicket_common::rack_update::ClearUpdateStateOptions;
-use wicket_common::rack_update::ClearUpdateStateResponse;
 use wicket_common::rack_update::StartUpdateOptions;
 use wicket_common::update_events::EventReport;
-
-/// Full release repositories are currently (Dec 2024) 1.8 GiB and are likely to
-/// continue growing.
-const PUT_REPOSITORY_MAX_BYTES: usize = 4 * 1024 * 1024 * 1024;
+use wicketd_commission_types::rack_setup::BgpAuthKeyId;
+use wicketd_commission_types::update::ClearUpdateStateResponse;
+use wicketd_commission_types::update::UpdateTargets;
 
 #[dropshot::api_description]
 pub trait WicketdApi {
@@ -65,44 +58,27 @@ pub trait WicketdApi {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<CurrentRssUserConfig>, HttpError>;
 
-    /// Update (a subset of) the current RSS configuration.
+    /// Get the current status of the multirack join configuration.
+    #[endpoint {
+        method = GET,
+        path = "/rack-setup/config/multirack"
+    }]
+    async fn get_multirack_join_config(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<CurrentMultirackJoinUserConfig>, HttpError>;
+
+    /// Upload a configuration for joining this rack into an existing regional
+    /// cluster.
     ///
-    /// Sensitive values (certificates and password hash) are not set through
-    /// this endpoint.
+    /// A multirack join configuration is mutually exclusive with an RSS config.
     #[endpoint {
         method = PUT,
-        path = "/rack-setup/config"
+        path = "/rack-setup/config/multirack"
     }]
-    async fn put_rss_config(
+    async fn put_multirack_join_config(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<PutRssUserConfigInsensitive>,
+        body: TypedBody<MultirackJoinConfigBaseUserInput>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
-
-    /// Add an external certificate.
-    ///
-    /// This must be paired with its private key. They may be posted in either
-    /// order, but one cannot post two certs in a row (or two keys in a row).
-    #[endpoint {
-        method = POST,
-        path = "/rack-setup/config/cert"
-    }]
-    async fn post_rss_config_cert(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<String>,
-    ) -> Result<HttpResponseOk<CertificateUploadResponse>, HttpError>;
-
-    /// Add the private key of an external certificate.
-    ///
-    /// This must be paired with its certificate. They may be posted in either
-    /// order, but one cannot post two keys in a row (or two certs in a row).
-    #[endpoint {
-        method = POST,
-        path = "/rack-setup/config/key"
-    }]
-    async fn post_rss_config_key(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<String>,
-    ) -> Result<HttpResponseOk<CertificateUploadResponse>, HttpError>;
 
     // -- BGP authentication key management
 
@@ -122,36 +98,6 @@ pub trait WicketdApi {
         params: TypedBody<GetBgpAuthKeyParams>,
     ) -> Result<HttpResponseOk<GetBgpAuthKeyInfoResponse>, HttpError>;
 
-    /// Set the BGP authentication key for a particular key ID.
-    #[endpoint {
-        method = PUT,
-        path = "/rack-setup/config/bgp/auth-key/{key_id}"
-    }]
-    async fn put_bgp_auth_key(
-        rqctx: RequestContext<Self::Context>,
-        params: Path<PutBgpAuthKeyParams>,
-        body: TypedBody<PutBgpAuthKeyBody>,
-    ) -> Result<HttpResponseOk<PutBgpAuthKeyResponse>, HttpError>;
-
-    /// Update the RSS config recovery silo user password hash.
-    #[endpoint {
-        method = PUT,
-        path = "/rack-setup/config/recovery-user-password-hash"
-    }]
-    async fn put_rss_config_recovery_user_password_hash(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<PutRssRecoveryUserPasswordHash>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
-
-    /// Reset all RSS configuration to their default values.
-    #[endpoint {
-        method = DELETE,
-        path = "/rack-setup/config"
-    }]
-    async fn delete_rss_config(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
-
     /// Query current state of rack setup.
     #[endpoint {
         method = GET,
@@ -160,27 +106,6 @@ pub trait WicketdApi {
     async fn get_rack_setup_state(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<RackOperationStatus>, HttpError>;
-
-    /// Run rack setup.
-    ///
-    /// Will return an error if not all of the rack setup configuration has
-    /// been populated.
-    #[endpoint {
-        method = POST,
-        path = "/rack-setup"
-    }]
-    async fn post_run_rack_setup(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<RackInitUuid>, HttpError>;
-
-    /// Run rack reset.
-    #[endpoint {
-        method = DELETE,
-        path = "/rack-setup"
-    }]
-    async fn post_run_rack_reset(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<RackResetUuid>, HttpError>;
 
     /// A status endpoint used to report high level information known to
     /// wicketd.
@@ -198,20 +123,6 @@ pub trait WicketdApi {
         rqctx: RequestContext<Self::Context>,
         body_params: TypedBody<GetInventoryParams>,
     ) -> Result<HttpResponseOk<GetInventoryResponse>, HttpError>;
-
-    /// Upload a TUF repository to the server.
-    ///
-    /// At any given time, wicketd will keep at most one TUF repository in
-    /// memory. Any previously-uploaded repositories will be discarded.
-    #[endpoint {
-        method = PUT,
-        path = "/repository",
-        request_body_max_bytes = PUT_REPOSITORY_MAX_BYTES,
-    }]
-    async fn put_repository(
-        rqctx: RequestContext<Self::Context>,
-        body: StreamingBody,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// An endpoint used to report all available artifacts and event reports.
     ///
@@ -233,16 +144,6 @@ pub trait WicketdApi {
     async fn get_baseboard(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<GetBaseboardResponse>, HttpError>;
-
-    /// Report the identity of the sled and switch we're currently running on /
-    /// connected to.
-    #[endpoint {
-        method = GET,
-        path = "/location",
-    }]
-    async fn get_location(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<GetLocationResponse>, HttpError>;
 
     /// An endpoint to start updating one or more sleds, switches and PSCs.
     #[endpoint {
@@ -351,7 +252,7 @@ pub trait WicketdApi {
     Ord,
 )]
 pub struct BootstrapSledIp {
-    pub baseboard: Baseboard,
+    pub baseboard: BaseboardId,
     pub ip: Ipv6Addr,
 }
 
@@ -389,58 +290,10 @@ pub struct CurrentRssUserConfig {
     pub insensitive: CurrentRssUserConfigInsensitive,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
-#[serde(tag = "status", rename_all = "snake_case")]
-pub enum CertificateUploadResponse {
-    /// The key has been uploaded, but we're waiting on its corresponding
-    /// certificate chain.
-    WaitingOnCert,
-    /// The cert chain has been uploaded, but we're waiting on its corresponding
-    /// private key.
-    WaitingOnKey,
-    /// A cert chain and its key have been accepted.
-    CertKeyAccepted,
-    /// A cert chain and its key are valid, but have already been uploaded.
-    CertKeyDuplicateIgnored,
-}
-
 #[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct GetBgpAuthKeyParams {
     /// Checks that these keys are valid.
     pub check_valid: BTreeSet<BgpAuthKeyId>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
-pub struct PutBgpAuthKeyParams {
-    pub key_id: BgpAuthKeyId,
-}
-
-#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Eq)]
-pub struct PutBgpAuthKeyBody {
-    pub key: BgpAuthKey,
-}
-
-#[derive(Clone, Debug, Serialize, JsonSchema, PartialEq)]
-pub struct PutBgpAuthKeyResponse {
-    pub status: SetBgpAuthKeyStatus,
-}
-
-#[derive(Clone, Debug, Serialize, JsonSchema, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum SetBgpAuthKeyStatus {
-    /// The key was accepted and replaced an old key.
-    Replaced,
-
-    /// The key was accepted, and is the same as the existing key.
-    Unchanged,
-
-    /// The key was accepted and is new.
-    Added,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
-pub struct PutRssRecoveryUserPasswordHash {
-    pub hash: omicron_passwords::NewPasswordHash,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
@@ -459,14 +312,6 @@ pub enum GetInventoryResponse {
     Unavailable,
 }
 
-#[derive(Clone, Debug, JsonSchema, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub struct InstallableArtifacts {
-    pub artifact_id: ArtifactId,
-    pub installable: Vec<ArtifactHashId>,
-    pub sign: Option<Vec<u8>>,
-}
-
 /// The response to a `get_artifacts` call: the system version, and the list of
 /// all artifacts currently held by wicketd.
 #[derive(Clone, Debug, JsonSchema, Serialize)]
@@ -474,26 +319,17 @@ pub struct InstallableArtifacts {
 pub struct GetArtifactsAndEventReportsResponse {
     pub system_version: Option<Version>,
 
-    /// Map of artifacts we ingested from the most-recently-uploaded TUF
-    /// repository to a list of artifacts we're serving over the bootstrap
-    /// network. In some cases the list of artifacts being served will have
-    /// length 1 (when we're serving the artifact directly); in other cases the
-    /// artifact in the TUF repo contains multiple nested artifacts inside it
-    /// (e.g., RoT artifacts contain both A and B images), and we serve the list
-    /// of extracted artifacts but not the original combination.
-    ///
-    /// Conceptually, this is a `BTreeMap<ArtifactId, Vec<ArtifactHashId>>`, but
-    /// JSON requires string keys for maps, so we give back a vec of pairs
-    /// instead.
-    pub artifacts: Vec<InstallableArtifacts>,
+    /// List of artifacts we ingested from the most-recently-uploaded TUF
+    /// repository.
+    pub artifacts: Vec<ArtifactId>,
 
     pub event_reports: BTreeMap<SpType, BTreeMap<u16, EventReport>>,
 }
 
 #[derive(Clone, Debug, JsonSchema, Deserialize)]
 pub struct StartUpdateParams {
-    /// The SP identifiers to start the update with. Must be non-empty.
-    pub targets: BTreeSet<SpIdentifier>,
+    /// The SP identifiers to start the update with.
+    pub targets: UpdateTargets,
 
     /// Options for the update.
     pub options: StartUpdateOptions,
@@ -501,8 +337,8 @@ pub struct StartUpdateParams {
 
 #[derive(Clone, Debug, JsonSchema, Deserialize)]
 pub struct ClearUpdateStateParams {
-    /// The SP identifiers to clear the update state for. Must be non-empty.
-    pub targets: BTreeSet<SpIdentifier>,
+    /// The SP identifiers to clear the update state for.
+    pub targets: UpdateTargets,
 
     /// Options for clearing update state
     pub options: ClearUpdateStateOptions,
@@ -511,24 +347,7 @@ pub struct ClearUpdateStateParams {
 #[derive(Clone, Debug, JsonSchema, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub struct GetBaseboardResponse {
-    pub baseboard: Option<Baseboard>,
-}
-
-/// All the fields of this response are optional, because it's possible we don't
-/// know any of them (yet) if MGS has not yet finished discovering its location
-/// or (ever) if we're running in a dev environment that doesn't support
-/// MGS-location / baseboard mapping.
-#[derive(Clone, Debug, JsonSchema, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub struct GetLocationResponse {
-    /// The identity of our sled (where wicketd is running).
-    pub sled_id: Option<SpIdentifier>,
-    /// The baseboard of our sled (where wicketd is running).
-    pub sled_baseboard: Option<Baseboard>,
-    /// The baseboard of the switch our sled is physically connected to.
-    pub switch_baseboard: Option<Baseboard>,
-    /// The identity of the switch our sled is physically connected to.
-    pub switch_id: Option<SpIdentifier>,
+    pub baseboard: BaseboardId,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]

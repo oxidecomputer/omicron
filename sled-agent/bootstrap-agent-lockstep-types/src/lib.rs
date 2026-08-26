@@ -9,27 +9,43 @@
 //! out of this crate and into the relevant `*-types-versions` / `*-types` crate
 //! pairs.
 
-use omicron_common::address::AZ_PREFIX;
-use omicron_common::address::IpRange;
+use anyhow::Context as _;
+use iddqd::IdOrdItem;
+use iddqd::IdOrdMap;
+use iddqd::id_upcast;
+use iddqd::{BiHashItem, BiHashMap, bi_upcast};
+use omicron_common::address::AZ_PREFIX_LENGTH;
 use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::RACK_PREFIX;
-use omicron_common::address::SLED_PREFIX;
+use omicron_common::address::RACK_PREFIX_LENGTH;
+use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::address::get_64_subnet;
 use omicron_common::api::external::AllowedSourceIps;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::UserId;
 use omicron_common::api::internal::nexus::Certificate;
-use omicron_uuid_kinds::{RackInitUuid, RackResetUuid};
+use omicron_uuid_kinds::MultirackJoinUuid;
+use omicron_uuid_kinds::RackInitUuid;
+use omicron_uuid_kinds::RackUuid;
+use omicron_uuid_kinds::SledUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::early_networking::RackNetworkConfig;
-use sled_hardware_types::Baseboard;
+use sled_hardware_types::BaseboardId;
+use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use strum::EnumCount;
 use strum::EnumIter;
 use strum::IntoEnumIterator;
+use trust_quorum_types::messages::ReconfigureMsg as TqReconfigureMsg;
+use trust_quorum_types::status::CoordinatorStatus;
+use trust_quorum_types::types::Epoch;
+use trust_quorum_types::types::Threshold;
+pub use wicketd_commission_types::rack_setup::ServiceIpPoolConfig;
+pub use wicketd_commission_types::rack_setup::ServiceIpPoolError;
+
+pub mod scrimlet_reconcilers;
 
 /// Configuration for the "rack setup service".
 ///
@@ -43,7 +59,7 @@ pub struct RackInitializeRequest {
     /// The set of peer_ids required to initialize trust quorum
     ///
     /// The value is `None` if we are not using trust quorum
-    pub trust_quorum_peers: Option<Vec<Baseboard>>,
+    pub trust_quorum_peers: Option<Vec<BaseboardId>>,
 
     /// Describes how bootstrap addresses should be collected during RSS.
     pub bootstrap_discovery: BootstrapAddressDiscovery,
@@ -54,14 +70,13 @@ pub struct RackInitializeRequest {
     /// The external DNS server addresses.
     pub dns_servers: Vec<IpAddr>,
 
-    /// Ranges of the service IP pool which may be used for internal services.
-    // TODO(https://github.com/oxidecomputer/omicron/issues/1530): Eventually,
-    // we want to configure multiple pools.
-    pub internal_services_ip_pool_ranges: Vec<IpRange>,
+    /// Configuration for service IP Pools.
+    pub service_ip_pools: IdOrdMap<ServiceIpPoolConfig>,
 
     /// Service IP addresses on which we run external DNS servers.
     ///
-    /// Each address must be present in `internal_services_ip_pool_ranges`.
+    /// Each address must be present in the ranges of the pools in
+    /// `service_ip_pools`.
     pub external_dns_ips: Vec<IpAddr>,
 
     /// DNS name for the DNS zone delegated to the rack for external DNS
@@ -78,6 +93,13 @@ pub struct RackInitializeRequest {
 
     /// IPs or subnets allowed to make requests to user-facing services
     pub allowed_source_ips: AllowedSourceIps,
+
+    /// When true, end users may opt in to jumbo frames on the primary interface
+    /// of an instance, and control plane services with external-facing OPTE
+    /// NICs are brought up with an 8500 byte MTU. Operators can toggle this at
+    /// runtime via the fleet networking settings API.
+    #[serde(default)]
+    pub external_jumbo_frames_opt_in_enabled: bool,
 }
 
 // This custom debug implementation hides the private keys.
@@ -90,13 +112,14 @@ impl std::fmt::Debug for RackInitializeRequest {
             bootstrap_discovery,
             ntp_servers,
             dns_servers,
-            internal_services_ip_pool_ranges,
+            service_ip_pools,
             external_dns_ips,
             external_dns_zone_name,
             external_certificates: _,
             recovery_silo,
             rack_network_config,
             allowed_source_ips,
+            external_jumbo_frames_opt_in_enabled,
         } = &self;
 
         f.debug_struct("RackInitializeRequest")
@@ -104,36 +127,37 @@ impl std::fmt::Debug for RackInitializeRequest {
             .field("bootstrap_discovery", bootstrap_discovery)
             .field("ntp_servers", ntp_servers)
             .field("dns_servers", dns_servers)
-            .field(
-                "internal_services_ip_pool_ranges",
-                internal_services_ip_pool_ranges,
-            )
+            .field("service_ip_pools", service_ip_pools)
             .field("external_dns_ips", external_dns_ips)
             .field("external_dns_zone_name", external_dns_zone_name)
             .field("external_certificates", &"<redacted>")
             .field("recovery_silo", recovery_silo)
             .field("rack_network_config", rack_network_config)
             .field("allowed_source_ips", allowed_source_ips)
+            .field(
+                "external_jumbo_frames_opt_in_enabled",
+                external_jumbo_frames_opt_in_enabled,
+            )
             .finish()
     }
 }
 
 impl RackInitializeRequest {
-    pub fn az_subnet(&self) -> Ipv6Subnet<AZ_PREFIX> {
-        Ipv6Subnet::<AZ_PREFIX>::new(
+    pub fn az_subnet(&self) -> Ipv6Subnet<AZ_PREFIX_LENGTH> {
+        Ipv6Subnet::<AZ_PREFIX_LENGTH>::new(
             self.rack_network_config.rack_subnet.addr(),
         )
     }
 
     /// Returns the subnet for our rack.
-    pub fn rack_subnet(&self) -> Ipv6Subnet<RACK_PREFIX> {
-        Ipv6Subnet::<RACK_PREFIX>::new(
+    pub fn rack_subnet(&self) -> Ipv6Subnet<RACK_PREFIX_LENGTH> {
+        Ipv6Subnet::<RACK_PREFIX_LENGTH>::new(
             self.rack_network_config.rack_subnet.addr(),
         )
     }
 
     /// Returns the subnet for the `index`-th sled in the rack.
-    pub fn sled_subnet(&self, index: u8) -> Ipv6Subnet<SLED_PREFIX> {
+    pub fn sled_subnet(&self, index: u8) -> Ipv6Subnet<SLED_PREFIX_LENGTH> {
         get_64_subnet(self.rack_subnet(), index)
     }
 }
@@ -142,11 +166,11 @@ impl RackInitializeRequest {
 // fields.
 #[derive(Clone, Deserialize)]
 struct UnvalidatedRackInitializeRequest {
-    trust_quorum_peers: Option<Vec<Baseboard>>,
+    trust_quorum_peers: Option<Vec<BaseboardId>>,
     bootstrap_discovery: BootstrapAddressDiscovery,
     ntp_servers: Vec<String>,
     dns_servers: Vec<IpAddr>,
-    internal_services_ip_pool_ranges: Vec<IpRange>,
+    service_ip_pools: Vec<ServiceIpPoolConfig>,
     external_dns_ips: Vec<IpAddr>,
     external_dns_zone_name: String,
     external_certificates: Vec<Certificate>,
@@ -156,6 +180,8 @@ struct UnvalidatedRackInitializeRequest {
     // passing this field.
     #[serde(default = "default_allowed_source_ips")]
     allowed_source_ips: AllowedSourceIps,
+    #[serde(default)]
+    external_jumbo_frames_opt_in_enabled: bool,
 }
 
 impl TryFrom<UnvalidatedRackInitializeRequest> for RackInitializeRequest {
@@ -164,24 +190,28 @@ impl TryFrom<UnvalidatedRackInitializeRequest> for RackInitializeRequest {
     fn try_from(
         value: UnvalidatedRackInitializeRequest,
     ) -> anyhow::Result<Self> {
-        validate_external_dns(
-            &value.external_dns_ips,
-            &value.internal_services_ip_pool_ranges,
-        )?;
+        let service_ip_pools =
+            IdOrdMap::from_iter_unique(value.service_ip_pools)
+                .context("duplicate names in service IP Pool configuration")?;
+        if service_ip_pools.is_empty() {
+            anyhow::bail!("at least one service IP pool is required");
+        }
+        validate_external_dns(&value.external_dns_ips, &service_ip_pools)?;
 
         Ok(Self {
             trust_quorum_peers: value.trust_quorum_peers,
             bootstrap_discovery: value.bootstrap_discovery,
             ntp_servers: value.ntp_servers,
             dns_servers: value.dns_servers,
-            internal_services_ip_pool_ranges: value
-                .internal_services_ip_pool_ranges,
+            service_ip_pools,
             external_dns_ips: value.external_dns_ips,
             external_dns_zone_name: value.external_dns_zone_name,
             external_certificates: value.external_certificates,
             recovery_silo: value.recovery_silo,
             rack_network_config: value.rack_network_config,
             allowed_source_ips: value.allowed_source_ips,
+            external_jumbo_frames_opt_in_enabled: value
+                .external_jumbo_frames_opt_in_enabled,
         })
     }
 }
@@ -195,11 +225,13 @@ const fn default_allowed_source_ips() -> AllowedSourceIps {
 
 fn validate_external_dns(
     dns_ips: &Vec<IpAddr>,
-    internal_ranges: &Vec<IpRange>,
+    service_ip_pools: &IdOrdMap<ServiceIpPoolConfig>,
 ) -> anyhow::Result<()> {
     if dns_ips.is_empty() {
         anyhow::bail!("At least one external DNS IP is required");
     }
+    let internal_ranges =
+        service_ip_pools.iter().flat_map(|p| p.ranges()).collect::<Vec<_>>();
 
     // Every external DNS IP should also be present in one of the internal
     // services IP pool ranges. This check is O(N*M), but we expect both N
@@ -208,12 +240,25 @@ fn validate_external_dns(
         if !internal_ranges.iter().any(|range| range.contains(dns_ip)) {
             anyhow::bail!(
                 "External DNS IP {dns_ip} is not contained in \
-                 `internal_services_ip_pool_ranges`"
+                any service IP pool range"
             );
         }
     }
 
     Ok(())
+}
+
+#[derive(Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
+pub struct MultirackJoinRequest {
+    /// The set of peers required to initialize trust quorum
+    ///
+    /// Unlike RSS, this is not optional for multirack setups. Bootstrap
+    /// addresses are discovered by the bootstrap agent and mapped to the
+    /// `BaseboardId`s.
+    pub trust_quorum_peers: BTreeSet<BaseboardId>,
+
+    /// The rack network configuration for this joining rack
+    pub rack_network_config: RackNetworkConfig,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
@@ -235,9 +280,12 @@ pub struct RecoverySiloConfig {
 
 /// Current status of any rack-level operation being performed by this bootstrap
 /// agent.
-#[derive(Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
+)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum RackOperationStatus {
+    Uninitialized,
     Initializing {
         id: RackInitUuid,
         step: RssStep,
@@ -253,21 +301,19 @@ pub enum RackOperationStatus {
     InitializationPanicked {
         id: RackInitUuid,
     },
-    Resetting {
-        id: RackResetUuid,
+    MultirackJoinInProgress {
+        // Status is queried via a different API
+        id: MultirackJoinUuid,
     },
-    /// `reset_id` will be None if the rack is in an uninitialized-on-startup,
-    /// or Some if it is in an uninitialized state due to a reset operation
-    /// completing.
-    Uninitialized {
-        reset_id: Option<RackResetUuid>,
+    MultirackJoinCompleted {
+        id: Option<MultirackJoinUuid>,
     },
-    ResetFailed {
-        id: RackResetUuid,
+    MultirackJoinFailed {
+        id: MultirackJoinUuid,
         message: String,
     },
-    ResetPanicked {
-        id: RackResetUuid,
+    MultirackJoinPanicked {
+        id: MultirackJoinUuid,
     },
 }
 
@@ -321,6 +367,27 @@ impl RssStep {
         }
         return 0;
     }
+
+    pub fn description(&self) -> &'static str {
+        match self {
+            Self::Requested => "Requested",
+            Self::Starting => "Starting",
+            Self::LoadExistingPlan => "Loading existing plan",
+            Self::CreateSledPlan => "Creating sled plan",
+            Self::InitTrustQuorum => "Initializing trust quorum",
+            Self::InitialNetworkConfigUpdate => "Initial network config update",
+            Self::SledInit => "Initializing sleds",
+            Self::FinalNetworkConfigUpdate => "Final network config update",
+            Self::InitDns => "Initializing DNS",
+            Self::ConfigureDns => "Configuring DNS",
+            Self::InitNtp => "Initializing NTP",
+            Self::WaitForTimeSync => "Waiting for time sync",
+            Self::WaitForDatabase => "Waiting for database",
+            Self::ClusterInit => "Initializing cluster",
+            Self::ZonesInit => "Initializing zones",
+            Self::NexusHandoff => "Handing off to Nexus",
+        }
+    }
 }
 
 /// Wrapper for optional contents of the replicated network config.
@@ -342,4 +409,137 @@ pub struct ReplicatedNetworkConfigContents {
     /// serialization/deserialization of the contents is performed outside the
     /// replication engine, which just deals with a binary blob.
     pub base64_blob: String,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+)]
+pub struct BootstrapIpOfBaseboardId {
+    pub id: BaseboardId,
+    pub ip: Ipv6Addr,
+}
+
+impl IdOrdItem for BootstrapIpOfBaseboardId {
+    type Key<'a> = &'a BaseboardId;
+
+    fn key(&self) -> Self::Key<'_> {
+        &self.id
+    }
+
+    id_upcast!();
+}
+
+/// All `BaseboardId`s that can be found by sprockets connections on the
+/// bootstrap network.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct BaseboardIds {
+    pub data: IdOrdMap<BootstrapIpOfBaseboardId>,
+}
+
+/// The state of the commit phase of the trust quorum protocol
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+pub struct CommitState {
+    pub rack_id: RackUuid,
+    pub members: BTreeSet<BaseboardId>,
+    pub epoch: Epoch,
+    pub last_committed_epoch: Option<Epoch>,
+    pub threshold: Threshold,
+    pub commit_crash_tolerance: u8,
+    pub acked: BTreeSet<BaseboardId>,
+    pub fatal_errors: BTreeMap<BaseboardId, String>,
+    pub transient_errors: BTreeMap<BaseboardId, String>,
+}
+
+// Information about the state of a sled agent start request
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case", tag = "type")]
+pub enum SledAgentStartState {
+    InProgress { last_error: Option<String> },
+    Started,
+    Failed { reason: String },
+}
+
+/// Status information for a given sled agent
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+pub struct SledAgentInfo {
+    pub baseboard_id: BaseboardId,
+    pub sled_id: SledUuid,
+    pub sled_subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
+    pub start_state: SledAgentStartState,
+}
+
+impl BiHashItem for SledAgentInfo {
+    type K1<'a> = &'a BaseboardId;
+    type K2<'a> = &'a SledUuid;
+
+    fn key1(&self) -> Self::K1<'_> {
+        &self.baseboard_id
+    }
+
+    fn key2(&self) -> Self::K2<'_> {
+        &self.sled_id
+    }
+
+    bi_upcast!();
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+pub struct StartSledAgentsStatus {
+    pub sleds: BiHashMap<SledAgentInfo>,
+}
+
+impl StartSledAgentsStatus {
+    // Create the allocations necessary to start a sled-agent and return a
+    // preliminary state.
+    //
+    // This should only be called once.
+    pub fn assign_ids_and_subnets(req: MultirackJoinRequest) -> Self {
+        let rack_subnet = Ipv6Subnet::<RACK_PREFIX_LENGTH>::new(
+            req.rack_network_config.rack_subnet.addr(),
+        );
+        let sleds = req
+            .trust_quorum_peers
+            .into_iter()
+            .enumerate()
+            .map(|(idx, baseboard_id)| SledAgentInfo {
+                baseboard_id,
+                sled_id: SledUuid::new_v4(),
+                sled_subnet: get_64_subnet(
+                    rack_subnet,
+                    u8::try_from(idx + 1).expect("too many sleds"),
+                ),
+                start_state: SledAgentStartState::InProgress {
+                    last_error: None,
+                },
+            })
+            .collect();
+
+        StartSledAgentsStatus { sleds }
+    }
+}
+
+/// The current state of the `MultirackJoinService` as retrieved from the
+/// `output_rx` watch channel.
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case", tag = "state")]
+pub enum MultirackJoinServiceState {
+    Uninitialized,
+    Requested,
+    Starting,
+    TrustQuorumReconfigure(TqReconfigureMsg),
+    TrustQuorumPreparing(CoordinatorStatus),
+    TrustQuorumCommitting(CommitState),
+    StartSledAgents(StartSledAgentsStatus),
+    Completed,
+    Failed { message: String },
+    InvalidMembershipSize { message: String },
+    TaskPanicked,
 }

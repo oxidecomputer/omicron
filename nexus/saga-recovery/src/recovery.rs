@@ -5,8 +5,10 @@
 //! Guts of the saga recovery bookkeeping
 
 use super::status::RecoveryFailure;
+use super::status::RecoveryFailureKind;
 use super::status::RecoverySuccess;
 use chrono::{DateTime, Utc};
+use nexus_db_model::SecId;
 use omicron_common::api::external::Error;
 use slog::{debug, error, info, warn};
 use slog_error_chain::InlineErrorChain;
@@ -478,7 +480,12 @@ impl ExecutionBuilder {
     }
 
     /// Record that we failed to recover this saga
-    pub fn saga_recovery_failure(&mut self, saga_id: SagaId, error: &Error) {
+    pub fn saga_recovery_failure(
+        &mut self,
+        saga_id: SagaId,
+        current_sec: Option<SecId>,
+        error: &Error,
+    ) {
         let saga_logger = self
             .in_progress
             .remove(&saga_id)
@@ -487,6 +494,8 @@ impl ExecutionBuilder {
         self.failed.push(RecoveryFailure {
             time: Utc::now(),
             saga_id,
+            current_sec,
+            kind: RecoveryFailureKind::classify(error),
             message: InlineErrorChain::new(error).to_string(),
         });
     }
@@ -499,6 +508,7 @@ mod test {
     use crate::test::make_fake_saga;
     use crate::test::make_saga_ids;
     use omicron_test_utils::dev::test_setup_log;
+    use uuid::Uuid;
 
     #[test]
     fn test_read_all_from_channel() {
@@ -618,7 +628,7 @@ mod test {
             plan.sagas_needing_recovery().collect::<Vec<_>>();
         assert_eq!(to_recover.len(), found_to_recover.len());
         for (expected_saga_id, (found_saga_id, found_saga_record)) in
-            to_recover.into_iter().zip(found_to_recover.into_iter())
+            to_recover.into_iter().zip(found_to_recover)
         {
             assert_eq!(expected_saga_id, *found_saga_id);
             assert_eq!(expected_saga_id, found_saga_record.id.0);
@@ -680,6 +690,7 @@ mod test {
             if i == to_recover.len() - 1 {
                 execution_builder.saga_recovery_failure(
                     *saga_id,
+                    Some(SecId::from(Uuid::new_v4())),
                     &Error::internal_error("test error"),
                 );
             } else {

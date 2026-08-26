@@ -39,6 +39,9 @@ use nexus_db_model::InvCollectionError;
 use nexus_db_model::InvConfigReconcilerStatus;
 use nexus_db_model::InvConfigReconcilerStatusKind;
 use nexus_db_model::InvDataset;
+use nexus_db_model::InvFmdHostCase;
+use nexus_db_model::InvFmdResource;
+use nexus_db_model::InvFmdStatus;
 use nexus_db_model::InvHostPhase1ActiveSlot;
 use nexus_db_model::InvHostPhase1FlashHash;
 use nexus_db_model::InvInternalDns;
@@ -102,7 +105,6 @@ use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
-use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
@@ -110,6 +112,8 @@ use omicron_uuid_kinds::OmicronSledConfigUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
+use sled_agent_types::disk::DiskIdentity;
+use sled_agent_types::disk::M2Slot;
 use sled_agent_types::inventory::BootPartitionContents;
 use sled_agent_types::inventory::BootPartitionDetails;
 use sled_agent_types::inventory::ConfigReconcilerInventory;
@@ -451,6 +455,46 @@ impl DataStore {
                         sled_agent.sled_id,
                         measurement.path.to_string(),
                         measurement.result.clone(),
+                    )
+                })
+            })
+            .collect();
+
+        // Pull FMD inventory out of all sled agents. We always record one
+        // status row per sled (capturing the success/failure discriminant)
+        // and, when collection succeeded, a row per case and per resource.
+        let fmd_status_rows: Vec<_> = collection
+            .sled_agents
+            .iter()
+            .map(|sled_agent| {
+                InvFmdStatus::new(
+                    collection_id,
+                    sled_agent.sled_id,
+                    &sled_agent.fmd,
+                )
+            })
+            .collect();
+        let fmd_host_case_rows: Vec<_> = collection
+            .sled_agents
+            .iter()
+            .flat_map(|sled_agent| {
+                let cases = sled_agent.fmd.as_ref().ok().map(|inv| &inv.cases);
+                cases.into_iter().flatten().map(|case| {
+                    InvFmdHostCase::new(collection_id, sled_agent.sled_id, case)
+                })
+            })
+            .collect();
+        let fmd_resource_rows: Vec<_> = collection
+            .sled_agents
+            .iter()
+            .flat_map(|sled_agent| {
+                let resources =
+                    sled_agent.fmd.as_ref().ok().map(|inv| &inv.resources);
+                resources.into_iter().flatten().map(|resource| {
+                    InvFmdResource::new(
+                        collection_id,
+                        sled_agent.sled_id,
+                        resource,
                     )
                 })
             })
@@ -911,9 +955,7 @@ impl DataStore {
                 // structures also contain their own slot. (Maybe we could use
                 // `iddqd` here instead?)
                 let phase1_hashes = collection
-                    .host_phase_1_flash_hashes
-                    .iter()
-                    .flat_map(|(_slot, by_baseboard)| by_baseboard.iter());
+                    .host_phase_1_flash_hashes.values().flat_map(|by_baseboard| by_baseboard.iter());
 
                 for (baseboard_id, phase1) in phase1_hashes {
                     let selection = nexus_db_schema::schema::hw_baseboard_id::table
@@ -1430,7 +1472,62 @@ impl DataStore {
                 }
             }
 
+            // Insert FMD status rows (one per sled).
+            {
+                use nexus_db_schema::schema::inv_fmd_status::dsl;
 
+                let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
+                let mut rows = fmd_status_rows.into_iter();
+                loop {
+                    let some_rows =
+                        rows.by_ref().take(batch_size).collect::<Vec<_>>();
+                    if some_rows.is_empty() {
+                        break;
+                    }
+                    let _ = diesel::insert_into(dsl::inv_fmd_status)
+                        .values(some_rows)
+                        .execute_async(&conn)
+                        .await?;
+                }
+            }
+
+            // Insert FMD host case rows (zero or more per sled).
+            {
+                use nexus_db_schema::schema::inv_fmd_host_case::dsl;
+
+                let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
+                let mut rows = fmd_host_case_rows.into_iter();
+                loop {
+                    let some_rows =
+                        rows.by_ref().take(batch_size).collect::<Vec<_>>();
+                    if some_rows.is_empty() {
+                        break;
+                    }
+                    let _ = diesel::insert_into(dsl::inv_fmd_host_case)
+                        .values(some_rows)
+                        .execute_async(&conn)
+                        .await?;
+                }
+            }
+
+            // Insert FMD resource rows (zero or more per sled).
+            {
+                use nexus_db_schema::schema::inv_fmd_resource::dsl;
+
+                let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
+                let mut rows = fmd_resource_rows.into_iter();
+                loop {
+                    let some_rows =
+                        rows.by_ref().take(batch_size).collect::<Vec<_>>();
+                    if some_rows.is_empty() {
+                        break;
+                    }
+                    let _ = diesel::insert_into(dsl::inv_fmd_resource)
+                        .values(some_rows)
+                        .execute_async(&conn)
+                        .await?;
+                }
+            }
 
             // Insert rows for all the sled config reconciler disk results
             {
@@ -2164,6 +2261,9 @@ impl DataStore {
             nlast_reconciliation_orphaned_datasets: usize,
             nlast_reconciliation_zone_results: usize,
             nlast_reconciliation_measurements: usize,
+            nfmd_status: usize,
+            nfmd_host_cases: usize,
+            nfmd_resources: usize,
             nzone_manifest_zones: usize,
             nzone_manifest_measurements: usize,
             nzone_manifest_non_boot: usize,
@@ -2204,6 +2304,9 @@ impl DataStore {
             nlast_reconciliation_orphaned_datasets,
             nlast_reconciliation_zone_results,
             nlast_reconciliation_measurements,
+            nfmd_status,
+            nfmd_host_cases,
+            nfmd_resources,
             nzone_manifest_zones,
             nzone_manifest_measurements,
             nzone_manifest_non_boot,
@@ -2382,6 +2485,31 @@ impl DataStore {
                         .await?
                     };
 
+                    // Remove FMD inventory rows.
+                    let nfmd_status = {
+                        use nexus_db_schema::schema::inv_fmd_status::dsl;
+                        diesel::delete(dsl::inv_fmd_status.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
+                    let nfmd_host_cases = {
+                        use nexus_db_schema::schema::inv_fmd_host_case::dsl;
+                        diesel::delete(dsl::inv_fmd_host_case.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
+                    let nfmd_resources = {
+                        use nexus_db_schema::schema::inv_fmd_resource::dsl;
+                        diesel::delete(dsl::inv_fmd_resource.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
 
                     // Remove rows associated with zone resolver inventory.
                     let nzone_manifest_zones = {
@@ -2596,6 +2724,9 @@ impl DataStore {
                         nlast_reconciliation_orphaned_datasets,
                         nlast_reconciliation_zone_results,
                         nlast_reconciliation_measurements,
+                        nfmd_status,
+                        nfmd_host_cases,
+                        nfmd_resources,
                         nzone_manifest_zones,
                         nzone_manifest_measurements,
                         nzone_manifest_non_boot,
@@ -2647,6 +2778,9 @@ impl DataStore {
                 nlast_reconciliation_zone_results,
             "nlast_reconciliation_measurements" =>
                 nlast_reconciliation_measurements,
+            "nfmd_status" => nfmd_status,
+            "nfmd_host_cases" => nfmd_host_cases,
+            "nfmd_resources" => nfmd_resources,
             "nzone_manifest_zones" => nzone_manifest_zones,
             "nzone_manifest_measurements" => nzone_manifest_measurements,
             "nzone_manifest_non_boot" => nzone_manifest_non_boot,
@@ -2975,7 +3109,7 @@ impl DataStore {
 
                     disks.entry(sled_id).or_default().push(
                         nexus_types::inventory::PhysicalDisk {
-                            identity: omicron_common::disk::DiskIdentity {
+                            identity: DiskIdentity {
                                 vendor: disk.vendor,
                                 model: disk.model,
                                 serial: disk.serial,
@@ -3603,6 +3737,9 @@ impl DataStore {
                                 zones: IdOrdMap::default(),
                                 host_phase_2: sled_config.host_phase_2.into(),
                                 measurements: sled_config.measurements.into(),
+                                update_disposition: sled_config
+                                    .update_disposition
+                                    .into(),
                             },
                         })
                         .map_err(|e| {
@@ -4049,6 +4186,107 @@ impl DataStore {
             }
 
             measurements
+        };
+
+        // Load all FMD inventory rows. The producer's per-sled bounds
+        // (`FMD_MAX_CASES` / `FMD_MAX_RESOURCES`) keep this size predictable,
+        // so we don't paginate.
+        let mut fmd_status_by_sled: BTreeMap<
+            SledUuid,
+            Option<(nexus_db_model::FmdInventoryErrorKind, String)>,
+        > = {
+            use nexus_db_schema::schema::inv_fmd_status::dsl;
+            let rows = dsl::inv_fmd_status
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvFmdStatus::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+            rows.into_iter()
+                .map(|row| {
+                    let err = match (row.error_kind, row.error_message) {
+                        (Some(kind), Some(message)) => Some((kind, message)),
+                        (None, None) => None,
+                        _ => {
+                            return Err(Error::internal_error(
+                                "inv_fmd_status row violates \
+                                 error_kind_and_message_together CHECK \
+                                 constraint: exactly one of (error_kind, \
+                                 error_message) is NULL",
+                            ));
+                        }
+                    };
+                    Ok((row.sled_id.into(), err))
+                })
+                .collect::<Result<BTreeMap<_, _>, _>>()?
+        };
+
+        let mut fmd_cases_by_sled: BTreeMap<
+            SledUuid,
+            IdOrdMap<sled_agent_types::inventory::FmdHostCase>,
+        > = {
+            use nexus_db_schema::schema::inv_fmd_host_case::dsl;
+            let rows = dsl::inv_fmd_host_case
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvFmdHostCase::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+            let mut by_sled: BTreeMap<
+                SledUuid,
+                IdOrdMap<sled_agent_types::inventory::FmdHostCase>,
+            > = BTreeMap::new();
+            for row in rows {
+                let sled_id: SledUuid = row.sled_id.into();
+                by_sled
+                    .entry(sled_id)
+                    .or_default()
+                    .insert_unique(row.into())
+                    .map_err(|err| Error::InternalError {
+                    internal_message: format!(
+                        "unexpected duplicate FMD case: {}",
+                        InlineErrorChain::new(&err)
+                    ),
+                })?;
+            }
+            by_sled
+        };
+
+        let mut fmd_resources_by_sled: BTreeMap<
+            SledUuid,
+            IdOrdMap<sled_agent_types::inventory::FmdResource>,
+        > = {
+            use nexus_db_schema::schema::inv_fmd_resource::dsl;
+            let rows = dsl::inv_fmd_resource
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvFmdResource::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+            let mut by_sled: BTreeMap<
+                SledUuid,
+                IdOrdMap<sled_agent_types::inventory::FmdResource>,
+            > = BTreeMap::new();
+            for row in rows {
+                let sled_id: SledUuid = row.sled_id.into();
+                by_sled
+                    .entry(sled_id)
+                    .or_default()
+                    .insert_unique(row.into())
+                    .map_err(|err| Error::InternalError {
+                    internal_message: format!(
+                        "unexpected duplicate FMD resource: {}",
+                        InlineErrorChain::new(&err)
+                    ),
+                })?;
+            }
+            by_sled
         };
 
         // Load all the config reconciler zone results; build a map of maps
@@ -4637,6 +4875,28 @@ impl DataStore {
                 reference_measurements: last_reconciliation_measurements
                     .remove(&sled_id)
                     .unwrap_or_default(),
+                fmd: {
+                    use sled_agent_types::inventory::{
+                        FmdInventory, FmdInventoryError,
+                    };
+                    let cases =
+                        fmd_cases_by_sled.remove(&sled_id).unwrap_or_default();
+                    let resources = fmd_resources_by_sled
+                        .remove(&sled_id)
+                        .unwrap_or_default();
+                    // The status row's (error_kind, error_message) columns
+                    // distinguish Ok (both NULL) from Err (both set). If no
+                    // row exists at all (older collection predating this
+                    // migration), fall back to Ok with whatever case/resource
+                    // rows we found, which will normally be empty.
+                    match fmd_status_by_sled.remove(&sled_id) {
+                        Some(Some((kind, message))) => Err(FmdInventoryError {
+                            kind: kind.into(),
+                            message,
+                        }),
+                        _ => Ok(FmdInventory { cases, resources }),
+                    }
+                },
             };
             sled_agents
                 .insert_unique(sled_agent)
@@ -5052,6 +5312,7 @@ impl ConfigReconcilerRows {
             config.remove_mupdate_override,
             config.host_phase_2.clone(),
             config.measurements.clone(),
+            config.update_disposition,
         ));
         self.disks.extend(config.disks.iter().map(|disk| {
             InvOmicronSledConfigDisk::new(
@@ -5141,7 +5402,11 @@ mod test {
     use async_bb8_diesel::AsyncConnection;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use async_bb8_diesel::AsyncSimpleConnection;
+    use diesel::ExpressionMethods;
     use diesel::QueryDsl;
+    use diesel::SelectableHelper;
+    use nexus_db_model::InvOmicronSledConfigZoneNic;
+    use nexus_db_model::to_db_typed_uuid;
     use nexus_db_schema::schema;
     use nexus_inventory::examples::Representative;
     use nexus_inventory::examples::representative;
@@ -5151,18 +5416,28 @@ mod test {
     use nexus_types::inventory::RotPageWhich;
     use nexus_types::inventory::SpType;
     use omicron_common::api::external::Error;
+    use omicron_common::api::external::Vni;
+    use omicron_common::api::internal::shared::PrivateIpConfig;
+    use omicron_common::api::internal::shared::PrivateIpv4Config;
+    use omicron_common::api::internal::shared::PrivateIpv6Config;
     use omicron_common::disk::DatasetKind;
     use omicron_common::disk::DatasetName;
-    use omicron_common::disk::M2Slot;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::OmicronSledConfigUuid;
     use omicron_uuid_kinds::{
         CollectionUuid, DatasetUuid, OmicronZoneUuid, PhysicalDiskUuid,
         ZpoolUuid,
     };
     use pretty_assertions::assert_eq;
+    use sled_agent_types::disk::M2Slot;
     use sled_agent_types::inventory::BootPartitionContents;
     use sled_agent_types::inventory::BootPartitionDetails;
+    use sled_agent_types::inventory::NetworkInterface;
+    use sled_agent_types::inventory::NetworkInterfaceKind;
+    use sled_agent_types::inventory::OmicronZoneConfig;
+    use sled_agent_types::inventory::OmicronZoneType;
     use sled_agent_types::inventory::OrphanedDataset;
     use sled_agent_types::inventory::{
         BootImageHeader, RemoveMupdateOverrideBootSuccessInventory,
@@ -5177,6 +5452,7 @@ mod test {
     use std::num::NonZeroU32;
     use std::time::Duration;
     use tufaceous_artifact::ArtifactHash;
+    use uuid::Uuid;
 
     struct CollectionCounts {
         baseboards: usize,
@@ -5458,7 +5734,7 @@ mod test {
         );
         println!(
             "all collections: {:?}\n",
-            &[
+            [
                 collection1.id,
                 collection2.id,
                 collection3.id,
@@ -6331,5 +6607,138 @@ mod test {
 
         db.terminate().await;
         logctx.cleanup_successful();
+    }
+
+    // Write and then read a inventory NIC through the database with a given
+    // private IP configuration. This exercises the version-specific columns and
+    // checks, to ensure we can handle single- and dual-stack NICs.
+    async fn round_trip_zone_nic_through_inventory_db(
+        test_name: &'static str,
+        ip_config: PrivateIpConfig,
+    ) {
+        let logctx = dev::test_setup_log(test_name);
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let datastore = db.datastore();
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        let zone_id = OmicronZoneUuid::new_v4();
+        let nic = NetworkInterface {
+            id: Uuid::new_v4(),
+            kind: NetworkInterfaceKind::Service {
+                id: zone_id.into_untyped_uuid(),
+            },
+            name: "test-service-nic".parse().unwrap(),
+            ip_config,
+            mac: "a8:40:25:ff:00:01".parse().unwrap(),
+            vni: Vni::try_from(100).unwrap(),
+            primary: true,
+            slot: 0,
+        };
+        let zone = OmicronZoneConfig {
+            id: zone_id,
+            filesystem_pool: None,
+            zone_type: OmicronZoneType::Nexus {
+                internal_address: "[::1]:12345".parse().unwrap(),
+                lockstep_port: 12346,
+                external_ip: "192.0.2.1".parse().unwrap(),
+                nic: nic.clone(),
+                external_tls: false,
+                external_dns_servers: vec![],
+            },
+            image_source: OmicronZoneImageSource::InstallDataset,
+        };
+
+        let collection_id = CollectionUuid::new_v4();
+        let sled_config_id = OmicronSledConfigUuid::new_v4();
+        let row = InvOmicronSledConfigZoneNic::new(
+            collection_id,
+            sled_config_id,
+            &zone,
+        )
+        .expect("built inventory NIC row")
+        .expect("zone has a service NIC");
+
+        {
+            use schema::inv_omicron_sled_config_zone_nic::dsl;
+            diesel::insert_into(dsl::inv_omicron_sled_config_zone_nic)
+                .values(row)
+                .execute_async(&*conn)
+                .await
+                .expect("inserted inventory zone NIC");
+        }
+        let read: InvOmicronSledConfigZoneNic = {
+            use schema::inv_omicron_sled_config_zone_nic::dsl;
+            dsl::inv_omicron_sled_config_zone_nic
+                .filter(
+                    dsl::inv_collection_id.eq(to_db_typed_uuid(collection_id)),
+                )
+                .filter(
+                    dsl::sled_config_id.eq(to_db_typed_uuid(sled_config_id)),
+                )
+                .filter(dsl::id.eq(nic.id))
+                .select(InvOmicronSledConfigZoneNic::as_select())
+                .first_async(&*conn)
+                .await
+                .expect("read back inventory zone NIC")
+        };
+        let round_tripped =
+            read.into_network_interface_for_zone(zone_id).unwrap();
+        assert_eq!(nic, round_tripped);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_inv_zone_nic_dual_stack_round_trips_through_db() {
+        let ip_config = PrivateIpConfig::DualStack {
+            v4: PrivateIpv4Config::new(
+                "172.30.2.5".parse().unwrap(),
+                "172.30.2.0/24".parse().unwrap(),
+            )
+            .unwrap(),
+            v6: PrivateIpv6Config::new(
+                "fd00:1122:3344:100::5".parse().unwrap(),
+                "fd00:1122:3344:100::/64".parse().unwrap(),
+            )
+            .unwrap(),
+        };
+        round_trip_zone_nic_through_inventory_db(
+            "test_inv_zone_nic_dual_stack_round_trips_through_db",
+            ip_config,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_inv_zone_nic_ipv6_only_round_trips_through_db() {
+        let ip_config = PrivateIpConfig::V6(
+            PrivateIpv6Config::new(
+                "fd00:1122:3344:100::5".parse().unwrap(),
+                "fd00:1122:3344:100::/64".parse().unwrap(),
+            )
+            .unwrap(),
+        );
+        round_trip_zone_nic_through_inventory_db(
+            "test_inv_zone_nic_ipv6_only_round_trips_through_db",
+            ip_config,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_inv_zone_nic_ipv4_only_round_trips_through_db() {
+        let ip_config = PrivateIpConfig::V4(
+            PrivateIpv4Config::new(
+                "172.30.2.5".parse().unwrap(),
+                "172.30.2.0/24".parse().unwrap(),
+            )
+            .unwrap(),
+        );
+        round_trip_zone_nic_through_inventory_db(
+            "test_inv_zone_nic_ipv4_only_round_trips_through_db",
+            ip_config,
+        )
+        .await;
     }
 }

@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2024 Oxide Computer Company
-
 //! Types for publishing kernel statistics via oximeter.
 //!
 //! # illumos kernel statistics
@@ -91,6 +89,8 @@ use std::time::Duration;
 pub mod cpu;
 #[cfg(any(feature = "datalink", test))]
 pub mod link;
+#[cfg(any(feature = "opte_port", test))]
+pub mod opte_port;
 mod sampler;
 #[cfg(any(feature = "zone", test))]
 pub mod zone;
@@ -321,4 +321,10 @@ pub fn get_hires_time() -> i64 {
     } else {
         0
     }
+}
+
+/// Return the number of online processors on the system, or None on error.
+pub(crate) fn n_processors() -> Option<usize> {
+    let ret = unsafe { libc::sysconf(libc::_SC_NPROCESSORS_ONLN) };
+    if ret < 1 { None } else { usize::try_from(ret).ok() }
 }
