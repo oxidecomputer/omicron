@@ -7,7 +7,7 @@ use iddqd::IdOrdMap;
 use iddqd::id_ord_map::Entry;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
-use omicron_generation_kinds::Generation;
+use omicron_generation_kinds::SledConfigGeneration;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 
@@ -25,14 +25,14 @@ pub enum DisksEditError {
 
 #[derive(Debug)]
 pub(super) struct DisksEditor {
-    incoming_sled_agent_generation: Generation,
+    incoming_sled_agent_generation: SledConfigGeneration,
     disks: IdOrdMap<BlueprintPhysicalDiskConfig>,
     counts: EditCounts,
 }
 
 impl DisksEditor {
     pub fn new(
-        incoming_sled_agent_generation: Generation,
+        incoming_sled_agent_generation: SledConfigGeneration,
         disks: IdOrdMap<BlueprintPhysicalDiskConfig>,
     ) -> Self {
         Self {
@@ -44,7 +44,7 @@ impl DisksEditor {
 
     pub fn empty() -> Self {
         Self {
-            incoming_sled_agent_generation: Generation::new(),
+            incoming_sled_agent_generation: SledConfigGeneration::new(),
             disks: IdOrdMap::new(),
             counts: EditCounts::zeroes(),
         }

@@ -231,7 +231,9 @@ mod test {
     use omicron_common::api::external::Vni;
     use omicron_common::api::internal::shared::PrivateIpConfig;
     use omicron_common::zpool_name::ZpoolName;
-    use omicron_generation_kinds::{Generation, TargetReleaseGeneration};
+    use omicron_generation_kinds::{
+        Generation, SledConfigGeneration, TargetReleaseGeneration,
+    };
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::ExternalIpUuid;
@@ -311,7 +313,7 @@ mod test {
                 subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
                 last_allocated_ip_subnet_offset:
                     LastAllocatedSubnetIpOffset::initial(),
-                sled_agent_generation: Generation::new(),
+                sled_agent_generation: SledConfigGeneration::new(),
                 zones,
                 disks: IdOrdMap::new(),
                 datasets: IdOrdMap::new(),
@@ -566,6 +568,8 @@ mod test {
         // g1 is older than the current generation g2.
         let g1 = Generation::new();
         let g2 = g1.next();
+        let sled_g1 = SledConfigGeneration::new();
+        let sled_g2 = sled_g1.next();
 
         // Build a blueprint with different Nexus states across two generations:
         //
@@ -591,7 +595,7 @@ mod test {
                 (
                     g1_expunged_a,
                     BlueprintZoneDisposition::Expunged {
-                        as_of_generation: g1,
+                        as_of_generation: sled_g1,
                         ready_for_cleanup: true,
                     },
                     g1,
@@ -599,7 +603,7 @@ mod test {
                 (
                     g1_expunged_b,
                     BlueprintZoneDisposition::Expunged {
-                        as_of_generation: g1,
+                        as_of_generation: sled_g1,
                         ready_for_cleanup: true,
                     },
                     g1,
@@ -609,7 +613,7 @@ mod test {
                 (
                     g2_expunged_ready,
                     BlueprintZoneDisposition::Expunged {
-                        as_of_generation: g2,
+                        as_of_generation: sled_g2,
                         ready_for_cleanup: true,
                     },
                     g2,
@@ -617,7 +621,7 @@ mod test {
                 (
                     g2_expunged_not_ready,
                     BlueprintZoneDisposition::Expunged {
-                        as_of_generation: g2,
+                        as_of_generation: sled_g2,
                         ready_for_cleanup: false,
                     },
                     g2,
@@ -704,6 +708,8 @@ mod test {
         // Generations: g1 is older than the live generation g2.
         let g1 = Generation::new();
         let g2 = g1.next();
+        let sled_g1 = SledConfigGeneration::new();
+        let sled_g2 = sled_g1.next();
 
         // Build a blueprint with:
         // - an in-service Nexus at the live generation (g2)
@@ -723,7 +729,7 @@ mod test {
                 (
                     expunged_same_gen_zone,
                     BlueprintZoneDisposition::Expunged {
-                        as_of_generation: g2,
+                        as_of_generation: sled_g2,
                         ready_for_cleanup: true,
                     },
                     g2,
@@ -731,7 +737,7 @@ mod test {
                 (
                     orphan_zone,
                     BlueprintZoneDisposition::Expunged {
-                        as_of_generation: g1,
+                        as_of_generation: sled_g1,
                         ready_for_cleanup: true,
                     },
                     g1,

@@ -80,7 +80,9 @@ use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_debug_dropbox::DebugDropbox;
-use omicron_generation_kinds::{Generation, TargetReleaseGeneration};
+use omicron_generation_kinds::{
+    Generation, SledConfigGeneration, TargetReleaseGeneration,
+};
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev;
 use omicron_test_utils::dev::TestTempDir;
@@ -1015,7 +1017,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         // Send the sled-agents their new configurations.
         // This generation number should match the one in
         // `make_sled_configs`.
-        let generation = Generation::from_u32(2);
+        let generation = SledConfigGeneration::from_u32(2);
 
         for (sled_agent, sled_zones) in zip(self.sled_agents.iter(), zones) {
             let sled_id = sled_agent.sled_agent_id();
@@ -1377,7 +1379,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         // The generation number that the sled-agents' configuration
         // will have when this blueprint is executed. Should match
         // the one in `configure_sled_agents`.
-        let sled_agent_generation = Generation::from_u32(2);
+        let sled_agent_generation = SledConfigGeneration::from_u32(2);
 
         for (sled_agent, maybe_zones) in
             zip(self.sled_agents.iter(), maybe_zones)
