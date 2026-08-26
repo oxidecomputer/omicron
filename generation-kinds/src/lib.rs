@@ -40,6 +40,7 @@ impl_typed_generation_kinds! {
     },
     kinds = {
         Alert = {},
+        InstanceUpdater = {},
         Nexus = {},
         SagaAdopt = {},
         SagaReassignment = {},

@@ -10,6 +10,7 @@ use super::{
 use crate::ExternalSubnet;
 use crate::collection::DatastoreAttachTargetConfig;
 use crate::serde_time_delta::optional_time_delta;
+use crate::typed_generation::DbTypedGeneration;
 use chrono::{DateTime, TimeDelta, Utc};
 use db_macros::Resource;
 use diesel::expression::{ValidGrouping, is_aggregate};
@@ -18,6 +19,9 @@ use diesel::prelude::*;
 use diesel::sql_types::{Bool, Nullable};
 use nexus_db_schema::schema::{disk, external_ip, external_subnet, instance};
 use nexus_types::external_api::instance as instance_types;
+use omicron_generation_kinds::{
+    InstanceUpdaterGeneration, InstanceUpdaterGenerationKind,
+};
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use serde::Deserialize;
 use serde::Serialize;
@@ -103,7 +107,7 @@ pub struct Instance {
     /// `updater_id` field to ensure that the snapshot which indicated that the
     /// lock was not held is still valid when setting the lock ID.
     #[diesel(column_name = updater_gen)]
-    pub updater_gen: Generation,
+    pub updater_gen: DbTypedGeneration<InstanceUpdaterGenerationKind>,
 
     /// The "internal" state of this instance. The instance's externally-visible
     /// state may be delegated to the instance's active VMM, if it has one.
@@ -183,7 +187,7 @@ impl Instance {
             memory: params.memory.into(),
             hostname: params.hostname.to_string(),
             updater_id: None,
-            updater_gen: Generation::new(),
+            updater_gen: InstanceUpdaterGeneration::new().into(),
             nexus_state: InstanceState::Creating,
             time_last_auto_restarted: None,
             auto_restart,
