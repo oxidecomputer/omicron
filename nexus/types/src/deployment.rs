@@ -38,6 +38,7 @@ use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::disk::DatasetName;
 use omicron_generation_kinds::{
     Generation, SledConfigGeneration, TargetReleaseGeneration,
+    UpdateDispositionGeneration,
 };
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetUuid;
@@ -1663,7 +1664,7 @@ pub struct BlueprintSledConfig {
 )]
 pub struct BlueprintSledUpdateDisposition {
     /// A generation number bumped whenever `kind` changes.
-    pub generation: Generation,
+    pub generation: UpdateDispositionGeneration,
 
     /// The disposition itself.
     pub kind: BlueprintSledUpdateDispositionKind,
@@ -1677,7 +1678,7 @@ impl BlueprintSledUpdateDisposition {
     /// backfilled to by the schema migration that adds this field.
     pub const fn initial() -> Self {
         Self {
-            generation: Generation::new(),
+            generation: UpdateDispositionGeneration::new(),
             kind: BlueprintSledUpdateDispositionKind::Available,
         }
     }

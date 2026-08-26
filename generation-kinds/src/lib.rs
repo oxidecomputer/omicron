@@ -45,5 +45,6 @@ impl_typed_generation_kinds! {
         SledConfig = {},
         SupportBundle = {},
         TargetRelease = {},
+        UpdateDisposition = {},
     },
 }

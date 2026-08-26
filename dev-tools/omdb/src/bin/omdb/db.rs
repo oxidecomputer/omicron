@@ -155,6 +155,7 @@ use omicron_common::api::external;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::MacAddr;
 use omicron_generation_kinds::Generation;
+use omicron_generation_kinds::UpdateDispositionGeneration;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::DownstairsRegionUuid;
@@ -8191,7 +8192,7 @@ fn prettyprint_vmm(
         );
     }
     if let Some(ud_generation) = stop_for_update_disposition_generation {
-        let u_g = u64::from(ud_generation.0);
+        let u_g = UpdateDispositionGeneration::from(*ud_generation);
         println!(
             "{indent}{STOP_FOR_UPDATE:>width$}: update disposition generation {u_g}"
         );

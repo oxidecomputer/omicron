@@ -2748,7 +2748,7 @@
             "description": "A generation number bumped whenever `kind` changes.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Generation"
+                "$ref": "#/components/schemas/UpdateDispositionGeneration"
               }
             ]
           },
@@ -10223,6 +10223,17 @@
           "waited_for_concurrent_update",
           "took_over_concurrent_update"
         ]
+      },
+      "UpdateDispositionGeneration": {
+        "description": "Generation numbers stored in the database, used for optimistic concurrency control",
+        "x-rust-type": {
+          "crate": "omicron-generation-kinds",
+          "path": "omicron_generation_kinds::UpdateDispositionGeneration",
+          "version": "*"
+        },
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0
       },
       "UpdateStatus": {
         "type": "object",

@@ -67,6 +67,7 @@ use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_generation_kinds::{
     SledConfigGenerationKind, TargetReleaseGenerationKind,
+    UpdateDispositionGenerationKind,
 };
 use omicron_uuid_kinds::{
     BlueprintKind, BlueprintUuid, DatasetKind, ExternalIpKind, ExternalIpUuid,
@@ -264,7 +265,8 @@ pub struct BpSledMetadata {
     pub subnet: IpNetwork,
     pub last_allocated_ip_subnet_offset: SqlU16,
     pub measurements: DbBpSledMeasurements,
-    pub update_disposition_generation: Generation,
+    pub update_disposition_generation:
+        DbTypedGeneration<UpdateDispositionGenerationKind>,
     pub update_availability: DbSledUpdateAvailability,
     pub update_disruption_policy: Option<DbReconfiguratorDisruptionPolicy>,
 }
@@ -289,7 +291,7 @@ impl BpSledMetadata {
     pub fn update_disposition_columns(
         update_disposition: BlueprintSledUpdateDisposition,
     ) -> (
-        Generation,
+        DbTypedGeneration<UpdateDispositionGenerationKind>,
         DbSledUpdateAvailability,
         Option<DbReconfiguratorDisruptionPolicy>,
     ) {
@@ -385,7 +387,7 @@ impl_enum_type!(
 );
 
 fn reassemble_update_disposition(
-    generation: Generation,
+    generation: DbTypedGeneration<UpdateDispositionGenerationKind>,
     availability: DbSledUpdateAvailability,
     policy: Option<DbReconfiguratorDisruptionPolicy>,
 ) -> anyhow::Result<BlueprintSledUpdateDisposition> {
@@ -408,7 +410,7 @@ fn reassemble_update_disposition(
              is NULL (expected a policy)"
         ),
     };
-    Ok(BlueprintSledUpdateDisposition { generation: *generation, kind })
+    Ok(BlueprintSledUpdateDisposition { generation: generation.into(), kind })
 }
 
 impl_enum_type!(
@@ -1804,6 +1806,7 @@ impl DebugLogBlueprintPlanning {
 mod tests {
     use super::*;
     use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
+    use omicron_generation_kinds::UpdateDispositionGeneration;
 
     #[test]
     fn update_disposition_columns_roundtrip() {
@@ -1839,7 +1842,7 @@ mod tests {
     #[test]
     fn reassemble_rejects_inconsistent_columns() {
         // The generation is not relevant to these consistency checks.
-        let generation = Generation::new();
+        let generation = UpdateDispositionGeneration::new().into();
         // Available must not carry a disruption policy.
         for &policy in ReconfiguratorDisruptionPolicy::ALL_VARIANTS {
             assert!(
