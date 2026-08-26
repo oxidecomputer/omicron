@@ -1073,15 +1073,29 @@ impl InstanceManagerRunner {
                 continue;
             };
             if !current_zpools.contains(&filesystem_pool) {
-                info!(self.log, "use_only_these_disks: Removing instance"; "instance_id" => ?id);
+                info!(
+                    self.log,
+                    "use_only_these_disks: Terminating instance";
+                    "instance_id" => ?id,
+                );
                 let (tx, rx) = oneshot::channel();
                 if let Err(e) = instance.terminate(tx, VmmStateOwner::Runner) {
-                    warn!(self.log, "use_only_these_disks: Failed to request instance removal"; InlineErrorChain::new(&e));
+                    warn!(
+                        self.log,
+                        "use_only_these_disks: \
+                         Failed to request instance termination";
+                        InlineErrorChain::new(&e),
+                    );
                     continue;
                 }
 
                 if let Err(e) = rx.await {
-                    warn!(self.log, "use_only_these_disks: Failed while removing instance"; "err" => ?e);
+                    warn!(
+                        self.log,
+                        "use_only_these_disks: \
+                         Failed while terminating instance";
+                        InlineErrorChain::new(&e),
+                    );
                 }
             }
         }
