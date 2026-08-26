@@ -92,7 +92,9 @@ mod test {
     use omicron_common::api::external::Vni;
     use omicron_common::api::internal::shared::PrivateIpConfig;
     use omicron_common::zpool_name::ZpoolName;
-    use omicron_generation_kinds::{Generation, TargetReleaseGeneration};
+    use omicron_generation_kinds::{
+        Generation, SledConfigGeneration, TargetReleaseGeneration,
+    };
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::ExternalIpUuid;
@@ -170,7 +172,7 @@ mod test {
                 subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
                 last_allocated_ip_subnet_offset:
                     LastAllocatedSubnetIpOffset::initial(),
-                sled_agent_generation: Generation::new(),
+                sled_agent_generation: SledConfigGeneration::new(),
                 zones,
                 disks: IdOrdMap::new(),
                 datasets: IdOrdMap::new(),
@@ -261,7 +263,7 @@ mod test {
                 (
                     expunged_nexus,
                     BlueprintZoneDisposition::Expunged {
-                        as_of_generation: Generation::new(),
+                        as_of_generation: SledConfigGeneration::new(),
                         ready_for_cleanup: true,
                     },
                     Generation::new(),

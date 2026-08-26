@@ -104,7 +104,7 @@ mod tests {
     use omicron_common::address::REPO_DEPOT_PORT;
     use omicron_common::api::internal::shared::DatasetKind;
     use omicron_common::zpool_name::ZpoolName;
-    use omicron_generation_kinds::Generation;
+    use omicron_generation_kinds::{Generation, SledConfigGeneration};
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -135,7 +135,7 @@ mod tests {
         let sim_sled_agent = &cptestctx.sled_agents[0].sled_agent();
         let sim_sled_agent_config_generation = sim_sled_agent
             .omicron_sled_config()
-            .map_or(Generation::new(), |config| config.generation);
+            .map_or(SledConfigGeneration::new(), |config| config.generation);
 
         let sleds_by_id = id_ord_map! {
             Sled::new(
@@ -178,7 +178,7 @@ mod tests {
         disks
             .insert_unique(BlueprintPhysicalDiskConfig {
                 disposition: BlueprintPhysicalDiskDisposition::Expunged {
-                    as_of_generation: Generation::new(),
+                    as_of_generation: SledConfigGeneration::new(),
                     ready_for_cleanup: false,
                 },
                 identity: DiskIdentity {
@@ -248,7 +248,7 @@ mod tests {
         zones
             .insert_unique(BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::Expunged {
-                    as_of_generation: Generation::new(),
+                    as_of_generation: SledConfigGeneration::new(),
                     ready_for_cleanup: false,
                 },
                 id: OmicronZoneUuid::new_v4(),

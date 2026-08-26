@@ -50,7 +50,9 @@ use omicron_common::policy::{
     OXIMETER_REDUNDANCY, RESERVED_INTERNAL_DNS_REDUNDANCY,
     SINGLE_NODE_CLICKHOUSE_REDUNDANCY,
 };
-use omicron_generation_kinds::{Generation, TargetReleaseGeneration};
+use omicron_generation_kinds::{
+    Generation, SledConfigGeneration, TargetReleaseGeneration,
+};
 use omicron_uuid_kinds::{
     BlueprintUuid, DatasetUuid, ExternalIpUuid, GenericUuid, OmicronZoneUuid,
     PhysicalDiskUuid, SledUuid, ZpoolUuid,
@@ -911,7 +913,7 @@ impl ServicePlan {
 
     pub fn to_blueprint(
         &self,
-        sled_agent_config_generation: Generation,
+        sled_agent_config_generation: SledConfigGeneration,
     ) -> anyhow::Result<Blueprint> {
         let mut blueprint_sleds = BTreeMap::new();
         for sled_description in &self.all_sleds {
