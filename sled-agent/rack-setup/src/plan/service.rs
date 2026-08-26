@@ -50,7 +50,7 @@ use omicron_common::policy::{
     OXIMETER_REDUNDANCY, RESERVED_INTERNAL_DNS_REDUNDANCY,
     SINGLE_NODE_CLICKHOUSE_REDUNDANCY,
 };
-use omicron_generation_kinds::Generation;
+use omicron_generation_kinds::{Generation, TargetReleaseGeneration};
 use omicron_uuid_kinds::{
     BlueprintUuid, DatasetUuid, ExternalIpUuid, GenericUuid, OmicronZoneUuid,
     PhysicalDiskUuid, SledUuid, ZpoolUuid,
@@ -991,7 +991,7 @@ impl ServicePlan {
             // initial generation of 1. Nexus will bump this up when it updates
             // external DNS (including creating the recovery silo).
             external_dns_version: Generation::new(),
-            target_release_minimum_generation: Generation::new(),
+            target_release_minimum_generation: TargetReleaseGeneration::new(),
             nexus_generation: Generation::new(),
             external_networking_generation: Generation::new(),
             // Nexus will fill in the CockroachDB values during initialization.

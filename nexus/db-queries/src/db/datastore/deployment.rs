@@ -1582,7 +1582,7 @@ impl DataStore {
         let internal_dns_version = *blueprint_row.internal_dns_version;
         let external_dns_version = *blueprint_row.external_dns_version;
         let target_release_minimum_generation =
-            *blueprint_row.target_release_minimum_generation;
+            blueprint_row.target_release_minimum_generation.into();
         let nexus_generation = *blueprint_row.nexus_generation;
         let external_networking_generation =
             *blueprint_row.external_networking_generation;

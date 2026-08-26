@@ -56,7 +56,7 @@ use omicron_common::address::REPO_DEPOT_PORT;
 use omicron_common::api::external::Name;
 use omicron_common::policy::NEXUS_REDUNDANCY;
 use omicron_common::update::OmicronInstallManifestSource;
-use omicron_generation_kinds::Generation;
+use omicron_generation_kinds::{Generation, TargetReleaseGeneration};
 use omicron_repl_utils::run_repl_from_file;
 use omicron_repl_utils::run_repl_on_stdin;
 use omicron_uuid_kinds::GenericUuid;
@@ -974,7 +974,7 @@ enum BlueprintEditCommands {
     #[clap(visible_alias = "set-target-release-min-gen")]
     SetTargetReleaseMinimumGeneration {
         /// the minimum target release generation
-        generation: Generation,
+        generation: TargetReleaseGeneration,
     },
     /// expunge a zone
     ExpungeZones { zone_ids: Vec<OmicronZoneUuid> },

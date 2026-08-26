@@ -65,7 +65,7 @@ use omicron_common::address::NTP_PORT;
 use omicron_common::address::ReservedRackSubnet;
 use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::api::external::Vni;
-use omicron_generation_kinds::Generation;
+use omicron_generation_kinds::{Generation, TargetReleaseGeneration};
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::MupdateOverrideUuid;
@@ -139,8 +139,8 @@ pub enum Error {
          expected current value is {expected} but actual value is {actual}"
     )]
     TargetReleaseMinimumGenerationMismatch {
-        expected: Generation,
-        actual: Generation,
+        expected: TargetReleaseGeneration,
+        actual: TargetReleaseGeneration,
     },
     #[error(
         "target release minimum generation was set to {current}, \
@@ -148,8 +148,8 @@ pub enum Error {
          possible table rollback which should not happen"
     )]
     TargetReleaseMinimumGenerationRollback {
-        current: Generation,
-        new: Generation,
+        current: TargetReleaseGeneration,
+        new: TargetReleaseGeneration,
     },
     #[error(transparent)]
     TufRepoContentsError(#[from] TufRepoContentsError),
@@ -365,8 +365,8 @@ pub(crate) enum Operation {
         new_generation: Generation,
     },
     SetTargetReleaseMinimumGeneration {
-        current_generation: Generation,
-        new_generation: Generation,
+        current_generation: TargetReleaseGeneration,
+        new_generation: TargetReleaseGeneration,
     },
     SledNoopZoneImageSourcesUpdated {
         sled_id: SledUuid,
@@ -546,7 +546,7 @@ pub struct BlueprintBuilder<'a> {
     // corresponding fields in `Blueprint`.
     cockroachdb_setting_preserve_downgrade: CockroachDbPreserveDowngrade,
     cockroachdb_fingerprint: String,
-    target_release_minimum_generation: Generation,
+    target_release_minimum_generation: TargetReleaseGeneration,
     nexus_generation: Generation,
     internal_dns_version: Generation,
     external_dns_version: Generation,
@@ -578,7 +578,7 @@ impl<'a> BlueprintBuilder<'a> {
             parent_blueprint_id: None,
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
-            target_release_minimum_generation: Generation::new(),
+            target_release_minimum_generation: TargetReleaseGeneration::new(),
             nexus_generation: Generation::new(),
             external_networking_generation: Generation::new(),
             cockroachdb_fingerprint: String::new(),
@@ -2280,7 +2280,7 @@ impl<'a> BlueprintBuilder<'a> {
     }
 
     /// Get the value of `target_release_minimum_generation`.
-    pub fn target_release_minimum_generation(&self) -> Generation {
+    pub fn target_release_minimum_generation(&self) -> TargetReleaseGeneration {
         self.target_release_minimum_generation
     }
 
@@ -2288,8 +2288,8 @@ impl<'a> BlueprintBuilder<'a> {
     /// new value for this blueprint.
     pub fn set_target_release_minimum_generation(
         &mut self,
-        current_generation: Generation,
-        new_generation: Generation,
+        current_generation: TargetReleaseGeneration,
+        new_generation: TargetReleaseGeneration,
     ) -> Result<(), Error> {
         if self.target_release_minimum_generation != current_generation {
             return Err(Error::TargetReleaseMinimumGenerationMismatch {

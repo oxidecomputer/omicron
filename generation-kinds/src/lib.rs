@@ -43,5 +43,6 @@ impl_typed_generation_kinds! {
         SagaAdopt = {},
         SagaReassignment = {},
         SupportBundle = {},
+        TargetRelease = {},
     },
 }
