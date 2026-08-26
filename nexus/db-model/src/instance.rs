@@ -4,8 +4,8 @@
 
 use super::InstanceIntendedState as IntendedState;
 use super::{
-    ByteCount, Disk, ExternalIp, Generation, InstanceAutoRestartPolicy,
-    InstanceCpuCount, InstanceCpuPlatform, InstanceState, Vmm, VmmState,
+    ByteCount, Disk, ExternalIp, InstanceAutoRestartPolicy, InstanceCpuCount,
+    InstanceCpuPlatform, InstanceState, Vmm, VmmState,
 };
 use crate::ExternalSubnet;
 use crate::collection::DatastoreAttachTargetConfig;
@@ -20,6 +20,7 @@ use diesel::sql_types::{Bool, Nullable};
 use nexus_db_schema::schema::{disk, external_ip, external_subnet, instance};
 use nexus_types::external_api::instance as instance_types;
 use omicron_generation_kinds::{
+    InstanceStateGeneration, InstanceStateGenerationKind,
     InstanceUpdaterGeneration, InstanceUpdaterGenerationKind,
 };
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
@@ -59,7 +60,7 @@ pub struct Instance {
     /// including the fallback state, the instance's active Propolis ID, and its
     /// migration IDs.
     #[diesel(column_name = state_generation)]
-    pub state_generation: Generation,
+    pub state_generation: DbTypedGeneration<InstanceStateGenerationKind>,
 
     /// The ID of the Propolis server hosting the current incarnation of this
     /// instance, or None if the instance has no active VMM.
@@ -179,7 +180,7 @@ impl Instance {
             project_id,
             user_data: params.user_data.clone(),
             time_state_updated: creation_time,
-            state_generation: Generation::new(),
+            state_generation: InstanceStateGeneration::new().into(),
             propolis_id: None,
             dst_propolis_id: None,
             migration_id: None,
@@ -340,7 +341,7 @@ pub struct InstanceRuntimeState {
     /// migration IDs.
     #[diesel(column_name = state_generation)]
     #[serde(rename = "gen")]
-    pub generation: Generation,
+    pub generation: DbTypedGeneration<InstanceStateGenerationKind>,
 
     /// The ID of the Propolis server hosting the current incarnation of this
     /// instance, or None if the instance has no active VMM.
