@@ -858,7 +858,8 @@ impl DataStore {
                              as target";
                             &e,
                         );
-                        err.set(RackInitError::BlueprintTargetSet(e)).unwrap();
+                        err.set(RackInitError::BlueprintTargetSet(e.into()))
+                            .unwrap();
                         DieselError::RollbackTransaction
                     })?;
 

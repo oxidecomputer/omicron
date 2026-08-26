@@ -11,6 +11,7 @@ use iddqd::IdOrdMap;
 use nexus_db_model::TargetReleaseSource;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_inventory::now_db_precision;
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::planner::PlannerRng;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
@@ -153,7 +154,7 @@ impl super::Nexus {
         let new_target = BlueprintTarget {
             target_id: params.target_id,
             enabled: params.enabled,
-            time_made_target: chrono::Utc::now(),
+            time_made_target: now_db_precision(),
         };
 
         // Use `SetTargetDebugWriter` to write out debugging files related to
@@ -174,7 +175,7 @@ impl super::Nexus {
             // Try to cancel the dropbox deposit.  This information is
             // useless now.  It's not a problem if this doesn't work.
             debug_dropbox_writer.cancel().await;
-            return Err(error);
+            return Err(error.into());
         }
 
         // We've got a new target.
@@ -201,7 +202,7 @@ impl super::Nexus {
         let new_target = BlueprintTarget {
             target_id: params.target_id,
             enabled: params.enabled,
-            time_made_target: chrono::Utc::now(),
+            time_made_target: now_db_precision(),
         };
 
         // We don't need to create or archive a Reconfigurator state file here

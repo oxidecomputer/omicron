@@ -34,6 +34,7 @@ use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::address::SLED_RESERVED_ADDRESSES;
 use omicron_common::address::get_sled_address;
 use omicron_common::api::external::ByteCount;
+use omicron_common::api::external::ResourceType;
 use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::disk::DatasetName;
 use omicron_generation_kinds::{
@@ -42,6 +43,7 @@ use omicron_generation_kinds::{
 };
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -69,6 +71,7 @@ use sled_agent_types_versions::latest::inventory::OmicronZoneConfig;
 use sled_agent_types_versions::latest::inventory::OmicronZoneImageSource;
 use sled_agent_types_versions::latest::inventory::ZoneKind;
 use slog::Key;
+use slog_error_chain::SlogInlineError;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
@@ -78,6 +81,7 @@ use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use strum::EnumIter;
+use thiserror::Error;
 use tufaceous_artifact::Artifact;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
@@ -3472,6 +3476,47 @@ pub struct BlueprintTarget {
     pub enabled: bool,
     /// when this blueprint was made the target
     pub time_made_target: chrono::DateTime<chrono::Utc>,
+}
+
+/// Errors from making a blueprint the current target.
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, Error, SlogInlineError,
+)]
+pub enum BlueprintTargetSetError {
+    /// The target blueprint does not exist in the blueprint table.
+    #[error("blueprint {blueprint_id} does not exist")]
+    NoSuchBlueprint { blueprint_id: BlueprintUuid },
+    /// The requested target blueprint's parent is not the current target.
+    #[error(
+        "blueprint {blueprint_id}'s parent blueprint is not the current \
+         target blueprint"
+    )]
+    ParentNotTarget { blueprint_id: BlueprintUuid },
+    /// Any other error, including authorization and database connection
+    /// failures.
+    #[error(transparent)]
+    Other(#[from] Error),
+}
+
+/// Converts to the public error type:
+///
+/// * `NoSuchBlueprint` is a 404
+/// * `ParentNotTarget` is a 400
+impl From<BlueprintTargetSetError> for Error {
+    fn from(value: BlueprintTargetSetError) -> Self {
+        match value {
+            BlueprintTargetSetError::NoSuchBlueprint { blueprint_id } => {
+                Error::not_found_by_id(
+                    ResourceType::Blueprint,
+                    blueprint_id.as_untyped_uuid(),
+                )
+            }
+            BlueprintTargetSetError::ParentNotTarget { .. } => {
+                Error::invalid_request(value.to_string())
+            }
+            BlueprintTargetSetError::Other(error) => error,
+        }
+    }
 }
 
 /// Specifies what blueprint, if any, the system should be working toward

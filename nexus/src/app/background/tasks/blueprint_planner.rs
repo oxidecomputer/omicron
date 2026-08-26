@@ -9,20 +9,22 @@ use crate::app::BlueprintDebugAction;
 use crate::app::background::BackgroundTask;
 use crate::app::background::tasks::blueprint_load::LoadedTargetBlueprint;
 use crate::app::deployment::SetTargetDebugWriter;
-use chrono::Utc;
 use futures::future::BoxFuture;
 use iddqd::IdOrdMap;
 use nexus_auth::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
+use nexus_inventory::now_db_precision;
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::planner::PlannerRng;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
 use nexus_reconfigurator_preparation::reconfigurator_state_assemble;
 use nexus_types::deployment::BlueprintSource;
 use nexus_types::deployment::BlueprintTarget;
+use nexus_types::deployment::BlueprintTargetSetError;
 use nexus_types::deployment::PlanningReport;
+use nexus_types::internal_api::background::BlueprintPlannerSkipReason;
 use nexus_types::internal_api::background::BlueprintPlannerStatus;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::Error;
@@ -39,10 +41,8 @@ use tokio::sync::watch::{self, Receiver, Sender};
 #[derive(Debug, thiserror::Error)]
 enum PlanError {
     // Warning-level problems
-    #[error("no target blueprint available")]
-    NoTargetBlueprint,
-    #[error("no inventory collection available")]
-    NoInventoryCollection,
+    #[error(transparent)]
+    Skipped(BlueprintPlannerSkipReason),
 
     // Error-level problems
     #[error("failed to assemble planning input")]
@@ -137,14 +137,14 @@ impl BlueprintPlanner {
             Ok(status) => status,
             Err(plan_error) => {
                 let error = InlineErrorChain::new(&plan_error);
-                match &plan_error {
-                    PlanError::NoTargetBlueprint
-                    | PlanError::NoInventoryCollection => {
+                match plan_error {
+                    PlanError::Skipped(reason) => {
                         warn!(
                             &opctx.log,
                             "blueprint planning skipped";
                             &error,
                         );
+                        BlueprintPlannerStatus::Skipped(reason)
                     }
                     PlanError::AssemblePlanningInput(_)
                     | PlanError::MakePlanner { .. }
@@ -155,9 +155,9 @@ impl BlueprintPlanner {
                             "blueprint planning failed";
                             &error,
                         );
+                        BlueprintPlannerStatus::Error(error.to_string())
                     }
                 }
-                BlueprintPlannerStatus::Error(error.to_string())
             }
         }
     }
@@ -186,10 +186,14 @@ impl BlueprintPlanner {
 
         // Get the current target blueprint to use as a parent.
         // Cloned so that we don't block the channel.
-        let Some(LoadedTargetBlueprint { target, blueprint: parent }) =
-            self.rx_blueprint.borrow_and_update().clone()
+        let Some(LoadedTargetBlueprint {
+            target: parent_target,
+            blueprint: parent,
+        }) = self.rx_blueprint.borrow_and_update().clone()
         else {
-            return Err(PlanError::NoTargetBlueprint);
+            return Err(PlanError::Skipped(
+                BlueprintPlannerSkipReason::NoTargetBlueprint,
+            ));
         };
         let parent_blueprint_id = parent.id;
 
@@ -199,7 +203,9 @@ impl BlueprintPlanner {
         let Some(collection) =
             self.rx_inventory.borrow_and_update().as_ref().map(Arc::clone)
         else {
-            return Err(PlanError::NoInventoryCollection);
+            return Err(PlanError::Skipped(
+                BlueprintPlannerSkipReason::NoInventoryCollection,
+            ));
         };
 
         // Assemble the planning context.
@@ -271,7 +277,7 @@ impl BlueprintPlanner {
                     "parent_blueprint_id" => %parent_blueprint_id,
                 );
                 return Ok(BlueprintPlannerStatus::Unchanged {
-                    parent_blueprint_id,
+                    parent: parent_target,
                     report,
                     blueprint_count,
                     limit: self.blueprint_limit,
@@ -305,7 +311,7 @@ impl BlueprintPlanner {
             input,
             IdOrdMap::from_iter([(*collection).clone()]),
             IdOrdMap::from_iter([(*parent).clone(), blueprint.clone()]),
-            target,
+            parent_target,
             Some(blueprint_id),
         )
         .await;
@@ -320,18 +326,40 @@ impl BlueprintPlanner {
         // Try to make it the current target.
         let target = BlueprintTarget {
             target_id: blueprint_id,
-            enabled: target.enabled, // copy previous `enabled` flag
-            time_made_target: Utc::now(),
+            enabled: parent_target.enabled, // copy previous `enabled` flag
+            time_made_target: now_db_precision(),
         };
         match self.datastore.blueprint_target_set_current(opctx, target).await {
             Ok(()) => (),
             Err(error) => {
-                warn!(
-                    &opctx.log,
-                    "can't make blueprint the current target, deleting it";
-                    "error" => %error,
-                    "blueprint_id" => %blueprint_id
-                );
+                match &error {
+                    BlueprintTargetSetError::ParentNotTarget { .. } => {
+                        // Either the loader hasn't caught up with a target set
+                        // by someone else, or another Nexus instance's planner
+                        // beat us to it. Neither of these are error conditions.
+                        warn!(
+                            &opctx.log,
+                            "can't make blueprint the current target, \
+                             deleting it";
+                            &error,
+                            "blueprint_id" => %blueprint_id,
+                        );
+                    }
+                    BlueprintTargetSetError::NoSuchBlueprint { .. }
+                    | BlueprintTargetSetError::Other(_) => {
+                        // We inserted this blueprint moments ago, so it not
+                        // existing is an invariant violation, and any other
+                        // failure is a database or authorization problem. These
+                        // are both error conditions.
+                        error!(
+                            &opctx.log,
+                            "can't make blueprint the current target, \
+                             deleting it";
+                            &error,
+                            "blueprint_id" => %blueprint_id,
+                        );
+                    }
+                }
 
                 // Try to cancel the dropbox deposit since the information is
                 // useless now.
@@ -359,8 +387,8 @@ impl BlueprintPlanner {
                     }
                 }
                 return Ok(BlueprintPlannerStatus::Planned {
-                    parent_blueprint_id,
-                    error: format!("{error}"),
+                    parent: parent_target,
+                    error,
                     report,
                     blueprint_count,
                     limit: self.blueprint_limit,
@@ -379,8 +407,8 @@ impl BlueprintPlanner {
 
         self.tx_planned.send_replace(Some(blueprint.id));
         Ok(BlueprintPlannerStatus::Targeted {
-            parent_blueprint_id,
-            blueprint_id,
+            parent: parent_target,
+            target,
             report,
             // A new blueprint was added, so increment the count by 1.
             blueprint_count: blueprint_count + 1,
@@ -583,15 +611,15 @@ mod test {
         .expect("can't activate planner");
         let blueprint_id = match status {
             BlueprintPlannerStatus::Targeted {
-                parent_blueprint_id,
-                blueprint_id,
+                parent,
+                target,
                 report: _,
                 blueprint_count: _,
                 limit: _,
-            } if parent_blueprint_id == initial_blueprint.id
-                && blueprint_id != initial_blueprint.id =>
+            } if parent.target_id == initial_blueprint.id
+                && target.target_id != initial_blueprint.id =>
             {
-                blueprint_id
+                target.target_id
             }
             other => panic!("expected new target blueprint, found {other:?}"),
         };
@@ -623,11 +651,11 @@ mod test {
         assert_matches!(
             status,
             BlueprintPlannerStatus::Unchanged {
-                parent_blueprint_id,
+                parent,
                 report: _,
                 blueprint_count: _,
                 limit: _,
-            } if parent_blueprint_id == parent_blueprint_id
+            } if parent.target_id == blueprint_id
         );
 
         // Enable execution.
@@ -694,11 +722,11 @@ mod test {
         assert_matches!(
             status,
             BlueprintPlannerStatus::Unchanged {
-                parent_blueprint_id,
+                parent,
                 report: _,
                 blueprint_count: _,
                 limit: _,
-            } if parent_blueprint_id == blueprint_id
+            } if parent.target_id == blueprint_id
         );
     }
 

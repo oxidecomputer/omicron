@@ -1513,6 +1513,14 @@ fn print_task_blueprint_planner(details: &serde_json::Value) {
         BlueprintPlannerStatus::Disabled => {
             println!("    blueprint planning explicitly disabled by config!");
         }
+        BlueprintPlannerStatus::Skipped(reason) => {
+            println!("    blueprint planning skipped: {reason}");
+            println!(
+                "    (this resolves once the \"{}\" task loads a value; check \
+                 that task if it persists)",
+                reason.loader_task_name(),
+            );
+        }
         BlueprintPlannerStatus::LimitReached { limit, report } => {
             println!(
                 "    blueprint auto-planning disabled because \
@@ -1526,12 +1534,12 @@ fn print_task_blueprint_planner(details: &serde_json::Value) {
             println!("    task did not complete successfully: {error}");
         }
         BlueprintPlannerStatus::Unchanged {
-            parent_blueprint_id,
+            parent,
             report,
             blueprint_count,
             limit,
         } => {
-            println!("    plan unchanged from parent {parent_blueprint_id}");
+            println!("    plan unchanged from parent {}", parent.target_id);
             println!(
                 "    note: {}/{} blueprints in database",
                 blueprint_count, limit
@@ -1539,15 +1547,16 @@ fn print_task_blueprint_planner(details: &serde_json::Value) {
             println!("{report}");
         }
         BlueprintPlannerStatus::Planned {
-            parent_blueprint_id,
+            parent,
             error,
             report,
             blueprint_count,
             limit,
         } => {
             println!(
-                "    planned new blueprint from parent {parent_blueprint_id}, \
-                     but could not make it the target: {error}"
+                "    planned new blueprint from parent {}, but could not make \
+                 it the target: {error}",
+                parent.target_id,
             );
             println!(
                 "    note: {}/{} blueprints in database",
@@ -1556,15 +1565,20 @@ fn print_task_blueprint_planner(details: &serde_json::Value) {
             println!("{report}");
         }
         BlueprintPlannerStatus::Targeted {
-            parent_blueprint_id: _,
-            blueprint_id,
+            parent: _,
+            target,
             report,
             blueprint_count,
             limit,
         } => {
             println!(
-                "    planned new blueprint {blueprint_id}, \
-                     and made it the current target"
+                "    planned new blueprint {}, and made it the current target \
+                 (execution {}, at {})",
+                target.target_id,
+                if target.enabled { "enabled" } else { "disabled" },
+                humantime::format_rfc3339_millis(
+                    target.time_made_target.into()
+                ),
             );
             println!(
                 "    note: {}/{} blueprints in database",

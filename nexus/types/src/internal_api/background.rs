@@ -2,6 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::deployment::BlueprintTarget;
+use crate::deployment::BlueprintTargetSetError;
 use crate::deployment::PlanningReport;
 use crate::external_api::alert;
 use chrono::DateTime;
@@ -842,11 +844,19 @@ pub enum InventoryLoadStatus {
 }
 
 /// The status of a `blueprint_planner` background task activation.
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub enum BlueprintPlannerStatus {
     /// Automatic blueprint planning has been explicitly disabled
     /// by the config file.
     Disabled,
+
+    /// Planning was skipped because an input it depends on isn't available yet.
+    ///
+    /// This only happens before the task that loads that input (see
+    /// [`BlueprintPlannerSkipReason`]) has loaded its first value -- normally,
+    /// shortly after Nexus startup -- and resolves once it does. If it
+    /// persists, check that task's status.
+    Skipped(BlueprintPlannerSkipReason),
 
     /// The blueprint limit was reached, so automatic blueprint planning was
     /// disabled.
@@ -860,7 +870,8 @@ pub enum BlueprintPlannerStatus {
     /// Planning produced a blueprint identital to the current target,
     /// so we threw it away and did nothing.
     Unchanged {
-        parent_blueprint_id: BlueprintUuid,
+        /// The target the blueprint was planned from.
+        parent: BlueprintTarget,
         report: Arc<PlanningReport>,
         blueprint_count: u64,
         limit: u64,
@@ -869,8 +880,9 @@ pub enum BlueprintPlannerStatus {
     /// Planning produced a new blueprint, but we failed to make it
     /// the current target and so deleted it.
     Planned {
-        parent_blueprint_id: BlueprintUuid,
-        error: String,
+        /// The target the blueprint was planned from.
+        parent: BlueprintTarget,
+        error: BlueprintTargetSetError,
         report: Arc<PlanningReport>,
         blueprint_count: u64,
         limit: u64,
@@ -879,12 +891,41 @@ pub enum BlueprintPlannerStatus {
     /// Planing succeeded, and we saved and made the new blueprint the
     /// current target.
     Targeted {
-        parent_blueprint_id: BlueprintUuid,
-        blueprint_id: BlueprintUuid,
+        /// The target the blueprint was planned from.
+        parent: BlueprintTarget,
+        /// The new target.
+        target: BlueprintTarget,
         report: Arc<PlanningReport>,
         blueprint_count: u64,
         limit: u64,
     },
+}
+
+/// The reason the blueprint planner skipped planning.
+#[derive(
+    Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, thiserror::Error,
+)]
+pub enum BlueprintPlannerSkipReason {
+    /// The blueprint loader hasn't loaded a target blueprint yet.
+    #[error("no target blueprint available")]
+    NoTargetBlueprint,
+    /// The inventory loader hasn't loaded a collection yet.
+    #[error("no inventory collection available")]
+    NoInventoryCollection,
+}
+
+impl BlueprintPlannerSkipReason {
+    /// The name of the background task that loads the missing input.
+    ///
+    /// If planning keeps being skipped, that task's status says why.
+    pub fn loader_task_name(&self) -> &'static str {
+        match self {
+            BlueprintPlannerSkipReason::NoTargetBlueprint => "blueprint_loader",
+            BlueprintPlannerSkipReason::NoInventoryCollection => {
+                "inventory_loader"
+            }
+        }
+    }
 }
 
 /// The status of a `alert_dispatcher` background task activation.
