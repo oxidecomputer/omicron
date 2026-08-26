@@ -357,7 +357,9 @@ mod test {
     use omicron_common::address::get_switch_zone_address;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::zpool_name::ZpoolName;
-    use omicron_generation_kinds::{Generation, TargetReleaseGeneration};
+    use omicron_generation_kinds::{
+        Generation, SledConfigGeneration, TargetReleaseGeneration,
+    };
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::ExternalIpUuid;
@@ -733,7 +735,7 @@ mod test {
             .zones
             .insert_unique(BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::Expunged {
-                    as_of_generation: Generation::new(),
+                    as_of_generation: SledConfigGeneration::new(),
                     ready_for_cleanup: false,
                 },
                 id: out_of_service_id,
@@ -1180,7 +1182,7 @@ mod test {
             .find(|z| z.zone_type.is_nexus())
             .unwrap();
         nexus_zone.disposition = BlueprintZoneDisposition::Expunged {
-            as_of_generation: Generation::new(),
+            as_of_generation: SledConfigGeneration::new(),
             ready_for_cleanup: false,
         };
         mem::drop(nexus_zone);

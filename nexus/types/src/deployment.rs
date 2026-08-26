@@ -36,7 +36,9 @@ use omicron_common::address::get_sled_address;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::disk::DatasetName;
-use omicron_generation_kinds::{Generation, TargetReleaseGeneration};
+use omicron_generation_kinds::{
+    Generation, SledConfigGeneration, TargetReleaseGeneration,
+};
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::MupdateOverrideUuid;
@@ -1632,7 +1634,7 @@ pub struct BlueprintSledConfig {
     /// `state` from `Active` to `Decommissioned` would not require a bump to
     /// `sled_agent_generation`, because a `Decommissioned` sled will never be
     /// sent an `OmicronSledConfig`.
-    pub sled_agent_generation: Generation,
+    pub sled_agent_generation: SledConfigGeneration,
 
     pub disks: IdOrdMap<BlueprintPhysicalDiskConfig>,
     pub datasets: IdOrdMap<BlueprintDatasetConfig>,
@@ -2012,7 +2014,7 @@ pub enum BlueprintZoneDisposition {
     /// The zone is permanently gone.
     Expunged {
         /// Generation of the parent config in which this zone became expunged.
-        as_of_generation: Generation,
+        as_of_generation: SledConfigGeneration,
 
         /// True if Reconfiguration knows that this zone has been shut down and
         /// will not be restarted.
@@ -3172,7 +3174,7 @@ pub enum BlueprintPhysicalDiskDisposition {
     /// The physical disk is permanently gone.
     Expunged {
         /// Generation of the parent config in which this disk became expunged.
-        as_of_generation: Generation,
+        as_of_generation: SledConfigGeneration,
 
         /// True if Reconfiguration knows that this disk has been expunged.
         ///
@@ -3222,7 +3224,7 @@ impl BlueprintPhysicalDiskDisposition {
 
     /// Return the generation when a disk was expunged or `None` if the disk
     /// was not expunged.
-    pub fn expunged_as_of_generation(&self) -> Option<Generation> {
+    pub fn expunged_as_of_generation(&self) -> Option<SledConfigGeneration> {
         match self {
             BlueprintPhysicalDiskDisposition::Expunged {
                 as_of_generation,

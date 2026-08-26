@@ -65,7 +65,9 @@ use nexus_types::deployment::{
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::zpool_name::ZpoolName;
-use omicron_generation_kinds::TargetReleaseGenerationKind;
+use omicron_generation_kinds::{
+    SledConfigGenerationKind, TargetReleaseGenerationKind,
+};
 use omicron_uuid_kinds::{
     BlueprintKind, BlueprintUuid, DatasetKind, ExternalIpKind, ExternalIpUuid,
     GenericUuid, MupdateOverrideKind, OmicronZoneKind, OmicronZoneUuid,
@@ -253,7 +255,7 @@ pub struct BpSledMetadata {
     pub blueprint_id: DbTypedUuid<BlueprintKind>,
     pub sled_id: DbTypedUuid<SledKind>,
     pub sled_state: SledState,
-    pub sled_agent_generation: Generation,
+    pub sled_agent_generation: DbTypedGeneration<SledConfigGenerationKind>,
     pub remove_mupdate_override: Option<DbTypedUuid<MupdateOverrideKind>>,
     pub host_phase_2_desired_slot_a: Option<ArtifactHash>,
     pub host_phase_2_desired_slot_b: Option<ArtifactHash>,
@@ -428,7 +430,8 @@ impl_enum_type!(
 
 struct DbBpPhysicalDiskDispositionColumns {
     disposition: DbBpPhysicalDiskDisposition,
-    expunged_as_of_generation: Option<Generation>,
+    expunged_as_of_generation:
+        Option<DbTypedGeneration<SledConfigGenerationKind>>,
     expunged_ready_for_cleanup: bool,
 }
 
@@ -449,7 +452,7 @@ impl From<BlueprintPhysicalDiskDisposition>
                 ready_for_cleanup,
             } => (
                 DbBpPhysicalDiskDisposition::Expunged,
-                Some(Generation(as_of_generation)),
+                Some(as_of_generation.into()),
                 ready_for_cleanup,
             ),
         };
@@ -475,7 +478,7 @@ impl TryFrom<DbBpPhysicalDiskDispositionColumns>
             }
             (DbBpPhysicalDiskDisposition::Expunged, Some(as_of_generation)) => {
                 Ok(Self::Expunged {
-                    as_of_generation: *as_of_generation,
+                    as_of_generation: as_of_generation.into(),
                     ready_for_cleanup: value.expunged_ready_for_cleanup,
                 })
             }
@@ -505,7 +508,8 @@ pub struct BpOmicronPhysicalDisk {
     pub pool_id: Uuid,
 
     disposition: DbBpPhysicalDiskDisposition,
-    disposition_expunged_as_of_generation: Option<Generation>,
+    disposition_expunged_as_of_generation:
+        Option<DbTypedGeneration<SledConfigGenerationKind>>,
     disposition_expunged_ready_for_cleanup: bool,
 }
 
@@ -709,7 +713,8 @@ pub struct BpOmicronZone {
     pub snat_last_port: Option<SqlU16>,
 
     disposition: DbBpZoneDisposition,
-    disposition_expunged_as_of_generation: Option<Generation>,
+    disposition_expunged_as_of_generation:
+        Option<DbTypedGeneration<SledConfigGenerationKind>>,
     disposition_expunged_ready_for_cleanup: bool,
 
     pub external_ip_id: Option<DbTypedUuid<ExternalIpKind>>,
@@ -1201,7 +1206,8 @@ impl_enum_type!(
 
 struct DbBpZoneDispositionColumns {
     disposition: DbBpZoneDisposition,
-    expunged_as_of_generation: Option<Generation>,
+    expunged_as_of_generation:
+        Option<DbTypedGeneration<SledConfigGenerationKind>>,
     expunged_ready_for_cleanup: bool,
 }
 
@@ -1220,7 +1226,7 @@ impl From<BlueprintZoneDisposition> for DbBpZoneDispositionColumns {
                 ready_for_cleanup,
             } => (
                 DbBpZoneDisposition::Expunged,
-                Some(Generation(as_of_generation)),
+                Some(as_of_generation.into()),
                 ready_for_cleanup,
             ),
         };
@@ -1242,7 +1248,7 @@ impl TryFrom<DbBpZoneDispositionColumns> for BlueprintZoneDisposition {
             (DbBpZoneDisposition::InService, None) => Ok(Self::InService),
             (DbBpZoneDisposition::Expunged, Some(as_of_generation)) => {
                 Ok(Self::Expunged {
-                    as_of_generation: *as_of_generation,
+                    as_of_generation: as_of_generation.into(),
                     ready_for_cleanup: value.expunged_ready_for_cleanup,
                 })
             }
