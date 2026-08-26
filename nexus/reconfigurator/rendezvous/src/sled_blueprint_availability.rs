@@ -319,7 +319,7 @@ mod tests {
     use async_bb8_diesel::AsyncSimpleConnection;
     use nexus_db_queries::db::pub_test_utils::TestDatabase;
     use nexus_db_queries::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
-    use omicron_generation_kinds::Generation;
+    use omicron_generation_kinds::UpdateDispositionGeneration;
     use omicron_test_utils::dev;
     use proptest::prelude::*;
     use proptest::proptest;
@@ -340,9 +340,8 @@ mod tests {
         fn state(self) -> SledBpAvailabilityState {
             SledBpAvailabilityState::Active {
                 availability: self.availability,
-                update_disposition_generation: Generation::from(
-                    self.generation,
-                ),
+                update_disposition_generation:
+                    UpdateDispositionGeneration::from(self.generation),
             }
         }
     }
@@ -372,7 +371,9 @@ mod tests {
                             RendezvousSledBpAvailabilityUpdate::new(
                                 sled_id,
                                 ps.availability,
-                                Generation::from(ps.generation),
+                                UpdateDispositionGeneration::from(
+                                    ps.generation,
+                                ),
                                 blueprint_id,
                             ),
                         )
@@ -670,7 +671,7 @@ mod tests {
                 RendezvousSledBpAvailabilityUpdate::new(
                     sled_id,
                     ActiveSledBpAvailability::Available,
-                    Generation::from(2u32),
+                    UpdateDispositionGeneration::from(2u32),
                     bp_stored,
                 ),
             )
@@ -685,7 +686,8 @@ mod tests {
                 sled_id,
                 state: SledBpAvailabilityState::Active {
                     availability: ActiveSledBpAvailability::Unavailable,
-                    update_disposition_generation: Generation::from(2u32),
+                    update_disposition_generation:
+                        UpdateDispositionGeneration::from(2u32),
                 },
             }])
             .expect("a single input is trivially unique"),
@@ -714,7 +716,8 @@ mod tests {
             row.state().expect("reassembled row state"),
             SledBpAvailabilityState::Active {
                 availability: ActiveSledBpAvailability::Available,
-                update_disposition_generation: Generation::from(2u32),
+                update_disposition_generation:
+                    UpdateDispositionGeneration::from(2u32),
             },
             "the stored row must be left untouched",
         );

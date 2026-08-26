@@ -65,7 +65,9 @@ use omicron_common::address::NTP_PORT;
 use omicron_common::address::ReservedRackSubnet;
 use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::api::external::Vni;
-use omicron_generation_kinds::{Generation, TargetReleaseGeneration};
+use omicron_generation_kinds::{
+    Generation, SledConfigGeneration, TargetReleaseGeneration,
+};
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::MupdateOverrideUuid;
@@ -893,7 +895,7 @@ impl<'a> BlueprintBuilder<'a> {
     pub fn current_sled_incoming_sled_agent_generation(
         &self,
         sled_id: SledUuid,
-    ) -> Result<Generation, Error> {
+    ) -> Result<SledConfigGeneration, Error> {
         let editor = self.sled_editors.get(&sled_id).ok_or_else(|| {
             Error::Planner(anyhow!(
                 "tried to get incoming generation for unknown sled {sled_id}"
@@ -2704,7 +2706,10 @@ pub(crate) enum BpMupdateOverrideNotSetReason {
     /// The sled's inventory is stale relative to the parent blueprint, so we
     /// can't trust an override observed in inventory to reflect current
     /// reality.
-    InventoryStale { parent_bp_gen: Generation, inventory_gen: Generation },
+    InventoryStale {
+        parent_bp_gen: SledConfigGeneration,
+        inventory_gen: SledConfigGeneration,
+    },
     /// The sled has not yet successfully reconciled any config, so we have no
     /// generation to compare against.
     NoLastReconciliation,
@@ -2920,7 +2925,7 @@ pub mod test {
             summary.diff.sleds.added.first_key_value().unwrap();
         assert_eq!(*sled_id, new_sled_id);
         // The generation number should be newer than the initial default.
-        assert!(new_sled.sled_agent_generation > Generation::new());
+        assert!(new_sled.sled_agent_generation > SledConfigGeneration::new());
 
         // All zones' underlay addresses ought to be on the sled's subnet.
         for z in &new_sled.zones {
@@ -3005,7 +3010,7 @@ pub mod test {
 
             for mut zone in &mut sled_config.zones {
                 zone.disposition = BlueprintZoneDisposition::Expunged {
-                    as_of_generation: Generation::new(),
+                    as_of_generation: SledConfigGeneration::new(),
                     ready_for_cleanup: false,
                 };
             }
@@ -3014,7 +3019,7 @@ pub mod test {
             }
             for mut disk in &mut sled_config.disks {
                 disk.disposition = BlueprintPhysicalDiskDisposition::Expunged {
-                    as_of_generation: Generation::new(),
+                    as_of_generation: SledConfigGeneration::new(),
                     ready_for_cleanup: false,
                 };
             }
@@ -3059,7 +3064,7 @@ pub mod test {
             &mut blueprint2.sleds.get_mut(&decommision_sled_id).unwrap().zones
         {
             z.disposition = BlueprintZoneDisposition::Expunged {
-                as_of_generation: Generation::new(),
+                as_of_generation: SledConfigGeneration::new(),
                 ready_for_cleanup: false,
             };
         }
