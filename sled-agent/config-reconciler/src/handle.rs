@@ -150,7 +150,7 @@ impl UpdateDispositionReceiver {
     /// watch channel containing the entire sled config, so `changed()` returns
     /// any time any part of the sled config changes, not only when the update
     /// disposition changes.
-    // If spurious `changed()` notifications becomes problematic, we can revisit
+    // If spurious `changed()` notifications become problematic, we can revisit
     // this implementation (e.g., add an intermediate channel that only contains
     // the update disposition). But sled config changes are relatively
     // infrequent, so the occasional extra wakeup here seems pretty harmless.
