@@ -51,9 +51,8 @@ impl From<UnnumberedRouter> for RouterPeerType {
 pub struct NumberedRouter {
     /// Target IP address for numbered BGP peers.
     pub(crate) target_addr: v30::RouterPeerIpAddr,
-    /// Optional local IP address to bind when establishing outbound TCP
-    /// connections to this peer. If `None`, the OS selects the source
-    /// address.
+    /// Source IP address to use when initiating the BGP session with the
+    /// peer. If not provided, an address is selected automatically.
     // We derive default here because this type gets shared with the
     // Nexus external api, and many users will not need to specify this
     // parameter for their configurations

@@ -87,6 +87,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_08_25_00, BGP_PEER_SRC_ADDR_DESC),
     (2026_08_19_01, BGP_PEER_SRC_ADDR),
     (2026_08_17_00, SUPPORT_BUNDLES_STABLE),
     (2026_08_14_00, ALERT_LIST),
