@@ -2592,7 +2592,7 @@
                 "description": "Generation of the parent config in which this disk became expunged.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/Generation"
+                    "$ref": "#/components/schemas/SledConfigGeneration"
                   }
                 ]
               },
@@ -2695,7 +2695,7 @@
             "description": "Generation number used when this type is converted into an `OmicronSledConfig` for use by sled-agent.\n\nThis field is explicitly named `sled_agent_generation` to indicate that it is only required to cover information that changes what Reconfigurator sends to sled agent. For example, changing the sled `state` from `Active` to `Decommissioned` would not require a bump to `sled_agent_generation`, because a `Decommissioned` sled will never be sent an `OmicronSledConfig`.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Generation"
+                "$ref": "#/components/schemas/SledConfigGeneration"
               }
             ]
           },
@@ -2748,7 +2748,7 @@
             "description": "A generation number bumped whenever `kind` changes.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Generation"
+                "$ref": "#/components/schemas/UpdateDispositionGeneration"
               }
             ]
           },
@@ -3047,7 +3047,7 @@
                 "description": "Generation of the parent config in which this zone became expunged.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/Generation"
+                    "$ref": "#/components/schemas/SledConfigGeneration"
                   }
                 ]
               },
@@ -9584,6 +9584,17 @@
           "zones"
         ]
       },
+      "SledConfigGeneration": {
+        "description": "Generation numbers stored in the database, used for optimistic concurrency control",
+        "x-rust-type": {
+          "crate": "omicron-generation-kinds",
+          "path": "omicron_generation_kinds::SledConfigGeneration",
+          "version": "*"
+        },
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0
+      },
       "SledPolicy": {
         "description": "The operator-defined policy of a sled.",
         "oneOf": [
@@ -10212,6 +10223,17 @@
           "waited_for_concurrent_update",
           "took_over_concurrent_update"
         ]
+      },
+      "UpdateDispositionGeneration": {
+        "description": "Generation numbers stored in the database, used for optimistic concurrency control",
+        "x-rust-type": {
+          "crate": "omicron-generation-kinds",
+          "path": "omicron_generation_kinds::UpdateDispositionGeneration",
+          "version": "*"
+        },
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0
       },
       "UpdateStatus": {
         "type": "object",

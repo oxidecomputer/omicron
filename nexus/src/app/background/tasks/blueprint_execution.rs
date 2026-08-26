@@ -252,7 +252,9 @@ mod test {
     use omicron_common::address::Ipv6Subnet;
     use omicron_common::api::external;
     use omicron_common::zpool_name::ZpoolName;
-    use omicron_generation_kinds::{Generation, TargetReleaseGeneration};
+    use omicron_generation_kinds::{
+        Generation, SledConfigGeneration, TargetReleaseGeneration,
+    };
     use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -292,7 +294,8 @@ mod test {
                         subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
                         last_allocated_ip_subnet_offset:
                             LastAllocatedSubnetIpOffset::initial(),
-                        sled_agent_generation: Generation::new().next(),
+                        sled_agent_generation: SledConfigGeneration::new()
+                            .next(),
                         disks: IdOrdMap::new(),
                         datasets: IdOrdMap::new(),
                         zones,
