@@ -164,8 +164,8 @@ pub fn blueprint_internal_dns_config(
 
     for scrimlet in sleds_by_id.iter().filter(|sled| sled.is_scrimlet()) {
         let address = scrimlet.sled_agent_address();
-        let switch_sled = dns_builder
-            .host_sled(scrimlet.id(), *address.ip())?;
+        let switch_sled =
+            dns_builder.host_sled(scrimlet.id(), *address.ip())?;
 
         dns_builder.service_backend_sled(
             ServiceName::SwitchSledAgent,
