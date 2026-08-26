@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "3.0.0"
+    "version": "4.0.0"
   },
   "paths": {
     "/bootstrap-sleds": {
@@ -117,6 +117,41 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/LocationInfo"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/multirack-join": {
+      "post": {
+        "summary": "Join this rack into an existing multirack cluster",
+        "description": "This is the multirack counterpart to running rack setup, and applies to every rack but the first: it initializes this rack's trust quorum, starts its sled-agents, and publishes its network configuration, but places no control plane services. Reconfigurator adopts the rack afterwards.\n\nUnlike rack setup, the configuration is not staged through this API beforehand; it is posted here in full and forwarded to the bootstrap agent. Progress is reported by `GET /rack-setup`, as a `RackOperation` whose `kind` is `multirack-join`.",
+        "operationId": "post_run_multirack_join",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MultirackJoinRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunMultirackJoinResponse"
                 }
               }
             }
@@ -529,6 +564,51 @@
           "serial_number"
         ]
       },
+      "BfdMode": {
+        "description": "BFD connection mode.",
+        "type": "string",
+        "enum": [
+          "single_hop",
+          "multi_hop"
+        ]
+      },
+      "BfdPeerConfig": {
+        "type": "object",
+        "properties": {
+          "detection_threshold": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "local": {
+            "nullable": true,
+            "type": "string",
+            "format": "ip"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/BfdMode"
+          },
+          "remote": {
+            "type": "string",
+            "format": "ip"
+          },
+          "required_rx": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "switch": {
+            "$ref": "#/components/schemas/SwitchSlot"
+          }
+        },
+        "required": [
+          "detection_threshold",
+          "mode",
+          "remote",
+          "required_rx",
+          "switch"
+        ]
+      },
       "BgpAuthKey": {
         "description": "Describes the actual authentication key to use with a BGP peer.\n\nCurrently, only TCP-MD5 authentication is supported.",
         "oneOf": [
@@ -603,6 +683,153 @@
         "required": [
           "asn",
           "originate"
+        ]
+      },
+      "BgpPeerConfig": {
+        "description": "A BGP peer configuration for a port.",
+        "type": "object",
+        "properties": {
+          "addr": {
+            "description": "Address of the peer (numbered or unnumbered).",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RouterPeerType"
+              }
+            ]
+          },
+          "allowed_export": {
+            "description": "Define export policy for a peer.",
+            "default": {
+              "type": "no_filtering"
+            },
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ImportExportPolicy"
+              }
+            ]
+          },
+          "allowed_import": {
+            "description": "Define import policy for a peer.",
+            "default": {
+              "type": "no_filtering"
+            },
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ImportExportPolicy"
+              }
+            ]
+          },
+          "asn": {
+            "description": "The autonomous system number of the router the peer belongs to.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "communities": {
+            "description": "Include the provided communities in updates sent to the peer.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          "connect_retry": {
+            "nullable": true,
+            "description": "The interval in seconds between peer connection retry attempts.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "delay_open": {
+            "nullable": true,
+            "description": "How long to delay sending open messages to a peer. In seconds.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "enforce_first_as": {
+            "description": "Enforce that the first AS in paths received from this peer is the peer's AS.",
+            "default": false,
+            "type": "boolean"
+          },
+          "hold_time": {
+            "nullable": true,
+            "description": "How long to keep a session alive without a keepalive in seconds. Defaults to 6.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "idle_hold_time": {
+            "nullable": true,
+            "description": "How long to keep a peer in idle after a state machine reset in seconds.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "keepalive": {
+            "nullable": true,
+            "description": "The interval to send keepalive messages at.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "local_pref": {
+            "nullable": true,
+            "description": "Apply a local preference to routes received from this peer.",
+            "default": null,
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "md5_auth_key": {
+            "nullable": true,
+            "description": "Use the given key for TCP-MD5 authentication with the peer.",
+            "default": null,
+            "type": "string"
+          },
+          "min_ttl": {
+            "nullable": true,
+            "description": "Require messages from a peer have a minimum IP time to live field.",
+            "default": null,
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "multi_exit_discriminator": {
+            "nullable": true,
+            "description": "Apply the provided multi-exit discriminator (MED) updates sent to the peer.",
+            "default": null,
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "port": {
+            "description": "Switch port the peer is reachable on.",
+            "type": "string"
+          },
+          "remote_asn": {
+            "nullable": true,
+            "description": "Require that a peer has a specified ASN.",
+            "default": null,
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "vlan_id": {
+            "nullable": true,
+            "description": "Associate a VLAN ID with a BGP peer session.",
+            "default": null,
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "addr",
+          "asn",
+          "port"
         ]
       },
       "BootstrapSled": {
@@ -1232,6 +1459,47 @@
           "sp"
         ]
       },
+      "ImportExportPolicy": {
+        "description": "Define policy relating to the import and export of prefixes from a BGP peer.",
+        "oneOf": [
+          {
+            "description": "Do not perform any filtering.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "no_filtering"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "allow"
+                ]
+              },
+              "value": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/IpNet"
+                }
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
+        ]
+      },
       "Inventory": {
         "description": "Inventory across all service processors and switch transceivers.",
         "type": "object",
@@ -1418,6 +1686,58 @@
           "first",
           "last"
         ]
+      },
+      "L1PortConfig": {
+        "description": "Configuration for the physical layer of a port",
+        "type": "object",
+        "properties": {
+          "autoneg": {
+            "description": "Whether autonegotiation is enabled.",
+            "type": "boolean"
+          },
+          "fec": {
+            "nullable": true,
+            "description": "The forward error correction mode, if any.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LinkFec"
+              }
+            ]
+          },
+          "lldp": {
+            "nullable": true,
+            "description": "LLDP configuration for this port.",
+            "default": null,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LldpPortConfig"
+              }
+            ]
+          },
+          "speed": {
+            "description": "The port speed.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LinkSpeed"
+              }
+            ]
+          },
+          "tx_eq": {
+            "nullable": true,
+            "description": "Transmit equalization overrides for this port.",
+            "default": null,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TxEqConfig"
+              }
+            ]
+          }
+        },
+        "required": [
+          "autoneg",
+          "speed"
+        ],
+        "additionalProperties": false
       },
       "LaneMonitors": {
         "description": "The optical power monitors of one lane of a transceiver module.",
@@ -1648,50 +1968,113 @@
           "switch_slot"
         ]
       },
-      "ManualPortConfig": {
-        "description": "User-specified per-port configuration.\n\nThis contains all of the fields of a port configuration other than the port name, which is used as the map key.",
+      "MaxPathConfig": {
+        "type": "integer",
+        "format": "uint8",
+        "minimum": 1,
+        "maximum": 32
+      },
+      "MultirackJoinRequest": {
+        "description": "A request to join this rack into an existing multirack cluster.",
+        "type": "object",
+        "properties": {
+          "rack_network_config": {
+            "description": "The network configuration for this joining rack.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RackNetworkConfig"
+              }
+            ]
+          },
+          "trust_quorum_peers": {
+            "description": "The peers required to initialize this rack's trust quorum.\n\nUnlike RSS, this is not optional: the bootstrap agent discovers bootstrap addresses and maps them to these `BaseboardId`s.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BaseboardId"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "rack_network_config",
+          "trust_quorum_peers"
+        ]
+      },
+      "MultirackJoinUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::MultirackJoinUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
+      },
+      "Name": {
+        "title": "A name unique within the parent collection",
+        "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID, but they may contain a UUID. They can be at most 63 characters long.",
+        "type": "string",
+        "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z]([a-zA-Z0-9-]*[a-zA-Z0-9]+)?$",
+        "minLength": 1,
+        "maxLength": 63
+      },
+      "PortConfig": {
         "type": "object",
         "properties": {
           "addresses": {
-            "description": "Addresses configured on this port.",
+            "description": "This port's addresses and optional vlan IDs",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/UserSpecifiedUplinkAddressConfig"
+              "$ref": "#/components/schemas/UplinkAddressConfig"
             }
           },
+          "allow_ddm_traffic": {
+            "description": "Whether or not to allow DDM traffic on this port",
+            "default": false,
+            "type": "boolean"
+          },
           "autoneg": {
-            "description": "Whether autonegotiation is enabled.",
+            "description": "Whether or not to set autonegotiation",
+            "default": false,
             "type": "boolean"
           },
           "bgp_peers": {
-            "description": "BGP peers reachable on this port.",
-            "default": [],
+            "description": "BGP peers on this port",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/UserSpecifiedBgpPeerConfig"
+              "$ref": "#/components/schemas/BgpPeerConfig"
             }
           },
           "lldp": {
             "nullable": true,
-            "description": "LLDP configuration for this port.",
-            "default": null,
+            "description": "LLDP configuration for this port",
             "allOf": [
               {
                 "$ref": "#/components/schemas/LldpPortConfig"
               }
             ]
           },
+          "port": {
+            "description": "Name of the port this config applies to.",
+            "type": "string"
+          },
           "routes": {
-            "description": "Static routes for this port.",
+            "description": "The set of routes associated with this port.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/RouteConfig"
             }
           },
+          "switch": {
+            "description": "Switch the port belongs to.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SwitchSlot"
+              }
+            ]
+          },
           "tx_eq": {
             "nullable": true,
-            "description": "Transmit equalization overrides for this port.",
-            "default": null,
+            "description": "TX-EQ configuration for this port",
             "allOf": [
               {
                 "$ref": "#/components/schemas/TxEqConfig"
@@ -1700,7 +2083,7 @@
           },
           "uplink_port_fec": {
             "nullable": true,
-            "description": "The forward error correction mode, if any.",
+            "description": "Port forward error correction type.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/LinkFec"
@@ -1708,7 +2091,7 @@
             ]
           },
           "uplink_port_speed": {
-            "description": "The port speed.",
+            "description": "Port speed.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/LinkSpeed"
@@ -1718,25 +2101,12 @@
         },
         "required": [
           "addresses",
-          "autoneg",
+          "bgp_peers",
+          "port",
           "routes",
+          "switch",
           "uplink_port_speed"
-        ],
-        "additionalProperties": false
-      },
-      "MaxPathConfig": {
-        "type": "integer",
-        "format": "uint8",
-        "minimum": 1,
-        "maximum": 32
-      },
-      "Name": {
-        "title": "A name unique within the parent collection",
-        "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID, but they may contain a UUID. They can be at most 63 characters long.",
-        "type": "string",
-        "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z]([a-zA-Z0-9-]*[a-zA-Z0-9]+)?$",
-        "minLength": 1,
-        "maxLength": 63
+        ]
       },
       "PowerState": {
         "description": "See RFD 81.\n\nThis enum only lists power states the SP is able to control; higher power states are controlled by ignition.",
@@ -1766,7 +2136,7 @@
         "additionalProperties": false
       },
       "PutRssUserConfigInsensitive": {
-        "description": "The portion of the RSS configuration that can be posted in one shot.\n\nIt is provided by the operator uploading a TOML file. Sensitive values (certificates, the recovery password hash, and BGP authentication keys) are set separately.\n\nThis version updates the [`UserSpecifiedRackNetworkConfig`] to use an updated bgp peer config that allows specification of the source address that will be used for the TCP socket for the peering session for numbered peers.",
+        "description": "The portion of the RSS configuration that can be posted in one shot.\n\nIt is provided by the operator uploading a TOML file. Sensitive values (certificates, the recovery password hash, and BGP authentication keys) are set separately.",
         "type": "object",
         "properties": {
           "allowed_source_ips": {
@@ -1866,6 +2236,55 @@
         },
         "type": "string",
         "format": "uuid"
+      },
+      "RackNetworkConfig": {
+        "description": "Initial network configuration",
+        "type": "object",
+        "properties": {
+          "bfd": {
+            "description": "BFD configuration for connecting the rack to external networks",
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BfdPeerConfig"
+            }
+          },
+          "bgp": {
+            "description": "BGP configurations for connecting the rack to external networks",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BgpConfig"
+            }
+          },
+          "infra_ip_first": {
+            "description": "First ip address to be used for configuring network infrastructure",
+            "type": "string",
+            "format": "ip"
+          },
+          "infra_ip_last": {
+            "description": "Last ip address to be used for configuring network infrastructure",
+            "type": "string",
+            "format": "ip"
+          },
+          "ports": {
+            "description": "Uplinks for connecting the rack to external networks",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UplinkPorts"
+              }
+            ]
+          },
+          "rack_subnet": {
+            "$ref": "#/components/schemas/Ipv6Net"
+          }
+        },
+        "required": [
+          "bgp",
+          "infra_ip_first",
+          "infra_ip_last",
+          "ports",
+          "rack_subnet"
+        ]
       },
       "RackOperation": {
         "description": "A rack-level operation, in progress or most recently observed.",
@@ -2400,6 +2819,60 @@
         "minimum": 0,
         "maximum": 9000
       },
+      "RouterPeerType": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "router_lifetime": {
+                "description": "Router lifetime in seconds for unnumbered BGP peers.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RouterLifetimeConfig"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "unnumbered"
+                ]
+              }
+            },
+            "required": [
+              "router_lifetime",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "src_addr": {
+                "nullable": true,
+                "description": "Optional local IP address to bind when establishing outbound TCP connections to this peer. If `None`, the OS selects the source address.",
+                "default": null,
+                "type": "string",
+                "format": "ip"
+              },
+              "target_addr": {
+                "description": "Target IP address for numbered BGP peers.",
+                "type": "string",
+                "format": "ip"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "numbered"
+                ]
+              }
+            },
+            "required": [
+              "target_addr",
+              "type"
+            ]
+          }
+        ]
+      },
       "RssStepInfo": {
         "description": "Information about a step of a rack-level operation.",
         "type": "object",
@@ -2425,6 +2898,23 @@
           "description",
           "step",
           "total_steps"
+        ]
+      },
+      "RunMultirackJoinResponse": {
+        "description": "The response to a request to join a multirack cluster.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "The ID of the multirack join that was started.\n\nA query for the state of rack setup reports this same ID, in untyped form, as `RackOperation::id` with `kind` set to `multirack-join`.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MultirackJoinUuid"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id"
         ]
       },
       "RunRackSetupResponse": {
@@ -3996,6 +4486,149 @@
         "minItems": 1,
         "uniqueItems": true
       },
+      "UplinkAddress": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "addrconf"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "ip_net": {
+                "$ref": "#/components/schemas/IpNet"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "static"
+                ]
+              }
+            },
+            "required": [
+              "ip_net",
+              "type"
+            ]
+          }
+        ]
+      },
+      "UplinkAddressConfig": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "description": "The address to be used on the uplink.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UplinkAddress"
+              }
+            ]
+          },
+          "vlan_id": {
+            "nullable": true,
+            "description": "The VLAN id (if any) associated with this address.",
+            "default": null,
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "address"
+        ]
+      },
+      "UplinkPortConfig": {
+        "description": "User-specified per-port configuration.\n\nThis contains all of the fields of a port configuration other than the port name, which is used as the map key.",
+        "type": "object",
+        "properties": {
+          "addresses": {
+            "description": "Addresses configured on this port.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UserSpecifiedUplinkAddressConfig"
+            }
+          },
+          "autoneg": {
+            "description": "Whether autonegotiation is enabled.",
+            "type": "boolean"
+          },
+          "bgp_peers": {
+            "description": "BGP peers reachable on this port.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UserSpecifiedBgpPeerConfig"
+            }
+          },
+          "lldp": {
+            "nullable": true,
+            "description": "LLDP configuration for this port.",
+            "default": null,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LldpPortConfig"
+              }
+            ]
+          },
+          "routes": {
+            "description": "Static routes for this port.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouteConfig"
+            }
+          },
+          "tx_eq": {
+            "nullable": true,
+            "description": "Transmit equalization overrides for this port.",
+            "default": null,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TxEqConfig"
+              }
+            ]
+          },
+          "uplink_port_fec": {
+            "nullable": true,
+            "description": "The forward error correction mode, if any.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LinkFec"
+              }
+            ]
+          },
+          "uplink_port_speed": {
+            "description": "The port speed.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LinkSpeed"
+              }
+            ]
+          }
+        },
+        "required": [
+          "addresses",
+          "autoneg",
+          "routes",
+          "uplink_port_speed"
+        ],
+        "additionalProperties": false
+      },
+      "UplinkPorts": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/PortConfig"
+        },
+        "minItems": 1
+      },
       "UserSpecifiedBgpPeerConfig": {
         "description": "User-specified configuration for a BGP peer.\n\nThis is similar to the internal BGP peer configuration, except it does not carry the sensitive `md5_auth_key`; the operator provides the key separately, referenced by `auth_key_id`.",
         "type": "object",
@@ -4171,17 +4804,20 @@
         "description": "A user-specified port configuration.",
         "anyOf": [
           {
-            "description": "A manually-configured port.",
+            "description": "A front port intended for use as an uplink",
             "allOf": [
               {
-                "$ref": "#/components/schemas/ManualPortConfig"
+                "$ref": "#/components/schemas/UplinkPortConfig"
               }
             ]
           },
           {
-            "description": "A port configured automatically via DDM.",
-            "type": "object",
-            "additionalProperties": false
+            "description": "A front port running DDM for multirack",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/L1PortConfig"
+              }
+            ]
           }
         ]
       },

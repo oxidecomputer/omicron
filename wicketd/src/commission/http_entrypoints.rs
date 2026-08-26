@@ -20,8 +20,9 @@ use wicketd_commission_types::inventory::{
 };
 use wicketd_commission_types::rack_setup::{
     BgpAuthKey, BgpAuthKeyPath, CertificatePem, CertificateUploadResponse,
-    PrivateKeyPem, PutRecoveryUserPasswordHash, PutRssUserConfigInsensitive,
-    RackSetupStatus, RunRackSetupResponse, SetBgpAuthKeyStatus,
+    MultirackJoinRequest, PrivateKeyPem, PutRecoveryUserPasswordHash,
+    PutRssUserConfigInsensitive, RackSetupStatus, RunMultirackJoinResponse,
+    RunRackSetupResponse, SetBgpAuthKeyStatus,
 };
 use wicketd_commission_types::update::{
     ClearUpdateStateParams, ClearUpdateStateResponse,
@@ -459,5 +460,33 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
             .into_inner();
 
         Ok(HttpResponseOk(RunRackSetupResponse { id }))
+    }
+
+    async fn post_run_multirack_join(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<MultirackJoinRequest>,
+    ) -> Result<HttpResponseOk<RunMultirackJoinResponse>, HttpError> {
+        let ctx = rqctx.context();
+
+        let client = ba_lockstep_client(ctx);
+        let MultirackJoinRequest { trust_quorum_peers, rack_network_config } =
+            body.into_inner();
+
+        slog::info!(
+            ctx.log,
+            "Sending multirack join request to {}",
+            client.baseurl()
+        );
+
+        let id = client
+            .multirack_join(&bootstrap_agent_lockstep_types::MultirackJoinRequest {
+                trust_quorum_peers,
+                rack_network_config,
+            })
+            .await
+            .map_err(|err| ba_lockstep_error_to_http(err, "multirack join"))?
+            .into_inner();
+
+        Ok(HttpResponseOk(RunMultirackJoinResponse { id }))
     }
 }

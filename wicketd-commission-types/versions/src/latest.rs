@@ -93,11 +93,26 @@ pub mod rack_setup {
     pub use crate::v2::rack_setup::ServiceIpPoolConfig;
     pub use crate::v2::rack_setup::ServiceIpPoolError;
 
-    pub use crate::v3::rack_setup::ManualPortConfig;
-    pub use crate::v3::rack_setup::PutRssUserConfigInsensitive;
     pub use crate::v3::rack_setup::UserSpecifiedBgpPeerConfig;
-    pub use crate::v3::rack_setup::UserSpecifiedPortConfig;
-    pub use crate::v3::rack_setup::UserSpecifiedRackNetworkConfig;
+
+    pub use crate::v4::rack_setup::BfdMode;
+    pub use crate::v4::rack_setup::BfdPeerConfig;
+    pub use crate::v4::rack_setup::BgpPeerConfig;
+    pub use crate::v4::rack_setup::ImportExportPolicy;
+    pub use crate::v4::rack_setup::L1PortConfig;
+    pub use crate::v4::rack_setup::MultirackJoinRequest;
+    pub use crate::v4::rack_setup::NumberedRouter;
+    pub use crate::v4::rack_setup::PortConfig;
+    pub use crate::v4::rack_setup::PutRssUserConfigInsensitive;
+    pub use crate::v4::rack_setup::RackNetworkConfig;
+    pub use crate::v4::rack_setup::RouterPeerType;
+    pub use crate::v4::rack_setup::RunMultirackJoinResponse;
+    pub use crate::v4::rack_setup::UnnumberedRouter;
+    pub use crate::v4::rack_setup::UplinkAddressConfig;
+    pub use crate::v4::rack_setup::UplinkPortConfig;
+    pub use crate::v4::rack_setup::UplinkPorts;
+    pub use crate::v4::rack_setup::UserSpecifiedPortConfig;
+    pub use crate::v4::rack_setup::UserSpecifiedRackNetworkConfig;
 }
 
 pub mod update {

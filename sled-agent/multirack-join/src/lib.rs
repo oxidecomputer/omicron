@@ -25,9 +25,12 @@ use omicron_ledger::{self as ledger};
 use omicron_uuid_kinds::RackUuid;
 use sled_agent_bootstrap_common::sprockets::SprocketsClient;
 use sled_agent_bootstrap_common::{RssContext, RunRssError};
+use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
+use sled_agent_types::rack_init::rack_init_bootstore_generation;
 use sled_agent_types::sled::{
     StartSledAgentRequest, StartSledAgentRequestBody,
 };
+use sled_agent_types::system_networking::SystemNetworkingConfig;
 use sled_hardware_types::BaseboardId;
 use slog::{Logger, error, info};
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
@@ -82,6 +85,9 @@ pub enum MultirackJoinServiceError {
 
     #[error("Failed to access ledger")]
     Ledger(#[from] ledger::Error),
+
+    #[error("Bootstore error")]
+    Bootstore(#[from] bootstore::schemes::v0::NodeRequestError),
 }
 
 impl From<RunRssError> for MultirackJoinServiceError {
@@ -223,12 +229,46 @@ impl MultirackJoinServiceTask {
 
         self.init_trust_quorum(rack_id).await?;
 
+        // We must initialize the bootstore before starting sled-agents or
+        // sled-agents will block waiting indefinitely.
+        self.configure_networking().await?;
+
         self.start_sled_agents(rack_id).await?;
 
-        // TODO:
-        //   Configure networking
-        //
-        // https://github.com/oxidecomputer/omicron/issues/10637
+        // We're done
+        self.ctx.write_rss_completed_ledger(&self.log).await?;
+
+        Ok(())
+    }
+
+    /// Publish this rack's network configuration to the bootstore.
+    async fn configure_networking(
+        &mut self,
+    ) -> Result<(), MultirackJoinServiceError> {
+        let rack_network_config =
+            self.input_rx.borrow_and_update().rack_network_config.clone();
+
+        self.output_tx.send_modify(|state| {
+            *state = MultirackJoinServiceState::ConfigureNetworking
+        });
+
+        // Only RSS places services, so a joining rack has no service zone NAT
+        // entries to publish and stays at the initial generation.
+        let config = SystemNetworkingConfig {
+            rack_network_config,
+            blueprint_external_networking_config: None,
+        };
+
+        info!(self.log, "Writing initial network configuration to bootstore");
+        self.ctx
+            .bootstore_node_handle
+            .update_network_config(
+                EarlyNetworkConfigEnvelope::from(&config)
+                    .serialize_to_bootstore_with_generation(
+                        rack_init_bootstore_generation::RSS_INITIAL,
+                    ),
+            )
+            .await?;
 
         Ok(())
     }

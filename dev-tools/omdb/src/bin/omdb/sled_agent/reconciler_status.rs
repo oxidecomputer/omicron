@@ -14,6 +14,7 @@ use bootstrap_agent_lockstep_types::scrimlet_reconcilers::ReconcilerRunningStatu
 use bootstrap_agent_lockstep_types::scrimlet_reconcilers::ReconcilerStatus;
 use bootstrap_agent_lockstep_types::scrimlet_reconcilers::ReconciliationCompletedStatus;
 use bootstrap_agent_lockstep_types::scrimlet_reconcilers::ScrimletReconcilersStatus;
+use bootstrap_agent_lockstep_types::scrimlet_reconcilers::ddmd::DdmdReconcilerStatus;
 use bootstrap_agent_lockstep_types::scrimlet_reconcilers::dpd::DpdNatReconcilerStatus;
 use bootstrap_agent_lockstep_types::scrimlet_reconcilers::dpd::DpdNatReconcilerStatusNatEntry;
 use bootstrap_agent_lockstep_types::scrimlet_reconcilers::dpd::DpdNatReconcilerStatusNatEntryFailure;
@@ -129,6 +130,7 @@ impl fmt::Display for ScrimletReconcilersStatusDisplay<'_> {
                 lldpd_reconciler,
                 mgd_reconciler,
                 uplinkd_reconciler,
+                ddmd_reconciler,
             } => {
                 let reconcilers = [
                     (
@@ -139,6 +141,7 @@ impl fmt::Display for ScrimletReconcilersStatusDisplay<'_> {
                     ("mgd", &ReconcilerStatusDisplay(&mgd_reconciler)),
                     ("lldpd", &ReconcilerStatusDisplay(&lldpd_reconciler)),
                     ("uplinkd", &ReconcilerStatusDisplay(&uplinkd_reconciler)),
+                    ("ddmd", &ReconcilerStatusDisplay(&ddmd_reconciler)),
                 ];
                 write_lines(f, reconcilers, |f, (name, displayable)| {
                     writeln!(f, "{name} reconciler:")?;
@@ -355,6 +358,48 @@ impl fmt::Display for UplinkdReconcilerStatusDisplay<'_> {
                         |f, (port, values)| {
                             write!(f, "* {port}: {}", values.join(", "))
                         },
+                    )?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+impl DisplayableStatus for DdmdReconcilerStatus {
+    type DisplayAdapter<'a>
+        = DdmdReconcilerStatusDisplay<'a>
+    where
+        Self: 'a;
+
+    /// Get a `fmt::Display`-able version of this status (e.g., for `omdb`).
+    fn display(&self) -> DdmdReconcilerStatusDisplay<'_> {
+        DdmdReconcilerStatusDisplay(self)
+    }
+}
+
+struct DdmdReconcilerStatusDisplay<'a>(&'a DdmdReconcilerStatus);
+
+impl fmt::Display for DdmdReconcilerStatusDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.0 {
+            DdmdReconcilerStatus::Failed(reason) => {
+                write!(f, "reconciliation failed: {reason}")
+            }
+            DdmdReconcilerStatus::Reconciled { interfaces } => {
+                let plural = if interfaces.len() == 1 { "" } else { "s" };
+                write!(
+                    f,
+                    "successfully reconciled {} interface{plural}",
+                    interfaces.len()
+                )?;
+
+                if !interfaces.is_empty() {
+                    writeln!(f, ":")?;
+                    write_lines(
+                        &mut IndentWriter::new(INDENT, f),
+                        interfaces,
+                        |f, interface| write!(f, "* {interface}"),
                     )?;
                 }
                 Ok(())

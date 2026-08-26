@@ -30,6 +30,7 @@ use slog::info;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::time::Duration;
 
 const UPLINK_SERVICE_NAME: &str = "oxide/uplink";
@@ -51,6 +52,7 @@ impl Reconciler for UplinkdReconciler {
     fn new(
         mode: ScrimletReconcilersMode,
         switch_slot: ThisSledSwitchSlot,
+        _base_ddm_interfaces: BTreeSet<String>,
         _parent_log: &Logger,
     ) -> Self {
         let is_running_in_test_mode = match mode {

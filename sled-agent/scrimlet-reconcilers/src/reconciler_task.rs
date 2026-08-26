@@ -36,6 +36,7 @@ use sled_agent_types::system_networking::SystemNetworkingConfig;
 use slog::Logger;
 use slog::error;
 use slog::info;
+use std::collections::BTreeSet;
 use std::convert::Infallible;
 use std::time::Duration;
 use std::time::Instant;
@@ -55,10 +56,12 @@ pub(crate) trait Reconciler: Send + 'static {
     ///
     /// Typically builds a client for the relevant service based on `mode` and
     /// record `switch_slot` for use inside future calls to
-    /// `do_reconciliation()`.
+    /// `do_reconciliation()`. Only `DdmdReconciler` uses
+    /// `base_ddm_interfaces`.
     fn new(
         mode: ScrimletReconcilersMode,
         switch_slot: ThisSledSwitchSlot,
+        base_ddm_interfaces: BTreeSet<String>,
         parent_log: &Logger,
     ) -> Self;
 
@@ -91,15 +94,19 @@ impl<T: Reconciler> ReconcilerTaskHandle<T> {
         system_networking_config_rx: watch::Receiver<SystemNetworkingConfig>,
         mode: ScrimletReconcilersMode,
         this_sled_switch_slot: ThisSledSwitchSlot,
+        base_ddm_interfaces: &BTreeSet<String>,
         parent_log: &Logger,
     ) -> Self {
+        let base_ddm_interfaces = base_ddm_interfaces.clone();
         Self::spawn_impl(
             scrimlet_status_rx,
             system_networking_config_rx,
             mode,
             this_sled_switch_slot,
             parent_log,
-            T::new,
+            move |mode, switch_slot, log| {
+                T::new(mode, switch_slot, base_ddm_interfaces, log)
+            },
         )
     }
 

@@ -780,6 +780,11 @@ impl SledAgent {
                 mode: ScrimletReconcilersMode::SwitchZone(
                     this_sled_switch_zone_ip,
                 ),
+                base_ddm_interfaces:
+                    crate::services::switch_zone_ddm_base_interfaces(
+                        &config.sidecar_revision,
+                        &config.switch_zone_maghemite_links,
+                    ),
             });
 
         // Start reconciling against our ledgered sled config.
