@@ -4,7 +4,7 @@
 
 //! When the higher level disks backed by local storage are deleted, this
 //! background task will delete any allocated local storage, and will delete
-//! local storage allocation records when those resources have been cleand up.
+//! local storage allocation records when those resources have been cleaned up.
 
 use crate::app::background::BackgroundTask;
 use futures::FutureExt;
