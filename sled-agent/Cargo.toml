@@ -154,12 +154,14 @@ http.workspace = true
 hyper.workspace = true
 omicron-test-utils.workspace = true
 progenitor.workspace = true
+proptest.workspace = true
 pretty_assertions.workspace = true
 regress.workspace = true
 reqwest = { workspace = true, features = ["blocking"] }
 subprocess.workspace = true
 slog-async.workspace = true
 slog-term.workspace = true
+test-strategy.workspace = true
 tokio-stream.workspace = true
 tokio-util.workspace = true
 zfs-test-harness.workspace = true

@@ -42,7 +42,7 @@ use self::jobs::Jobs;
 const QUEUE_SIZE: usize = 256;
 
 /// Reasons we may reject VMM registration requests.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VmmRegistrationDisallowedReason {
     /// We haven't yet loaded our sled config, so we don't know whether we're
     /// available for new VMMs or are still in the evacuating state from an

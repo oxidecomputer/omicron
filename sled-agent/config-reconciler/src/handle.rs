@@ -117,6 +117,7 @@ impl ConfigReconcilerSpawnToken {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub enum CurrentUpdateDisposition {
     ConfigNotAvailable,
     Known(OmicronSledUpdateDisposition),
