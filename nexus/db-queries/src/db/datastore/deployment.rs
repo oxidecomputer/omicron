@@ -1304,7 +1304,7 @@ impl DataStore {
                 state: s.sled_state.into(),
                 update_disposition,
                 subnet,
-                sled_agent_generation: *s.sled_agent_generation,
+                sled_agent_generation: s.sled_agent_generation.into(),
                 last_allocated_ip_subnet_offset,
                 disks: IdOrdMap::new(),
                 datasets: IdOrdMap::new(),
