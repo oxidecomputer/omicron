@@ -1059,7 +1059,6 @@ impl InstanceManagerRunner {
     async fn use_only_currently_managed_zpools(&mut self) {
         let current_zpools =
             self.currently_managed_zpools_rx.current_and_update();
-        let mut to_remove = vec![];
         for (id, instance) in self.jobs.iter() {
             // If we can read the filesystem pool, consider it. Otherwise, move
             // on, to prevent blocking the cleanup of other instances.
@@ -1074,13 +1073,7 @@ impl InstanceManagerRunner {
                 continue;
             };
             if !current_zpools.contains(&filesystem_pool) {
-                to_remove.push(*id);
-            }
-        }
-
-        for id in to_remove {
-            info!(self.log, "use_only_these_disks: Removing instance"; "instance_id" => ?id);
-            if let Some(instance) = self.jobs.remove(&id) {
+                info!(self.log, "use_only_these_disks: Removing instance"; "instance_id" => ?id);
                 let (tx, rx) = oneshot::channel();
                 if let Err(e) = instance.terminate(tx, VmmStateOwner::Runner) {
                     warn!(self.log, "use_only_these_disks: Failed to request instance removal"; InlineErrorChain::new(&e));
