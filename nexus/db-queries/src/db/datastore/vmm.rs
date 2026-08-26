@@ -36,6 +36,7 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PropolisUuid;
+use omicron_uuid_kinds::SledUuid;
 use sled_agent_types::instance::MigrationRuntimeState;
 use std::net::SocketAddr;
 use uuid::Uuid;
@@ -150,6 +151,40 @@ impl DataStore {
                     ),
                 )
             })?;
+
+        Ok(updated)
+    }
+
+    /// Marks VMMs on the given sled as needing to be stopped in order to update
+    /// the sled.
+    ///
+    /// VMMs that are already stopping/stopped, migrating or in a terminal state
+    /// do not need to be stopped, so they are left untouched.
+    ///
+    /// `update_disposition_generation` is the sled's `update_disposition`
+    /// generation at the time the VMMs were marked.
+    pub async fn vmm_bulk_mark_stop_for_update_by_sled(
+        &self,
+        opctx: &OpContext,
+        sled_id: SledUuid,
+        update_disposition_generation: model::Generation,
+    ) -> UpdateResult<usize> {
+        let updated = diesel::update(dsl::vmm)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::sled_id.eq(model::to_db_typed_uuid(sled_id)))
+            .filter(dsl::state.eq_any([
+                DbVmmState::Creating,
+                DbVmmState::Starting,
+                DbVmmState::Running,
+                DbVmmState::Rebooting,
+            ]))
+            .set(
+                dsl::stop_for_update_disposition_generation
+                    .eq(update_disposition_generation),
+            )
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         Ok(updated)
     }
@@ -492,11 +527,13 @@ mod tests {
     use crate::db::model::Migration;
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_db_model::VmmCpuPlatform;
+    use nexus_db_model::VmmFailureReason;
     use nexus_types::instance::VmmState;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::InstanceUuid;
     use omicron_uuid_kinds::SledUuid;
     use sled_agent_types::instance::MigrationState;
+    use std::collections::HashMap;
 
     #[tokio::test]
     async fn test_vmm_and_migration_update_runtime() {
@@ -758,6 +795,211 @@ mod tests {
         assert_eq!(
             db_migration2.target_gen,
             Generation(Generation::new().0.next()),
+        );
+
+        // Clean up.
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_vmm_bulk_mark_stop_for_update_by_sled() {
+        // Setup
+        let logctx =
+            dev::test_setup_log("test_vmm_bulk_mark_stop_for_update_by_sled");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // The states from which a VMM can still be stopped for an update. Only
+        // VMMs in these states should be marked by
+        // `vmm_bulk_mark_stop_for_update_by_sled`.
+        let is_stoppable = |state: DbVmmState| {
+            matches!(
+                state,
+                DbVmmState::Creating
+                    | DbVmmState::Starting
+                    | DbVmmState::Running
+                    | DbVmmState::Rebooting
+            )
+        };
+
+        // Insert a VMM in every possible state onto each of two sleds. All of
+        // them start out unmarked (i.e. `stop_for_update_disposition_generation`
+        // is NULL).
+        let sled_a = SledUuid::new_v4();
+        let sled_b = SledUuid::new_v4();
+        let mut vmms = Vec::new();
+        for sled_id in [sled_a, sled_b] {
+            for &state in DbVmmState::ALL_STATES {
+                // The `failure_reason_iff_failed` constraint requires that a
+                // `Failed` VMM has a failure reason and that no other VMM does.
+                let failure_reason = (state == DbVmmState::Failed)
+                    .then_some(VmmFailureReason::FromSledAgent);
+                let vmm = datastore
+                    .vmm_insert(
+                        &opctx,
+                        Vmm {
+                            id: Uuid::new_v4(),
+                            time_created: Utc::now(),
+                            time_deleted: None,
+                            instance_id: Uuid::new_v4(),
+                            sled_id: sled_id.into(),
+                            propolis_ip: "10.1.9.32".parse().unwrap(),
+                            propolis_port: 420.into(),
+                            cpu_platform: VmmCpuPlatform::SledDefault,
+                            time_state_updated: Utc::now(),
+                            generation: Generation::new(),
+                            state,
+                            failure_reason,
+                            stop_for_update_disposition_generation: None,
+                        },
+                    )
+                    .await
+                    .expect("VMM should be inserted successfully");
+                vmms.push(vmm);
+            }
+        }
+        let stoppable_per_sled =
+            vmms.iter().filter(|v| is_stoppable(v.state)).count() / 2;
+        assert_eq!(stoppable_per_sled, 4);
+
+        // Fetches every VMM's current row, keyed by VMM ID.
+        async fn fetch_all(
+            datastore: &DataStore,
+            opctx: &OpContext,
+            vmms: &[Vmm],
+        ) -> HashMap<Uuid, Vmm> {
+            let mut actual = HashMap::new();
+            for vmm in vmms {
+                let fetched = datastore
+                    .vmm_fetch(opctx, &PropolisUuid::from_untyped_uuid(vmm.id))
+                    .await
+                    .expect("VMM should be fetched successfully");
+                actual.insert(vmm.id, fetched);
+            }
+            actual
+        }
+
+        // Asserts that every fetched VMM row matches the expected row. The
+        // expected rows are the inserted rows with only their
+        // `stop_for_update_disposition_generation` field advanced as marks are
+        // applied, so any other difference means the bulk mark touched a column
+        // it should not have.
+        fn assert_rows(
+            actual: &HashMap<Uuid, Vmm>,
+            expected: &HashMap<Uuid, Vmm>,
+        ) {
+            assert_eq!(actual.len(), expected.len());
+            for (id, want) in expected {
+                assert_eq!(
+                    actual[id],
+                    *want,
+                    "VMM {} on sled {} in state {:?} changed unexpectedly",
+                    id,
+                    want.sled_id(),
+                    want.state,
+                );
+            }
+        }
+
+        // Initially every VMM is unmarked, so the expected rows are exactly the
+        // rows we inserted.
+        let gen1 = Generation::new();
+        let gen2 = Generation(Generation::new().0.next());
+        let mut expected: HashMap<Uuid, Vmm> =
+            vmms.iter().map(|vmm| (vmm.id, vmm.clone())).collect();
+
+        let actual = fetch_all(datastore, opctx, &vmms).await;
+        assert_rows(&actual, &expected);
+
+        // Mark sled A's VMMs at the first update disposition generation. Only
+        // its stoppable VMMs should be marked.
+        let marked = datastore
+            .vmm_bulk_mark_stop_for_update_by_sled(&opctx, sled_a, gen1)
+            .await
+            .expect("bulk mark for sled A should succeed");
+        assert_eq!(
+            marked, 4,
+            "only the 4 stoppable VMMs on sled A should be marked"
+        );
+        for vmm in expected.values_mut() {
+            if vmm.sled_id() == sled_a && is_stoppable(vmm.state) {
+                vmm.stop_for_update_disposition_generation = Some(gen1);
+            }
+        }
+
+        // The marked rows carry `gen1`; everything else is untouched. That
+        // leaves 16 unmarked rows (6 unstoppable on sled A, plus all 10 on
+        // sled B).
+        let actual = fetch_all(datastore, opctx, &vmms).await;
+        assert_rows(&actual, &expected);
+        assert_eq!(
+            actual
+                .values()
+                .filter(|v| v.stop_for_update_disposition_generation.is_none())
+                .count(),
+            16,
+            "all rows other than sled A's stoppable VMMs remain unmarked"
+        );
+
+        // Running the same command again is idempotent: the same 4 rows are
+        // rewritten with the same generation, so the observable state does not
+        // change.
+        let marked_again = datastore
+            .vmm_bulk_mark_stop_for_update_by_sled(&opctx, sled_a, gen1)
+            .await
+            .expect("re-running the bulk mark should succeed");
+        assert_eq!(marked_again, 4);
+        let actual = fetch_all(datastore, opctx, &vmms).await;
+        assert_rows(&actual, &expected);
+        assert_eq!(
+            actual
+                .values()
+                .filter(|v| v.stop_for_update_disposition_generation.is_none())
+                .count(),
+            16
+        );
+
+        // Now mark sled B's VMMs at a later generation. Only sled B's stoppable
+        // VMMs change; sled A's marked VMMs keep `gen1` and the unstoppable VMMs
+        // remain unmarked.
+        let marked_b = datastore
+            .vmm_bulk_mark_stop_for_update_by_sled(&opctx, sled_b, gen2)
+            .await
+            .expect("bulk mark for sled B should succeed");
+        assert_eq!(
+            marked_b, 4,
+            "only the 4 stoppable VMMs on sled B should be marked"
+        );
+        for vmm in expected.values_mut() {
+            if vmm.sled_id() == sled_b && is_stoppable(vmm.state) {
+                vmm.stop_for_update_disposition_generation = Some(gen2);
+            }
+        }
+
+        let actual = fetch_all(datastore, opctx, &vmms).await;
+        assert_rows(&actual, &expected);
+        let gen1_count = actual
+            .values()
+            .filter(|v| v.stop_for_update_disposition_generation == Some(gen1))
+            .count();
+        let gen2_count = actual
+            .values()
+            .filter(|v| v.stop_for_update_disposition_generation == Some(gen2))
+            .count();
+        let null_count = actual
+            .values()
+            .filter(|v| v.stop_for_update_disposition_generation.is_none())
+            .count();
+        assert_eq!(gen1_count, 4, "sled A's marked VMMs are unchanged");
+        assert_eq!(gen2_count, 4, "sled B's stoppable VMMs are newly marked");
+        assert_eq!(null_count, 12, "the unstoppable VMMs remain unmarked");
+        // Everything the sled B call did not touch is unchanged: sled A's 4
+        // marked rows plus the 12 still-unmarked rows.
+        assert_eq!(
+            gen1_count + null_count,
+            16,
+            "rows untouched by the sled B call are unchanged"
         );
 
         // Clean up.
