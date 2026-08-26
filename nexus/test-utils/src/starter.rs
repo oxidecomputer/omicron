@@ -947,16 +947,32 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         .await
         .expect("Failed to start sled agent");
 
-        // Add a DNS entry for the TUF Repo Depot on this simulated sled agent.
-        let SocketAddr::V6(server_addr_v6) = sled_agent.repo_depot_address
+        // Add DNS entries for the simulated sled agent.  Scrimlets also
+        // register SwitchSledAgent (which lets sync_switch_configuration find
+        // the sled-agent at its actual port).  Since host_sled() may only be
+        // called once per sled, both services share the same registration.
+        let SocketAddr::V6(repo_depot_addr_v6) = sled_agent.repo_depot_address
         else {
-            panic!("expected sim sled agent to be listening on IPv6");
+            panic!("expected repo depot to be listening on IPv6");
         };
-        self.rack_init_builder.add_gz_service_to_dns(
-            sled_id,
-            server_addr_v6,
-            ServiceName::RepoDepot,
-        );
+        if is_scrimlet {
+            let SocketAddr::V6(sled_agent_addr_v6) =
+                sled_agent.http_server.local_addr()
+            else {
+                panic!("expected sim sled agent to be listening on IPv6");
+            };
+            self.rack_init_builder.add_scrimlet_gz_services_to_dns(
+                sled_id,
+                sled_agent_addr_v6,
+                repo_depot_addr_v6.port(),
+            );
+        } else {
+            self.rack_init_builder.add_gz_service_to_dns(
+                sled_id,
+                repo_depot_addr_v6,
+                ServiceName::RepoDepot,
+            );
+        }
 
         self.sled_agents
             .push(ControlPlaneTestContextSledAgent { server: sled_agent });
@@ -1536,6 +1552,35 @@ impl RackInitRequestBuilder {
         self.internal_dns_config
             .service_backend_sled(service_name, &sled, address.port())
             .expect("Failed to set up DNS for GZ service");
+    }
+
+    /// For a scrimlet, register both `SwitchSledAgent` and `RepoDepot` in DNS
+    /// using a single `host_sled()` call.  `SwitchSledAgent` lets
+    /// `sync_switch_configuration` find the sled-agent at its actual port.
+    fn add_scrimlet_gz_services_to_dns(
+        &mut self,
+        sled_id: SledUuid,
+        sled_agent_addr: SocketAddrV6,
+        repo_depot_port: u16,
+    ) {
+        let sled = self
+            .internal_dns_config
+            .host_sled(sled_id, *sled_agent_addr.ip())
+            .expect("Failed to register scrimlet sled in DNS");
+        self.internal_dns_config
+            .service_backend_sled(
+                ServiceName::SwitchSledAgent,
+                &sled,
+                sled_agent_addr.port(),
+            )
+            .expect("Failed to set up SwitchSledAgent DNS for scrimlet");
+        self.internal_dns_config
+            .service_backend_sled(
+                ServiceName::RepoDepot,
+                &sled,
+                repo_depot_port,
+            )
+            .expect("Failed to set up RepoDepot DNS for scrimlet");
     }
 
     // Special handling of Nexus, which has multiple SRV records for its single
