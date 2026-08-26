@@ -169,7 +169,7 @@ impl BackgroundTask for LocalStorageDeleter {
                 Err(e) => {
                     let s = format!(
                         "error calling \
-                            unencrypted_allocations_for_deleted_disks: {e}"
+                            deleted_disks_with_undeleted_local_storage: {e}"
                     );
 
                     error!(log, "{s}");
