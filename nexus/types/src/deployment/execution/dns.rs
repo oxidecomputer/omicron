@@ -150,6 +150,16 @@ pub fn blueprint_internal_dns_config(
 
     let scrimlets = sleds_by_id.iter().filter(|sled| sled.is_scrimlet());
     for scrimlet in scrimlets {
+        let address = scrimlet.sled_agent_address();
+        let switch_sled = dns_builder
+            .host_sled(scrimlet.id(), *address.ip())?;
+
+        dns_builder.service_backend_sled(
+            ServiceName::SwitchSledAgent,
+            &switch_sled,
+            address.port(),
+        )?;
+
         let sled_subnet = scrimlet.subnet();
         let switch_zone_ip =
             overrides.switch_zone_ip(scrimlet.id(), sled_subnet);

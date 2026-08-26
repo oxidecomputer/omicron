@@ -10,6 +10,7 @@ use crate::app::{
 };
 
 use internal_dns_resolver::Resolver;
+use internal_dns_types::names::ServiceName;
 use nexus_db_model::{BootstoreConfig, NETWORK_KEY};
 use tokio::sync::watch;
 
@@ -33,6 +34,7 @@ use sled_agent_types::system_networking::BlueprintExternalNetworkingConfig;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use sled_agent_types::system_networking::WriteNetworkConfigRequest;
 use slog_error_chain::InlineErrorChain;
+use std::net::SocketAddrV6;
 use std::{
     collections::{HashMap, HashSet},
     hash::Hash,
@@ -104,9 +106,26 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     },
                 };
 
+                // Lookup the SocketAddrs for all switch sled-agents
+                let scrimlet_addrs = match self.resolver
+                    .lookup_all_socket_v6(ServiceName::SwitchSledAgent)
+                    .await
+                {
+                    Ok(addrs) => addrs,
+                    Err(e) => {
+                        error!(log, "failed to resolve addresses for switch sled agents"; "error" => %e);
+                        continue;
+                    }
+                };
+
+                if scrimlet_addrs.is_empty() {
+                        error!(log, "no available sled agents for switches");
+                        continue;
+                }
+
                 // TODO https://github.com/oxidecomputer/omicron/issues/5201
                 // build sled agent clients for sleds that are connected to the switches
-                let scrimlet_sled_agent_clients = build_sled_agent_clients(&mappings, &log);
+                let scrimlet_sled_agent_clients = build_sled_agent_clients(scrimlet_addrs, &log);
 
                 //
                 // calculate and apply bootstore changes
@@ -338,12 +357,12 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     // push the updates to both scrimlets
                     // if both scrimlets are down, bootstore updates aren't happening anyway
                     let mut one_succeeded = false;
-                    for (switch_slot, client) in &scrimlet_sled_agent_clients {
+                    for client in &scrimlet_sled_agent_clients {
                         if let Err(e) = client.write_network_bootstore_config(&write_request).await {
                             error!(
                                 log,
                                 "error updating bootstore";
-                                "switch_slot" => ?switch_slot,
+                                "client" => ?client,
                                 "request" => ?write_request,
                                 "error" => %e,
                             )
@@ -408,23 +427,15 @@ where
 }
 
 fn build_sled_agent_clients(
-    mappings: &HashMap<SwitchSlot, std::net::Ipv6Addr>,
+    sled_agent_addrs: Vec<SocketAddrV6>,
     log: &slog::Logger,
-) -> HashMap<SwitchSlot, sled_agent_client::Client> {
-    let sled_agent_clients: HashMap<SwitchSlot, sled_agent_client::Client> =
-        mappings
-            .iter()
-            .map(|(switch_slot, addr)| {
-                // build sled agent address from switch zone address
-                let addr = get_sled_address(Ipv6Subnet::new(*addr));
-                let client = sled_agent_client::Client::new(
-                    &format!("http://{}", addr),
-                    log.clone(),
-                );
-                (*switch_slot, client)
-            })
-            .collect();
-    sled_agent_clients
+) -> Vec<sled_agent_client::Client> {
+    sled_agent_addrs.iter().map(|addr| {
+        sled_agent_client::Client::new(
+            &format!("http://{addr}"),
+            log.clone(),
+        )
+    }).collect()
 }
 
 // Helper to decide whether we should update the replicated bootstore.
