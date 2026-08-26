@@ -36,9 +36,9 @@ pub(super) enum CanEnsureVmmResult<'a, T> {
 // `Instance`s; prod code always uses the default type.
 pub(super) struct Jobs<T = Instance> {
     // Invariant: `jobs.len()` is always equal to
-    // `status_tx.num_registered_vmms`. This is enforced by `remove()` and
-    // `insert()` below, which always update `status_tx.num_registered_vmms`
-    // when modifying the contents of `jobs`.
+    // `status_tx.num_registered_vmms`. This is enforced by `Jobs::remove()` and
+    // `RegisterNewVmm::insert()` below, which always update
+    // `status_tx.num_registered_vmms` when modifying the contents of `jobs`.
     jobs: BTreeMap<PropolisUuid, T>,
     status_tx: watch::Sender<InstanceManagerJobsStatus>,
 }
@@ -141,7 +141,7 @@ mod tests {
     use super::*;
     use test_strategy::proptest;
 
-    // Our proptests us `u8` as the propolis ID type (allowing proptest to
+    // Our proptests use `u8` as the propolis ID type (allowing proptest to
     // easily generate some duplicate IDs) and `usize` as the instance type.
     fn fake_id_to_propolis_uuid(id: u8) -> PropolisUuid {
         PropolisUuid::from_u128(u128::from(id))
@@ -201,7 +201,6 @@ mod tests {
                     self.disposition = disposition;
                 }
                 Op::TryEnsure { id, instance, insert_if_allowed } => {
-                    // only actually insert if we can this op wants us to
                     if insert_if_allowed
                         && self.expected_can_ensure_result(&id) == Ok(None)
                     {

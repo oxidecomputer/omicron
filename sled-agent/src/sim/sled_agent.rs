@@ -227,6 +227,27 @@ impl SledAgent {
             ));
         };
 
+        // Respond with a fake 503 failure if we're evacuating. This is
+        // less-than-fully-faithful to real sled-agent in at least two ways:
+        //
+        // 1. Real sled-agent will also return a 503 if it has no config. We
+        //    don't do that here because sim-sled-agent never gets a config if
+        //    it isn't explicitly given one.
+        // 2. Real sled-agent includes an error code indicating the reason for
+        //    the 503.
+        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
+            if let Some(config) = self.omicron_sled_config() {
+                match config.update_disposition {
+                    OmicronSledUpdateDisposition::Available => (),
+                    OmicronSledUpdateDisposition::Evacuating => {
+                        return Err(Error::unavail(
+                            "sim sled-agent is evacuating",
+                        ));
+                    }
+                }
+            }
+        }
+
         // Make sure each file backend was ensured before changing any state
         for (_id, disk) in vmm_spec.file_backends() {
             let FileStorageBackend { path, .. } = disk;
@@ -320,27 +341,6 @@ impl SledAgent {
                 generation: Generation::new(),
                 time_updated: chrono::Utc::now(),
             });
-
-        // Respond with a fake 503 failure if we're evacuating. This is
-        // less-than-fully-faithful to real sled-agent in at least two ways:
-        //
-        // 1. Real sled-agent will also return a 503 if it has no config. We
-        //    don't do that here because sim-sled-agent never gets a config if
-        //    it isn't explicitly given one.
-        // 2. Real sled-agent includes an error code indicating the reason for
-        //    the 503.
-        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
-            if let Some(config) = self.omicron_sled_config() {
-                match config.update_disposition {
-                    OmicronSledUpdateDisposition::Available => (),
-                    OmicronSledUpdateDisposition::Evacuating => {
-                        return Err(Error::unavail(
-                            "sim sled-agent is evacuating",
-                        ));
-                    }
-                }
-            }
-        }
 
         let instance_run_time_state = self
             .vmms

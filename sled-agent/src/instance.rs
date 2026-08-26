@@ -3608,7 +3608,7 @@ mod tests {
                     })
                 }
             },
-            &Duration::from_secs(1),
+            &Duration::from_millis(100),
             &TIMEOUT_DURATION,
         )
         .await
