@@ -9,9 +9,13 @@ use dropshot::test_util::ClientTestContext;
 use nexus_lockstep_client::types::BackgroundTask;
 use nexus_lockstep_client::types::CurrentStatus;
 use nexus_lockstep_client::types::LastResult;
+use nexus_types::deployment::BlueprintTarget;
+use nexus_types::deployment::BlueprintTargetSetError;
 use nexus_types::internal_api::background::*;
-use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
+use omicron_test_utils::dev::poll::{self, CondCheckError, wait_for_condition};
+use omicron_uuid_kinds::BlueprintUuid;
 use slog::info;
+use slog::warn;
 use std::time::Duration;
 
 /// Given the name of a background task, wait for it to complete if it's
@@ -509,12 +513,32 @@ pub async fn run_tuf_artifact_replication_step(
     status
 }
 
-/// Run the blueprint_loader background task
-pub async fn run_blueprint_loader(lockstep_client: &ClientTestContext) {
-    let last_background_task =
-        activate_background_task(&lockstep_client, "blueprint_loader").await;
+/// Run the `blueprint_loader` background task.
+///
+/// The loader's watch channel is populated after this completes.
+///
+/// Panics if activation fails.
+pub async fn run_blueprint_loader(
+    lockstep_client: &ClientTestContext,
+) -> BlueprintLoaded {
+    run_blueprint_loader_with_timeout(lockstep_client, Duration::from_secs(10))
+        .await
+}
 
-    let LastResult::Completed(_last_result_completed) =
+/// Like `run_blueprint_loader`, but with a configurable timeout for the
+/// activation.
+pub async fn run_blueprint_loader_with_timeout(
+    lockstep_client: &ClientTestContext,
+    timeout: Duration,
+) -> BlueprintLoaded {
+    let last_background_task = activate_background_task_with_timeout(
+        &lockstep_client,
+        "blueprint_loader",
+        timeout,
+    )
+    .await;
+
+    let LastResult::Completed(last_result_completed) =
         last_background_task.last
     else {
         panic!(
@@ -522,14 +546,56 @@ pub async fn run_blueprint_loader(lockstep_client: &ClientTestContext) {
             last_background_task.last,
         );
     };
+
+    let details = last_result_completed.details;
+    let status =
+        serde_json::from_value::<BlueprintLoaderStatus>(details.clone())
+            .unwrap_or_else(|error| {
+                panic!(
+                    "blueprint_loader status did not parse as \
+             BlueprintLoaderStatus: {error}; details: {details:#}"
+                )
+            });
+    match status {
+        BlueprintLoaderStatus::Loaded(loaded) => loaded,
+        BlueprintLoaderStatus::Error(error) => {
+            panic!("blueprint_loader activation failed: {error}");
+        }
+        BlueprintLoaderStatus::ImmutableBlueprintChanged { target_id } => {
+            panic!(
+                "blueprint_loader found that target blueprint {target_id} \
+                 changed, but blueprints are immutable"
+            );
+        }
+    }
 }
 
-/// Run the blueprint_planner background task
+/// Activate the `blueprint_planner` background task, and return the status of
+/// the next activation to complete.
+///
+/// This does not guarantee that exactly one activation runs, nor that the
+/// returned status is from the activation requested by this call. That's
+/// because the planner is also activated through other sources, and
+/// `activate_background_task` returns whichever activation completes next.
 pub async fn run_blueprint_planner(
     lockstep_client: &ClientTestContext,
 ) -> BlueprintPlannerStatus {
-    let last_background_task =
-        activate_background_task(&lockstep_client, "blueprint_planner").await;
+    run_blueprint_planner_with_timeout(lockstep_client, Duration::from_secs(10))
+        .await
+}
+
+/// Like `run_blueprint_planner`, but with a configurable timeout for the
+/// activation.
+pub async fn run_blueprint_planner_with_timeout(
+    lockstep_client: &ClientTestContext,
+    timeout: Duration,
+) -> BlueprintPlannerStatus {
+    let last_background_task = activate_background_task_with_timeout(
+        &lockstep_client,
+        "blueprint_planner",
+        timeout,
+    )
+    .await;
 
     let LastResult::Completed(last_result_completed) =
         last_background_task.last
@@ -540,10 +606,202 @@ pub async fn run_blueprint_planner(
         );
     };
 
-    serde_json::from_value::<BlueprintPlannerStatus>(
-        last_result_completed.details,
+    let details = last_result_completed.details;
+    serde_json::from_value::<BlueprintPlannerStatus>(details.clone())
+        .unwrap_or_else(|error| {
+            panic!(
+                "blueprint_planner status did not parse as \
+                 BlueprintPlannerStatus: {error}; details: {details:#}"
+            )
+        })
+}
+
+/// Repeatedly activate the `blueprint_planner` background task until it makes
+/// a target blueprint other than `prior_target_id`, then run the
+/// `blueprint_loader` task so that the new target is loaded.
+///
+/// Callers must:
+///
+/// * Enable the planner.
+/// * Make a change that planning will act on (i.e., the planner should not
+///   result in a no-op). Otherwise the planner reports `Unchanged`, which is
+///   treated as a permanent failure.
+/// * Pass in `prior_target_id` as the current target.
+///
+/// Returns the new target as the planner set it. Note that if another blueprint
+/// is somehow generated and something else sets the new target in the meantime,
+/// the loader holds that newer one instead. The new target should always be a
+/// descendant of the returned target, though.
+pub async fn run_blueprint_planner_until_new_target(
+    lockstep_client: &ClientTestContext,
+    prior_target_id: BlueprintUuid,
+    timeout: Duration,
+) -> BlueprintTarget {
+    let result = wait_for_condition(
+        || async {
+            let status =
+                run_blueprint_planner_with_timeout(lockstep_client, timeout)
+                    .await;
+            match status {
+                BlueprintPlannerStatus::Targeted { target, .. } => Ok(target),
+                BlueprintPlannerStatus::Unchanged { parent, .. }
+                    if parent.target_id != prior_target_id =>
+                {
+                    // A watcher-triggered activation already made a new
+                    // target, and the loader has loaded it.
+                    Ok(parent)
+                }
+                BlueprintPlannerStatus::Disabled => {
+                    // Either the caller forgot to enable the planner, or the
+                    // config loader hasn't observed the caller's change yet.
+                    // The former is not fixed here (it is documented as a
+                    // precondition), but the latter will be fixed if the
+                    // corresponding task is activated.
+                    activate_planner_input_loader(
+                        lockstep_client,
+                        BlueprintPlannerSkipReason::ConfigNotYetLoaded,
+                        timeout,
+                    )
+                    .await;
+                    Err(CondCheckError::NotYet {
+                        status: Some(
+                            "planner disabled: either the caller has not \
+                             enabled it, or the reconfigurator config loader \
+                             has not yet observed the change"
+                                .to_string(),
+                        ),
+                    })
+                }
+                BlueprintPlannerStatus::Unchanged {
+                    parent, report, ..
+                } => {
+                    // This activation started after the caller's change landed,
+                    // so if the change was visible to the planner, it really
+                    // had nothing to do.
+                    Err(CondCheckError::Failed(format!(
+                        "planner found nothing to change from prior target \
+                         {}; planning report:\n{report}",
+                        parent.target_id,
+                    )))
+                }
+                BlueprintPlannerStatus::Skipped(reason) => {
+                    // Skipped means that something hasn't been loaded yet, so
+                    // activate that loader and retry.
+                    activate_planner_input_loader(
+                        lockstep_client,
+                        reason,
+                        timeout,
+                    )
+                    .await;
+                    Err(CondCheckError::NotYet {
+                        status: Some(format!(
+                            "planner skipped: {reason}; activated the \"{}\" \
+                             task",
+                            reason.loader_task_name(),
+                        )),
+                    })
+                }
+                BlueprintPlannerStatus::Planned {
+                    parent,
+                    error: BlueprintTargetSetError::ParentNotTarget { .. },
+                    ..
+                } => {
+                    // This means the loader fell behind and the planner ran
+                    // against a stale parent. Try again, hoping that this
+                    // process comes to rest.
+                    run_blueprint_loader_with_timeout(lockstep_client, timeout)
+                        .await;
+                    Err(CondCheckError::NotYet {
+                        status: Some(format!(
+                            "planner produced a blueprint from {}, but the \
+                             target moved underneath it; loaded the current \
+                             target",
+                            parent.target_id,
+                        )),
+                    })
+                }
+                BlueprintPlannerStatus::Planned {
+                    parent,
+                    error:
+                        error @ (BlueprintTargetSetError::NoSuchBlueprint { .. }
+                        | BlueprintTargetSetError::Other(_)),
+                    ..
+                } => Err(CondCheckError::Failed(format!(
+                    "planner produced a blueprint from {} but could not make \
+                     it the target: {error}",
+                    parent.target_id,
+                ))),
+                BlueprintPlannerStatus::Error(error) => {
+                    Err(CondCheckError::Failed(format!(
+                        "blueprint planner failed: {error}"
+                    )))
+                }
+                BlueprintPlannerStatus::LimitReached { limit, .. } => {
+                    Err(CondCheckError::Failed(format!(
+                        "blueprint limit ({limit}) reached"
+                    )))
+                }
+            }
+        },
+        &Duration::from_secs(1),
+        &timeout,
     )
-    .unwrap()
+    .await;
+
+    let new_target = match result {
+        Ok(new_target) => new_target,
+        Err(poll::Error::TimedOut { elapsed, last_status }) => {
+            panic!(
+                "blueprint planner did not make a new target blueprint \
+                 (prior target {prior_target_id}) within {elapsed:?}; \
+                 last status: {}",
+                last_status.as_deref().unwrap_or("(none)"),
+            );
+        }
+        Err(poll::Error::PermanentError(message)) => {
+            panic!("blueprint planner cannot make a new target: {message}");
+        }
+    };
+
+    // The planner notifies the loader through a watch channel, but only
+    // asynchronously. Load the new target now so that the caller's next planner
+    // activation plans from it. (In principle, this might load a different
+    // target that's a descendant of this one -- log if so.)
+    let loaded =
+        run_blueprint_loader_with_timeout(lockstep_client, timeout).await;
+    if loaded.target.target_id != new_target.target_id {
+        warn!(
+            lockstep_client.client_log,
+            "blueprint loader loaded a different target than the planner \
+             just set -- something else set a target in the meantime";
+            "planner_target_id" => %new_target.target_id,
+            "loaded_target_id" => %loaded.target.target_id,
+        );
+    } else if loaded.target != new_target {
+        // Weird. (Was a `BlueprintTarget` constructed with a timestamp that
+        // isn't at database precision?) We should detect this.
+        panic!(
+            "blueprint target {} did not round-trip through the database: \
+             planner set {new_target:?}, loader loaded {:?}",
+            new_target.target_id, loaded.target,
+        );
+    }
+    new_target
+}
+
+/// Activate the task named by `reason`, waiting for that activation to
+/// complete.
+async fn activate_planner_input_loader(
+    lockstep_client: &ClientTestContext,
+    reason: BlueprintPlannerSkipReason,
+    timeout: Duration,
+) {
+    activate_background_task_with_timeout(
+        lockstep_client,
+        reason.loader_task_name(),
+        timeout,
+    )
+    .await;
 }
 
 /// Run the blueprint_executor background task

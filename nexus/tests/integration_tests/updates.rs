@@ -36,6 +36,7 @@ use crate::integration_tests::target_release::set_target_release_for_mupdate_rec
 use nexus_lockstep_client::types::BlueprintTargetSet;
 use nexus_lockstep_client::types::SledSelector;
 use nexus_test_utils::background::run_blueprint_planner;
+use nexus_test_utils::background::run_blueprint_planner_until_new_target;
 use nexus_types::deployment::ReconfiguratorConfig;
 use nexus_types::deployment::ReconfiguratorConfigParam;
 use nexus_types::deployment::ReconfiguratorStateInput;
@@ -43,8 +44,6 @@ use nexus_types::deployment::UnstableReconfiguratorState;
 use nexus_types::internal_api::background::BlueprintPlannerStatus;
 use omicron_nexus::app::DEBUG_DROPBOX_PRODUCER_RECONFIGURATOR;
 use omicron_test_utils::dev::dropbox::DropboxReader;
-use omicron_test_utils::dev::poll::CondCheckError;
-use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_uuid_kinds::GenericUuid;
 use slog_error_chain::InlineErrorChain;
 
@@ -1207,40 +1206,24 @@ async fn test_debug_files(cptestctx: &ControlPlaneTestContext) {
         .await
         .expect("expunge sled");
 
-    // We need to wait until there's a new target blueprint.  As usual, we wait
-    // for the thing we care about rather than waiting precisely for one more
-    // activation of the background task.  That's because there's other
-    // asynchrony involved here (e.g., the updated reconfigurator config needs
-    // to be loaded, too).
-    let bp4_id = wait_for_condition(
-        || async {
-            let target = datastore
-                .blueprint_target_get_current(&opctx)
-                .await
-                .expect("target blueprint");
-            if target.target_id == bp2_id {
-                Err(CondCheckError::<()>::NotYet { status: None })
-            } else {
-                Ok(target.target_id)
-            }
-        },
-        &std::time::Duration::from_secs(1),
-        &std::time::Duration::from_secs(60),
+    // Activate the planner until a new target blueprint exists.  (The expunge
+    // itself does not activate the planner, so waiting for the target to
+    // change on its own is racy.)
+    let bp4 = run_blueprint_planner_until_new_target(
+        &cptestctx.lockstep_client,
+        bp2_id,
+        std::time::Duration::from_secs(60),
     )
-    .await
-    .expect("autoplanner should have created new blueprint within 60s");
+    .await;
+    let bp4_id = bp4.target_id;
 
-    // We know that the planner has gotten far enough to set the new target
-    // blueprint, but it might still be saving out files.  Wait for it to come
-    // to rest.
-    let _ = run_blueprint_planner(&cptestctx.lockstep_client).await;
     let files = dropbox.load_new::<UnstableReconfiguratorState>();
     assert_eq!(files.len(), 1);
     let file = files.into_iter().next().expect("non-empty Vec");
     cli_inputs.push(("file4", &file));
     assert!(file.blueprints.contains_key(&bp2_id));
     assert!(file.blueprints.contains_key(&bp4_id));
-    assert_eq!(file.target_blueprint.target_id, bp4_id);
+    assert_eq!(file.target_blueprint, bp4);
     assert!(file.intended_target_blueprint.is_none());
 
     // Case: autoplanner produces no files when it doesn't generate a new
