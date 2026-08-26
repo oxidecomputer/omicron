@@ -186,7 +186,11 @@ impl Server {
                         &NexusTypes::SledAgentInfo {
                             sa_address: sa_address.to_string(),
                             repo_depot_port,
-                            role: NexusTypes::SledRole::Scrimlet,
+                            role: if config.is_scrimlet {
+                                NexusTypes::SledRole::Scrimlet
+                            } else {
+                                NexusTypes::SledRole::Gimlet
+                            },
                             baseboard: NexusTypes::Baseboard {
                                 serial: config
                                     .hardware

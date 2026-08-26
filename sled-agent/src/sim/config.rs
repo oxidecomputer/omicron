@@ -82,6 +82,8 @@ pub struct Config {
     pub storage: ConfigStorage,
     /// configuration to emulate the sled agent's hardware
     pub hardware: ConfigHardware,
+    /// whether this sled is a scrimlet (connected to a switch)
+    pub is_scrimlet: bool,
 }
 
 pub enum ZpoolConfig {
@@ -107,6 +109,7 @@ impl Config {
             zpool_config,
             cpu_family,
             None,
+            false,
         )
     }
 
@@ -117,6 +120,7 @@ impl Config {
         zpool_config: ZpoolConfig,
         cpu_family: SledCpuFamily,
         baseboard_serial: Option<String>,
+        is_scrimlet: bool,
     ) -> Config {
         // This IP range is guaranteed by RFC 6666 to discard traffic.
         // For tests that don't use a Nexus, we use this address to simulate a
@@ -164,6 +168,7 @@ impl Config {
                     revision: 3,
                 },
             },
+            is_scrimlet,
         }
     }
 }

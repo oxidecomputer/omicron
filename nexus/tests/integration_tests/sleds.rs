@@ -76,6 +76,7 @@ async fn test_sleds_list(cptestctx: &ControlPlaneTestContext) {
                 // sled agents as part of the ControlPlaneTestContext setup.
                 2 + i as u16,
                 sim::SimMode::Explicit,
+                false,
                 &cptestctx.first_sled_agent().simulated_upstairs,
             )
             .await

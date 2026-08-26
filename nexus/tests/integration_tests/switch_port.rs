@@ -669,20 +669,56 @@ async fn test_port_settings_basic_v6_crud(ctx: &ControlPlaneTestContext) {
     .await
     .unwrap();
 
-    // TODO-cleanup We'd like to confirm that the `sync_switch_configuration`
-    // background task propagates the changes requested above out to the
-    // bootstore via sled-agent, but in the test suite, that propagation fails
-    // for unrelated reasons:
-    // <https://github.com/oxidecomputer/omicron/issues/10958>.
+    // Verify that `sync_switch_configuration` propagates the changes to the
+    // bootstore via sled-agent (regression test for
+    // <https://github.com/oxidecomputer/omicron/issues/10958>).
     //
-    // As a fallback, it'd be nice to check that `sync_switch_configuration` at
-    // least persists the new config into CRDB, but the task gates that on
-    // having successfully contacted at least one sled-agent, so this also is
-    // blocked by the above issue. For now, we've manually confirmed that the
-    // above route is present in the request `sync_switch_configuration`
-    // attempts to send by inspecting the logfile (where the request is included
-    // alongside the connection error from trying to contact a nonexistent
-    // sled-agent).
+    // First, run the blueprint executor so that `SwitchSledAgent` DNS entries
+    // are populated for the scrimlet sled-agent — `sync_switch_configuration`
+    // uses these to find the right sled-agent address+port.
+    nexus_test_utils::background::run_blueprint_executor(&ctx.lockstep_client)
+        .await;
+
+    // Now run sync_switch_configuration.
+    let task = nexus_test_utils::background::activate_background_task(
+        &ctx.lockstep_client,
+        "switch_port_config_manager",
+    )
+    .await;
+
+    let nexus_lockstep_client::types::LastResult::Completed(result) = task.last
+    else {
+        panic!(
+            "switch_port_config_manager task did not complete: {:?}",
+            task.last
+        );
+    };
+    let status = serde_json::from_value::<
+        nexus_types::internal_api::background::SwitchPortSettingsManagerStatus,
+    >(result.details)
+    .expect(
+        "task details should deserialize as SwitchPortSettingsManagerStatus",
+    );
+    assert!(
+        status.incomplete_bootstore_configs.is_empty(),
+        "sync_switch_configuration should have successfully built a bootstore \
+         config for all racks: {status:?}",
+    );
+
+    // The task only writes to the sled-agent if it can build a valid config.
+    // Check the sim sled-agent's in-memory bootstore was actually updated,
+    // confirming it was successfully contacted.
+    let bootstore_generation = ctx
+        .first_sled_agent()
+        .bootstore_network_config
+        .lock()
+        .unwrap()
+        .generation;
+    assert!(
+        bootstore_generation > 0,
+        "sync_switch_configuration should have written to the sled-agent \
+         bootstore (generation was still 0, indicating it was never contacted)",
+    );
 }
 
 #[nexus_test]

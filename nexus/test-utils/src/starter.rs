@@ -177,6 +177,8 @@ pub struct ControlPlaneStarter<'a, N: NexusServer> {
     pub password: Option<String>,
 
     pub simulated_upstairs: Arc<sim::SimulatedUpstairs>,
+
+    scrimlet_sled_ids: BTreeSet<SledUuid>,
 }
 
 type StepInitFn<'a, N> = Box<
@@ -228,6 +230,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             simulated_upstairs: Arc::new(sim::SimulatedUpstairs::new(
                 simulated_upstairs_log,
             )),
+            scrimlet_sled_ids: BTreeSet::new(),
         }
     }
 
@@ -519,7 +522,8 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                     ddm: self.ddm.get(&switch_slot).unwrap().port,
                 },
             )
-            .unwrap()
+            .unwrap();
+        self.scrimlet_sled_ids.insert(sled_id);
     }
 
     pub async fn start_oximeter(&mut self) {
@@ -927,6 +931,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         let nexus_address =
             self.nexus_internal_addr.expect("Must launch Nexus first");
 
+        let is_scrimlet = self.scrimlet_sled_ids.contains(&sled_id);
         let sled_agent = start_sled_agent(
             self.logctx.log.new(o!(
                 "component" => "omicron_sled_agent::sim::Server",
@@ -936,6 +941,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             sled_id,
             sled_index,
             sim_mode,
+            is_scrimlet,
             &self.simulated_upstairs,
         )
         .await
@@ -1058,6 +1064,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             sled_id,
             sled_index,
             sim_mode,
+            false,
             &self.simulated_upstairs,
         )
         .await
@@ -1901,6 +1908,7 @@ pub async fn start_sled_agent(
     id: SledUuid,
     sled_index: u16,
     sim_mode: sim::SimMode,
+    is_scrimlet: bool,
     simulated_upstairs: &Arc<sim::SimulatedUpstairs>,
 ) -> Result<sim::Server, String> {
     // Generate a baseboard serial number that matches the SP configuration
@@ -1915,6 +1923,7 @@ pub async fn start_sled_agent(
         sim::ZpoolConfig::None,
         SledCpuFamily::AmdMilan,
         Some(baseboard_serial),
+        is_scrimlet,
     );
     start_sled_agent_with_config(log, &config, sled_index, simulated_upstairs)
         .await
