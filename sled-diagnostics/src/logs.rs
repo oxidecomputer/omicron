@@ -1393,6 +1393,7 @@ mod illumos_tests {
                     &mut log_snapshots,
                     &log,
                     LogType::Current,
+                    None,
                 )
                 .await
                 .unwrap();
@@ -1492,6 +1493,7 @@ mod illumos_tests {
                     &mut log_snapshots,
                     &log,
                     LogType::Current,
+                    None,
                 )
                 .await
                 .unwrap();
