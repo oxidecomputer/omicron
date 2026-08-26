@@ -418,23 +418,22 @@ impl UpdateActivityState {
             return UpdateActivityState::Idle;
         }
 
-        // An update is in progress. It is only considered "stuck" when there
-        // has been no forward progress within `STUCK_UPDATE_THRESHOLD`. This
-        // requires the last blueprint's creation time, and the he target
-        // release request time to be older than the threshold.
+        // An update is in progress. It is only considered "stuck" when the last
+        // blueprint's creation time, and the target release request time are
+        // both older than the `STUCK_UPDATE_THRESHOLD`.
         //
         // We care about the target release request time because during a short
         // window of time between a user requesting a new target release and the
         // planner producing the first blueprint for it, the latest blueprint is
         // still the one from the previous update (which could be pretty old).
         // If a user happens to check the update status during that window, it
-        // could end up as a spurious "stuck" report.
+        // could end up as a spurious "stuck" update.
         let threshold = Utc::now() - STUCK_UPDATE_THRESHOLD;
         let blueprint_stale = blueprint.time_created < threshold;
         let target_release_old = match current_target_release {
             Some(target_release) => target_release.time_requested < threshold,
-            // Unreachable in practice. With no target release the update is not
-            // in progress and we returned `Idle` above. Fall back to the
+            // Unreachable in practice. With no target release, the update is
+            // not in progress and we returned `Idle` above. Fall back to the
             // blueprint-only check.
             None => true,
         };
@@ -1696,11 +1695,10 @@ mod test {
             Utc::now() - STUCK_UPDATE_THRESHOLD - TimeDelta::seconds(10),
             true,
         );
-        // Components are split across multiple non-initial versions and the
-        // last step planned is older than `STUCK_UPDATE_THRESHOLD`, so the
-        // update is considered stuck and contact support is true. The target
-        // release was requested longer than when the blueprint was created,
-        // so it doesn't take precedence over.
+        // Components are split across multiple non-initial versions. Both the
+        // last step planned and the time the target release was requested are
+        // older than `STUCK_UPDATE_THRESHOLD`, so the update is considered
+        // stuck and contact support is true.
         assert!(
             nexus
                 .contact_support(
@@ -1960,9 +1958,9 @@ mod test {
                 .unwrap(),
         );
 
-        // The blueprint is entirely on `prev_version` (from the previous
-        // update) and was created well over `STUCK_UPDATE_THRESHOLD` ago. It
-        // differs from the current target release below, so
+        // The blueprint's artifacts are all on the version from the previous
+        // update and it was created before the `STUCK_UPDATE_THRESHOLD`. The
+        // version is different from the current target release below, so
         // `is_update_in_progress` returns true.
         let prev_version: Version =
             "8.0.0-0.ci+gitprev0000000".parse().unwrap();
@@ -1974,8 +1972,8 @@ mod test {
         );
 
         // The target release was requested just now, so even though the latest
-        // blueprint is stale, the update is considered in progress (not stuck)
-        // and contact support should be false.
+        // blueprint is old, the update is considered in progress, and contact
+        // support should be false.
         let target_release = TargetRelease {
             time_requested: Utc::now(),
             version: fake_target_version(),
