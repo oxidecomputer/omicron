@@ -35,8 +35,9 @@ use uuid::Uuid;
 mod jobs;
 
 use self::jobs::CanEnsureVmmResult;
-use self::jobs::InstanceManagerJobsStatus;
 use self::jobs::Jobs;
+
+pub(crate) use self::jobs::InstanceManagerJobsStatus;
 
 // The depth of the request queue for the instance manager.
 const QUEUE_SIZE: usize = 256;

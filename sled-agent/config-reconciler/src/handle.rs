@@ -158,25 +158,74 @@ impl UpdateDispositionReceiver {
         self.ledger_rx.changed().await
     }
 
+    /// Create a fake receiver with the given `update_disposition`. It will
+    /// never change.
     #[cfg(any(test, feature = "testing"))]
     pub fn fake_static(
         update_disposition: OmicronSledUpdateDisposition,
     ) -> Self {
-        // The only field that matters here is `update_disposition`; it's the
-        // only thing read by `current_and_update`.
-        let config =
-            OmicronSledConfig { update_disposition, ..Default::default() };
-        let (ledger_tx, ledger_rx) =
-            watch::channel(CurrentSledConfig::Ledgered(Box::new(config)));
+        let (receiver, sender) = Self::fake_dynamic(
+            CurrentUpdateDisposition::Known(update_disposition),
+        );
         // spawn a task that keeps the tx channel alive as long as there are any
         // receivers. this allows receivers to call `.changed()` - it won't
         // return (because we never change the contents), but would fail if we
         // dropped tx entirely.
         tokio::spawn(async move {
-            ledger_tx.closed().await;
-            std::mem::drop(ledger_tx);
+            sender.ledger_tx.closed().await;
+            std::mem::drop(sender);
         });
-        Self { ledger_rx }
+        receiver
+    }
+
+    /// Create a fake receiver whose observed disposition can be changed by the
+    /// test via the returned [`FakeUpdateDispositionSender`].
+    #[cfg(any(test, feature = "testing"))]
+    pub fn fake_dynamic(
+        initial: CurrentUpdateDisposition,
+    ) -> (Self, FakeUpdateDispositionSender) {
+        let (ledger_tx, ledger_rx) =
+            watch::channel(fake_config_for_disposition(initial));
+        (Self { ledger_rx }, FakeUpdateDispositionSender { ledger_tx })
+    }
+}
+
+/// The only config field that matters here is `update_disposition`; it's the
+/// only thing read by `current_and_update`.
+#[cfg(any(test, feature = "testing"))]
+fn fake_config_for_disposition(
+    disposition: CurrentUpdateDisposition,
+) -> CurrentSledConfig {
+    match disposition {
+        CurrentUpdateDisposition::ConfigNotAvailable => {
+            CurrentSledConfig::WaitingForInitialConfig
+        }
+        CurrentUpdateDisposition::Known(update_disposition) => {
+            CurrentSledConfig::Ledgered(Box::new(OmicronSledConfig {
+                update_disposition,
+                ..Default::default()
+            }))
+        }
+    }
+}
+
+/// Test-only handle controlling the disposition observed by
+/// receivers created via [`UpdateDispositionReceiver::fake_dynamic`].
+///
+/// Dropping this sender closes the underlying watch channel, which will
+/// cause `UpdateDispositionReceiver::changed()` to return a RecvError.
+#[cfg(any(test, feature = "testing"))]
+#[derive(Debug)]
+pub struct FakeUpdateDispositionSender {
+    ledger_tx: watch::Sender<CurrentSledConfig>,
+}
+
+#[cfg(any(test, feature = "testing"))]
+impl FakeUpdateDispositionSender {
+    /// Set the disposition observed by receivers. Always notifies `changed()`,
+    /// even if the value is unchanged.
+    pub fn set(&self, disposition: CurrentUpdateDisposition) {
+        self.ledger_tx.send_replace(fake_config_for_disposition(disposition));
     }
 }
 
