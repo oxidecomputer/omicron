@@ -2376,31 +2376,30 @@ impl DataStore {
         opctx.authorize(authz::Action::Read, &authz::BLUEPRINT_CONFIG).await?;
 
         // There are lots of ways to do this.  We'll do it by paging backwards
-        // through the table until we identify MAX_NKEEP distinct blueprints.
+        // through the table until we identify `nkeep` distinct blueprints.
         //
-        // Alternative considered: take MAX(version) and subtract MAX_NKEEP.
-        // This is easy to do, but might result in keeping fewer blueprints if
-        // some of those rows just involve having enabled or disabled the
-        // target.  That's not a big deal while MAX_NKEEP = 1000, given how
-        // uncommon it is to enable/disable the target.  But it could also be
-        // *very* wrong if for whatever reason somebody has already removed rows
-        // near the end of the table.  This too should be impossible, but
-        // there's no need to rely on it.
+        // Alternative considered: take MAX(version) and subtract `nkeep`.  This
+        // is easy to do, but might result in keeping fewer blueprints if some
+        // of those rows just involve having enabled or disabled the target.
+        // It's uncommon to enable/disable the target, so this matters most when
+        // `nkeep` is small.  It could also be *very* wrong if for whatever
+        // reason somebody has already removed rows near the end of the table.
+        // This too should be impossible, but there's no need to rely on it.
         //
         // Alternative considered: have the database tell us the version that's
-        // `MAX_NKEEP` rows from the end.  e.g., something like
+        // `nkeep` rows from the end.  e.g., something like
         //
         //   SELECT version FROM bp_target \
-        //       ORDER BY version DESC OFFSET `MAX_NKEEP`
+        //       ORDER BY version DESC OFFSET `nkeep`
         //
-        // That query is somewhat expensive (well, proportional to `MAX_NKEEP`)
-        // and still has the problem of not keeping enough blueprints if some of
+        // That query is somewhat expensive (well, proportional to `nkeep`) and
+        // still has the problem of not keeping enough blueprints if some of
         // these rows correspond to just enabling/disabling the current target.
         //
         // By comparison, the approach we pick here is just a paginated scan (no
         // exotic SQL), each query's cost is proportional to the page size
-        // (rather than `MAX_NKEEP`), and it allows us to keep the right number
-        // of distinct blueprints.
+        // (rather than `nkeep`), and it allows us to keep the right number of
+        // distinct blueprints.
 
         let mut nscanned = 0;
         let mut blueprint_ids_to_keep: BTreeSet<BlueprintUuid> =

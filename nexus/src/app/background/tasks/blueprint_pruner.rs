@@ -77,7 +77,9 @@
 //! target.  It's helpful for system debugging to keep around the last N,
 //! where N corresponds to 1-2 upgrades' worth of blueprints.  That way,
 //! developers and support can use `omdb` on the live system to debug
-//! everything going back to the last upgrade.
+//! everything going back to the last upgrade.  N comes from the reconfigurator
+//! config in the database (`blueprint_pruner_nkeep`), as does whether this task
+//! does anything at all (`blueprint_pruner_enabled`).
 //!
 //! It's important to note that, aside from a transition period described
 //! below, we're not losing this information forever when we delete it from
@@ -92,6 +94,7 @@
 //! Finally, note too that none of this needs to be transactional because the
 //! approach is conservative.
 
+use super::reconfigurator_config::ReconfiguratorConfigLoaderState;
 use crate::app::background::BackgroundTask;
 use anyhow::Context;
 use anyhow::anyhow;
@@ -118,11 +121,11 @@ use slog_error_chain::InlineErrorChain;
 use std::num::NonZeroU32;
 use std::ops::ControlFlow;
 use std::sync::Arc;
+use tokio::sync::watch::Receiver;
 
-/// Maximum number of recent target blueprints to keep in the database
-///
-/// (That is: stop pruning once there are this many blueprints left.)
-const MAX_NKEEP: usize = 1000;
+/// Smallest number of recent target blueprints that we keep, no matter what the
+/// configured `blueprint_pruner_nkeep` says
+const MIN_NKEEP: usize = 3;
 
 /// Max number of bp_target rows to consider deleting per activation of the task
 ///
@@ -134,11 +137,15 @@ const MAX_DELETE_ATTEMPTS_PER_ACTIVATION: usize = 50;
 /// Background task that prunes old blueprints from the database
 pub struct BlueprintPruner {
     datastore: Arc<DataStore>,
+    rx_config: Receiver<ReconfiguratorConfigLoaderState>,
 }
 
 impl BlueprintPruner {
-    pub fn new(datastore: Arc<DataStore>) -> Self {
-        Self { datastore }
+    pub fn new(
+        datastore: Arc<DataStore>,
+        rx_config: Receiver<ReconfiguratorConfigLoaderState>,
+    ) -> Self {
+        Self { datastore, rx_config }
     }
 }
 
@@ -148,34 +155,74 @@ impl BackgroundTask for BlueprintPruner {
         opctx: &'a OpContext,
     ) -> BoxFuture<'a, serde_json::Value> {
         Box::pin(async move {
-            match prune_blueprints(
+            match prune_blueprints_as_configured(
                 opctx,
                 &self.datastore,
-                &opctx.log,
-                MAX_NKEEP,
-                MAX_DELETE_ATTEMPTS_PER_ACTIVATION,
-                SQL_BATCH_SIZE,
+                &self.rx_config,
             )
             .await
             {
-                Ok(details) => {
-                    let status = BlueprintPrunerStatus::Enabled(details);
-                    match serde_json::to_value(status) {
-                        Ok(val) => val,
-                        Err(err) => json!({
-                            "error": format!(
-                                "could not serialize task status: {}",
-                                InlineErrorChain::new(&err)
-                            ),
-                        }),
-                    }
-                }
+                Ok(status) => match serde_json::to_value(status) {
+                    Ok(val) => val,
+                    Err(err) => json!({
+                        "error": format!(
+                            "could not serialize task status: {}",
+                            InlineErrorChain::new(&err)
+                        ),
+                    }),
+                },
                 Err(error) => json!({
                     "error": InlineErrorChain::new(&*error).to_string(),
                 }),
             }
         })
     }
+}
+
+/// Prune blueprints as directed by the reconfigurator config
+async fn prune_blueprints_as_configured(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    rx_config: &Receiver<ReconfiguratorConfigLoaderState>,
+) -> Result<BlueprintPrunerStatus, anyhow::Error> {
+    let nkeep = match &*rx_config.borrow() {
+        // Refuse to run if we haven't had a chance to load our config from the
+        // database yet.  (There might not be a config, which is fine!  But the
+        // loading task needs to have a chance to check.)
+        ReconfiguratorConfigLoaderState::NotYetLoaded => {
+            info!(
+                opctx.log,
+                "reconfigurator config not yet loaded; doing nothing"
+            );
+            return Ok(BlueprintPrunerStatus::Disabled {
+                reason: String::from("reconfigurator config not yet loaded"),
+            });
+        }
+        ReconfiguratorConfigLoaderState::Loaded(view) => {
+            if !view.config.blueprint_pruner_enabled {
+                info!(opctx.log, "blueprint pruner disabled; doing nothing");
+                return Ok(BlueprintPrunerStatus::Disabled {
+                    reason: String::from("explicitly disabled"),
+                });
+            }
+
+            // `usize` is 64 bits wide on every platform we support, so this
+            // conversion cannot really fail.  Saturate rather than `unwrap()`.
+            usize::try_from(view.config.blueprint_pruner_nkeep)
+                .unwrap_or(usize::MAX)
+        }
+    };
+
+    let details = prune_blueprints(
+        opctx,
+        datastore,
+        &opctx.log,
+        nkeep,
+        MAX_DELETE_ATTEMPTS_PER_ACTIVATION,
+        SQL_BATCH_SIZE,
+    )
+    .await?;
+    Ok(BlueprintPrunerStatus::Enabled(details))
 }
 
 /// Figure out which blueprints can be pruned and prune them.
@@ -187,8 +234,8 @@ async fn prune_blueprints(
     max_delete_attempts: usize,
     batch_size: NonZeroU32,
 ) -> Result<BlueprintPrunerDetails, anyhow::Error> {
-    // Clamp `nkeep` at 3 on the low end.
-    let nkeep = nkeep.clamp(3, usize::MAX);
+    // Keep at least `MIN_NKEEP` blueprints, no matter what we were told.
+    let nkeep = nkeep.max(MIN_NKEEP);
     // Figure out the maximum version that we'd consider pruning.
     let pruneable = datastore
         .bp_target_determine_pruneable(opctx, nkeep, batch_size)

@@ -689,9 +689,10 @@ impl BackgroundTasksInitializer {
             period: config.blueprints.period_secs_prune,
             task_impl: Box::new(blueprint_pruner::BlueprintPruner::new(
                 datastore.clone(),
+                reconfigurator_config_watcher.clone(),
             )),
             opctx: opctx.child(BTreeMap::new()),
-            watchers: vec![],
+            watchers: vec![Box::new(reconfigurator_config_watcher.clone())],
             activator: task_blueprint_pruner,
         });
 

@@ -5527,7 +5527,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.reconfigurator_config (
     tuf_repo_pruner_enabled BOOL NOT NULL,
 
     -- How to disrupt instances during updates.
-    disruption_policy omicron.public.reconfigurator_disruption_policy NOT NULL
+    disruption_policy omicron.public.reconfigurator_disruption_policy NOT NULL,
+
+    -- Enable the blueprint pruner background task
+    blueprint_pruner_enabled BOOL NOT NULL,
+
+    -- Number of recent target blueprints that the blueprint pruner keeps
+    blueprint_pruner_nkeep INT8 NOT NULL
 );
 
 /*
@@ -9422,7 +9428,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '296.0.0', NULL)
+    (TRUE, NOW(), NOW(), '297.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

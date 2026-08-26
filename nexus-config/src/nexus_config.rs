@@ -1308,6 +1308,8 @@ mod test {
             planner_enabled = true
             tuf_repo_pruner_enabled = false
             disruption_policy = "terminate"
+            blueprint_pruner_enabled = false
+            blueprint_pruner_nkeep = 137
             [background_tasks]
             dns_internal.period_secs_config = 1
             dns_internal.period_secs_servers = 2
@@ -1484,6 +1486,8 @@ mod test {
                         planner_config: PlannerConfig::default(),
                         tuf_repo_pruner_enabled: false,
                         disruption_policy: ReconfiguratorDisruptionPolicy::Terminate,
+                        blueprint_pruner_enabled: false,
+                        blueprint_pruner_nkeep: 137,
                     }),
                     background_tasks: BackgroundTaskConfig {
                         dns_internal: DnsTasksConfig {

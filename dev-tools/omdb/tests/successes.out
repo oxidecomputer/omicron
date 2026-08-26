@@ -2247,6 +2247,8 @@ Reconfigurator config:
     tuf repo pruner enabled: true
     disruption policy: terminate
     planner enabled: false
+    blueprint pruner enabled: true
+    blueprint pruner nkeep: 1000
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
@@ -2324,9 +2326,11 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 reconfigurator config updated to version 2:
-    tuf repo pruner enabled:   true (unchanged)
-*   planner enabled:::::::::   false -> true
-    disruption policy:::::::   terminate (unchanged)
+    tuf repo pruner enabled::   true (unchanged)
+*   planner enabled::::::::::   false -> true
+    disruption policy::::::::   terminate (unchanged)
+    blueprint pruner enabled:   true (unchanged)
+    blueprint pruner nkeep:::   1000 (unchanged)
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
@@ -2336,9 +2340,11 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 reconfigurator config updated to version 3:
-    tuf repo pruner enabled:   true (unchanged)
-    planner enabled:::::::::   true (unchanged)
-*   disruption policy:::::::   terminate -> live-migrate or terminate
+    tuf repo pruner enabled::   true (unchanged)
+    planner enabled::::::::::   true (unchanged)
+*   disruption policy::::::::   terminate -> live-migrate or terminate
+    blueprint pruner enabled:   true (unchanged)
+    blueprint pruner nkeep:::   1000 (unchanged)
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
@@ -2353,6 +2359,8 @@ Reconfigurator config:
     tuf repo pruner enabled: true
     disruption policy: live-migrate or terminate
     planner enabled: true
+    blueprint pruner enabled: true
+    blueprint pruner nkeep: 1000
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/

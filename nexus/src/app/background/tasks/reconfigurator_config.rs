@@ -90,13 +90,15 @@ mod test {
     use nexus_lockstep_client::types::LastResult;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::{
-        PlannerConfig, ReconfiguratorConfig, ReconfiguratorConfigParam,
-        ReconfiguratorDisruptionPolicy,
+        DEFAULT_BLUEPRINT_PRUNER_NKEEP, PlannerConfig, ReconfiguratorConfig,
+        ReconfiguratorConfigParam, ReconfiguratorDisruptionPolicy,
     };
     use nexus_types::internal_api::background::BlueprintPlannerStatus;
+    use nexus_types::internal_api::background::BlueprintPrunerStatus;
     use nexus_types::internal_api::background::TufRepoPrunerStatus;
     use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
     use serde::de::DeserializeOwned;
+    use slog_error_chain::InlineErrorChain;
     use std::time::Duration;
 
     type ControlPlaneTestContext =
@@ -152,6 +154,8 @@ mod test {
             planner_config: PlannerConfig::default(),
             tuf_repo_pruner_enabled: true,
             disruption_policy: ReconfiguratorDisruptionPolicy::default(),
+            blueprint_pruner_enabled: true,
+            blueprint_pruner_nkeep: DEFAULT_BLUEPRINT_PRUNER_NKEEP,
         };
         let switches =
             ReconfiguratorConfigParam { version: 1, config: expected_switches };
@@ -184,6 +188,8 @@ mod test {
             planner_config: PlannerConfig::default(),
             tuf_repo_pruner_enabled: true,
             disruption_policy: ReconfiguratorDisruptionPolicy::default(),
+            blueprint_pruner_enabled: true,
+            blueprint_pruner_nkeep: DEFAULT_BLUEPRINT_PRUNER_NKEEP,
         };
         let switches =
             ReconfiguratorConfigParam { version: 2, config: expected_switches };
@@ -218,18 +224,19 @@ mod test {
         let lockstep_client = cptestctx.lockstep_client();
 
         // As of this writing, the initial state in the test suite is that the
-        // planner is disabled but the TUF repo pruner is enabled.  But we don't
-        // want to depend on that.  So the basic plan here will be:
+        // planner is disabled but the TUF repo pruner and blueprint pruner are
+        // enabled.  But we don't want to depend on that.  So the basic plan
+        // here will be:
         //
-        // - disable both tasks: verify they're disabled
-        // - enable both tasks: verify they're enabled
-        // - disable both tasks again: verify they're disabled
+        // - disable all three tasks: verify they're disabled
+        // - enable all three tasks: verify they're enabled
+        // - disable all three tasks again: verify they're disabled
         //
         // This last step seems redundant but it exercises the transition from
         // enabled -> disabled, which may not have happened if one of the tasks
         // was disabled when we started.
 
-        // Disable both tasks.
+        // Disable all three tasks.
         let initial_config_version = lockstep_client
             .reconfigurator_config_show_current()
             .await
@@ -240,6 +247,8 @@ mod test {
             planner_config: PlannerConfig::default(),
             tuf_repo_pruner_enabled: false,
             disruption_policy: ReconfiguratorDisruptionPolicy::default(),
+            blueprint_pruner_enabled: false,
+            blueprint_pruner_nkeep: DEFAULT_BLUEPRINT_PRUNER_NKEEP,
         };
         let switches = ReconfiguratorConfigParam {
             version: initial_config_version + 1,
@@ -249,9 +258,9 @@ mod test {
             .reconfigurator_config_set(&switches)
             .await
             .expect("failed to set enabled config");
-        eprintln!("disabled both tasks");
+        eprintln!("disabled all three tasks");
 
-        // Wait for both tasks to report being disabled.
+        // Wait for all three tasks to report being disabled.
         wait_for_task_status(
             &lockstep_client,
             "blueprint_planner",
@@ -268,13 +277,23 @@ mod test {
             },
         )
         .await;
+        wait_for_task_status(
+            &lockstep_client,
+            "blueprint_pruner",
+            &|pruner_status: &BlueprintPrunerStatus| {
+                matches!(pruner_status, BlueprintPrunerStatus::Disabled { .. })
+            },
+        )
+        .await;
 
-        // Enable both tasks.
+        // Enable all three tasks.
         let config_enabled = ReconfiguratorConfig {
             planner_enabled: true,
             planner_config: PlannerConfig::default(),
             tuf_repo_pruner_enabled: true,
             disruption_policy: ReconfiguratorDisruptionPolicy::default(),
+            blueprint_pruner_enabled: true,
+            blueprint_pruner_nkeep: DEFAULT_BLUEPRINT_PRUNER_NKEEP,
         };
         let switches = ReconfiguratorConfigParam {
             version: initial_config_version + 2,
@@ -284,9 +303,9 @@ mod test {
             .reconfigurator_config_set(&switches)
             .await
             .expect("failed to set enabled config");
-        eprintln!("enabled both tasks");
+        eprintln!("enabled all three tasks");
 
-        // Wait for both tasks to report being enabled.
+        // Wait for all three tasks to report being enabled.
         wait_for_task_status(
             &lockstep_client,
             "blueprint_planner",
@@ -303,8 +322,16 @@ mod test {
             },
         )
         .await;
+        wait_for_task_status(
+            &lockstep_client,
+            "blueprint_pruner",
+            &|pruner_status: &BlueprintPrunerStatus| {
+                !matches!(pruner_status, BlueprintPrunerStatus::Disabled { .. })
+            },
+        )
+        .await;
 
-        // Disable both tasks again.
+        // Disable all three tasks again.
         let switches = ReconfiguratorConfigParam {
             version: initial_config_version + 3,
             config: config_disabled,
@@ -313,9 +340,9 @@ mod test {
             .reconfigurator_config_set(&switches)
             .await
             .expect("failed to set enabled config");
-        eprintln!("disabled both tasks again");
+        eprintln!("disabled all three tasks again");
 
-        // Wait for both tasks to report being disabled.
+        // Wait for all three tasks to report being disabled.
         wait_for_task_status(
             &lockstep_client,
             "blueprint_planner",
@@ -329,6 +356,14 @@ mod test {
             "tuf_repo_pruner",
             &|pruner_status: &TufRepoPrunerStatus| {
                 matches!(pruner_status, TufRepoPrunerStatus::Disabled { .. })
+            },
+        )
+        .await;
+        wait_for_task_status(
+            &lockstep_client,
+            "blueprint_pruner",
+            &|pruner_status: &BlueprintPrunerStatus| {
+                matches!(pruner_status, BlueprintPrunerStatus::Disabled { .. })
             },
         )
         .await;
@@ -349,15 +384,28 @@ mod test {
                     .into_inner();
                 eprintln!("task {} status: {:#?}", task_name, task_status);
                 let LastResult::Completed(completed) = task_status.last else {
-                    return Err(CondCheckError::<()>::NotYet { status: None });
+                    return Err(CondCheckError::<()>::NotYet {
+                        status: Some(format!(
+                            "task {task_name} has not completed an activation"
+                        )),
+                    });
                 };
 
-                let status: T = serde_json::from_value(completed.details)
+                // A task that has not yet re-read its configuration may report
+                // some other shape of status altogether (e.g., an error).
+                // Treat that like any other status that we're not looking for.
+                let details = completed.details;
+                let status: T = serde_json::from_value(details.clone())
                     .expect("failed to parse task status as JSON");
                 if check(&status) {
                     Ok(())
                 } else {
-                    Err(CondCheckError::NotYet { status: None })
+                    Err(CondCheckError::NotYet {
+                        status: Some(format!(
+                            "task {task_name}: status does not match yet: \
+                             {details}"
+                        )),
+                    })
                 }
             },
             &Duration::from_millis(100),
