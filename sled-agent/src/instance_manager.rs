@@ -64,6 +64,18 @@ impl VmmRegistrationDisallowedReason {
             }
         }
     }
+
+    pub(crate) fn http_error_code(&self) -> &'static str {
+        const SLED_CONFIG_NOT_YET_LOADED: &str = "SLED_CONFIG_NOT_YET_LOADED";
+        const SLED_EVACUATING: &str = "SLED_EVACUATING";
+
+        match self {
+            VmmRegistrationDisallowedReason::ConfigNotYetLoaded => {
+                SLED_CONFIG_NOT_YET_LOADED
+            }
+            VmmRegistrationDisallowedReason::SledEvacuating => SLED_EVACUATING,
+        }
+    }
 }
 
 #[derive(thiserror::Error, Debug)]
