@@ -695,6 +695,7 @@ pub async fn create_project(
                 name: project_name.parse().unwrap(),
                 description: "a pier".to_string(),
             },
+            defaults: None,
         },
     )
     .await
@@ -1047,6 +1048,7 @@ pub async fn create_vpc(
             },
             ipv6_prefix: None,
             dns_name: "abc".parse().unwrap(),
+            defaults: None,
         },
     )
     .await
@@ -1073,6 +1075,7 @@ pub async fn create_vpc_with_error(
             },
             ipv6_prefix: None,
             dns_name: "abc".parse().unwrap(),
+            defaults: None,
         }))
         .expect_status(Some(status)),
     )

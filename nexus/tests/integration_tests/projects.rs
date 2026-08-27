@@ -21,6 +21,8 @@ use nexus_test_utils::resource_helpers::create_project_image;
 use nexus_test_utils::resource_helpers::create_vpc;
 use nexus_test_utils::resource_helpers::grant_iam;
 use nexus_test_utils::resource_helpers::object_create;
+use nexus_test_utils::resource_helpers::object_create_error;
+use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::project_get;
 use nexus_test_utils::resource_helpers::projects_list;
 use nexus_test_utils::resource_helpers::test_params;
@@ -34,6 +36,7 @@ use nexus_types::external_api::project;
 use nexus_types::external_api::project::Project;
 use nexus_types::external_api::silo::Silo;
 use nexus_types::external_api::snapshot;
+use nexus_types::external_api::vpc;
 use nexus_types::identity::Resource;
 use nexus_types_versions::latest::instance::Instance;
 use omicron_common::api::external::ByteCount;
@@ -71,6 +74,142 @@ async fn test_projects(cptestctx: &ControlPlaneTestContext) {
 
     // TODO: test that we can make a project with the same name in another silo
     // and when we list projects we only get the ones in each silo
+}
+
+#[nexus_test]
+async fn test_project_create_defaults(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+
+    async fn create(
+        client: &ClientTestContext,
+        name: &str,
+        defaults: Option<project::ProjectCreateDefaults>,
+    ) {
+        let _: Project = object_create(
+            client,
+            "/v1/projects",
+            &project::ProjectCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: name.parse().unwrap(),
+                    description: String::new(),
+                },
+                defaults,
+            },
+        )
+        .await;
+    }
+
+    async fn default_counts(
+        client: &ClientTestContext,
+        project: &str,
+    ) -> (usize, usize) {
+        let vpcs = objects_list_page_authz::<vpc::Vpc>(
+            client,
+            &format!("/v1/vpcs?project={project}"),
+        )
+        .await
+        .items;
+        let subnets = if vpcs.is_empty() {
+            Vec::new()
+        } else {
+            objects_list_page_authz::<vpc::VpcSubnet>(
+                client,
+                &format!("/v1/vpc-subnets?project={project}&vpc=default"),
+            )
+            .await
+            .items
+        };
+        (vpcs.len(), subnets.len())
+    }
+
+    async fn assert_default_nic_error(
+        client: &ClientTestContext,
+        project: &str,
+    ) {
+        let error = object_create_error(
+            client,
+            &format!("/v1/instances?project={project}"),
+            &instance::InstanceCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "my-instance".parse().unwrap(),
+                    description: String::new(),
+                },
+                ncpus: InstanceCpuCount(4),
+                memory: ByteCount::from_gibibytes_u32(1),
+                hostname: "the-host".parse().unwrap(),
+                user_data: Vec::new(),
+                ssh_public_keys: Some(Vec::new()),
+                network_interfaces: Default::default(),
+                external_ips: Vec::new(),
+                disks: Vec::new(),
+                boot_disk: None,
+                cpu_platform: None,
+                start: false,
+                auto_restart_policy: Default::default(),
+                anti_affinity_groups: Vec::new(),
+                multicast_groups: Vec::new(),
+                enable_jumbo_frames: false,
+            },
+            StatusCode::NOT_FOUND,
+        )
+        .await;
+        assert_eq!(error.error_code.as_deref(), Some("Not Found"));
+        assert_eq!(
+            error.message,
+            "this project has no VPC or subnet named \"default\", so a \
+             default network interface cannot be created; pass explicit \
+             network interface parameters or create the VPC/subnet first",
+        );
+    }
+
+    create(client, "defaults-omitted", None).await;
+    assert_eq!(default_counts(client, "defaults-omitted").await, (1, 1));
+
+    create(
+        client,
+        "defaults-empty",
+        Some(project::ProjectCreateDefaults { vpc: None }),
+    )
+    .await;
+    assert_eq!(default_counts(client, "defaults-empty").await, (0, 0));
+    assert_default_nic_error(client, "defaults-empty").await;
+
+    create(
+        client,
+        "defaults-vpc-all",
+        Some(project::ProjectCreateDefaults {
+            vpc: Some(vpc::VpcCreateDefaultsSelection::All),
+        }),
+    )
+    .await;
+    assert_eq!(default_counts(client, "defaults-vpc-all").await, (1, 1));
+
+    create(
+        client,
+        "defaults-vpc-only",
+        Some(project::ProjectCreateDefaults {
+            vpc: Some(vpc::VpcCreateDefaultsSelection::Explicit {
+                defaults: vpc::VpcCreateDefaults { subnet: None },
+            }),
+        }),
+    )
+    .await;
+    assert_eq!(default_counts(client, "defaults-vpc-only").await, (1, 0));
+    assert_default_nic_error(client, "defaults-vpc-only").await;
+
+    create(
+        client,
+        "defaults-selected",
+        Some(project::ProjectCreateDefaults {
+            vpc: Some(vpc::VpcCreateDefaultsSelection::Explicit {
+                defaults: vpc::VpcCreateDefaults {
+                    subnet: Some(vpc::SubnetCreateDefaults {}),
+                },
+            }),
+        }),
+    )
+    .await;
+    assert_eq!(default_counts(client, "defaults-selected").await, (1, 1));
 }
 
 async fn delete_project_default_subnet(
@@ -514,6 +653,7 @@ async fn test_limited_collaborator_cannot_create_project(
                     name: "forbidden-project".parse().unwrap(),
                     description: "should not be created".to_string(),
                 },
+                defaults: None,
             }))
             .expect_status(Some(StatusCode::FORBIDDEN)),
     )

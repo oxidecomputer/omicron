@@ -316,6 +316,7 @@ pub static DEMO_PROJECT_CREATE: LazyLock<project::ProjectCreate> =
             name: DEMO_PROJECT_NAME.clone(),
             description: String::from(""),
         },
+        defaults: None,
     });
 
 // VPC used for testing
@@ -341,6 +342,7 @@ pub static DEMO_VPC_CREATE: LazyLock<vpc::VpcCreate> =
         },
         ipv6_prefix: None,
         dns_name: DEMO_VPC_NAME.clone(),
+        defaults: None,
     });
 
 // VPC Subnet used for testing
