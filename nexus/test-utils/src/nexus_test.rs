@@ -7,6 +7,7 @@
 use crate::ControlPlaneStarter;
 use crate::ControlPlaneTestContextSledAgent;
 use crate::starter::PopulateCrdb;
+use crate::starter::SledIndexAllocator;
 use crate::starter::setup_with_config_impl;
 use crate::starter::start_sled_agent;
 #[cfg(feature = "omicron-dev")]
@@ -27,6 +28,7 @@ use omicron_common::api::external::UserId;
 use omicron_common::api::internal::nexus::Certificate;
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev;
+use omicron_test_utils::dev::TestTempDir;
 use omicron_test_utils::dev::poll;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_test_utils::dev::poll::wait_for_watch_channel_condition;
@@ -38,8 +40,6 @@ use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::inventory::SledCpuFamily;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
-use std::sync::atomic::AtomicU16;
-use std::sync::atomic::Ordering;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use transient_dns_server::TransientDnsServer;
@@ -121,10 +121,7 @@ pub struct ControlPlaneTestContext<N> {
     pub clickhouse: dev::clickhouse::ClickHouseDeployment,
     pub logctx: LogContext,
     pub sled_agents: Vec<ControlPlaneTestContextSledAgent>,
-    /// Index for the next sled agent started by [`Self::add_sled`].
-    ///
-    /// Starts off with the number of sled agents started during setup.
-    pub(crate) next_sled_index: AtomicU16,
+    pub(crate) sled_index_allocator: SledIndexAllocator,
     pub oximeter: Oximeter,
     pub producer: ProducerServer,
     pub gateway: BTreeMap<SwitchSlot, GatewayTestContext>,
@@ -140,6 +137,8 @@ pub struct ControlPlaneTestContext<N> {
     pub silo_name: Name,
     pub user_name: UserId,
     pub password: String,
+
+    pub(crate) debug_dropbox_dir: TestTempDir,
 }
 
 impl<N: NexusServer> ControlPlaneTestContext<N> {
@@ -179,6 +178,10 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
 
     pub fn wildcard_silo_dns_name(&self) -> String {
         format!("*.sys.{}", self.external_dns_zone_name)
+    }
+
+    pub fn debug_dropbox_path(&self) -> &Utf8Path {
+        self.debug_dropbox_dir.path()
     }
 
     /// Wait until at least one inventory collection has been inserted into the
@@ -228,7 +231,7 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         sim_mode: sim::SimMode,
         cpu_family: SledCpuFamily,
     ) -> sim::Server {
-        let sled_index = self.next_sled_index.fetch_add(1, Ordering::Relaxed);
+        let sled_index = self.sled_index_allocator.next();
         let nexus_address = self.server.get_http_server_internal_address();
 
         // `start_sled_agent` uses `NexusRegistration::WaitForCompletion`, so
@@ -383,6 +386,7 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         for (_, mut ddm) in self.ddm {
             ddm.cleanup().await.unwrap();
         }
+        self.debug_dropbox_dir.cleanup_successful();
         self.logctx.cleanup_successful();
     }
 }

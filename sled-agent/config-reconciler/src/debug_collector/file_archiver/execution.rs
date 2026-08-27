@@ -113,7 +113,6 @@ async fn archive_one(
 #[cfg(test)]
 mod test {
     use crate::debug_collector::file_archiver;
-    use crate::debug_collector::file_archiver::test_helpers::TestDir;
     use anyhow::Context;
     use camino::Utf8Path;
     use chrono::DateTime;
@@ -121,6 +120,7 @@ mod test {
     use file_archiver::planning::ArchiveKind;
     use file_archiver::planning::ArchivePlanner;
     use filetime::FileTime;
+    use omicron_test_utils::dev::TestTempDir;
     use omicron_test_utils::dev::test_setup_log;
     use slog::info;
 
@@ -134,7 +134,7 @@ mod test {
         let log = &logctx.log;
 
         // Create a temporary directory in which to store some output files.
-        let tempdir = TestDir::new();
+        let tempdir = TestTempDir::new(log);
         info!(log, "temporary directory"; "tempdir" => %tempdir.path());
 
         // Populate it with a couple of files.
@@ -348,7 +348,7 @@ mod test {
             .unwrap();
         assert_eq!(contents, "core.123-second");
 
-        tempdir.cleanup();
+        tempdir.cleanup_successful();
         logctx.cleanup_successful();
     }
 
@@ -371,7 +371,7 @@ mod test {
         let logctx = test_setup_log("test_entry_type_confusion");
         let log = &logctx.log;
 
-        let tempdir = TestDir::new();
+        let tempdir = TestTempDir::new(log);
         info!(log, "temporary directory"; "tempdir" => %tempdir.path());
 
         // The input tree, relative to the temporary directory, looks like
@@ -516,7 +516,7 @@ mod test {
             );
         }
 
-        tempdir.cleanup();
+        tempdir.cleanup_successful();
         logctx.cleanup_successful();
     }
 }

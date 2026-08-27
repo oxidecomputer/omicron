@@ -4,12 +4,17 @@
 
 //! Configuration of the deployment system
 
+use anyhow::Context;
+use anyhow::anyhow;
+use anyhow::bail;
+use iddqd::IdOrdMap;
 use nexus_db_model::TargetReleaseSource;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::planner::PlannerRng;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
+use nexus_reconfigurator_preparation::reconfigurator_state_assemble;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintArtifactVersion;
 use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
@@ -21,6 +26,7 @@ use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
+use nexus_types::deployment::UnstableReconfiguratorState;
 use nexus_types::external_api::update;
 use nexus_types::internal_api::views::UpdateStatus;
 use nexus_types::inventory::Collection;
@@ -32,7 +38,11 @@ use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
-use omicron_generation_kinds::Generation;
+use omicron_debug_dropbox::DepositHandle;
+use omicron_debug_dropbox::Producer;
+use omicron_generation_kinds::TargetReleaseGeneration;
+use omicron_uuid_kinds::BlueprintUuid;
+use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
 use slog::Logger;
 use slog::warn;
@@ -43,6 +53,7 @@ use uuid::Uuid;
 
 /// Common structure for collecting information that the planner needs
 struct PlanningContext {
+    target: BlueprintTarget,
     planning_input: PlanningInput,
     creator: String,
     inventory: Option<Collection>,
@@ -101,6 +112,39 @@ impl super::Nexus {
         self.db_datastore.blueprint_target_get_current(opctx).await
     }
 
+    async fn assemble_state_for_new_target(
+        &self,
+        opctx: &OpContext,
+        new_target: BlueprintTarget,
+    ) -> Result<UnstableReconfiguratorState, anyhow::Error> {
+        let planning_context = self.blueprint_planning_context(opctx).await?;
+        let inventory = planning_context.inventory.ok_or_else(|| {
+            Error::internal_error("no recent inventory collection found")
+        })?;
+        let datastore = self.datastore();
+        let blueprint = self
+            .blueprint_view(opctx, *new_target.target_id.as_untyped_uuid())
+            .await?;
+        let blueprint_id = blueprint.id;
+        // Currently, this can only be used on systems that already have a
+        // target blueprint set, so this blueprint must have a parent.
+        let Some(parent_id) = blueprint.parent_blueprint_id else {
+            bail!("desired blueprint has no parent");
+        };
+        let parent =
+            self.blueprint_view(opctx, *parent_id.as_untyped_uuid()).await?;
+        reconfigurator_state_assemble(
+            opctx,
+            datastore,
+            planning_context.planning_input,
+            IdOrdMap::from_iter([inventory]),
+            IdOrdMap::from_iter([parent, blueprint]),
+            planning_context.target,
+            Some(blueprint_id),
+        )
+        .await
+    }
+
     pub async fn blueprint_target_set(
         &self,
         opctx: &OpContext,
@@ -112,12 +156,37 @@ impl super::Nexus {
             time_made_target: chrono::Utc::now(),
         };
 
-        self.db_datastore
-            .blueprint_target_set_current(opctx, new_target)
-            .await?;
+        // Use `SetTargetDebugWriter` to write out debugging files related to
+        // this operation.  All of this is best-effort.
+        let debug_dropbox_writer = SetTargetDebugWriter::new(
+            &opctx.log,
+            &self.debug_dropbox_reconfigurator,
+            self.assemble_state_for_new_target(opctx, new_target).await,
+        )
+        .write_intent(BlueprintDebugAction::TargetIntent)
+        .await;
 
-        // We have a new target: trigger the background task to load this
-        // blueprint.
+        if let Err(error) = self
+            .db_datastore
+            .blueprint_target_set_current(opctx, new_target)
+            .await
+        {
+            // Try to cancel the dropbox deposit.  This information is
+            // useless now.  It's not a problem if this doesn't work.
+            debug_dropbox_writer.cancel().await;
+            return Err(error);
+        }
+
+        // We've got a new target.
+        //
+        // There's no point in failing after this, whatever happens.
+        //
+        // Write a second Reconfigurator state file reflecting the new target.
+        debug_dropbox_writer
+            .write_committed(new_target, BlueprintDebugAction::Target)
+            .await;
+
+        // Trigger the background task to load this blueprint.
         self.background_tasks
             .activate(&self.background_tasks.task_blueprint_loader);
 
@@ -135,6 +204,9 @@ impl super::Nexus {
             time_made_target: chrono::Utc::now(),
         };
 
+        // We don't need to create or archive a Reconfigurator state file here
+        // because one would have been created when this blueprint was made the
+        // target in the first place.
         self.db_datastore
             .blueprint_target_set_current_enabled(opctx, new_target)
             .await?;
@@ -154,7 +226,7 @@ impl super::Nexus {
         let creator = format!("nexus {}", self.id);
         let datastore = self.datastore();
 
-        let (_, parent_blueprint) =
+        let (target, parent_blueprint) =
             self.db_datastore.blueprint_target_get_current_full(opctx).await?;
 
         // Load up the planner config from the db directly (rather than from,
@@ -191,7 +263,7 @@ impl super::Nexus {
                 "fetching latest inventory collection for blueprint planner",
             )?;
 
-        Ok(PlanningContext { planning_input, creator, inventory })
+        Ok(PlanningContext { target, planning_input, creator, inventory })
     }
 
     async fn blueprint_add(
@@ -229,7 +301,69 @@ impl super::Nexus {
             ))
         })?;
 
-        self.blueprint_add(&opctx, &blueprint).await?;
+        // Assemble a Reconfigurator state file that we can archive for future
+        // debugging.  This is best-effort.
+        let parent = Blueprint::clone(
+            planning_context.planning_input.parent_blueprint(),
+        );
+        let maybe_debug = reconfigurator_state_assemble(
+            opctx,
+            self.datastore(),
+            planning_context.planning_input,
+            IdOrdMap::from_iter([inventory]),
+            IdOrdMap::from_iter([parent, blueprint.clone()]),
+            planning_context.target,
+            None,
+        )
+        .await
+        .and_then(|s| {
+            serde_json::to_string(&s)
+                .context("serializing Reconfigurator state file")
+        })
+        .map_err(|error| {
+            Error::internal_error(&format!(
+                "error assembling Reconfigurator state: {}",
+                InlineErrorChain::new(&*error),
+            ))
+        });
+
+        let archive_deposit = match maybe_debug {
+            Err(error) => Err(error),
+            Ok(debug_str) => {
+                let debug_name = blueprint_debug_filename(
+                    &blueprint,
+                    BlueprintDebugAction::Plan,
+                );
+                self.debug_dropbox_reconfigurator
+                    .deposit_file(&debug_name, &debug_str)
+                    .await
+                    .map_err(|error| {
+                        Error::internal_error(&format!(
+                            "error saving Reconfigurator state: {}",
+                            InlineErrorChain::new(&error),
+                        ))
+                    })
+            }
+        };
+
+        if let Err(error) = &archive_deposit {
+            warn!(
+                &opctx.log,
+                "failed to archive debug file for new blueprint";
+                "blueprint_id" => %blueprint.id,
+                InlineErrorChain::new(error),
+            );
+        }
+
+        if let Err(error) = self.blueprint_add(&opctx, &blueprint).await {
+            // Try to cancel the dropbox deposit.  This information is
+            // useless now.  It's not a problem if this doesn't work.
+            if let Ok(deposit) = archive_deposit {
+                deposit.cancel_and_attempt_delete().await;
+            }
+            return Err(error);
+        }
+
         Ok(blueprint)
     }
 
@@ -238,6 +372,15 @@ impl super::Nexus {
         opctx: &OpContext,
         blueprint: Blueprint,
     ) -> Result<(), Error> {
+        // We do not save a Reconfigurator state file for import.  The only
+        // reason to do so is for the historical record to contain this specific
+        // blueprint.  If it's made the target, the record will contain another
+        // state file for that operation and that will contain the blueprint.
+        // If not, it's not that important.  (We could generate one anyway, but
+        // most of the state in the state file would be useless: most of it is
+        // oriented around understanding a planning decision, but the state we
+        // would construct would not be associated with planning this
+        // blueprint.)
         let _ = self.blueprint_add(&opctx, &blueprint).await?;
         Ok(())
     }
@@ -390,7 +533,7 @@ impl super::Nexus {
                     SetTargetReleaseIntent::RecoverFromMupdate => {
                         validate_can_set_target_release_for_mupdate_recovery(
                             &current_blueprint,
-                            *current_target_release.generation,
+                            current_target_release.generation(),
                             &new_system_version,
                             &self.log,
                         )
@@ -489,7 +632,7 @@ enum TargetReleaseChangeError {
 // it work the second time.
 fn validate_can_set_target_release_for_mupdate_recovery(
     current_blueprint: &Blueprint,
-    current_target_release_gen: Generation,
+    current_target_release_gen: TargetReleaseGeneration,
     proposed_new_version: &semver::Version,
     log: &Logger,
 ) -> Result<(), TargetReleaseChangeError> {
@@ -938,13 +1081,320 @@ impl SledUpdateStatus {
     }
 }
 
+/// Describes why a Reconfigurator state file is being created by Nexus
+///
+/// This is used to name the resulting file.
+#[derive(Debug, Clone, Copy)]
+pub enum BlueprintDebugAction {
+    /// the autoplanner generated this blueprint and will try to make it the
+    /// target
+    AutoplanIntent,
+    /// the autoplanner generated this blueprint and made it the target
+    Autoplan,
+    /// someone explicitly ran the planner using the Nexus internal API
+    /// (likely a person running `omdb`)
+    Plan,
+    /// someone explicitly requested to set the target blueprint using the Nexus
+    /// internal API (likely a person running `omdb`) and the system will try to
+    /// make this the new target
+    TargetIntent,
+    /// someone explicitly set the target blueprint using the Nexus internal API
+    /// (likely a person running `omdb`) and the system made it the new target
+    Target,
+}
+
+/// Returns the filename for a debug dropbox file related to blueprint planning
+pub fn blueprint_debug_filename(
+    blueprint: &Blueprint,
+    action: BlueprintDebugAction,
+) -> String {
+    let action_str = match action {
+        BlueprintDebugAction::AutoplanIntent => "autoplan-intent",
+        BlueprintDebugAction::Autoplan => "autoplan",
+        BlueprintDebugAction::Plan => "plan",
+        BlueprintDebugAction::TargetIntent => "target-intent",
+        BlueprintDebugAction::Target => "target",
+    };
+    let time_str = blueprint.time_created.format("%Y%m%dT%H%M%SZ");
+    format!("{time_str}-{action_str}-{}.json", blueprint.id)
+}
+
+/// Typestate-based helper to manage writing out two Reconfigurator state files
+/// as part of setting a new target blueprint: the first is an "intent" file and
+/// the second is a "committed" file.
+///
+/// The typestates prevent this from being misused in obvious ways (e.g.,
+/// writing commit file without having tried to write the intent file).
+/// However, there are various other kinds of failures here, including
+/// caller errors.  All of these get swallowed because we don't want them to
+/// prevent the consumer from doing whatever it's trying to do.
+// This is currently used in two places.  The main reasons to factor it
+// separately are to encapsulate the awkward best-effort logic and to be able to
+// test the intent file behavior.  The latter is otherwise difficult to
+// orchestrate in either of the two consumers.
+#[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
+pub enum SetTargetDebugWriter<'a> {
+    /// We're ready to write the intent file.
+    Ready(SetTargetDebugWriterReady<'a>),
+    /// We've encountered an error and will be ignoring subsequent operations.
+    Failed(anyhow::Error),
+}
+
+/// internal state of SetTargetDebugWriter when we haven't encountered an error
+#[derive(Debug)]
+pub struct SetTargetDebugWriterReady<'a> {
+    log: &'a Logger,
+    producer: &'a Producer,
+    intent_state: UnstableReconfiguratorState,
+    intended_blueprint_id: BlueprintUuid,
+    intent_state_str: String,
+}
+
+impl<'a> SetTargetDebugWriterReady<'a> {
+    fn new(
+        log: &'a Logger,
+        producer: &'a Producer,
+        maybe_intent_state: Result<UnstableReconfiguratorState, anyhow::Error>,
+    ) -> Result<SetTargetDebugWriterReady<'a>, anyhow::Error> {
+        let intent_state = match maybe_intent_state {
+            Ok(intent_state) => intent_state,
+            Err(error) => return Err(error),
+        };
+
+        let Some(intended_blueprint_id) =
+            intent_state.intended_target_blueprint
+        else {
+            bail!("intent_state does not have an intended_target_blueprint");
+        };
+
+        if !intent_state.blueprints.contains_key(&intended_blueprint_id) {
+            bail!(
+                "intent_state's intended_target_blueprint is missing \
+                 from `blueprints`"
+            );
+        }
+
+        let intent_state_str = serde_json::to_string(&intent_state)
+            .context("serializing intent Reconfigurator state file")?;
+
+        Ok(SetTargetDebugWriterReady {
+            log,
+            producer,
+            intent_state,
+            intended_blueprint_id,
+            intent_state_str,
+        })
+    }
+}
+
+impl<'a> SetTargetDebugWriter<'a> {
+    pub fn new(
+        log: &'a Logger,
+        producer: &'a Producer,
+        intent_state: Result<UnstableReconfiguratorState, anyhow::Error>,
+    ) -> SetTargetDebugWriter<'a> {
+        match SetTargetDebugWriterReady::new(log, producer, intent_state) {
+            Ok(ready) => SetTargetDebugWriter::Ready(ready),
+            Err(error) => {
+                error!(
+                    log,
+                    "failed to assemble SetTarget debug files";
+                    InlineErrorChain::new(&*error),
+                );
+                SetTargetDebugWriter::Failed(error)
+            }
+        }
+    }
+
+    pub async fn write_intent(
+        self,
+        intent_reason: BlueprintDebugAction,
+    ) -> SetTargetDebugWriterPhase2<'a> {
+        match self {
+            SetTargetDebugWriter::Failed(error) => {
+                return SetTargetDebugWriterPhase2::Failed(error);
+            }
+            SetTargetDebugWriter::Ready(SetTargetDebugWriterReady {
+                log,
+                producer,
+                intent_state,
+                intended_blueprint_id,
+                intent_state_str,
+            }) => {
+                // unwrap(): we checked in `new` that this was present.
+                let blueprint = intent_state
+                    .blueprints
+                    .get(&intended_blueprint_id)
+                    .unwrap();
+                let name = blueprint_debug_filename(blueprint, intent_reason);
+
+                match producer.deposit_file(&name, &intent_state_str).await {
+                    Ok(intent_deposit) => {
+                        info!(
+                            &log,
+                            "saved intent debug file";
+                            "filename" => name
+                        );
+
+                        SetTargetDebugWriterPhase2::Ready {
+                            log,
+                            producer,
+                            intent_state,
+                            intent_deposit,
+                        }
+                    }
+                    Err(error) => {
+                        warn!(
+                            log,
+                            "failed to save SetTarget intent file";
+                            InlineErrorChain::new(&error),
+                        );
+
+                        SetTargetDebugWriterPhase2::Failed(anyhow!(error))
+                    }
+                }
+            }
+        }
+    }
+
+    #[cfg(test)]
+    pub fn error(&self) -> Option<&anyhow::Error> {
+        match self {
+            SetTargetDebugWriter::Ready { .. } => None,
+            SetTargetDebugWriter::Failed(error) => Some(error),
+        }
+    }
+}
+
+#[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
+pub enum SetTargetDebugWriterPhase2<'a> {
+    /// We're ready to write the commit file.
+    Ready {
+        log: &'a Logger,
+        producer: &'a Producer,
+        intent_state: UnstableReconfiguratorState,
+        intent_deposit: DepositHandle,
+    },
+
+    /// We've encountered an error and will be ignoring subsequent operations.
+    // The specific error is only used for tests.  Rather than sprinkle
+    // `cfg(test)` around all the bookkeeping, we just allow this to be
+    // dead_code in non-test builds.
+    Failed(#[cfg_attr(not(test), expect(dead_code))] anyhow::Error),
+}
+
+impl<'a> SetTargetDebugWriterPhase2<'a> {
+    #[cfg(test)]
+    pub fn error(&self) -> Option<&anyhow::Error> {
+        match self {
+            SetTargetDebugWriterPhase2::Ready { .. } => None,
+            SetTargetDebugWriterPhase2::Failed(error) => Some(error),
+        }
+    }
+
+    pub async fn cancel(self) {
+        if let SetTargetDebugWriterPhase2::Ready {
+            log, intent_deposit, ..
+        } = self
+        {
+            debug!(&log, "attempting to remove intent file after failure");
+            intent_deposit.cancel_and_attempt_delete().await;
+            warn!(&log, "attempted to remove intent file after failure");
+        }
+    }
+
+    pub async fn write_committed(
+        self,
+        new_target: BlueprintTarget,
+        commit_reason: BlueprintDebugAction,
+    ) {
+        // If we previously failed, do nothing now.
+        let SetTargetDebugWriterPhase2::Ready {
+            log,
+            producer,
+            intent_state,
+            intent_deposit,
+        } = self
+        else {
+            return;
+        };
+
+        // Compute the committed state based on the intended state.
+        //
+        // The only difference is that the intended target blueprint has become
+        // the real target blueprint.
+        let committed_state = UnstableReconfiguratorState {
+            intended_target_blueprint: None,
+            target_blueprint: new_target,
+            ..intent_state
+        };
+
+        let Some(blueprint) = committed_state
+            .blueprints
+            .get(&committed_state.target_blueprint.target_id)
+        else {
+            // This should be impossible  That's because the new target_id
+            // *should* be the one that was previously the intended target id,
+            // and we checked in `SetTargetDebugWriterReady::new()` that that
+            // blueprint was present.  However, it's conceivable for the caller
+            // to give us a different target blueprint here.  That's not good or
+            // right, but our job is to save a state file matching whatever they
+            // told us -- if we can.
+            error!(
+                log,
+                "caller setting target to a blueprint different from previous \
+                 intended target and it is not also being saved";
+                "blueprint_id" => %committed_state.target_blueprint.target_id,
+            );
+            return;
+        };
+        let name = blueprint_debug_filename(&blueprint, commit_reason);
+        let committed_str = match serde_json::to_string(&committed_state) {
+            Ok(s) => s,
+            Err(error) => {
+                error!(
+                    &log,
+                    "failed to serialize committed debug state";
+                    InlineErrorChain::new(&error),
+                    "filename" => name,
+                );
+                return;
+            }
+        };
+
+        match producer.deposit_file(&name, &committed_str).await {
+            Ok(_deposit) => {
+                // We successfully deposited the "commit" state.
+                // Make a best-effort to cancel the intended state file.
+                intent_deposit.cancel_and_attempt_delete().await;
+                info!(&log, "saved committed debug state"; "filename" => name);
+            }
+            Err(error) => {
+                // We failed to deposit the "commit" state.  Log the error and
+                // keep the intended state around.  There's nothing more to do.
+                error!(
+                    &log,
+                    "failed to save committed debug state";
+                    InlineErrorChain::new(&error),
+                    "filename" => name,
+                );
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Utc;
     use nexus_reconfigurator_planning::example::example;
     use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
+    use omicron_test_utils::dev::dropbox::TestDropbox;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::MupdateOverrideUuid;
+    use reconfigurator_cli::test_utils::ReconfiguratorCliTestState;
     use tufaceous_artifact::ArtifactHash;
     use tufaceous_artifact::ArtifactVersion;
 
@@ -1518,5 +1968,199 @@ mod tests {
         );
 
         logctx.cleanup_successful();
+    }
+
+    /// Verifies the helper for writing Reconfigurator state files
+    #[tokio::test]
+    async fn test_debug_files() {
+        let logctx = test_setup_log("test_debug_files");
+        let log = &logctx.log;
+
+        // Set up a simulated system whose initial state we can work with.
+        let mut sim = ReconfiguratorCliTestState::new("test_debug_files", &log);
+        sim.load_example().expect("loading example system");
+        let initial_state =
+            sim.current_state().to_serializable().expect("initial state");
+        let blueprint = sim.run_planner().expect("expected new blueprint");
+
+        // Case: it's an error to provide an initial state that doesn't have the
+        // intended blueprint field set.
+        let test_dropbox = TestDropbox::new(log.clone()).await;
+        let intent_state = initial_state.clone();
+        let helper = SetTargetDebugWriter::new(
+            log,
+            test_dropbox.producer(),
+            Ok(intent_state),
+        );
+        let error = helper.error().unwrap();
+        println!("found error: {error:#}");
+        assert!(format!("{error:#}").contains("intended_target_blueprint"));
+
+        // We should still be able to invoke `write_intent()`, and then either
+        // `cancel()` or `write_committed`.  In this case, we'll check
+        // `cancel()`.  The dropbox should be empty even before we cancel.
+        let helper =
+            helper.write_intent(BlueprintDebugAction::TargetIntent).await;
+        assert!(test_dropbox.new_reader().load_new::<()>().is_empty());
+        helper.cancel().await;
+        test_dropbox.cleanup_successful();
+
+        // Case: it's an error to provide an initial state referencing a
+        // blueprint that isn't in `blueprints`.
+        let test_dropbox = TestDropbox::new(log.clone()).await;
+        let mut intent_state = initial_state.clone();
+        intent_state.intended_target_blueprint = Some(blueprint.id);
+        let helper = SetTargetDebugWriter::new(
+            log,
+            test_dropbox.producer(),
+            Ok(intent_state),
+        );
+        let error = helper.error().unwrap();
+        println!("found error: {error:#}");
+        assert!(format!("{error:#}").contains("intended_target_blueprint"));
+
+        // As above, we should still be able to invoke `write_intent()`, and
+        // then either `cancel()` or `write_committed`.  In this case, we'll
+        // check `write_committed()`.  The dropbox should be empty even after
+        // that.
+        let helper =
+            helper.write_intent(BlueprintDebugAction::TargetIntent).await;
+        helper
+            .write_committed(
+                BlueprintTarget {
+                    target_id: blueprint.id,
+                    enabled: false,
+                    time_made_target: Utc::now(),
+                },
+                BlueprintDebugAction::Target,
+            )
+            .await;
+        assert!(test_dropbox.new_reader().load_new::<()>().is_empty());
+        test_dropbox.cleanup_successful();
+
+        // The remaining test cases assume a valid intended state.
+        let mut intent_state = initial_state.clone();
+        intent_state.intended_target_blueprint = Some(blueprint.id);
+        intent_state
+            .blueprints
+            .insert_unique((*blueprint).clone())
+            .expect("new blueprint");
+
+        test_debug_files_success(log, &intent_state).await;
+        test_debug_files_cancel(log, &intent_state).await;
+        test_debug_files_intent_fail(log, &intent_state).await;
+
+        logctx.cleanup_successful();
+    }
+
+    /// Test case: happy path (writing "intent" file followed by "commit" file)
+    async fn test_debug_files_success(
+        log: &Logger,
+        intent_state: &UnstableReconfiguratorState,
+    ) {
+        let test_dropbox = TestDropbox::new(log.clone()).await;
+        let producer = test_dropbox.producer();
+        let mut reader = test_dropbox.new_reader();
+
+        // No files ought to have been created yet.
+        let files = reader.load_new::<UnstableReconfiguratorState>();
+        assert!(files.is_empty());
+
+        // Write the intent file and verify it.
+        let helper =
+            SetTargetDebugWriter::new(log, producer, Ok(intent_state.clone()));
+        assert!(helper.error().is_none());
+        let helper =
+            helper.write_intent(BlueprintDebugAction::TargetIntent).await;
+
+        let files = reader.load_new::<UnstableReconfiguratorState>();
+        assert_eq!(files.len(), 1);
+        let file = files.into_iter().next().expect("non-empty Vec");
+        assert_eq!(file, *intent_state);
+        assert_eq!(0, reader.count_removed());
+
+        // Write the commit file and verify it.
+        let now = Utc::now();
+        let new_target = BlueprintTarget {
+            target_id: intent_state.intended_target_blueprint.unwrap(),
+            enabled: intent_state.target_blueprint.enabled,
+            time_made_target: now,
+        };
+        helper.write_committed(new_target, BlueprintDebugAction::Target).await;
+
+        let files = reader.load_new::<UnstableReconfiguratorState>();
+        assert_eq!(files.len(), 1);
+        let file = files.into_iter().next().expect("non-empty Vec");
+
+        let expected_state = UnstableReconfiguratorState {
+            target_blueprint: new_target,
+            intended_target_blueprint: None,
+            ..intent_state.clone()
+        };
+        assert_eq!(file, expected_state);
+
+        // The intent file ought to have been removed.
+        assert_eq!(1, reader.count_removed());
+        test_dropbox.cleanup_successful();
+    }
+
+    /// Test case: cancel writing new "set target" debug file after writing the
+    /// intent file
+    async fn test_debug_files_cancel(
+        log: &Logger,
+        intent_state: &UnstableReconfiguratorState,
+    ) {
+        let test_dropbox = TestDropbox::new(log.clone()).await;
+        let producer = test_dropbox.producer();
+        let mut reader = test_dropbox.new_reader();
+
+        // No files ought to have been created yet.
+        let files = reader.load_new::<UnstableReconfiguratorState>();
+        assert!(files.is_empty());
+
+        // Write the intent file and verify it.
+        let helper =
+            SetTargetDebugWriter::new(log, producer, Ok(intent_state.clone()));
+        assert!(helper.error().is_none());
+        let helper =
+            helper.write_intent(BlueprintDebugAction::TargetIntent).await;
+
+        let files = reader.load_new::<UnstableReconfiguratorState>();
+        assert_eq!(files.len(), 1);
+        let file = files.into_iter().next().expect("non-empty Vec");
+        assert_eq!(file, *intent_state);
+
+        // Case: cancel.  This is what we'd do if we failed to make the new
+        // blueprint the target.  There should be nothing new in the dropbox and
+        // the previous file ought to have been removed.
+        helper.cancel().await;
+        let files = reader.load_new::<UnstableReconfiguratorState>();
+        assert!(files.is_empty());
+        assert_eq!(1, reader.count_removed());
+
+        test_dropbox.cleanup_successful();
+    }
+
+    /// Test case: exercise failure to write the intent file
+    async fn test_debug_files_intent_fail(
+        log: &Logger,
+        intent_state: &UnstableReconfiguratorState,
+    ) {
+        let test_dropbox = TestDropbox::new(log.clone()).await;
+        let (dir, producer) = test_dropbox.into_parts();
+
+        // Delete the directory so that the write below will fail.
+        dir.cleanup_successful();
+
+        // Attempt to write the intent file and verify the error.
+        let helper =
+            SetTargetDebugWriter::new(log, &producer, Ok(intent_state.clone()));
+        assert!(helper.error().is_none());
+        let helper =
+            helper.write_intent(BlueprintDebugAction::TargetIntent).await;
+        let error = helper.error().unwrap();
+        let message = InlineErrorChain::new(&**error).to_string();
+        println!("found error: {message}");
+        assert!(message.contains("I/O error"));
     }
 }

@@ -6,7 +6,7 @@
 
 use camino::Utf8PathBuf;
 use dropshot::HttpError;
-use omicron_generation_kinds::Generation;
+use omicron_generation_kinds::SledConfigGeneration;
 use omicron_ledger as ledger;
 use omicron_ledger::Ledger;
 use sled_agent_types::artifact::ArtifactConfig;
@@ -64,9 +64,12 @@ pub enum LedgerNewConfigError {
     #[error(
         "sled config generation out of date (got {requested}, have {current})"
     )]
-    GenerationOutdated { current: Generation, requested: Generation },
+    GenerationOutdated {
+        current: SledConfigGeneration,
+        requested: SledConfigGeneration,
+    },
     #[error("sled config changed with the same generation ({generation})")]
-    ConfigurationChanged { generation: Generation },
+    ConfigurationChanged { generation: SledConfigGeneration },
     #[error("failed to commit sled config to ledger")]
     LedgerCommitFailed(#[source] ledger::Error),
     #[error("sled config is invalid: {0}")]
@@ -681,6 +684,7 @@ mod tests {
     use camino_tempfile::tempfile;
     use iddqd::IdOrdMap;
     use illumos_utils::zpool::ZpoolName;
+    use omicron_generation_kinds::Generation;
     use omicron_test_utils::dev;
     use omicron_test_utils::dev::poll::wait_for_watch_channel_condition;
     use omicron_uuid_kinds::InternalZpoolUuid;
@@ -880,7 +884,7 @@ mod tests {
     // particular contents.
     fn make_nonempty_sled_config() -> OmicronSledConfig {
         OmicronSledConfig {
-            generation: Generation::new().next(),
+            generation: SledConfigGeneration::new().next(),
             disks: [make_dummy_disk_config("test-serial")]
                 .into_iter()
                 .collect(),
@@ -1009,16 +1013,17 @@ mod tests {
         let logctx = dev::test_setup_log("reject_old_config_generation");
 
         // Set up the ledger task with an initial config (with a generation >
-        // `Generation::new()`, so we can test sending a lower generation).
+        // `SledConfigGeneration::new()`, so we can test sending a lower
+        // generation).
         let mut sled_config = make_nonempty_sled_config();
-        assert!(sled_config.generation > Generation::new());
+        assert!(sled_config.generation > SledConfigGeneration::new());
 
         let test_harness =
             TestHarness::with_initial_config(logctx.log.clone(), &sled_config)
                 .await;
 
         // Try to send a lower generation; the task should reject this.
-        sled_config.generation = Generation::new();
+        sled_config.generation = SledConfigGeneration::new();
         let err = test_harness
             .task_handle
             .set_new_config(sled_config)
@@ -1082,7 +1087,7 @@ mod tests {
         // Create a config that references a zone with a different artifact
         // hash.
         let mut config = OmicronSledConfig {
-            generation: Generation::new().next(),
+            generation: SledConfigGeneration::new().next(),
             disks: IdOrdMap::new(),
             datasets: IdOrdMap::new(),
             zones: [make_dummy_zone_config_using_artifact_hash(
