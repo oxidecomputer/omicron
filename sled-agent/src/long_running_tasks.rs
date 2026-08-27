@@ -229,6 +229,11 @@ pub async fn spawn_all_longrunning_tasks(
                     measurements: measurements.clone(),
                     bootstrap_ip: global_zone_bootstrap_ip,
                     peers: sush_gossip_peers_rx,
+                    bookmark_dirs: config_reconciler
+                        .internal_disks_rx()
+                        .current()
+                        .all_cluster_datasets()
+                        .collect(),
                 },
                 config_reconciler.available_datasets_rx(),
             )

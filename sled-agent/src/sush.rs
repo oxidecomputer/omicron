@@ -23,13 +23,15 @@
 //!
 //! Gossip runs over sprockets on the bootstrap network, so jobs and
 //! sessions are shared across sleds. A universe is a gossip network
-//! identity; peers that meet merge into one by a dominance rule.
-//! Session state is not yet persisted, so a restart forgets the
-//! current session and re-seeds its universe.
+//! identity; peers that meet merge into one by a dominance rule. A
+//! restarted sled re-seeds its universe, rejoins the rack's, and
+//! replays its history without re-executing it. Its gossip identity
+//! is kept in a bookmark on the boot M.2s' cluster datasets, which
+//! exist before trust quorum unlocks anything.
 
 use crate::config::SushConfig;
 use anyhow::Context;
-use camino::Utf8Path;
+use camino::{Utf8Path, Utf8PathBuf};
 use dropshot::{ConfigDropshot, HandlerTaskMode, HttpServer, ServerBuilder};
 use gateway_client::Client as MgsClient;
 use gateway_types::component::SpType;
@@ -66,6 +68,7 @@ use x509_cert::time::Validity;
 
 use sush_common::keys::{EphemeralKey, KeyType, pem_cert_chain};
 use sush_common::targets::{Cubbies, MAX_CUBBY};
+use sush_server::bookmark::BookmarkSource;
 use sush_server::executor::PathIsolation;
 use sush_server::gossip::{GossipConfig, isolated, spawn_gossip};
 use sush_server::link::CorpusSource;
@@ -145,13 +148,14 @@ impl SushHandles {
 }
 
 /// What gossip needs from the sled: its sprockets identity, its reference
-/// measurements, the bootstrap address to listen on, and where to find
-/// its peers.
+/// measurements, the bootstrap address to listen on, where to find its peers,
+/// and where to place its identity bookmark.
 pub struct GossipInputs {
     pub sprockets: SprocketsConfig,
     pub measurements: Arc<MeasurementsHandle>,
     pub bootstrap_ip: Ipv6Addr,
     pub peers: watch::Receiver<BTreeSet<SocketAddrV6>>,
+    pub bookmark_dirs: Vec<Utf8PathBuf>,
 }
 
 /// Start the Support Shell server's tasks, or return `None` if we can't.
@@ -189,7 +193,13 @@ pub async fn spawn_sush_tasks(
     // Gossip runs on the bootstrap network with the sled's sprockets
     // identity, and the attestation corpus is re-read per handshake because
     // updates change it. A sled that cannot gossip still serves local jobs.
-    let GossipInputs { sprockets, measurements, bootstrap_ip, peers } = gossip;
+    let GossipInputs {
+        sprockets,
+        measurements,
+        bootstrap_ip,
+        peers,
+        bookmark_dirs,
+    } = gossip;
     let corpus: CorpusSource = Arc::new({
         let log = log.clone();
         move || match measurements.current_measurements() {
@@ -200,6 +210,10 @@ pub async fn spawn_sush_tasks(
             }
         }
     });
+    let bookmarks = BookmarkSource::new(
+        &log,
+        bookmark_dirs.iter().map(|dir| dir.join("sush-bookmark")).collect(),
+    );
     let listen_addr = SocketAddrV6::new(bootstrap_ip, SUSH_GOSSIP_PORT, 0, 0);
     let universe = match spawn_gossip(
         &log,
@@ -208,7 +222,8 @@ pub async fn spawn_sush_tasks(
         corpus,
         listen_addr,
         peers,
-        seed_gossip(),
+        seed_gossip(&bookmarks).await,
+        bookmarks,
         shutdown.clone(),
     )
     .await
@@ -220,7 +235,7 @@ pub async fn spawn_sush_tasks(
                 "gossip disabled, this sled serves local jobs only";
                 "error" => InlineErrorChain::new(&err),
             );
-            isolated(seed_gossip())
+            isolated(seed_gossip(&BookmarkSource::null()).await)
         }
     };
 

@@ -28,8 +28,7 @@ base64 = { version = "0.22.1" }
 base64ct = { version = "1.8.3", default-features = false, features = ["std"] }
 bitflags-dff4ba8e3ae991db = { package = "bitflags", version = "1.3.2" }
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.11.0", default-features = false, features = ["serde", "std"] }
-bitvec = { version = "1.0.1" }
-borsh = { version = "1.8.0", features = ["bytes", "de_strict_order", "derive"] }
+blake3 = { version = "1.8.5", features = ["mmap", "rayon"] }
 bstr = { version = "1.12.1" }
 buf-list = { version = "1.1.2", default-features = false, features = ["tokio1"] }
 byte-wrapper = { version = "0.1.0", features = ["schemars08", "serde"] }
@@ -167,7 +166,7 @@ url = { version = "2.5.8", features = ["serde"] }
 usdt = { version = "0.6.0" }
 usdt-impl-3b31131e45eafb45 = { package = "usdt-impl", version = "0.6.0", default-features = false, features = ["des"] }
 usdt-impl-d8f496e17d97b5cb = { package = "usdt-impl", version = "0.5.0", default-features = false, features = ["asm", "des"] }
-uuid = { version = "1.23.4", features = ["borsh", "serde", "v4"] }
+uuid = { version = "1.23.4", features = ["serde", "v4"] }
 x509-cert = { version = "0.2.5" }
 zerocopy = { version = "0.8.56", default-features = false, features = ["derive", "simd"] }
 zeroize = { version = "1.9.0", features = ["aarch64", "std", "zeroize_derive"] }
@@ -185,9 +184,7 @@ base64 = { version = "0.22.1" }
 base64ct = { version = "1.8.3", default-features = false, features = ["std"] }
 bitflags-dff4ba8e3ae991db = { package = "bitflags", version = "1.3.2" }
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.11.0", default-features = false, features = ["serde", "std"] }
-bitvec = { version = "1.0.1" }
-borsh = { version = "1.8.0", features = ["bytes", "de_strict_order", "derive"] }
-borsh-derive = { version = "1.8.0" }
+blake3 = { version = "1.8.5", features = ["mmap", "rayon"] }
 bstr = { version = "1.12.1" }
 buf-list = { version = "1.1.2", default-features = false, features = ["tokio1"] }
 byte-wrapper = { version = "0.1.0", features = ["schemars08", "serde"] }
@@ -330,7 +327,7 @@ url = { version = "2.5.8", features = ["serde"] }
 usdt = { version = "0.6.0" }
 usdt-impl-3b31131e45eafb45 = { package = "usdt-impl", version = "0.6.0", default-features = false, features = ["des"] }
 usdt-impl-d8f496e17d97b5cb = { package = "usdt-impl", version = "0.5.0", default-features = false, features = ["asm", "des"] }
-uuid = { version = "1.23.4", features = ["borsh", "serde", "v4"] }
+uuid = { version = "1.23.4", features = ["serde", "v4"] }
 vergen = { version = "9.1.0", features = ["cargo", "rustc"] }
 vergen-lib = { version = "9.1.0", features = ["cargo", "git", "rustc"] }
 x509-cert = { version = "0.2.5" }
