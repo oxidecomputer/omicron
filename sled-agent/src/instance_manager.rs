@@ -886,6 +886,15 @@ impl InstanceManagerRunner {
                 registration_slot.insert(instance)
             }
             CanEnsureVmmResult::CannotRegister(reason) => {
+                // The VMM doesn't already exist, but we must disallow new
+                // registrations.
+                //
+                // This should be unusual but not impossible: this means Nexus
+                // placed a VMM on this sled (which it should only do if the
+                // sled's update disposition is "available") but we can't
+                // service that request because in the time between when Nexus
+                // placed the instance and we received this request, our update
+                // disposition changed to "evacuating".
                 warn!(
                     &self.log,
                     "rejecting new VMM registration";
@@ -894,8 +903,6 @@ impl InstanceManagerRunner {
                     "migration_id" => ?migration_id,
                     "reason" => reason.error_display(),
                 );
-                // The VMM doesn't already exist, but we must disallow new
-                // registrations.
                 return Err(Error::VmmRegistrationDisallowed(reason));
             }
         };
