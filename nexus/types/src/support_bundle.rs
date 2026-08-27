@@ -469,8 +469,10 @@ pub(crate) mod test_utils {
 
         fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
             // Generated bounds are ordered (start <= end when both are
-            // set) so arbitrary selections satisfy the database CHECK
-            // constraint when round-tripped through persistence tests.
+            // set) because `BundleTimeRange::new` rejects inverted ranges.
+            // The timestamps span chrono's full range, which exceeds what
+            // CockroachDB's TIMESTAMPTZ can store: fine for serde tests,
+            // unsuitable for persistence tests.
             (prop::option::of(arb_datetime()), prop::option::of(arb_datetime()))
                 .prop_map(|(a, b)| {
                     let (start, end) = match (a, b) {
@@ -525,7 +527,7 @@ mod tests {
         let now = ts(10 * WEEK_SECS);
         let lookback = chrono::Days::new(7);
 
-        // No range at all: the lookback anchors to `now`.
+        // The default (unbounded) range: the lookback anchors to `now`.
         let mut selection = BundleDataSelection::new();
         selection.ensure_start_bound(now, lookback);
         let range = selection.time_range();
