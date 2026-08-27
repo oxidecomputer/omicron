@@ -64,6 +64,7 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::bail_unless;
+use omicron_generation_kinds::InstanceStateGeneration;
 use omicron_generation_kinds::InstanceUpdaterGeneration;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
@@ -2056,7 +2057,9 @@ impl DataStore {
         // The expected state generation number of the instance record *before*
         // applying the update.
         let prev_state_gen =
-            u64::from(new_runtime.generation.0).saturating_sub(1);
+            InstanceStateGeneration::from(new_runtime.generation)
+                .as_u64()
+                .saturating_sub(1);
         match result {
             // If we updated the record, the lock has been released! Return
             // `Ok(true)` to indicate that we released the lock successfully.
@@ -2087,7 +2090,10 @@ impl DataStore {
             // another execution of the same saga action has already updated the
             // instance record.
             UpdateAndQueryResult { ref found, .. }
-                if u64::from(found.runtime().generation.0)
+                if InstanceStateGeneration::from(
+                    found.runtime().generation,
+                )
+                .as_u64()
                     != prev_state_gen
                     && InstanceUpdaterGeneration::from(found.updater_gen)
                         != locked_gen =>
@@ -2113,7 +2119,10 @@ impl DataStore {
             // longer update the instance, as its state has changed, potentially
             // invalidating the updates. We need to unwind.
             UpdateAndQueryResult { ref found, .. }
-                if u64::from(found.runtime().generation.0)
+                if InstanceStateGeneration::from(
+                    found.runtime().generation,
+                )
+                .as_u64()
                     != prev_state_gen
                     && InstanceUpdaterGeneration::from(found.updater_gen)
                         == locked_gen
@@ -2404,7 +2413,7 @@ mod tests {
                 &instance_id,
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    generation: Generation(Generation::new().next()),
+                    generation: InstanceStateGeneration::new().next().into(),
                     nexus_state: InstanceState::Vmm,
                     propolis_id: Some(vmm.id),
                     dst_propolis_id: None,
@@ -2616,9 +2625,7 @@ mod tests {
                 &InstanceUuid::from_untyped_uuid(authz_instance.id()),
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    generation: Generation(
-                        omicron_generation_kinds::Generation::from_u32(2),
-                    ),
+                    generation: InstanceStateGeneration::from_u32(2).into(),
                     propolis_id: None,
                     dst_propolis_id: None,
                     migration_id: None,
@@ -2794,9 +2801,7 @@ mod tests {
                 &InstanceUuid::from_untyped_uuid(authz_instance.id()),
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    generation: Generation(
-                        omicron_generation_kinds::Generation::from_u32(2),
-                    ),
+                    generation: InstanceStateGeneration::from_u32(2).into(),
                     propolis_id: None,
                     dst_propolis_id: None,
                     migration_id: None,
@@ -2841,9 +2846,7 @@ mod tests {
                 &InstanceUuid::from_untyped_uuid(authz_instance.id()),
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    generation: Generation(
-                        omicron_generation_kinds::Generation::from_u32(2),
-                    ),
+                    generation: InstanceStateGeneration::from_u32(2).into(),
                     propolis_id: None,
                     dst_propolis_id: None,
                     migration_id: None,
@@ -2919,9 +2922,7 @@ mod tests {
                 &InstanceUuid::from_untyped_uuid(authz_instance.id()),
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    generation: Generation(
-                        omicron_generation_kinds::Generation::from_u32(2),
-                    ),
+                    generation: InstanceStateGeneration::from_u32(2).into(),
                     propolis_id: None,
                     dst_propolis_id: None,
                     migration_id: None,
@@ -2983,9 +2984,7 @@ mod tests {
         .expect("instance should be locked");
         let new_runtime = &InstanceRuntimeState {
             time_updated: Utc::now(),
-            generation: Generation(
-                omicron_generation_kinds::Generation::from_u32(2),
-            ),
+            generation: InstanceStateGeneration::from_u32(2).into(),
             propolis_id: Some(Uuid::new_v4()),
             dst_propolis_id: None,
             migration_id: None,
@@ -3090,9 +3089,7 @@ mod tests {
         // acquired.
         let new_runtime = &InstanceRuntimeState {
             time_updated: Utc::now(),
-            generation: Generation(
-                omicron_generation_kinds::Generation::from_u32(2),
-            ),
+            generation: InstanceStateGeneration::from_u32(2).into(),
             propolis_id: Some(Uuid::new_v4()),
             dst_propolis_id: Some(Uuid::new_v4()),
             migration_id: Some(Uuid::new_v4()),
@@ -3121,9 +3118,7 @@ mod tests {
                     &lock,
                     &InstanceRuntimeState {
                         time_updated: Utc::now(),
-                        generation: Generation(
-                            omicron_generation_kinds::Generation::from_u32(2)
-                        ),
+                        generation: InstanceStateGeneration::from_u32(2).into(),
                         propolis_id: None,
                         dst_propolis_id: None,
                         migration_id: None,
@@ -3222,9 +3217,11 @@ mod tests {
                 &instance_id,
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    generation: Generation(
-                        snapshot.instance.state_generation.0.next(),
-                    ),
+                    generation: InstanceStateGeneration::from(
+                        snapshot.instance.state_generation,
+                    )
+                    .next()
+                    .into(),
                     nexus_state: InstanceState::Vmm,
                     propolis_id: Some(active_vmm.id),
                     ..snapshot.instance.runtime()
@@ -3295,9 +3292,11 @@ mod tests {
                 &instance_id,
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    generation: Generation(
-                        snapshot.instance.state_generation.0.next(),
-                    ),
+                    generation: InstanceStateGeneration::from(
+                        snapshot.instance.state_generation,
+                    )
+                    .next()
+                    .into(),
                     nexus_state: InstanceState::Vmm,
                     propolis_id: Some(active_vmm.id),
                     dst_propolis_id: Some(target_vmm.id),
@@ -3387,7 +3386,11 @@ mod tests {
                 &instance_id,
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    generation: Generation(instance.state_generation.0.next()),
+                    generation: InstanceStateGeneration::from(
+                        instance.state_generation,
+                    )
+                    .next()
+                    .into(),
                     nexus_state: InstanceState::Vmm,
                     propolis_id: Some(vmm1.id),
                     ..instance.runtime()
