@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026081901.0.0"
+    "version": "2026082700.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -12669,7 +12669,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SupportBundleInfo"
+                  "$ref": "#/components/schemas/SupportBundleView"
                 }
               }
             }
@@ -29026,10 +29026,155 @@
       "SupportBundleCreate": {
         "type": "object",
         "properties": {
+          "data_selection": {
+            "nullable": true,
+            "description": "What the bundle should collect. Everything, over the last seven days, if omitted.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SupportBundleDataSelection"
+              }
+            ]
+          },
           "user_comment": {
             "nullable": true,
             "description": "User comment for the support bundle",
             "type": "string"
+          }
+        }
+      },
+      "SupportBundleData": {
+        "description": "The data a support bundle collects.\n\nEach category's settings live within that category, so settings for a category that is not being collected cannot be expressed.",
+        "oneOf": [
+          {
+            "description": "Collect every category of data, from every sled, unfiltered.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "all"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Collect exactly what is specified here. A category that is omitted is not collected.",
+            "type": "object",
+            "properties": {
+              "ereports": {
+                "nullable": true,
+                "description": "Collect ereports.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/SupportBundleEreports"
+                  }
+                ]
+              },
+              "host_info": {
+                "nullable": true,
+                "description": "Collect diagnostic commands and zone logs from sleds.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/SupportBundleHostInfo"
+                  }
+                ]
+              },
+              "reconfigurator": {
+                "description": "Collect reconfigurator state: recent blueprints and information about the target blueprint.",
+                "default": false,
+                "type": "boolean"
+              },
+              "sled_cubby_info": {
+                "description": "Collect sled serial numbers, cubby numbers, and UUIDs.",
+                "default": false,
+                "type": "boolean"
+              },
+              "sp_dumps": {
+                "description": "Collect task dumps from service processors.",
+                "default": false,
+                "type": "boolean"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "explicit"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
+      "SupportBundleDataSelection": {
+        "description": "What a support bundle collects.\n\nWhen creating a bundle, an omitted field takes its default: everything, from every sled, unfiltered. When viewing a bundle, every field describes what was actually recorded for it.",
+        "type": "object",
+        "properties": {
+          "data": {
+            "description": "The data to collect. Everything if omitted.",
+            "default": {
+              "type": "all"
+            },
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SupportBundleData"
+              }
+            ]
+          },
+          "end_time": {
+            "nullable": true,
+            "description": "The inclusive end of that window. Unbounded if omitted.",
+            "type": "string",
+            "format": "date-time"
+          },
+          "start_time": {
+            "nullable": true,
+            "description": "The inclusive start of the window bounding time-bounded data: zone logs and ereports. Ereports are filtered on their timestamp; a log file is included when the interval it spans overlaps the window.\n\nWhen creating a bundle, an omitted start defaults to seven days before the end of the window (or seven days ago, when the window has no end). When viewing a bundle, an omitted start means the bundle was created before time windows were recorded, and was collected without a lower bound.",
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "SupportBundleEreports": {
+        "description": "Ereport collection.",
+        "type": "object",
+        "properties": {
+          "only_classes": {
+            "description": "Collect only ereports with these class strings. Unfiltered when empty.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "only_serials": {
+            "description": "Collect only ereports reported by systems with these serial numbers. Unfiltered when empty.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "SupportBundleHostInfo": {
+        "description": "Host info collection: diagnostic commands and zone logs from sleds.",
+        "type": "object",
+        "properties": {
+          "sleds": {
+            "description": "The sleds to collect from. Every sled if omitted.",
+            "default": {
+              "type": "all"
+            },
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SupportBundleSledSelection"
+              }
+            ]
           }
         }
       },
@@ -29087,6 +29232,49 @@
           "items"
         ]
       },
+      "SupportBundleSledSelection": {
+        "description": "The sleds to collect host info from.",
+        "oneOf": [
+          {
+            "description": "Collect from every sled.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "all"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Collect only from the listed sleds. An empty list collects from none of them.",
+            "type": "object",
+            "properties": {
+              "sleds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "specific"
+                ]
+              }
+            },
+            "required": [
+              "sleds",
+              "type"
+            ]
+          }
+        ]
+      },
       "SupportBundleState": {
         "oneOf": [
           {
@@ -29128,6 +29316,49 @@
             "type": "string"
           }
         }
+      },
+      "SupportBundleView": {
+        "description": "A support bundle, along with what it collects.",
+        "type": "object",
+        "properties": {
+          "data_selection": {
+            "description": "What this bundle collects.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SupportBundleDataSelection"
+              }
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reason_for_creation": {
+            "type": "string"
+          },
+          "reason_for_failure": {
+            "nullable": true,
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/SupportBundleState"
+          },
+          "time_created": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "user_comment": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "data_selection",
+          "id",
+          "reason_for_creation",
+          "state",
+          "time_created"
+        ]
       },
       "Switch": {
         "description": "An operator's view of a Switch.",

@@ -21,6 +21,8 @@ use crate::db::DbUrlOptions;
 use anyhow::Context;
 use camino::Utf8PathBuf;
 use camino_tempfile::tempdir_in;
+use chrono::DateTime;
+use chrono::Utc;
 use clap::Args;
 use clap::Subcommand;
 use clap::ValueEnum;
@@ -79,17 +81,8 @@ struct CollectArgs {
     #[clap(long, value_enum)]
     include: Vec<BundleDataCategory>,
 
-    /// Only collect time-bounded data (zone logs, ereports) newer than
-    /// this age, e.g. "2days" or "12h 30m". Defaults to a 7-day window
-    /// ending at --until (or now).
-    #[clap(long, value_parser = humantime::parse_duration)]
-    since: Option<std::time::Duration>,
-
-    /// Only collect time-bounded data (zone logs, ereports) older than
-    /// this age, e.g. "1h". Must be a smaller age than --since. Log files
-    /// that span this bound are included in full.
-    #[clap(long, value_parser = humantime::parse_duration)]
-    until: Option<std::time::Duration>,
+    #[command(flatten)]
+    window: TimeWindowArgs,
 }
 
 impl CollectArgs {
@@ -113,10 +106,43 @@ impl CollectArgs {
             };
         }
 
-        // Both flags are ages relative to now: --since is the oldest data
-        // to include (the window's start), --until the newest (its end).
-        // Without --since, `collect` fills in the default lookback,
-        // anchored to the end bound when one is given.
+        let window = self.window.bounds()?;
+        Ok(sel.with_time_range(BundleTimeRange::new(window.start, window.end)?))
+    }
+}
+
+/// The absolute window that [`TimeWindowArgs`] resolves to.
+pub struct TimeWindowBounds {
+    pub start: Option<DateTime<Utc>>,
+    pub end: Option<DateTime<Utc>>,
+}
+
+/// The `--since`/`--until` flags naming the window that bounds
+/// time-bounded bundle data.
+#[derive(Debug, Args)]
+pub struct TimeWindowArgs {
+    /// Only collect time-bounded data (zone logs, ereports) newer than
+    /// this age, e.g. "2days" or "12h 30m". Defaults to a 7-day window
+    /// ending at --until (or now).
+    #[clap(long, value_parser = humantime::parse_duration)]
+    since: Option<std::time::Duration>,
+
+    /// Only collect time-bounded data (zone logs, ereports) older than
+    /// this age, e.g. "1h". Must be a smaller age than --since. Log files
+    /// that span this bound are included in full.
+    #[clap(long, value_parser = humantime::parse_duration)]
+    until: Option<std::time::Duration>,
+}
+
+impl TimeWindowArgs {
+    /// Resolves both flags into absolute timestamps.
+    ///
+    /// Both flags are ages relative to now: --since is the oldest data
+    /// to include (the window's start), --until the newest (its end).
+    /// Without --since, the start bound is filled in with the default
+    /// lookback where the selection enters the system, anchored to the
+    /// end bound when one is given.
+    pub fn bounds(&self) -> anyhow::Result<TimeWindowBounds> {
         let now = omicron_common::now_db_precision();
         let age_to_timestamp = |flag: &str, age: std::time::Duration| {
             chrono::Duration::from_std(age)
@@ -135,7 +161,7 @@ impl CollectArgs {
                  --until ({end})",
             );
         }
-        Ok(sel.with_time_range(BundleTimeRange::new(start, end)?))
+        Ok(TimeWindowBounds { start, end })
     }
 }
 

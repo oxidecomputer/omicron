@@ -17,6 +17,7 @@ use crate::helpers::ConfirmationPrompt;
 use crate::helpers::const_max_len;
 use crate::helpers::display_option_blank;
 use crate::helpers::should_colorize;
+use crate::support_bundle_collect::TimeWindowArgs;
 use anyhow::Context as _;
 use anyhow::bail;
 use camino::Utf8PathBuf;
@@ -95,6 +96,7 @@ use nexus_types::internal_api::background::TufArtifactReplicationRequest;
 use nexus_types::internal_api::background::TufArtifactReplicationStatus;
 use nexus_types::internal_api::background::TufRepoPrunerStatus;
 use nexus_types::internal_api::background::fm_rendezvous;
+use nexus_types::support_bundle::BundleDataCategory;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DemoSagaUuid;
@@ -573,7 +575,7 @@ enum SupportBundleCommands {
     /// List all support bundles
     List,
     /// Create a new support bundle
-    Create,
+    Create(SupportBundleCreateArgs),
     /// Delete a support bundle
     Delete(SupportBundleDeleteArgs),
     /// Download an entire support bundle
@@ -662,6 +664,17 @@ impl FromStr for TrustQuorumEpochOrLatest {
             Ok(Self::Epoch(Epoch(i)))
         }
     }
+}
+
+#[derive(Debug, Args)]
+struct SupportBundleCreateArgs {
+    /// Categories of data to collect. May be supplied multiple times.
+    /// Defaults to all categories.
+    #[clap(long, value_enum)]
+    include: Vec<BundleDataCategory>,
+
+    #[command(flatten)]
+    window: TimeWindowArgs,
 }
 
 #[derive(Debug, Args)]
@@ -929,10 +942,10 @@ impl NexusArgs {
                 command: SupportBundleCommands::List,
             }) => cmd_nexus_support_bundles_list(&client).await,
             NexusCommands::SupportBundles(SupportBundleArgs {
-                command: SupportBundleCommands::Create,
+                command: SupportBundleCommands::Create(args),
             }) => {
                 let token = omdb.check_allow_destructive()?;
-                cmd_nexus_support_bundles_create(&client, token).await
+                cmd_nexus_support_bundles_create(&client, args, token).await
             }
             NexusCommands::SupportBundles(SupportBundleArgs {
                 command: SupportBundleCommands::Delete(args),
@@ -5649,14 +5662,63 @@ async fn lookup_sled_by_id(
 /// Runs `omdb nexus support-bundles create`
 async fn cmd_nexus_support_bundles_create(
     client: &nexus_lockstep_client::Client,
+    args: &SupportBundleCreateArgs,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
+    use nexus_lockstep_client::types;
+
+    let data = if args.include.is_empty() {
+        types::SupportBundleData::All
+    } else {
+        let mut data = types::SupportBundleData::Explicit {
+            reconfigurator: false,
+            sled_cubby_info: false,
+            sp_dumps: false,
+            host_info: None,
+            ereports: None,
+        };
+        let types::SupportBundleData::Explicit {
+            reconfigurator,
+            sled_cubby_info,
+            sp_dumps,
+            host_info,
+            ereports,
+        } = &mut data
+        else {
+            unreachable!("just constructed as Explicit");
+        };
+        for category in &args.include {
+            match category {
+                BundleDataCategory::Reconfigurator => *reconfigurator = true,
+                BundleDataCategory::SledCubbyInfo => *sled_cubby_info = true,
+                BundleDataCategory::SpDumps => *sp_dumps = true,
+                BundleDataCategory::HostInfo => {
+                    *host_info = Some(types::SupportBundleHostInfo {
+                        sleds: types::SupportBundleSledSelection::All,
+                    })
+                }
+                BundleDataCategory::Ereports => {
+                    *ereports = Some(types::SupportBundleEreports {
+                        only_serials: Vec::new(),
+                        only_classes: Vec::new(),
+                    })
+                }
+            }
+        }
+        data
+    };
+
+    let window = args.window.bounds()?;
+
     let support_bundle_id = client
-        .support_bundle_create(
-            &nexus_lockstep_client::types::SupportBundleCreate {
-                user_comment: None,
-            },
-        )
+        .support_bundle_create(&types::SupportBundleCreate {
+            user_comment: None,
+            data_selection: Some(types::SupportBundleDataSelection {
+                data,
+                start_time: window.start,
+                end_time: window.end,
+            }),
+        })
         .await
         .context("creating support bundle")?
         .into_inner()

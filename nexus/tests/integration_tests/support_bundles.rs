@@ -21,6 +21,7 @@ use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::support_bundle::SupportBundleInfo;
 use nexus_types::external_api::support_bundle::SupportBundleState;
+use nexus_types::external_api::support_bundle::SupportBundleView;
 use nexus_types::internal_api::background::SupportBundleActivationReport;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionStep;
@@ -99,6 +100,13 @@ async fn bundle_get(
     client: &ClientTestContext,
     id: SupportBundleUuid,
 ) -> Result<SupportBundleInfo> {
+    Ok(bundle_view(client, id).await?.bundle)
+}
+
+async fn bundle_view(
+    client: &ClientTestContext,
+    id: SupportBundleUuid,
+) -> Result<SupportBundleView> {
     let url = format!("{BUNDLES_URL}/{id}");
     NexusRequest::object_get(client, &url)
         .authn_as(AuthnMode::PrivilegedUser)
@@ -163,7 +171,8 @@ async fn bundle_create_with_comment(
 ) -> Result<SupportBundleInfo> {
     use nexus_types::external_api::support_bundle::SupportBundleCreate;
 
-    let create_params = SupportBundleCreate { user_comment };
+    let create_params =
+        SupportBundleCreate { user_comment, data_selection: None };
 
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, BUNDLES_URL)
@@ -185,7 +194,8 @@ async fn bundle_create_expect_fail(
 ) -> Result<()> {
     use nexus_types::external_api::support_bundle::SupportBundleCreate;
 
-    let create_params = SupportBundleCreate { user_comment: None };
+    let create_params =
+        SupportBundleCreate { user_comment: None, data_selection: None };
     let error = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, BUNDLES_URL)
             .body(Some(&create_params))

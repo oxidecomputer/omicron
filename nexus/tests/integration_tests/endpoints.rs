@@ -3080,6 +3080,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                         serde_json::to_value(
                             &support_bundle::SupportBundleCreate {
                                 user_comment: None,
+                                data_selection: None,
                             },
                         )
                         .unwrap(),
