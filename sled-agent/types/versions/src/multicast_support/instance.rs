@@ -79,20 +79,6 @@ pub struct InstanceMulticastMembership {
     pub sources: Vec<IpAddr>,
 }
 
-impl From<v1::instance::InstanceEnsureBody> for InstanceEnsureBody {
-    fn from(v1: v1::instance::InstanceEnsureBody) -> Self {
-        Self {
-            vmm_spec: v1.vmm_spec,
-            local_config: v1.local_config.into(),
-            vmm_runtime: v1.vmm_runtime,
-            instance_id: v1.instance_id,
-            migration_id: v1.migration_id,
-            propolis_addr: v1.propolis_addr,
-            metadata: v1.metadata,
-        }
-    }
-}
-
 impl From<v1::instance::InstanceSledLocalConfig> for InstanceSledLocalConfig {
     fn from(v1: v1::instance::InstanceSledLocalConfig) -> Self {
         Self {

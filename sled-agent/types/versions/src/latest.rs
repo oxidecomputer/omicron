@@ -111,7 +111,7 @@ pub mod instance {
     pub use crate::v1::instance::VmmIssueDiskSnapshotRequestBody;
     pub use crate::v1::instance::VmmIssueDiskSnapshotRequestPathParam;
     pub use crate::v1::instance::VmmIssueDiskSnapshotRequestResponse;
-    pub use crate::v1::instance::VmmPathParam;
+    pub use crate::v50::instance::VmmPathParam;
     pub use crate::v1::instance::VmmPutStateBody;
     pub use crate::v1::instance::VmmPutStateResponse;
     pub use crate::v1::instance::VmmRuntimeState;

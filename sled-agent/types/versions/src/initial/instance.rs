@@ -13,7 +13,7 @@ use omicron_common::api::external::Hostname;
 use omicron_common::api::internal::nexus::HostIdentifier;
 use omicron_common::api::internal::shared::DhcpConfig;
 use omicron_generation_kinds::Generation;
-use omicron_uuid_kinds::{InstanceUuid, PropolisUuid};
+use omicron_uuid_kinds::PropolisUuid;
 use propolis_api_types_versions::v1::instance_spec::InstanceSpec;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -21,12 +21,6 @@ use uuid::Uuid;
 
 use super::inventory::NetworkInterface;
 use super::inventory::SourceNatConfig;
-
-/// Path parameters for VMM requests.
-#[derive(Deserialize, JsonSchema)]
-pub struct VmmPathParam {
-    pub propolis_id: PropolisUuid,
-}
 
 /// Path parameters for VMM disk snapshot requests.
 #[derive(Deserialize, JsonSchema)]
@@ -139,36 +133,6 @@ pub enum MigrationState {
     Failed,
     /// The migration has completed.
     Completed,
-}
-
-/// The body of a request to ensure that a instance and VMM are known to a sled
-/// agent.
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct InstanceEnsureBody {
-    /// The virtual hardware configuration this virtual machine should have when
-    /// it is started.
-    pub vmm_spec: VmmSpec,
-
-    /// Information about the sled-local configuration that needs to be
-    /// established to make the VM's virtual hardware fully functional.
-    pub local_config: InstanceSledLocalConfig,
-
-    /// The initial VMM runtime state for the VMM being registered.
-    pub vmm_runtime: VmmRuntimeState,
-
-    /// The ID of the instance for which this VMM is being created.
-    pub instance_id: InstanceUuid,
-
-    /// The ID of the migration in to this VMM, if this VMM is being
-    /// ensured is part of a migration in. If this is `None`, the VMM is not
-    /// being created due to a migration.
-    pub migration_id: Option<Uuid>,
-
-    /// The address at which this VMM should serve a Propolis server API.
-    pub propolis_addr: SocketAddr,
-
-    /// Metadata used to track instance statistics.
-    pub metadata: InstanceMetadata,
 }
 
 /// Describes sled-local configuration that a sled-agent must establish to make

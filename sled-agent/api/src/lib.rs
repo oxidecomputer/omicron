@@ -83,7 +83,6 @@ api_versions!([
     (10, ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES),
     (9, DELEGATE_ZVOL_TO_PROPOLIS),
     (8, REMOVE_SLED_ROLE),
-    (7, MULTICAST_SUPPORT),
     // Versions before this have been retired. We no longer support in any
     // server, nor expect it from any client.
 ]);
@@ -581,7 +580,7 @@ pub trait SledAgentApi {
     }]
     async fn vmm_register_v10(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<v1::instance::VmmPathParam>,
+        path_params: Path<latest::instance::VmmPathParam>,
         body: TypedBody<v10::instance::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError> {
         let body = body.try_map(v11::instance::InstanceEnsureBody::try_from)?;
@@ -597,7 +596,7 @@ pub trait SledAgentApi {
     }]
     async fn vmm_register_v9(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<v1::instance::VmmPathParam>,
+        path_params: Path<latest::instance::VmmPathParam>,
         body: TypedBody<v9::instance::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError> {
         let body = body.try_map(v10::instance::InstanceEnsureBody::try_from)?;
@@ -608,28 +607,14 @@ pub trait SledAgentApi {
         operation_id = "vmm_register",
         method = PUT,
         path = "/vmms/{propolis_id}",
-        versions = VERSION_MULTICAST_SUPPORT..VERSION_DELEGATE_ZVOL_TO_PROPOLIS
+        versions = ..VERSION_DELEGATE_ZVOL_TO_PROPOLIS
     }]
     async fn vmm_register_v7(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<v1::instance::VmmPathParam>,
+        path_params: Path<latest::instance::VmmPathParam>,
         body: TypedBody<v7::instance::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError> {
         Self::vmm_register_v9(rqctx, path_params, body.map(Into::into)).await
-    }
-
-    #[endpoint {
-        operation_id = "vmm_register",
-        method = PUT,
-        path = "/vmms/{propolis_id}",
-        versions = ..VERSION_MULTICAST_SUPPORT
-    }]
-    async fn vmm_register_v1(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<v1::instance::VmmPathParam>,
-        body: TypedBody<v1::instance::InstanceEnsureBody>,
-    ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError> {
-        Self::vmm_register_v7(rqctx, path_params, body.map(Into::into)).await
     }
 
     #[endpoint {
@@ -686,7 +671,6 @@ pub trait SledAgentApi {
     #[endpoint {
         method = PUT,
         path = "/vmms/{propolis_id}/multicast-group",
-        versions = VERSION_MULTICAST_SUPPORT..,
     }]
     async fn vmm_join_multicast_group(
         rqctx: RequestContext<Self::Context>,
@@ -697,7 +681,6 @@ pub trait SledAgentApi {
     #[endpoint {
         method = DELETE,
         path = "/vmms/{propolis_id}/multicast-group",
-        versions = VERSION_MULTICAST_SUPPORT..,
     }]
     async fn vmm_leave_multicast_group(
         rqctx: RequestContext<Self::Context>,

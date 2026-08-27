@@ -4,4 +4,8 @@
 
 //! Version `RETIRE_UP_TO_VERSION_23` of the Sled Agent API.
 
+/// Types here were moved from retired versions because they were the latest
+/// version of that type.
+
 pub mod debug;
+pub mod instance;
