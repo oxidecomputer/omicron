@@ -45,7 +45,7 @@ use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
 };
-use omicron_generation_kinds::Generation;
+use omicron_generation_kinds::{Generation, NexusGeneration};
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -521,7 +521,7 @@ pub async fn run_standalone_server(
                         },
                         external_tls: false,
                         external_dns_servers: vec![],
-                        nexus_generation: Generation::new(),
+                        nexus_generation: NexusGeneration::new(),
                     },
                 ),
                 filesystem_pool: get_random_zpool(),

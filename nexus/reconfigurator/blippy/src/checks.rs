@@ -25,7 +25,7 @@ use omicron_common::address::DnsSubnet;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::disk::DatasetKind;
-use omicron_generation_kinds::Generation;
+use omicron_generation_kinds::NexusGeneration;
 use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -701,7 +701,7 @@ fn check_nexus_generation_consistency(blippy: &mut Blippy<'_>) {
 
     // Map from generation -> (sled_id, image_source, zone)
     let mut generation_info: HashMap<
-        Generation,
+        NexusGeneration,
         Vec<(SledUuid, BlueprintZoneImageSource, &BlueprintZoneConfig)>,
     > = HashMap::new();
 
@@ -2109,7 +2109,7 @@ mod tests {
             ((sled1, zone1.id), (sled2, zone2.id))
         };
 
-        let generation = Generation::new();
+        let generation = NexusGeneration::new();
 
         let zone1 = {
             // Find the zones in the blueprint and modify them

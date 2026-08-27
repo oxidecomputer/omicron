@@ -10,6 +10,7 @@ use crate::PhysicalDiskKind;
 use crate::omicron_zone_config::{self, OmicronZoneNic};
 use crate::sled_cpu_family::SledCpuFamily;
 use crate::to_db_typed_uuid;
+use crate::typed_generation::DbTypedGeneration;
 use crate::typed_uuid::DbTypedUuid;
 use crate::{
     ByteCount, MacAddr, Name, ServiceKind, SqlU8, SqlU16, SqlU32,
@@ -58,6 +59,9 @@ use nexus_types::inventory::{
 use omicron_common::disk::DatasetName;
 use omicron_common::update::OmicronInstallManifestSource;
 use omicron_common::zpool_name::ZpoolName;
+use omicron_generation_kinds::{
+    SledConfigGeneration, SledConfigGenerationKind,
+};
 use omicron_uuid_kinds::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::FmdHostCaseKind;
@@ -2751,7 +2755,7 @@ impl From<DbInvSledUpdateDisposition> for OmicronSledUpdateDisposition {
 pub struct InvOmicronSledConfig {
     pub inv_collection_id: DbTypedUuid<CollectionKind>,
     pub id: DbTypedUuid<OmicronSledConfigKind>,
-    pub generation: Generation,
+    pub generation: DbTypedGeneration<SledConfigGenerationKind>,
     pub remove_mupdate_override: Option<DbTypedUuid<MupdateOverrideKind>>,
 
     #[diesel(embed)]
@@ -2766,7 +2770,7 @@ impl InvOmicronSledConfig {
     pub fn new(
         inv_collection_id: CollectionUuid,
         id: OmicronSledConfigUuid,
-        generation: omicron_generation_kinds::Generation,
+        generation: SledConfigGeneration,
         remove_mupdate_override: Option<MupdateOverrideUuid>,
         host_phase_2: HostPhase2DesiredSlots,
         measurements: BTreeSet<OmicronSingleMeasurement>,
@@ -2775,7 +2779,7 @@ impl InvOmicronSledConfig {
         Self {
             inv_collection_id: inv_collection_id.into(),
             id: id.into(),
-            generation: Generation(generation),
+            generation: generation.into(),
             remove_mupdate_override: remove_mupdate_override.map(From::from),
             host_phase_2: host_phase_2.into(),
             measurements: measurements.into(),

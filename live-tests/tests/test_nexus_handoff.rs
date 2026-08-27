@@ -22,7 +22,7 @@ use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::blueprint_zone_type;
-use omicron_generation_kinds::Generation;
+use omicron_generation_kinds::NexusGeneration;
 use omicron_test_utils::dev::poll::CondCheckError;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -495,7 +495,7 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
 async fn check_internal_dns(
     log: &slog::Logger,
     blueprint: &Blueprint,
-    active_generation: Generation,
+    active_generation: NexusGeneration,
 ) -> Result<(), CondCheckError<anyhow::Error>> {
     // Compute what we expect to find, based on which Nexus instances in the
     // blueprint have the specified generation.
@@ -559,7 +559,7 @@ async fn check_internal_dns(
 async fn check_external_dns(
     log: &slog::Logger,
     blueprint: &Blueprint,
-    active_generation: Generation,
+    active_generation: NexusGeneration,
 ) -> Result<(), CondCheckError<anyhow::Error>> {
     // Compute which Nexus instances we expect to find in external DNS based on
     // what's in-service in the blueprint.
