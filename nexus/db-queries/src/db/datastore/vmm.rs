@@ -34,6 +34,7 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
+use omicron_generation_kinds::UpdateDispositionGeneration;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -167,7 +168,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         sled_id: SledUuid,
-        update_disposition_generation: model::Generation,
+        update_disposition_generation: UpdateDispositionGeneration,
     ) -> UpdateResult<usize> {
         let updated = diesel::update(dsl::vmm)
             .filter(dsl::time_deleted.is_null())
@@ -179,8 +180,9 @@ impl DataStore {
                 DbVmmState::Rebooting,
             ]))
             .set(
-                dsl::stop_for_update_disposition_generation
-                    .eq(update_disposition_generation),
+                dsl::stop_for_update_disposition_generation.eq(
+                    model::to_db_typed_generation(update_disposition_generation),
+                ),
             )
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -904,8 +906,8 @@ mod tests {
 
         // Initially every VMM is unmarked, so the expected rows are exactly the
         // rows we inserted.
-        let gen1 = Generation::new();
-        let gen2 = Generation(Generation::new().0.next());
+        let gen1 = UpdateDispositionGeneration::new();
+        let gen2 = UpdateDispositionGeneration::new().next();
         let mut expected: HashMap<Uuid, Vmm> =
             vmms.iter().map(|vmm| (vmm.id, vmm.clone())).collect();
 
@@ -924,7 +926,7 @@ mod tests {
         );
         for vmm in expected.values_mut() {
             if vmm.sled_id() == sled_a && is_stoppable(vmm.state) {
-                vmm.stop_for_update_disposition_generation = Some(gen1);
+                vmm.stop_for_update_disposition_generation = Some(gen1.into());
             }
         }
 
@@ -973,7 +975,7 @@ mod tests {
         );
         for vmm in expected.values_mut() {
             if vmm.sled_id() == sled_b && is_stoppable(vmm.state) {
-                vmm.stop_for_update_disposition_generation = Some(gen2);
+                vmm.stop_for_update_disposition_generation = Some(gen2.into());
             }
         }
 
@@ -981,11 +983,15 @@ mod tests {
         assert_rows(&actual, &expected);
         let gen1_count = actual
             .values()
-            .filter(|v| v.stop_for_update_disposition_generation == Some(gen1))
+            .filter(|v| {
+                v.stop_for_update_disposition_generation == Some(gen1.into())
+            })
             .count();
         let gen2_count = actual
             .values()
-            .filter(|v| v.stop_for_update_disposition_generation == Some(gen2))
+            .filter(|v| {
+                v.stop_for_update_disposition_generation == Some(gen2.into())
+            })
             .count();
         let null_count = actual
             .values()
