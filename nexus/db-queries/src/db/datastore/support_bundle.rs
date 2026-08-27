@@ -1535,6 +1535,60 @@ mod test {
     }
 
     #[tokio::test]
+    async fn test_data_selection_read_without_time_range_row() {
+        let logctx = dev::test_setup_log(
+            "test_data_selection_read_without_time_range_row",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        let _test_sled = create_sled_and_zpools(&datastore, &opctx, 1).await;
+        let this_nexus_id = OmicronZoneUuid::new_v4();
+
+        let bundle = datastore
+            .support_bundle_create(
+                &opctx,
+                SupportBundleCreateParams {
+                    reason: "legacy bundle without a time range row",
+                    nexus_id: this_nexus_id,
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all(),
+                },
+            )
+            .await
+            .expect("Should be able to create bundle");
+
+        // Bundles that were already collected before time ranges existed
+        // have no time_range row at all (the schema migration only creates
+        // rows for bundles still awaiting collection). Simulate one by
+        // deleting the row that creation stamped.
+        {
+            use nexus_db_schema::schema::support_bundle_data_selection_time_range::dsl;
+            diesel::delete(
+                dsl::support_bundle_data_selection_time_range
+                    .filter(dsl::bundle_id.eq(bundle.id.into_untyped_uuid())),
+            )
+            .execute_async(&*conn)
+            .await
+            .expect("Should be able to delete time range row");
+        }
+
+        // The read maps the absent row to the default (unbounded) range and
+        // preserves the rest of the selection.
+        let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
+        let selection = datastore
+            .support_bundle_data_selection_get(&opctx, &authz_bundle)
+            .await
+            .expect("Should be able to read selection without time range row");
+        assert_eq!(selection.time_range(), &Default::default());
+        assert_eq!(selection, BundleDataSelection::all());
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
     async fn test_create_stamps_default_start_bound() {
         let logctx =
             dev::test_setup_log("test_create_stamps_default_start_bound");
