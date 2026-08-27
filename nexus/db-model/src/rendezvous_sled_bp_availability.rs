@@ -217,73 +217,38 @@ impl IdOrdItem for RendezvousSledBpAvailability {
 /// The form of [`RendezvousSledBpAvailability`] used to upsert a sled's
 /// availability.
 #[derive(Debug, Clone)]
-pub struct RendezvousSledBpAvailabilityUpdate {
+pub struct RendezvousSledBpAvailabilityWrite {
     sled_id: SledUuid,
-    availability: ActiveSledBpAvailability,
-    update_disposition_generation: UpdateDispositionGeneration,
+    state: SledBpAvailabilityState,
     blueprint_id: BlueprintUuid,
 }
 
-impl RendezvousSledBpAvailabilityUpdate {
+impl RendezvousSledBpAvailabilityWrite {
     pub fn new(
         sled_id: SledUuid,
-        availability: ActiveSledBpAvailability,
-        update_disposition_generation: UpdateDispositionGeneration,
+        state: SledBpAvailabilityState,
         blueprint_id: BlueprintUuid,
     ) -> Self {
-        Self {
-            sled_id,
-            availability,
-            update_disposition_generation,
-            blueprint_id,
-        }
+        Self { sled_id, state, blueprint_id }
     }
 
-    pub fn update_disposition_generation(&self) -> UpdateDispositionGeneration {
-        self.update_disposition_generation
+    pub fn sled_id(&self) -> SledUuid {
+        self.sled_id
     }
 
-    /// Convert self into an insertable row.
-    pub fn into_insertable(self) -> RendezvousSledBpAvailability {
-        let now = Utc::now();
-        let (bp_availability, update_disposition_generation) =
-            RendezvousSledBpAvailability::state_columns(
-                SledBpAvailabilityState::Active {
-                    availability: self.availability,
-                    update_disposition_generation: self
-                        .update_disposition_generation,
-                },
-            );
-        RendezvousSledBpAvailability {
-            sled_id: self.sled_id.into(),
-            bp_availability,
-            update_disposition_generation,
-            blueprint_id: self.blueprint_id.into(),
-            time_created: now,
-            time_modified: now,
-        }
+    pub fn state(&self) -> SledBpAvailabilityState {
+        self.state
     }
-}
 
-/// The form of [`RendezvousSledBpAvailability`] used to decommission a sled.
-#[derive(Debug, Clone)]
-pub struct RendezvousSledBpAvailabilityDecommission {
-    sled_id: SledUuid,
-    blueprint_id: BlueprintUuid,
-}
-
-impl RendezvousSledBpAvailabilityDecommission {
-    pub fn new(sled_id: SledUuid, blueprint_id: BlueprintUuid) -> Self {
-        Self { sled_id, blueprint_id }
+    pub fn blueprint_id(&self) -> BlueprintUuid {
+        self.blueprint_id
     }
 
     /// Convert self into an insertable row.
     pub fn into_insertable(self) -> RendezvousSledBpAvailability {
         let now = Utc::now();
         let (bp_availability, update_disposition_generation) =
-            RendezvousSledBpAvailability::state_columns(
-                SledBpAvailabilityState::Decommissioned,
-            );
+            RendezvousSledBpAvailability::state_columns(self.state);
         RendezvousSledBpAvailability {
             sled_id: self.sled_id.into(),
             bp_availability,

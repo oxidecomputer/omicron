@@ -14,13 +14,16 @@ use diesel::upsert::excluded;
 use iddqd::IdOrdMap;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
+use nexus_db_model::ActiveSledBpAvailability;
 use nexus_db_model::DbSledBpAvailability;
 use nexus_db_model::RendezvousSledBpAvailability;
-use nexus_db_model::RendezvousSledBpAvailabilityDecommission;
-use nexus_db_model::RendezvousSledBpAvailabilityUpdate;
+use nexus_db_model::RendezvousSledBpAvailabilityWrite;
+use nexus_db_model::SledBpAvailabilityState;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
+use omicron_generation_kinds::UpdateDispositionGeneration;
+use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
 
@@ -105,7 +108,10 @@ impl DataStore {
     pub async fn rendezvous_sled_bp_availability_upsert(
         &self,
         opctx: &OpContext,
-        update: RendezvousSledBpAvailabilityUpdate,
+        sled_id: SledUuid,
+        availability: ActiveSledBpAvailability,
+        update_disposition_generation: UpdateDispositionGeneration,
+        blueprint_id: BlueprintUuid,
     ) -> Result<bool, Error> {
         // `FilterDsl` brings `.filter()` (the `WHERE` on the `ON CONFLICT DO
         // UPDATE` below) into scope; the prelude's `QueryDsl` only offers it for
@@ -117,9 +123,17 @@ impl DataStore {
 
         // Compared against the stored generation by the staleness guard.
         let incoming_generation = nexus_db_model::to_db_typed_generation(
-            update.update_disposition_generation(),
+            update_disposition_generation,
         );
-        let sled = update.into_insertable();
+        let sled = RendezvousSledBpAvailabilityWrite::new(
+            sled_id,
+            SledBpAvailabilityState::Active {
+                availability,
+                update_disposition_generation,
+            },
+            blueprint_id,
+        )
+        .into_insertable();
 
         diesel::insert_into(dsl::rendezvous_sled_bp_availability)
             .values(sled)
@@ -162,7 +176,8 @@ impl DataStore {
     pub async fn rendezvous_sled_bp_availability_decommission(
         &self,
         opctx: &OpContext,
-        decommission: RendezvousSledBpAvailabilityDecommission,
+        sled_id: SledUuid,
+        blueprint_id: BlueprintUuid,
     ) -> Result<bool, Error> {
         // `FilterDsl` brings `.filter()` (the `WHERE` on the `ON CONFLICT DO
         // UPDATE` below) into scope; the prelude's `QueryDsl` only offers it for
@@ -172,7 +187,12 @@ impl DataStore {
 
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
-        let tombstone = decommission.into_insertable();
+        let tombstone = RendezvousSledBpAvailabilityWrite::new(
+            sled_id,
+            SledBpAvailabilityState::Decommissioned,
+            blueprint_id,
+        )
+        .into_insertable();
 
         diesel::insert_into(dsl::rendezvous_sled_bp_availability)
             .values(tombstone)
@@ -213,26 +233,28 @@ impl DataStore {
 mod tests {
     use super::*;
     use crate::db::pub_test_utils::TestDatabase;
-    use nexus_db_model::ActiveSledBpAvailability;
-    use nexus_db_model::SledBpAvailabilityState;
-    use omicron_generation_kinds::UpdateDispositionGeneration;
     use omicron_test_utils::dev;
-    use omicron_uuid_kinds::BlueprintUuid;
 
-    // Convenience for building an availability update at a given
-    // availability/generation.
-    fn row(
+    // Upsert a sled's availability at a given generation, returning whether
+    // the write applied.
+    async fn upsert(
+        opctx: &OpContext,
+        datastore: &DataStore,
         sled_id: SledUuid,
         availability: ActiveSledBpAvailability,
         generation: u32,
         blueprint_id: BlueprintUuid,
-    ) -> RendezvousSledBpAvailabilityUpdate {
-        RendezvousSledBpAvailabilityUpdate::new(
-            sled_id,
-            availability,
-            UpdateDispositionGeneration::from(generation),
-            blueprint_id,
-        )
+    ) -> bool {
+        datastore
+            .rendezvous_sled_bp_availability_upsert(
+                opctx,
+                sled_id,
+                availability,
+                UpdateDispositionGeneration::from(generation),
+                blueprint_id,
+            )
+            .await
+            .expect("query succeeded")
     }
 
     // Fetch the single row for a sled, if present.
@@ -260,13 +282,15 @@ mod tests {
         let bp2 = BlueprintUuid::new_v4();
 
         // Initial insert at generation 1, available.
-        let wrote = datastore
-            .rendezvous_sled_bp_availability_upsert(
-                opctx,
-                row(sled_id, ActiveSledBpAvailability::Available, 1, bp1),
-            )
-            .await
-            .expect("query succeeded");
+        let wrote = upsert(
+            opctx,
+            datastore,
+            sled_id,
+            ActiveSledBpAvailability::Available,
+            1,
+            bp1,
+        )
+        .await;
         assert!(wrote, "first insert should write");
         let got = get(opctx, datastore, sled_id).await.expect("row present");
         assert_eq!(
@@ -279,13 +303,15 @@ mod tests {
         );
 
         // A newer generation (2) flipping the sled to unavailable should win.
-        let wrote = datastore
-            .rendezvous_sled_bp_availability_upsert(
-                opctx,
-                row(sled_id, ActiveSledBpAvailability::Unavailable, 2, bp2),
-            )
-            .await
-            .expect("query succeeded");
+        let wrote = upsert(
+            opctx,
+            datastore,
+            sled_id,
+            ActiveSledBpAvailability::Unavailable,
+            2,
+            bp2,
+        )
+        .await;
         assert!(wrote, "newer generation should write");
         let got = get(opctx, datastore, sled_id).await.expect("row present");
         assert_eq!(
@@ -300,13 +326,15 @@ mod tests {
 
         // A stale write at the same generation (2) trying to flip back to
         // available must be rejected.
-        let wrote = datastore
-            .rendezvous_sled_bp_availability_upsert(
-                opctx,
-                row(sled_id, ActiveSledBpAvailability::Available, 2, bp1),
-            )
-            .await
-            .expect("query succeeded");
+        let wrote = upsert(
+            opctx,
+            datastore,
+            sled_id,
+            ActiveSledBpAvailability::Available,
+            2,
+            bp1,
+        )
+        .await;
         assert!(!wrote, "equal-generation write should be rejected as stale");
         let got = get(opctx, datastore, sled_id).await.expect("row present");
         assert_eq!(
@@ -320,13 +348,15 @@ mod tests {
         );
 
         // A stale write at an older generation (1) must also be rejected.
-        let wrote = datastore
-            .rendezvous_sled_bp_availability_upsert(
-                opctx,
-                row(sled_id, ActiveSledBpAvailability::Available, 1, bp1),
-            )
-            .await
-            .expect("query succeeded");
+        let wrote = upsert(
+            opctx,
+            datastore,
+            sled_id,
+            ActiveSledBpAvailability::Available,
+            1,
+            bp1,
+        )
+        .await;
         assert!(!wrote, "older-generation write should be rejected as stale");
         let got = get(opctx, datastore, sled_id).await.expect("row present");
         assert_eq!(
@@ -340,13 +370,15 @@ mod tests {
         );
 
         // A newer generation (3) flipping back to available wins.
-        let wrote = datastore
-            .rendezvous_sled_bp_availability_upsert(
-                opctx,
-                row(sled_id, ActiveSledBpAvailability::Available, 3, bp2),
-            )
-            .await
-            .expect("query succeeded");
+        let wrote = upsert(
+            opctx,
+            datastore,
+            sled_id,
+            ActiveSledBpAvailability::Available,
+            3,
+            bp2,
+        )
+        .await;
         assert!(wrote, "newest generation should write");
         let got = get(opctx, datastore, sled_id).await.expect("row present");
         assert_eq!(
@@ -372,13 +404,15 @@ mod tests {
         let bp = BlueprintUuid::new_v4();
 
         // Insert the sled (available, generation 1) and confirm we see it.
-        datastore
-            .rendezvous_sled_bp_availability_upsert(
-                opctx,
-                row(sled_id, ActiveSledBpAvailability::Available, 1, bp),
-            )
-            .await
-            .expect("query succeeded");
+        upsert(
+            opctx,
+            datastore,
+            sled_id,
+            ActiveSledBpAvailability::Available,
+            1,
+            bp,
+        )
+        .await;
         assert_eq!(
             get(opctx, datastore, sled_id)
                 .await
@@ -395,10 +429,7 @@ mod tests {
         // Decommissioning it should change the sled's state to
         // `decommissioned`.
         let decommissioned = datastore
-            .rendezvous_sled_bp_availability_decommission(
-                opctx,
-                RendezvousSledBpAvailabilityDecommission::new(sled_id, bp),
-            )
+            .rendezvous_sled_bp_availability_decommission(opctx, sled_id, bp)
             .await
             .expect("query succeeded");
         assert!(decommissioned);
@@ -410,23 +441,22 @@ mod tests {
 
         // A second decommission is a no-op.
         let decommissioned = datastore
-            .rendezvous_sled_bp_availability_decommission(
-                opctx,
-                RendezvousSledBpAvailabilityDecommission::new(sled_id, bp),
-            )
+            .rendezvous_sled_bp_availability_decommission(opctx, sled_id, bp)
             .await
             .expect("query succeeded");
         assert!(!decommissioned);
 
         // A stale Nexus must not be able to resurrect a decommissioned sled,
         // even at a newer generation.
-        let wrote = datastore
-            .rendezvous_sled_bp_availability_upsert(
-                opctx,
-                row(sled_id, ActiveSledBpAvailability::Available, 5, bp),
-            )
-            .await
-            .expect("query succeeded");
+        let wrote = upsert(
+            opctx,
+            datastore,
+            sled_id,
+            ActiveSledBpAvailability::Available,
+            5,
+            bp,
+        )
+        .await;
         assert!(!wrote, "decommissioned sled must not be resurrected");
         assert_eq!(
             get(opctx, datastore, sled_id)
@@ -453,10 +483,7 @@ mod tests {
         let bp_stale = BlueprintUuid::new_v4();
 
         let decommissioned = datastore
-            .rendezvous_sled_bp_availability_decommission(
-                opctx,
-                RendezvousSledBpAvailabilityDecommission::new(sled_id, bp),
-            )
+            .rendezvous_sled_bp_availability_decommission(opctx, sled_id, bp)
             .await
             .expect("query succeeded");
         assert!(decommissioned, "fresh tombstone insert should report true");
@@ -467,13 +494,15 @@ mod tests {
         );
         assert_eq!(got.blueprint_id(), bp);
 
-        let wrote = datastore
-            .rendezvous_sled_bp_availability_upsert(
-                opctx,
-                row(sled_id, ActiveSledBpAvailability::Available, 5, bp_stale),
-            )
-            .await
-            .expect("query succeeded");
+        let wrote = upsert(
+            opctx,
+            datastore,
+            sled_id,
+            ActiveSledBpAvailability::Available,
+            5,
+            bp_stale,
+        )
+        .await;
         assert!(!wrote, "decommissioned sled must not be resurrected");
         assert_eq!(
             get(opctx, datastore, sled_id).await.unwrap().blueprint_id(),

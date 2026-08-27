@@ -14,8 +14,6 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::model::ActiveSledBpAvailability;
 use nexus_db_queries::db::model::DbSledBpAvailability;
-use nexus_db_queries::db::model::RendezvousSledBpAvailabilityDecommission;
-use nexus_db_queries::db::model::RendezvousSledBpAvailabilityUpdate;
 use nexus_db_queries::db::model::SledBpAvailabilityState;
 use nexus_types::deployment::BlueprintSledConfig;
 use nexus_types::external_api::sled::SledState;
@@ -170,12 +168,10 @@ pub(crate) async fn reconcile_sled_blueprint_availability(
                 let wrote = datastore
                     .rendezvous_sled_bp_availability_upsert(
                         opctx,
-                        RendezvousSledBpAvailabilityUpdate::new(
-                            sled_id,
-                            availability,
-                            update_disposition_generation,
-                            blueprint_id,
-                        ),
+                        sled_id,
+                        availability,
+                        update_disposition_generation,
+                        blueprint_id,
                     )
                     .await
                     .with_context(|| {
@@ -252,10 +248,8 @@ pub(crate) async fn reconcile_sled_blueprint_availability(
                         let decommissioned = datastore
                             .rendezvous_sled_bp_availability_decommission(
                                 opctx,
-                                RendezvousSledBpAvailabilityDecommission::new(
-                                    sled_id,
-                                    blueprint_id,
-                                ),
+                                sled_id,
+                                blueprint_id,
                             )
                             .await
                             .with_context(|| {
@@ -368,14 +362,10 @@ mod tests {
                     datastore
                         .rendezvous_sled_bp_availability_upsert(
                             opctx,
-                            RendezvousSledBpAvailabilityUpdate::new(
-                                sled_id,
-                                ps.availability,
-                                UpdateDispositionGeneration::from(
-                                    ps.generation,
-                                ),
-                                blueprint_id,
-                            ),
+                            sled_id,
+                            ps.availability,
+                            UpdateDispositionGeneration::from(ps.generation),
+                            blueprint_id,
                         )
                         .await
                         .expect("query succeeded");
@@ -384,10 +374,8 @@ mod tests {
                     datastore
                         .rendezvous_sled_bp_availability_decommission(
                             opctx,
-                            RendezvousSledBpAvailabilityDecommission::new(
-                                sled_id,
-                                blueprint_id,
-                            ),
+                            sled_id,
+                            blueprint_id,
                         )
                         .await
                         .expect("query succeeded");
@@ -668,12 +656,10 @@ mod tests {
         datastore
             .rendezvous_sled_bp_availability_upsert(
                 opctx,
-                RendezvousSledBpAvailabilityUpdate::new(
-                    sled_id,
-                    ActiveSledBpAvailability::Available,
-                    UpdateDispositionGeneration::from(2u32),
-                    bp_stored,
-                ),
+                sled_id,
+                ActiveSledBpAvailability::Available,
+                UpdateDispositionGeneration::from(2u32),
+                bp_stored,
             )
             .await
             .expect("seeded the stored row");
