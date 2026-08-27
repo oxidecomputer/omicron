@@ -86,7 +86,6 @@ api_versions!([
     (7, MULTICAST_SUPPORT),
     (6, ADD_PROBE_PUT_ENDPOINT),
     (5, NEWTYPE_UUID_BUMP),
-    (4, ADD_NEXUS_LOCKSTEP_PORT_TO_INVENTORY),
     // Versions before this have been retired. We no longer support in any
     // server, nor expect it from any client.
 ]);
@@ -443,7 +442,7 @@ pub trait SledAgentApi {
         method = PUT,
         path = "/omicron-config",
         versions =
-            VERSION_ADD_NEXUS_LOCKSTEP_PORT_TO_INVENTORY..VERSION_ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES,
+            ..VERSION_ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES,
     }]
     async fn omicron_config_put_v4(
         rqctx: RequestContext<Self::Context>,
@@ -451,19 +450,6 @@ pub trait SledAgentApi {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let body = body.try_map(v10::inventory::OmicronSledConfig::try_from)?;
         Self::omicron_config_put_v10(rqctx, body).await
-    }
-
-    #[endpoint {
-        operation_id = "omicron_config_put",
-        method = PUT,
-        path = "/omicron-config",
-        versions = ..VERSION_ADD_NEXUS_LOCKSTEP_PORT_TO_INVENTORY,
-    }]
-    async fn omicron_config_put_v1(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<v1::inventory::OmicronSledConfig>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        Self::omicron_config_put_v4(rqctx, body.map(Into::into)).await
     }
 
     #[endpoint {
@@ -1405,29 +1391,13 @@ pub trait SledAgentApi {
         operation_id = "inventory",
         method = GET,
         path = "/inventory",
-        versions =
-            VERSION_ADD_NEXUS_LOCKSTEP_PORT_TO_INVENTORY..VERSION_ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES,
+        versions = ..VERSION_ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES,
     }]
     async fn inventory_v4(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<v4::inventory::Inventory>, HttpError> {
         let HttpResponseOk(inventory) = Self::inventory_v10(rqctx).await?;
         inventory.try_into().map_err(HttpError::from).map(HttpResponseOk)
-    }
-
-    /// Fetch basic information about this sled
-    #[endpoint {
-        operation_id = "inventory",
-        method = GET,
-        path = "/inventory",
-        versions = ..VERSION_ADD_NEXUS_LOCKSTEP_PORT_TO_INVENTORY,
-    }]
-    async fn inventory_v1(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<v1::inventory::Inventory>, HttpError> {
-        Self::inventory_v4(rqctx).await.map(|HttpResponseOk(inv)| {
-            HttpResponseOk(v1::inventory::Inventory::from(inv))
-        })
     }
 
     /// Fetch sled identifiers

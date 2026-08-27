@@ -285,19 +285,6 @@ pub struct OmicronZonesConfig {
     pub zones: Vec<OmicronZoneConfig>,
 }
 
-impl From<v1::inventory::OmicronSledConfig> for OmicronSledConfig {
-    fn from(value: v1::inventory::OmicronSledConfig) -> Self {
-        Self {
-            generation: value.generation,
-            disks: value.disks,
-            datasets: value.datasets,
-            zones: value.zones.into_iter().map(Into::into).collect(),
-            remove_mupdate_override: value.remove_mupdate_override,
-            host_phase_2: value.host_phase_2,
-        }
-    }
-}
-
 impl From<v1::inventory::OmicronZoneConfig> for OmicronZoneConfig {
     fn from(value: v1::inventory::OmicronZoneConfig) -> Self {
         Self {
@@ -391,41 +378,6 @@ impl From<v1::inventory::OmicronZoneType> for OmicronZoneType {
     }
 }
 
-impl From<Inventory> for v1::inventory::Inventory {
-    fn from(value: Inventory) -> Self {
-        Self {
-            sled_id: value.sled_id,
-            sled_agent_address: value.sled_agent_address,
-            sled_role: value.sled_role,
-            baseboard: value.baseboard,
-            usable_hardware_threads: value.usable_hardware_threads,
-            usable_physical_ram: value.usable_physical_ram,
-            cpu_family: value.cpu_family,
-            reservoir_size: value.reservoir_size,
-            disks: value.disks,
-            zpools: value.zpools,
-            datasets: value.datasets,
-            ledgered_sled_config: value.ledgered_sled_config.map(Into::into),
-            reconciler_status: value.reconciler_status.into(),
-            last_reconciliation: value.last_reconciliation.map(Into::into),
-            zone_image_resolver: value.zone_image_resolver,
-        }
-    }
-}
-
-impl From<OmicronSledConfig> for v1::inventory::OmicronSledConfig {
-    fn from(value: OmicronSledConfig) -> Self {
-        Self {
-            generation: value.generation,
-            disks: value.disks,
-            datasets: value.datasets,
-            zones: value.zones.into_iter().map(Into::into).collect(),
-            remove_mupdate_override: value.remove_mupdate_override,
-            host_phase_2: value.host_phase_2,
-        }
-    }
-}
-
 impl From<OmicronZoneConfig> for v1::inventory::OmicronZoneConfig {
     fn from(value: OmicronZoneConfig) -> Self {
         Self {
@@ -510,44 +462,6 @@ impl From<OmicronZoneType> for v1::inventory::OmicronZoneType {
                 external_dns_servers,
             },
             OmicronZoneType::Oximeter { address } => Self::Oximeter { address },
-        }
-    }
-}
-
-impl From<ConfigReconcilerInventory>
-    for v1::inventory::ConfigReconcilerInventory
-{
-    fn from(value: ConfigReconcilerInventory) -> Self {
-        Self {
-            last_reconciled_config: value.last_reconciled_config.into(),
-            external_disks: value.external_disks,
-            datasets: value.datasets,
-            orphaned_datasets: value.orphaned_datasets,
-            zones: value.zones,
-            boot_partitions: value.boot_partitions,
-            remove_mupdate_override: value.remove_mupdate_override,
-        }
-    }
-}
-
-impl From<ConfigReconcilerInventoryStatus>
-    for v1::inventory::ConfigReconcilerInventoryStatus
-{
-    fn from(value: ConfigReconcilerInventoryStatus) -> Self {
-        match value {
-            ConfigReconcilerInventoryStatus::NotYetRun => Self::NotYetRun,
-            ConfigReconcilerInventoryStatus::Running {
-                config,
-                started_at,
-                running_for,
-            } => Self::Running {
-                config: Box::new((*config).into()),
-                started_at,
-                running_for,
-            },
-            ConfigReconcilerInventoryStatus::Idle { completed_at, ran_for } => {
-                Self::Idle { completed_at, ran_for }
-            }
         }
     }
 }
