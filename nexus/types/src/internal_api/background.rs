@@ -846,8 +846,11 @@ pub enum InventoryLoadStatus {
 /// The status of a `blueprint_planner` background task activation.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub enum BlueprintPlannerStatus {
-    /// Automatic blueprint planning has been explicitly disabled
-    /// by the config file.
+    /// Automatic blueprint planning is disabled in the reconfigurator config.
+    ///
+    /// Until the config has been loaded at all, the status is
+    /// [`Self::Skipped`] with [`BlueprintPlannerSkipReason::ConfigNotYetLoaded`]
+    /// instead.
     Disabled,
 
     /// Planning was skipped because an input it depends on isn't available yet.
@@ -906,6 +909,11 @@ pub enum BlueprintPlannerStatus {
     Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, thiserror::Error,
 )]
 pub enum BlueprintPlannerSkipReason {
+    /// The reconfigurator config loader hasn't loaded the config yet, so it's
+    /// not known whether planning is enabled. This is treated as planning being
+    /// disabled.
+    #[error("reconfigurator config not yet loaded")]
+    ConfigNotYetLoaded,
     /// The blueprint loader hasn't loaded a target blueprint yet.
     #[error("no target blueprint available")]
     NoTargetBlueprint,
@@ -920,6 +928,9 @@ impl BlueprintPlannerSkipReason {
     /// If planning keeps being skipped, that task's status says why.
     pub fn loader_task_name(&self) -> &'static str {
         match self {
+            BlueprintPlannerSkipReason::ConfigNotYetLoaded => {
+                "reconfigurator_config_watcher"
+            }
             BlueprintPlannerSkipReason::NoTargetBlueprint => "blueprint_loader",
             BlueprintPlannerSkipReason::NoInventoryCollection => {
                 "inventory_loader"

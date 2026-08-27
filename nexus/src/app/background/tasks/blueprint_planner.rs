@@ -171,11 +171,9 @@ impl BlueprintPlanner {
         // loading task needs to have a chance to check.)
         let config = match &*self.rx_config.borrow_and_update() {
             ReconfiguratorConfigLoaderState::NotYetLoaded => {
-                debug!(
-                    opctx.log,
-                    "reconfigurator config not yet loaded; doing nothing"
-                );
-                return Ok(BlueprintPlannerStatus::Disabled);
+                return Err(PlanError::Skipped(
+                    BlueprintPlannerSkipReason::ConfigNotYetLoaded,
+                ));
             }
             ReconfiguratorConfigLoaderState::Loaded(config) => config.clone(),
         };

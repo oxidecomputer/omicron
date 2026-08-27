@@ -93,6 +93,7 @@ mod test {
         PlannerConfig, ReconfiguratorConfig, ReconfiguratorConfigParam,
         ReconfiguratorDisruptionPolicy,
     };
+    use nexus_types::internal_api::background::BlueprintPlannerSkipReason;
     use nexus_types::internal_api::background::BlueprintPlannerStatus;
     use nexus_types::internal_api::background::TufRepoPrunerStatus;
     use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
@@ -255,9 +256,7 @@ mod test {
         wait_for_task_status(
             &lockstep_client,
             "blueprint_planner",
-            &|planner_status: &BlueprintPlannerStatus| {
-                matches!(planner_status, BlueprintPlannerStatus::Disabled)
-            },
+            &planner_observed_disabled,
         )
         .await;
         wait_for_task_status(
@@ -290,9 +289,7 @@ mod test {
         wait_for_task_status(
             &lockstep_client,
             "blueprint_planner",
-            &|planner_status: &BlueprintPlannerStatus| {
-                !matches!(planner_status, BlueprintPlannerStatus::Disabled)
-            },
+            &planner_observed_enabled,
         )
         .await;
         wait_for_task_status(
@@ -319,9 +316,7 @@ mod test {
         wait_for_task_status(
             &lockstep_client,
             "blueprint_planner",
-            &|planner_status: &BlueprintPlannerStatus| {
-                matches!(planner_status, BlueprintPlannerStatus::Disabled)
-            },
+            &planner_observed_disabled,
         )
         .await;
         wait_for_task_status(
@@ -332,6 +327,41 @@ mod test {
             },
         )
         .await;
+    }
+
+    /// Return true if the planner has observed a config with planning disabled.
+    fn planner_observed_disabled(status: &BlueprintPlannerStatus) -> bool {
+        match status {
+            BlueprintPlannerStatus::Disabled => true,
+            BlueprintPlannerStatus::Skipped(_)
+            | BlueprintPlannerStatus::LimitReached { .. }
+            | BlueprintPlannerStatus::Error(_)
+            | BlueprintPlannerStatus::Unchanged { .. }
+            | BlueprintPlannerStatus::Planned { .. }
+            | BlueprintPlannerStatus::Targeted { .. } => false,
+        }
+    }
+
+    /// Return true if the planner has observed a config with planning enabled.
+    fn planner_observed_enabled(status: &BlueprintPlannerStatus) -> bool {
+        match status {
+            // For ConfigNotYetLoaded, the planner has not yet observed a config
+            // with planning enabled.
+            BlueprintPlannerStatus::Disabled
+            | BlueprintPlannerStatus::Skipped(
+                BlueprintPlannerSkipReason::ConfigNotYetLoaded,
+            ) => false,
+            // Planning must be enabled to return any of these values.
+            BlueprintPlannerStatus::Skipped(
+                BlueprintPlannerSkipReason::NoTargetBlueprint
+                | BlueprintPlannerSkipReason::NoInventoryCollection,
+            )
+            | BlueprintPlannerStatus::LimitReached { .. }
+            | BlueprintPlannerStatus::Error(_)
+            | BlueprintPlannerStatus::Unchanged { .. }
+            | BlueprintPlannerStatus::Planned { .. }
+            | BlueprintPlannerStatus::Targeted { .. } => true,
+        }
     }
 
     async fn wait_for_task_status<T: DeserializeOwned>(
