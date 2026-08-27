@@ -11,10 +11,7 @@
 //!
 //! This layer never reads the `support_bundle` table, never transfers
 //! data to a sled-agent's bundle storage endpoints, and never polls
-//! bundle state. Those responsibilities belong to the caller, as does
-//! filling in default time-range bounds: the selection is collected
-//! exactly as given, so a selection without a start bound collects
-//! unbounded history.
+//! bundle state. Those responsibilities belong to the caller.
 
 use crate::cache::Cache;
 use crate::perfetto;
