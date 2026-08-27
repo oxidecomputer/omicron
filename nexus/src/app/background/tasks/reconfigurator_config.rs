@@ -98,7 +98,6 @@ mod test {
     use nexus_types::internal_api::background::TufRepoPrunerStatus;
     use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
     use serde::de::DeserializeOwned;
-    use slog_error_chain::InlineErrorChain;
     use std::time::Duration;
 
     type ControlPlaneTestContext =
