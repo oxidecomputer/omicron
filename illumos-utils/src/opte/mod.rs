@@ -38,7 +38,6 @@ pub use port_manager::MulticastGroupCfg;
 pub use port_manager::PortCreateParams;
 pub use port_manager::PortManager;
 pub use port_manager::PortTicket;
-use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 
@@ -103,18 +102,6 @@ impl Gateway {
         match &self.ips {
             GatewayIps::V6(v6) | GatewayIps::DualStack { v6, .. } => Some(&v6),
             GatewayIps::V4(_) => None,
-        }
-    }
-
-    /// Return the IPv4 address, if it exists, or the IPv6 address.
-    ///
-    /// At least one of these always exists.
-    pub fn ipv4_or_ipv6_addr(&self) -> IpAddr {
-        match &self.ips {
-            GatewayIps::V4(v4) | GatewayIps::DualStack { v4, .. } => {
-                IpAddr::V4(*v4)
-            }
-            GatewayIps::V6(v6) => IpAddr::V6(*v6),
         }
     }
 }

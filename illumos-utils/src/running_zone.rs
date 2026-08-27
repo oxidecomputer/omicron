@@ -359,11 +359,7 @@ impl RunningZone {
             }
         })?;
         let zone = Some(self.inner.name.as_ref());
-        // Both the v4 gateway and the v4 private address are present exactly
-        // when the port has an IPv4 configuration, so this matches both or
-        // neither.
-        if let (Some(gateway), Some(private_ip)) =
-            (port.gateway().ipv4_addr(), port.ipv4_addr())
+        if let Some((gateway_ip, private_ip)) = port.gateway_and_private_ipv4()
         {
             let v4_name = format!("{}4", name);
             let addrobj =
@@ -377,12 +373,12 @@ impl RunningZone {
             Zones::configure_opte_ipv4_port(
                 zone,
                 &addrobj,
-                *gateway,
+                *gateway_ip,
                 *private_ip,
             )
             .await?;
         }
-        if port.gateway().ipv6_addr().is_some() {
+        if port.ipv6_addr().is_some() {
             let v6_name = format!("{}6", name);
             let addrobj =
                 AddrObject::new(port.name(), &v6_name).map_err(|err| {

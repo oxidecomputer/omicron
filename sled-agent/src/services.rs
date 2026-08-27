@@ -1392,13 +1392,15 @@ impl ServiceManager {
         // updated first (reconfigurator-driven) or at the same time (mupdate).
         //
         // (3) In this case, the sled-agent will set the IPv4 properties as
-        // before, and will _also_ set the new SMF property
+        // before, and could _also_ set the new SMF property
         // `config/create_ipv6`. That property will be ignored by the old
         // binary, which is fine because (1) that's how it works now, and (2)
-        // there are no IPv6 control plane zones. Since all old zones also have
-        // an IPv4 address, we don't have to worry about this value being unset,
-        // and becoming the default "unknown", which the `zone-setup` binary
-        // will fail to parse as an IPv4 address.
+        // there _are_ no IPv6 control plane zones until we get all the way
+        // through the update and Nexus starts handing out IPv6 addresses
+        // anyway. Since all old zones also have an IPv4 address, we don't have
+        // to worry about this value being unset, and becoming the default
+        // "unknown", which the `zone-setup` binary will fail to parse as an
+        // IPv4 address.
         //
         // (4) Everything is fine here, the sled-agent and SMF service are on
         // the same version. The sled-agent writes out the IPv4 / IPv6
@@ -1410,14 +1412,10 @@ impl ServiceManager {
         let mut config_builder = PropertyGroupBuilder::new("config")
             .add_property("interface", "astring", opte_interface);
 
-        // NOTE: Both the gateway / IP are either None or Some(_). That's
-        // guaranteed by the construction of `Port`'s `PrivateIpConfig`.
-        //
         // If there is no IPv4 address, these properties will be left at their
         // default values of "unknown", which the zone-setup binary understands
         // means "don't set up IPv4 at all".
-        if let (Some(gateway_ip), Some(private_ip)) =
-            (port.gateway().ipv4_addr(), port.ipv4_addr())
+        if let Some((gateway_ip, private_ip)) = port.gateway_and_private_ipv4()
         {
             config_builder = config_builder
                 .add_property("gateway", "astring", gateway_ip.to_string())

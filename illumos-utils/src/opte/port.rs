@@ -15,7 +15,6 @@ use omicron_common::api::internal::shared::RouterKind;
 use oxnet::Ipv4Net;
 use oxnet::Ipv6Net;
 use sled_agent_types::inventory::NetworkInterfaceKind;
-use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::sync::Arc;
@@ -94,29 +93,23 @@ impl Port {
         self.inner.ip.ipv6_addr()
     }
 
-    /// Return the VPC-private IPv4 address, if it exits, or the IPv6 address.
-    ///
-    /// One of these always exists.
-    pub fn ipv4_or_ipv6_addr(&self) -> IpAddr {
-        self.inner.ip.ipv4_addr().copied().map(IpAddr::V4).unwrap_or_else(
-            || {
-                self.inner
-                    .ip
-                    .ipv6_addr()
-                    .copied()
-                    .expect("At least one address always exists")
-                    .into()
-            },
-        )
-    }
-
     pub fn name(&self) -> &str {
         &self.inner.name
     }
 
+    /// Return the OPTE gateway IPv4 address and the private IPv4 address.
+    ///
+    /// If the port is not configured for IPv4, None is returned.
     // TODO-remove: <https://github.com/oxidecomputer/omicron/issues/2931>
-    pub fn gateway(&self) -> &Gateway {
-        &self.inner.gateway
+    pub fn gateway_and_private_ipv4(&self) -> Option<(&Ipv4Addr, &Ipv4Addr)> {
+        match (self.inner.gateway.ipv4_addr(), self.ipv4_addr()) {
+            (None, None) => None,
+            (None, Some(_)) => unreachable!(),
+            (Some(_), None) => unreachable!(),
+            (Some(gateway_ip), Some(private_ip)) => {
+                Some((gateway_ip, private_ip))
+            }
+        }
     }
 
     #[allow(dead_code)]

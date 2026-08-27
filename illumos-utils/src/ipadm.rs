@@ -28,7 +28,6 @@ const INTERFACE_ALREADY_EXISTS: &str = "Interface already exists";
 const ADDROBJ_ALREADY_EXISTS: &str = "Address object already exists";
 
 pub enum AddrObjType {
-    DHCP,
     // NOTE: This can result in more than one address, if there is a DHCPv6
     // server on the same link as the addrobj. That happens most often for OPTE
     // ports used in zones that need external connectivity.
@@ -65,7 +64,6 @@ impl Ipadm {
         let mut cmd = Command::new(PFEXEC);
         let cmd = cmd.args(&[IPADM, "create-addr", "-t", "-T"]);
         let cmd = match addrtype {
-            AddrObjType::DHCP => cmd.args(&["dhcp"]),
             AddrObjType::AddrConf => cmd.args(&["addrconf"]),
             AddrObjType::Static(addr) => {
                 cmd.args(&["static", "-a", &addr.to_string()])

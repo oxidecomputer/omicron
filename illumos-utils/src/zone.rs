@@ -18,7 +18,6 @@ use crate::ExecutionError;
 use crate::addrobj::AddrObject;
 use crate::dladm::{EtherstubVnic, VNIC_PREFIX_BOOTSTRAP, VNIC_PREFIX_CONTROL};
 use crate::route::Route;
-use crate::route::RouteError;
 use crate::zpool::PathInPool;
 use crate::{PFEXEC, execute_async};
 use omicron_common::address::SLED_PREFIX_LENGTH;
@@ -232,7 +231,7 @@ pub enum OptePortSetupError {
         err: crate::ExecutionError,
     },
     #[error(transparent)]
-    Route(#[from] RouteError),
+    Exec(#[from] ExecutionError),
     #[error("Failed to wait for a DHCPv6 address on {addrobj}")]
     NoDhcpV6Addr { addrobj: AddrObject },
 }
@@ -962,7 +961,7 @@ impl Zones {
                 }
             },
             |error, delay| {
-                slog::debug!(
+                slog::info!(
                     log,
                     "No non-link-local IPv6 address yet (retrying)";
                     "delay" => ?delay,

@@ -18,29 +18,13 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use tokio::process::Command;
 
 #[derive(Clone, Copy, Debug)]
-pub enum RouteDestination {
+enum RouteDestination {
     /// The "default" route, suitable for any gateway.
     ///
     /// This is only used in OPTE routing setup.
     Default,
     /// An AZ IPv6 /48 subnet. Used only for underlay routing setup.
     Subnet(Ipv6Subnet<AZ_PREFIX_LENGTH>),
-}
-
-impl RouteDestination {
-    const fn check_gateway(&self, gateway: IpAddr) -> Result<(), RouteError> {
-        match self {
-            // Works for either
-            RouteDestination::Default => Ok(()),
-            RouteDestination::Subnet(_) => {
-                if gateway.is_ipv6() {
-                    Ok(())
-                } else {
-                    Err(RouteError::IncompatibleGatewayAndDestination)
-                }
-            }
-        }
-    }
 }
 
 impl core::fmt::Display for RouteDestination {
@@ -52,15 +36,34 @@ impl core::fmt::Display for RouteDestination {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum RouteError {
-    #[error(
-        "Destination and gateway are incompatible, because they \
-        have different IP versions"
-    )]
-    IncompatibleGatewayAndDestination,
-    #[error(transparent)]
-    Exec(#[from] ExecutionError),
+#[derive(Clone, Copy, Debug)]
+struct GatewayRoute {
+    destination: RouteDestination,
+    address: IpAddr,
+}
+
+impl GatewayRoute {
+    fn default_route(address: IpAddr) -> Self {
+        Self { destination: RouteDestination::Default, address }
+    }
+
+    fn subnet_route(
+        address: Ipv6Addr,
+        subnet: Ipv6Subnet<AZ_PREFIX_LENGTH>,
+    ) -> Self {
+        Self {
+            destination: RouteDestination::Subnet(subnet),
+            address: IpAddr::V6(address),
+        }
+    }
+
+    fn destination(&self) -> &RouteDestination {
+        &self.destination
+    }
+
+    fn address(&self) -> &IpAddr {
+        &self.address
+    }
 }
 
 /// Wraps commands for interacting with routing tables.
@@ -72,13 +75,12 @@ impl Route {
     pub async fn ensure_underlay_route_with_gateway(
         gateway: Ipv6Addr,
         datalink: &str,
-    ) -> Result<(), RouteError> {
+    ) -> Result<(), ExecutionError> {
         // Route to the underlay AZ's /48 by deriving it from the gateway IP.
         let underlay_az = Ipv6Subnet::new(gateway);
         Self::ensure_route_with_gateway(
             None,
-            RouteDestination::Subnet(underlay_az),
-            IpAddr::V6(gateway),
+            GatewayRoute::subnet_route(gateway, underlay_az),
             datalink,
         )
         .await
@@ -88,15 +90,13 @@ impl Route {
     /// `destination` on the provided `datalink`.
     async fn ensure_route_with_gateway(
         zone: Option<&str>,
-        destination: RouteDestination,
-        gateway_ip: IpAddr,
+        gateway_route: GatewayRoute,
         datalink: &str,
-    ) -> Result<(), RouteError> {
-        destination.check_gateway(gateway_ip)?;
-        let destination = destination.to_string();
+    ) -> Result<(), ExecutionError> {
+        let destination = gateway_route.destination().to_string();
         let inet;
         let gw;
-        match gateway_ip {
+        match gateway_route.address() {
             IpAddr::V4(addr) => {
                 inet = "-inet";
                 gw = addr.to_string();
@@ -124,10 +124,10 @@ impl Route {
         ]);
 
         let out = cmd.output().await.map_err(|err| {
-            RouteError::Exec(ExecutionError::ExecutionStart {
+            ExecutionError::ExecutionStart {
                 command: command_to_string(cmd.as_std()),
                 err,
-            })
+            }
         })?;
         match out.status.code() {
             Some(0) => (),
@@ -149,13 +149,10 @@ impl Route {
                     "-ifp",
                     datalink,
                 ]);
-                execute_async(cmd).await.map_err(RouteError::from)?;
+                execute_async(cmd).await?;
             }
             Some(_) | None => {
-                return Err(RouteError::Exec(output_to_exec_error(
-                    cmd.as_std(),
-                    &out,
-                )));
+                return Err(output_to_exec_error(cmd.as_std(), &out));
             }
         };
         Ok(())
@@ -206,13 +203,12 @@ impl Route {
         opte_port: &str,
         gateway_ip: &Ipv4Addr,
         private_ip: &Ipv4Addr,
-    ) -> Result<(), RouteError> {
+    ) -> Result<(), ExecutionError> {
         Self::ensure_opte_route(zone, opte_port, gateway_ip, private_ip)
             .await?;
         Self::ensure_route_with_gateway(
             zone,
-            RouteDestination::Default,
-            IpAddr::V4(*gateway_ip),
+            GatewayRoute::default_route(IpAddr::V4(*gateway_ip)),
             opte_port,
         )
         .await
@@ -299,23 +295,5 @@ impl Route {
         ]);
         execute_async(cmd).await?;
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    const V4_ADDR: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 1);
-    const V4: IpAddr = IpAddr::V4(V4_ADDR);
-    const V6_ADDR: Ipv6Addr = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1);
-    const V6: IpAddr = IpAddr::V6(V6_ADDR);
-
-    #[test]
-    fn check_gateway() {
-        let subnet = Ipv6Subnet::new(V6_ADDR);
-        assert!(RouteDestination::Default.check_gateway(V4).is_ok());
-        assert!(RouteDestination::Default.check_gateway(V6).is_ok());
-        assert!(RouteDestination::Subnet(subnet).check_gateway(V4).is_err());
-        assert!(RouteDestination::Subnet(subnet).check_gateway(V6).is_ok());
     }
 }

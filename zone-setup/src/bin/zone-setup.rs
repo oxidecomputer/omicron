@@ -10,7 +10,7 @@ use clap::{ArgAction, Args, Parser, Subcommand};
 use illumos_utils::ExecutionError;
 use illumos_utils::addrobj::{AddrObject, IPV6_LINK_LOCAL_ADDROBJ_NAME};
 use illumos_utils::ipadm::Ipadm;
-use illumos_utils::route::{Route, RouteError};
+use illumos_utils::route::Route;
 use illumos_utils::svcadm::Svcadm;
 use illumos_utils::zone::{AddressRequest, Zones};
 use omicron_common::address::Ipv6Subnet;
@@ -90,25 +90,16 @@ impl core::str::FromStr for MaybeIpv4Addr {
     }
 }
 
-impl core::fmt::Display for MaybeIpv4Addr {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.0 {
-            Some(a) => a.fmt(f),
-            None => "none".fmt(f),
-        }
-    }
-}
-
 #[derive(Debug, Args)]
 struct OpteInterfaceArgs {
     #[arg(short, long, value_parser = parse_string_rejecting_unknown)]
     interface: String,
     /// OPTE's virtual gateway address for external connectivity via boundary
     /// services
-    #[arg(short, long)]
+    #[arg(short, long, requires = "ip")]
     gateway: MaybeIpv4Addr,
     /// The private IPv4 address for the OPTE port.
-    #[arg(short = 'p', long)]
+    #[arg(short = 'p', long, requires = "gateway")]
     ip: MaybeIpv4Addr,
     /// Configure the OPTE port to support IPv6.
     //
@@ -712,7 +703,7 @@ async fn ensure_underlay_route_via_gateway_with_retries(
     log: &Logger,
 ) -> anyhow::Result<()> {
     // Helper to attach error context in the retry loop below.
-    let err_with_context = |err: RouteError| {
+    let err_with_context = |err: ExecutionError| {
         anyhow!(err).context(format!(
             "failed to ensure default route via gateway {gateway}",
         ))
@@ -732,7 +723,7 @@ async fn ensure_underlay_route_via_gateway_with_retries(
             Route::ensure_underlay_route_with_gateway(gateway, datalink)
                 .await
                 .map_err(|err| match err {
-                    RouteError::Exec(ExecutionError::CommandFailure(ref e)) => {
+                    ExecutionError::CommandFailure(ref e) => {
                         if e.stdout.contains("Network is unreachable") {
                             BackoffError::transient(err_with_context(err))
                         } else {
@@ -784,8 +775,8 @@ async fn opte_interface_set_up(
         log,
         "Configuring OPTE port";
         "interface" => %interface,
-        "gateway_ip" => %gateway,
-        "private_ip" => %ip,
+        "gateway_ip" => ?gateway,
+        "private_ip" => ?ip,
         "create_ipv6" => %create_ipv6,
     );
     if let Some((gateway_ip, private_ip)) = maybe_ipv4_data {
