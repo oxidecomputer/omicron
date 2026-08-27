@@ -7,6 +7,9 @@
 
 use anyhow::Context;
 use anyhow::anyhow;
+// TODO-RAINCLAUDE: linking the instrumentation crate is what lets an Antithesis build load libvoidstar for coverage.
+#[cfg(feature = "antithesis")]
+use antithesis_instrumentation as _;
 use clap::Parser;
 use serde::Deserialize;
 use slog::info;

@@ -13,6 +13,7 @@ workspace = true
 omicron-rpaths.workspace = true
 
 [dependencies]
+antithesis-instrumentation = { workspace = true, optional = true }
 anyhow.workspace = true
 async-trait.workspace = true
 atomicwrites.workspace = true
@@ -31,6 +32,7 @@ clickhouse-admin-types.workspace = true
 derive_more.workspace = true
 dice-verifier = { workspace = true, features = ["ipcc", "mock"] }
 display-error-chain.workspace = true
+dns-service-client.workspace = true
 # XXX NOTE this is due to https://github.com/oxidecomputer/omicron/issues/9704
 # This is the R20 dpd client
 # dpd-client.workspace = true
@@ -181,6 +183,8 @@ name = "sled-agent"
 doc = false
 
 [features]
+# TODO-RAINCLAUDE: only antithesis/Dockerfile enables this; the sancov rustflags it uses need every binary to link the instrumentation crate.
+antithesis = ["dep:antithesis-instrumentation"]
 image-trampoline = []
 switch-asic = []
 switch-stub = []

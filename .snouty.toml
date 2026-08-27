@@ -1,0 +1,5 @@
+# TODO-RAINCLAUDE: project-level snouty settings (see antithesis/README.adoc). Credentials never go here: snouty reads the API key from ANTITHESIS_API_KEY or its credential store. `container_engine` is set because this repo's developers use rootless podman with Compose v2.
+tenant = "oxide"
+# TODO-RAINCLAUDE: the full registry path, not the bare repository name: snouty pushes to `{repository}/{image}:{tag}`, and a bare name sends podman to docker.io.
+repository = "us-central1-docker.pkg.dev/molten-verve-216720/oxide-repository"
+container_engine = "podman"

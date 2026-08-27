@@ -431,6 +431,22 @@ impl RunningSaga {
     pub(crate) async fn wait_until_stopped(self) -> StoppedSaga {
         let result = self.saga_completion_future.await;
         info!(self.log, "saga finished"; "saga_result" => ?result);
+        // TODO-RAINCLAUDE: Antithesis hooks; a stuck saga (failed undo) is always a bug worth surfacing.
+        match &result.kind {
+            Ok(_) => {
+                antithesis_sdk::assert_sometimes!(
+                    true,
+                    "nexus: saga completed"
+                );
+            }
+            Err(saga_error) => {
+                antithesis_sdk::assert_sometimes!(true, "nexus: saga unwound");
+                antithesis_sdk::assert_always!(
+                    saga_error.undo_failure.is_none(),
+                    "nexus: saga unwinding never fails"
+                );
+            }
+        }
         StoppedSaga { id: self.id, result, log: self.log }
     }
 }

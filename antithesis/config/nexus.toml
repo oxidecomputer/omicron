@@ -1,0 +1,124 @@
+# TODO-RAINCLAUDE: Nexus configuration for the Antithesis deployment; derived from nexus/examples/config.toml with addresses matching antithesis/config/docker-compose.yaml.
+
+[console]
+static_dir = "/opt/oxide/console-assets"
+session_idle_timeout_minutes = 480
+session_absolute_timeout_minutes = 1440
+
+[authn]
+schemes_external = ["session_cookie", "access_token", "scim_token"]
+
+[log]
+level = "info"
+mode = "stderr-terminal"
+
+# TODO-RAINCLAUDE: no ClickHouse in phase 1; leaving the address unset keeps Nexus bootable without it.
+[timeseries_db]
+
+[deployment]
+id = "e6bff1ff-24fb-49dc-a54e-c6a350cd4d6c"
+rack_id = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc"
+# TODO-RAINCLAUDE: Nexus refuses to start with no upstream resolvers (nexus/src/app/mod.rs), and the Antithesis environment has no internet, so point it at the internal DNS server: lookups of external names fail fast with NXDOMAIN instead of timing out against an unreachable public resolver.
+external_dns_servers = ["fd00:1122:3344:101::3"]
+
+[deployment.dropshot_external]
+bind_address = "[fd00:1122:3344:101::5]:12220"
+default_request_body_max_bytes = 1048576
+compression = "gzip"
+
+[deployment.dropshot_internal]
+bind_address = "[fd00:1122:3344:101::5]:12221"
+default_request_body_max_bytes = 1048576
+
+[deployment.dropshot_lockstep]
+bind_address = "[fd00:1122:3344:101::5]:12232"
+default_request_body_max_bytes = 1048576
+
+[deployment.internal_dns]
+type = "from_address"
+address = "[fd00:1122:3344:101::3]:53"
+
+[deployment.database]
+type = "from_url"
+url = "postgresql://root@[fd00:1122:3344:101::4]:32221/omicron?sslmode=disable"
+
+[tunables]
+max_vpc_ipv4_subnet_prefix = 26
+
+[background_tasks]
+dns_internal.period_secs_config = 60
+dns_internal.period_secs_servers = 60
+dns_internal.period_secs_propagation = 60
+dns_internal.max_concurrent_server_updates = 5
+dns_external.period_secs_config = 60
+dns_external.period_secs_servers = 60
+dns_external.period_secs_propagation = 60
+dns_external.max_concurrent_server_updates = 5
+metrics_producer_gc.period_secs = 60
+external_endpoints.period_secs = 60
+nat_cleanup.period_secs = 30
+inventory.period_secs_load = 15
+inventory.period_secs_collect = 600
+inventory.nkeep = 5
+inventory.disable_collect = false
+phantom_disks.period_secs = 30
+physical_disk_adoption.period_secs = 30
+support_bundle_collector.period_secs = 30
+decommissioned_disk_cleaner.period_secs = 60
+blueprints.period_secs_load = 10
+blueprints.period_secs_plan = 60
+blueprints.period_secs_execute = 60
+blueprints.period_secs_rendezvous = 300
+blueprints.period_secs_collect_crdb_node_ids = 180
+blueprints.period_secs_load_reconfigurator_config = 5
+switch_port_settings_manager.period_secs = 30
+region_replacement.period_secs = 30
+region_replacement_driver.period_secs = 30
+instance_watcher.period_secs = 30
+instance_updater.period_secs = 30
+instance_reincarnation.period_secs = 60
+service_firewall_propagation.period_secs = 300
+v2p_mapping_propagation.period_secs = 30
+abandoned_vmm_reaper.period_secs = 60
+saga_recovery.period_secs = 600
+lookup_region_port.period_secs = 60
+region_snapshot_replacement_start.period_secs = 30
+region_snapshot_replacement_garbage_collection.period_secs = 30
+region_snapshot_replacement_step.period_secs = 30
+region_snapshot_replacement_finish.period_secs = 30
+tuf_artifact_replication.period_secs = 300
+tuf_artifact_replication.min_sled_replication = 1
+tuf_repo_pruner.period_secs = 300
+tuf_repo_pruner.nkeep_extra_target_releases = 1
+tuf_repo_pruner.nkeep_extra_newly_uploaded = 1
+alert_dispatcher.period_secs = 60
+webhook_deliverator.period_secs = 60
+read_only_region_replacement_start.period_secs = 30
+sp_ereport_ingester.period_secs = 30
+fm.sitrep_load_period_secs = 15
+fm.config_load_period_secs = 15
+fm.analysis_period_secs = 120
+fm.sitrep_gc_period_secs = 600
+fm.sitrep_history_prune_period_secs = 600
+fm.rendezvous_period_secs = 300
+probe_distributor.period_secs = 60
+multicast_reconciler.period_secs = 60
+trust_quorum.period_secs = 60
+attached_subnet_manager.period_secs = 60
+session_cleanup.period_secs = 300
+session_cleanup.max_delete_per_activation = 10000
+audit_log_timeout_incomplete.period_secs = 600
+audit_log_timeout_incomplete.timeout_secs = 14400
+audit_log_timeout_incomplete.max_timed_out_per_activation = 1000
+audit_log_cleanup.period_secs = 600
+audit_log_cleanup.retention_days = 90
+audit_log_cleanup.max_deleted_per_activation = 10000
+populate_switch_ports.period_secs = 30
+
+# TODO-RAINCLAUDE: a fixed seed keeps region allocation ordering deterministic so Antithesis controls the only randomness.
+[default_region_allocation_strategy]
+type = "random"
+seed = 0
+
+[omdb]
+bin_path = "/opt/oxide/bin/omdb"

@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "antithesis/workload",
     "api_identity",
     "bootstore",
     "certificates",
@@ -195,6 +196,7 @@ members = [
 ]
 
 default-members = [
+    "antithesis/workload",
     "api_identity",
     "bootstore",
     "certificates",
@@ -439,6 +441,8 @@ cast_lossless = "warn"
 [workspace.dependencies]
 anyhow = "1.0"
 anstyle = "1.0.11"
+antithesis-instrumentation = "0.1.0"
+antithesis_sdk = { version = "0.2.9", default-features = false }
 api_identity = { path = "api_identity" }
 approx = "0.5.1"
 assert_matches = "1.5.0"
@@ -987,6 +991,12 @@ opt-level = 3
 
 [profile.release]
 panic = "abort"
+
+# TODO-RAINCLAUDE: profile for Antithesis binaries (antithesis/README.adoc); keeps DWARF line tables unstripped for symbolization, while sancov instrumentation comes from antithesis/cargo-config.toml.
+[profile.antithesis]
+inherits = "release"
+debug = "line-tables-only"
+strip = "none"
 
 # proptest based test generation and shrinking is expensive. Let's optimize it.
 [profile.dev.package.proptest]

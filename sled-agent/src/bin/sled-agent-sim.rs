@@ -10,15 +10,23 @@ use clap::Parser;
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
+use omicron_common::api::external::Name;
+use omicron_common::api::external::UserId;
 use omicron_common::api::internal::nexus::Certificate;
 use omicron_common::cmd::CmdError;
 use omicron_common::cmd::fatal;
+// TODO-RAINCLAUDE: linking the instrumentation crate is what lets an Antithesis build load libvoidstar for coverage.
+#[cfg(feature = "antithesis")]
+use antithesis_instrumentation as _;
+use omicron_sled_agent::sim::InternalDnsConfig;
 use omicron_sled_agent::sim::RssArgs;
 use omicron_sled_agent::sim::{
     Config, ConfigHardware, ConfigStorage, ConfigZpool, SimMode, ZpoolConfig,
     run_standalone_server,
 };
+use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
+use oxnet::Ipv6Net;
 use sled_agent_types::inventory::ZpoolHealth;
 use sled_hardware_types::{Baseboard, SledCpuFamily};
 use std::net::SocketAddr;
@@ -62,6 +70,10 @@ struct Args {
     /// cause Nexus to publish DNS names to external DNS.
     rss_nexus_external_addr: Option<SocketAddr>,
 
+    // TODO-RAINCLAUDE: must equal `deployment.id` in the Nexus config, or Nexus never finds itself in the initial blueprint and never opens its external API.
+    #[clap(long, name = "NEXUS_ZONE_ID", action)]
+    rss_nexus_id: Option<OmicronZoneUuid>,
+
     #[clap(long, name = "EXTERNAL_DNS_INTERNAL_IP:PORT", action)]
     /// If specified, when the simulated sled agent initializes the rack, it
     /// will record the external DNS service running with the specified internal
@@ -73,6 +85,30 @@ struct Args {
     /// If specified, the sled agent will create a DNS server exposing the
     /// following socket address for the DNS interface.
     rss_internal_dns_dns_addr: Option<SocketAddrV6>,
+
+    // TODO-RAINCLAUDE: with this set, no DNS server is started; the one at this HTTP address is populated instead, and INTERNAL_DNS_INTERNAL_IP:PORT names where it serves DNS.
+    #[clap(
+        long,
+        name = "INTERNAL_DNS_HTTP_IP:PORT",
+        requires = "INTERNAL_DNS_INTERNAL_IP:PORT",
+        action
+    )]
+    rss_internal_dns_http_addr: Option<SocketAddrV6>,
+
+    // TODO-RAINCLAUDE: repeatable; each CockroachDB node is recorded in internal DNS and the initial blueprint.
+    #[clap(long = "cockroach-addr", name = "COCKROACH_IP:PORT", action = clap::ArgAction::Append)]
+    cockroach_addrs: Vec<SocketAddrV6>,
+
+    // TODO-RAINCLAUDE: defaults to the /56 containing SA_IP.
+    #[clap(long, name = "RACK_SUBNET", action)]
+    rack_subnet: Option<Ipv6Net>,
+
+    #[clap(long, name = "RECOVERY_SILO_NAME", action)]
+    rss_recovery_silo_name: Option<Name>,
+
+    // TODO-RAINCLAUDE: the recovery user's password is always "oxide".
+    #[clap(long, name = "RECOVERY_USER_NAME", action)]
+    rss_recovery_user_name: Option<UserId>,
 
     #[clap(long, name = "TLS_CERT_PEM_FILE", action)]
     /// If this flag and TLS_KEY_PEM_FILE are specified, when the simulated sled
@@ -99,6 +135,8 @@ async fn do_run() -> Result<(), CmdError> {
     let config = Config {
         dropshot: ConfigDropshot {
             bind_address: args.sled_agent_addr.into(),
+            // TODO-RAINCLAUDE: dropshot's default of 1 KiB rejects every sled config and firewall rule push from Nexus; this matches `Config::for_testing`.
+            default_request_body_max_bytes: 1024 * 1024,
             ..Default::default()
         },
         storage: ConfigStorage {
@@ -150,10 +188,32 @@ async fn do_run() -> Result<(), CmdError> {
         }
     };
 
+    // TODO-RAINCLAUDE: clap's `requires` already rejects an HTTP address without a DNS address, but that is not visible to the type system, so the usage error is spelled out here as well.
+    let internal_dns =
+        match (args.rss_internal_dns_http_addr, args.rss_internal_dns_dns_addr)
+        {
+            (Some(http_addr), Some(dns_addr)) => {
+                InternalDnsConfig::External { http_addr, dns_addr }
+            }
+            (None, dns_addr) => InternalDnsConfig::InProcess { dns_addr },
+            (Some(_), None) => {
+                return Err(CmdError::Usage(String::from(
+                    "--rss-internal-dns-http-addr requires \
+                     --rss-internal-dns-dns-addr (Nexus must be told where \
+                     the external DNS server serves DNS)",
+                )));
+            }
+        };
+
     let rss_args = RssArgs {
         nexus_external_addr: args.rss_nexus_external_addr,
+        nexus_id: args.rss_nexus_id,
         external_dns_internal_addr: args.rss_external_dns_internal_addr,
-        internal_dns_dns_addr: args.rss_internal_dns_dns_addr,
+        internal_dns,
+        cockroach_addrs: args.cockroach_addrs,
+        rack_subnet: args.rack_subnet,
+        recovery_silo_name: args.rss_recovery_silo_name,
+        recovery_user_name: args.rss_recovery_user_name,
         tls_certificate,
     };
 

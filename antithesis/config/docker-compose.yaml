@@ -1,0 +1,150 @@
+# TODO-RAINCLAUDE: Antithesis deployment of the simulated control plane; addresses here must match antithesis/config/nexus.toml and the sled-agent-sim arguments.
+name: omicron
+
+networks:
+  underlay:
+    enable_ipv6: true
+    ipam:
+      config:
+        - subnet: fd00:1122:3344:101::/64
+
+services:
+  cockroach:
+    container_name: cockroach
+    hostname: cockroach
+    platform: linux/amd64
+    init: true
+    build:
+      context: ../..
+      dockerfile: antithesis/Dockerfile
+      target: omicron-antithesis-cockroach
+    image: omicron-antithesis-cockroach:latest
+    environment:
+      NO_COLOR: "1"
+    # TODO-RAINCLAUDE: same flags as test-utils/src/dev/db.rs apart from the fixed addresses.
+    command:
+      - cockroach
+      - start-single-node
+      - --insecure
+      - --store=path=/data,ballast-size=0
+      - --listen-addr=[::]:32221
+      - --http-addr=[::]:8080
+      - --max-sql-memory=256MiB
+    healthcheck:
+      test: ["CMD", "/opt/oxide/bin/cockroach-healthcheck.sh"]
+      interval: 2s
+      timeout: 2s
+      retries: 60
+    networks:
+      underlay:
+        ipv6_address: fd00:1122:3344:101::4
+
+  # TODO-RAINCLAUDE: only the nexus service carries the build: for omicron-antithesis; podman's compose path builds once per service that declares build:, so the other users of the image reference it by name.
+  internal-dns:
+    container_name: internal-dns
+    hostname: internal-dns
+    platform: linux/amd64
+    init: true
+    image: omicron-antithesis:latest
+    environment:
+      NO_COLOR: "1"
+    command:
+      - dns-server
+      - --config-file=/opt/oxide/config/dns-server.toml
+      - --http-address=[fd00:1122:3344:101::3]:5353
+      - --dns-address=[fd00:1122:3344:101::3]:53
+    # TODO-RAINCLAUDE: a plain TCP connect rather than an HTTP request: the dns-server API is versioned and logs an error for every request without an api-version header, and pinning a version here would rot.
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/fd00:1122:3344:101::3/5353"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    networks:
+      underlay:
+        ipv6_address: fd00:1122:3344:101::3
+
+  nexus:
+    container_name: nexus
+    hostname: nexus
+    platform: linux/amd64
+    init: true
+    build:
+      context: ../..
+      dockerfile: antithesis/Dockerfile
+      target: omicron-antithesis
+    image: omicron-antithesis:latest
+    environment:
+      NO_COLOR: "1"
+    command:
+      - nexus
+      - /opt/oxide/config/nexus.toml
+    depends_on:
+      cockroach:
+        condition: service_healthy
+      internal-dns:
+        condition: service_healthy
+    # TODO-RAINCLAUDE: healthy means the internal API accepts TCP connections; the external API only appears after the sled-agent-sim handoff, so checking it here would deadlock, and an HTTP request without an api-version header is logged as an error on every probe.
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/fd00:1122:3344:101::5/12221"]
+      interval: 2s
+      timeout: 2s
+      retries: 60
+    networks:
+      underlay:
+        ipv6_address: fd00:1122:3344:101::5
+
+  sled-agent-sim:
+    container_name: sled-agent-sim
+    hostname: sled-agent-sim
+    platform: linux/amd64
+    init: true
+    image: omicron-antithesis:latest
+    environment:
+      NO_COLOR: "1"
+    command:
+      - sled-agent-sim
+      - b6d65341-167c-41df-9b5c-41cded99c229
+      - "[fd00:1122:3344:101::6]:12345"
+      - "[fd00:1122:3344:101::5]:12221"
+      - "12232"
+      - --rss-nexus-external-addr=[fd00:1122:3344:101::5]:12220
+      # TODO-RAINCLAUDE: deployment.id in nexus.toml. The recovery silo and user are left at sled-agent-sim's defaults (demo-silo, demo-privileged, password oxide), which the workload also defaults to.
+      - --rss-nexus-id=e6bff1ff-24fb-49dc-a54e-c6a350cd4d6c
+      - --rss-internal-dns-dns-addr=[fd00:1122:3344:101::3]:53
+      - --rss-internal-dns-http-addr=[fd00:1122:3344:101::3]:5353
+      - --cockroach-addr=[fd00:1122:3344:101::4]:32221
+      - --rack-subnet=fd00:1122:3344::/56
+    depends_on:
+      nexus:
+        condition: service_healthy
+      internal-dns:
+        condition: service_healthy
+    networks:
+      underlay:
+        ipv6_address: fd00:1122:3344:101::6
+
+  workload:
+    container_name: workload
+    hostname: workload
+    platform: linux/amd64
+    init: true
+    build:
+      context: ../..
+      dockerfile: antithesis/Dockerfile
+      target: omicron-antithesis-workload
+    image: omicron-antithesis-workload:latest
+    environment:
+      NO_COLOR: "1"
+    # TODO-RAINCLAUDE: wait-ready emits setup_complete; the container then stays up so Antithesis can exec the test commands baked into /opt/antithesis/test/v1.
+    command:
+      - /bin/sh
+      - -c
+      - omicron-antithesis-workload wait-ready && exec sleep infinity
+    depends_on:
+      nexus:
+        condition: service_healthy
+      sled-agent-sim:
+        condition: service_started
+    networks:
+      underlay:
+        ipv6_address: fd00:1122:3344:101::7

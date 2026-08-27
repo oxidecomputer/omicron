@@ -1,0 +1,10 @@
+[dropshot]
+default_request_body_max_bytes = 104857600
+
+[log]
+level = "info"
+mode = "stderr-terminal"
+
+[storage]
+storage_path = "/var/oxide/dns-storage"
+keep_old_generations = 3

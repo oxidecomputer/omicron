@@ -7,7 +7,12 @@ license = "MPL-2.0"
 [lints]
 workspace = true
 
+[features]
+# TODO-RAINCLAUDE: only antithesis/Dockerfile enables this; the sancov rustflags it uses need every binary to link the instrumentation crate.
+antithesis = ["dep:antithesis-instrumentation"]
+
 [dependencies]
+antithesis-instrumentation = { workspace = true, optional = true }
 anyhow.workspace = true
 camino.workspace = true
 chrono.workspace = true

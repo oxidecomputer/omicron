@@ -182,6 +182,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "antithesis-instrumentation"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eb6b548668212c6d3a942a4ac7be13bc4fc25715bf661328438f30e3fd342cf0"
+dependencies = [
+ "cc",
+]
+
+[[package]]
+name = "antithesis_sdk"
+version = "0.2.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "08410fcac93669a476c006cd6c4512ac1e2b30fd117231a5d55d8a2c76599b82"
+dependencies = [
+ "libc",
+ "libloading",
+ "linkme",
+ "once_cell",
+ "rand 0.8.6",
+ "rustc_version_runtime",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "anyhow"
 version = "1.0.104"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3153,6 +3178,7 @@ dependencies = [
 name = "dns-server"
 version = "0.1.0"
 dependencies = [
+ "antithesis-instrumentation",
  "anyhow",
  "camino",
  "camino-tempfile",
@@ -7438,6 +7464,7 @@ dependencies = [
 name = "nexus-db-queries"
 version = "0.1.0"
 dependencies = [
+ "antithesis_sdk",
  "anyhow",
  "assert_matches",
  "async-bb8-diesel",
@@ -8746,6 +8773,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "omicron-antithesis-workload"
+version = "0.1.0"
+dependencies = [
+ "antithesis-instrumentation",
+ "antithesis_sdk",
+ "anyhow",
+ "clap",
+ "dropshot",
+ "futures",
+ "http",
+ "nexus-config",
+ "nexus-lockstep-client",
+ "omicron-workspace-hack",
+ "oxide-client",
+ "oxide-tokio-rt",
+ "reqwest 0.13.2",
+ "serde_json",
+ "slog",
+ "tokio",
+]
+
+[[package]]
 name = "omicron-certificates"
 version = "0.1.0"
 dependencies = [
@@ -9198,6 +9247,8 @@ dependencies = [
 name = "omicron-nexus"
 version = "0.1.0"
 dependencies = [
+ "antithesis-instrumentation",
+ "antithesis_sdk",
  "anyhow",
  "assert_matches",
  "async-bb8-diesel",
@@ -9427,6 +9478,7 @@ dependencies = [
 name = "omicron-omdb"
 version = "0.1.0"
 dependencies = [
+ "antithesis-instrumentation",
  "anyhow",
  "async-bb8-diesel",
  "async-trait",
@@ -9716,6 +9768,7 @@ dependencies = [
 name = "omicron-sled-agent"
 version = "0.1.0"
 dependencies = [
+ "antithesis-instrumentation",
  "anyhow",
  "assert_matches",
  "async-trait",
@@ -9737,6 +9790,7 @@ dependencies = [
  "derive_more 0.99.20",
  "dice-verifier 0.3.0-pre0 (git+https://github.com/oxidecomputer/dice-util?branch=main)",
  "display-error-chain",
+ "dns-service-client",
  "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=cc0c307c617f2988aafdca4e3bd35ea178b64801)",
  "dropshot",
  "expectorate",
@@ -10020,9 +10074,7 @@ dependencies = [
  "predicates",
  "proc-macro2",
  "quote",
- "rand 0.8.6",
  "rand 0.9.2",
- "rand_chacha 0.3.1",
  "rand_chacha 0.9.0",
  "regex",
  "regex-automata",
@@ -13155,6 +13207,16 @@ version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cfcb3a22ef46e85b45de6ee7e79d063319ebb6594faafcf1c225ea92ab6e9b92"
 dependencies = [
+ "semver 1.0.28",
+]
+
+[[package]]
+name = "rustc_version_runtime"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2dd18cd2bae1820af0b6ad5e54f4a51d0f3fcc53b05f845675074efcc7af071d"
+dependencies = [
+ "rustc_version 0.4.1",
  "semver 1.0.28",
 ]
 

@@ -9,12 +9,16 @@ workspace = true
 
 [features]
 multicast = []
+# TODO-RAINCLAUDE: only antithesis/Dockerfile enables this; without it the SDK calls compile to no-ops.
+antithesis =["antithesis_sdk/full", "dep:antithesis-instrumentation"]
 
 [build-dependencies]
 omicron-rpaths.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+antithesis-instrumentation = { workspace = true, optional = true }
+antithesis_sdk.workspace = true
 async-bb8-diesel.workspace = true
 assert_matches.workspace = true
 async-trait.workspace = true

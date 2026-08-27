@@ -5,6 +5,9 @@
 //! Upgrades CRDB schema
 
 use anyhow::anyhow;
+// TODO-RAINCLAUDE: linking the instrumentation crate is what lets an Antithesis build load libvoidstar for coverage.
+#[cfg(feature = "antithesis")]
+use antithesis_instrumentation as _;
 use camino::Utf8PathBuf;
 use clap::Parser;
 use clap::Subcommand;

@@ -12,6 +12,9 @@
 
 use anyhow::Context;
 use anyhow::anyhow;
+// TODO-RAINCLAUDE: linking the instrumentation crate is what lets an Antithesis build load libvoidstar for coverage.
+#[cfg(feature = "antithesis")]
+use antithesis_instrumentation as _;
 use camino::Utf8PathBuf;
 use clap::Parser;
 use nexus_config::NexusConfig;
@@ -31,6 +34,8 @@ struct Args {
 }
 
 fn main() {
+    // TODO-RAINCLAUDE: registers the Antithesis assertion catalog; a no-op unless the `antithesis` feature is on.
+    antithesis_sdk::antithesis_init();
     if let Err(cmd_error) = oxide_tokio_rt::run(do_run()) {
         fatal(cmd_error);
     }

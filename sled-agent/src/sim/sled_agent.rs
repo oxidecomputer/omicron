@@ -168,10 +168,15 @@ impl SledAgent {
 
         simulated_upstairs.register_storage(id, &storage);
 
+        // TODO-RAINCLAUDE: the repo depot must not reuse the sled agent's own port (omicron#4421); port 0 is fine because Nexus learns the port from sled_agent_put.
+        let repo_depot_dropshot = dropshot::ConfigDropshot {
+            bind_address: SocketAddr::new(config.dropshot.bind_address.ip(), 0),
+            ..config.dropshot.clone()
+        };
         let repo_depot =
             ArtifactStore::new(&log, SimArtifactStorage::new(), None)
                 .await
-                .start(&log, &config.dropshot);
+                .start(&log, &repo_depot_dropshot);
 
         let health_monitor = HealthMonitorHandle::stub();
 

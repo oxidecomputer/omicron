@@ -167,6 +167,11 @@ impl RetryHelper {
             "Retryable transaction failure";
             "retry_after (ms)" => duration.as_millis(),
         );
+        // TODO-RAINCLAUDE: Antithesis liveness hook showing that injected faults reach the CockroachDB retry path.
+        antithesis_sdk::assert_sometimes!(
+            true,
+            "nexus: CockroachDB transaction retried"
+        );
         tokio::time::sleep(duration).await;
 
         // Now that we've finished sleeping, reset the timer and bump the number

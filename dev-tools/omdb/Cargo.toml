@@ -10,7 +10,12 @@ workspace = true
 [build-dependencies]
 omicron-rpaths.workspace = true
 
+[features]
+# TODO-RAINCLAUDE: only antithesis/Dockerfile enables this; the sancov rustflags it uses need every binary to link the instrumentation crate.
+antithesis = ["dep:antithesis-instrumentation"]
+
 [dependencies]
+antithesis-instrumentation = { workspace = true, optional = true }
 anyhow.workspace = true
 async-bb8-diesel.workspace = true
 async-trait.workspace = true

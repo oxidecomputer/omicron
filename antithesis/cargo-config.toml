@@ -1,0 +1,15 @@
+# TODO-RAINCLAUDE: pass with `cargo build --config antithesis/cargo-config.toml`; kept out of .cargo/config.toml because sancov slows every crate's build.
+# TODO-RAINCLAUDE: an explicit build.target keeps the rustflags off host artifacts (build scripts, proc macros), which cannot link without the instrumentation crate's sancov hooks.
+[build]
+target = "x86_64-unknown-linux-gnu"
+
+# TODO-RAINCLAUDE: target rustflags replace build.rustflags, so --cfg tokio_unstable is repeated here; --build-id is required by Antithesis for symbolization.
+[target.x86_64-unknown-linux-gnu]
+rustflags = [
+    "--cfg", "tokio_unstable",
+    "-Ccodegen-units=1",
+    "-Cpasses=sancov-module",
+    "-Cllvm-args=-sanitizer-coverage-level=3",
+    "-Cllvm-args=-sanitizer-coverage-trace-pc-guard",
+    "-Clink-args=-Wl,--build-id",
+]

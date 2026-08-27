@@ -17,6 +17,7 @@ use crucible_agent_client::types::State as RegionState;
 use iddqd::IdOrdMap;
 use illumos_utils::zpool::ZpoolName;
 use internal_dns_types::config::DnsConfigBuilder;
+use internal_dns_types::config::DnsConfigParams;
 use internal_dns_types::names::DNS_ZONE_EXTERNAL_TESTING;
 use internal_dns_types::names::ServiceName;
 use nexus_client::types as NexusTypes;
@@ -37,15 +38,22 @@ use omicron_common::address::IpRange;
 use omicron_common::address::Ipv4Range;
 use omicron_common::address::Ipv6Range;
 use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
+use omicron_common::address::RACK_PREFIX_LENGTH;
 use omicron_common::address::{DNS_OPTE_IPV4_SUBNET, Ipv6Subnet};
 use omicron_common::api::external::MacAddr;
+use omicron_common::api::external::Name;
+use omicron_common::api::external::UserId;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::nexus::Certificate;
 use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
 };
-use omicron_generation_kinds::{Generation, NexusGeneration};
+use omicron_common::disk::DatasetKind;
+use omicron_common::disk::DatasetName;
+use omicron_generation_kinds::{
+    Generation, NexusGeneration, SledConfigGeneration,
+};
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -58,16 +66,24 @@ use sled_agent_rack_setup::{
     from_ipaddr_to_external_floating_ip,
     from_sockaddr_to_external_floating_addr,
 };
+use sled_agent_types::disk::CompressionAlgorithm;
+use sled_agent_types::disk::DatasetConfig;
 use sled_agent_types::disk::DiskIdentity;
+use sled_agent_types::disk::OmicronPhysicalDiskConfig;
+use sled_agent_types::disk::SharedDatasetConfig;
 use sled_agent_types::early_networking::PortConfig;
 use sled_agent_types::early_networking::UplinkPorts;
+use sled_agent_types::inventory::HostPhase2DesiredSlots;
 use sled_agent_types::inventory::NetworkInterface;
 use sled_agent_types::inventory::NetworkInterfaceKind;
+use sled_agent_types::inventory::OmicronSledConfig;
+use sled_agent_types::inventory::OmicronSledUpdateDisposition;
+use sled_agent_types::inventory::OmicronZoneConfig;
 use sled_agent_types::inventory::OmicronZoneDataset;
-use slog::{Drain, Logger, info};
+use slog::{Drain, Logger, info, warn};
+use std::collections::BTreeSet;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
-use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
@@ -349,14 +365,145 @@ pub struct RssArgs {
     /// Specify the external address of Nexus so that we can include it in
     /// external DNS
     pub nexus_external_addr: Option<SocketAddr>,
+    // TODO-RAINCLAUDE: the zone id recorded for Nexus in the initial blueprint; Nexus only opens its external API once it finds its own `deployment.id` in the target blueprint, so this must match that config value.
+    pub nexus_id: Option<OmicronZoneUuid>,
     /// Specify the (internal) address of an external DNS server so that Nexus
     /// will know about it and keep it up to date
     pub external_dns_internal_addr: Option<SocketAddrV6>,
-    /// Specify the (dns) address of an internal DNS server
-    pub internal_dns_dns_addr: Option<SocketAddrV6>,
+    // TODO-RAINCLAUDE: which internal DNS server to populate during rack initialization.
+    pub internal_dns: InternalDnsConfig,
+    // TODO-RAINCLAUDE: CockroachDB nodes to record in internal DNS and the initial blueprint so Nexus can use `database.type = "from_dns"`.
+    pub cockroach_addrs: Vec<SocketAddrV6>,
+    // TODO-RAINCLAUDE: rack subnet reported to Nexus; defaults to the /56 containing the sled agent's address.
+    pub rack_subnet: Option<Ipv6Net>,
+    // TODO-RAINCLAUDE: recovery silo and user names; the password is always "oxide" (see the hash below).
+    pub recovery_silo_name: Option<Name>,
+    pub recovery_user_name: Option<UserId>,
     /// Specify a certificate and associated private key for the initial Silo's
     /// initial TLS certificates
     pub tls_certificate: Option<Certificate>,
+}
+
+// TODO-RAINCLAUDE: how the standalone simulated sled agent obtains the internal DNS server it populates during rack initialization; an external server needs both addresses (Nexus is told the DNS address, the sled agent talks to the HTTP address), so the pair is one variant rather than two independent options.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum InternalDnsConfig {
+    // TODO-RAINCLAUDE: start a DNS server in this process, optionally at a fixed DNS address.
+    InProcess { dns_addr: Option<SocketAddrV6> },
+    // TODO-RAINCLAUDE: populate an already-running DNS server via its HTTP API.
+    External { http_addr: SocketAddrV6, dns_addr: SocketAddrV6 },
+}
+
+impl Default for InternalDnsConfig {
+    fn default() -> Self {
+        InternalDnsConfig::InProcess { dns_addr: None }
+    }
+}
+
+// TODO-RAINCLAUDE: the standalone server either owns an in-process DNS server or points at an external one whose addresses are only known from the arguments.
+enum InternalDns {
+    InProcess(TransientDnsServer),
+    External { http_addr: SocketAddrV6, dns_addr: SocketAddrV6 },
+}
+
+impl InternalDns {
+    async fn new(
+        log: &Logger,
+        config: &InternalDnsConfig,
+    ) -> Result<InternalDns, anyhow::Error> {
+        match config {
+            InternalDnsConfig::External { http_addr, dns_addr } => {
+                Ok(InternalDns::External {
+                    http_addr: *http_addr,
+                    dns_addr: *dns_addr,
+                })
+            }
+            InternalDnsConfig::InProcess { dns_addr: Some(dns_addr) } => {
+                Ok(InternalDns::InProcess(
+                    TransientDnsServer::new_with_address(
+                        log,
+                        (*dns_addr).into(),
+                    )
+                    .await?,
+                ))
+            }
+            InternalDnsConfig::InProcess { dns_addr: None } => {
+                Ok(InternalDns::InProcess(TransientDnsServer::new(log).await?))
+            }
+        }
+    }
+
+    fn http_addr(&self) -> Result<SocketAddrV6, anyhow::Error> {
+        match self {
+            InternalDns::InProcess(dns) => {
+                match dns.dropshot_server.local_addr() {
+                    SocketAddr::V4(addr) => bail!(
+                        "internal DNS HTTP server bound an IPv4 address \
+                         ({addr}); internal DNS zones require IPv6"
+                    ),
+                    SocketAddr::V6(addr) => Ok(addr),
+                }
+            }
+            InternalDns::External { http_addr, .. } => Ok(*http_addr),
+        }
+    }
+
+    fn dns_addr(&self) -> Result<SocketAddrV6, anyhow::Error> {
+        match self {
+            InternalDns::InProcess(dns) => {
+                match dns.dns_server.local_address() {
+                    SocketAddr::V4(addr) => bail!(
+                        "internal DNS server bound an IPv4 address ({addr}); \
+                         internal DNS zones require IPv6"
+                    ),
+                    SocketAddr::V6(addr) => Ok(addr),
+                }
+            }
+            InternalDns::External { dns_addr, .. } => Ok(*dns_addr),
+        }
+    }
+
+    async fn initialize_with_config(
+        &self,
+        log: &Logger,
+        dns_config: &DnsConfigParams,
+    ) -> Result<(), anyhow::Error> {
+        match self {
+            InternalDns::InProcess(dns) => {
+                dns.initialize_with_config(log, dns_config).await
+            }
+            InternalDns::External { http_addr, .. } => {
+                let client = dns_service_client::Client::new(
+                    &format!("http://{http_addr}"),
+                    log.new(o!("component" => "DnsServiceClient")),
+                );
+                // TODO-RAINCLAUDE: the external DNS server may still be starting, so retry the way the Nexus handoff does.
+                let put_config = || async {
+                    client
+                        .dns_config_put(dns_config)
+                        .await
+                        .map_err(BackoffError::transient)
+                };
+                let log_failure = |err, delay| {
+                    warn!(
+                        log,
+                        "failed to initialize internal DNS at {http_addr}, \
+                         will retry in {delay:?}";
+                        "error" => ?err,
+                    );
+                };
+                retry_notify(
+                    retry_policy_internal_service_aggressive(),
+                    put_config,
+                    log_failure,
+                )
+                .await
+                .with_context(|| {
+                    format!("initializing internal DNS at {http_addr}")
+                })?;
+                Ok(())
+            }
+        }
+    }
 }
 
 /// Run an instance of the `Server` which is able to handoff to Nexus.
@@ -399,12 +546,16 @@ pub async fn run_standalone_server(
     .await?;
     info!(log, "sled agent started successfully");
 
-    // Start the Internal DNS server
-    let dns = if let Some(addr) = rss_args.internal_dns_dns_addr {
-        TransientDnsServer::new_with_address(&log, addr.into()).await?
-    } else {
-        TransientDnsServer::new(&log).await?
+    let underlay_address = match server.http_server.local_addr() {
+        SocketAddr::V4(addr) => {
+            bail!("sled agent bound an IPv4 address ({addr}); it must be IPv6")
+        }
+        SocketAddr::V6(addr) => addr,
     };
+    let sled_ip = *underlay_address.ip();
+
+    // Start the Internal DNS server
+    let dns = InternalDns::new(&log, &rss_args.internal_dns).await?;
     let mut dns_config_builder = DnsConfigBuilder::new();
 
     // Start the Crucible Pantry
@@ -429,6 +580,48 @@ pub async fn run_standalone_server(
         )
         .expect("failed to set up DNS");
 
+    // TODO-RAINCLAUDE: CockroachDB zones go into DNS now and into the blueprint below; the blueprint executor rewrites DNS from the blueprint, so both must agree.
+    let cockroach_zones: Vec<(OmicronZoneUuid, SocketAddrV6)> = rss_args
+        .cockroach_addrs
+        .iter()
+        .map(|addr| (OmicronZoneUuid::new_v4(), *addr))
+        .collect();
+    for (zone_id, addr) in &cockroach_zones {
+        dns_config_builder
+            .host_zone_with_one_backend(*zone_id, ServiceName::Cockroach, *addr)
+            .with_context(|| {
+                format!("adding CockroachDB node {addr} to internal DNS")
+            })?;
+    }
+
+    // TODO-RAINCLAUDE: Nexus discovers DNS servers through `_nameservice._tcp` and its peers through `_nexus._tcp`, and the blueprint executor cannot publish those records until it can find a DNS server, so the initial config must carry them; the zone ids are reused in the blueprint below so the executor's rewrite agrees with them.
+    let internal_dns_zone_id = OmicronZoneUuid::new_v4();
+    dns_config_builder
+        .host_zone_internal_dns(
+            internal_dns_zone_id,
+            ServiceName::InternalDns,
+            dns.http_addr()?,
+            dns.dns_addr()?,
+        )
+        .context("adding the internal DNS server to internal DNS")?;
+    let nexus_internal_addr = match config.nexus_address {
+        SocketAddr::V4(addr) => {
+            bail!("Nexus internal address {addr} must be IPv6")
+        }
+        SocketAddr::V6(addr) => addr,
+    };
+    let nexus_zone_id =
+        rss_args.nexus_id.unwrap_or_else(OmicronZoneUuid::new_v4);
+    if rss_args.nexus_external_addr.is_some() {
+        dns_config_builder
+            .host_zone_nexus(
+                nexus_zone_id,
+                nexus_internal_addr,
+                nexus_lockstep_port,
+            )
+            .context("adding Nexus to internal DNS")?;
+    }
+
     // Initialize the internal DNS entries
     let dns_config =
         dns_config_builder.build_full_config_for_initial_generation();
@@ -444,27 +637,20 @@ pub async fn run_standalone_server(
 
     // Record the internal DNS server as though RSS had provisioned it so
     // that Nexus knows about it.
-    let http_bound = match dns.dropshot_server.local_addr() {
-        SocketAddr::V4(_) => panic!("did not expect v4 address"),
-        SocketAddr::V6(a) => a,
-    };
-    let pool_name = ZpoolName::new_external(ZpoolUuid::new_v4());
+    // TODO-RAINCLAUDE: every zone's filesystem pool must be one of the simulated sled's real zpools, because the sled config ledgered below lists exactly those disks and Nexus cross-checks zone pools against them.
+    let pool_name = get_random_zpool();
     let mut zones = IdOrdMap::new();
     zones
         .insert_unique(BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
-            id: OmicronZoneUuid::new_v4(),
+            id: internal_dns_zone_id,
             zone_type: BlueprintZoneType::InternalDns(
                 blueprint_zone_type::InternalDns {
                     dataset: OmicronZoneDataset { pool_name },
-                    http_address: http_bound,
-                    dns_address: match dns.dns_server.local_address() {
-                        SocketAddr::V4(_) => {
-                            panic!("did not expect v4 address")
-                        }
-                        SocketAddr::V6(a) => a,
-                    },
-                    gz_address: Ipv6Addr::LOCALHOST,
+                    http_address: dns.http_addr()?,
+                    dns_address: dns.dns_addr()?,
+                    // TODO-RAINCLAUDE: nothing in the simulation routes through the global zone, so the sled's own address stands in for it.
+                    gz_address: sled_ip,
                     gz_address_index: 0,
                 },
             ),
@@ -474,12 +660,30 @@ pub async fn run_standalone_server(
         })
         .expect("freshly generated zone IDs are unique");
 
+    for (zone_id, address) in cockroach_zones {
+        let pool_name = get_random_zpool();
+        zones
+            .insert_unique(BlueprintZoneConfig {
+                disposition: BlueprintZoneDisposition::InService,
+                id: zone_id,
+                zone_type: BlueprintZoneType::CockroachDb(
+                    blueprint_zone_type::CockroachDb {
+                        address,
+                        dataset: OmicronZoneDataset { pool_name },
+                    },
+                ),
+                filesystem_pool: pool_name,
+                image_source: BlueprintZoneImageSource::InstallDataset,
+            })
+            .expect("freshly generated zone IDs are unique");
+    }
+
     let mut internal_services_ipv4_ranges = vec![];
     let mut internal_services_ipv6_ranges = vec![];
     let mut macs = MacAddr::iter_system();
     if let Some(nexus_external_addr) = rss_args.nexus_external_addr {
         let external_ip = nexus_external_addr.ip();
-        let id = OmicronZoneUuid::new_v4();
+        let id = nexus_zone_id;
         let private_ip = NEXUS_OPTE_IPV4_SUBNET
             .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
             .unwrap();
@@ -493,12 +697,7 @@ pub async fn run_standalone_server(
                 id,
                 zone_type: BlueprintZoneType::Nexus(
                     blueprint_zone_type::Nexus {
-                        internal_address: match config.nexus_address {
-                            SocketAddr::V4(_) => {
-                                panic!("did not expect v4 address")
-                            }
-                            SocketAddr::V6(a) => a,
-                        },
+                        internal_address: nexus_internal_addr,
                         lockstep_port: nexus_lockstep_port,
                         external_ip: from_ipaddr_to_external_floating_ip(
                             external_ip,
@@ -548,7 +747,7 @@ pub async fn run_standalone_server(
         let ip_config =
             PrivateIpConfig::new_ipv4(private_ip, *DNS_OPTE_IPV4_SUBNET)
                 .context("creating private IP configuration")?;
-        let pool_name = ZpoolName::new_external(ZpoolUuid::new_v4());
+        let pool_name = get_random_zpool();
         zones
             .insert_unique(BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
@@ -585,8 +784,14 @@ pub async fn run_standalone_server(
     }
 
     let recovery_silo = RecoverySiloConfig {
-        silo_name: "demo-silo".parse().unwrap(),
-        user_name: "demo-privileged".parse().unwrap(),
+        silo_name: rss_args
+            .recovery_silo_name
+            .clone()
+            .unwrap_or_else(|| "demo-silo".parse().unwrap()),
+        user_name: rss_args
+            .recovery_user_name
+            .clone()
+            .unwrap_or_else(|| "demo-privileged".parse().unwrap()),
         // The following is a hash for the password "oxide".  This is
         // (obviously) only intended for transient deployments in
         // development with no sensitive data or resources.  You can change
@@ -626,17 +831,76 @@ pub async fn run_standalone_server(
         None => vec![],
     };
 
+    // TODO-RAINCLAUDE: RSS ledgers a sled config on every sled before handing off to Nexus, and the blueprint below is derived from what the sled reports as ledgered (see `inventory.ledgered_sled_config`), so the standalone path has to do the same or the handoff cannot be built. Mirrors nexus-test-utils `configure_sled_agents`: one disk per zpool, one transient-zone dataset per zone, generation 2.
+    let sled_config_generation = SledConfigGeneration::from_u32(2);
+    let mut disk_configs = IdOrdMap::new();
+    for zpool in &zpools {
+        let disk = physical_disks
+            .iter()
+            .find(|disk| disk.id == zpool.physical_disk_id)
+            .with_context(|| {
+                format!(
+                    "zpool {} refers to unknown physical disk {}",
+                    zpool.id, zpool.physical_disk_id
+                )
+            })?;
+        disk_configs
+            .insert_unique(OmicronPhysicalDiskConfig {
+                identity: DiskIdentity {
+                    vendor: disk.vendor.clone(),
+                    model: disk.model.clone(),
+                    serial: disk.serial.clone(),
+                },
+                id: disk.id,
+                pool_id: ZpoolUuid::from_untyped_uuid(zpool.id),
+            })
+            .map_err(|_| {
+                anyhow!("physical disk {} backs more than one zpool", disk.id)
+            })?;
+    }
+    let mut dataset_configs = IdOrdMap::new();
+    for zone in &zones {
+        dataset_configs
+            .insert_unique(DatasetConfig {
+                id: DatasetUuid::new_v4(),
+                name: DatasetName::new(
+                    zone.filesystem_pool,
+                    DatasetKind::TransientZone {
+                        name: illumos_utils::zone::zone_name(
+                            zone.zone_type.kind().zone_prefix(),
+                            Some(zone.id),
+                        ),
+                    },
+                ),
+                inner: SharedDatasetConfig {
+                    compression: CompressionAlgorithm::Off,
+                    quota: None,
+                    reservation: None,
+                },
+            })
+            .expect("freshly generated dataset IDs are unique");
+    }
+    server
+        .sled_agent
+        .set_omicron_config(OmicronSledConfig {
+            generation: sled_config_generation,
+            disks: disk_configs,
+            datasets: dataset_configs,
+            zones: zones.iter().cloned().map(OmicronZoneConfig::from).collect(),
+            remove_mupdate_override: None,
+            host_phase_2: HostPhase2DesiredSlots::current_contents(),
+            measurements: BTreeSet::new(),
+            update_disposition: OmicronSledUpdateDisposition::Available,
+        })
+        .map_err(|error| {
+            anyhow!("ledgering the simulated sled config: {error}")
+        })?;
+
     let blueprint = {
         let sled_config =
             server.sled_agent.omicron_sled_config().unwrap_or_default();
-        let underlay_address = match server.http_server.local_addr() {
-            SocketAddr::V4(_) => {
-                bail!("sled_agent_ip must be v6")
-            }
-            SocketAddr::V6(addr) => addr,
-        };
 
-        let subnet = Ipv6Subnet::new(*underlay_address.ip());
+        let subnet = Ipv6Subnet::new(sled_ip);
         let last_allocated_ip_subnet_offset = LastAllocatedSubnetIpOffset::new(
             zones
                 .iter()
@@ -721,7 +985,10 @@ pub async fn run_standalone_server(
         external_dns_zone_name: DNS_ZONE_EXTERNAL_TESTING.to_owned(),
         recovery_silo,
         rack_network_config: RackNetworkConfig {
-            rack_subnet: Ipv6Net::host_net(Ipv6Addr::LOCALHOST),
+            // TODO-RAINCLAUDE: default to the /56 around the sled so that non-loopback deployments (containers) get a subnet that contains their zones.
+            rack_subnet: rss_args.rack_subnet.unwrap_or_else(|| {
+                Ipv6Subnet::<RACK_PREFIX_LENGTH>::new(sled_ip).net()
+            }),
             infra_ip_first: IpAddr::V4(Ipv4Addr::LOCALHOST),
             infra_ip_last: IpAddr::V4(Ipv4Addr::LOCALHOST),
             // `UplinkPorts` must be non-empty; the simulated rack doesn't

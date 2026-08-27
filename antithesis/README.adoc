@@ -1,0 +1,230 @@
+:showtitle:
+:toc: left
+:icons: font
+
+= Running Omicron under Antithesis
+
+This directory holds everything needed to run the simulated control plane
+(Nexus, CockroachDB, internal DNS, and a simulated sled agent) inside
+https://antithesis.com[Antithesis], whose fault injector partitions, throttles,
+pauses, and (when enabled) kills containers while properties asserted through
+the Antithesis SDK are checked.
+
+The plan behind this layout, including the phased roadmap and the seed property
+catalog, is in `scratchbook/plan.md`. The layout follows what the
+https://github.com/antithesishq/antithesis-skills[antithesis-skills] expect, so
+those skills and the `snouty` CLI work here unmodified.
+
+== Layout
+
+[cols="1,3"]
+|===
+| Path | Purpose
+
+| `Dockerfile`
+| Multi-stage build. `omicron-antithesis` holds the instrumented Rust binaries
+  (`nexus`, `sled-agent-sim`, `dns-server`, `schema-updater`, `omdb`,
+  `omicron-antithesis-workload`), the CockroachDB schema, and the test commands.
+  `omicron-antithesis-cockroach` holds the pinned Oxide CockroachDB fork with a
+  store pre-seeded from `schema/crdb/dbinit.sql`.
+
+| `cargo-config.toml`
+| The rustflags that add Antithesis coverage instrumentation. Passed
+  explicitly with `cargo build --config`; never part of `.cargo/config.toml`.
+
+| `config/docker-compose.yaml`
+| The five-container topology on an IPv6 network. The addresses in it, in
+  `config/nexus.toml`, and in the `sled-agent-sim` arguments must agree.
+
+| `config/nexus.toml`, `config/dns-server.toml`
+| Service configuration mounted into the containers.
+
+| `test/v1/nexus/`
+| Antithesis test commands. The filename prefix (`first_`, `parallel_driver_`,
+  `eventually_`, and so on) tells Antithesis when to run each one. They are
+  baked into the `omicron-antithesis` image at `/opt/antithesis/test/v1`.
+
+| `workload/`
+| The `omicron-antithesis-workload` crate that the test commands call. It
+  emits the `setup_complete` signal, seeds a project and IP pool, and checks
+  properties.
+
+| `scratchbook/`
+| Analysis artifacts consumed by the `antithesis-research`, `antithesis-setup`,
+  and `antithesis-workload` skills.
+|===
+
+== How the pieces fit together
+
+. `cockroach` starts on a pre-seeded store, so no migration runs at boot.
+. `internal-dns` starts empty.
+. `nexus` starts its internal and lockstep APIs and waits for rack
+  initialization. Its healthcheck only checks the internal API; the external
+  API does not exist until the handoff below.
+. `sled-agent-sim` registers a simulated Gimlet with Nexus, populates
+  `internal-dns` (including the CockroachDB record), and performs the rack
+  setup handoff. This is the same path `omicron-dev run-all` exercises, but
+  across container boundaries.
+. `workload` runs `omicron-antithesis-workload wait-ready`, which waits for
+  the external API, a successful login as the recovery user, and a registered
+  sled, then writes the Antithesis `setup_complete` signal. Testing starts
+  from that moment.
+
+The recovery silo is `demo-silo` and the user is `demo-privileged` with
+password `oxide`; both names are `sled-agent-sim` options.
+
+== Building the images
+
+The build runs on x86-64 Linux only (Antithesis runs x86-64 containers, and the
+instrumentation flags target `x86_64-unknown-linux-gnu`). From the repository
+root:
+
+[source,text]
+----
+$ docker compose -f antithesis/config/docker-compose.yaml build
+----
+
+Docker is not required. Rootless podman works as long as `podman compose`
+resolves to Compose v2 rather than podman-compose (install the
+`docker-compose` binary from https://github.com/docker/compose/releases into
+`~/.docker/cli-plugins/`); then substitute `podman` for `docker` in every
+command in this document. Paths handed to podman must be visible to the host
+that runs it.
+
+The build context deliberately excludes `.git` and `.jj` (see the repository's
+`.dockerignore`). Build scripts that materialize `.gitstub` files still need
+git history, so the builder stage makes a treeless, checkout-less partial clone of
+`https://github.com/oxidecomputer/omicron` (override with
+`--build-arg OMICRON_GIT_URL=...`) and points `/omicron/.git` at it. A stub
+that references a commit not yet pushed to that remote will fail to
+materialize inside the image build.
+
+The builder stage compiles the workspace once with `--profile antithesis` and
+the flags from `cargo-config.toml`. Expect this to take well over an hour on a
+laptop the first time; the `target` and registry directories are BuildKit
+cache mounts, so rebuilds are incremental.
+
+To check that a binary is instrumented:
+
+[source,text]
+----
+$ docker run --rm omicron-antithesis:latest sh -c 'nm /opt/oxide/bin/nexus | grep antithesis_load_libvoidstar'
+$ docker run --rm omicron-antithesis:latest sh -c 'readelf -S /opt/oxide/bin/nexus | grep sancov'
+----
+
+== Running locally
+
+[source,text]
+----
+$ docker compose -f antithesis/config/docker-compose.yaml up
+----
+
+Wait for the `workload` container to log `sent setup_complete`. Then the test
+commands can be exercised by hand:
+
+[source,text]
+----
+$ docker compose -f antithesis/config/docker-compose.yaml exec workload /opt/antithesis/test/v1/nexus/first_seed.sh
+$ docker compose -f antithesis/config/docker-compose.yaml exec workload /opt/antithesis/test/v1/nexus/eventually_sagas_settle.sh
+----
+
+The external API is reachable from the host only if Docker publishes it;
+inside the network it is `http://[fd00:1122:3344:101::5]:12220`.
+
+=== Proving the deployment is hermetic
+
+Antithesis runs without internet access. To confirm nothing at runtime depends
+on it, bring the stack up inside a network namespace with no external
+connectivity:
+
+[source,text]
+----
+$ sudo unshare -n docker compose -f antithesis/config/docker-compose.yaml up
+----
+
+=== Validating with snouty
+
+With https://github.com/antithesishq/snouty[snouty] installed:
+
+[source,text]
+----
+$ snouty doctor
+$ SNOUTY_TEMP_DIR=$HOME/.cache/snouty-validate-$(date +%s) snouty validate antithesis/config --timeout 480
+----
+
+`validate` needs no credentials at all; `doctor` needs them only for its API
+connectivity check (see <<Authenticating>>). `--timeout` is in seconds
+(the default of 120 is enough here; the stack reaches `setup_complete`
+within about a minute). `SNOUTY_TEMP_DIR` must be a fresh directory that the
+host's container engine can bind-mount: snouty relabels it for SELinux and
+watches it for the `setup_complete` event, and the repository's
+`.snouty.toml` selects podman. A successful run ends with
+`Setup validation successful.` and a count of discovered test commands; the
+count should match the files in `test/v1/nexus/` exactly once, because only
+the workload image carries them.
+
+`snouty validate` builds the images, brings the stack up, and waits for the
+`setup_complete` signal.
+
+[#Authenticating]
+=== Authenticating
+
+The tenant (`oxide`) and repository
+(`us-central1-docker.pkg.dev/molten-verve-216720/oxide-repository`) are in
+`.snouty.toml` at the repository root. The repository has to be that whole
+path: `snouty` pushes to `{repository}/{image}:{tag}`, so a bare
+`oxide-repository` sends the push to Docker Hub, which fails late with a
+confusing `requested access to the resource is denied` after uploading
+several gigabytes of blobs. Two secrets are not in the file: an API key, which
+`snouty` uses to talk to the API, and a Google service-account key, which the
+container engine uses to push images to Antithesis's registry. Oxide keeps
+both in 1Password.
+
+`snouty` reads the API key from the environment, so it never has to be stored
+on disk:
+
+[source,text]
+----
+$ export ANTITHESIS_API_KEY="$(op read 'op://Private/antithesis api key/notesPlain' | tail -1)"
+$ snouty doctor
+----
+
+`snouty login` is the alternative; it persists the key under `$HOME` instead.
+
+Pushing images needs a separate `docker login` against Google Artifact
+Registry, which `snouty launch` then reuses:
+
+[source,text]
+----
+$ op read 'op://Private/antithesis gar key/notesPlain' \
+    | docker login -u _json_key --password-stdin us-central1-docker.pkg.dev
+----
+
+Two notes for podman users. Drop the `https://` scheme Antithesis's own
+instructions carry: podman rejects it. And the credential lands in
+`$XDG_RUNTIME_DIR/containers/auth.json`, which is a tmpfs, so the login has to
+be repeated after a reboot. If podman runs on the host through a distrobox
+shim, run this so that it reaches the same host engine that builds and pushes.
+
+== Adding a property
+
+Assertions inside Nexus use `antithesis_sdk` directly (see
+`nexus/src/app/saga.rs` and `nexus/db-queries/src/transaction_retry.rs`). The
+crate is a no-op unless the `antithesis` feature of `omicron-nexus` is enabled,
+which only the Dockerfile does, so nothing changes for production builds or
+the test suite. Assertion names must be string literals: Antithesis catalogs
+them statically.
+
+Properties checked from outside Nexus go in the workload crate, with a
+wrapper script in `test/v1/nexus/`. Scripts whose names start with `helper_`
+are ignored by Antithesis.
+
+== Still blocked on Antithesis
+
+* Confirmation that Antithesis's compose environment supports IPv6 networks
+  with static `ipv6_address` assignments. Omicron's internal DNS records are
+  IPv6-only, so this topology depends on it. The fallback in
+  `scratchbook/plan.md` keeps `cockroach` and `workload` as separate
+  containers over IPv4 and co-locates the rest on `::1`.
+* Enabling node termination faults for the `nexus` container once saga
+  recovery properties exist.

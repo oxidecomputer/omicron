@@ -304,6 +304,8 @@ impl Server {
                 producer_server,
             )
             .await;
+        // TODO-RAINCLAUDE: bootstrap Antithesis property proving the SDK and instrumentation are wired up.
+        antithesis_sdk::assert_reachable!("nexus: external API started");
         let server = Server { apictx: apictx.clone() };
         Ok(server)
     }

@@ -55,4 +55,8 @@ third-party = [
     # a feature only we can use that; until then, it's fine to just exclude
     # this crate entirely: it's not very big and isn't used by many things.
     { name = "scuffle" },
+
+    # TODO-RAINCLAUDE: the Antithesis SDK must stay a no-op except under the `antithesis` features of omicron-nexus and omicron-antithesis-workload; unifying it through the workspace-hack would turn on `full` for every build.
+    { name = "antithesis_sdk" },
+    { name = "antithesis-instrumentation" },
 ]

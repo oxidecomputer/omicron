@@ -1,0 +1,5 @@
+# TODO-RAINCLAUDE: keeps build outputs and VCS state out of the Antithesis image build context (antithesis/Dockerfile).
+target/
+out/
+.jj/
+.git/
