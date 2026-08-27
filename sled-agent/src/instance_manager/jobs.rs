@@ -26,11 +26,25 @@ pub(super) enum CanEnsureVmmResult<'a, T> {
     CanRegister(RegisterNewVmm<'a, T>),
 }
 
-/// [`Jobs`] is a wrapper around a `BTreeMap` + watch channel pair that handles:
+/// [`Jobs`] stores a set of VMM registrations (i.e., [`Instance`]s keyed by
+/// their propolis ID).
 ///
-/// 1. Rejecting new VMM registrations when we're supposed to be evacuating
-/// 2. Keeping the count of currently-registered VMMs reported by the watch
-///    channel in sync with the map of Propolis IDs to [`Instance`]s
+/// Callers should treat this as a fancy `BTreeMap<PropolisUuid, Instance>` with
+/// some special sauce:
+///
+/// 1. `Jobs` is able to act on the sled's update disposition, and knows that
+///    new VMM registrations may be disallowed depending on the disposition.
+/// 2. Instead of a direct `insert()` method or `entry()` API,
+///    callers should use [`Jobs::can_ensure_vmm()`] when they want to ensure a
+///    VMM registration exists. Its return value can represent all three
+///    relevant cases: the VMM is already registered, VMM registrations are
+///    disallowed by the disposition, or the VMM can be registered; in the third
+///    case the returned value includes a [`RegisterNewVmm`] which provides
+///    [`RegisterNewVmm::insert()`].
+/// 3. The status of VMM registrations is available via the watch receiver
+///    returned by [`Jobs::new()`]. This contains information relevant to
+///    Reconfigurator for determining when a sled is fully evacuated for an
+///    update.
 //
 // This type is generic only to support easy testing without having to construct
 // `Instance`s; prod code always uses the default type.

@@ -613,9 +613,9 @@ struct InstanceManagerRunner {
     metrics_queue: MetricsRequestQueue,
 
     // Watch channel receiver which notifies us if this sled is available for
-    // VMM registration or is in the process of being evacuated for an update
-    // (in which case we should reject new VMM registrations while continuing
-    // to allow operations on existing VMMs).
+    // VMM registration, or is in the process of being evacuated for an update.
+    // If it is evacuating, we should reject new VMM registrations while
+    // continuing to allow operations on existing VMMs.
     update_disposition_rx: UpdateDispositionReceiver,
 }
 
