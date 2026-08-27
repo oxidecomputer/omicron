@@ -348,7 +348,7 @@ pub mod blueprint_zone_type {
     use crate::deployment::OmicronZoneExternalFloatingIp;
     use crate::deployment::OmicronZoneExternalSnatIp;
     use daft::Diffable;
-    use omicron_common::api::external::Generation;
+    use omicron_generation_kinds::NexusGeneration;
     use schemars::JsonSchema;
     use serde::Deserialize;
     use serde::Serialize;
@@ -579,7 +579,7 @@ pub mod blueprint_zone_type {
         /// Generation number for this Nexus zone.
         /// This is used to coordinate handoff between old and new Nexus instances
         /// during updates. See RFD 588.
-        pub nexus_generation: Generation,
+        pub nexus_generation: NexusGeneration,
     }
 
     impl Nexus {

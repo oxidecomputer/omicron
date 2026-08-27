@@ -25,3 +25,4 @@ pub use events::{Action, Event, Recorder, Snapshot};
 pub use keymap::{Cmd, KeyHandler};
 pub use state::State;
 pub use ui::{Control, Screen};
+pub use wicketd::WicketdAddrs;

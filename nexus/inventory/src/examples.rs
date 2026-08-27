@@ -25,13 +25,9 @@ use nexus_types::inventory::ZpoolName;
 use omicron_cockroach_metrics::MetricValue;
 use omicron_cockroach_metrics::PrometheusMetrics;
 use omicron_common::api::external::ByteCount;
-use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetKind;
 use omicron_common::disk::DatasetName;
-use omicron_common::disk::DiskVariant;
-use omicron_common::disk::M2Slot;
-use omicron_common::disk::OmicronPhysicalDiskConfig;
-use omicron_common::disk::SharedDatasetConfig;
+use omicron_generation_kinds::{GenericGeneration, SledConfigGeneration};
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -45,6 +41,12 @@ use sled_agent_resolvable_files_examples::NON_BOOT_PATHS;
 use sled_agent_resolvable_files_examples::NON_BOOT_UUID;
 use sled_agent_resolvable_files_examples::WriteInstallDatasetContext;
 use sled_agent_resolvable_files_examples::dataset_missing_error;
+use sled_agent_types::disk::DatasetConfig;
+use sled_agent_types::disk::DiskIdentity;
+use sled_agent_types::disk::DiskVariant;
+use sled_agent_types::disk::M2Slot;
+use sled_agent_types::disk::OmicronPhysicalDiskConfig;
+use sled_agent_types::disk::SharedDatasetConfig;
 use sled_agent_types::inventory::BootImageHeader;
 use sled_agent_types::inventory::BootPartitionDetails;
 use sled_agent_types::inventory::ConfigReconcilerInventory;
@@ -58,6 +60,7 @@ use sled_agent_types::inventory::InventoryDisk;
 use sled_agent_types::inventory::InventoryZpool;
 use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
 use sled_agent_types::inventory::OmicronSledConfig;
+use sled_agent_types::inventory::OmicronSledUpdateDisposition;
 use sled_agent_types::inventory::OmicronZonesConfig;
 use sled_agent_types::inventory::OrphanedDataset;
 use sled_agent_types::inventory::SingleMeasurementInventory;
@@ -405,31 +408,40 @@ pub fn representative() -> Representative {
     // Convert these to `OmicronSledConfig`s. We'll start with empty disks and
     // datasets for now, and add to them below for sled14.
     let mut sled14 = OmicronSledConfig {
-        generation: sled14.generation,
+        generation: SledConfigGeneration::from_untyped_generation(
+            sled14.generation,
+        ),
         disks: Default::default(),
         datasets: Default::default(),
         zones: sled14.zones.into_iter().collect(),
         remove_mupdate_override: None,
         host_phase_2: HostPhase2DesiredSlots::current_contents(),
         measurements: Default::default(),
+        update_disposition: OmicronSledUpdateDisposition::Available,
     };
     let sled16 = OmicronSledConfig {
-        generation: sled16.generation,
+        generation: SledConfigGeneration::from_untyped_generation(
+            sled16.generation,
+        ),
         disks: Default::default(),
         datasets: Default::default(),
         zones: sled16.zones.into_iter().collect(),
         remove_mupdate_override: None,
         host_phase_2: HostPhase2DesiredSlots::current_contents(),
         measurements: Default::default(),
+        update_disposition: OmicronSledUpdateDisposition::Available,
     };
     let sled17 = OmicronSledConfig {
-        generation: sled17.generation,
+        generation: SledConfigGeneration::from_untyped_generation(
+            sled17.generation,
+        ),
         disks: Default::default(),
         datasets: Default::default(),
         zones: sled17.zones.into_iter().collect(),
         remove_mupdate_override: None,
         host_phase_2: HostPhase2DesiredSlots::current_contents(),
         measurements: Default::default(),
+        update_disposition: OmicronSledUpdateDisposition::Evacuating,
     };
 
     // Create iterator producing fixed IDs.
@@ -466,7 +478,7 @@ pub fn representative() -> Representative {
     let disks = vec![
         // Let's say we have one manufacturer for our M.2...
         InventoryDisk {
-            identity: omicron_common::disk::DiskIdentity {
+            identity: DiskIdentity {
                 vendor: "macrohard".to_string(),
                 model: "box".to_string(),
                 serial: "XXIV".to_string(),
@@ -481,7 +493,7 @@ pub fn representative() -> Representative {
         },
         // ... and a couple different vendors for our U.2s
         InventoryDisk {
-            identity: omicron_common::disk::DiskIdentity {
+            identity: DiskIdentity {
                 vendor: "memetendo".to_string(),
                 model: "swatch".to_string(),
                 serial: "0001".to_string(),
@@ -495,7 +507,7 @@ pub fn representative() -> Representative {
             slot_firmware_versions: vec![Some("EXAMP1".to_string())],
         },
         InventoryDisk {
-            identity: omicron_common::disk::DiskIdentity {
+            identity: DiskIdentity {
                 vendor: "memetendo".to_string(),
                 model: "swatch".to_string(),
                 serial: "0002".to_string(),
@@ -509,7 +521,7 @@ pub fn representative() -> Representative {
             slot_firmware_versions: vec![Some("EXAMP1".to_string())],
         },
         InventoryDisk {
-            identity: omicron_common::disk::DiskIdentity {
+            identity: DiskIdentity {
                 vendor: "tony".to_string(),
                 model: "craystation".to_string(),
                 serial: "5".to_string(),

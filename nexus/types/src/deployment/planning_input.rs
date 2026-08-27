@@ -36,9 +36,8 @@ use omicron_common::address::Ipv4Range;
 use omicron_common::address::Ipv6Range;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX_LENGTH;
-use omicron_common::api::external::Generation;
-use omicron_common::disk::DiskIdentity;
 use omicron_common::policy::SINGLE_NODE_CLICKHOUSE_REDUNDANCY;
+use omicron_generation_kinds::{Generation, TargetReleaseGeneration};
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -46,6 +45,7 @@ use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use sled_agent_types::disk::DiskIdentity;
 use sled_agent_types_versions::latest::inventory::SourceNatConfigError;
 use sled_agent_types_versions::latest::inventory::ZoneKind;
 use sled_hardware_types::BaseboardId;
@@ -1576,7 +1576,7 @@ impl OximeterReadPolicy {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TufRepoPolicy {
     /// The generation of the target release for the TUF repo.
-    pub target_release_generation: Generation,
+    pub target_release_generation: TargetReleaseGeneration,
 
     /// A description of the target release.
     pub description: TargetReleaseDescription,
@@ -1590,7 +1590,7 @@ impl TufRepoPolicy {
     #[inline]
     pub fn initial() -> Self {
         Self {
-            target_release_generation: Generation::new(),
+            target_release_generation: TargetReleaseGeneration::new(),
             description: TargetReleaseDescription::Initial,
         }
     }

@@ -10,6 +10,7 @@ use crate::PhysicalDiskKind;
 use crate::omicron_zone_config::{self, OmicronZoneNic};
 use crate::sled_cpu_family::SledCpuFamily;
 use crate::to_db_typed_uuid;
+use crate::typed_generation::DbTypedGeneration;
 use crate::typed_uuid::DbTypedUuid;
 use crate::{
     ByteCount, MacAddr, Name, ServiceKind, SqlU8, SqlU16, SqlU32,
@@ -55,14 +56,12 @@ use nexus_types::inventory::{
     Caboose, CockroachStatus, Collection, InternalDnsGenerationStatus,
     NvmeFirmware, PowerState, RotPage, RotSlot, TimeSync,
 };
-use omicron_common::api::external;
-use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetName;
-use omicron_common::disk::DiskIdentity;
-use omicron_common::disk::M2Slot;
-use omicron_common::disk::OmicronPhysicalDiskConfig;
 use omicron_common::update::OmicronInstallManifestSource;
 use omicron_common::zpool_name::ZpoolName;
+use omicron_generation_kinds::{
+    SledConfigGeneration, SledConfigGenerationKind,
+};
 use omicron_uuid_kinds::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::FmdHostCaseKind;
@@ -85,6 +84,11 @@ use omicron_uuid_kinds::SvcEnabledNotOnlineUuid;
 use omicron_uuid_kinds::ZpoolKind;
 use omicron_uuid_kinds::{CollectionKind, OmicronZoneKind};
 use omicron_uuid_kinds::{CollectionUuid, OmicronZoneUuid};
+use sled_agent_types::disk::DatasetConfig;
+use sled_agent_types::disk::DiskIdentity;
+use sled_agent_types::disk::M2Slot;
+use sled_agent_types::disk::OmicronPhysicalDiskConfig;
+use sled_agent_types::disk::SharedDatasetConfig;
 use sled_agent_types::inventory::BootImageHeader;
 use sled_agent_types::inventory::BootPartitionDetails;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
@@ -103,6 +107,7 @@ use sled_agent_types::inventory::MupdateOverrideNonBootInventory;
 use sled_agent_types::inventory::NetworkInterface;
 use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
 use sled_agent_types::inventory::OmicronSingleMeasurement;
+use sled_agent_types::inventory::OmicronSledUpdateDisposition;
 use sled_agent_types::inventory::OrphanedDataset;
 use sled_agent_types::inventory::RemoveMupdateOverrideBootSuccessInventory;
 use sled_agent_types::inventory::RemoveMupdateOverrideInventory;
@@ -2303,6 +2308,7 @@ impl_enum_type!(
     Offline => b"offline"
     Degraded => b"degraded"
     Maintenance => b"maintenance"
+    Unrecognized => b"unrecognized"
 );
 
 impl From<SvcEnabledNotOnlineState> for InvSvcEnabledNotOnlineState {
@@ -2316,6 +2322,9 @@ impl From<SvcEnabledNotOnlineState> for InvSvcEnabledNotOnlineState {
             }
             SvcEnabledNotOnlineState::Maintenance => {
                 InvSvcEnabledNotOnlineState::Maintenance
+            }
+            SvcEnabledNotOnlineState::Unrecognized => {
+                InvSvcEnabledNotOnlineState::Unrecognized
             }
         }
     }
@@ -2332,6 +2341,9 @@ impl From<InvSvcEnabledNotOnlineState> for SvcEnabledNotOnlineState {
             }
             InvSvcEnabledNotOnlineState::Maintenance => {
                 SvcEnabledNotOnlineState::Maintenance
+            }
+            InvSvcEnabledNotOnlineState::Unrecognized => {
+                SvcEnabledNotOnlineState::Unrecognized
             }
         }
     }
@@ -2701,37 +2713,77 @@ impl From<InvDataset> for nexus_types::inventory::Dataset {
     }
 }
 
+impl_enum_type!(
+    InvSledUpdateDispositionEnum:
+
+    /// Database representation of a sled's `update_disposition`.
+    #[derive(
+        Copy,
+        Clone,
+        Debug,
+        PartialEq,
+        AsExpression,
+        FromSqlRow,
+    )]
+    pub enum DbInvSledUpdateDisposition;
+
+    Available => b"available"
+    Evacuating => b"evacuating"
+);
+
+impl From<OmicronSledUpdateDisposition> for DbInvSledUpdateDisposition {
+    fn from(value: OmicronSledUpdateDisposition) -> Self {
+        match value {
+            OmicronSledUpdateDisposition::Available => Self::Available,
+            OmicronSledUpdateDisposition::Evacuating => Self::Evacuating,
+        }
+    }
+}
+
+impl From<DbInvSledUpdateDisposition> for OmicronSledUpdateDisposition {
+    fn from(value: DbInvSledUpdateDisposition) -> Self {
+        match value {
+            DbInvSledUpdateDisposition::Available => Self::Available,
+            DbInvSledUpdateDisposition::Evacuating => Self::Evacuating,
+        }
+    }
+}
+
 /// Top-level information contained in an [`OmicronSledConfig`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_omicron_sled_config)]
 pub struct InvOmicronSledConfig {
     pub inv_collection_id: DbTypedUuid<CollectionKind>,
     pub id: DbTypedUuid<OmicronSledConfigKind>,
-    pub generation: Generation,
+    pub generation: DbTypedGeneration<SledConfigGenerationKind>,
     pub remove_mupdate_override: Option<DbTypedUuid<MupdateOverrideKind>>,
 
     #[diesel(embed)]
     pub host_phase_2: DbHostPhase2DesiredSlots,
     #[diesel(embed)]
     pub measurements: DbOmicronMeasurements,
+
+    pub update_disposition: DbInvSledUpdateDisposition,
 }
 
 impl InvOmicronSledConfig {
     pub fn new(
         inv_collection_id: CollectionUuid,
         id: OmicronSledConfigUuid,
-        generation: external::Generation,
+        generation: SledConfigGeneration,
         remove_mupdate_override: Option<MupdateOverrideUuid>,
         host_phase_2: HostPhase2DesiredSlots,
         measurements: BTreeSet<OmicronSingleMeasurement>,
+        update_disposition: OmicronSledUpdateDisposition,
     ) -> Self {
         Self {
             inv_collection_id: inv_collection_id.into(),
             id: id.into(),
-            generation: Generation(generation),
+            generation: generation.into(),
             remove_mupdate_override: remove_mupdate_override.map(From::from),
             host_phase_2: host_phase_2.into(),
             measurements: measurements.into(),
+            update_disposition: update_disposition.into(),
         }
     }
 }
@@ -2880,7 +2932,7 @@ impl From<sled_agent_types::inventory::ZoneKind> for ZoneType {
     }
 }
 
-/// See [`omicron_common::disk::OmicronPhysicalDiskConfig`].
+/// See [`OmicronPhysicalDiskConfig`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_omicron_sled_config_disk)]
 pub struct InvOmicronSledConfigDisk {
@@ -2927,7 +2979,7 @@ impl From<InvOmicronSledConfigDisk> for OmicronPhysicalDiskConfig {
     }
 }
 
-/// See [`omicron_common::disk::DatasetConfig`].
+/// See [`DatasetConfig`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_omicron_sled_config_dataset)]
 pub struct InvOmicronSledConfigDataset {
@@ -2979,7 +3031,7 @@ impl TryFrom<InvOmicronSledConfigDataset> for DatasetConfig {
         Ok(Self {
             id: dataset.id.into(),
             name: DatasetName::new(pool, kind),
-            inner: omicron_common::disk::SharedDatasetConfig {
+            inner: SharedDatasetConfig {
                 quota: dataset.quota.map(|b| b.into()),
                 reservation: dataset.reservation.map(|b| b.into()),
                 compression: dataset.compression.parse()?,

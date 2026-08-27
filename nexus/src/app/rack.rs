@@ -25,7 +25,6 @@ use nexus_types::external_api::hardware;
 use nexus_types::external_api::networking;
 use nexus_types::external_api::policy;
 use nexus_types::external_api::silo;
-use nexus_types::external_api::sled as sled_types;
 use nexus_types::inventory::SpType;
 use nexus_types::silo::silo_dns_name;
 use omicron_common::address::{
@@ -604,7 +603,12 @@ impl super::Nexus {
 
             match self
                 .db_datastore
-                .switch_port_settings_create(opctx, &port_settings_params, None)
+                .switch_port_settings_create(
+                    opctx,
+                    &port_settings_params,
+                    None,
+                    uplink_config.allow_ddm_traffic,
+                )
                 .await
             {
                 Ok(_) | Err(Error::ObjectAlreadyExists { .. }) => Ok(()),
@@ -807,10 +811,8 @@ impl super::Nexus {
                 })
                 .collect();
 
-        let sled_baseboards: BTreeSet<hardware::Baseboard> = sleds
-            .into_iter()
-            .map(|s| sled_types::Sled::from(s).baseboard)
-            .collect();
+        let sled_baseboards: BTreeSet<hardware::Baseboard> =
+            sleds.into_iter().map(db::model::Sled::into_baseboard).collect();
 
         // Retain all sleds that exist but are not in the sled table
         uninitialized_sleds.retain(|s| !sled_baseboards.contains(&s.baseboard));
@@ -918,7 +920,12 @@ impl super::Nexus {
         opctx: &OpContext,
     ) -> Result<String, Error> {
         let addr = self
-            .sled_list(opctx, &DataPageParams::max_page())
+            .db_datastore
+            .sled_list(
+                opctx,
+                &DataPageParams::max_page(),
+                SledFilter::InService,
+            )
             .await?
             .get(0)
             .ok_or(Error::InternalError {

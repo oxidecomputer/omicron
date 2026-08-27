@@ -34,15 +34,12 @@ use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::address::SLED_RESERVED_ADDRESSES;
 use omicron_common::address::get_sled_address;
 use omicron_common::api::external::ByteCount;
-use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::DatasetKind;
-use omicron_common::disk::CompressionAlgorithm;
-use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetName;
-use omicron_common::disk::DiskIdentity;
-use omicron_common::disk::M2Slot;
-use omicron_common::disk::OmicronPhysicalDiskConfig;
-use omicron_common::disk::SharedDatasetConfig;
+use omicron_generation_kinds::{
+    Generation, NexusGeneration, SledConfigGeneration, TargetReleaseGeneration,
+    UpdateDispositionGeneration,
+};
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::MupdateOverrideUuid;
@@ -53,6 +50,13 @@ use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use sled_agent_types::disk::CompressionAlgorithm;
+use sled_agent_types::disk::DatasetConfig;
+use sled_agent_types::disk::DiskIdentity;
+use sled_agent_types::disk::M2Slot;
+use sled_agent_types::disk::OmicronPhysicalDiskConfig;
+use sled_agent_types::disk::SharedDatasetConfig;
+use sled_agent_types::inventory::OmicronSledUpdateDisposition;
 use sled_agent_types::system_networking::ServiceZoneNatEntries;
 use sled_agent_types::system_networking::ServiceZoneNatEntriesError;
 use sled_agent_types::system_networking::ServiceZoneNatEntry;
@@ -251,14 +255,14 @@ pub struct Blueprint {
     /// Once an operator sets a new target release, its generation will be 6 or
     /// higher. Reconfigurator will then know that it is back in charge of
     /// driving the system to the target release.
-    pub target_release_minimum_generation: Generation,
+    pub target_release_minimum_generation: TargetReleaseGeneration,
 
     /// The generation of the active group of Nexuses
     ///
     /// If a Nexus instance notices it has a nexus_generation less than
     /// this value, it will start to quiesce in preparation for handing off
     /// control to the newer generation (see: RFD 588).
-    pub nexus_generation: Generation,
+    pub nexus_generation: NexusGeneration,
 
     /// The generation of the collective set of all external networking required
     /// for in-service zones
@@ -643,7 +647,7 @@ impl Blueprint {
     pub fn find_generation_for_nexus(
         &self,
         nexus_zones: &BTreeSet<OmicronZoneUuid>,
-    ) -> Result<Option<Generation>, anyhow::Error> {
+    ) -> Result<Option<NexusGeneration>, anyhow::Error> {
         let mut r#gen = None;
         for (_, zone, nexus_zone) in self.in_service_nexus_zones() {
             if nexus_zones.contains(&zone.id) {
@@ -666,7 +670,7 @@ impl Blueprint {
     pub fn find_generation_for_self(
         &self,
         nexus_id: OmicronZoneUuid,
-    ) -> Result<Generation, Error> {
+    ) -> Result<NexusGeneration, Error> {
         for (_sled_id, zone_config) in self.all_maybe_running_zones() {
             if let BlueprintZoneType::Nexus(nexus_config) =
                 &zone_config.zone_type
@@ -865,6 +869,14 @@ pub enum BlueprintExpungedZoneAccessReason {
     /// remaining with the set of configuration.
     NexusExternalConfig,
 
+    /// Sagas assigned to any expunged Nexus whose generation is older than the
+    /// current running Nexus zone are considered orphaned and marked as
+    /// abandoned.
+    ///
+    /// The planner must not prune a Nexus zone if it still has any sagas
+    /// assigned to it.
+    NexusOrphanSagaAbandonment,
+
     /// Nexus needs to whether it itself should be quiescing. If the
     /// actively-running Nexus has been expunged (but not yet shut down), it
     /// should still be able to determine this!
@@ -872,8 +884,8 @@ pub enum BlueprintExpungedZoneAccessReason {
     /// The planner does not need to account for this when pruning Nexus zones.
     NexusSelfIsQuiescing,
 
-    /// Sagas assigneed to any expunged Nexus must be reassigned to an
-    /// in-service Nexus.
+    /// Sagas assigned to any expunged Nexus must be reassigned to an in-service
+    /// Nexus.
     ///
     /// The planner must not prune a Nexus zone if it still has any sagas
     /// assigned to it.
@@ -1623,7 +1635,7 @@ pub struct BlueprintSledConfig {
     /// `state` from `Active` to `Decommissioned` would not require a bump to
     /// `sled_agent_generation`, because a `Decommissioned` sled will never be
     /// sent an `OmicronSledConfig`.
-    pub sled_agent_generation: Generation,
+    pub sled_agent_generation: SledConfigGeneration,
 
     pub disks: IdOrdMap<BlueprintPhysicalDiskConfig>,
     pub datasets: IdOrdMap<BlueprintDatasetConfig>,
@@ -1652,7 +1664,7 @@ pub struct BlueprintSledConfig {
 )]
 pub struct BlueprintSledUpdateDisposition {
     /// A generation number bumped whenever `kind` changes.
-    pub generation: Generation,
+    pub generation: UpdateDispositionGeneration,
 
     /// The disposition itself.
     pub kind: BlueprintSledUpdateDispositionKind,
@@ -1666,7 +1678,7 @@ impl BlueprintSledUpdateDisposition {
     /// backfilled to by the schema migration that adds this field.
     pub const fn initial() -> Self {
         Self {
-            generation: Generation::new(),
+            generation: UpdateDispositionGeneration::new(),
             kind: BlueprintSledUpdateDispositionKind::Available,
         }
     }
@@ -1675,6 +1687,22 @@ impl BlueprintSledUpdateDisposition {
 impl fmt::Display for BlueprintSledUpdateDisposition {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} (generation {})", self.kind, self.generation)
+    }
+}
+
+impl From<BlueprintSledUpdateDisposition> for OmicronSledUpdateDisposition {
+    fn from(value: BlueprintSledUpdateDisposition) -> Self {
+        // sled-agent only cares about the disposition itself, not the
+        // generation
+        let BlueprintSledUpdateDisposition { generation: _, kind } = value;
+        match kind {
+            BlueprintSledUpdateDispositionKind::Available => Self::Available,
+            BlueprintSledUpdateDispositionKind::Evacuating {
+                // similarly, sled-agent doesn't care about the policy, only
+                // that it should be evacuating
+                policy: _,
+            } => Self::Evacuating,
+        }
     }
 }
 
@@ -1704,6 +1732,17 @@ pub enum BlueprintSledUpdateDispositionKind {
     // In the future, this will gain `ReservedForMigrationTarget`, for a sled
     // that is disallowed for general provisioning but usable as a target for
     // update-related migrations.
+}
+
+impl BlueprintSledUpdateDispositionKind {
+    /// Whether a sled with this disposition may be used to provision new
+    /// instances.
+    pub fn is_available_for_provisioning(self) -> bool {
+        match self {
+            BlueprintSledUpdateDispositionKind::Available => true,
+            BlueprintSledUpdateDispositionKind::Evacuating { .. } => false,
+        }
+    }
 }
 
 impl fmt::Display for BlueprintSledUpdateDispositionKind {
@@ -1768,6 +1807,7 @@ impl BlueprintSledConfig {
             remove_mupdate_override: self.remove_mupdate_override,
             host_phase_2: self.host_phase_2.into(),
             measurements: self.measurements.into(),
+            update_disposition: self.update_disposition.into(),
         }
     }
 
@@ -1975,7 +2015,7 @@ pub enum BlueprintZoneDisposition {
     /// The zone is permanently gone.
     Expunged {
         /// Generation of the parent config in which this zone became expunged.
-        as_of_generation: Generation,
+        as_of_generation: SledConfigGeneration,
 
         /// True if Reconfiguration knows that this zone has been shut down and
         /// will not be restarted.
@@ -3135,7 +3175,7 @@ pub enum BlueprintPhysicalDiskDisposition {
     /// The physical disk is permanently gone.
     Expunged {
         /// Generation of the parent config in which this disk became expunged.
-        as_of_generation: Generation,
+        as_of_generation: SledConfigGeneration,
 
         /// True if Reconfiguration knows that this disk has been expunged.
         ///
@@ -3185,7 +3225,7 @@ impl BlueprintPhysicalDiskDisposition {
 
     /// Return the generation when a disk was expunged or `None` if the disk
     /// was not expunged.
-    pub fn expunged_as_of_generation(&self) -> Option<Generation> {
+    pub fn expunged_as_of_generation(&self) -> Option<SledConfigGeneration> {
         match self {
             BlueprintPhysicalDiskDisposition::Expunged {
                 as_of_generation,
@@ -3390,11 +3430,11 @@ pub struct BlueprintMetadata {
     /// The minimum generation for the target release.
     ///
     /// See [`Blueprint::target_release_minimum_generation`].
-    pub target_release_minimum_generation: Generation,
+    pub target_release_minimum_generation: TargetReleaseGeneration,
     /// The Nexus generation number
     ///
     /// See [`Blueprint::nexus_generation`].
-    pub nexus_generation: Generation,
+    pub nexus_generation: NexusGeneration,
     /// The current generation of the collective set of external networking
     /// configuration across all in-service zones
     ///
@@ -3474,13 +3514,41 @@ impl From<&crate::inventory::Dataset> for CollectionDatasetIdentifier {
 /// backwards-compatibility guarantees.**
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UnstableReconfiguratorState {
+    /// The planning input contains a variety of state that Reconfigurator uses
+    /// to decide what to do
+    ///
+    /// For state files created to debug planning, this will be the actual
+    /// planning input used for planning.  For other state files, this is a
+    /// planning input generated on-demand simply to summarize the relevant
+    /// state of the system.
     pub planning_input: PlanningInput,
+    /// Inventory collections in the system
     pub collections: IdOrdMap<Collection>,
+    /// The system's current target blueprint (when this file was generated)
     pub target_blueprint: BlueprintTarget,
+    /// If non-`None`, then this file was created as the system was attempting
+    /// to make this blueprint the new target
+    // We use `serde(default)` to support deserializing older-format state files
+    // as though they contained `None` for this field.  That's always correct
+    // because prior to adding this field, by construction, files didn't have an
+    // intended target blueprint.  (In other words, adding this field was a
+    // semantically compatible change.  Its presence (or absence) does not
+    // require interpreting anything else in this structure differently.)
+    //
+    // This format is documented as unstable, so this isn't strictly necessary.
+    // But it's easy enough, fail-safe, and convenient enough to make it
+    // worthwhile in this case.
+    #[serde(default)]
+    pub intended_target_blueprint: Option<BlueprintUuid>,
+    /// Blueprints in the system
     pub blueprints: IdOrdMap<Blueprint>,
+    /// Current and past contents of internal DNS
     pub internal_dns: BTreeMap<Generation, DnsConfigParams>,
+    /// Current and past contents of external DNS
     pub external_dns: BTreeMap<Generation, DnsConfigParams>,
+    /// List of all silo names
     pub silo_names: Vec<omicron_common::api::external::Name>,
+    /// List of external DNS zone names
     pub external_dns_zone_names: Vec<String>,
 }
 
@@ -3514,6 +3582,7 @@ impl UnstableReconfiguratorState {
         struct UniqueState {
             planning_input: PlanningInput,
             target_blueprint: BlueprintTarget,
+            intended_target_blueprint: Option<BlueprintUuid>,
             external_dns_zone_names: Vec<String>,
             silo_names: Vec<omicron_common::api::external::Name>,
             label: String,
@@ -3673,6 +3742,7 @@ impl UnstableReconfiguratorState {
                     vacant_entry.insert(UniqueState {
                         planning_input: p.planning_input,
                         target_blueprint: p.target_blueprint,
+                        intended_target_blueprint: p.intended_target_blueprint,
                         external_dns_zone_names: p.external_dns_zone_names,
                         silo_names: p.silo_names,
                         label: input.label.clone(),
@@ -3739,7 +3809,6 @@ impl UnstableReconfiguratorState {
         // At this point, `maybe_targets` contains the set of blueprint ids that
         // were not observed to be the parent of any blueprint contained in
         // these files.
-        //
         let latest = match maybe_targets.len() {
             0 => {
                 // If `maybe_targets` were empty, that would mean that either we
@@ -3799,6 +3868,19 @@ impl UnstableReconfiguratorState {
             }
         };
 
+        if let Some(intended_id) = latest.intended_target_blueprint {
+            warnings.push(anyhow!(
+                "the latest state file loaded has \
+                 `intended_target_blueprint = Some({intended_id})`.  This \
+                 means that this file was created as the system was attempting \
+                 to make {intended_id} the target blueprint.  The loaded state \
+                 will reflect that the last known target blueprint ({}) is the \
+                 current target blueprint, since it is not known whether this \
+                 intended transition ever happened.",
+                latest.target_blueprint.target_id,
+            ));
+        }
+
         Ok(ReadSeries {
             latest: latest.label.to_owned(),
             warnings,
@@ -3806,6 +3888,7 @@ impl UnstableReconfiguratorState {
                 planning_input: latest.planning_input,
                 collections,
                 target_blueprint: latest.target_blueprint,
+                intended_target_blueprint: latest.intended_target_blueprint,
                 blueprints,
                 internal_dns,
                 external_dns,
