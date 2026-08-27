@@ -664,16 +664,12 @@ impl InstanceManagerRunner {
                     }
                 }
 
-                // If our update disposition has changed, copy the disposition
-                // into our internal watch channel (which is both how we report
-                // our status to inventory and how we decide whether to accept
-                // new VMM registrations).
-                result = self.update_disposition_rx.changed() => {
+                // If our update disposition has changed, notify `self.jobs`
+                // of the new value.
+                result = self.update_disposition_rx.changed_value() => {
                     match result {
-                        Ok(()) => {
-                            self.jobs.set_update_disposition(
-                                self.update_disposition_rx.current_and_update(),
-                            );
+                        Ok(disposition) => {
+                            self.jobs.set_update_disposition(disposition);
                         }
                         Err(_) => {
                             warn!(
