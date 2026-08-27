@@ -218,7 +218,6 @@ mod api_impl {
     use sled_agent_types::bootstore::BootstoreStatus;
     use sled_agent_types::dataset::LocalStorageDatasetDeleteRequest;
     use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
-    use sled_agent_types::debug::ChickenSwitchDestroyOrphanedDatasets;
     use sled_agent_types::debug::OperatorSwitchZonePolicy;
     use sled_agent_types::diagnostics::SledDiagnosticsLogsDownloadPathParm;
     use sled_agent_types::diagnostics::SledDiagnosticsLogsDownloadQueryParam;
@@ -969,22 +968,6 @@ mod api_impl {
                 SledDiagnosticsLogsDownloadQueryParam,
             >,
         ) -> Result<http::Response<Body>, HttpError> {
-            unimplemented!()
-        }
-
-        async fn chicken_switch_destroy_orphaned_datasets_get_v1(
-            _request_context: RequestContext<Self::Context>,
-        ) -> Result<
-            HttpResponseOk<ChickenSwitchDestroyOrphanedDatasets>,
-            HttpError,
-        > {
-            unimplemented!()
-        }
-
-        async fn chicken_switch_destroy_orphaned_datasets_put_v1(
-            _request_context: RequestContext<Self::Context>,
-            _body: TypedBody<ChickenSwitchDestroyOrphanedDatasets>,
-        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }
 

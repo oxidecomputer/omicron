@@ -1522,59 +1522,6 @@ impl SledAgentApi for SledAgentImpl {
             .await
     }
 
-    async fn chicken_switch_destroy_orphaned_datasets_get_v1(
-        request_context: RequestContext<Self::Context>,
-    ) -> Result<
-        HttpResponseOk<v1::debug::ChickenSwitchDestroyOrphanedDatasets>,
-        HttpError,
-    > {
-        let sa = request_context.context();
-        sa.latencies()
-            .instrument_dropshot_handler(&request_context, async {
-                // This API has been removed, but we still provide an endpoint for
-                // backwards compatibility. Only `omdb` ever called this endpoint, so we
-                // could probably just always return an error, but we can at least
-                // attempt to do something reasonable. We've removed this chicken switch
-                // and always attempt to destroy orphans, so we can just claim the
-                // chicken switch is always in that state.
-                let destroy_orphans = true;
-                Ok(HttpResponseOk(
-                    v1::debug::ChickenSwitchDestroyOrphanedDatasets {
-                        destroy_orphans,
-                    },
-                ))
-            })
-            .await
-    }
-
-    async fn chicken_switch_destroy_orphaned_datasets_put_v1(
-        request_context: RequestContext<Self::Context>,
-        body: TypedBody<v1::debug::ChickenSwitchDestroyOrphanedDatasets>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let sa = request_context.context();
-        let v1::debug::ChickenSwitchDestroyOrphanedDatasets { destroy_orphans } =
-            body.into_inner();
-        sa.latencies()
-            .instrument_dropshot_handler(&request_context, async {
-                // This API has been removed, but we still provide an endpoint for
-                // backwards compatibility. Only `omdb` ever called this endpoint, so we
-                // could probably just always return an error, but we can at least
-                // attempt to do something reasonable. We've removed this chicken switch
-                // and always attempt to destroy orphans, so we can treat requests to
-                // destroy orphans as successful and attempts to disable it as an error.
-                if destroy_orphans {
-                    Ok(HttpResponseUpdatedNoContent())
-                } else {
-                    Err(HttpError::for_bad_request(
-                    None,
-                    "orphaned dataset destruction can no longer be disabled"
-                        .to_string(),
-                ))
-                }
-            })
-            .await
-    }
-
     async fn debug_operator_switch_zone_policy_get(
         request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<OperatorSwitchZonePolicy>, HttpError> {

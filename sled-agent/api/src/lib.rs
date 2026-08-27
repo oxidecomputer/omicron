@@ -87,8 +87,6 @@ api_versions!([
     (5, NEWTYPE_UUID_BUMP),
     (4, ADD_NEXUS_LOCKSTEP_PORT_TO_INVENTORY),
     (3, ADD_SWITCH_ZONE_OPERATOR_POLICY),
-    (2, REMOVE_DESTROY_ORPHANED_DATASETS_CHICKEN_SWITCH),
-    (1, INITIAL),
 ]);
 
 // WHEN CHANGING THE API (part 2 of 2):
@@ -1581,38 +1579,6 @@ pub trait SledAgentApi {
             latest::diagnostics::SledDiagnosticsLogsDownloadQueryParam,
         >,
     ) -> Result<http::Response<Body>, HttpError>;
-
-    /// This endpoint reports the status of the `destroy_orphaned_datasets`
-    /// chicken switch. It will be removed with omicron#6177.
-    #[endpoint {
-        operation_id = "chicken_switch_destroy_orphaned_datasets_get",
-        method = GET,
-        path = "/chicken-switch/destroy-orphaned-datasets",
-        versions = ..VERSION_REMOVE_DESTROY_ORPHANED_DATASETS_CHICKEN_SWITCH,
-    }]
-    async fn chicken_switch_destroy_orphaned_datasets_get_v1(
-        request_context: RequestContext<Self::Context>,
-    ) -> Result<
-        HttpResponseOk<v1::debug::ChickenSwitchDestroyOrphanedDatasets>,
-        HttpError,
-    >;
-
-    /// This endpoint sets the `destroy_orphaned_datasets` chicken switch
-    /// (allowing sled-agent to delete datasets it believes are orphaned). It
-    /// will be removed with omicron#6177.
-    #[endpoint {
-        operation_id = "chicken_switch_destroy_orphaned_datasets_put",
-        method = PUT,
-        path = "/chicken-switch/destroy-orphaned-datasets",
-        // This should have been removed in
-        // `VERSION_REMOVE_DESTROY_ORPHANED_DATASETS_CHICKEN_SWITCH`, but was
-        // overlooked. This removes it as of the next version instead.
-        versions = ..VERSION_ADD_SWITCH_ZONE_OPERATOR_POLICY,
-    }]
-    async fn chicken_switch_destroy_orphaned_datasets_put_v1(
-        request_context: RequestContext<Self::Context>,
-        body: TypedBody<v1::debug::ChickenSwitchDestroyOrphanedDatasets>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// A debugging endpoint only used by `omdb` that allows us to test
     /// restarting the switch zone without restarting sled-agent. See

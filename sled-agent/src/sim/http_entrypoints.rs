@@ -1070,22 +1070,6 @@ impl SledAgentApi for SledAgentSimImpl {
         method_unimplemented()
     }
 
-    async fn chicken_switch_destroy_orphaned_datasets_get_v1(
-        _request_context: RequestContext<Self::Context>,
-    ) -> Result<
-        HttpResponseOk<v1::debug::ChickenSwitchDestroyOrphanedDatasets>,
-        HttpError,
-    > {
-        method_unimplemented()
-    }
-
-    async fn chicken_switch_destroy_orphaned_datasets_put_v1(
-        _request_context: RequestContext<Self::Context>,
-        _body: TypedBody<v1::debug::ChickenSwitchDestroyOrphanedDatasets>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        method_unimplemented()
-    }
-
     async fn debug_operator_switch_zone_policy_get(
         _request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<OperatorSwitchZonePolicy>, HttpError> {

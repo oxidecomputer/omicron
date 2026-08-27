@@ -33,8 +33,6 @@ pub mod dataset {
 }
 
 pub mod debug {
-    pub use crate::v1::debug::ChickenSwitchDestroyOrphanedDatasets;
-
     pub use crate::v3::debug::OperatorSwitchZonePolicy;
 }
 

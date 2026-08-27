@@ -6,7 +6,6 @@
 
 pub mod artifact;
 pub mod bootstore;
-pub mod debug;
 pub mod diagnostics;
 pub mod disk;
 pub mod early_networking;
