@@ -87,6 +87,8 @@ api_versions!([
     (5, NEWTYPE_UUID_BUMP),
     (4, ADD_NEXUS_LOCKSTEP_PORT_TO_INVENTORY),
     (3, ADD_SWITCH_ZONE_OPERATOR_POLICY),
+    // Versions before this have been retired. We no longer support in any
+    // server, nor expect it from any client.
 ]);
 
 // WHEN CHANGING THE API (part 2 of 2):
