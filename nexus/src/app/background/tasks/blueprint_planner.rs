@@ -627,7 +627,7 @@ mod test {
                 report: _,
                 blueprint_count: _,
                 limit: _,
-            } if parent_blueprint_id == parent_blueprint_id
+            } if parent_blueprint_id == blueprint_id
         );
 
         // Enable execution.
