@@ -179,11 +179,9 @@ impl DataStore {
                 DbVmmState::Running,
                 DbVmmState::Rebooting,
             ]))
-            .set(
-                dsl::stop_for_update_disposition_generation.eq(
-                    model::to_db_typed_generation(update_disposition_generation),
-                ),
-            )
+            .set(dsl::stop_for_update_disposition_generation.eq(
+                model::to_db_typed_generation(update_disposition_generation),
+            ))
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
