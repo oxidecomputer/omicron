@@ -4,7 +4,7 @@
  * those zones. These columns are no longer for external address information.
  *
  * NOTE: We don't need to delete the SNAT-related data for boundary NTP zones,
- * because we drop the columns wholesale in the follow migration files.
+ * because we drop the columns wholesale in the following migration files.
  */
 SET LOCAL disallow_full_table_scans = 'off';
 

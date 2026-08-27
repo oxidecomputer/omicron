@@ -5338,6 +5338,16 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config_zone_external_
     snat_last_port INT4
         CHECK (snat_last_port IS NULL OR snat_last_port BETWEEN 0 AND 65535),
 
+    -- must provide both SNAT ports
+    CONSTRAINT both_snat_ports CHECK (
+        (snat_first_port IS NULL) = (snat_last_port IS NULL)
+    ),
+
+    -- may not provide _both_ `port` and any SNAT port
+    CONSTRAINT only_port_or_snat_ports CHECK (
+        NOT ((port IS NOT NULL) AND (snat_first_port IS NOT NULL))
+    ),
+
     PRIMARY KEY (inv_collection_id, sled_config_id, zone_id, ip)
 );
 

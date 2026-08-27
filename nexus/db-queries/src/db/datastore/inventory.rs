@@ -6284,7 +6284,7 @@ mod test {
     }
 
     // Sanity check that we correctly receive, write, and then read an inventory
-    // collection with multiple zones sharing an SNAP IP address.
+    // collection with multiple zones sharing an SNAT IP address.
     //
     // Boundary NTP uses SNAT addresses, which split the port range into chunks
     // and share an IP address. This check is pretty paranoid, but we're
