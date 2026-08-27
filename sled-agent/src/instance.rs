@@ -3777,6 +3777,10 @@ mod tests {
                 VmmRegistrationDisallowedReason::SledEvacuating
             )
         );
+        assert_eq!(
+            test_objects.instance_manager.jobs_status().num_registered_vmms,
+            1
+        );
 
         // Flip back to available; the new VMM can now register.
         disposition_tx.set(CurrentUpdateDisposition::Known(
