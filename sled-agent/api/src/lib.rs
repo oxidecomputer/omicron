@@ -85,7 +85,6 @@ api_versions!([
     (8, REMOVE_SLED_ROLE),
     (7, MULTICAST_SUPPORT),
     (6, ADD_PROBE_PUT_ENDPOINT),
-    (5, NEWTYPE_UUID_BUMP),
     // Versions before this have been retired. We no longer support in any
     // server, nor expect it from any client.
 ]);
