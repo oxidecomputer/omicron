@@ -40,9 +40,12 @@ impl_typed_generation_kinds! {
     },
     kinds = {
         Alert = {},
+        Nexus = {},
         SagaAdopt = {},
         SagaReassignment = {},
+        SledConfig = {},
         SupportBundle = {},
         TargetRelease = {},
+        UpdateDisposition = {},
     },
 }

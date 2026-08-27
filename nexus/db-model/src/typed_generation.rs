@@ -13,6 +13,7 @@ use diesel::sql_types;
 use omicron_generation_kinds::{
     Generation, GenericGeneration, TypedGeneration, TypedGenerationKind,
 };
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Returns the corresponding `DbTypedGeneration` for this `TypedGeneration`.
@@ -32,8 +33,9 @@ pub fn to_db_typed_generation<T: TypedGenerationKind>(
 /// type. Most code should use the upstream `TypedGeneration` as much as
 /// possible, since that has much more infrastructure built around it.
 #[derive_where(Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Hash)]
-#[derive(AsExpression, FromSqlRow)]
+#[derive(AsExpression, FromSqlRow, Serialize, Deserialize)]
 #[diesel(sql_type = sql_types::BigInt)]
+#[serde(transparent, bound = "")]
 pub struct DbTypedGeneration<T: TypedGenerationKind>(
     pub(crate) TypedGeneration<T>,
 );
