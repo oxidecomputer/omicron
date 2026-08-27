@@ -94,7 +94,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         filters: &EreportFilters,
-        time_range: Option<&BundleTimeRange>,
+        time_range: &BundleTimeRange,
         pagparams: &DataPageParams<'_, (Uuid, DbEna)>,
     ) -> ListResultVec<Ereport> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
@@ -109,7 +109,7 @@ impl DataStore {
 
     fn ereport_fetch_matching_query(
         filters: &EreportFilters,
-        time_range: Option<&BundleTimeRange>,
+        time_range: &BundleTimeRange,
         pagparams: &DataPageParams<'_, (Uuid, DbEna)>,
     ) -> impl RunnableQuery<Ereport> + use<> {
         let mut query = paginated_multicolumn(
@@ -120,11 +120,11 @@ impl DataStore {
         .filter(dsl::time_deleted.is_null())
         .select(Ereport::as_select());
 
-        if let Some(start) = time_range.and_then(|r| r.start()) {
+        if let Some(start) = time_range.start() {
             query = query.filter(dsl::time_collected.ge(start));
         }
 
-        if let Some(end) = time_range.and_then(|r| r.end()) {
+        if let Some(end) = time_range.end() {
             query = query.filter(dsl::time_collected.le(end));
         }
 
@@ -754,7 +754,7 @@ mod tests {
         explain_fetch_matching_query(
             "explain_ereport_fetch_matching_default",
             EreportFilters::default(),
-            None,
+            BundleTimeRange::default(),
         )
         .await
     }
@@ -764,7 +764,7 @@ mod tests {
         explain_fetch_matching_query(
             "explain_ereport_fetch_matching_only_serials",
             EreportFilters::new().with_serials(["BRM6900420", "BRM5555555"]),
-            None,
+            BundleTimeRange::default(),
         )
         .await
     }
@@ -779,7 +779,7 @@ mod tests {
                     "my.cool.ereport",
                     "hw.frobulator.fault.frobulation_failed",
                 ]),
-            None,
+            BundleTimeRange::default(),
         )
         .await
     }
@@ -789,7 +789,7 @@ mod tests {
         explain_fetch_matching_query(
             "explain_ereport_fetch_matching_only_time",
             EreportFilters::new(),
-            Some(BundleTimeRange::new(None, Some(chrono::Utc::now())).unwrap()),
+            BundleTimeRange::new(None, Some(chrono::Utc::now())).unwrap(),
         )
         .await
     }
@@ -799,7 +799,7 @@ mod tests {
         explain_fetch_matching_query(
             "explain_ereport_fetch_matching_time_and_serials",
             EreportFilters::new().with_serials(["BRM6900420", "BRM5555555"]),
-            Some(BundleTimeRange::new(None, Some(chrono::Utc::now())).unwrap()),
+            BundleTimeRange::new(None, Some(chrono::Utc::now())).unwrap(),
         )
         .await
     }
@@ -807,7 +807,7 @@ mod tests {
     async fn explain_fetch_matching_query(
         test_name: &str,
         filters: EreportFilters,
-        time_range: Option<BundleTimeRange>,
+        time_range: BundleTimeRange,
     ) {
         let logctx = dev::test_setup_log(test_name);
         let db = TestDatabase::new_with_pool(&logctx.log).await;
@@ -824,7 +824,7 @@ mod tests {
 
         let query = DataStore::ereport_fetch_matching_query(
             &filters,
-            time_range.as_ref(),
+            &time_range,
             &pagparams,
         );
 
@@ -1182,7 +1182,7 @@ mod tests {
             .ereport_fetch_matching(
                 opctx,
                 &Default::default(),
-                None,
+                &BundleTimeRange::default(),
                 &pagparams,
             )
             .await
@@ -1193,13 +1193,11 @@ mod tests {
             .ereport_fetch_matching(
                 opctx,
                 &EreportFilters::new(),
-                Some(
-                    &BundleTimeRange::new(
-                        Some(time_collected - Duration::from_secs(600)),
-                        None,
-                    )
-                    .unwrap(),
-                ),
+                &BundleTimeRange::new(
+                    Some(time_collected - Duration::from_secs(600)),
+                    None,
+                )
+                .unwrap(),
                 &pagparams,
             )
             .await
@@ -1210,7 +1208,7 @@ mod tests {
             .ereport_fetch_matching(
                 opctx,
                 &EreportFilters::new().with_serials(["my cool serial"]),
-                None,
+                &BundleTimeRange::default(),
                 &pagparams,
             )
             .await
@@ -1221,7 +1219,7 @@ mod tests {
             .ereport_fetch_matching(
                 opctx,
                 &EreportFilters::new().with_classes(["my cool ereport"]),
-                None,
+                &BundleTimeRange::default(),
                 &pagparams,
             )
             .await

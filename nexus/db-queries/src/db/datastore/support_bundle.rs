@@ -804,16 +804,14 @@ impl DataStore {
         // Creation stamps a start bound before persisting, so a selection
         // reaching this insert always carries a time range with a start
         // (which the table requires: start_time is NOT NULL).
-        let Some(start) =
-            data_selection.time_range().and_then(|range| range.start())
-        else {
+        let Some(start) = data_selection.time_range().start() else {
             return Err(DbError::QueryBuilderError(
                 "support bundle data selection reached persistence without \
                  a start bound; bundle creation must stamp one first"
                     .into(),
             ));
         };
-        let end = data_selection.time_range().and_then(|range| range.end());
+        let end = data_selection.time_range().end();
         diesel::insert_into(
             time_range_dsl::support_bundle_data_selection_time_range,
         )
@@ -1510,7 +1508,7 @@ mod test {
             "Data selection should exist before delete"
         );
         assert!(
-            selection.time_range().is_some_and(|range| range.start().is_some()),
+            selection.time_range().start().is_some(),
             "Persisted selection should carry a start bound"
         );
 
@@ -1550,7 +1548,7 @@ mod test {
         // default start bound stamped at creation; everything else is
         // unchanged.
         let windowless = BundleDataSelection::all();
-        assert!(windowless.time_range().is_none());
+        assert!(!windowless.time_range().has_bounds());
         let bundle = datastore
             .support_bundle_create(
                 &opctx,
@@ -1568,15 +1566,13 @@ mod test {
             .support_bundle_data_selection_get(&opctx, &authz_bundle)
             .await
             .expect("Should be able to query data selection");
-        let range = selection
-            .time_range()
-            .expect("persisted selection should have a time range");
+        let range = selection.time_range();
         assert!(
             range.start().is_some(),
             "persisted selection should carry a start bound"
         );
         assert!(range.end().is_none(), "no end bound was supplied");
-        selection.set_time_range(None);
+        selection.set_time_range(Default::default());
         assert_eq!(
             selection, windowless,
             "creation should change nothing but the time range"

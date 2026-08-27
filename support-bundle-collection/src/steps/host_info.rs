@@ -38,7 +38,7 @@ pub async fn spawn_query_all_sleds(
     else {
         return Ok(CollectionStepOutput::Skipped);
     };
-    let time_range = collection.data_selection().time_range().cloned();
+    let time_range = collection.data_selection().time_range().clone();
 
     let all_sleds = tokio::select! {
         _ = collection.cancelled() => return Ok(CollectionStepOutput::None),
@@ -92,7 +92,7 @@ pub async fn spawn_query_all_sleds(
 async fn collect_data_from_sled(
     collection: &BundleCollection,
     sled: Sled,
-    time_range: Option<BundleTimeRange>,
+    time_range: BundleTimeRange,
     dir: &Utf8Path,
 ) -> anyhow::Result<CollectionStepOutput> {
     let (log, opctx, datastore) =
@@ -252,7 +252,7 @@ async fn collect_data_from_sled(
     // it can respond, so we cap the number of in-flight requests.
     let sled_client = &sled_client;
     let sled_path = &sled_path;
-    let time_range = time_range.as_ref();
+    let time_range = &time_range;
     let mut log_futs = futures::stream::iter(zones)
         .map(|zone| async move {
             save_zone_log_zip_or_error(
@@ -340,15 +340,14 @@ async fn save_zone_log_zip_or_error(
     client: &sled_agent_client::Client,
     zone: &str,
     path: &Utf8Path,
-    time_range: Option<&BundleTimeRange>,
+    time_range: &BundleTimeRange,
     cancellation_token: &CancellationToken,
 ) -> anyhow::Result<()> {
     // Bind with names so the positional Progenitor call below can't
     // accidentally swap start and end: query parameters are supplied in
     // alphabetical order, which is why "end time" comes before
     // "start time".
-    let range = time_range.cloned().unwrap_or_default();
-    let (start, end) = (range.start(), range.end());
+    let (start, end) = (time_range.start(), time_range.end());
 
     let download_result = tokio::select! {
         _ = cancellation_token.cancelled() => return Ok(()),

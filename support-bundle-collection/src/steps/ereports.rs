@@ -34,7 +34,7 @@ pub async fn collect(
         debug!(log, "Support bundle: ereports not requested");
         return Ok(CollectionStepOutput::Skipped);
     };
-    let time_range = collection.data_selection().time_range().cloned();
+    let time_range = collection.data_selection().time_range().clone();
     let ereports_dir = dir.join("ereports");
     let mut status = SupportBundleEreportStatus::default();
     if let Err(err) = save_ereports(
@@ -70,7 +70,7 @@ pub async fn collect(
 async fn save_ereports(
     collection: &BundleCollection,
     filters: EreportFilters,
-    time_range: Option<BundleTimeRange>,
+    time_range: BundleTimeRange,
     dir: Utf8PathBuf,
     status: &mut SupportBundleEreportStatus,
 ) -> anyhow::Result<()> {
@@ -83,7 +83,7 @@ async fn save_ereports(
         let ereports = tokio::select! {
             _ = collection.cancelled() => return Ok(()),
             result = datastore.ereport_fetch_matching(
-                &opctx, &filters, time_range.as_ref(), &pagparams
+                &opctx, &filters, &time_range, &pagparams
             ) => {
                 result.map_err(|e| {
                     e.internal_context("failed to query for ereports")

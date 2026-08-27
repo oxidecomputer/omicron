@@ -1111,7 +1111,10 @@ impl DataStore {
                 req_id,
                 &data_selection,
             ));
-            if let Some(range) = data_selection.time_range() {
+            // Row absence is the canonical encoding of an unbounded
+            // range; only write a row when some bound is set.
+            let range = data_selection.time_range();
+            if range.has_bounds() {
                 time_range_rows
                     .push(TimeRange::from_sitrep(sitrep_id, req_id, range));
             }

@@ -144,6 +144,11 @@ impl BundleTimeRange {
     pub fn end(&self) -> Option<DateTime<Utc>> {
         self.end
     }
+
+    /// Returns `true` when at least one bound is set.
+    pub fn has_bounds(&self) -> bool {
+        self.start.is_some() || self.end.is_some()
+    }
 }
 
 /// Mirror of [`BundleTimeRange`] that deserialization goes through so
@@ -168,13 +173,15 @@ impl TryFrom<UncheckedBundleTimeRange> for BundleTimeRange {
 /// insert (BundleDataCategory::Reconfigurator, BundleData::SpDumps)
 /// because each BundleData determines its own category.
 ///
-/// `time_range`, when set, bounds every time-bounded category's collection
-/// (host-info logs and ereports).
+/// `time_range` bounds every time-bounded category's collection (host-info
+/// logs and ereports); the default range is unbounded on both sides and
+/// applies no filter.
 #[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct BundleDataSelection {
     // Ordered so iteration (and therefore display output) is deterministic.
     data: BTreeMap<BundleDataCategory, BundleData>,
-    time_range: Option<BundleTimeRange>,
+    #[serde(default)]
+    time_range: BundleTimeRange,
 }
 
 impl BundleDataSelection {
@@ -205,16 +212,15 @@ impl BundleDataSelection {
 
     /// Ensures the bundle-wide time range has a start bound.
     ///
-    /// When the selection has no range, or a range without a start bound,
-    /// the start is filled in `lookback` before the range's end bound, or
-    /// before `now` when the range has no end bound either. Existing bounds
-    /// are preserved.
+    /// When the range has no start bound, the start is filled in `lookback`
+    /// before the range's end bound, or before `now` when the range has no
+    /// end bound either. Existing bounds are preserved.
     pub fn ensure_start_bound(
         &mut self,
         now: DateTime<Utc>,
         lookback: chrono::Days,
     ) {
-        let range = self.time_range.get_or_insert_with(Default::default);
+        let range = &mut self.time_range;
         if range.start.is_none() {
             let anchor = range.end.unwrap_or(now);
             // Checked subtraction: an end bound near the minimum
@@ -271,7 +277,7 @@ impl BundleDataSelection {
     /// Sets the bundle-wide time range. Affects every time-bounded category
     /// (host-info logs and ereports) at collection time.
     pub fn with_time_range(mut self, range: BundleTimeRange) -> Self {
-        self.time_range = Some(range);
+        self.time_range = range;
         self
     }
 
@@ -283,7 +289,7 @@ impl BundleDataSelection {
 
     /// Sets the bundle-wide time range in place (used by code paths that
     /// build the selection incrementally, e.g. database read paths).
-    pub fn set_time_range(&mut self, range: Option<BundleTimeRange>) {
+    pub fn set_time_range(&mut self, range: BundleTimeRange) {
         self.time_range = range;
     }
 
@@ -320,10 +326,11 @@ impl BundleDataSelection {
         }
     }
 
-    /// Returns the bundle-wide time range, if any was set. Applies to every
-    /// time-bounded category at collection time.
-    pub fn time_range(&self) -> Option<&BundleTimeRange> {
-        self.time_range.as_ref()
+    /// Returns the bundle-wide time range. Applies to every time-bounded
+    /// category at collection time; the default range is unbounded and
+    /// applies no filter.
+    pub fn time_range(&self) -> &BundleTimeRange {
+        &self.time_range
     }
 }
 
@@ -379,7 +386,8 @@ impl fmt::Display for DisplayBundleDataSelection<'_> {
             }
             write!(f, "{:>indent$}- {}", "", item.display())?;
         }
-        if let Some(range) = self.selection.time_range() {
+        let range = self.selection.time_range();
+        if range.has_bounds() {
             if !self.selection.data.is_empty() {
                 writeln!(f)?;
             }
@@ -483,7 +491,7 @@ pub(crate) mod test_utils {
         fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
             (
                 prop::collection::vec(any::<BundleData>(), 0..=5),
-                prop::option::of(any::<BundleTimeRange>()),
+                any::<BundleTimeRange>(),
             )
                 .prop_map(|(data, time_range)| {
                     let mut sel: BundleDataSelection =
@@ -520,7 +528,7 @@ mod tests {
         // No range at all: the lookback anchors to `now`.
         let mut selection = BundleDataSelection::new();
         selection.ensure_start_bound(now, lookback);
-        let range = selection.time_range().unwrap();
+        let range = selection.time_range();
         assert_eq!(range.start(), Some(ts(9 * WEEK_SECS)));
         assert_eq!(range.end(), None);
 
@@ -530,7 +538,7 @@ mod tests {
             BundleTimeRange::new(None, Some(ts(5 * WEEK_SECS))).unwrap(),
         );
         selection.ensure_start_bound(now, lookback);
-        let range = selection.time_range().unwrap();
+        let range = selection.time_range();
         assert_eq!(range.start(), Some(ts(4 * WEEK_SECS)));
         assert_eq!(range.end(), Some(ts(5 * WEEK_SECS)));
 
@@ -538,7 +546,7 @@ mod tests {
         let mut selection = BundleDataSelection::new()
             .with_time_range(BundleTimeRange::new(Some(ts(50)), None).unwrap());
         selection.ensure_start_bound(now, lookback);
-        let range = selection.time_range().unwrap();
+        let range = selection.time_range();
         assert_eq!(range.start(), Some(ts(50)));
         assert_eq!(range.end(), None);
 
@@ -548,7 +556,7 @@ mod tests {
             BundleTimeRange::new(None, Some(DateTime::<Utc>::MIN_UTC)).unwrap(),
         );
         selection.ensure_start_bound(now, lookback);
-        let range = selection.time_range().unwrap();
+        let range = selection.time_range();
         assert_eq!(range.start(), Some(DateTime::<Utc>::MIN_UTC));
         assert_eq!(range.end(), Some(DateTime::<Utc>::MIN_UTC));
     }

@@ -244,7 +244,8 @@ impl TryFrom<BundleDataSelection>
         if let Some(ereports) = row.ereports {
             selection.insert(ereports.into());
         }
-        selection.set_time_range(row.time_range.map(Into::into));
+        selection
+            .set_time_range(row.time_range.map(Into::into).unwrap_or_default());
         Ok(selection)
     }
 }
