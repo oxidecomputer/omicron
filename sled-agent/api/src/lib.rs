@@ -84,7 +84,6 @@ api_versions!([
     (9, DELEGATE_ZVOL_TO_PROPOLIS),
     (8, REMOVE_SLED_ROLE),
     (7, MULTICAST_SUPPORT),
-    (6, ADD_PROBE_PUT_ENDPOINT),
     // Versions before this have been retired. We no longer support in any
     // server, nor expect it from any client.
 ]);
@@ -1606,8 +1605,7 @@ pub trait SledAgentApi {
         operation_id = "probes_put",
         method = PUT,
         path = "/probes",
-        versions =
-            VERSION_ADD_PROBE_PUT_ENDPOINT..VERSION_ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES,
+        versions = ..VERSION_ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES,
     }]
     async fn probes_put_v6(
         request_context: RequestContext<Self::Context>,
