@@ -1788,10 +1788,7 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
                 "start_sled1",
                 Box::new(move |builder| {
                     builder
-                        .start_sled(
-                            SLED_AGENT_UUID.parse().unwrap(),
-                            sim_mode,
-                        )
+                        .start_sled(SLED_AGENT_UUID.parse().unwrap(), sim_mode)
                         .boxed()
                 }),
             )],
