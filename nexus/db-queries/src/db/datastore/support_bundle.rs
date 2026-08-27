@@ -311,11 +311,11 @@ impl DataStore {
             -> BoxFuture<'a, Result<SupportBundle, DbError>>,
         I: Clone + Send + Sync,
     {
-        // Every persisted selection carries a start bound for its time range,
-        // so the stored record reflects the window collection will use and
-        // collection never sees an unbounded lookback. Callers' explicit
-        // bounds are preserved; only a missing start is filled in. Stamping
-        // outside the transaction keeps the bound stable across retries.
+        // When we persist the support bundle database record,
+        // we ensure that a start bound exists for it.
+        //
+        // If the caller supplies an explicit start bound, we'll use it, but
+        // otherwise, we set a default bound to avoid collecting too much data.
         data_selection.ensure_start_bound(
             omicron_common::now_db_precision(),
             BundleDataSelection::DEFAULT_LOOKBACK,
@@ -801,15 +801,22 @@ impl DataStore {
             .execute_async(conn)
             .await?;
 
-        // Insert a time range row only when a range was set.
-        if let Some(range) = data_selection.time_range() {
-            diesel::insert_into(
-                time_range_dsl::support_bundle_data_selection_time_range,
-            )
-            .values(TimeRange::new(bundle_id, range))
-            .execute_async(conn)
-            .await?;
-        }
+        // Creation stamps a start bound before persisting, so a selection
+        // reaching this insert always carries a time range; a windowless
+        // row would collect unbounded history.
+        let Some(range) = data_selection.time_range() else {
+            return Err(DbError::QueryBuilderError(
+                "support bundle data selection reached persistence without \
+                 a time range; bundle creation must stamp a start bound first"
+                    .into(),
+            ));
+        };
+        diesel::insert_into(
+            time_range_dsl::support_bundle_data_selection_time_range,
+        )
+        .values(TimeRange::new(bundle_id, range))
+        .execute_async(conn)
+        .await?;
 
         // Insert payload tables for variants that carry data.
         for data in data_selection {
