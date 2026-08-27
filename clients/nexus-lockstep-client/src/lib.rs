@@ -27,6 +27,7 @@ progenitor::generate_api!(
     }),
     crates = {
         "iddqd" = "*",
+        "omicron-generation-kinds" = "*",
         "omicron-uuid-kinds" = "*",
         "oxnet" = "0.1.0",
     },
@@ -51,7 +52,7 @@ progenitor::generate_api!(
         DnsConfigParams = nexus_types::internal_api::params::DnsConfigParams,
         DnsConfigZone = nexus_types::internal_api::params::DnsConfigZone,
         DnsRecord = nexus_types::internal_api::params::DnsRecord,
-        Generation = omicron_common::api::external::Generation,
+        Generation = omicron_generation_kinds::Generation,
         FmConfigView = nexus_types::fm::FmConfigView,
         FmConfigParam = nexus_types::fm::FmConfigParam,
         ImportExportPolicy = sled_agent_types::early_networking::ImportExportPolicy,

@@ -67,9 +67,9 @@ use omicron_common::address::DNS_OPTE_IPV4_SUBNET;
 use omicron_common::address::DNS_OPTE_IPV6_SUBNET;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
+use omicron_common::address::NEXUS_OPTE_IPV6_SUBNET;
 use omicron_common::address::NTP_OPTE_IPV4_SUBNET;
 use omicron_common::address::NTP_PORT;
-use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::UserId;
@@ -80,8 +80,13 @@ use omicron_common::api::internal::nexus::ProducerKind;
 use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_common::zpool_name::ZpoolName;
+use omicron_debug_dropbox::DebugDropbox;
+use omicron_generation_kinds::{
+    Generation, NexusGeneration, SledConfigGeneration, TargetReleaseGeneration,
+};
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev;
+use omicron_test_utils::dev::TestTempDir;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ExternalIpUuid;
@@ -103,12 +108,13 @@ use sled_agent_types::inventory::HostPhase2DesiredSlots;
 use sled_agent_types::inventory::NetworkInterface;
 use sled_agent_types::inventory::NetworkInterfaceKind;
 use sled_agent_types::inventory::OmicronSledConfig;
+use sled_agent_types::inventory::OmicronSledUpdateDisposition;
 use sled_agent_types::inventory::OmicronZoneDataset;
 use sled_agent_types::inventory::SledCpuFamily;
 use sled_agent_types::inventory::SourceNatConfigGeneric;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use sled_agent_types::system_networking::WriteNetworkConfigRequest;
-use slog::{Logger, debug, error, o};
+use slog::{Logger, debug, error, info, o};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
@@ -185,6 +191,9 @@ pub struct ControlPlaneStarter<'a, N: NexusServer> {
     pub mgd_bgp_loopback:
         Option<Arc<Mutex<loopback_ip_mgr::LoopbackIpManager>>>,
     pub mgd_bgp_addrs: BTreeMap<SwitchSlot, Ipv4Addr>,
+    scrimlet_sled_ids: BTreeSet<SledUuid>,
+
+    debug_dropbox_dir: TestTempDir,
 }
 
 type StepInitFn<'a, N> = Box<
@@ -199,6 +208,8 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         let simulated_upstairs_log = logctx.log.new(o!(
             "component" => "omicron_sled_agent::sim::SimulatedUpstairs",
         ));
+
+        let debug_dropbox_dir = TestTempDir::new(&logctx.log);
 
         Self {
             config,
@@ -239,6 +250,8 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             )),
             mgd_bgp_loopback: None,
             mgd_bgp_addrs: BTreeMap::new(),
+            scrimlet_sled_ids: BTreeSet::new(),
+            debug_dropbox_dir,
         }
     }
 
@@ -581,7 +594,8 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                     lldp: self.lldpd.get(&switch_slot).unwrap().port,
                 },
             )
-            .unwrap()
+            .unwrap();
+        self.scrimlet_sled_ids.insert(sled_id);
     }
 
     pub async fn start_oximeter(&mut self) {
@@ -658,7 +672,12 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                 .clone(),
         };
 
-        let nexus_internal = N::start_internal(&self.config, &log).await?;
+        let debug_dropbox =
+            DebugDropbox::for_tests(log, &self.debug_dropbox_dir.path())
+                .await
+                .expect("creating debug dropbox directory");
+        let nexus_internal =
+            N::start_internal(&self.config, &log, debug_dropbox).await?;
         let nexus_internal_addr =
             nexus_internal.get_http_server_internal_address();
         let internal_address = match nexus_internal_addr {
@@ -757,13 +776,28 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             .mac_addrs
             .next()
             .expect("ran out of MAC addresses");
-        let ip_config = PrivateIpConfig::new_ipv4(
-            NEXUS_OPTE_IPV4_SUBNET
-                .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1 + which)
+        let ip_config =
+            match config.deployment.dropshot_external.dropshot.bind_address {
+                SocketAddr::V4(_) => PrivateIpConfig::new_ipv4(
+                    NEXUS_OPTE_IPV4_SUBNET
+                        .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1 + which)
+                        .unwrap(),
+                    *NEXUS_OPTE_IPV4_SUBNET,
+                )
                 .unwrap(),
-            *NEXUS_OPTE_IPV4_SUBNET,
-        )
-        .unwrap();
+                SocketAddr::V6(_) => PrivateIpConfig::new_ipv6(
+                    NEXUS_OPTE_IPV6_SUBNET
+                        .nth(
+                            u128::try_from(
+                                NUM_INITIAL_RESERVED_IP_ADDRESSES + 1 + which,
+                            )
+                            .unwrap(),
+                        )
+                        .unwrap(),
+                    *NEXUS_OPTE_IPV6_SUBNET,
+                )
+                .unwrap(),
+            };
         self.blueprint_zones.push(BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id,
@@ -797,7 +831,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                     slot: 0,
                     vni: Vni::SERVICES_VNI,
                 },
-                nexus_generation: Generation::new(),
+                nexus_generation: NexusGeneration::new(),
             }),
             image_source: BlueprintZoneImageSource::InstallDataset,
         });
@@ -825,7 +859,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             .clone()
             .build_full_config_for_initial_generation();
 
-        slog::info!(log, "DNS population: {:#?}", dns_config);
+        info!(log, "DNS population: {:#?}", dns_config);
         dns_config_client.dns_config_put(&dns_config).await.expect(
             "Failed to send initial DNS records to internal DNS server",
         );
@@ -870,8 +904,8 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             parent_blueprint_id: None,
             internal_dns_version: dns_config.generation,
             external_dns_version: Generation::new(),
-            target_release_minimum_generation: Generation::new(),
-            nexus_generation: Generation::new(),
+            target_release_minimum_generation: TargetReleaseGeneration::new(),
+            nexus_generation: NexusGeneration::new(),
             external_networking_generation: Generation::new(),
             cockroachdb_fingerprint: String::new(),
             cockroachdb_setting_preserve_downgrade:
@@ -974,6 +1008,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         let nexus_address =
             self.nexus_internal_addr.expect("Must launch Nexus first");
 
+        let is_scrimlet = self.scrimlet_sled_ids.contains(&sled_id);
         let sled_agent = start_sled_agent(
             self.logctx.log.new(o!(
                 "component" => "omicron_sled_agent::sim::Server",
@@ -983,21 +1018,38 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             sled_id,
             sled_index,
             sim_mode,
+            is_scrimlet,
             &self.simulated_upstairs,
         )
         .await
         .expect("Failed to start sled agent");
 
-        // Add a DNS entry for the TUF Repo Depot on this simulated sled agent.
-        let SocketAddr::V6(server_addr_v6) = sled_agent.repo_depot_address
+        // Add DNS entries for the simulated sled agent.  Scrimlets also
+        // register SwitchSledAgent (which lets sync_switch_configuration find
+        // the sled-agent at its actual port).  Since host_sled() may only be
+        // called once per sled, both services share the same registration.
+        let SocketAddr::V6(repo_depot_addr_v6) = sled_agent.repo_depot_address
         else {
-            panic!("expected sim sled agent to be listening on IPv6");
+            panic!("expected repo depot to be listening on IPv6");
         };
-        self.rack_init_builder.add_gz_service_to_dns(
-            sled_id,
-            server_addr_v6,
-            ServiceName::RepoDepot,
-        );
+        if is_scrimlet {
+            let SocketAddr::V6(sled_agent_addr_v6) =
+                sled_agent.http_server.local_addr()
+            else {
+                panic!("expected sim sled agent to be listening on IPv6");
+            };
+            self.rack_init_builder.add_scrimlet_gz_services_to_dns(
+                sled_id,
+                sled_agent_addr_v6,
+                repo_depot_addr_v6.port(),
+            );
+        } else {
+            self.rack_init_builder.add_gz_service_to_dns(
+                sled_id,
+                repo_depot_addr_v6,
+                ServiceName::RepoDepot,
+            );
+        }
 
         self.sled_agents
             .push(ControlPlaneTestContextSledAgent { server: sled_agent });
@@ -1050,7 +1102,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         // Send the sled-agents their new configurations.
         // This generation number should match the one in
         // `make_sled_configs`.
-        let generation = Generation::from_u32(2);
+        let generation = SledConfigGeneration::from_u32(2);
 
         for (sled_agent, sled_zones) in zip(self.sled_agents.iter(), zones) {
             let sled_id = sled_agent.sled_agent_id();
@@ -1071,6 +1123,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                     remove_mupdate_override: None,
                     host_phase_2: HostPhase2DesiredSlots::current_contents(),
                     measurements: BTreeSet::new(),
+                    update_disposition: OmicronSledUpdateDisposition::Available,
                 })
                 .await
                 .expect("Failed to configure sled agent {sled_id} with zones");
@@ -1104,6 +1157,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             sled_id,
             sled_index,
             sim_mode,
+            false,
             &self.simulated_upstairs,
         )
         .await
@@ -1354,6 +1408,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             silo_name: self.silo_name.unwrap(),
             user_name: self.user_name.unwrap(),
             password: self.password.unwrap(),
+            debug_dropbox_dir: self.debug_dropbox_dir,
         }
     }
 
@@ -1394,6 +1449,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         for (_, mut lldpd) in self.lldpd {
             lldpd.cleanup().await.unwrap();
         }
+        self.debug_dropbox_dir.cleanup_successful();
         self.logctx.cleanup_successful();
     }
 
@@ -1413,7 +1469,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         // The generation number that the sled-agents' configuration
         // will have when this blueprint is executed. Should match
         // the one in `configure_sled_agents`.
-        let sled_agent_generation = Generation::from_u32(2);
+        let sled_agent_generation = SledConfigGeneration::from_u32(2);
 
         for (sled_agent, maybe_zones) in
             zip(self.sled_agents.iter(), maybe_zones)
@@ -1579,6 +1635,35 @@ impl RackInitRequestBuilder {
         self.internal_dns_config
             .service_backend_sled(service_name, &sled, address.port())
             .expect("Failed to set up DNS for GZ service");
+    }
+
+    /// For a scrimlet, register both `SwitchSledAgent` and `RepoDepot` in DNS
+    /// using a single `host_sled()` call.  `SwitchSledAgent` lets
+    /// `sync_switch_configuration` find the sled-agent at its actual port.
+    fn add_scrimlet_gz_services_to_dns(
+        &mut self,
+        sled_id: SledUuid,
+        sled_agent_addr: SocketAddrV6,
+        repo_depot_port: u16,
+    ) {
+        let sled = self
+            .internal_dns_config
+            .host_sled(sled_id, *sled_agent_addr.ip())
+            .expect("Failed to register scrimlet sled in DNS");
+        self.internal_dns_config
+            .service_backend_sled(
+                ServiceName::SwitchSledAgent,
+                &sled,
+                sled_agent_addr.port(),
+            )
+            .expect("Failed to set up SwitchSledAgent DNS for scrimlet");
+        self.internal_dns_config
+            .service_backend_sled(
+                ServiceName::RepoDepot,
+                &sled,
+                repo_depot_port,
+            )
+            .expect("Failed to set up RepoDepot DNS for scrimlet");
     }
 
     // Special handling of Nexus, which has multiple SRV records for its single
@@ -1963,6 +2048,7 @@ pub async fn start_sled_agent(
     id: SledUuid,
     sled_index: u16,
     sim_mode: sim::SimMode,
+    is_scrimlet: bool,
     simulated_upstairs: &Arc<sim::SimulatedUpstairs>,
 ) -> Result<sim::Server, String> {
     // Generate a baseboard serial number that matches the SP configuration
@@ -1977,6 +2063,7 @@ pub async fn start_sled_agent(
         sim::ZpoolConfig::None,
         SledCpuFamily::AmdMilan,
         Some(baseboard_serial),
+        is_scrimlet,
     );
     start_sled_agent_with_config(log, &config, sled_index, simulated_upstairs)
         .await
@@ -1988,10 +2075,15 @@ pub async fn start_sled_agent_with_config(
     sled_index: u16,
     simulated_upstairs: &Arc<sim::SimulatedUpstairs>,
 ) -> Result<sim::Server, String> {
-    let server =
-        sim::Server::start(&config, &log, true, simulated_upstairs, sled_index)
-            .await
-            .map_err(|e| e.to_string())?;
+    let server = sim::Server::start(
+        &config,
+        &log,
+        sim::NexusRegistration::WaitForCompletion,
+        simulated_upstairs,
+        sled_index,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
     Ok(server)
 }
 

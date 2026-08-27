@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "48.0.0"
+    "version": "50.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -7544,7 +7544,7 @@
         "type": "object",
         "properties": {
           "datasets": {
-            "title": "IdOrdMapAsMap",
+            "title": "IdOrdMap",
             "x-rust-type": {
               "crate": "iddqd",
               "parameters": [
@@ -7555,13 +7555,14 @@
               "path": "iddqd::IdOrdMap",
               "version": "*"
             },
-            "type": "object",
-            "additionalProperties": {
+            "type": "array",
+            "items": {
               "$ref": "#/components/schemas/DatasetConfig"
-            }
+            },
+            "uniqueItems": true
           },
           "disks": {
-            "title": "IdOrdMapAsMap",
+            "title": "IdOrdMap",
             "x-rust-type": {
               "crate": "iddqd",
               "parameters": [
@@ -7572,28 +7573,17 @@
               "path": "iddqd::IdOrdMap",
               "version": "*"
             },
-            "type": "object",
-            "additionalProperties": {
+            "type": "array",
+            "items": {
               "$ref": "#/components/schemas/OmicronPhysicalDiskConfig"
-            }
+            },
+            "uniqueItems": true
           },
           "generation": {
-            "$ref": "#/components/schemas/Generation"
+            "$ref": "#/components/schemas/SledConfigGeneration"
           },
           "host_phase_2": {
-            "default": {
-              "slot_a": {
-                "type": "current_contents"
-              },
-              "slot_b": {
-                "type": "current_contents"
-              }
-            },
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/HostPhase2DesiredSlots"
-              }
-            ]
+            "$ref": "#/components/schemas/HostPhase2DesiredSlots"
           },
           "measurements": {
             "type": "array",
@@ -7610,8 +7600,11 @@
               }
             ]
           },
+          "update_disposition": {
+            "$ref": "#/components/schemas/OmicronSledUpdateDisposition"
+          },
           "zones": {
-            "title": "IdOrdMapAsMap",
+            "title": "IdOrdMap",
             "x-rust-type": {
               "crate": "iddqd",
               "parameters": [
@@ -7622,18 +7615,29 @@
               "path": "iddqd::IdOrdMap",
               "version": "*"
             },
-            "type": "object",
-            "additionalProperties": {
+            "type": "array",
+            "items": {
               "$ref": "#/components/schemas/OmicronZoneConfig"
-            }
+            },
+            "uniqueItems": true
           }
         },
         "required": [
           "datasets",
           "disks",
           "generation",
+          "host_phase_2",
           "measurements",
+          "update_disposition",
           "zones"
+        ]
+      },
+      "OmicronSledUpdateDisposition": {
+        "description": "Controls a sled's availability for VMM provisioning.\n\nThis is a simplified version of `BlueprintSledUpdateDisposition`. The blueprint version of this type includes information describing _how_ the sled should be evacuated as well as blueprint-specific metadata. From sled-agent itself, we only need to know the high-level state; we use this to determine whether or not to accept new VMM registration requests.",
+        "type": "string",
+        "enum": [
+          "available",
+          "evacuating"
         ]
       },
       "OmicronZoneConfig": {
@@ -9381,6 +9385,17 @@
           "path",
           "result"
         ]
+      },
+      "SledConfigGeneration": {
+        "description": "Generation numbers stored in the database, used for optimistic concurrency control",
+        "x-rust-type": {
+          "crate": "omicron-generation-kinds",
+          "path": "omicron_generation_kinds::SledConfigGeneration",
+          "version": "*"
+        },
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0
       },
       "SledCpuFamily": {
         "description": "Identifies the kind of CPU present on a sled, determined by reading CPUID.\n\nThis is intended to broadly support the control plane answering the question \"can I run this instance on that sled?\" given an instance with either no or some CPU platform requirement. It is not enough information for more precise placement questions - for example, is a CPU a high-frequency part or many-core part? We don't include Genoa here, but in that CPU family there are high frequency parts, many-core parts, and large-cache parts. To support those questions (or satisfactorily answer #8730) we would need to collect additional information and send it along.",

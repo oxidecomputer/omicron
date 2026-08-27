@@ -92,13 +92,15 @@ use ntp_admin_client::{
     Client as NtpAdminClient, Error as NtpAdminError, types::TimeSync,
 };
 use omicron_common::address::{COCKROACH_ADMIN_PORT, NTP_ADMIN_PORT};
-use omicron_common::api::external::Generation;
 use omicron_common::api::internal::nexus::Certificate;
 use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
 };
 use omicron_common::disk::DatasetKind;
 use omicron_ddm_admin_client::DdmError;
+use omicron_generation_kinds::{
+    Generation, GenericGeneration, SledConfigGeneration,
+};
 use omicron_ledger::{self as ledger};
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackUuid;
@@ -109,6 +111,7 @@ use sled_agent_client::{
     Client as SledAgentClient, Error as SledAgentError, types as SledAgentTypes,
 };
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
+use sled_agent_types::inventory::OmicronSledUpdateDisposition;
 use sled_agent_types::inventory::{
     ConfigReconcilerInventoryResult, HostPhase2DesiredSlots, OmicronSledConfig,
     OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
@@ -414,7 +417,7 @@ impl ServiceInner {
     async fn wait_for_config_reconciliation_on_sled(
         &self,
         sled_address: SocketAddrV6,
-        generation: Generation,
+        generation: SledConfigGeneration,
     ) -> Result<(), SetupServiceError> {
         let dur = std::time::Duration::from_secs(60);
         let client = reqwest::ClientBuilder::new()
@@ -565,7 +568,9 @@ impl ServiceInner {
 
                 // We bump the zone generation as we step through phases of
                 // RSS; use that as the overall sled config generation.
-                let generation = zones_config.generation;
+                let generation = SledConfigGeneration::from_untyped_generation(
+                    zones_config.generation,
+                );
                 let sled_config = OmicronSledConfig {
                     generation,
                     disks: config
@@ -578,6 +583,7 @@ impl ServiceInner {
                     remove_mupdate_override: None,
                     host_phase_2: HostPhase2DesiredSlots::current_contents(),
                     measurements: Default::default(),
+                    update_disposition: OmicronSledUpdateDisposition::Available,
                 };
 
                 self.set_config_on_sled(*sled_address, sled_config).await?;
@@ -1146,7 +1152,9 @@ impl ServiceInner {
                 // `V5_EVERYTHING` (i.e., "don't filter anything out"), so use
                 // that as the generation for all sled configs in the blueprint,
                 // too.
-                DeployStepVersion::V5_EVERYTHING,
+                SledConfigGeneration::from_untyped_generation(
+                    DeployStepVersion::V5_EVERYTHING,
+                ),
             )
             .map_err(SetupServiceError::ConvertPlanToBlueprint)?;
 
@@ -1629,8 +1637,9 @@ mod test {
             AZ_PREFIX_LENGTH, IpRange, Ipv6Subnet, RACK_PREFIX_LENGTH,
             SLED_PREFIX_LENGTH, get_sled_address,
         },
-        api::external::{AllowedSourceIps, ByteCount, Generation},
+        api::external::{AllowedSourceIps, ByteCount},
     };
+    use omicron_generation_kinds::Generation;
     use omicron_uuid_kinds::SledUuid;
     use oxnet::Ipv6Net;
     use sled_agent_types::disk::DiskIdentity;
@@ -1874,7 +1883,9 @@ mod test {
                 .expect("created service plan");
 
         let blueprint = service_plan
-            .to_blueprint(DeployStepVersion::V5_EVERYTHING)
+            .to_blueprint(SledConfigGeneration::from_untyped_generation(
+                DeployStepVersion::V5_EVERYTHING,
+            ))
             .expect("built blueprint");
 
         let report = Blippy::new_blueprint_only(&blueprint)

@@ -2378,6 +2378,40 @@ CREATE INDEX IF NOT EXISTS lookup_ip_pool_by_type ON omicron.public.ip_pool (
 ) WHERE
     time_deleted IS NULL;
 
+/*
+ * The external services whose external addresses are drawn from IP pools.
+ */
+CREATE TYPE IF NOT EXISTS omicron.public.external_service_kind AS ENUM (
+    'nexus',
+    'boundary_ntp',
+    'external_dns'
+);
+
+/*
+ * Join table assigning IP pools to external services.
+ *
+ * This represents the operator's intent about which pools should be used for
+ * those services, but we're intentionally not specifying the semantics yet
+ * (e.g., an assignment means we MUST use an IP from the pool, vs MAY do so).
+ * We'll flesh that out per-service as needed during implementation.
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.external_service_ip_pool (
+    service omicron.public.external_service_kind NOT NULL,
+    ip_pool_id UUID NOT NULL,
+    -- Most commonly want to look up per-service first, e.g., during blueprint
+    -- planning
+    PRIMARY KEY (service, ip_pool_id)
+);
+
+/*
+ * Index supporting fast lookup of a pool, e.g. to list services assigned to it.
+ * Also used when deleting the actual `ip_pool` row, failing the query if it's
+ * still assigned to anything.
+ */
+CREATE INDEX IF NOT EXISTS external_service_ip_pool_by_ip_pool_id ON omicron.public.external_service_ip_pool (
+    ip_pool_id
+);
+
 -- The order here is most-specific first, and it matters because we use this
 -- fact to select the most specific default in the case where there is both a
 -- silo default and a fleet default. If we were to add a project type, it should
@@ -3752,7 +3786,8 @@ CREATE TYPE IF NOT EXISTS omicron.public.switch_port_geometry AS ENUM (
 
 CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_port_config (
     port_settings_id UUID PRIMARY KEY,
-    geometry omicron.public.switch_port_geometry
+    geometry omicron.public.switch_port_geometry,
+    allow_ddm_traffic BOOL NOT NULL
 );
 
 CREATE TYPE IF NOT EXISTS omicron.public.switch_link_fec AS ENUM (
@@ -4828,6 +4863,19 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_dataset (
     PRIMARY KEY (inv_collection_id, sled_id, name)
 );
 
+-- A sled's update disposition in inventory.
+--
+-- This is analogous to the `sled_update_availability` enum used as a part of
+-- storing update disposition in blueprints. We use a separate enum (despite
+-- currently having identical variants) because there are separate Rust
+-- types, and it allows the two to evolve independently.
+CREATE TYPE IF NOT EXISTS omicron.public.inv_sled_update_disposition AS ENUM (
+    -- Available for use for all provisions.
+    'available',
+    -- Disallowed for all use + migratable instances are being evacuated.
+    'evacuating'
+);
+
 CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config (
     -- where this observation came from
     -- (foreign key into `inv_collection` table)
@@ -4851,6 +4899,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config (
 
     -- the set of artifact hashes used with trust quorum, can be empty
     measurements STRING(64)[],
+
+    -- current update disposition, controlling whether new VMM registrations are
+    -- accepted
+    update_disposition omicron.public.inv_sled_update_disposition NOT NULL,
 
     PRIMARY KEY (inv_collection_id, id)
 );
@@ -6181,6 +6233,97 @@ CREATE INDEX IF NOT EXISTS lookup_usable_rendezvous_debug_dataset
 /*******************************************************************/
 
 /*
+ * The availability state of a sled in the `rendezvous_sled_bp_availability` table.
+ *
+ *   available     - the sled may be used to provision new instances
+ *   unavailable   - the sled is an active sled but is not currently a
+ *                   provisioning target (e.g. it is being evacuated for an
+ *                   update)
+ *   decommissioned - the sled is marked decommissioned in the blueprint; this
+ *                    is a terminal state (see the table comment below)
+ */
+CREATE TYPE IF NOT EXISTS omicron.public.sled_bp_availability AS ENUM (
+    'available',
+    'unavailable',
+    'decommissioned'
+);
+
+/*
+ * Per-sled provisioning availability as of the target blueprint.
+ *
+ * This is a Reconfigurator rendezvous table reflecting which sleds the
+ * target blueprint considers available for provisioning. Once wired up, the
+ * instance-start allocation path will consult this table alongside `sled`.
+ *
+ * Unlike the other rendezvous tables, sled availability is not monotonic: a sled
+ * becomes unavailable while evacuated for an update, then available again
+ * afterwards. This means that we can't use one-way tombstones. We keep one row
+ * per sled and move its `bp_availability` between `available` and
+ * `unavailable`.
+ *
+ * To prevent duelling Nexuses from trampling over each other's state, we use
+ * the following mechanisms:
+ *
+ * - The available/unavailable flip is guarded by
+ *   `update_disposition_generation`, so that a write takes effect only if its
+ *   generation is greater than the stored one.
+ *
+ * - A decommissioned sled's row moves to the terminal `decommissioned` state
+ *   rather than being deleted. Like the other rendezvous tables' tombstones,
+ *   this stops a stale Nexus from resurrecting the sled by re-inserting it.
+ *
+ * A sled is moved to the terminal `decommissioned` state only when the
+ * blueprint marks it as decommissioned. In particular, the absence
+ * of a sled from the target blueprint does not cause it to be moved to the
+ * decommissioned state, because that sled might have just been added by a
+ * different instance of Nexus and not be in this Nexus's target blueprint.
+ *
+ * When blueprint sled pruning for decommission is implemented, as a
+ * precondition to pruning, we must ensure that the sled has been marked as
+ * decommissioned in this table.
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.rendezvous_sled_bp_availability (
+    /* ID of the sled */
+    sled_id UUID PRIMARY KEY,
+
+    /* The sled's availability state (see the enum and comment above) */
+    bp_availability omicron.public.sled_bp_availability NOT NULL,
+
+    /*
+     * The sled's `update_disposition` generation from the blueprint this row was
+     * last written from.
+     *
+     * NULL if and only if the sled is decommissioned (see the CHECK constraint
+     * below).
+     */
+    update_disposition_generation INT8,
+
+    /*
+     * ID of the target blueprint the Reconfigurator reconciliation RPW was
+     * acting on when this row was last written.
+     */
+    blueprint_id UUID NOT NULL,
+
+    /* Time this row was created */
+    time_created TIMESTAMPTZ NOT NULL,
+
+    /* Time this row was last modified */
+    time_modified TIMESTAMPTZ NOT NULL,
+
+    CONSTRAINT decommissioned_has_no_generation CHECK (
+        (bp_availability = 'decommissioned')
+        = (update_disposition_generation IS NULL)
+    )
+);
+
+/* Add an index which lets instance allocation find available sleds */
+CREATE INDEX IF NOT EXISTS lookup_available_sled
+    ON omicron.public.rendezvous_sled_bp_availability (sled_id)
+    WHERE bp_availability = 'available';
+
+/*******************************************************************/
+
+/*
  * The `sled_instance` view's definition needs to be modified in a separate
  * transaction from the transaction that created it.
  */
@@ -6328,6 +6471,24 @@ CREATE TABLE IF NOT EXISTS omicron.public.vmm (
     state omicron.public.vmm_state NOT NULL,
     cpu_platform omicron.public.vmm_cpu_platform NOT NULL,
     failure_reason omicron.public.vmm_failure_reason,
+    /*
+     * The sled's `update_disposition` generation at which this VMM was marked
+     * as needing to be stopped in order to update the sled.
+     *
+     * This is set when the sled begins evacuating its VMs. It indicates two
+     * things: that the VMM needs to be stopped, and that when it is stopped,
+     * this was in order to update the sled.
+     *
+     * This field is set just as a blueprint containing sleds to be updated
+     * is executed. So, depending on _when_ this field is observed, the sled
+     * and/or associated VMMs may not have been stopped yet.
+     *
+     * The `update_disposition` generation number is used primarily for
+     * debugging purposes. During the process to stop VMMs for an update, we
+     * only care if this field is stopped or not. THe field is NULL when its
+     * state has not been modified by an update.
+     */
+    stop_for_update_disposition_generation INT8,
 
     -- If a VMM is in the 'failed' state, it must have a failure reason; if it
     -- is not in the failed state, it must not have a failure reason.
@@ -9261,7 +9422,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '291.0.0', NULL)
+    (TRUE, NOW(), NOW(), '296.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

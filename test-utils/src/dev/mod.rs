@@ -8,6 +8,7 @@
 pub mod clickhouse;
 pub mod db;
 pub mod dendrite;
+pub mod dropbox;
 pub mod falcon;
 pub mod lldp;
 pub mod maghemite;
@@ -18,7 +19,8 @@ pub mod tcp_proxy;
 pub mod test_cmds;
 
 use anyhow::{Context, Result};
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
+use camino_tempfile::Utf8TempDir;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingIfExists;
 use dropshot::ConfigLoggingLevel;
@@ -167,4 +169,50 @@ pub fn file_checksum(path: PathBuf) -> Result<String> {
     }
 
     Ok(format!("{:x}", digest.finalize()))
+}
+
+/// Temporary directory used for tests
+///
+/// Unlike typical temporary directories, this one is preserved by default, but
+/// cleaned up if the caller invokes `cleanup_successful()`.  The usual pattern
+/// is that you create one of these in which to put temporary files, then when
+/// your test succeeds, you call `cleanup_successful()`.  If the test fails, the
+/// directory will be kept around for debugging.
+pub struct TestTempDir {
+    log: Logger,
+    tempdir: Option<Utf8TempDir>,
+}
+
+impl TestTempDir {
+    pub fn new(log: &Logger) -> Self {
+        let tempdir =
+            camino_tempfile::tempdir().expect("creating temporary directory");
+        let log = log.new(slog::o!("directory" => tempdir.path().to_string()));
+        info!(log, "created temporary directory");
+        Self { log, tempdir: Some(tempdir) }
+    }
+
+    /// Record that the test was successful and this temporary directory can be
+    /// cleaned up.
+    pub fn cleanup_successful(mut self) {
+        info!(&self.log, "cleaning up temporary directory");
+        let _ = self
+            .tempdir
+            .take()
+            .expect("cleanup_successful() called more than once?");
+    }
+
+    /// Returns the path to this temporary directory.
+    pub fn path(&self) -> &Utf8Path {
+        self.tempdir.as_ref().expect("not yet cleaned up").path()
+    }
+}
+
+impl Drop for TestTempDir {
+    fn drop(&mut self) {
+        if let Some(tempdir) = self.tempdir.take() {
+            error!(&self.log, "preserving temporary directory");
+            let _ = tempdir.keep();
+        }
+    }
 }

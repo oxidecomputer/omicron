@@ -64,8 +64,10 @@ use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::NTP_PORT;
 use omicron_common::address::ReservedRackSubnet;
 use omicron_common::address::SLED_PREFIX_LENGTH;
-use omicron_common::api::external::Generation;
 use omicron_common::api::external::Vni;
+use omicron_generation_kinds::{
+    Generation, NexusGeneration, SledConfigGeneration, TargetReleaseGeneration,
+};
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::MupdateOverrideUuid;
@@ -139,8 +141,8 @@ pub enum Error {
          expected current value is {expected} but actual value is {actual}"
     )]
     TargetReleaseMinimumGenerationMismatch {
-        expected: Generation,
-        actual: Generation,
+        expected: TargetReleaseGeneration,
+        actual: TargetReleaseGeneration,
     },
     #[error(
         "target release minimum generation was set to {current}, \
@@ -148,8 +150,8 @@ pub enum Error {
          possible table rollback which should not happen"
     )]
     TargetReleaseMinimumGenerationRollback {
-        current: Generation,
-        new: Generation,
+        current: TargetReleaseGeneration,
+        new: TargetReleaseGeneration,
     },
     #[error(transparent)]
     TufRepoContentsError(#[from] TufRepoContentsError),
@@ -361,12 +363,12 @@ pub(crate) enum Operation {
         num_zones_expunged: usize,
     },
     SetNexusGeneration {
-        current_generation: Generation,
-        new_generation: Generation,
+        current_generation: NexusGeneration,
+        new_generation: NexusGeneration,
     },
     SetTargetReleaseMinimumGeneration {
-        current_generation: Generation,
-        new_generation: Generation,
+        current_generation: TargetReleaseGeneration,
+        new_generation: TargetReleaseGeneration,
     },
     SledNoopZoneImageSourcesUpdated {
         sled_id: SledUuid,
@@ -546,8 +548,8 @@ pub struct BlueprintBuilder<'a> {
     // corresponding fields in `Blueprint`.
     cockroachdb_setting_preserve_downgrade: CockroachDbPreserveDowngrade,
     cockroachdb_fingerprint: String,
-    target_release_minimum_generation: Generation,
-    nexus_generation: Generation,
+    target_release_minimum_generation: TargetReleaseGeneration,
+    nexus_generation: NexusGeneration,
     internal_dns_version: Generation,
     external_dns_version: Generation,
 
@@ -578,8 +580,8 @@ impl<'a> BlueprintBuilder<'a> {
             parent_blueprint_id: None,
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
-            target_release_minimum_generation: Generation::new(),
-            nexus_generation: Generation::new(),
+            target_release_minimum_generation: TargetReleaseGeneration::new(),
+            nexus_generation: NexusGeneration::new(),
             external_networking_generation: Generation::new(),
             cockroachdb_fingerprint: String::new(),
             cockroachdb_setting_preserve_downgrade:
@@ -893,7 +895,7 @@ impl<'a> BlueprintBuilder<'a> {
     pub fn current_sled_incoming_sled_agent_generation(
         &self,
         sled_id: SledUuid,
-    ) -> Result<Generation, Error> {
+    ) -> Result<SledConfigGeneration, Error> {
         let editor = self.sled_editors.get(&sled_id).ok_or_else(|| {
             Error::Planner(anyhow!(
                 "tried to get incoming generation for unknown sled {sled_id}"
@@ -1708,7 +1710,7 @@ impl<'a> BlueprintBuilder<'a> {
         sled_id: SledUuid,
         image_source: BlueprintZoneImageSource,
         external_ip: ExternalNetworkingChoice,
-        nexus_generation: Generation,
+        nexus_generation: NexusGeneration,
         config: &OperatorNexusConfig<'_>,
     ) -> Result<(), Error> {
         let nexus_id = self.rng.sled_rng(sled_id).next_zone();
@@ -2280,7 +2282,7 @@ impl<'a> BlueprintBuilder<'a> {
     }
 
     /// Get the value of `target_release_minimum_generation`.
-    pub fn target_release_minimum_generation(&self) -> Generation {
+    pub fn target_release_minimum_generation(&self) -> TargetReleaseGeneration {
         self.target_release_minimum_generation
     }
 
@@ -2288,8 +2290,8 @@ impl<'a> BlueprintBuilder<'a> {
     /// new value for this blueprint.
     pub fn set_target_release_minimum_generation(
         &mut self,
-        current_generation: Generation,
-        new_generation: Generation,
+        current_generation: TargetReleaseGeneration,
+        new_generation: TargetReleaseGeneration,
     ) -> Result<(), Error> {
         if self.target_release_minimum_generation != current_generation {
             return Err(Error::TargetReleaseMinimumGenerationMismatch {
@@ -2306,13 +2308,13 @@ impl<'a> BlueprintBuilder<'a> {
     }
 
     /// Get the value of `nexus_generation`.
-    pub fn nexus_generation(&self) -> Generation {
+    pub fn nexus_generation(&self) -> NexusGeneration {
         self.nexus_generation
     }
 
     /// Given the current value of `nexus_generation`, set the new value for
     /// this blueprint.
-    pub fn set_nexus_generation(&mut self, new_generation: Generation) {
+    pub fn set_nexus_generation(&mut self, new_generation: NexusGeneration) {
         let current_generation = self.nexus_generation;
         self.nexus_generation = new_generation;
         self.record_operation(Operation::SetNexusGeneration {
@@ -2704,7 +2706,10 @@ pub(crate) enum BpMupdateOverrideNotSetReason {
     /// The sled's inventory is stale relative to the parent blueprint, so we
     /// can't trust an override observed in inventory to reflect current
     /// reality.
-    InventoryStale { parent_bp_gen: Generation, inventory_gen: Generation },
+    InventoryStale {
+        parent_bp_gen: SledConfigGeneration,
+        inventory_gen: SledConfigGeneration,
+    },
     /// The sled has not yet successfully reconciled any config, so we have no
     /// generation to compare against.
     NoLastReconciliation,
@@ -2920,7 +2925,7 @@ pub mod test {
             summary.diff.sleds.added.first_key_value().unwrap();
         assert_eq!(*sled_id, new_sled_id);
         // The generation number should be newer than the initial default.
-        assert!(new_sled.sled_agent_generation > Generation::new());
+        assert!(new_sled.sled_agent_generation > SledConfigGeneration::new());
 
         // All zones' underlay addresses ought to be on the sled's subnet.
         for z in &new_sled.zones {
@@ -3005,7 +3010,7 @@ pub mod test {
 
             for mut zone in &mut sled_config.zones {
                 zone.disposition = BlueprintZoneDisposition::Expunged {
-                    as_of_generation: Generation::new(),
+                    as_of_generation: SledConfigGeneration::new(),
                     ready_for_cleanup: false,
                 };
             }
@@ -3014,7 +3019,7 @@ pub mod test {
             }
             for mut disk in &mut sled_config.disks {
                 disk.disposition = BlueprintPhysicalDiskDisposition::Expunged {
-                    as_of_generation: Generation::new(),
+                    as_of_generation: SledConfigGeneration::new(),
                     ready_for_cleanup: false,
                 };
             }
@@ -3059,7 +3064,7 @@ pub mod test {
             &mut blueprint2.sleds.get_mut(&decommision_sled_id).unwrap().zones
         {
             z.disposition = BlueprintZoneDisposition::Expunged {
-                as_of_generation: Generation::new(),
+                as_of_generation: SledConfigGeneration::new(),
                 ready_for_cleanup: false,
             };
         }

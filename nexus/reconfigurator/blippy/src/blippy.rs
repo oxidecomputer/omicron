@@ -17,9 +17,9 @@ use nexus_types::inventory::ZpoolName;
 use omicron_common::address::DnsSubnet;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX_LENGTH;
-use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;
 use omicron_common::disk::DatasetKind;
+use omicron_generation_kinds::{Generation, NexusGeneration};
 use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -115,7 +115,7 @@ impl Kind {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum BlueprintKind {
     /// No zones exist in the blueprint using the active Nexus generation
-    NoZonesWithActiveNexusGeneration(Generation),
+    NoZonesWithActiveNexusGeneration(NexusGeneration),
 }
 
 impl fmt::Display for BlueprintKind {
@@ -242,15 +242,15 @@ pub enum SledKind {
     /// A Nexus zone exists which is too new, relative to the "active
     /// generation".
     NexusZoneGenerationTooNew {
-        active_generation: Generation,
-        zone_generation: Generation,
+        active_generation: NexusGeneration,
+        zone_generation: NexusGeneration,
         id: OmicronZoneUuid,
     },
     /// Nexus zones with the same generation have different image sources.
     NexusZoneGenerationImageSourceMismatch {
         zone1: BlueprintZoneConfig,
         zone2: BlueprintZoneConfig,
-        generation: Generation,
+        generation: NexusGeneration,
     },
 }
 

@@ -513,7 +513,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "serde",
- "serde_tokenstream",
+ "serde_tokenstream 0.2.3",
  "syn 2.0.117",
 ]
 
@@ -1463,7 +1463,7 @@ dependencies = [
  "clickhouse-admin-types-versions",
  "dropshot",
  "dropshot-api-manager-types",
- "omicron-common",
+ "omicron-generation-kinds",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "schemars 0.8.22",
@@ -1550,6 +1550,7 @@ dependencies = [
  "iddqd",
  "itertools 0.14.0",
  "omicron-common",
+ "omicron-generation-kinds",
  "omicron-workspace-hack",
  "schemars 0.8.22",
  "serde",
@@ -1637,7 +1638,6 @@ dependencies = [
  "dropshot",
  "dropshot-api-manager-types",
  "http",
- "omicron-common",
  "omicron-workspace-hack",
  "semver 1.0.28",
 ]
@@ -2431,9 +2431,9 @@ dependencies = [
 
 [[package]]
 name = "daft"
-version = "0.1.7"
+version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "49921a57f45e3bf2cc8a0c4e3a10aa342b95a481d7dd89d844c1225496957296"
+checksum = "37da1a58f7d13865d88632f596075dab24f01df73390b011d93742db7f6229a1"
 dependencies = [
  "daft-derive",
  "newtype-uuid",
@@ -2444,13 +2444,13 @@ dependencies = [
 
 [[package]]
 name = "daft-derive"
-version = "0.1.7"
+version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91850c0efee1e6dffcea4e5841ff3a71db80575a79f933d0c77e41c6fe0973d1"
+checksum = "c839348835bc8a59714d79797f2f1bca237ca043e3d2d5ce4e727606396fb834"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.117",
+ "syn 3.0.3",
 ]
 
 [[package]]
@@ -2644,7 +2644,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "serde",
- "serde_tokenstream",
+ "serde_tokenstream 0.2.3",
  "syn 2.0.117",
 ]
 
@@ -3169,6 +3169,7 @@ dependencies = [
  "internal-dns-types",
  "internal-dns-types-versions",
  "omicron-common",
+ "omicron-generation-kinds",
  "omicron-test-utils",
  "omicron-workspace-hack",
  "oxide-tokio-rt",
@@ -3480,7 +3481,7 @@ dependencies = [
  "quote",
  "semver 1.0.28",
  "serde",
- "serde_tokenstream",
+ "serde_tokenstream 0.2.3",
  "syn 2.0.117",
 ]
 
@@ -4278,7 +4279,6 @@ dependencies = [
  "dropshot-api-manager-types",
  "ereport-types",
  "gateway-types-versions",
- "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "schemars 0.8.22",
@@ -4297,7 +4297,6 @@ dependencies = [
  "gateway-client",
  "gateway-messages",
  "gateway-types",
- "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxide-tokio-rt",
@@ -5860,7 +5859,6 @@ dependencies = [
  "dropshot-api-manager-types",
  "hyper",
  "installinator-common-versions",
- "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxide-update-engine-types",
@@ -5875,7 +5873,6 @@ dependencies = [
 name = "installinator-client"
 version = "0.1.0"
 dependencies = [
- "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxide-update-engine-types",
@@ -5897,7 +5894,6 @@ dependencies = [
  "illumos-utils",
  "installinator-common-versions",
  "libc",
- "omicron-common",
  "omicron-workspace-hack",
  "oxide-update-engine",
  "oxide-update-engine-types",
@@ -5989,6 +5985,7 @@ dependencies = [
  "expectorate",
  "internal-dns-types-versions",
  "omicron-common",
+ "omicron-generation-kinds",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "schemars 0.8.22",
@@ -6003,7 +6000,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
- "omicron-common",
+ "omicron-generation-kinds",
  "omicron-workspace-hack",
  "schemars 0.8.22",
  "serde",
@@ -6033,7 +6030,6 @@ version = "0.1.0"
 dependencies = [
  "ciborium",
  "libipcc 0.1.0 (git+https://github.com/oxidecomputer/ipcc-rs?rev=524eb8f125003dff50b9703900c6b323f00f9e1b)",
- "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "proptest",
@@ -6298,7 +6294,6 @@ dependencies = [
  "async-trait",
  "hkdf 0.12.4",
  "key-manager-types",
- "omicron-common",
  "omicron-workspace-hack",
  "secrecy 0.10.3",
  "sha3 0.10.8",
@@ -7235,7 +7230,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "serde",
- "serde_tokenstream",
+ "serde_tokenstream 0.2.3",
  "syn 2.0.117",
 ]
 
@@ -7305,6 +7300,7 @@ dependencies = [
  "iddqd",
  "nexus-types",
  "omicron-common",
+ "omicron-generation-kinds",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
@@ -7428,6 +7424,7 @@ dependencies = [
  "omicron-certificates",
  "omicron-cockroach-metrics",
  "omicron-common",
+ "omicron-generation-kinds",
  "omicron-git-version",
  "omicron-passwords",
  "omicron-rpaths",
@@ -7509,6 +7506,7 @@ dependencies = [
  "nonempty",
  "omicron-cockroach-metrics",
  "omicron-common",
+ "omicron-generation-kinds",
  "omicron-passwords",
  "omicron-rpaths",
  "omicron-sled-agent",
@@ -7526,6 +7524,7 @@ dependencies = [
  "pq-sys",
  "predicates",
  "pretty_assertions",
+ "proptest",
  "qorb",
  "rand 0.9.2",
  "rcgen",
@@ -7635,6 +7634,7 @@ dependencies = [
  "nexus-reconfigurator-planning",
  "nexus-types",
  "omicron-common",
+ "omicron-generation-kinds",
  "omicron-rpaths",
  "omicron-test-utils",
  "omicron-uuid-kinds",
@@ -7698,6 +7698,7 @@ dependencies = [
  "ntp-admin-client",
  "omicron-cockroach-metrics",
  "omicron-common",
+ "omicron-generation-kinds",
  "omicron-rpaths",
  "omicron-sled-agent",
  "omicron-uuid-kinds",
@@ -7749,6 +7750,7 @@ dependencies = [
  "iddqd",
  "nexus-types",
  "omicron-common",
+ "omicron-generation-kinds",
  "omicron-passwords",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -7827,6 +7829,7 @@ dependencies = [
  "internal-dns-types",
  "nexus-types",
  "omicron-common",
+ "omicron-generation-kinds",
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -7890,6 +7893,7 @@ dependencies = [
  "nexus-reconfigurator-planning",
  "nexus-types",
  "omicron-common",
+ "omicron-generation-kinds",
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -7965,6 +7969,7 @@ dependencies = [
  "nexus-test-utils-macros",
  "nexus-types",
  "omicron-common",
+ "omicron-generation-kinds",
  "omicron-nexus",
  "omicron-rpaths",
  "omicron-test-utils",
@@ -8020,6 +8025,7 @@ dependencies = [
  "nexus-types",
  "omicron-common",
  "omicron-deployment-graph",
+ "omicron-generation-kinds",
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -8060,6 +8066,7 @@ dependencies = [
  "nexus-db-queries",
  "nexus-types",
  "omicron-common",
+ "omicron-generation-kinds",
  "omicron-rpaths",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -8077,11 +8084,13 @@ dependencies = [
  "anyhow",
  "async-bb8-diesel",
  "diesel",
+ "iddqd",
  "nexus-db-model",
  "nexus-db-queries",
  "nexus-db-schema",
  "nexus-types",
  "omicron-common",
+ "omicron-generation-kinds",
  "omicron-rpaths",
  "omicron-test-utils",
  "omicron-uuid-kinds",
@@ -8111,6 +8120,7 @@ dependencies = [
  "nexus-reconfigurator-planning",
  "nexus-types",
  "omicron-common",
+ "omicron-generation-kinds",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "petname",
@@ -8198,6 +8208,7 @@ dependencies = [
  "nexus-db-queries",
  "nexus-types",
  "omicron-common",
+ "omicron-debug-dropbox",
  "omicron-rpaths",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -8245,6 +8256,8 @@ dependencies = [
  "nexus-types-versions",
  "omicron-cockroach-admin",
  "omicron-common",
+ "omicron-debug-dropbox",
+ "omicron-generation-kinds",
  "omicron-passwords",
  "omicron-rpaths",
  "omicron-sled-agent",
@@ -8318,6 +8331,7 @@ dependencies = [
  "newtype_derive",
  "nexus-types-versions",
  "omicron-common",
+ "omicron-generation-kinds",
  "omicron-passwords",
  "omicron-test-utils",
  "omicron-uuid-kinds",
@@ -8489,7 +8503,6 @@ dependencies = [
  "dropshot-api-manager-types",
  "http",
  "ntp-admin-types-versions",
- "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "schemars 0.8.22",
@@ -8790,6 +8803,7 @@ dependencies = [
  "http",
  "illumos-utils",
  "omicron-common",
+ "omicron-generation-kinds",
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -8906,6 +8920,7 @@ dependencies = [
  "itertools 0.14.0",
  "libc",
  "macaddr",
+ "omicron-generation-kinds",
  "omicron-ledger",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -8952,6 +8967,19 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "omicron-debug-dropbox"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/omicron-debug-dropbox?rev=eb13fc7a0031261dd51a14a30a133155460f5c0a#eb13fc7a0031261dd51a14a30a133155460f5c0a"
+dependencies = [
+ "camino",
+ "derive_more 2.1.1",
+ "slog",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
+ "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]
@@ -9099,6 +9127,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "omicron-generation-kinds"
+version = "0.1.0"
+dependencies = [
+ "oxide-generation",
+ "oxide-generation-macros",
+]
+
+[[package]]
 name = "omicron-git-version"
 version = "0.1.0"
 dependencies = [
@@ -9147,6 +9183,7 @@ dependencies = [
  "nexus-reconfigurator-preparation",
  "nexus-types",
  "omicron-common",
+ "omicron-generation-kinds",
  "omicron-rpaths",
  "omicron-test-utils",
  "omicron-uuid-kinds",
@@ -9288,6 +9325,8 @@ dependencies = [
  "num-integer",
  "omicron-cockroach-metrics",
  "omicron-common",
+ "omicron-debug-dropbox",
+ "omicron-generation-kinds",
  "omicron-passwords",
  "omicron-rpaths",
  "omicron-sled-agent",
@@ -9324,6 +9363,7 @@ dependencies = [
  "range-requests",
  "raw-cpuid",
  "rcgen",
+ "reconfigurator-cli",
  "ref-cast",
  "regex",
  "reqwest 0.13.2",
@@ -9474,6 +9514,7 @@ dependencies = [
  "nexus-types",
  "ntp-admin-client",
  "omicron-common",
+ "omicron-generation-kinds",
  "omicron-git-version",
  "omicron-nexus",
  "omicron-rpaths",
@@ -9761,6 +9802,7 @@ dependencies = [
  "nix 0.31.2",
  "omicron-common",
  "omicron-ddm-admin-client",
+ "omicron-generation-kinds",
  "omicron-ledger",
  "omicron-rpaths",
  "omicron-test-utils",
@@ -9861,6 +9903,7 @@ dependencies = [
  "loopback-ip-mgr",
  "nexus-config",
  "omicron-common",
+ "omicron-debug-dropbox",
  "omicron-workspace-hack",
  "oxide-tokio-rt",
  "pem",
@@ -9870,6 +9913,7 @@ dependencies = [
  "reqwest 0.13.2",
  "rustls",
  "serde",
+ "serde_json",
  "sha2 0.10.9",
  "slog",
  "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
@@ -9932,6 +9976,8 @@ dependencies = [
  "daft",
  "data-encoding",
  "der 0.7.10",
+ "derive_more 2.1.1",
+ "derive_more-impl",
  "digest 0.10.7",
  "digest 0.11.3",
  "dof 0.3.0",
@@ -9955,7 +10001,6 @@ dependencies = [
  "gateway-messages",
  "generic-array 0.14.7",
  "getrandom 0.2.17",
- "getrandom 0.3.4",
  "getrandom 0.4.3",
  "group 0.13.0",
  "hashbrown 0.15.5",
@@ -10313,6 +10358,34 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "oxide-generation"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e130a1add81f976d13f8f3ab455de3e3fd1f1b9b796520049680dd19a385809c"
+dependencies = [
+ "daft",
+ "proptest",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "slog",
+]
+
+[[package]]
+name = "oxide-generation-macros"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "68b727e329bc9ff425bf3051e7f39986943bea27aefd6e30b43b468ca999a348"
+dependencies = [
+ "heck 0.5.0",
+ "proc-macro2",
+ "quote",
+ "serde",
+ "serde_tokenstream 0.3.0",
+ "syn 3.0.3",
 ]
 
 [[package]]
@@ -10746,10 +10819,14 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "camino",
+ "camino-tempfile",
  "chrono",
  "clap",
  "glob",
+ "illumos-nvpair",
+ "illumos-nvpair-sys",
  "jiff",
+ "libc",
  "omicron-workspace-hack",
  "rayon",
  "sigpipe",
@@ -11921,7 +11998,7 @@ dependencies = [
  "schemars 0.8.22",
  "serde",
  "serde_json",
- "serde_tokenstream",
+ "serde_tokenstream 0.2.3",
  "serde_yaml",
  "syn 2.0.117",
 ]
@@ -11939,7 +12016,7 @@ dependencies = [
  "schemars 0.8.22",
  "serde",
  "serde_json",
- "serde_tokenstream",
+ "serde_tokenstream 0.2.3",
  "serde_yaml",
  "syn 2.0.117",
 ]
@@ -12504,6 +12581,7 @@ dependencies = [
  "nexus-reconfigurator-simulation",
  "nexus-types",
  "omicron-common",
+ "omicron-generation-kinds",
  "omicron-repl-utils",
  "omicron-rpaths",
  "omicron-test-utils",
@@ -12544,7 +12622,6 @@ dependencies = [
  "internal-dns-types",
  "nexus-mgs-updates",
  "nexus-types",
- "omicron-common",
  "omicron-repl-utils",
  "omicron-workspace-hack",
  "oxide-tokio-rt",
@@ -13818,6 +13895,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_tokenstream"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "db95b8acf6eca5bc1bc771a7d7fb1a0d1485bdef0c46eec2f573bbaf4b4118f8"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "serde",
+ "syn 3.0.3",
+]
+
+[[package]]
 name = "serde_urlencoded"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -14179,6 +14268,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "omicron-common",
+ "omicron-generation-kinds",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
@@ -14215,6 +14305,7 @@ dependencies = [
  "dropshot",
  "either",
  "expectorate",
+ "filetime",
  "futures",
  "glob",
  "iddqd",
@@ -14222,8 +14313,11 @@ dependencies = [
  "installinator-common",
  "key-manager",
  "key-manager-types",
+ "libc",
  "ntp-admin-client",
  "omicron-common",
+ "omicron-debug-dropbox",
+ "omicron-generation-kinds",
  "omicron-ledger",
  "omicron-test-utils",
  "omicron-uuid-kinds",
@@ -14251,6 +14345,7 @@ dependencies = [
  "tokio",
  "trust-quorum-types",
  "tufaceous-artifact 0.2.0",
+ "walkdir",
  "xshell",
  "zone",
 ]
@@ -14282,7 +14377,6 @@ dependencies = [
  "dropshot",
  "futures",
  "illumos-utils",
- "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "serde",
@@ -14377,6 +14471,7 @@ dependencies = [
  "ntp-admin-client",
  "omicron-common",
  "omicron-ddm-admin-client",
+ "omicron-generation-kinds",
  "omicron-ledger",
  "omicron-test-utils",
  "omicron-uuid-kinds",
@@ -14540,6 +14635,7 @@ dependencies = [
  "ipnetwork",
  "itertools 0.14.0",
  "omicron-common",
+ "omicron-generation-kinds",
  "omicron-ledger",
  "omicron-passwords",
  "omicron-test-utils",
@@ -15360,7 +15456,6 @@ dependencies = [
  "nexus-networking",
  "nexus-reconfigurator-preparation",
  "nexus-types",
- "omicron-common",
  "omicron-rpaths",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -15465,6 +15560,17 @@ name = "syn"
 version = "2.0.117"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e665b8803e7b1d2a727f4023456bbbbe74da67099c585258af0ad9c5013b9b99"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "unicode-ident",
+]
+
+[[package]]
+name = "syn"
+version = "3.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "53e9bae58849f64dfa4f5d5ae372c8341f7305f82a3868709269343628b659a3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -15620,7 +15726,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.4",
  "windows-sys 0.61.2",
@@ -16954,7 +17060,7 @@ dependencies = [
  "semver 1.0.28",
  "serde",
  "serde_json",
- "serde_tokenstream",
+ "serde_tokenstream 0.2.3",
  "syn 2.0.117",
  "typify-impl",
 ]
@@ -17148,7 +17254,7 @@ dependencies = [
  "dtrace-parser 0.2.0",
  "proc-macro2",
  "quote",
- "serde_tokenstream",
+ "serde_tokenstream 0.2.3",
  "syn 2.0.117",
  "usdt-impl 0.5.0",
 ]
@@ -17162,7 +17268,7 @@ dependencies = [
  "dtrace-parser 0.3.0",
  "proc-macro2",
  "quote",
- "serde_tokenstream",
+ "serde_tokenstream 0.2.3",
  "syn 2.0.117",
  "usdt-impl 0.6.0",
 ]
@@ -17215,7 +17321,7 @@ dependencies = [
  "dtrace-parser 0.2.0",
  "proc-macro2",
  "quote",
- "serde_tokenstream",
+ "serde_tokenstream 0.2.3",
  "syn 2.0.117",
  "usdt-impl 0.5.0",
 ]
@@ -17229,7 +17335,7 @@ dependencies = [
  "dtrace-parser 0.3.0",
  "proc-macro2",
  "quote",
- "serde_tokenstream",
+ "serde_tokenstream 0.2.3",
  "syn 2.0.117",
  "usdt-impl 0.6.0",
 ]
@@ -17818,8 +17924,6 @@ dependencies = [
  "bootstrap-agent-lockstep-types",
  "dropshot",
  "gateway-client",
- "omicron-common",
- "omicron-passwords",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "schemars 0.8.22",

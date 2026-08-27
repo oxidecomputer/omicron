@@ -1220,7 +1220,7 @@ mod tests {
     use nexus_types::internal_api::params::DnsConfigParams;
     use omicron_common::address::REPO_DEPOT_PORT;
     use omicron_common::address::get_sled_address;
-    use omicron_common::api::external::Generation;
+    use omicron_generation_kinds::{Generation, NexusGeneration};
     use omicron_test_utils::dev::test_setup_log;
     use sled_agent_types::inventory::{OmicronZoneConfig, ZoneKind};
     use slog_error_chain::InlineErrorChain;
@@ -1563,7 +1563,7 @@ mod tests {
         let dns_config = blueprint_internal_dns_config(
             &blueprint,
             &sleds_by_id,
-            Generation::new(),
+            NexusGeneration::new(),
             &overridables::DEFAULT,
         )
         .expect("built DNS configuration");
@@ -1767,6 +1767,7 @@ mod tests {
                 | ServiceName::OximeterReader
                 | ServiceName::RepoDepot
                 | ServiceName::ManagementGatewayService
+                | ServiceName::SwitchSledAgent
                 | ServiceName::Dendrite
                 | ServiceName::Lldpd
                 | ServiceName::Mgd

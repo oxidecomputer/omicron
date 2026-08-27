@@ -64,7 +64,7 @@ use crate::names::{BOUNDARY_NTP_DNS_NAME, DNS_ZONE, ServiceName};
 use anyhow::{anyhow, ensure};
 use core::fmt;
 use omicron_common::address::{CLICKHOUSE_ADMIN_PORT, CLICKHOUSE_TCP_PORT};
-use omicron_common::api::external::Generation;
+use omicron_generation_kinds::Generation;
 use omicron_uuid_kinds::{OmicronZoneUuid, SledUuid};
 use std::collections::BTreeMap;
 use std::net::{Ipv6Addr, SocketAddrV6};
@@ -758,7 +758,7 @@ mod test {
         DnsConfigBuilder, DnsRecord, Host, HostSwitchZonePorts, ServiceName,
     };
     use crate::{config::Zone, names::DNS_ZONE};
-    use omicron_common::api::external::Generation;
+    use omicron_generation_kinds::Generation;
     use omicron_uuid_kinds::{OmicronZoneUuid, SledUuid};
     use std::{
         collections::BTreeMap, io::Write, net::Ipv6Addr, net::SocketAddrV6,

@@ -143,6 +143,8 @@ pub struct PortInput {
     pub lldp: Vec<LldpInput>,
     /// The port's TX-EQ overrides. Only the first entry is used today.
     pub tx_eq: Vec<TxEqConfig>,
+    /// Whether DDM traffic is permitted on this port.
+    pub allow_ddm_traffic: bool,
 }
 
 /// An IP address assigned to a port.
@@ -460,7 +462,7 @@ pub fn build_rack_network_config(
                     management_addrs: c.management_ip.map(|ip| vec![ip]),
                 }),
             tx_eq,
-            allow_ddm_traffic: false,
+            allow_ddm_traffic: port.allow_ddm_traffic,
         };
 
         ports.push(port_config);
@@ -540,6 +542,7 @@ mod tests {
             routes: vec![],
             lldp: vec![],
             tx_eq: vec![],
+            allow_ddm_traffic: false,
         }
     }
 

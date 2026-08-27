@@ -5,11 +5,10 @@
 //! Background task for propagating user provided switch configurations
 //! to the bootstore via sled-agent
 
-use crate::app::{
-    background::LoadedTargetBlueprint, switch_zone_address_mappings,
-};
+use crate::app::background::LoadedTargetBlueprint;
 
 use internal_dns_resolver::Resolver;
+use internal_dns_types::names::ServiceName;
 use nexus_db_model::{BootstoreConfig, NETWORK_KEY};
 use tokio::sync::watch;
 
@@ -21,23 +20,16 @@ use nexus_db_queries::{context::OpContext, db::DataStore};
 use nexus_types::identity::Asset;
 use nexus_types::internal_api::background::IncompleteBootstoreConfigReport;
 use nexus_types::internal_api::background::SwitchPortSettingsManagerStatus;
-use omicron_common::{
-    address::{Ipv6Subnet, get_sled_address},
-    api::external::DataPageParams,
-};
+use omicron_common::api::external::DataPageParams;
 use serde_json::json;
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::early_networking::RackNetworkConfig;
-use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::system_networking::BlueprintExternalNetworkingConfig;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use sled_agent_types::system_networking::WriteNetworkConfigRequest;
 use slog_error_chain::InlineErrorChain;
-use std::{
-    collections::{HashMap, HashSet},
-    hash::Hash,
-    sync::Arc,
-};
+use std::net::SocketAddrV6;
+use std::{collections::HashSet, hash::Hash, sync::Arc};
 
 pub struct SwitchPortSettingsManager {
     datastore: Arc<DataStore>,
@@ -89,24 +81,26 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 let rack_id = rack.id().to_string();
                 let log = log.new(slog::o!("rack_id" => rack_id));
 
-                // lookup switch zones via DNS
-                // TODO https://github.com/oxidecomputer/omicron/issues/5201
-                let mappings = match
-                    switch_zone_address_mappings(&self.resolver, &log).await
+                // Lookup the SocketAddrs for all switch sled-agents
+                let scrimlet_addrs = match self.resolver
+                    .lookup_all_socket_v6(ServiceName::SwitchSledAgent)
+                    .await
                 {
-                    Ok(mappings) => mappings,
+                    Ok(addrs) => addrs,
                     Err(e) => {
-                        error!(
-                            log,
-                            "failed to resolve addresses for switch services";
-                            "error" => %e);
+                        error!(log, "failed to resolve addresses for switch sled agents"; "error" => %e);
                         continue;
-                    },
+                    }
                 };
 
+                // This might be true while waiting for information to get populated into DNS
+                if scrimlet_addrs.is_empty() {
+                        error!(log, "no switch sled agents found in DNS");
+                        continue;
+                }
+
                 // TODO https://github.com/oxidecomputer/omicron/issues/5201
-                // build sled agent clients for sleds that are connected to the switches
-                let scrimlet_sled_agent_clients = build_sled_agent_clients(&mappings, &log);
+                let scrimlet_sled_agent_clients = build_sled_agent_clients(scrimlet_addrs, &log);
 
                 //
                 // calculate and apply bootstore changes
@@ -338,12 +332,12 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     // push the updates to both scrimlets
                     // if both scrimlets are down, bootstore updates aren't happening anyway
                     let mut one_succeeded = false;
-                    for (switch_slot, client) in &scrimlet_sled_agent_clients {
+                    for client in &scrimlet_sled_agent_clients {
                         if let Err(e) = client.write_network_bootstore_config(&write_request).await {
                             error!(
                                 log,
                                 "error updating bootstore";
-                                "switch_slot" => ?switch_slot,
+                                "client" => ?client,
                                 "request" => ?write_request,
                                 "error" => %e,
                             )
@@ -408,23 +402,18 @@ where
 }
 
 fn build_sled_agent_clients(
-    mappings: &HashMap<SwitchSlot, std::net::Ipv6Addr>,
+    sled_agent_addrs: Vec<SocketAddrV6>,
     log: &slog::Logger,
-) -> HashMap<SwitchSlot, sled_agent_client::Client> {
-    let sled_agent_clients: HashMap<SwitchSlot, sled_agent_client::Client> =
-        mappings
-            .iter()
-            .map(|(switch_slot, addr)| {
-                // build sled agent address from switch zone address
-                let addr = get_sled_address(Ipv6Subnet::new(*addr));
-                let client = sled_agent_client::Client::new(
-                    &format!("http://{}", addr),
-                    log.clone(),
-                );
-                (*switch_slot, client)
-            })
-            .collect();
-    sled_agent_clients
+) -> Vec<sled_agent_client::Client> {
+    sled_agent_addrs
+        .iter()
+        .map(|addr| {
+            sled_agent_client::Client::new(
+                &format!("http://{addr}"),
+                log.clone(),
+            )
+        })
+        .collect()
 }
 
 // Helper to decide whether we should update the replicated bootstore.
@@ -636,8 +625,8 @@ fn does_bootstore_need_update(
 mod tests {
     use super::*;
     use iddqd::IdOrdMap;
-    use omicron_common::api::external::Generation;
     use omicron_common::api::external::Vni;
+    use omicron_generation_kinds::Generation;
     use omicron_test_utils::dev::test_setup_log;
     use sled_agent_types::early_networking::PortConfig;
     use sled_agent_types::early_networking::UplinkPorts;

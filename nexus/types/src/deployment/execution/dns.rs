@@ -9,7 +9,8 @@ use internal_dns_types::{
     config::DnsConfigBuilder,
     names::{ServiceName, ZONE_APEX_NAME},
 };
-use omicron_common::api::external::{Generation, Name};
+use omicron_common::api::external::Name;
+use omicron_generation_kinds::NexusGeneration;
 
 use crate::{
     deployment::{
@@ -28,7 +29,7 @@ use super::{
 pub fn blueprint_internal_dns_config(
     blueprint: &Blueprint,
     sleds_by_id: &IdOrdMap<Sled>,
-    active_nexus_generation: Generation,
+    active_nexus_generation: NexusGeneration,
     overrides: &Overridables,
 ) -> anyhow::Result<DnsConfigZone> {
     // The DNS names configured here should match what RSS configures for the
@@ -147,8 +148,42 @@ pub fn blueprint_internal_dns_config(
         )?;
     }
 
-    let scrimlets = sleds_by_id.iter().filter(|sled| sled.is_scrimlet());
-    for scrimlet in scrimlets {
+    // Scrimlets have two extra DNS registrations: `SwitchSledAgent` (so
+    // `sync_switch_configuration` can find the right sled-agent address
+    // regardless of port) and `RepoDepot` (handled here alongside
+    // `SwitchSledAgent` to avoid a double `host_sled()` call in the
+    // RepoDepot loop below).
+    //
+    // We currently limit the repo depot backends to keep us under current DNS
+    // limits.  See oxidecomputer/omicron#6342.  This number is chosen somewhat
+    // arbitrarily: it's small enough to fit under the DNS limit, but enough
+    // to give some redundancy.  We're implicitly assuming iteration over
+    // `sleds_by_id` will be stable so that we're not thrashing on the DNS
+    // names.
+    let mut nrepo_depots = 6;
+
+    for scrimlet in sleds_by_id.iter().filter(|sled| sled.is_scrimlet()) {
+        let address = scrimlet.sled_agent_address();
+        let switch_sled =
+            dns_builder.host_sled(scrimlet.id(), *address.ip())?;
+
+        dns_builder.service_backend_sled(
+            ServiceName::SwitchSledAgent,
+            &switch_sled,
+            address.port(),
+        )?;
+
+        if SledFilter::TufArtifactReplication.matches_policy(scrimlet.policy())
+            && nrepo_depots > 0
+        {
+            dns_builder.service_backend_sled(
+                ServiceName::RepoDepot,
+                &switch_sled,
+                scrimlet.repo_depot_address().port(),
+            )?;
+            nrepo_depots -= 1;
+        }
+
         let sled_subnet = scrimlet.subnet();
         let switch_zone_ip =
             overrides.switch_zone_ip(scrimlet.id(), sled_subnet);
@@ -166,15 +201,7 @@ pub fn blueprint_internal_dns_config(
     // replicated synchronously or atomically to all instances.  That is: a
     // consumer should be careful when fetching an artifact about whether they
     // really can just pick any backend of this service or not.
-    //
-    // We currently limit the repo depot backends to keep us under current DNS
-    // limits.  See oxidecomputer/omicron#6342.  This number is chosen somewhat
-    // arbitrarily: it's small enough to fit under the DNS limit, but enough
-    // to give some redundancy.  We're implicitly assuming iteration over
-    // `sleds_by_id` will be stable so that we're not thrashing on the DNS
-    // names.
-    let mut nrepo_depots = 6;
-    for sled in sleds_by_id {
+    for sled in sleds_by_id.iter().filter(|sled| !sled.is_scrimlet()) {
         if !SledFilter::TufArtifactReplication.matches_policy(sled.policy()) {
             continue;
         }
@@ -198,7 +225,7 @@ pub fn blueprint_external_dns_config<'a>(
     blueprint: &Blueprint,
     silos: impl IntoIterator<Item = &'a Name>,
     external_dns_zone_name: String,
-    active_nexus_generation: Generation,
+    active_nexus_generation: NexusGeneration,
 ) -> DnsConfigZone {
     let nexus_external_ips =
         blueprint_nexus_external_ips(blueprint, active_nexus_generation);

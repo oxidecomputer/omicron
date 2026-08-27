@@ -24,14 +24,13 @@ use dropshot::Body;
 use dropshot::HttpError;
 use futures::Stream;
 use iddqd::IdOrdMap;
-use omicron_common::api::external::{
-    ByteCount, Error, Generation, ResourceType,
-};
+use omicron_common::api::external::{ByteCount, Error, ResourceType};
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::shared::{
     ResolvedVpcRoute, ResolvedVpcRouteSet, ResolvedVpcRouteState, RouterId,
     RouterKind, RouterVersion, VirtualNetworkInterfaceHost,
 };
+use omicron_generation_kinds::Generation;
 use omicron_uuid_kinds::{
     DatasetUuid, GenericUuid, PhysicalDiskUuid, PropolisUuid, SledUuid,
     SupportBundleUuid, ZpoolUuid,
@@ -899,7 +898,11 @@ impl SledAgent {
         Ok(Inventory {
             sled_id: self.id,
             sled_agent_address,
-            sled_role: SledRole::Scrimlet,
+            sled_role: if self.config.is_scrimlet {
+                SledRole::Scrimlet
+            } else {
+                SledRole::Gimlet
+            },
             baseboard_id: self.config.hardware.baseboard.clone().into(),
             usable_hardware_threads: self.config.hardware.hardware_threads,
             usable_physical_ram: ByteCount::try_from(
