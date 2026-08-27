@@ -3390,7 +3390,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.support_bundle_data_selection_time_ran
 
     PRIMARY KEY (bundle_id),
     CONSTRAINT start_before_end CHECK (
-        start_time IS NULL OR end_time IS NULL OR start_time <= end_time
+        end_time IS NULL OR start_time <= end_time
     )
 );
 
