@@ -39,6 +39,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (51, RETIRE_UP_TO_VERSION_23),
     (50, TYPED_SLED_CONFIG_GENERATION),
     (49, ADD_UPDATE_DISPOSITION),
     (48, ALLOW_DDM_TRAFFIC),
@@ -86,7 +87,6 @@ api_versions!([
     (6, ADD_PROBE_PUT_ENDPOINT),
     (5, NEWTYPE_UUID_BUMP),
     (4, ADD_NEXUS_LOCKSTEP_PORT_TO_INVENTORY),
-    (3, ADD_SWITCH_ZONE_OPERATOR_POLICY),
     // Versions before this have been retired. We no longer support in any
     // server, nor expect it from any client.
 ]);
@@ -1588,7 +1588,6 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/debug/switch-zone-policy",
-        versions = VERSION_ADD_SWITCH_ZONE_OPERATOR_POLICY..,
     }]
     async fn debug_operator_switch_zone_policy_get(
         request_context: RequestContext<Self::Context>,
@@ -1608,7 +1607,6 @@ pub trait SledAgentApi {
     #[endpoint {
         method = PUT,
         path = "/debug/switch-zone-policy",
-        versions = VERSION_ADD_SWITCH_ZONE_OPERATOR_POLICY..,
     }]
     async fn debug_operator_switch_zone_policy_put(
         request_context: RequestContext<Self::Context>,

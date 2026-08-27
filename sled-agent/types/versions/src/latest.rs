@@ -33,7 +33,7 @@ pub mod dataset {
 }
 
 pub mod debug {
-    pub use crate::v3::debug::OperatorSwitchZonePolicy;
+    pub use crate::v51::debug::OperatorSwitchZonePolicy;
 }
 
 pub mod diagnostics {
