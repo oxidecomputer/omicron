@@ -11,12 +11,24 @@ use sled_agent_config_reconciler::CurrentUpdateDisposition;
 use sled_agent_types::inventory::OmicronSledUpdateDisposition;
 use std::collections::BTreeMap;
 use std::collections::btree_map;
-use tokio::sync::watch;
+use std::sync::Arc;
+use std::sync::RwLock;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InstanceManagerJobsStatus {
     pub update_disposition: CurrentUpdateDisposition,
     pub num_registered_vmms: usize,
+}
+
+#[derive(Debug)]
+pub struct InstanceManagerJobsStatusReceiver {
+    status: Arc<RwLock<InstanceManagerJobsStatus>>,
+}
+
+impl InstanceManagerJobsStatusReceiver {
+    pub fn read(&self) -> InstanceManagerJobsStatus {
+        *self.status.read().unwrap()
+    }
 }
 
 #[derive(Debug)]
@@ -41,8 +53,8 @@ pub(super) enum CanEnsureVmmResult<'a, T> {
 ///    disallowed by the disposition, or the VMM can be registered; in the third
 ///    case the returned value includes a [`RegisterNewVmm`] which provides
 ///    [`RegisterNewVmm::insert()`].
-/// 3. The status of VMM registrations is available via the watch receiver
-///    returned by [`Jobs::new()`]. This contains information relevant to
+/// 3. The status of VMM registrations is available via receivers returned by
+///    [`Jobs::status_receiver()`]. This contains information relevant to
 ///    Reconfigurator for determining when a sled is fully evacuated for an
 ///    update.
 //
@@ -50,37 +62,32 @@ pub(super) enum CanEnsureVmmResult<'a, T> {
 // `Instance`s; prod code always uses the default type.
 pub(super) struct Jobs<T = Instance> {
     // Invariant: `jobs.len()` is always equal to
-    // `status_tx.num_registered_vmms`. This is enforced by `Jobs::remove()` and
-    // `RegisterNewVmm::insert()` below, which always update
-    // `status_tx.num_registered_vmms` when modifying the contents of `jobs`.
+    // `status.num_registered_vmms`. This is enforced by `Jobs::remove()` and
+    // `RegisterNewVmm::insert()` below, which always update `status` when
+    // modifying the contents of `jobs`.
     jobs: BTreeMap<PropolisUuid, T>,
-    status_tx: watch::Sender<InstanceManagerJobsStatus>,
+    status: Arc<RwLock<InstanceManagerJobsStatus>>,
 }
 
 impl<T> Jobs<T> {
-    pub(super) fn new(
-        update_disposition: CurrentUpdateDisposition,
-    ) -> (Self, watch::Receiver<InstanceManagerJobsStatus>) {
-        let (status_tx, status_rx) =
-            watch::channel(InstanceManagerJobsStatus {
-                update_disposition,
-                num_registered_vmms: 0,
-            });
-        (Self { jobs: BTreeMap::new(), status_tx }, status_rx)
+    pub(super) fn new(update_disposition: CurrentUpdateDisposition) -> Self {
+        let status = Arc::new(RwLock::new(InstanceManagerJobsStatus {
+            update_disposition,
+            num_registered_vmms: 0,
+        }));
+        Self { jobs: BTreeMap::new(), status }
+    }
+
+    pub(super) fn status_receiver(&self) -> InstanceManagerJobsStatusReceiver {
+        InstanceManagerJobsStatusReceiver { status: Arc::clone(&self.status) }
     }
 
     pub(super) fn set_update_disposition(
         &mut self,
         disposition: CurrentUpdateDisposition,
     ) {
-        self.status_tx.send_if_modified(|status| {
-            if status.update_disposition != disposition {
-                status.update_disposition = disposition;
-                true
-            } else {
-                false
-            }
-        });
+        let mut status = self.status.write().unwrap();
+        status.update_disposition = disposition;
     }
 
     pub(super) fn get(&self, propolis_id: &PropolisUuid) -> Option<&T> {
@@ -90,9 +97,8 @@ impl<T> Jobs<T> {
     pub(super) fn remove(&mut self, propolis_id: &PropolisUuid) -> Option<T> {
         let old = self.jobs.remove(propolis_id);
         if old.is_some() {
-            self.status_tx.send_modify(|status| {
-                status.num_registered_vmms -= 1;
-            });
+            let mut status = self.status.write().unwrap();
+            status.num_registered_vmms -= 1;
         }
         old
     }
@@ -112,7 +118,7 @@ impl<T> Jobs<T> {
             }
             btree_map::Entry::Vacant(entry) => {
                 // Otherwise, are we allowed to ensure new VMMs?
-                match self.status_tx.borrow().update_disposition {
+                match self.status.read().unwrap().update_disposition {
                     CurrentUpdateDisposition::ConfigNotAvailable => {
                         CanEnsureVmmResult::CannotRegister(
                             VmmRegistrationDisallowedReason::ConfigNotYetLoaded,
@@ -127,7 +133,7 @@ impl<T> Jobs<T> {
                         OmicronSledUpdateDisposition::Available,
                     ) => CanEnsureVmmResult::CanRegister(RegisterNewVmm {
                         entry,
-                        status_tx: &self.status_tx,
+                        status: &self.status,
                     }),
                 }
             }
@@ -138,14 +144,15 @@ impl<T> Jobs<T> {
 #[derive(Debug)]
 pub(super) struct RegisterNewVmm<'a, T> {
     entry: btree_map::VacantEntry<'a, PropolisUuid, T>,
-    status_tx: &'a watch::Sender<InstanceManagerJobsStatus>,
+    status: &'a RwLock<InstanceManagerJobsStatus>,
 }
 
 impl<'a, T> RegisterNewVmm<'a, T> {
     pub(super) fn insert(self, instance: T) -> &'a T {
-        self.status_tx.send_modify(|status| {
+        {
+            let mut status = self.status.write().unwrap();
             status.num_registered_vmms += 1;
-        });
+        }
         self.entry.insert(instance)
     }
 }
@@ -230,21 +237,16 @@ mod tests {
         // Assert that the contents of the model (`self`) exactly match what's
         // been tracked by `jobs`.
         fn assert_matches(&self, jobs: &Jobs<usize>) {
-            assert_eq!(
-                self.disposition,
-                jobs.status_tx.borrow().update_disposition
-            );
-
             let expected_jobs = self
                 .jobs
                 .iter()
                 .map(|(k, v)| (fake_id_to_propolis_uuid(*k), *v))
                 .collect::<BTreeMap<_, _>>();
             assert_eq!(expected_jobs, jobs.jobs);
-            assert_eq!(
-                expected_jobs.len(),
-                jobs.status_tx.borrow().num_registered_vmms
-            );
+
+            let status = jobs.status.read().unwrap();
+            assert_eq!(self.disposition, status.update_disposition);
+            assert_eq!(expected_jobs.len(), status.num_registered_vmms);
         }
     }
 
@@ -254,7 +256,7 @@ mod tests {
         ops: Vec<Op>,
     ) {
         let mut model = Model::new(initial_disposition);
-        let (mut jobs, _) = Jobs::<usize>::new(initial_disposition);
+        let mut jobs = Jobs::<usize>::new(initial_disposition);
 
         for op in ops {
             match op {

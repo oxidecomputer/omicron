@@ -29,12 +29,13 @@ use sled_agent_types::instance::*;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
-use tokio::sync::{mpsc, oneshot, watch};
+use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
 mod jobs;
 
 use self::jobs::CanEnsureVmmResult;
+use self::jobs::InstanceManagerJobsStatusReceiver;
 use self::jobs::Jobs;
 
 pub(crate) use self::jobs::InstanceManagerJobsStatus;
@@ -134,13 +135,13 @@ struct InstanceManagerInternal {
 pub struct InstanceManager {
     inner: Arc<InstanceManagerInternal>,
 
-    // Watch channel receiver that allows us to report on the current status of
-    // `Jobs`, including both whether we're rejecting new VMM registrations and
-    // how many VMM registrations currently exist.
+    // Receiver that allows us to report on the current status of `Jobs`,
+    // including both whether we're rejecting new VMM registrations and how many
+    // VMM registrations currently exist.
     //
     // Reconfigurator uses this information to determine when this sled is done
     // being evacuated for update.
-    jobs_status_rx: watch::Receiver<InstanceManagerJobsStatus>,
+    jobs_status_rx: InstanceManagerJobsStatusReceiver,
 }
 
 impl InstanceManager {
@@ -195,8 +196,8 @@ impl InstanceManager {
         let (terminate_tx, terminate_rx) = mpsc::unbounded_channel();
 
         let log = log.new(o!("component" => "InstanceManager"));
-        let (jobs, jobs_status_rx) =
-            Jobs::new(update_disposition_rx.current_and_update());
+        let jobs = Jobs::new(update_disposition_rx.current_and_update());
+        let jobs_status_rx = jobs.status_receiver();
         let runner = InstanceManagerRunner {
             log: log.clone(),
             rx,
@@ -230,7 +231,7 @@ impl InstanceManager {
     // TODO: Plumb this status through inventory. Part of omicron#11121.
     #[allow(unused)]
     pub fn jobs_status(&self) -> InstanceManagerJobsStatus {
-        *self.jobs_status_rx.borrow()
+        self.jobs_status_rx.read()
     }
 
     pub async fn ensure_registered(
