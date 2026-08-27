@@ -16,7 +16,6 @@ use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::identity::Resource;
 use crate::db::model::ByteCount;
-use crate::db::model::Generation;
 use crate::db::model::Instance;
 use crate::db::model::InstanceAutoRestart;
 use crate::db::model::InstanceAutoRestartPolicy;
@@ -48,6 +47,7 @@ use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::Disk;
+use nexus_db_model::to_db_typed_generation;
 use nexus_types::external_api::instance as instance_types;
 use nexus_types::internal_api::background::ReincarnationReason;
 use omicron_common::api;
@@ -64,6 +64,7 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::bail_unless;
+use omicron_generation_kinds::InstanceUpdaterGeneration;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
@@ -213,7 +214,7 @@ pub struct InstanceGestalt {
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct UpdaterLock {
     pub updater_id: Uuid,
-    locked_gen: Generation,
+    locked_gen: InstanceUpdaterGeneration,
 }
 
 /// Errors returned by [`DataStore::instance_updater_lock`].
@@ -1581,7 +1582,8 @@ impl DataStore {
         // *same* instance at the same time. So, idempotency is probably more
         // important than handling that extremely unlikely edge case.
         let mut did_lock = false;
-        let mut locked_gen = instance.updater_gen;
+        let mut locked_gen =
+            InstanceUpdaterGeneration::from(instance.updater_gen);
         loop {
             match instance.updater_id {
                 // If the `updater_id` field is not null and the ID equals this
@@ -1615,8 +1617,9 @@ impl DataStore {
             }
 
             // Okay, now attempt to acquire the lock
-            let current_gen = instance.updater_gen;
-            locked_gen = Generation(current_gen.0.next());
+            let current_gen =
+                InstanceUpdaterGeneration::from(instance.updater_gen);
+            locked_gen = current_gen.next();
             slog::debug!(
                 &opctx.log,
                 "attempting to acquire instance updater lock";
@@ -1639,9 +1642,12 @@ impl DataStore {
                     // This query is used equivalently to an atomic
                     // compare-and-swap instruction in the implementation of a
                     // non-distributed, single-process mutex.
-                    .filter(dsl::updater_gen.eq(current_gen))
+                    .filter(
+                        dsl::updater_gen
+                            .eq(to_db_typed_generation(current_gen)),
+                    )
                     .set((
-                        dsl::updater_gen.eq(locked_gen),
+                        dsl::updater_gen.eq(to_db_typed_generation(locked_gen)),
                         dsl::updater_id.eq(Some(updater_id)),
                     ))
                     .check_if_exists::<Instance>(instance_id)
@@ -1743,15 +1749,15 @@ impl DataStore {
         use nexus_db_schema::schema::instance::dsl;
         let &UpdaterLock { updater_id: parent_id, locked_gen } = parent_lock;
         let instance_id = authz_instance.id();
-        let new_gen = Generation(locked_gen.0.next());
+        let new_gen = locked_gen.next();
 
         let result = diesel::update(dsl::instance)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(instance_id))
-            .filter(dsl::updater_gen.eq(locked_gen))
+            .filter(dsl::updater_gen.eq(to_db_typed_generation(locked_gen)))
             .filter(dsl::updater_id.eq(parent_id))
             .set((
-                dsl::updater_gen.eq(new_gen),
+                dsl::updater_gen.eq(to_db_typed_generation(new_gen)),
                 dsl::updater_id.eq(Some(child_lock_id)),
             ))
             .check_if_exists::<Instance>(instance_id)
@@ -1812,7 +1818,10 @@ impl DataStore {
                     "parent_id" => %parent_id,
                     "parent_gen" => ?locked_gen,
                 );
-                debug_assert_eq!(found.updater_gen, new_gen);
+                debug_assert_eq!(
+                    InstanceUpdaterGeneration::from(found.updater_gen),
+                    new_gen
+                );
                 Ok(UpdaterLock {
                     updater_id: child_lock_id,
                     locked_gen: new_gen,
@@ -1860,9 +1869,9 @@ impl DataStore {
             .filter(dsl::updater_id.eq(Some(updater_id)))
             // - the provided updater generation matches the current updater
             //   generation.
-            .filter(dsl::updater_gen.eq(locked_gen))
+            .filter(dsl::updater_gen.eq(to_db_typed_generation(locked_gen)))
             .set((
-                dsl::updater_gen.eq(Generation(locked_gen.0.next())),
+                dsl::updater_gen.eq(to_db_typed_generation(locked_gen.next())),
                 dsl::updater_id.eq(None::<Uuid>),
             ))
             .check_if_exists::<Instance>(instance_id)
@@ -1912,7 +1921,9 @@ impl DataStore {
             UpdateAndQueryResult { ref found, .. }
                 if found.updater_id != Some(updater_id) =>
             {
-                if found.updater_gen > locked_gen {
+                if InstanceUpdaterGeneration::from(found.updater_gen)
+                    > locked_gen
+                {
                     // The generation has advanced past the generation where we
                     // acquired the lock. That's totally fine: a previous
                     // execution of the same saga action must have unlocked it,
@@ -2021,10 +2032,10 @@ impl DataStore {
             .filter(dsl::updater_id.eq(Some(updater_id)))
             // - the provided updater generation matches the current updater
             //   generation.
-            .filter(dsl::updater_gen.eq(locked_gen))
+            .filter(dsl::updater_gen.eq(to_db_typed_generation(locked_gen)))
             .filter(dsl::state_generation.lt(new_runtime.generation))
             .set((
-                dsl::updater_gen.eq(Generation(locked_gen.0.next())),
+                dsl::updater_gen.eq(to_db_typed_generation(locked_gen.next())),
                 dsl::updater_id.eq(None::<Uuid>),
                 new_runtime.clone(),
                 IntentUpdate { intended_state: new_intent },
@@ -2078,7 +2089,8 @@ impl DataStore {
             UpdateAndQueryResult { ref found, .. }
                 if u64::from(found.runtime().generation.0)
                     != prev_state_gen
-                    && found.updater_gen != locked_gen =>
+                    && InstanceUpdaterGeneration::from(found.updater_gen)
+                        != locked_gen =>
             {
                 debug_assert_ne!(found.updater_id, Some(updater_id));
                 debug!(
@@ -2103,7 +2115,8 @@ impl DataStore {
             UpdateAndQueryResult { ref found, .. }
                 if u64::from(found.runtime().generation.0)
                     != prev_state_gen
-                    && found.updater_gen == locked_gen
+                    && InstanceUpdaterGeneration::from(found.updater_gen)
+                        == locked_gen
                     && found.updater_id == Some(updater_id) =>
             {
                 info!(
@@ -2259,6 +2272,7 @@ impl DataStore {
 mod tests {
     use super::*;
     use crate::db::datastore::sled;
+    use crate::db::model::Generation;
     use crate::db::pagination::Paginator;
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_db_lookup::LookupPath;
@@ -2704,9 +2718,12 @@ mod tests {
             dbg!(datastore.instance_refetch(&opctx, &authz_instance).await)
                 .expect("instance should exist");
         assert_eq!(instance.updater_id, Some(saga1));
-        assert_eq!(instance.updater_gen, lock1.locked_gen);
+        assert_eq!(
+            InstanceUpdaterGeneration::from(instance.updater_gen),
+            lock1.locked_gen
+        );
 
-        let next_gen = Generation(lock1.locked_gen.0.next());
+        let next_gen = lock1.locked_gen.next();
 
         // unlocking with the correct ID should succeed.
         let unlocked = dbg!(
@@ -2721,7 +2738,10 @@ mod tests {
             dbg!(datastore.instance_refetch(&opctx, &authz_instance).await)
                 .expect("instance should exist");
         assert_eq!(instance.updater_id, None);
-        assert_eq!(instance.updater_gen, next_gen);
+        assert_eq!(
+            InstanceUpdaterGeneration::from(instance.updater_gen),
+            next_gen
+        );
 
         // unlocking with the lock holder's ID *again* at a new generation
         // (where the lock is no longer held) shouldn't do anything
