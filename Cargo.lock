@@ -1759,27 +1759,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "common"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dendrite?rev=cc0c307c617f2988aafdca4e3bd35ea178b64801#cc0c307c617f2988aafdca4e3bd35ea178b64801"
-dependencies = [
- "anyhow",
- "chrono",
- "oxnet",
- "rand 0.9.2",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "slog",
- "slog-async",
- "slog-bunyan",
- "slog-term",
- "smf 0.10.0",
- "thiserror 1.0.69",
- "tokio",
-]
-
-[[package]]
 name = "compact_str"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3323,30 +3302,6 @@ dependencies = [
  "oxnet",
  "progenitor 0.14.0",
  "regress 0.11.1",
- "reqwest 0.13.2",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "slog",
- "tokio",
- "transceiver-controller 0.1.1 (git+https://github.com/oxidecomputer/transceiver-control?branch=main)",
- "uuid",
-]
-
-[[package]]
-name = "dpd-client"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dendrite?rev=cc0c307c617f2988aafdca4e3bd35ea178b64801#cc0c307c617f2988aafdca4e3bd35ea178b64801"
-dependencies = [
- "async-trait",
- "chrono",
- "common 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=cc0c307c617f2988aafdca4e3bd35ea178b64801)",
- "crc8",
- "futures",
- "http",
- "oxnet",
- "progenitor 0.13.0",
- "regress 0.10.5",
  "reqwest 0.13.2",
  "schemars 0.8.22",
  "serde",
@@ -9737,7 +9692,6 @@ dependencies = [
  "derive_more 0.99.20",
  "dice-verifier 0.3.0-pre0 (git+https://github.com/oxidecomputer/dice-util?branch=main)",
  "display-error-chain",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=cc0c307c617f2988aafdca4e3bd35ea178b64801)",
  "dropshot",
  "expectorate",
  "flate2",
@@ -9805,7 +9759,6 @@ dependencies = [
  "sled-agent-bootstrap-common",
  "sled-agent-client",
  "sled-agent-config-reconciler",
- "sled-agent-early-networking",
  "sled-agent-health-monitor",
  "sled-agent-measurements",
  "sled-agent-multirack-join",
@@ -14316,22 +14269,6 @@ dependencies = [
  "walkdir",
  "xshell",
  "zone",
-]
-
-[[package]]
-name = "sled-agent-early-networking"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "futures",
- "gateway-client",
- "internal-dns-resolver",
- "internal-dns-types",
- "omicron-common",
- "omicron-workspace-hack",
- "sled-agent-types",
- "slog",
- "tokio",
 ]
 
 [[package]]
