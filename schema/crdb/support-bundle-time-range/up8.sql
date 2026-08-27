@@ -26,3 +26,13 @@ SELECT id, NOW() - INTERVAL '7 days', NULL
 FROM omicron.public.support_bundle
 WHERE state = 'collecting'
 ON CONFLICT (bundle_id) DO NOTHING;
+
+-- Any start-less rows remaining belong to bundles in terminal states,
+-- created before start bounds were recorded (e.g. rows promoted from
+-- end-only ereport filters). Their collection had no effective lower
+-- bound; encode that as a bound predating all possible data (the year
+-- 2000 precedes the first shipped rack) so that start_time can be made
+-- NOT NULL in the next migration step.
+UPDATE omicron.public.support_bundle_data_selection_time_range
+SET start_time = '2000-01-01T00:00:00Z'
+WHERE start_time IS NULL;

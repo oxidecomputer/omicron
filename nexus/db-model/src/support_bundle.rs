@@ -246,32 +246,31 @@ impl From<Ereports> for BundleData {
     }
 }
 
-/// Bundle-wide time range row. Row existence indicates a range was set.
+/// Bundle-wide time range row. Row existence indicates a range was set,
+/// and a persisted range always carries a start bound (stamped at bundle
+/// creation; backfilled for rows that predate the stamping).
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
 #[diesel(table_name = support_bundle_data_selection_time_range)]
 pub struct TimeRange {
     pub bundle_id: DbTypedUuid<SupportBundleKind>,
-    pub start_time: Option<DateTime<Utc>>,
+    pub start_time: DateTime<Utc>,
     pub end_time: Option<DateTime<Utc>>,
 }
 
 impl TimeRange {
     pub fn new(
         bundle_id: impl Into<DbTypedUuid<SupportBundleKind>>,
-        range: &BundleTimeRange,
+        start_time: DateTime<Utc>,
+        end_time: Option<DateTime<Utc>>,
     ) -> Self {
-        TimeRange {
-            bundle_id: bundle_id.into(),
-            start_time: range.start(),
-            end_time: range.end(),
-        }
+        TimeRange { bundle_id: bundle_id.into(), start_time, end_time }
     }
 }
 
 impl From<TimeRange> for BundleTimeRange {
     fn from(row: TimeRange) -> Self {
         let TimeRange { bundle_id: _, start_time, end_time } = row;
-        BundleTimeRange::new(start_time, end_time)
+        BundleTimeRange::new(Some(start_time), end_time)
             .expect("database CHECK constraint enforces start <= end")
     }
 }

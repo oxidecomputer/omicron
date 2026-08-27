@@ -3380,10 +3380,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.support_bundle_data_selection_ereports
 );
 
 -- Bundle-wide time range applied to time-bounded categories (host-info logs
--- and ereports) at collection time. Row existence indicates a range was set.
+-- and ereports) at collection time. Row existence indicates a range was set,
+-- and a persisted range always carries a start bound (stamped at bundle
+-- creation).
 CREATE TABLE IF NOT EXISTS omicron.public.support_bundle_data_selection_time_range (
     bundle_id UUID NOT NULL,
-    start_time TIMESTAMPTZ,
+    start_time TIMESTAMPTZ NOT NULL,
     end_time TIMESTAMPTZ,
 
     PRIMARY KEY (bundle_id),

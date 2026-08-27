@@ -1673,7 +1673,7 @@ table! {
 table! {
     support_bundle_data_selection_time_range (bundle_id) {
         bundle_id -> Uuid,
-        start_time -> Nullable<Timestamptz>,
+        start_time -> Timestamptz,
         end_time -> Nullable<Timestamptz>,
     }
 }

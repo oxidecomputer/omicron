@@ -802,19 +802,22 @@ impl DataStore {
             .await?;
 
         // Creation stamps a start bound before persisting, so a selection
-        // reaching this insert always carries a time range; a windowless
-        // row would collect unbounded history.
-        let Some(range) = data_selection.time_range() else {
+        // reaching this insert always carries a time range with a start
+        // (which the table requires: start_time is NOT NULL).
+        let Some(start) =
+            data_selection.time_range().and_then(|range| range.start())
+        else {
             return Err(DbError::QueryBuilderError(
                 "support bundle data selection reached persistence without \
-                 a time range; bundle creation must stamp a start bound first"
+                 a start bound; bundle creation must stamp one first"
                     .into(),
             ));
         };
+        let end = data_selection.time_range().and_then(|range| range.end());
         diesel::insert_into(
             time_range_dsl::support_bundle_data_selection_time_range,
         )
-        .values(TimeRange::new(bundle_id, range))
+        .values(TimeRange::new(bundle_id, start, end))
         .execute_async(conn)
         .await?;
 
