@@ -7,5 +7,4 @@
 //! This version added support for delegating zvols to Propolis.
 
 pub mod dataset;
-pub mod firewall_rules;
 pub mod instance;
