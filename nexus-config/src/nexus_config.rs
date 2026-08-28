@@ -531,6 +531,15 @@ pub struct VmmMarkStopForUpdateConfig {
     /// period (in seconds) for periodic activations of this task
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
+
+    /// disable marking VMMs to stop for a sled update.
+    ///
+    /// This is an emergency lever for support / operations. It should only be
+    /// necessary if something has gone extremely wrong.
+    ///
+    /// Default: Off
+    #[serde(default)]
+    pub disable: bool,
 }
 
 #[serde_as]
@@ -1669,6 +1678,7 @@ mod test {
                         },
                         vmm_mark_stop_for_update: VmmMarkStopForUpdateConfig {
                             period_secs: Duration::from_secs(33),
+                            disable: false,
                         },
                     },
                     multicast: MulticastConfig { enabled: false },

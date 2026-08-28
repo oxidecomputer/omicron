@@ -1435,6 +1435,8 @@ pub struct AuditLogCleanupStatus {
 /// The status of a `vmm_mark_stop_for_update` background task activation.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct VmmMarkStopForUpdateStatus {
+    /// If `true`, this task has been explicitly disabled by the config file.
+    pub disabled: bool,
     /// Number of VMMs that were marked as needing to be stopped for update in
     /// this activation.
     pub vmms_marked: usize,

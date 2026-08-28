@@ -2854,12 +2854,19 @@ fn print_task_vmm_mark_stop_for_update(details: &serde_json::Value) {
             error, details
         ),
         Ok(status) => {
+            let VmmMarkStopForUpdateStatus { disabled, vmms_marked, error } =
+                status;
+
+            if disabled {
+                println!("    task explicitly disabled by config!");
+            }
+
             const MARKED: &str = "VMMs marked:";
             const ERROR: &str = "error:";
             const WIDTH: usize = const_max_len(&[MARKED, ERROR]) + 1;
 
-            println!("    {MARKED:<WIDTH$}{}", status.vmms_marked);
-            if let Some(error) = &status.error {
+            println!("    {MARKED:<WIDTH$}{}", vmms_marked);
+            if let Some(error) = &error {
                 println!("    {ERROR:<WIDTH$}{error}");
             }
         }

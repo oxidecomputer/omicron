@@ -1323,7 +1323,10 @@ impl BackgroundTasksInitializer {
             description: "marks VMMs on evacuating sleds as needing to be \
             stopped for an update",
             period: config.vmm_mark_stop_for_update.period_secs,
-            task_impl: Box::new(VmmMarkStopForUpdate::new(datastore)),
+            task_impl: Box::new(VmmMarkStopForUpdate::new(
+                datastore,
+                config.vmm_mark_stop_for_update.disable,
+            )),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
             activator: task_vmm_mark_stop_for_update,
