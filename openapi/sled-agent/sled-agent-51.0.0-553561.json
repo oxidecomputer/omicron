@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "50.0.0"
+    "version": "51.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -706,13 +706,33 @@
           },
           {
             "in": "query",
-            "name": "max_rotated",
-            "description": "The max number of rotated logs to include in the final support bundle",
-            "required": true,
+            "name": "end_time",
+            "description": "Upper bound (inclusive) on collected log content. Files whose content begins after this are excluded. Filtering is per-file: a file created before this bound but still modified after it is included in full, so the archive may contain data newer than this bound. If absent, no upper bound is applied.",
             "schema": {
+              "nullable": true,
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_rotated",
+            "description": "The max number of rotated logs to include in the final support bundle. If absent, no count cap is applied.",
+            "schema": {
+              "nullable": true,
               "type": "integer",
               "format": "uint",
               "minimum": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "start_time",
+            "description": "Lower bound (inclusive) on collected log content. Files whose last modification (`mtime`) predates this are excluded; a file's `mtime` is the timestamp of its newest content, so excluded files contain no data from the window. If absent, no lower bound is applied.",
+            "schema": {
+              "nullable": true,
+              "type": "string",
+              "format": "date-time"
             }
           }
         ],

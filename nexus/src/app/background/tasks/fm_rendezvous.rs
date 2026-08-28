@@ -2112,6 +2112,21 @@ mod tests {
             "DE-provided comment should be used as reason_for_creation",
         );
 
+        // The DE-built selection had no time bounds; creation must have
+        // stamped the default start bound onto the persisted selection.
+        let authz_bundle = nexus_db_queries::authz::SupportBundle::new(
+            nexus_db_queries::authz::FLEET,
+            bundle1_id,
+            omicron_common::api::external::LookupType::ById(
+                bundle1_id.into_untyped_uuid(),
+            ),
+        );
+        let selection = datastore
+            .support_bundle_data_selection_get(opctx, &authz_bundle)
+            .await
+            .expect("should read created bundle's data selection");
+        assert!(selection.time_range().start().is_some());
+
         // The collector should have been activated.
         support_bundle_collector_activator.assert_activated(
             "collector should be activated when bundles are created",

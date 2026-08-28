@@ -22,7 +22,7 @@ cfg_if::cfg_if! {
 }
 
 pub mod logs;
-pub use logs::{LogError, LogsHandle};
+pub use logs::{LogError, LogTimeWindow, LogsHandle};
 
 mod queries;
 pub use crate::queries::{

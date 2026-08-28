@@ -105,6 +105,8 @@ pub mod v48;
 pub mod v49;
 #[path = "typed_sled_config_generation/mod.rs"]
 pub mod v50;
+#[path = "add_log_time_range/mod.rs"]
+pub mod v51;
 #[path = "add_probe_put_endpoint/mod.rs"]
 pub mod v6;
 #[path = "multicast_support/mod.rs"]
