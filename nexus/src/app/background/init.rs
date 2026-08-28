@@ -142,6 +142,7 @@ use super::tasks::trust_quorum;
 use super::tasks::tuf_artifact_replication;
 use super::tasks::tuf_repo_pruner;
 use super::tasks::v2p_mappings::V2PManager;
+use super::tasks::vmm_mark_stop_for_update::VmmMarkStopForUpdate;
 use super::tasks::vpc_routes;
 use super::tasks::webhook_deliverator;
 use crate::Nexus;
@@ -280,6 +281,7 @@ impl BackgroundTasksInitializer {
             task_attached_subnet_manager: Activator::new(),
             task_session_cleanup: Activator::new(),
             task_populate_switch_ports: Activator::new(),
+            task_vmm_mark_stop_for_update: Activator::new(),
 
             // Handles to activate background tasks that do not get used by Nexus
             // at-large.  These background tasks are implementation details as far as
@@ -376,6 +378,7 @@ impl BackgroundTasksInitializer {
             task_audit_log_timeout_incomplete,
             task_audit_log_cleanup,
             task_populate_switch_ports,
+            task_vmm_mark_stop_for_update,
             // Add new background tasks here.  Be sure to use this binding in a
             // call to `Driver::register()` below.  That's what actually wires
             // up the Activator to the corresponding background task.
@@ -1313,6 +1316,17 @@ impl BackgroundTasksInitializer {
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
             activator: task_populate_switch_ports,
+        });
+
+        driver.register(TaskDefinition {
+            name: "vmm_mark_stop_for_update",
+            description: "marks VMMs on evacuating sleds as needing to be \
+            stopped for an update",
+            period: config.vmm_mark_stop_for_update.period_secs,
+            task_impl: Box::new(VmmMarkStopForUpdate::new(datastore)),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_vmm_mark_stop_for_update,
         });
 
         driver

@@ -1432,6 +1432,16 @@ pub struct AuditLogCleanupStatus {
     pub error: Option<String>,
 }
 
+/// The status of a `vmm_mark_stop_for_update` background task activation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct VmmMarkStopForUpdateStatus {
+    /// Number of VMMs that were marked as needing to be stopped for update in
+    /// this activation.
+    pub vmms_marked: usize,
+    /// Error encountered during this activation, if any.
+    pub error: Option<String>,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SwitchPortPopulatorStatusKind {
