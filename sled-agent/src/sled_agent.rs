@@ -322,8 +322,20 @@ impl From<Error> for dropshot::HttpError {
                 HttpError::for_not_found(
                     Some(NO_SUCH_INSTANCE.to_string()),
                     // NoSuchVmm has no source error, so it's currently not
-                    // necessary to use a chain-logging adapter here, but if that
-                    // changes in the future, the compiler won't complain.
+                    // necessary to use a chain-logging adapter here, but if
+                    // that changes in the future, the compiler won't complain.
+                    InlineErrorChain::new(&e).to_string(),
+                )
+            }
+            Error::Instance(
+                e @ InstanceManagerError::VmmRegistrationDisallowed(reason),
+            ) => {
+                HttpError::for_unavail(
+                    Some(reason.http_error_code().to_string()),
+                    // VmmRegistrationDisallowed has no source error, so it's
+                    // currently not necessary to use a chain-logging adapter
+                    // here, but if that changes in the future, the compiler
+                    // won't complain.
                     InlineErrorChain::new(&e).to_string(),
                 )
             }
@@ -699,6 +711,7 @@ impl SledAgent {
             long_running_task_handles.zone_bundler.clone(),
             vmm_reservoir_manager.clone(),
             metrics_manager.request_queue(),
+            config_reconciler_spawn_token.subscribe_update_disposition(),
         )?;
 
         let svc_config =

@@ -63,6 +63,7 @@ use std::time::Duration;
     Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq,
 )]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub enum OmicronSledUpdateDisposition {
     Available,
     Evacuating,
