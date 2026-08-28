@@ -75,7 +75,6 @@ api_versions!([
     (18, ADD_ATTACHED_SUBNETS),
     (17, TWO_TYPES_OF_DELEGATED_ZVOL),
     (16, MEASUREMENT_PROPER_INVENTORY),
-    (15, ADD_TRUST_QUORUM_STATUS),
     // Versions before this have been retired. We no longer support them in any
     // server, nor expect them from any client.
 ]);
@@ -1565,7 +1564,6 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/trust-quorum/status",
-        versions = VERSION_ADD_TRUST_QUORUM_STATUS..,
     }]
     async fn trust_quorum_status(
         request_context: RequestContext<Self::Context>,
@@ -1575,7 +1573,6 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/trust-quorum/network-config",
-        versions = VERSION_ADD_TRUST_QUORUM_STATUS..,
     }]
     async fn trust_quorum_network_config_get(
         request_context: RequestContext<Self::Context>,
@@ -1588,7 +1585,6 @@ pub trait SledAgentApi {
     #[endpoint {
         method = PUT,
         path = "/trust-quorum/network-config",
-        versions = VERSION_ADD_TRUST_QUORUM_STATUS..,
     }]
     async fn trust_quorum_network_config_put(
         request_context: RequestContext<Self::Context>,
