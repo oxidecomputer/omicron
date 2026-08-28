@@ -815,47 +815,30 @@ permalinks = [
     "https://github.com/oxidecomputer/dice-util/blob/d7472bfa91aee859c3fe0bdc1dbb1e320285228e/verifier/src/sled_agent.rs#L19-L25",
 ]
 
-# NOTE: The following sled-agent edges are bugs: they cross deployment units.
-# They are kept here to avoid breaking the build, but need to be fixed, either
-# through client-side versioning or by some other means.
-
 [[intra_deployment_unit_only_edges]]
 server = "omicron-sled-agent"
 client = "gateway-client"
 note = """
-BUG: Sled Agent creates two MGS clients. One of them (in the
-sled-agent-scrimlet-reconcilers crate) queries the switch zone on the same sled,
-which is within the same deployment unit as the global zone, so this is okay.
-
-The other one (early-networking/lib.rs:259, called from services.rs:1095)
-queries both switch zones, so it crosses deployment units. This needs to be
-fixed.
-
-Reference: https://github.com/oxidecomputer/omicron/issues/9708
+Sled Agent on scrimlets talks to MGS within its own sled's switch zone. The
+`sled-agent-scrimlet-reconcilers` crate attempts to go out of its way to ensure
+it's only ever used in this way. The switch zone is within the same deployment
+unit as the global zone on its own sled, so this is okay.
 """
 permalinks = [
     "https://github.com/oxidecomputer/omicron/blob/fbc091a3/sled-agent/scrimlet-reconcilers/src/switch_zone_slot.rs#L46-L59",
-    "https://github.com/oxidecomputer/omicron/blob/32de20c/sled-agent/src/services.rs#L1095-L1102",
-    "https://github.com/oxidecomputer/omicron/blob/32de20c/sled-agent/early-networking/src/lib.rs#L259-L262",
 ]
 
 [[intra_deployment_unit_only_edges]]
 server = "omicron-sled-agent"
 client = "dpd-client"
 note = """
-BUG: Sled Agent creates two DPD clients.  One of them (in the
-sled-agent-scrimlet-reconcilers crate) is always to the switch zone on the same
-sled, which is in the same deployment unit.
-
-The other one (services.rs:1104, iterating addresses returned by
-EarlyNetworkSetup::lookup_uplinked_switch_zone_underlay_addrs) queries both
-switch zones, so it crosses deployment units.  This needs to be fixed.
-
-Reference: https://github.com/oxidecomputer/omicron/issues/9708
+Sled Agent on scrimlets talks to dendrite within its own sled's switch zone. The
+`sled-agent-scrimlet-reconcilers` crate attempts to go out of its way to ensure
+it's only ever used in this way. The switch zone is within the same deployment
+unit as the global zone on its own sled, so this is okay.
 """
 permalinks = [
     "https://github.com/oxidecomputer/omicron/blob/fbc091a3/sled-agent/scrimlet-reconcilers/src/switch_zone_slot.rs#L46-L59",
-    "https://github.com/oxidecomputer/omicron/blob/32de20c/sled-agent/src/services.rs#L1104-L1115",
 ]
 
 # Note: sled-agent-rack-setup (RSS) is marked with `lifecycle = "rack-init"`

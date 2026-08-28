@@ -36,6 +36,7 @@ use nexus_types_versions::v2026_01_30_01;
 use nexus_types_versions::v2026_01_31_00;
 use nexus_types_versions::v2026_02_13_01;
 use nexus_types_versions::v2026_04_16_00;
+use nexus_types_versions::v2026_05_07_00;
 use nexus_types_versions::v2026_06_05_00;
 use omicron_common::address::IpRange;
 use omicron_common::api::external::{
@@ -86,6 +87,8 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_08_19_01, BGP_PEER_SRC_ADDR),
+    (2026_08_17_00, SUPPORT_BUNDLES_STABLE),
     (2026_08_14_00, ALERT_LIST),
     (2026_08_12_00, SLED_SLOT),
     (2026_07_31_00, SET_TARGET_RELEASE_UPDATE_RECOVERY_DOCS),
@@ -392,6 +395,12 @@ const PUT_UPDATE_REPOSITORY_MAX_BYTES: usize = 4 * GIB;
                 description = "Silos represent a logical partition of users and resources.",
                 external_docs = {
                     url = "http://docs.oxide.computer/api/system-silos"
+                }
+            },
+            "system/support-bundles" = {
+                description = "Support bundles collect debugging information from the rack for use by Oxide support.",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/system-support-bundles"
                 }
             },
             "system/update" = {
@@ -5272,7 +5281,7 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/system/networking/switch-port-settings",
         tags = ["system/networking"],
-        versions = VERSION_REMOVE_DUPLICATED_NETWORKING_TYPES..,
+        versions = VERSION_BGP_PEER_SRC_ADDR..,
     }]
     async fn networking_switch_port_settings_create(
         rqctx: RequestContext<Self::Context>,
@@ -5281,6 +5290,37 @@ pub trait NexusExternalApi {
         HttpResponseCreated<latest::networking::SwitchPortSettings>,
         HttpError,
     >;
+
+    #[endpoint {
+        operation_id = "networking_switch_port_settings_create",
+        method = POST,
+        path = "/v1/system/networking/switch-port-settings",
+        tags = ["system/networking"],
+        versions = VERSION_REMOVE_DUPLICATED_NETWORKING_TYPES..VERSION_BGP_PEER_SRC_ADDR,
+    }]
+    async fn networking_switch_port_settings_create_v2026_05_07_00(
+        rqctx: RequestContext<Self::Context>,
+        new_settings: TypedBody<
+            v2026_05_07_00::networking::SwitchPortSettingsCreate,
+        >,
+    ) -> Result<
+        HttpResponseCreated<v2026_05_07_00::networking::SwitchPortSettings>,
+        HttpError,
+    > {
+        Self::networking_switch_port_settings_create(
+            rqctx,
+            new_settings.map(Into::into),
+        )
+        .await
+        .and_then(|response| {
+            response.try_map(TryFrom::try_from).map_err(|err| {
+                HttpError::for_internal_error(format!(
+                    "switch port settings contain configuration that \
+                     cannot be represented in this API version: {err:#}"
+                ))
+            })
+        })
+    }
 
     #[endpoint {
         operation_id = "networking_switch_port_settings_create",
@@ -5308,7 +5348,14 @@ pub trait NexusExternalApi {
             })?,
         )
         .await
-        .map(|response| response.map(From::from))
+        .and_then(|response| {
+            response.try_map(TryFrom::try_from).map_err(|err| {
+                HttpError::for_internal_error(format!(
+                    "switch port settings contain configuration that \
+                     cannot be represented in this API version: {err:#}"
+                ))
+            })
+        })
     }
 
     #[endpoint {
@@ -5404,12 +5451,38 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/networking/switch-port-settings/{port}",
         tags = ["system/networking"],
-        versions = VERSION_REMOVE_DUPLICATED_NETWORKING_TYPES..,
+        versions = VERSION_BGP_PEER_SRC_ADDR..,
     }]
     async fn networking_switch_port_settings_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::networking::SwitchPortSettingsInfoSelector>,
     ) -> Result<HttpResponseOk<latest::networking::SwitchPortSettings>, HttpError>;
+
+    #[endpoint {
+        operation_id = "networking_switch_port_settings_view",
+        method = GET,
+        path = "/v1/system/networking/switch-port-settings/{port}",
+        tags = ["system/networking"],
+        versions = VERSION_REMOVE_DUPLICATED_NETWORKING_TYPES..VERSION_BGP_PEER_SRC_ADDR,
+    }]
+    async fn networking_switch_port_settings_view_v2026_05_07_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::networking::SwitchPortSettingsInfoSelector>,
+    ) -> Result<
+        HttpResponseOk<v2026_05_07_00::networking::SwitchPortSettings>,
+        HttpError,
+    > {
+        Self::networking_switch_port_settings_view(rqctx, path_params)
+            .await
+            .and_then(|response| {
+                response.try_map(TryFrom::try_from).map_err(|err| {
+                    HttpError::for_internal_error(format!(
+                        "switch port settings contain configuration that \
+                         cannot be represented in this API version: {err:#}"
+                    ))
+                })
+            })
+    }
 
     #[endpoint {
         operation_id = "networking_switch_port_settings_view",
@@ -5427,7 +5500,14 @@ pub trait NexusExternalApi {
     > {
         Self::networking_switch_port_settings_view(rqctx, path_params)
             .await
-            .map(|response| response.map(From::from))
+            .and_then(|response| {
+                response.try_map(TryFrom::try_from).map_err(|err| {
+                    HttpError::for_internal_error(format!(
+                        "switch port settings contain configuration that \
+                         cannot be represented in this API version: {err:#}"
+                    ))
+                })
+            })
     }
 
     #[endpoint {
@@ -8452,13 +8532,14 @@ pub trait NexusExternalApi {
         path_params: Path<latest::path_params::TokenPath>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
-    // Support bundles (experimental)
+    // Support bundles
 
     /// List all support bundles
     #[endpoint {
         method = GET,
-        path = "/experimental/v1/system/support-bundles",
-        tags = ["experimental"], // system/support-bundles: only one tag is allowed
+        path = "/v1/system/support-bundles",
+        tags = ["system/support-bundles"],
+        versions = VERSION_SUPPORT_BUNDLES_STABLE..,
     }]
     async fn support_bundle_list(
         rqctx: RequestContext<Self::Context>,
@@ -8468,11 +8549,32 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
+    /// List all support bundles
+    #[endpoint {
+        operation_id = "support_bundle_list",
+        method = GET,
+        path = "/experimental/v1/system/support-bundles",
+        tags = ["experimental"],
+        versions = ..VERSION_SUPPORT_BUNDLES_STABLE,
+    }]
+    async fn support_bundle_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByTimeAndId>,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<v2025_11_20_00::support_bundle::SupportBundleInfo>,
+        >,
+        HttpError,
+    > {
+        Self::support_bundle_list(rqctx, query_params).await
+    }
+
     /// View support bundle
     #[endpoint {
         method = GET,
-        path = "/experimental/v1/system/support-bundles/{bundle_id}",
-        tags = ["experimental"], // system/support-bundles: only one tag is allowed
+        path = "/v1/system/support-bundles/{bundle_id}",
+        tags = ["system/support-bundles"],
+        versions = VERSION_SUPPORT_BUNDLES_STABLE..,
     }]
     async fn support_bundle_view(
         rqctx: RequestContext<Self::Context>,
@@ -8482,11 +8584,30 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
+    /// View support bundle
+    #[endpoint {
+        operation_id = "support_bundle_view",
+        method = GET,
+        path = "/experimental/v1/system/support-bundles/{bundle_id}",
+        tags = ["experimental"],
+        versions = ..VERSION_SUPPORT_BUNDLES_STABLE,
+    }]
+    async fn support_bundle_view_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::support_bundle::SupportBundlePath>,
+    ) -> Result<
+        HttpResponseOk<v2025_11_20_00::support_bundle::SupportBundleInfo>,
+        HttpError,
+    > {
+        Self::support_bundle_view(rqctx, path_params).await
+    }
+
     /// Download support bundle index
     #[endpoint {
         method = GET,
-        path = "/experimental/v1/system/support-bundles/{bundle_id}/index",
-        tags = ["experimental"], // system/support-bundles: only one tag is allowed
+        path = "/v1/system/support-bundles/{bundle_id}/index",
+        tags = ["system/support-bundles"],
+        versions = VERSION_SUPPORT_BUNDLES_STABLE..,
     }]
     async fn support_bundle_index(
         rqctx: RequestContext<Self::Context>,
@@ -8494,11 +8615,28 @@ pub trait NexusExternalApi {
         path_params: Path<latest::support_bundle::SupportBundlePath>,
     ) -> Result<Response<Body>, HttpError>;
 
+    /// Download support bundle index
+    #[endpoint {
+        operation_id = "support_bundle_index",
+        method = GET,
+        path = "/experimental/v1/system/support-bundles/{bundle_id}/index",
+        tags = ["experimental"],
+        versions = ..VERSION_SUPPORT_BUNDLES_STABLE,
+    }]
+    async fn support_bundle_index_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        headers: Header<v2025_11_20_00::headers::RangeRequest>,
+        path_params: Path<v2025_11_20_00::support_bundle::SupportBundlePath>,
+    ) -> Result<Response<Body>, HttpError> {
+        Self::support_bundle_index(rqctx, headers, path_params).await
+    }
+
     /// Download support bundle contents
     #[endpoint {
         method = GET,
-        path = "/experimental/v1/system/support-bundles/{bundle_id}/download",
-        tags = ["experimental"], // system/support-bundles: only one tag is allowed
+        path = "/v1/system/support-bundles/{bundle_id}/download",
+        tags = ["system/support-bundles"],
+        versions = VERSION_SUPPORT_BUNDLES_STABLE..,
     }]
     async fn support_bundle_download(
         rqctx: RequestContext<Self::Context>,
@@ -8506,11 +8644,28 @@ pub trait NexusExternalApi {
         path_params: Path<latest::support_bundle::SupportBundlePath>,
     ) -> Result<Response<Body>, HttpError>;
 
+    /// Download support bundle contents
+    #[endpoint {
+        operation_id = "support_bundle_download",
+        method = GET,
+        path = "/experimental/v1/system/support-bundles/{bundle_id}/download",
+        tags = ["experimental"],
+        versions = ..VERSION_SUPPORT_BUNDLES_STABLE,
+    }]
+    async fn support_bundle_download_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        headers: Header<v2025_11_20_00::headers::RangeRequest>,
+        path_params: Path<v2025_11_20_00::support_bundle::SupportBundlePath>,
+    ) -> Result<Response<Body>, HttpError> {
+        Self::support_bundle_download(rqctx, headers, path_params).await
+    }
+
     /// Download file from support bundle
     #[endpoint {
         method = GET,
-        path = "/experimental/v1/system/support-bundles/{bundle_id}/download/{file}",
-        tags = ["experimental"], // system/support-bundles: only one tag is allowed
+        path = "/v1/system/support-bundles/{bundle_id}/download/{file}",
+        tags = ["system/support-bundles"],
+        versions = VERSION_SUPPORT_BUNDLES_STABLE..,
     }]
     async fn support_bundle_download_file(
         rqctx: RequestContext<Self::Context>,
@@ -8518,11 +8673,30 @@ pub trait NexusExternalApi {
         path_params: Path<latest::support_bundle::SupportBundleFilePath>,
     ) -> Result<Response<Body>, HttpError>;
 
+    /// Download file from support bundle
+    #[endpoint {
+        operation_id = "support_bundle_download_file",
+        method = GET,
+        path = "/experimental/v1/system/support-bundles/{bundle_id}/download/{file}",
+        tags = ["experimental"],
+        versions = ..VERSION_SUPPORT_BUNDLES_STABLE,
+    }]
+    async fn support_bundle_download_file_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        headers: Header<v2025_11_20_00::headers::RangeRequest>,
+        path_params: Path<
+            v2025_11_20_00::support_bundle::SupportBundleFilePath,
+        >,
+    ) -> Result<Response<Body>, HttpError> {
+        Self::support_bundle_download_file(rqctx, headers, path_params).await
+    }
+
     /// Download support bundle metadata
     #[endpoint {
         method = HEAD,
-        path = "/experimental/v1/system/support-bundles/{bundle_id}/download",
-        tags = ["experimental"], // system/support-bundles: only one tag is allowed
+        path = "/v1/system/support-bundles/{bundle_id}/download",
+        tags = ["system/support-bundles"],
+        versions = VERSION_SUPPORT_BUNDLES_STABLE..,
     }]
     async fn support_bundle_head(
         rqctx: RequestContext<Self::Context>,
@@ -8530,11 +8704,28 @@ pub trait NexusExternalApi {
         path_params: Path<latest::support_bundle::SupportBundlePath>,
     ) -> Result<Response<Body>, HttpError>;
 
+    /// Download support bundle metadata
+    #[endpoint {
+        operation_id = "support_bundle_head",
+        method = HEAD,
+        path = "/experimental/v1/system/support-bundles/{bundle_id}/download",
+        tags = ["experimental"],
+        versions = ..VERSION_SUPPORT_BUNDLES_STABLE,
+    }]
+    async fn support_bundle_head_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        headers: Header<v2025_11_20_00::headers::RangeRequest>,
+        path_params: Path<v2025_11_20_00::support_bundle::SupportBundlePath>,
+    ) -> Result<Response<Body>, HttpError> {
+        Self::support_bundle_head(rqctx, headers, path_params).await
+    }
+
     /// Download metadata of file in support bundle
     #[endpoint {
         method = HEAD,
-        path = "/experimental/v1/system/support-bundles/{bundle_id}/download/{file}",
-        tags = ["experimental"], // system/support-bundles: only one tag is allowed
+        path = "/v1/system/support-bundles/{bundle_id}/download/{file}",
+        tags = ["system/support-bundles"],
+        versions = VERSION_SUPPORT_BUNDLES_STABLE..,
     }]
     async fn support_bundle_head_file(
         rqctx: RequestContext<Self::Context>,
@@ -8542,11 +8733,30 @@ pub trait NexusExternalApi {
         path_params: Path<latest::support_bundle::SupportBundleFilePath>,
     ) -> Result<Response<Body>, HttpError>;
 
+    /// Download metadata of file in support bundle
+    #[endpoint {
+        operation_id = "support_bundle_head_file",
+        method = HEAD,
+        path = "/experimental/v1/system/support-bundles/{bundle_id}/download/{file}",
+        tags = ["experimental"],
+        versions = ..VERSION_SUPPORT_BUNDLES_STABLE,
+    }]
+    async fn support_bundle_head_file_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        headers: Header<v2025_11_20_00::headers::RangeRequest>,
+        path_params: Path<
+            v2025_11_20_00::support_bundle::SupportBundleFilePath,
+        >,
+    ) -> Result<Response<Body>, HttpError> {
+        Self::support_bundle_head_file(rqctx, headers, path_params).await
+    }
+
     /// Create support bundle
     #[endpoint {
         method = POST,
-        path = "/experimental/v1/system/support-bundles",
-        tags = ["experimental"], // system/support-bundles: only one tag is allowed
+        path = "/v1/system/support-bundles",
+        tags = ["system/support-bundles"],
+        versions = VERSION_SUPPORT_BUNDLES_STABLE..,
     }]
     async fn support_bundle_create(
         rqctx: RequestContext<Self::Context>,
@@ -8556,25 +8766,63 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
+    /// Create support bundle
+    #[endpoint {
+        operation_id = "support_bundle_create",
+        method = POST,
+        path = "/experimental/v1/system/support-bundles",
+        tags = ["experimental"],
+        versions = ..VERSION_SUPPORT_BUNDLES_STABLE,
+    }]
+    async fn support_bundle_create_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v2025_11_20_00::support_bundle::SupportBundleCreate>,
+    ) -> Result<
+        HttpResponseCreated<v2025_11_20_00::support_bundle::SupportBundleInfo>,
+        HttpError,
+    > {
+        Self::support_bundle_create(rqctx, body).await
+    }
+
     /// Delete support bundle
     ///
     /// May also be used to cancel a support bundle which is currently being
     /// collected, or to remove metadata for a support bundle that has failed.
     #[endpoint {
         method = DELETE,
-        path = "/experimental/v1/system/support-bundles/{bundle_id}",
-        tags = ["experimental"], // system/support-bundles: only one tag is allowed
+        path = "/v1/system/support-bundles/{bundle_id}",
+        tags = ["system/support-bundles"],
+        versions = VERSION_SUPPORT_BUNDLES_STABLE..,
     }]
     async fn support_bundle_delete(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::support_bundle::SupportBundlePath>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
+    /// Delete support bundle
+    ///
+    /// May also be used to cancel a support bundle which is currently being
+    /// collected, or to remove metadata for a support bundle that has failed.
+    #[endpoint {
+        operation_id = "support_bundle_delete",
+        method = DELETE,
+        path = "/experimental/v1/system/support-bundles/{bundle_id}",
+        tags = ["experimental"],
+        versions = ..VERSION_SUPPORT_BUNDLES_STABLE,
+    }]
+    async fn support_bundle_delete_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::support_bundle::SupportBundlePath>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        Self::support_bundle_delete(rqctx, path_params).await
+    }
+
     /// Update support bundle
     #[endpoint {
         method = PUT,
-        path = "/experimental/v1/system/support-bundles/{bundle_id}",
-        tags = ["experimental"], // system/support-bundles: only one tag is allowed
+        path = "/v1/system/support-bundles/{bundle_id}",
+        tags = ["system/support-bundles"],
+        versions = VERSION_SUPPORT_BUNDLES_STABLE..,
     }]
     async fn support_bundle_update(
         rqctx: RequestContext<Self::Context>,
@@ -8584,6 +8832,25 @@ pub trait NexusExternalApi {
         HttpResponseOk<latest::support_bundle::SupportBundleInfo>,
         HttpError,
     >;
+
+    /// Update support bundle
+    #[endpoint {
+        operation_id = "support_bundle_update",
+        method = PUT,
+        path = "/experimental/v1/system/support-bundles/{bundle_id}",
+        tags = ["experimental"],
+        versions = ..VERSION_SUPPORT_BUNDLES_STABLE,
+    }]
+    async fn support_bundle_update_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::support_bundle::SupportBundlePath>,
+        body: TypedBody<v2025_11_20_00::support_bundle::SupportBundleUpdate>,
+    ) -> Result<
+        HttpResponseOk<v2025_11_20_00::support_bundle::SupportBundleInfo>,
+        HttpError,
+    > {
+        Self::support_bundle_update(rqctx, path_params, body).await
+    }
 
     // Probes (experimental)
 

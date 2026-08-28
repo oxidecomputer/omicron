@@ -32,6 +32,7 @@ ipnetwork.workspace = true
 itertools.workspace = true
 macaddr.workspace = true
 nonempty.workspace = true
+omicron-generation-kinds.workspace = true
 oxnet.workspace = true
 paste.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
@@ -116,12 +117,17 @@ pem.workspace = true
 petgraph.workspace = true
 predicates.workspace = true
 pretty_assertions.workspace = true
+proptest.workspace = true
 rcgen.workspace = true
 regex.workspace = true
 rustls.workspace = true
 sha2.workspace = true
 subprocess.workspace = true
 term.workspace = true
+
+[target.'cfg(target_os = "illumos")'.dev-dependencies]
+# socket2 is used for an illumos-only test.
+socket2.workspace = true
 
 [[bench]]
 name = "sled_reservation"

@@ -57,6 +57,9 @@ pub enum SagaAbandonReason {
     /// The saga-recovery background task failed to recover the saga with a
     /// non-transient error and gave up on it.
     Unrecoverable,
+    /// The saga can never be reassigned because its `current_sec` is an
+    /// expunged Nexus of an older generation than the active Nexuses.
+    Orphaned,
 }
 
 /// The execution state of a *live* (running or unwinding) saga. This is the

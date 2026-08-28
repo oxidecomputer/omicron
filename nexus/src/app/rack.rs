@@ -603,7 +603,12 @@ impl super::Nexus {
 
             match self
                 .db_datastore
-                .switch_port_settings_create(opctx, &port_settings_params, None)
+                .switch_port_settings_create(
+                    opctx,
+                    &port_settings_params,
+                    None,
+                    uplink_config.allow_ddm_traffic,
+                )
                 .await
             {
                 Ok(_) | Err(Error::ObjectAlreadyExists { .. }) => Ok(()),

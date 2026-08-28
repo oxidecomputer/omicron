@@ -74,7 +74,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "version_check",
- "zerocopy 0.8.56",
+ "zerocopy 0.8.55",
 ]
 
 [[package]]
@@ -167,7 +167,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -178,7 +178,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -457,25 +457,6 @@ dependencies = [
 [[package]]
 name = "attest-data"
 version = "0.5.0"
-source = "git+https://github.com/oxidecomputer/dice-util?rev=10952e8d9599b735b85d480af3560a11700e5b64#10952e8d9599b735b85d480af3560a11700e5b64"
-dependencies = [
- "const-oid 0.9.6",
- "der 0.7.10",
- "getrandom 0.3.4",
- "hex",
- "hubpack",
- "rats-corim 0.1.0 (git+https://github.com/oxidecomputer/rats-corim)",
- "salty",
- "serde",
- "serde_with 3.21.0",
- "sha3 0.10.8",
- "static_assertions",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "attest-data"
-version = "0.5.0"
 source = "git+https://github.com/oxidecomputer/dice-util?rev=4a39ef08d81e5177edee0bddb1146032aa21074d#4a39ef08d81e5177edee0bddb1146032aa21074d"
 dependencies = [
  "const-oid 0.9.6",
@@ -495,17 +476,18 @@ dependencies = [
 [[package]]
 name = "attest-mock"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dice-util?rev=10952e8d9599b735b85d480af3560a11700e5b64#10952e8d9599b735b85d480af3560a11700e5b64"
+source = "git+https://github.com/oxidecomputer/dice-util?rev=4a39ef08d81e5177edee0bddb1146032aa21074d#4a39ef08d81e5177edee0bddb1146032aa21074d"
 dependencies = [
  "anyhow",
- "attest-data 0.5.0 (git+https://github.com/oxidecomputer/dice-util?rev=10952e8d9599b735b85d480af3560a11700e5b64)",
+ "attest-data 0.5.0 (git+https://github.com/oxidecomputer/dice-util?rev=4a39ef08d81e5177edee0bddb1146032aa21074d)",
  "clap",
  "hex",
  "hubpack",
- "knuffel",
- "miette 5.10.0",
+ "knus",
  "rats-corim 0.1.0 (git+https://github.com/oxidecomputer/rats-corim)",
- "serde_json",
+ "slog",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?rev=15f69041f45774602108e47fb25e705dc23acfb2)",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -531,7 +513,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "serde",
- "serde_tokenstream",
+ "serde_tokenstream 0.2.3",
  "syn 2.0.117",
 ]
 
@@ -923,7 +905,7 @@ dependencies = [
  "sled-hardware-types",
  "slog",
  "slog-async",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "slog-term",
  "thiserror 2.0.18",
  "tokio",
@@ -947,6 +929,7 @@ name = "bootstrap-agent-lockstep-client"
 version = "0.1.0"
 dependencies = [
  "bootstrap-agent-lockstep-types",
+ "chrono",
  "iddqd",
  "omicron-common",
  "omicron-uuid-kinds",
@@ -976,10 +959,13 @@ dependencies = [
  "omicron-workspace-hack",
  "schemars 0.8.22",
  "serde",
+ "serde_json",
  "sled-agent-types",
  "sled-hardware-types",
  "slog",
  "strum 0.27.2",
+ "thiserror 2.0.18",
+ "trust-quorum-types",
  "wicketd-commission-types",
 ]
 
@@ -1485,7 +1471,7 @@ dependencies = [
  "slog",
  "slog-async",
  "slog-dtrace",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "slog-term",
  "tokio",
  "tokio-postgres",
@@ -1498,7 +1484,7 @@ dependencies = [
  "clickhouse-admin-types-versions",
  "dropshot",
  "dropshot-api-manager-types",
- "omicron-common",
+ "omicron-generation-kinds",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "schemars 0.8.22",
@@ -1585,6 +1571,7 @@ dependencies = [
  "iddqd",
  "itertools 0.14.0",
  "omicron-common",
+ "omicron-generation-kinds",
  "omicron-workspace-hack",
  "schemars 0.8.22",
  "serde",
@@ -1672,7 +1659,6 @@ dependencies = [
  "dropshot",
  "dropshot-api-manager-types",
  "http",
- "omicron-common",
  "omicron-workspace-hack",
  "semver 1.0.28",
 ]
@@ -1711,7 +1697,7 @@ dependencies = [
  "proptest",
  "schemars 0.8.22",
  "serde",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "test-strategy",
  "thiserror 2.0.18",
 ]
@@ -1738,7 +1724,7 @@ version = "3.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "faf9468729b8cbcea668e36183cb69d317348c2e08e994829fb56ebfdfbaac34"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1790,27 +1776,6 @@ dependencies = [
  "slog-term",
  "smf 0.10.0",
  "thiserror 2.0.18",
- "tokio",
-]
-
-[[package]]
-name = "common"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dendrite?rev=cc0c307c617f2988aafdca4e3bd35ea178b64801#cc0c307c617f2988aafdca4e3bd35ea178b64801"
-dependencies = [
- "anyhow",
- "chrono",
- "oxnet",
- "rand 0.9.2",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "slog",
- "slog-async",
- "slog-bunyan",
- "slog-term",
- "smf 0.10.0",
- "thiserror 1.0.69",
  "tokio",
 ]
 
@@ -2466,9 +2431,9 @@ dependencies = [
 
 [[package]]
 name = "daft"
-version = "0.1.7"
+version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "49921a57f45e3bf2cc8a0c4e3a10aa342b95a481d7dd89d844c1225496957296"
+checksum = "37da1a58f7d13865d88632f596075dab24f01df73390b011d93742db7f6229a1"
 dependencies = [
  "daft-derive",
  "newtype-uuid",
@@ -2479,13 +2444,13 @@ dependencies = [
 
 [[package]]
 name = "daft-derive"
-version = "0.1.7"
+version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91850c0efee1e6dffcea4e5841ff3a71db80575a79f933d0c77e41c6fe0973d1"
+checksum = "c839348835bc8a59714d79797f2f1bca237ca043e3d2d5ce4e727606396fb834"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.117",
+ "syn 3.0.3",
 ]
 
 [[package]]
@@ -2698,7 +2663,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "serde",
- "serde_tokenstream",
+ "serde_tokenstream 0.2.3",
  "syn 2.0.117",
 ]
 
@@ -2994,7 +2959,7 @@ dependencies = [
  "serde-big-array",
  "thiserror 2.0.18",
  "x509-cert",
- "zerocopy 0.8.56",
+ "zerocopy 0.8.55",
 ]
 
 [[package]]
@@ -3223,6 +3188,7 @@ dependencies = [
  "internal-dns-types",
  "internal-dns-types-versions",
  "omicron-common",
+ "omicron-generation-kinds",
  "omicron-test-utils",
  "omicron-workspace-hack",
  "oxide-tokio-rt",
@@ -3234,7 +3200,7 @@ dependencies = [
  "serde_json",
  "sled",
  "slog",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "thiserror 2.0.18",
  "tokio",
  "toml 0.8.23",
@@ -3329,7 +3295,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
- "zerocopy 0.8.56",
+ "zerocopy 0.8.55",
 ]
 
 [[package]]
@@ -3376,30 +3342,6 @@ dependencies = [
  "oxnet",
  "progenitor 0.14.0",
  "regress 0.11.1",
- "reqwest 0.13.2",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "slog",
- "tokio",
- "transceiver-controller 0.1.1 (git+https://github.com/oxidecomputer/transceiver-control?branch=main)",
- "uuid",
-]
-
-[[package]]
-name = "dpd-client"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dendrite?rev=cc0c307c617f2988aafdca4e3bd35ea178b64801#cc0c307c617f2988aafdca4e3bd35ea178b64801"
-dependencies = [
- "async-trait",
- "chrono",
- "common 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=cc0c307c617f2988aafdca4e3bd35ea178b64801)",
- "crc8",
- "futures",
- "http",
- "oxnet",
- "progenitor 0.13.0",
- "regress 0.10.5",
  "reqwest 0.13.2",
  "schemars 0.8.22",
  "serde",
@@ -3479,9 +3421,9 @@ dependencies = [
 
 [[package]]
 name = "dropshot-api-manager"
-version = "0.7.2"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04789d14d7af239289cf53064f28f3b3e4fbefc0d716ebdb45a2a76d9a59d8a6"
+checksum = "717b8725b0ba287944e595d1bd6873f36bd955fc2846ea6f80b1fa649cbbb035"
 dependencies = [
  "anyhow",
  "atomicwrites",
@@ -3512,9 +3454,9 @@ dependencies = [
 
 [[package]]
 name = "dropshot-api-manager-types"
-version = "0.7.2"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7e89e6f3e5558d7eab06739cbc92b178605f20693715e7640eee6405fd655582"
+checksum = "db49298fe751d1a7e8ecfbe0c94fffe3b99bcafbbc5d182c4e89e750f9c97886"
 dependencies = [
  "anyhow",
  "camino",
@@ -3534,7 +3476,7 @@ dependencies = [
  "quote",
  "semver 1.0.28",
  "serde",
- "serde_tokenstream",
+ "serde_tokenstream 0.2.3",
  "syn 2.0.117",
 ]
 
@@ -3800,7 +3742,7 @@ dependencies = [
  "serde_json",
  "sled-agent-types",
  "slog",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "socket2 0.5.10",
  "thiserror 2.0.18",
  "tokio",
@@ -3904,7 +3846,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4341,7 +4283,6 @@ dependencies = [
  "dropshot-api-manager-types",
  "ereport-types",
  "gateway-types-versions",
- "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "schemars 0.8.22",
@@ -4360,7 +4301,6 @@ dependencies = [
  "gateway-client",
  "gateway-messages",
  "gateway-types",
- "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxide-tokio-rt",
@@ -4369,7 +4309,7 @@ dependencies = [
  "serde_json",
  "slog",
  "slog-async",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "slog-term",
  "termios",
  "tokio",
@@ -4408,7 +4348,7 @@ version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=6c0aca2545a73fd75536e149d29faa7108be5862#6c0aca2545a73fd75536e149d29faa7108be5862"
 dependencies = [
  "serde",
- "zerocopy 0.8.56",
+ "zerocopy 0.8.55",
 ]
 
 [[package]]
@@ -4426,7 +4366,7 @@ dependencies = [
  "strum 0.27.2",
  "strum_macros 0.27.2",
  "uuid",
- "zerocopy 0.8.56",
+ "zerocopy 0.8.55",
 ]
 
 [[package]]
@@ -4455,7 +4395,7 @@ dependencies = [
  "serde_cbor",
  "serde_json",
  "slog",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "socket2 0.6.3",
  "string_cache",
  "thiserror 2.0.18",
@@ -4464,7 +4404,7 @@ dependencies = [
  "usdt 0.5.0",
  "uuid",
  "version_check",
- "zerocopy 0.8.56",
+ "zerocopy 0.8.55",
  "zip 0.6.6",
 ]
 
@@ -4482,7 +4422,7 @@ dependencies = [
  "omicron-workspace-hack",
  "qorb",
  "slog",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "sp-sim",
  "tokio",
  "uuid",
@@ -4795,7 +4735,7 @@ checksum = "6ea2d84b969582b4b1864a92dc5d27cd2b77b622a8d79306834f1be5ba20d84b"
 dependencies = [
  "cfg-if",
  "crunchy",
- "zerocopy 0.8.56",
+ "zerocopy 0.8.55",
 ]
 
 [[package]]
@@ -5467,7 +5407,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.3",
  "system-configuration",
  "tokio",
  "tower-layer",
@@ -5715,7 +5655,7 @@ dependencies = [
  "sled-agent-types",
  "slog",
  "slog-async",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "slog-term",
  "smf 0.2.3",
  "strum 0.27.2",
@@ -5808,7 +5748,7 @@ dependencies = [
  "ingot-types",
  "macaddr",
  "serde",
- "zerocopy 0.8.56",
+ "zerocopy 0.8.55",
 ]
 
 [[package]]
@@ -5833,7 +5773,7 @@ checksum = "0c38331af4cff022b2ea46b220467d5962973853a47bd6851c54c111b71baa42"
 dependencies = [
  "ingot-macros",
  "macaddr",
- "zerocopy 0.8.56",
+ "zerocopy 0.8.55",
 ]
 
 [[package]]
@@ -5907,13 +5847,14 @@ dependencies = [
  "reqwest 0.13.2",
  "serde_json",
  "sha2 0.10.9",
+ "sled-agent-types",
  "sled-hardware",
  "sled-hardware-types",
  "sled-storage",
  "slog",
  "slog-async",
  "slog-envlogger",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "slog-term",
  "smf 0.2.3",
  "tar",
@@ -5933,7 +5874,6 @@ dependencies = [
  "dropshot-api-manager-types",
  "hyper",
  "installinator-common-versions",
- "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxide-update-engine-types",
@@ -5948,7 +5888,6 @@ dependencies = [
 name = "installinator-client"
 version = "0.1.0"
 dependencies = [
- "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxide-update-engine-types",
@@ -5970,7 +5909,6 @@ dependencies = [
  "illumos-utils",
  "installinator-common-versions",
  "libc",
- "omicron-common",
  "omicron-workspace-hack",
  "oxide-update-engine",
  "oxide-update-engine-types",
@@ -5979,6 +5917,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with 3.21.0",
+ "sled-agent-types",
  "test-strategy",
  "thiserror 2.0.18",
  "tokio",
@@ -6061,6 +6000,7 @@ dependencies = [
  "expectorate",
  "internal-dns-types-versions",
  "omicron-common",
+ "omicron-generation-kinds",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "schemars 0.8.22",
@@ -6075,7 +6015,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
- "omicron-common",
+ "omicron-generation-kinds",
  "omicron-workspace-hack",
  "schemars 0.8.22",
  "serde",
@@ -6105,12 +6045,11 @@ version = "0.1.0"
 dependencies = [
  "ciborium",
  "libipcc 0.1.0 (git+https://github.com/oxidecomputer/ipcc-rs?rev=524eb8f125003dff50b9703900c6b323f00f9e1b)",
- "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "proptest",
  "serde",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "test-strategy",
  "thiserror 2.0.18",
  "tufaceous-artifact 0.2.0",
@@ -6130,9 +6069,9 @@ dependencies = [
 
 [[package]]
 name = "ipnet"
-version = "2.12.1"
+version = "2.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a756c3fac73139e83f14c2d742155dd2b78d3ee56597b419a0579b7bdd6dd78"
+checksum = "d98f6fed1fde3f8c21bc40a1abb88dd75e67924f9cffc3ef95607bad8017f8e2"
 dependencies = [
  "serde",
 ]
@@ -6165,7 +6104,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi 0.5.2",
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6370,10 +6309,10 @@ dependencies = [
  "async-trait",
  "hkdf 0.12.4",
  "key-manager-types",
- "omicron-common",
  "omicron-workspace-hack",
  "secrecy 0.10.3",
  "sha3 0.10.8",
+ "sled-agent-types",
  "slog",
  "thiserror 2.0.18",
  "tokio",
@@ -6857,7 +6796,7 @@ dependencies = [
  "sha2 0.10.9",
  "thiserror 2.0.18",
  "x509-cert",
- "zerocopy 0.8.56",
+ "zerocopy 0.8.55",
 ]
 
 [[package]]
@@ -6871,9 +6810,9 @@ dependencies = [
 
 [[package]]
 name = "lru"
-version = "0.18.2"
+version = "0.18.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d2f2f9b4ba7e6b24d95e7e899329d35be83bcded72c8540cdd5368932d1d90a"
+checksum = "0d317b4b9eb398e6acce275758ec6125535505e7a146fb1a9b8bda2451b0ff4c"
 dependencies = [
  "hashbrown 0.17.0",
 ]
@@ -7292,7 +7231,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "serde",
- "serde_tokenstream",
+ "serde_tokenstream 0.2.3",
  "syn 2.0.117",
 ]
 
@@ -7362,6 +7301,7 @@ dependencies = [
  "iddqd",
  "nexus-types",
  "omicron-common",
+ "omicron-generation-kinds",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
@@ -7485,6 +7425,7 @@ dependencies = [
  "omicron-certificates",
  "omicron-cockroach-metrics",
  "omicron-common",
+ "omicron-generation-kinds",
  "omicron-git-version",
  "omicron-passwords",
  "omicron-rpaths",
@@ -7505,7 +7446,7 @@ dependencies = [
  "sled-agent-types",
  "sled-hardware-types",
  "slog",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "sqlparser",
  "steno",
  "strum 0.27.2",
@@ -7566,6 +7507,7 @@ dependencies = [
  "nonempty",
  "omicron-cockroach-metrics",
  "omicron-common",
+ "omicron-generation-kinds",
  "omicron-passwords",
  "omicron-rpaths",
  "omicron-sled-agent",
@@ -7583,6 +7525,7 @@ dependencies = [
  "pq-sys",
  "predicates",
  "pretty_assertions",
+ "proptest",
  "qorb",
  "rand 0.9.2",
  "rcgen",
@@ -7600,7 +7543,8 @@ dependencies = [
  "sled-agent-types",
  "sled-hardware-types",
  "slog",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
+ "socket2 0.5.10",
  "static_assertions",
  "steno",
  "strum 0.27.2",
@@ -7673,7 +7617,7 @@ dependencies = [
  "scim2-rs",
  "serde",
  "serde_json",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "trust-quorum-types",
  "uuid",
 ]
@@ -7691,6 +7635,7 @@ dependencies = [
  "nexus-reconfigurator-planning",
  "nexus-types",
  "omicron-common",
+ "omicron-generation-kinds",
  "omicron-rpaths",
  "omicron-test-utils",
  "omicron-uuid-kinds",
@@ -7700,7 +7645,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "steno",
  "strum 0.27.2",
  "thiserror 2.0.18",
@@ -7754,6 +7699,7 @@ dependencies = [
  "ntp-admin-client",
  "omicron-cockroach-metrics",
  "omicron-common",
+ "omicron-generation-kinds",
  "omicron-rpaths",
  "omicron-sled-agent",
  "omicron-uuid-kinds",
@@ -7767,7 +7713,7 @@ dependencies = [
  "sled-agent-types-versions",
  "sled-hardware-types",
  "slog",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "strum 0.27.2",
  "swrite",
  "thiserror 2.0.18",
@@ -7805,6 +7751,7 @@ dependencies = [
  "iddqd",
  "nexus-types",
  "omicron-common",
+ "omicron-generation-kinds",
  "omicron-passwords",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -7855,7 +7802,7 @@ dependencies = [
  "oximeter-client",
  "pq-sys",
  "slog",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "thiserror 2.0.18",
  "tokio",
  "uuid",
@@ -7883,6 +7830,7 @@ dependencies = [
  "internal-dns-types",
  "nexus-types",
  "omicron-common",
+ "omicron-generation-kinds",
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -7899,7 +7847,7 @@ dependencies = [
  "sled-diagnostics",
  "sled-hardware-types",
  "slog",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "sp-sim",
  "thiserror 2.0.18",
  "tokio",
@@ -7946,6 +7894,7 @@ dependencies = [
  "nexus-reconfigurator-planning",
  "nexus-types",
  "omicron-common",
+ "omicron-generation-kinds",
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -8021,6 +7970,7 @@ dependencies = [
  "nexus-test-utils-macros",
  "nexus-types",
  "omicron-common",
+ "omicron-generation-kinds",
  "omicron-nexus",
  "omicron-rpaths",
  "omicron-test-utils",
@@ -8031,10 +7981,12 @@ dependencies = [
  "oxnet",
  "pq-sys",
  "reqwest 0.13.2",
+ "serde_json",
  "sled-agent-client",
  "sled-agent-types",
  "slog",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
+ "steno",
  "tokio",
  "uuid",
 ]
@@ -8074,6 +8026,7 @@ dependencies = [
  "nexus-types",
  "omicron-common",
  "omicron-deployment-graph",
+ "omicron-generation-kinds",
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -8087,7 +8040,7 @@ dependencies = [
  "sled-agent-types",
  "sled-hardware-types",
  "slog",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "sp-sim",
  "static_assertions",
  "strum 0.27.2",
@@ -8114,6 +8067,7 @@ dependencies = [
  "nexus-db-queries",
  "nexus-types",
  "omicron-common",
+ "omicron-generation-kinds",
  "omicron-rpaths",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -8121,7 +8075,7 @@ dependencies = [
  "sled-agent-types",
  "sled-hardware-types",
  "slog",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
 ]
 
 [[package]]
@@ -8131,11 +8085,13 @@ dependencies = [
  "anyhow",
  "async-bb8-diesel",
  "diesel",
+ "iddqd",
  "nexus-db-model",
  "nexus-db-queries",
  "nexus-db-schema",
  "nexus-types",
  "omicron-common",
+ "omicron-generation-kinds",
  "omicron-rpaths",
  "omicron-test-utils",
  "omicron-uuid-kinds",
@@ -8143,6 +8099,7 @@ dependencies = [
  "pq-sys",
  "proptest",
  "serde",
+ "sled-agent-types",
  "slog",
  "test-strategy",
  "tokio",
@@ -8164,6 +8121,7 @@ dependencies = [
  "nexus-reconfigurator-planning",
  "nexus-types",
  "omicron-common",
+ "omicron-generation-kinds",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "petname",
@@ -8201,7 +8159,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "steno",
  "tokio",
  "uuid",
@@ -8251,6 +8209,7 @@ dependencies = [
  "nexus-db-queries",
  "nexus-types",
  "omicron-common",
+ "omicron-debug-dropbox",
  "omicron-rpaths",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -8297,6 +8256,8 @@ dependencies = [
  "nexus-types-versions",
  "omicron-cockroach-admin",
  "omicron-common",
+ "omicron-debug-dropbox",
+ "omicron-generation-kinds",
  "omicron-passwords",
  "omicron-rpaths",
  "omicron-sled-agent",
@@ -8315,7 +8276,7 @@ dependencies = [
  "sled-agent-client",
  "sled-agent-types",
  "slog",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "tokio",
  "tokio-postgres",
  "tokio-util",
@@ -8370,6 +8331,7 @@ dependencies = [
  "newtype_derive",
  "nexus-types-versions",
  "omicron-common",
+ "omicron-generation-kinds",
  "omicron-passwords",
  "omicron-test-utils",
  "omicron-uuid-kinds",
@@ -8394,7 +8356,7 @@ dependencies = [
  "sled-agent-types-versions",
  "sled-hardware-types",
  "slog",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "steno",
  "strum 0.27.2",
  "swrite",
@@ -8441,7 +8403,7 @@ dependencies = [
  "serde_json",
  "sled-agent-types-versions",
  "sled-hardware-types",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "strum 0.27.2",
  "thiserror 2.0.18",
  "tough 0.22.0",
@@ -8541,7 +8503,6 @@ dependencies = [
  "dropshot-api-manager-types",
  "http",
  "ntp-admin-types-versions",
- "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "schemars 0.8.22",
@@ -8585,7 +8546,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -8676,9 +8637,9 @@ dependencies = [
 
 [[package]]
 name = "num-modular"
-version = "0.6.4"
+version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc41a1374056e9672221567958a66c16be12d0e2c1b408761e14d901c237d5e0"
+checksum = "bd8e500409e6cd603b03e477c26a6caecdc27ac58979a53e881c75eafc079f44"
 
 [[package]]
 name = "num-primitive"
@@ -8743,7 +8704,7 @@ version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "680998035259dcfcafe653688bf2aa6d3e2dc05e98be6ab46afb089dc84f1df8"
 dependencies = [
- "proc-macro-crate 1.3.1",
+ "proc-macro-crate 3.4.0",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -8854,6 +8815,7 @@ dependencies = [
  "http",
  "illumos-utils",
  "omicron-common",
+ "omicron-generation-kinds",
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -8869,7 +8831,7 @@ dependencies = [
  "slog",
  "slog-async",
  "slog-dtrace",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "slog-term",
  "subprocess",
  "thiserror 2.0.18",
@@ -8916,7 +8878,7 @@ dependencies = [
  "slog",
  "slog-async",
  "slog-dtrace",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "subprocess",
  "test-strategy",
  "thiserror 2.0.18",
@@ -8970,6 +8932,7 @@ dependencies = [
  "itertools 0.14.0",
  "libc",
  "macaddr",
+ "omicron-generation-kinds",
  "omicron-ledger",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -8988,7 +8951,7 @@ dependencies = [
  "serde_urlencoded",
  "serde_with 3.21.0",
  "slog",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "strum 0.27.2",
  "test-strategy",
  "thiserror 2.0.18",
@@ -9012,10 +8975,23 @@ dependencies = [
  "serde",
  "sled-hardware-types",
  "slog",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "thiserror 2.0.18",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "omicron-debug-dropbox"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/omicron-debug-dropbox?rev=eb13fc7a0031261dd51a14a30a133155460f5c0a#eb13fc7a0031261dd51a14a30a133155460f5c0a"
+dependencies = [
+ "camino",
+ "derive_more 2.1.1",
+ "slog",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
+ "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]
@@ -9142,7 +9118,7 @@ dependencies = [
  "signal-hook-tokio",
  "slog",
  "slog-dtrace",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "sp-sim",
  "subprocess",
  "thiserror 2.0.18",
@@ -9153,6 +9129,14 @@ dependencies = [
  "tufaceous-artifact 0.2.0",
  "uuid",
  "zip 4.6.1",
+]
+
+[[package]]
+name = "omicron-generation-kinds"
+version = "0.1.0"
+dependencies = [
+ "oxide-generation",
+ "oxide-generation-macros",
 ]
 
 [[package]]
@@ -9178,7 +9162,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "thiserror 2.0.18",
  "tokio",
 ]
@@ -9204,6 +9188,7 @@ dependencies = [
  "nexus-reconfigurator-preparation",
  "nexus-types",
  "omicron-common",
+ "omicron-generation-kinds",
  "omicron-rpaths",
  "omicron-test-utils",
  "omicron-uuid-kinds",
@@ -9213,7 +9198,7 @@ dependencies = [
  "serde",
  "sled-agent-types",
  "slog",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "textwrap 0.16.2",
  "tokio",
  "uuid",
@@ -9345,6 +9330,8 @@ dependencies = [
  "num-integer",
  "omicron-cockroach-metrics",
  "omicron-common",
+ "omicron-debug-dropbox",
+ "omicron-generation-kinds",
  "omicron-passwords",
  "omicron-rpaths",
  "omicron-sled-agent",
@@ -9381,6 +9368,7 @@ dependencies = [
  "range-requests",
  "raw-cpuid",
  "rcgen",
+ "reconfigurator-cli",
  "ref-cast",
  "regex",
  "reqwest 0.13.2",
@@ -9405,7 +9393,7 @@ dependencies = [
  "slog",
  "slog-async",
  "slog-dtrace",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "slog-term",
  "sp-sim",
  "static_assertions",
@@ -9461,7 +9449,7 @@ dependencies = [
  "slog",
  "slog-async",
  "slog-dtrace",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "subprocess",
  "test-strategy",
  "thiserror 2.0.18",
@@ -9480,6 +9468,7 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "bootstrap-agent-lockstep-client",
+ "bootstrap-agent-lockstep-types",
  "bytes",
  "camino",
  "camino-tempfile",
@@ -9530,6 +9519,7 @@ dependencies = [
  "nexus-types",
  "ntp-admin-client",
  "omicron-common",
+ "omicron-generation-kinds",
  "omicron-git-version",
  "omicron-nexus",
  "omicron-rpaths",
@@ -9556,7 +9546,7 @@ dependencies = [
  "sled-agent-types",
  "sled-hardware-types",
  "slog",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "steno",
  "strum 0.27.2",
  "subprocess",
@@ -9744,7 +9734,7 @@ dependencies = [
  "serde_json",
  "signal-hook-tokio",
  "slog",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "tokio",
  "tokio-util",
  "tufaceous",
@@ -9783,7 +9773,6 @@ dependencies = [
  "derive_more 0.99.20",
  "dice-verifier 0.3.0-pre0 (git+https://github.com/oxidecomputer/dice-util?branch=main)",
  "display-error-chain",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=cc0c307c617f2988aafdca4e3bd35ea178b64801)",
  "dropshot",
  "expectorate",
  "flate2",
@@ -9819,6 +9808,7 @@ dependencies = [
  "nix 0.31.2",
  "omicron-common",
  "omicron-ddm-admin-client",
+ "omicron-generation-kinds",
  "omicron-ledger",
  "omicron-rpaths",
  "omicron-test-utils",
@@ -9849,11 +9839,12 @@ dependencies = [
  "sha3 0.10.8",
  "signal-hook",
  "sled-agent-api",
+ "sled-agent-bootstrap-common",
  "sled-agent-client",
  "sled-agent-config-reconciler",
- "sled-agent-early-networking",
  "sled-agent-health-monitor",
  "sled-agent-measurements",
+ "sled-agent-multirack-join",
  "sled-agent-rack-setup",
  "sled-agent-resolvable-files",
  "sled-agent-scrimlet-reconcilers",
@@ -9866,7 +9857,7 @@ dependencies = [
  "slog",
  "slog-async",
  "slog-dtrace",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "slog-term",
  "smf 0.2.3",
  "sp-sim",
@@ -9919,6 +9910,7 @@ dependencies = [
  "libc",
  "nexus-config",
  "omicron-common",
+ "omicron-debug-dropbox",
  "omicron-workspace-hack",
  "oxide-tokio-rt",
  "pem",
@@ -9928,9 +9920,10 @@ dependencies = [
  "reqwest 0.13.2",
  "rustls",
  "serde",
+ "serde_json",
  "sha2 0.10.9",
  "slog",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "subprocess",
  "tar",
  "thiserror 2.0.18",
@@ -9993,6 +9986,8 @@ dependencies = [
  "daft",
  "data-encoding",
  "der 0.7.10",
+ "derive_more 2.1.1",
+ "derive_more-impl",
  "dice-verifier 0.3.0-pre0 (git+https://github.com/oxidecomputer/dice-util?rev=4a39ef08d81e5177edee0bddb1146032aa21074d)",
  "digest 0.10.7",
  "digest 0.11.3",
@@ -10017,7 +10012,6 @@ dependencies = [
  "gateway-messages",
  "generic-array 0.14.7",
  "getrandom 0.2.17",
- "getrandom 0.3.4",
  "getrandom 0.4.3",
  "group 0.13.0",
  "hashbrown 0.15.5",
@@ -10038,6 +10032,7 @@ dependencies = [
  "ipnet",
  "ipnetwork",
  "itertools 0.13.0",
+ "itertools 0.15.0",
  "jiff",
  "lalrpop-util",
  "lazy_static",
@@ -10047,6 +10042,7 @@ dependencies = [
  "log",
  "managed",
  "memchr",
+ "miette 7.6.0",
  "miniz_oxide",
  "mio",
  "newtype-uuid",
@@ -10131,7 +10127,7 @@ dependencies = [
  "vergen-lib 9.1.0",
  "winnow 1.0.3",
  "x509-cert",
- "zerocopy 0.8.56",
+ "zerocopy 0.8.55",
  "zeroize",
  "zip 0.6.6",
  "zip 4.6.1",
@@ -10285,7 +10281,7 @@ dependencies = [
  "serde",
  "tabwriter",
  "version_check",
- "zerocopy 0.8.56",
+ "zerocopy 0.8.55",
 ]
 
 [[package]]
@@ -10378,6 +10374,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxide-generation"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e130a1add81f976d13f8f3ab455de3e3fd1f1b9b796520049680dd19a385809c"
+dependencies = [
+ "daft",
+ "proptest",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "slog",
+]
+
+[[package]]
+name = "oxide-generation-macros"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "68b727e329bc9ff425bf3051e7f39986943bea27aefd6e30b43b468ca999a348"
+dependencies = [
+ "heck 0.5.0",
+ "proc-macro2",
+ "quote",
+ "serde",
+ "serde_tokenstream 0.3.0",
+ "syn 3.0.3",
+]
+
+[[package]]
 name = "oxide-tokio-rt"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10451,7 +10475,7 @@ dependencies = [
  "serde",
  "tabwriter",
  "uuid",
- "zerocopy 0.8.56",
+ "zerocopy 0.8.55",
 ]
 
 [[package]]
@@ -10539,7 +10563,7 @@ dependencies = [
  "slog",
  "slog-async",
  "slog-dtrace",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "slog-term",
  "strum 0.27.2",
  "subprocess",
@@ -10606,7 +10630,7 @@ dependencies = [
  "slog",
  "slog-async",
  "slog-dtrace",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "slog-term",
  "sqlformat",
  "sqlparser",
@@ -10643,7 +10667,7 @@ dependencies = [
  "serde",
  "slog",
  "slog-async",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "slog-term",
  "thiserror 2.0.18",
  "tokio",
@@ -10700,7 +10724,7 @@ dependencies = [
  "serde_json",
  "slog",
  "slog-dtrace",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "slog-term",
  "thiserror 2.0.18",
  "tokio",
@@ -10731,7 +10755,7 @@ dependencies = [
  "quote",
  "schemars 0.8.22",
  "serde",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "syn 2.0.117",
  "toml 0.8.23",
 ]
@@ -10808,10 +10832,14 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "camino",
+ "camino-tempfile",
  "chrono",
  "clap",
  "glob",
+ "illumos-nvpair",
+ "illumos-nvpair-sys",
  "jiff",
+ "libc",
  "omicron-workspace-hack",
  "rayon",
  "sigpipe",
@@ -11291,7 +11319,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9cd31dcfdbbd7431a807ef4df6edd6473228e94d5c805e8cf671227a21bad068"
 dependencies = [
  "anyhow",
- "itertools 0.12.1",
+ "itertools 0.15.0",
  "proc-macro2",
  "quote",
  "rand 0.8.6",
@@ -11695,7 +11723,7 @@ version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "85eae3c4ed2f50dcfe72643da4befc30deadb458a9b590d720cde2f2b1e97da9"
 dependencies = [
- "zerocopy 0.8.56",
+ "zerocopy 0.8.55",
 ]
 
 [[package]]
@@ -12009,7 +12037,7 @@ dependencies = [
  "schemars 0.8.22",
  "serde",
  "serde_json",
- "serde_tokenstream",
+ "serde_tokenstream 0.2.3",
  "serde_yaml",
  "syn 2.0.117",
 ]
@@ -12027,7 +12055,7 @@ dependencies = [
  "schemars 0.8.22",
  "serde",
  "serde_json",
- "serde_tokenstream",
+ "serde_tokenstream 0.2.3",
  "serde_yaml",
  "syn 2.0.117",
 ]
@@ -12235,7 +12263,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.5.10",
+ "socket2 0.6.3",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -12274,7 +12302,7 @@ dependencies = [
  "cfg_aliases 0.2.1",
  "libc",
  "once_cell",
- "socket2 0.5.10",
+ "socket2 0.6.3",
  "tracing",
  "windows-sys 0.60.2",
 ]
@@ -12602,6 +12630,7 @@ dependencies = [
  "nexus-reconfigurator-simulation",
  "nexus-types",
  "omicron-common",
+ "omicron-generation-kinds",
  "omicron-repl-utils",
  "omicron-rpaths",
  "omicron-test-utils",
@@ -12614,7 +12643,7 @@ dependencies = [
  "serde_json",
  "sled-agent-types",
  "slog",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "slog-term",
  "subprocess",
  "swrite",
@@ -12642,7 +12671,6 @@ dependencies = [
  "internal-dns-types",
  "nexus-mgs-updates",
  "nexus-types",
- "omicron-common",
  "omicron-repl-utils",
  "omicron-workspace-hack",
  "oxide-tokio-rt",
@@ -13268,7 +13296,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -13335,7 +13363,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -13950,6 +13978,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_tokenstream"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "db95b8acf6eca5bc1bc771a7d7fb1a0d1485bdef0c46eec2f573bbaf4b4118f8"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "serde",
+ "syn 3.0.3",
+]
+
+[[package]]
 name = "serde_urlencoded"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -14272,11 +14312,35 @@ dependencies = [
  "sled-agent-types-versions",
  "sled-diagnostics",
  "sled-hardware-types",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "static_assertions",
  "trust-quorum-types",
  "uuid",
  "x509-cert",
+]
+
+[[package]]
+name = "sled-agent-bootstrap-common"
+version = "0.1.0"
+dependencies = [
+ "bootstore",
+ "camino",
+ "omicron-common",
+ "omicron-ledger",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "serde",
+ "serde_json",
+ "sled-agent-config-reconciler",
+ "sled-agent-measurements",
+ "sled-agent-types",
+ "slog",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
+ "sprockets-tls",
+ "thiserror 2.0.18",
+ "tokio",
+ "trust-quorum",
+ "uuid",
 ]
 
 [[package]]
@@ -14287,6 +14351,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "omicron-common",
+ "omicron-generation-kinds",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
@@ -14323,6 +14388,7 @@ dependencies = [
  "dropshot",
  "either",
  "expectorate",
+ "filetime",
  "futures",
  "glob",
  "iddqd",
@@ -14330,8 +14396,11 @@ dependencies = [
  "installinator-common",
  "key-manager",
  "key-manager-types",
+ "libc",
  "ntp-admin-client",
  "omicron-common",
+ "omicron-debug-dropbox",
+ "omicron-generation-kinds",
  "omicron-ledger",
  "omicron-test-utils",
  "omicron-uuid-kinds",
@@ -14352,31 +14421,16 @@ dependencies = [
  "sled-hardware",
  "sled-storage",
  "slog",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "strum 0.27.2",
  "test-strategy",
  "thiserror 2.0.18",
  "tokio",
  "trust-quorum-types",
  "tufaceous-artifact 0.2.0",
+ "walkdir",
  "xshell",
  "zone",
-]
-
-[[package]]
-name = "sled-agent-early-networking"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "futures",
- "gateway-client",
- "internal-dns-resolver",
- "internal-dns-types",
- "omicron-common",
- "omicron-workspace-hack",
- "sled-agent-types",
- "slog",
- "tokio",
 ]
 
 [[package]]
@@ -14390,14 +14444,13 @@ dependencies = [
  "dropshot",
  "futures",
  "illumos-utils",
- "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "serde",
  "sled-agent-api",
  "sled-agent-types",
  "slog",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "thiserror 2.0.18",
  "tokio",
 ]
@@ -14418,9 +14471,45 @@ dependencies = [
  "sled-agent-types",
  "sled-agent-types-versions",
  "slog",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "thiserror 2.0.18",
  "tokio",
+]
+
+[[package]]
+name = "sled-agent-multirack-join"
+version = "0.1.0"
+dependencies = [
+ "bootstore",
+ "bootstrap-agent-lockstep-types",
+ "camino",
+ "camino-tempfile",
+ "iddqd",
+ "itertools 0.14.0",
+ "nexus-types",
+ "omicron-common",
+ "omicron-ddm-admin-client",
+ "omicron-ledger",
+ "omicron-test-utils",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "oxnet",
+ "schemars 0.8.22",
+ "serde",
+ "sled-agent-bootstrap-common",
+ "sled-agent-types",
+ "sled-hardware-types",
+ "sled-storage",
+ "slog",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
+ "static_assertions",
+ "thiserror 2.0.18",
+ "tokio",
+ "toml 0.8.23",
+ "trust-quorum",
+ "trust-quorum-protocol",
+ "trust-quorum-types",
+ "uuid",
 ]
 
 [[package]]
@@ -14449,6 +14538,7 @@ dependencies = [
  "ntp-admin-client",
  "omicron-common",
  "omicron-ddm-admin-client",
+ "omicron-generation-kinds",
  "omicron-ledger",
  "omicron-test-utils",
  "omicron-uuid-kinds",
@@ -14459,13 +14549,14 @@ dependencies = [
  "reqwest 0.13.2",
  "schemars 0.8.22",
  "serde",
+ "sled-agent-bootstrap-common",
  "sled-agent-client",
  "sled-agent-config-reconciler",
  "sled-agent-types",
  "sled-hardware-types",
  "sled-storage",
  "slog",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "static_assertions",
  "thiserror 2.0.18",
  "tokio",
@@ -14499,7 +14590,7 @@ dependencies = [
  "sled-agent-types",
  "sled-storage",
  "slog",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "thiserror 2.0.18",
  "tufaceous-artifact 0.2.0",
 ]
@@ -14556,7 +14647,7 @@ dependencies = [
  "serde_json",
  "sled-agent-types",
  "slog",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "test-strategy",
  "thiserror 2.0.18",
  "tokio",
@@ -14585,7 +14676,7 @@ dependencies = [
  "sled-agent-types-versions",
  "sled-hardware-types",
  "slog",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "swrite",
  "test-strategy",
  "thiserror 2.0.18",
@@ -14611,6 +14702,7 @@ dependencies = [
  "ipnetwork",
  "itertools 0.14.0",
  "omicron-common",
+ "omicron-generation-kinds",
  "omicron-ledger",
  "omicron-passwords",
  "omicron-test-utils",
@@ -14627,7 +14719,7 @@ dependencies = [
  "sha3 0.10.8",
  "sled-hardware-types",
  "slog",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "strum 0.27.2",
  "test-strategy",
  "thiserror 2.0.18",
@@ -14661,9 +14753,10 @@ dependencies = [
  "regex",
  "schemars 0.8.22",
  "serde",
+ "sled-agent-types",
  "sled-storage",
  "slog",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "thiserror 2.0.18",
  "tokio",
  "zfs-test-harness",
@@ -14692,9 +14785,10 @@ dependencies = [
  "rand 0.9.2",
  "schemars 0.8.22",
  "serde",
+ "sled-agent-types",
  "sled-hardware-types",
  "slog",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "thiserror 2.0.18",
  "tofino",
  "tokio",
@@ -14740,9 +14834,10 @@ dependencies = [
  "schemars 0.8.22",
  "serde",
  "serde_json",
+ "sled-agent-types",
  "sled-hardware",
  "slog",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
@@ -14821,13 +14916,32 @@ version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/slog-error-chain?branch=main#15f69041f45774602108e47fb25e705dc23acfb2"
 dependencies = [
  "slog",
- "slog-error-chain-derive",
+ "slog-error-chain-derive 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
+]
+
+[[package]]
+name = "slog-error-chain"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/slog-error-chain?rev=15f69041f45774602108e47fb25e705dc23acfb2#15f69041f45774602108e47fb25e705dc23acfb2"
+dependencies = [
+ "slog",
+ "slog-error-chain-derive 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?rev=15f69041f45774602108e47fb25e705dc23acfb2)",
 ]
 
 [[package]]
 name = "slog-error-chain-derive"
 version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/slog-error-chain?branch=main#15f69041f45774602108e47fb25e705dc23acfb2"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "slog-error-chain-derive"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/slog-error-chain?rev=15f69041f45774602108e47fb25e705dc23acfb2#15f69041f45774602108e47fb25e705dc23acfb2"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -14967,7 +15081,7 @@ version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c1c97747dbf44bb1ca44a561ece23508e99cb592e862f22222dcf42f51d1e451"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -14990,7 +15104,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -15016,14 +15130,15 @@ dependencies = [
  "serde_cbor",
  "sha2 0.10.9",
  "sha3 0.10.8",
+ "sled-agent-types",
  "slog",
  "slog-dtrace",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "thiserror 2.0.18",
  "tokio",
  "toml 0.8.23",
  "uuid",
- "zerocopy 0.8.56",
+ "zerocopy 0.8.55",
 ]
 
 [[package]]
@@ -15084,7 +15199,7 @@ dependencies = [
  "sha3 0.10.8",
  "slog",
  "slog-async",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "slog-term",
  "thiserror 1.0.69",
  "tokio",
@@ -15459,7 +15574,6 @@ dependencies = [
  "nexus-networking",
  "nexus-reconfigurator-preparation",
  "nexus-types",
- "omicron-common",
  "omicron-rpaths",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -15470,7 +15584,7 @@ dependencies = [
  "sha2 0.10.9",
  "sled-agent-client",
  "slog",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "tokio",
  "tokio-util",
  "uuid",
@@ -15641,7 +15755,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "libc",
- "lru 0.18.2",
+ "lru 0.18.3",
  "memmap2",
  "p256 0.13.2",
  "percent-encoding",
@@ -15694,6 +15808,17 @@ name = "syn"
 version = "2.0.117"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e665b8803e7b1d2a727f4023456bbbbe74da67099c585258af0ad9c5013b9b99"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "unicode-ident",
+]
+
+[[package]]
+name = "syn"
+version = "3.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "53e9bae58849f64dfa4f5d5ae372c8341f7305f82a3868709269343628b659a3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -15849,10 +15974,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -15872,7 +15997,7 @@ version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d8c27177b12a6399ffc08b98f76f7c9a1f4fe9fc967c784c5a071fa8d93cf7e1"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -16117,9 +16242,9 @@ dependencies = [
 
 [[package]]
 name = "tinyvec"
-version = "1.12.0"
+version = "1.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bb4ebadaa0af04fab11ae01eb5f9fdb5f9c5b875506e210e71c07873528baa7f"
+checksum = "3e61e67053d25a4e82c844e8424039d9745781b3fc4f32b8d55ed50f5f667ef3"
 dependencies = [
  "tinyvec_macros",
 ]
@@ -16811,7 +16936,7 @@ dependencies = [
  "sled-agent-types",
  "sled-hardware-types",
  "slog",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "sprockets-tls",
  "sprockets-tls-test-utils",
  "static_assertions",
@@ -16857,7 +16982,7 @@ dependencies = [
  "sled-agent-types",
  "sled-hardware-types",
  "slog",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "static_assertions",
  "subtle",
  "test-strategy",
@@ -16915,7 +17040,7 @@ dependencies = [
  "serde_with 3.21.0",
  "sled-hardware-types",
  "slog",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "thiserror 2.0.18",
 ]
 
@@ -17212,7 +17337,7 @@ dependencies = [
  "semver 1.0.28",
  "serde",
  "serde_json",
- "serde_tokenstream",
+ "serde_tokenstream 0.2.3",
  "syn 2.0.117",
  "typify-impl",
 ]
@@ -17406,7 +17531,7 @@ dependencies = [
  "dtrace-parser 0.2.0",
  "proc-macro2",
  "quote",
- "serde_tokenstream",
+ "serde_tokenstream 0.2.3",
  "syn 2.0.117",
  "usdt-impl 0.5.0",
 ]
@@ -17420,7 +17545,7 @@ dependencies = [
  "dtrace-parser 0.3.0",
  "proc-macro2",
  "quote",
- "serde_tokenstream",
+ "serde_tokenstream 0.2.3",
  "syn 2.0.117",
  "usdt-impl 0.6.0",
 ]
@@ -17473,7 +17598,7 @@ dependencies = [
  "dtrace-parser 0.2.0",
  "proc-macro2",
  "quote",
- "serde_tokenstream",
+ "serde_tokenstream 0.2.3",
  "syn 2.0.117",
  "usdt-impl 0.5.0",
 ]
@@ -17487,7 +17612,7 @@ dependencies = [
  "dtrace-parser 0.3.0",
  "proc-macro2",
  "quote",
- "serde_tokenstream",
+ "serde_tokenstream 0.2.3",
  "syn 2.0.117",
  "usdt-impl 0.6.0",
 ]
@@ -17895,7 +18020,7 @@ dependencies = [
  "slog",
  "slog-async",
  "slog-envlogger",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "slog-term",
  "supports-color 3.0.2",
  "tabled 0.15.0",
@@ -17965,7 +18090,7 @@ dependencies = [
  "slog",
  "slog-async",
  "slog-envlogger",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "slog-term",
  "tokio",
  "wicket",
@@ -18044,7 +18169,7 @@ dependencies = [
  "sled-storage",
  "slog",
  "slog-dtrace",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "sp-sim",
  "subprocess",
  "tar",
@@ -18066,6 +18191,7 @@ dependencies = [
  "wicketd-commission-client",
  "wicketd-commission-types",
  "wicketd-commission-types-versions",
+ "zeroize",
 ]
 
 [[package]]
@@ -18075,8 +18201,6 @@ dependencies = [
  "bootstrap-agent-lockstep-types",
  "dropshot",
  "gateway-client",
- "omicron-common",
- "omicron-passwords",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "schemars 0.8.22",
@@ -18168,11 +18292,12 @@ dependencies = [
  "serde_json",
  "sled-agent-types-versions",
  "sled-hardware-types",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "test-strategy",
  "thiserror 2.0.18",
  "toml 0.8.23",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]
@@ -18203,7 +18328,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -18847,11 +18972,11 @@ dependencies = [
 
 [[package]]
 name = "zerocopy"
-version = "0.8.56"
+version = "0.8.55"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "556764e583adb45a9f8d413c2a147fa7e8d821e48e12b14fd560b607998b75eb"
+checksum = "b5a105cd7b140f6eeec8acff2ea38135d3cab283ada58540f629fe51e46696eb"
 dependencies = [
- "zerocopy-derive 0.8.56",
+ "zerocopy-derive 0.8.55",
 ]
 
 [[package]]
@@ -18878,9 +19003,9 @@ dependencies = [
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.8.56"
+version = "0.8.55"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2ab42fc20575779bd240faa45f94a74256f755c0fa9e89f0ede20d91d0cdfc1"
+checksum = "0fe976fb70c78cd64cccfe3a6fc142244e8a77b70959b30faf9d0ac37ee228eb"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -18914,6 +19039,7 @@ version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e13c156562582aa81c60cb29407084cdb54c4164760106ab78e6c5b0858cf64e"
 dependencies = [
+ "serde",
  "zeroize_derive",
 ]
 
@@ -18974,9 +19100,10 @@ dependencies = [
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "sled-agent-types",
  "sled-storage",
  "slog",
- "slog-error-chain",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "tokio",
 ]
 

@@ -31,11 +31,7 @@ use wicket_common::rack_update::AbortUpdateOptions;
 use wicket_common::rack_update::ClearUpdateStateOptions;
 use wicket_common::rack_update::StartUpdateOptions;
 use wicket_common::update_events::EventReport;
-use wicketd_commission_types::rack_setup::BgpAuthKey;
 use wicketd_commission_types::rack_setup::BgpAuthKeyId;
-use wicketd_commission_types::rack_setup::CertificateUploadResponse;
-use wicketd_commission_types::rack_setup::PutRssUserConfigInsensitive;
-use wicketd_commission_types::rack_setup::SetBgpAuthKeyStatus;
 use wicketd_commission_types::update::ClearUpdateStateResponse;
 use wicketd_commission_types::update::UpdateTargets;
 
@@ -62,19 +58,6 @@ pub trait WicketdApi {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<CurrentRssUserConfig>, HttpError>;
 
-    /// Update (a subset of) the current RSS configuration.
-    ///
-    /// Sensitive values (certificates and password hash) are not set through
-    /// this endpoint.
-    #[endpoint {
-        method = PUT,
-        path = "/rack-setup/config"
-    }]
-    async fn put_rss_config(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<PutRssUserConfigInsensitive>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
-
     /// Get the current status of the multirack join configuration.
     #[endpoint {
         method = GET,
@@ -97,32 +80,6 @@ pub trait WicketdApi {
         body: TypedBody<MultirackJoinConfigBaseUserInput>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
-    /// Add an external certificate.
-    ///
-    /// This must be paired with its private key. They may be posted in either
-    /// order, but one cannot post two certs in a row (or two keys in a row).
-    #[endpoint {
-        method = POST,
-        path = "/rack-setup/config/cert"
-    }]
-    async fn post_rss_config_cert(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<String>,
-    ) -> Result<HttpResponseOk<CertificateUploadResponse>, HttpError>;
-
-    /// Add the private key of an external certificate.
-    ///
-    /// This must be paired with its certificate. They may be posted in either
-    /// order, but one cannot post two keys in a row (or two certs in a row).
-    #[endpoint {
-        method = POST,
-        path = "/rack-setup/config/key"
-    }]
-    async fn post_rss_config_key(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<String>,
-    ) -> Result<HttpResponseOk<CertificateUploadResponse>, HttpError>;
-
     // -- BGP authentication key management
 
     /// Return information about BGP authentication keys, including checking
@@ -140,36 +97,6 @@ pub trait WicketdApi {
         // nice way to transmit this information as a batch.
         params: TypedBody<GetBgpAuthKeyParams>,
     ) -> Result<HttpResponseOk<GetBgpAuthKeyInfoResponse>, HttpError>;
-
-    /// Set the BGP authentication key for a particular key ID.
-    #[endpoint {
-        method = PUT,
-        path = "/rack-setup/config/bgp/auth-key/{key_id}"
-    }]
-    async fn put_bgp_auth_key(
-        rqctx: RequestContext<Self::Context>,
-        params: Path<PutBgpAuthKeyParams>,
-        body: TypedBody<PutBgpAuthKeyBody>,
-    ) -> Result<HttpResponseOk<PutBgpAuthKeyResponse>, HttpError>;
-
-    /// Update the RSS config recovery silo user password hash.
-    #[endpoint {
-        method = PUT,
-        path = "/rack-setup/config/recovery-user-password-hash"
-    }]
-    async fn put_rss_config_recovery_user_password_hash(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<PutRssRecoveryUserPasswordHash>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
-
-    /// Reset all RSS configuration to their default values.
-    #[endpoint {
-        method = DELETE,
-        path = "/rack-setup/config"
-    }]
-    async fn delete_rss_config(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Query current state of rack setup.
     #[endpoint {
@@ -367,26 +294,6 @@ pub struct CurrentRssUserConfig {
 pub struct GetBgpAuthKeyParams {
     /// Checks that these keys are valid.
     pub check_valid: BTreeSet<BgpAuthKeyId>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
-pub struct PutBgpAuthKeyParams {
-    pub key_id: BgpAuthKeyId,
-}
-
-#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Eq)]
-pub struct PutBgpAuthKeyBody {
-    pub key: BgpAuthKey,
-}
-
-#[derive(Clone, Debug, Serialize, JsonSchema, PartialEq)]
-pub struct PutBgpAuthKeyResponse {
-    pub status: SetBgpAuthKeyStatus,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
-pub struct PutRssRecoveryUserPasswordHash {
-    pub hash: omicron_passwords::NewPasswordHash,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]

@@ -100,11 +100,11 @@ use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::ZoneRunningStatus;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::Generation;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
+use omicron_generation_kinds::Generation;
 use omicron_uuid_kinds::BlueprintKind;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid;
@@ -1304,7 +1304,7 @@ impl DataStore {
                 state: s.sled_state.into(),
                 update_disposition,
                 subnet,
-                sled_agent_generation: *s.sled_agent_generation,
+                sled_agent_generation: s.sled_agent_generation.into(),
                 last_allocated_ip_subnet_offset,
                 disks: IdOrdMap::new(),
                 datasets: IdOrdMap::new(),
@@ -1582,8 +1582,8 @@ impl DataStore {
         let internal_dns_version = *blueprint_row.internal_dns_version;
         let external_dns_version = *blueprint_row.external_dns_version;
         let target_release_minimum_generation =
-            *blueprint_row.target_release_minimum_generation;
-        let nexus_generation = *blueprint_row.nexus_generation;
+            blueprint_row.target_release_minimum_generation.into();
+        let nexus_generation = blueprint_row.nexus_generation.into();
         let external_networking_generation =
             *blueprint_row.external_networking_generation;
         let cockroachdb_fingerprint = blueprint_row.cockroachdb_fingerprint;
@@ -3133,6 +3133,7 @@ fn insert_target_query(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use omicron_generation_kinds::NexusGeneration;
 
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::pub_test_utils::helpers::create_service_ip_pool;
@@ -3178,8 +3179,6 @@ mod tests {
     use omicron_common::api::internal::shared::PrivateIpConfig;
     use omicron_common::api::internal::shared::PrivateIpv4Config;
     use omicron_common::api::internal::shared::PrivateIpv6Config;
-    use omicron_common::disk::DiskIdentity;
-    use omicron_common::disk::M2Slot;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev;
     use omicron_test_utils::dev::poll::CondCheckError;
@@ -3191,6 +3190,8 @@ mod tests {
     use omicron_uuid_kinds::ZpoolUuid;
     use pretty_assertions::assert_eq;
     use rand::Rng;
+    use sled_agent_types::disk::DiskIdentity;
+    use sled_agent_types::disk::M2Slot;
     use sled_agent_types::inventory::NetworkInterface;
     use sled_agent_types::inventory::NetworkInterfaceKind;
     use std::collections::BTreeMap;
@@ -5245,7 +5246,7 @@ mod tests {
                 nic: nic.clone(),
                 external_tls: false,
                 external_dns_servers: Vec::new(),
-                nexus_generation: Generation::new(),
+                nexus_generation: NexusGeneration::new(),
             }),
             image_source: BlueprintZoneImageSource::InstallDataset,
         };

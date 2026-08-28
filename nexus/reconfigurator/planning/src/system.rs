@@ -48,17 +48,18 @@ use omicron_common::address::RACK_PREFIX_LENGTH;
 use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::address::get_sled_address;
 use omicron_common::api::external::ByteCount;
-use omicron_common::api::external::Generation;
-use omicron_common::disk::DiskIdentity;
-use omicron_common::disk::DiskVariant;
-use omicron_common::disk::M2Slot;
 use omicron_common::policy::CRUCIBLE_PANTRY_REDUNDANCY;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_common::policy::NEXUS_REDUNDANCY;
+use omicron_generation_kinds::Generation;
 use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use sled_agent_types::disk::DatasetConfig;
+use sled_agent_types::disk::DiskIdentity;
+use sled_agent_types::disk::DiskVariant;
+use sled_agent_types::disk::M2Slot;
 use sled_agent_types::inventory::ConfigReconcilerInventory;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
 use sled_agent_types::inventory::FmdInventory;
@@ -1736,10 +1737,7 @@ impl Sled {
     ///
     /// The inventory values for "available space" and "used space" are
     /// made up, since this is a synthetic dataset.
-    pub fn add_synthetic_dataset(
-        &mut self,
-        config: omicron_common::disk::DatasetConfig,
-    ) {
+    pub fn add_synthetic_dataset(&mut self, config: DatasetConfig) {
         self.inventory_sled_agent.datasets.push(InventoryDataset {
             id: Some(config.id),
             name: config.name.full_name(),

@@ -7,7 +7,9 @@
 use crate::ControlPlaneStarter;
 use crate::ControlPlaneTestContextSledAgent;
 use crate::starter::PopulateCrdb;
+use crate::starter::SledIndexAllocator;
 use crate::starter::setup_with_config_impl;
+use crate::starter::start_sled_agent;
 #[cfg(feature = "omicron-dev")]
 use anyhow::Context;
 #[cfg(feature = "omicron-dev")]
@@ -26,6 +28,7 @@ use omicron_common::api::external::UserId;
 use omicron_common::api::internal::nexus::Certificate;
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev;
+use omicron_test_utils::dev::TestTempDir;
 use omicron_test_utils::dev::poll;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_test_utils::dev::poll::wait_for_watch_channel_condition;
@@ -34,6 +37,7 @@ use omicron_uuid_kinds::SledUuid;
 use oximeter_collector::Oximeter;
 use oximeter_producer::Server as ProducerServer;
 use sled_agent_types::early_networking::SwitchSlot;
+use sled_agent_types::inventory::SledCpuFamily;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -48,6 +52,7 @@ pub struct ControlPlaneBuilder<'a> {
     nextra_sled_agents: u16,
     tls_cert: Option<Certificate>,
     nexus_config: NexusConfig,
+    configure_second_nexus: bool,
 }
 
 impl<'a> ControlPlaneBuilder<'a> {
@@ -57,6 +62,7 @@ impl<'a> ControlPlaneBuilder<'a> {
             nextra_sled_agents: 0,
             tls_cert: None,
             nexus_config: load_test_config(),
+            configure_second_nexus: false,
         }
     }
 
@@ -67,6 +73,11 @@ impl<'a> ControlPlaneBuilder<'a> {
 
     pub fn with_tls_cert(mut self, tls_cert: Option<Certificate>) -> Self {
         self.tls_cert = tls_cert;
+        self
+    }
+
+    pub fn with_second_nexus_configured(mut self, do_configure: bool) -> Self {
+        self.configure_second_nexus = do_configure;
         self
     }
 
@@ -89,7 +100,7 @@ impl<'a> ControlPlaneBuilder<'a> {
             self.tls_cert,
             self.nextra_sled_agents,
             DEFAULT_SP_SIM_CONFIG.into(),
-            false,
+            self.configure_second_nexus,
         )
         .await
     }
@@ -110,6 +121,7 @@ pub struct ControlPlaneTestContext<N> {
     pub clickhouse: dev::clickhouse::ClickHouseDeployment,
     pub logctx: LogContext,
     pub sled_agents: Vec<ControlPlaneTestContextSledAgent>,
+    pub(crate) sled_index_allocator: SledIndexAllocator,
     pub oximeter: Oximeter,
     pub producer: ProducerServer,
     pub gateway: BTreeMap<SwitchSlot, GatewayTestContext>,
@@ -125,6 +137,8 @@ pub struct ControlPlaneTestContext<N> {
     pub silo_name: Name,
     pub user_name: UserId,
     pub password: String,
+
+    pub(crate) debug_dropbox_dir: TestTempDir,
 }
 
 impl<N: NexusServer> ControlPlaneTestContext<N> {
@@ -166,6 +180,10 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         format!("*.sys.{}", self.external_dns_zone_name)
     }
 
+    pub fn debug_dropbox_path(&self) -> &Utf8Path {
+        self.debug_dropbox_dir.path()
+    }
+
     /// Wait until at least one inventory collection has been inserted into the
     /// datastore, and the inventory watch channel is populated.
     ///
@@ -196,6 +214,42 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
                 );
             }
         }
+    }
+
+    /// Start a simulated sled agent partway through a test, waiting for the
+    /// sled to be registered with Nexus.
+    ///
+    /// The returned server must be held for as long as the sled should exist
+    /// (dropping it shuts the sled agent down).
+    ///
+    /// Unlike sled agents started during setup, sleds added this way are not
+    /// included in [`Self::all_sled_agents`].
+    #[must_use = "dropping the returned server shuts the sled agent down"]
+    pub async fn add_sled(
+        &self,
+        sled_id: SledUuid,
+        sim_mode: sim::SimMode,
+        cpu_family: SledCpuFamily,
+    ) -> sim::Server {
+        let sled_index = self.sled_index_allocator.next();
+        let nexus_address = self.server.get_http_server_internal_address();
+
+        // `start_sled_agent` uses `NexusRegistration::WaitForCompletion`, so
+        // Nexus knows about the sled once this returns.
+        start_sled_agent(
+            self.logctx.log.new(slog::o!(
+                "component" => "omicron_sled_agent::sim::Server",
+                "sled_id" => sled_id.to_string(),
+            )),
+            nexus_address,
+            sled_id,
+            sled_index,
+            sim_mode,
+            cpu_family,
+            &self.first_sled_agent().simulated_upstairs,
+        )
+        .await
+        .expect("started simulated sled agent")
     }
 
     pub fn internal_client(&self) -> nexus_client::Client {
@@ -332,6 +386,7 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         for (_, mut ddm) in self.ddm {
             ddm.cleanup().await.unwrap();
         }
+        self.debug_dropbox_dir.cleanup_successful();
         self.logctx.cleanup_successful();
     }
 }

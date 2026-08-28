@@ -101,3 +101,5 @@ pub mod v2026_06_11_00;
 pub mod v2026_08_12_00;
 #[path = "alert_list/mod.rs"]
 pub mod v2026_08_14_00;
+#[path = "bgp_peer_src_addr/mod.rs"]
+pub mod v2026_08_14_01;

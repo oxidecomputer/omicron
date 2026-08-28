@@ -17,12 +17,8 @@ use gateway_test_utils::setup as gateway_setup;
 use http::StatusCode;
 use installinator::HOST_PHASE_2_FILE_NAME;
 use maplit::btreeset;
-use omicron_common::{
-    disk::DiskIdentity,
-    update::{
-        MupdateOverrideInfo, OmicronInstallManifest,
-        OmicronInstallManifestSource,
-    },
+use omicron_common::update::{
+    MupdateOverrideInfo, OmicronInstallManifest, OmicronInstallManifestSource,
 };
 use omicron_uuid_kinds::{InternalZpoolUuid, MupdateUuid};
 use oxide_update_engine_types::spec::SerializableError;
@@ -31,6 +27,7 @@ use sled_agent_config_reconciler::{
     InternalDiskDetails, InternalDisksReceiver, InternalDisksWithBootDisk,
 };
 use sled_agent_resolvable_files::ZoneImageSourceResolver;
+use sled_agent_types::disk::DiskIdentity;
 use sled_agent_types::resolvable_files::MupdateOverrideNonBootResult;
 use sled_storage::config::MountConfig;
 use tokio::sync::oneshot;

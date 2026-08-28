@@ -88,11 +88,14 @@ mod test {
     use nexus_types::external_api::sled::SledState;
     use omicron_common::address::Ipv6Subnet;
     use omicron_common::api::external::Error;
-    use omicron_common::api::external::Generation;
     use omicron_common::api::external::MacAddr;
     use omicron_common::api::external::Vni;
     use omicron_common::api::internal::shared::PrivateIpConfig;
     use omicron_common::zpool_name::ZpoolName;
+    use omicron_generation_kinds::{
+        Generation, NexusGeneration, SledConfigGeneration,
+        TargetReleaseGeneration,
+    };
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::ExternalIpUuid;
@@ -107,11 +110,11 @@ mod test {
     use std::net::Ipv6Addr;
 
     fn create_test_blueprint(
-        top_level_nexus_generation: Generation,
+        top_level_nexus_generation: NexusGeneration,
         nexus_zones: Vec<(
             OmicronZoneUuid,
             BlueprintZoneDisposition,
-            Generation,
+            NexusGeneration,
         )>,
     ) -> Blueprint {
         let blueprint_id = BlueprintUuid::new_v4();
@@ -170,7 +173,7 @@ mod test {
                 subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
                 last_allocated_ip_subnet_offset:
                     LastAllocatedSubnetIpOffset::initial(),
-                sled_agent_generation: Generation::new(),
+                sled_agent_generation: SledConfigGeneration::new(),
                 zones,
                 disks: IdOrdMap::new(),
                 datasets: IdOrdMap::new(),
@@ -188,7 +191,7 @@ mod test {
             parent_blueprint_id: None,
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
-            target_release_minimum_generation: Generation::new(),
+            target_release_minimum_generation: TargetReleaseGeneration::new(),
             nexus_generation: top_level_nexus_generation,
             external_networking_generation: Generation::new(),
             cockroachdb_fingerprint: String::new(),
@@ -242,29 +245,29 @@ mod test {
             .unwrap();
 
         let blueprint = create_test_blueprint(
-            Generation::new(),
+            NexusGeneration::new(),
             vec![
                 // This nexus matches the top-level generation, and already
                 // exists as "active".
                 (
                     nexus1_id,
                     BlueprintZoneDisposition::InService,
-                    Generation::new(),
+                    NexusGeneration::new(),
                 ),
                 // This nexus is ahead of the the top-level nexus generation,
                 // and will be created as "not yet".
                 (
                     nexus2_id,
                     BlueprintZoneDisposition::InService,
-                    Generation::new().next(),
+                    NexusGeneration::new().next(),
                 ),
                 (
                     expunged_nexus,
                     BlueprintZoneDisposition::Expunged {
-                        as_of_generation: Generation::new(),
+                        as_of_generation: SledConfigGeneration::new(),
                         ready_for_cleanup: true,
                     },
-                    Generation::new(),
+                    NexusGeneration::new(),
                 ),
             ],
         );
@@ -355,14 +358,14 @@ mod test {
         let blueprint = create_test_blueprint(
             // NOTE: This is using a "Generation = 2", implying that all
             // nexuses using "Generation = 1" should start quiescing.
-            Generation::new().next(),
+            NexusGeneration::new().next(),
             vec![
                 // This Nexus already exists as active - even though it's
                 // quiescing currently.
                 (
                     nexus1_id,
                     BlueprintZoneDisposition::InService,
-                    Generation::new(),
+                    NexusGeneration::new(),
                 ),
                 // This Nexus matches the the top-level nexus generation,
                 // and will be created as "not yet", because "nexus1" is still
@@ -370,14 +373,14 @@ mod test {
                 (
                     nexus2_id,
                     BlueprintZoneDisposition::InService,
-                    Generation::new().next(),
+                    NexusGeneration::new().next(),
                 ),
                 // This Nexus will quiesce soon after starting, but can still be
                 // created as active.
                 (
                     nexus3_id,
                     BlueprintZoneDisposition::InService,
-                    Generation::new(),
+                    NexusGeneration::new(),
                 ),
             ],
         );
@@ -451,17 +454,17 @@ mod test {
         let nexus1_id = OmicronZoneUuid::new_v4();
         let nexus2_id = OmicronZoneUuid::new_v4();
         let blueprint = create_test_blueprint(
-            Generation::new(),
+            NexusGeneration::new(),
             vec![
                 (
                     nexus1_id,
                     BlueprintZoneDisposition::InService,
-                    Generation::new(),
+                    NexusGeneration::new(),
                 ),
                 (
                     nexus2_id,
                     BlueprintZoneDisposition::InService,
-                    Generation::new(),
+                    NexusGeneration::new(),
                 ),
             ],
         );
@@ -605,14 +608,22 @@ mod test {
         let nexus1_id = OmicronZoneUuid::new_v4();
         let nexus2_id = OmicronZoneUuid::new_v4();
         let both_nexuses = vec![
-            (nexus1_id, BlueprintZoneDisposition::InService, Generation::new()),
-            (nexus2_id, BlueprintZoneDisposition::InService, Generation::new()),
+            (
+                nexus1_id,
+                BlueprintZoneDisposition::InService,
+                NexusGeneration::new(),
+            ),
+            (
+                nexus2_id,
+                BlueprintZoneDisposition::InService,
+                NexusGeneration::new(),
+            ),
         ];
 
         let target_blueprint =
-            create_test_blueprint(Generation::new(), both_nexuses.clone());
+            create_test_blueprint(NexusGeneration::new(), both_nexuses.clone());
         let non_target_blueprint =
-            create_test_blueprint(Generation::new(), both_nexuses);
+            create_test_blueprint(NexusGeneration::new(), both_nexuses);
 
         // Initialize the "db_metadata_nexus" record for one of the Nexuses
         let conn = datastore.pool_connection_for_tests().await.unwrap();

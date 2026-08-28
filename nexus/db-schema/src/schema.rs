@@ -183,6 +183,7 @@ table! {
     switch_port_settings_port_config (port_settings_id) {
         port_settings_id -> Uuid,
         geometry -> crate::enums::SwitchPortGeometryEnum,
+        allow_ddm_traffic -> Bool,
     }
 }
 
@@ -276,6 +277,7 @@ table! {
         vlan_id -> Nullable<Int4>,
         id -> Uuid,
         router_lifetime -> Int4,
+        src_addr -> Nullable<Inet>,
     }
 }
 
@@ -323,28 +325,6 @@ table! {
         shaper -> Nullable<Text>,
         checker -> Nullable<Text>,
         max_paths -> Int2,
-    }
-}
-
-table! {
-    bgp_peer_view (switch_slot, port_name) {
-        switch_slot -> crate::enums::SwitchSlotEnum,
-        port_name -> Text,
-        addr -> Nullable<Inet>,
-        hold_time -> Int8,
-        idle_hold_time -> Int8,
-        delay_open -> Int8,
-        connect_retry -> Int8,
-        keepalive -> Int8,
-        remote_asn -> Nullable<Int8>,
-        min_ttl -> Nullable<Int2>,
-        md5_auth_key -> Nullable<Text>,
-        multi_exit_discriminator -> Nullable<Int8>,
-        local_pref -> Nullable<Int8>,
-        enforce_first_as -> Bool,
-        vlan_id -> Nullable<Int4>,
-        router_lifetime -> Int4,
-        asn -> Int8,
     }
 }
 
@@ -492,6 +472,7 @@ table! {
         state -> crate::enums::VmmStateEnum,
         cpu_platform -> crate::enums::VmmCpuPlatformEnum,
         failure_reason -> Nullable<crate::enums::VmmFailureReasonEnum>,
+        stop_for_update_disposition_generation -> Nullable<Int8>,
     }
 }
 joinable!(vmm -> sled (sled_id));
@@ -687,6 +668,13 @@ table! {
         ip_version -> crate::enums::IpVersionEnum,
         pool_type -> crate::enums::IpPoolTypeEnum,
         assignment -> crate::enums::IpPoolAssignmentEnum,
+    }
+}
+
+table! {
+    external_service_ip_pool (service, ip_pool_id) {
+        service -> crate::enums::ExternalServiceKindEnum,
+        ip_pool_id -> Uuid,
     }
 }
 
@@ -1279,6 +1267,17 @@ table! {
         pool_id -> Uuid,
         blueprint_id_when_created -> Uuid,
         blueprint_id_when_tombstoned -> Nullable<Uuid>,
+    }
+}
+
+table! {
+    rendezvous_sled_bp_availability (sled_id) {
+        sled_id -> Uuid,
+        bp_availability -> crate::enums::SledBpAvailabilityEnum,
+        update_disposition_generation -> Nullable<Int8>,
+        blueprint_id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
     }
 }
 
@@ -2135,6 +2134,7 @@ table! {
         host_phase_2_desired_slot_a -> Nullable<Text>,
         host_phase_2_desired_slot_b -> Nullable<Text>,
         measurements -> Nullable<Array<Text>>,
+        update_disposition -> crate::enums::InvSledUpdateDispositionEnum,
     }
 }
 
