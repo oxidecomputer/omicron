@@ -470,8 +470,7 @@ impl DataStore {
                                     )
                                 })
                             })?
-                            .generation
-                            .0
+                            .generation()
                     };
                     if target_release_generation_now
                         != recent_releases.target_release_generation
