@@ -94,30 +94,32 @@ impl PhysicalDisk {
         self,
         inv: &Option<Arc<inventory::Collection>>,
     ) -> physical_disk_types::PhysicalDisk {
-        physical_disk_types::PhysicalDisk {
-            identity: self.identity(),
-            policy: self.disk_policy.into(),
-            state: self.disk_state.into(),
-            sled_id: Some(self.sled_id.into()),
-            slot: inv.as_ref().and_then(|collection| {
-                collection.sled_agents.get(&self.sled_id()).and_then(|a| {
-                    let fauxdentity = sled_agent_types::disk::DiskIdentity {
-                        vendor: self.vendor.clone(),
-                        serial: self.serial.clone(),
-                        model: self.model.clone(),
-                    };
-                    a.disks.iter().find_map(|d| {
-                        if d.identity == fauxdentity {
-                            Some(d.slot)
-                        } else {
-                            None
-                        }
-                    })
-                })
-            }),
+        use sled_agent_types::disk::DiskIdentity;
+
+        let identity = self.identity();
+        let sled_id = self.sled_id();
+        let disk_identity = DiskIdentity {
             vendor: self.vendor,
             serial: self.serial,
             model: self.model,
+        };
+        let slot = inv.as_ref().and_then(|collection| {
+            collection
+                .sled_agents
+                .get(&sled_id)
+                .and_then(|a| a.disks.get(&disk_identity).map(|d| d.slot))
+        });
+        let DiskIdentity { vendor, serial, model } = disk_identity;
+
+        physical_disk_types::PhysicalDisk {
+            identity,
+            policy: self.disk_policy.into(),
+            state: self.disk_state.into(),
+            sled_id: Some(sled_id),
+            slot,
+            vendor,
+            serial,
+            model,
             form_factor: self.variant.into(),
         }
     }
