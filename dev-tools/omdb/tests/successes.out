@@ -498,6 +498,10 @@ task: "v2p_manager"
     manages opte v2p mappings for vpc networking
 
 
+task: "vmm_mark_stop_for_update"
+    marks VMMs on evacuating sleds as needing to be stopped for an update
+
+
 task: "vpc_route_manager"
     propagates updated VPC routes to all OPTE ports
 
@@ -1090,6 +1094,12 @@ task: "v2p_manager"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "v2p_manager" (don't know how to interpret details: Object {})
+
+task: "vmm_mark_stop_for_update"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    VMMs marked: 0
 
 task: "vpc_route_manager"
   configured period: every <REDACTED_DURATION>s
@@ -1812,6 +1822,12 @@ task: "v2p_manager"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "v2p_manager" (don't know how to interpret details: Object {})
+
+task: "vmm_mark_stop_for_update"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    VMMs marked: 0
 
 task: "vpc_route_manager"
   configured period: every <REDACTED_DURATION>s
