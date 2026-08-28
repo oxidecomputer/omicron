@@ -519,7 +519,6 @@ pub mod identity_provider {
 }
 
 pub mod physical_disk {
-    pub use crate::v2025_11_20_00::physical_disk::PhysicalDisk;
     pub use crate::v2025_11_20_00::physical_disk::PhysicalDiskKind;
     pub use crate::v2025_11_20_00::physical_disk::PhysicalDiskPolicy;
     pub use crate::v2025_11_20_00::physical_disk::PhysicalDiskState;
@@ -529,6 +528,9 @@ pub mod physical_disk {
     pub use crate::v2026_05_08_00::physical_disk::PhysicalDiskAdoptionRequestPath;
     pub use crate::v2026_05_08_00::physical_disk::PhysicalDiskManufacturerIdentity;
     pub use crate::v2026_05_08_00::physical_disk::UnadoptedPhysicalDisk;
+
+    // Types from ADD_PHYSICAL_DISK_LOCATION.
+    pub use crate::v2026_11_18_00::physical_disk::PhysicalDisk;
 }
 
 pub mod rack {
