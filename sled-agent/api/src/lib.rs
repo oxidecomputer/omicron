@@ -77,9 +77,8 @@ api_versions!([
     (16, MEASUREMENT_PROPER_INVENTORY),
     (15, ADD_TRUST_QUORUM_STATUS),
     (14, MEASUREMENTS),
-    (13, ADD_TRUST_QUORUM),
-    // Versions before this have been retired. We no longer support in any
-    // server, nor expect it from any client.
+    // Versions before this have been retired. We no longer support them in any
+    // server, nor expect them from any client.
 ]);
 
 // WHEN CHANGING THE API (part 2 of 2):
@@ -1507,7 +1506,6 @@ pub trait SledAgentApi {
     #[endpoint {
         method = POST,
         path = "/trust-quorum/configuration",
-        versions = VERSION_ADD_TRUST_QUORUM..,
     }]
     async fn trust_quorum_reconfigure(
         request_context: RequestContext<Self::Context>,
@@ -1518,7 +1516,6 @@ pub trait SledAgentApi {
     #[endpoint {
         method = POST,
         path = "/trust-quorum/upgrade",
-        versions = VERSION_ADD_TRUST_QUORUM..,
     }]
     async fn trust_quorum_upgrade_from_lrtq(
         request_context: RequestContext<Self::Context>,
@@ -1529,7 +1526,6 @@ pub trait SledAgentApi {
     #[endpoint {
         method = PUT,
         path = "/trust-quorum/commit",
-        versions = VERSION_ADD_TRUST_QUORUM..,
     }]
     async fn trust_quorum_commit(
         request_context: RequestContext<Self::Context>,
@@ -1540,7 +1536,6 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/trust-quorum/coordinator-status",
-        versions = VERSION_ADD_TRUST_QUORUM..,
     }]
     async fn trust_quorum_coordinator_status(
         request_context: RequestContext<Self::Context>,
@@ -1553,7 +1548,6 @@ pub trait SledAgentApi {
     #[endpoint {
         method = PUT,
         path = "/trust-quorum/prepare-and-commit",
-        versions = VERSION_ADD_TRUST_QUORUM..,
     }]
     async fn trust_quorum_prepare_and_commit(
         request_context: RequestContext<Self::Context>,
@@ -1567,7 +1561,6 @@ pub trait SledAgentApi {
     #[endpoint {
         method = PUT,
         path = "/trust-quorum/proxy/commit",
-        versions = VERSION_ADD_TRUST_QUORUM..,
     }]
     async fn trust_quorum_proxy_commit(
         request_context: RequestContext<Self::Context>,
@@ -1578,7 +1571,6 @@ pub trait SledAgentApi {
     #[endpoint {
         method = PUT,
         path = "/trust-quorum/proxy/prepare-and-commit",
-        versions = VERSION_ADD_TRUST_QUORUM..,
     }]
     async fn trust_quorum_proxy_prepare_and_commit(
         request_context: RequestContext<Self::Context>,
@@ -1592,7 +1584,6 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/trust-quorum/proxy/status",
-        versions = VERSION_ADD_TRUST_QUORUM..,
     }]
     async fn trust_quorum_proxy_status(
         request_context: RequestContext<Self::Context>,
