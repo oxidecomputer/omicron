@@ -71,7 +71,6 @@ api_versions!([
     (22, REMOVE_HEALTH_MONITOR_KEEP_CHECKS),
     (21, REMOVE_DISK_PUT),
     (20, BGP_V6),
-    (19, ADD_ROT_ATTESTATION),
     // Versions before this have been retired. We no longer support them in any
     // server, nor expect them from any client.
 ]);
@@ -1534,7 +1533,6 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/rot/{rot}/measurement-log",
-        versions = VERSION_ADD_ROT_ATTESTATION..,
     }]
     async fn rot_measurement_log(
         request_context: RequestContext<Self::Context>,
@@ -1545,7 +1543,6 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/rot/{rot}/certificate-chain",
-        versions = VERSION_ADD_ROT_ATTESTATION..,
     }]
     async fn rot_certificate_chain(
         request_context: RequestContext<Self::Context>,
@@ -1556,7 +1553,6 @@ pub trait SledAgentApi {
     #[endpoint {
         method = POST,
         path = "/rot/{rot}/attest",
-        versions = VERSION_ADD_ROT_ATTESTATION..,
     }]
     async fn rot_attest(
         request_context: RequestContext<Self::Context>,
