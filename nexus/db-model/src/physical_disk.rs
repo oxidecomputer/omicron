@@ -14,11 +14,13 @@ use nexus_db_schema::schema::{physical_disk, zpool};
 use nexus_types::external_api::physical_disk as physical_disk_types;
 use nexus_types::external_api::physical_disk::PhysicalDiskManufacturerIdentity;
 use nexus_types::identity::Asset;
+use nexus_types::inventory;
 use omicron_uuid_kinds::PhysicalDiskAdoptionRequestKind;
 use omicron_uuid_kinds::PhysicalDiskKind as PhysicalDiskUuidKind;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::SledUuid;
+use std::sync::Arc;
 
 /// Physical disk attached to sled.
 #[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
@@ -87,6 +89,38 @@ impl PhysicalDisk {
     pub fn sled_id(&self) -> SledUuid {
         self.sled_id.into()
     }
+
+    pub fn to_external_api(
+        self,
+        inv: &Option<Arc<inventory::Collection>>,
+    ) -> physical_disk_types::PhysicalDisk {
+        physical_disk_types::PhysicalDisk {
+            identity: self.identity(),
+            policy: self.disk_policy.into(),
+            state: self.disk_state.into(),
+            sled_id: Some(self.sled_id.into()),
+            slot: inv.as_ref().and_then(|collection| {
+                collection.sled_agents.get(&self.sled_id()).and_then(|a| {
+                    let fauxdentity = sled_agent_types::disk::DiskIdentity {
+                        vendor: self.vendor.clone(),
+                        serial: self.serial.clone(),
+                        model: self.model.clone(),
+                    };
+                    a.disks.iter().find_map(|d| {
+                        if d.identity == fauxdentity {
+                            Some(d.slot)
+                        } else {
+                            None
+                        }
+                    })
+                })
+            }),
+            vendor: self.vendor,
+            serial: self.serial,
+            model: self.model,
+            form_factor: self.variant.into(),
+        }
+    }
 }
 
 impl From<PhysicalDisk>
@@ -94,23 +128,6 @@ impl From<PhysicalDisk>
 {
     fn from(value: PhysicalDisk) -> Self {
         Self { vendor: value.vendor, serial: value.serial, model: value.model }
-    }
-}
-
-impl From<PhysicalDisk> for physical_disk_types::PhysicalDisk {
-    fn from(disk: PhysicalDisk) -> Self {
-        Self {
-            identity: disk.identity(),
-            policy: disk.disk_policy.into(),
-            state: disk.disk_state.into(),
-            sled_id: Some(disk.sled_id.into()),
-            // TODO: can we reliably copy the slot number from inventory collection?
-            slot: None,
-            vendor: disk.vendor,
-            serial: disk.serial,
-            model: disk.model,
-            form_factor: disk.variant.into(),
-        }
     }
 }
 
