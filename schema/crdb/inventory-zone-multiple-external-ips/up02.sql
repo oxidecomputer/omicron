@@ -30,4 +30,5 @@ SELECT
     inv_collection_id, sled_config_id, id, snat_ip,
     NULL::INT4, snat_first_port, snat_last_port
 FROM omicron.public.inv_omicron_sled_config_zone
-WHERE zone_type = 'boundary_ntp' AND snat_ip IS NOT NULL;
+WHERE zone_type = 'boundary_ntp' AND snat_ip IS NOT NULL
+ON CONFLICT DO NOTHING;
