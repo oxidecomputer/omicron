@@ -9,7 +9,7 @@ use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneImageSource;
-use omicron_common::api::external::Generation;
+use omicron_generation_kinds::SledConfigGeneration;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use sled_agent_types::inventory::ZoneKind;
@@ -37,14 +37,14 @@ pub enum ZonesEditError {
 
 #[derive(Debug)]
 pub(super) struct ZonesEditor {
-    incoming_sled_agent_generation: Generation,
+    incoming_sled_agent_generation: SledConfigGeneration,
     zones: IdOrdMap<BlueprintZoneConfig>,
     counts: EditCounts,
 }
 
 impl ZonesEditor {
     pub fn new(
-        incoming_sled_agent_generation: Generation,
+        incoming_sled_agent_generation: SledConfigGeneration,
         zones: IdOrdMap<BlueprintZoneConfig>,
     ) -> Self {
         Self {
@@ -56,7 +56,7 @@ impl ZonesEditor {
 
     pub fn empty() -> Self {
         Self {
-            incoming_sled_agent_generation: Generation::new(),
+            incoming_sled_agent_generation: SledConfigGeneration::new(),
             zones: IdOrdMap::new(),
             counts: EditCounts::zeroes(),
         }
@@ -247,7 +247,7 @@ impl ZonesEditor {
     fn expunge_impl(
         config: &mut BlueprintZoneConfig,
         counts: &mut EditCounts,
-        current_generation: Generation,
+        current_generation: SledConfigGeneration,
     ) -> bool {
         match config.disposition {
             BlueprintZoneDisposition::InService => {

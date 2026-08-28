@@ -355,9 +355,12 @@ mod test {
     use omicron_common::address::SLED_PREFIX_LENGTH;
     use omicron_common::address::get_sled_address;
     use omicron_common::address::get_switch_zone_address;
-    use omicron_common::api::external::Generation;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::zpool_name::ZpoolName;
+    use omicron_generation_kinds::{
+        Generation, NexusGeneration, SledConfigGeneration,
+        TargetReleaseGeneration,
+    };
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::ExternalIpUuid;
@@ -580,7 +583,7 @@ mod test {
                     nic,
                     external_tls,
                     external_dns_servers,
-                    nexus_generation: Generation::new(),
+                    nexus_generation: NexusGeneration::new(),
                 })
             }
             OmicronZoneType::Oximeter { address } => {
@@ -708,8 +711,8 @@ mod test {
             parent_blueprint_id: None,
             internal_dns_version: initial_dns_generation,
             external_dns_version: Generation::new(),
-            target_release_minimum_generation: Generation::new(),
-            nexus_generation: Generation::new(),
+            target_release_minimum_generation: TargetReleaseGeneration::new(),
+            nexus_generation: NexusGeneration::new(),
             external_networking_generation: Generation::new(),
             cockroachdb_fingerprint: String::new(),
             clickhouse_cluster_config: None,
@@ -733,7 +736,7 @@ mod test {
             .zones
             .insert_unique(BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::Expunged {
-                    as_of_generation: Generation::new(),
+                    as_of_generation: SledConfigGeneration::new(),
                     ready_for_cleanup: false,
                 },
                 id: out_of_service_id,
@@ -1180,7 +1183,7 @@ mod test {
             .find(|z| z.zone_type.is_nexus())
             .unwrap();
         nexus_zone.disposition = BlueprintZoneDisposition::Expunged {
-            as_of_generation: Generation::new(),
+            as_of_generation: SledConfigGeneration::new(),
             ready_for_cleanup: false,
         };
         mem::drop(nexus_zone);

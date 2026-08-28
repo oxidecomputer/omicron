@@ -15,6 +15,7 @@ use sled_agent_types_versions::v10;
 use sled_agent_types_versions::v11;
 use sled_agent_types_versions::v14;
 use sled_agent_types_versions::v49;
+use sled_agent_types_versions::v50;
 use slog::Logger;
 use slog::info;
 use slog::warn;
@@ -66,6 +67,7 @@ macro_rules! version_conversion_chain {
 // attempt to parse the ledgered config. Add new versions to the top of the
 // list.
 version_conversion_chain!(
+    v50::inventory::OmicronSledConfig,
     v49::inventory::OmicronSledConfig,
     v14::inventory::OmicronSledConfig,
     v11::inventory::OmicronSledConfig,
@@ -276,6 +278,8 @@ pub(super) mod tests {
         "expectorate/v14-sled-config.json";
     const EXPECTORATE_V49_CONFIG_PATH: &str =
         "expectorate/v49-sled-config.json";
+    const EXPECTORATE_V50_CONFIG_PATH: &str =
+        "expectorate/v50-sled-config.json";
 
     // This is solely an expectorate test to guarantee:
     //
@@ -305,6 +309,7 @@ pub(super) mod tests {
         let v14 = v14::inventory::OmicronSledConfig::try_from(v11.clone())
             .expect("converted from v11");
         let v49 = v49::inventory::OmicronSledConfig::from(v14.clone());
+        let v50 = v50::inventory::OmicronSledConfig::from(v49.clone());
 
         expectorate::assert_contents(
             EXPECTORATE_V10_CONFIG_PATH,
@@ -322,6 +327,10 @@ pub(super) mod tests {
             EXPECTORATE_V49_CONFIG_PATH,
             &serde_json::to_string_pretty(&v49).unwrap(),
         );
+        expectorate::assert_contents(
+            EXPECTORATE_V50_CONFIG_PATH,
+            &serde_json::to_string_pretty(&v50).unwrap(),
+        );
         logctx.cleanup_successful();
     }
 
@@ -336,28 +345,25 @@ pub(super) mod tests {
         // compilation error if the latest version changes. Bump the
         // version here and add the new version's path to the array of ledger
         // paths below.
-        let latest_version_path = EXPECTORATE_V49_CONFIG_PATH;
-        let expected_config = v49::inventory::OmicronSledConfig::read_from(
-            log,
-            latest_version_path.into(),
-        )
-        .await
-        .expect("read expected config");
+        type LatestConfig = v50::inventory::OmicronSledConfig;
+        let latest_version_path = EXPECTORATE_V50_CONFIG_PATH;
+        let expected_config =
+            LatestConfig::read_from(log, latest_version_path.into())
+                .await
+                .expect("read expected config");
 
         // Reading old configs should rewrite the file to match the newest
         // version.
         let expected_rewritten =
             serde_json::to_string(&expected_config).expect("serialized config");
 
-        // If no conversion was necessary, we should keep the same contents.
-        // This is semantically equivalent to `expected_rewritten` but may be
-        // formatted differently (e.g., our expectorate files are written
-        // pretty-printed, but ledgered files generally aren't).
-        let expected_unchanged = tokio::fs::read_to_string(latest_version_path)
-            .await
-            .expect("read latest version");
-
         let tempdir = Utf8TempDir::new().unwrap();
+
+        // Guard against every fixture silently taking one branch (e.g. after a
+        // wire-compatible bump or a forgotten array entry) by counting both
+        // branches and asserting that both of them were > 0.
+        let mut converted_count = 0usize;
+        let mut unchanged_count = 0usize;
 
         // For each older version, confirm we can read a ledger of that version
         // and that it's converted to the current version.
@@ -367,14 +373,52 @@ pub(super) mod tests {
             EXPECTORATE_V11_CONFIG_PATH,
             EXPECTORATE_V14_CONFIG_PATH,
             EXPECTORATE_V49_CONFIG_PATH,
+            EXPECTORATE_V50_CONFIG_PATH,
         ] {
             // Copy the ledger into `my-ledger.json`
             let dst_ledger_path = tempdir.child("my-ledger.json");
             dst_ledger_path.write_file(src_ledger_path.into()).unwrap();
 
+            // Read the fixture contents. This is expected to be a
+            // pretty-printed JSON file.
+            let fixture_contents = tokio::fs::read_to_string(src_ledger_path)
+                .await
+                .expect("read source ledger");
+
+            // Does this fixture need conversion (does it parse directly as the
+            // latest version?)
+            //
+            // A source can also parse successfully as the latest version
+            // without being the latest expectorate file, e.g. when a version
+            // bump introduces a transparent newtype.
+            //
+            // Ledger::<LatestConfig>::new is (effectively) the first step of
+            // read_ledgered_sled_config, so the test matches the SUT if a
+            // version ever overrides Ledgerable::deserialize.
+            let parses_as_latest = Ledger::<LatestConfig>::new(
+                log,
+                vec![dst_ledger_path.to_path_buf()],
+            )
+            .await
+            .is_some();
+            if src_ledger_path == V4_CONFIG_PATH {
+                assert!(
+                    !parses_as_latest,
+                    "{src_ledger_path} is the oldest supported version \
+                     and must not parse as the latest version"
+                );
+            }
+            if src_ledger_path == latest_version_path {
+                assert!(
+                    parses_as_latest,
+                    "{src_ledger_path} is the latest version \
+                     and must parse as such"
+                );
+            }
+
             // Attempt to read `my-ledger.json`; this should give us back a
-            // current-version `OmicronSledConfig` and also have rewritten the
-            // config.
+            // current-version `OmicronSledConfig` and, if a conversion was
+            // needed, also have rewritten the config.
             let converted_config = read_ledgered_sled_config(
                 log,
                 vec![dst_ledger_path.to_path_buf()],
@@ -383,16 +427,57 @@ pub(super) mod tests {
             .expect("read and converted ledger");
             assert_eq!(expected_config, converted_config);
 
-            // We should only rewrite the file if we converted it.
             let data = tokio::fs::read_to_string(&dst_ledger_path)
                 .await
                 .expect("read tempdir ledger");
-            if data != expected_unchanged {
-                // The data changed - we must have done a conversion. Assert it
-                // matches what we expect.
-                assert_eq!(data, expected_rewritten);
+            if parses_as_latest {
+                unchanged_count += 1;
+                // Ensure that the fixture contents are *not* byte-identical to
+                // the serialized JSON that a rewrite would produce (fixtures
+                // are pretty-printed while ledgered data is stored as compact
+                // JSON).
+                //
+                // Why? In the assert_eq! below, we depend on the fact that
+                // these two are not the same.
+                //
+                // * The expected behavior here is "if the data is successfully
+                //   parsed as the latest version, the file isn't changed, even
+                //   if what it would serialize to differs from the input".
+                // * If the two were the same, and if we accidentally changed the
+                //   SUT to always rewrite the file, then data == fixture_contents
+                //   would be true even though the SUT had unexpected behavior.
+                assert_ne!(
+                    fixture_contents, expected_rewritten,
+                    "{src_ledger_path} is byte-identical to its compact \
+                     rewrite, so a spurious rewrite would be undetectable"
+                );
+
+                assert_eq!(
+                    data, fixture_contents,
+                    "{src_ledger_path} parses as the latest version \
+                     and must not be rewritten"
+                );
+            } else {
+                converted_count += 1;
+                // We couldn't parse as the latest version, so the file must
+                // have been rewritten in the latest format.
+                assert_eq!(
+                    data, expected_rewritten,
+                    "{src_ledger_path} required conversion \
+                     and must be rewritten"
+                );
             }
         }
+
+        assert!(
+            converted_count > 0,
+            "no fixture required conversion; the conversion chain is untested"
+        );
+        assert!(
+            unchanged_count > 0,
+            "no fixture parsed as the latest version; \
+             the no-conversion path is untested"
+        );
 
         logctx.cleanup_successful();
     }

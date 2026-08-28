@@ -19,7 +19,7 @@ use nexus_types::{
     },
     inventory::Collection,
 };
-use omicron_common::api::external::Generation;
+use omicron_generation_kinds::SledConfigGeneration;
 use omicron_uuid_kinds::{MupdateOverrideUuid, OmicronZoneUuid, SledUuid};
 use sled_agent_types::inventory::{
     BootPartitionContents, BootPartitionDetails, ManifestBootInventory,
@@ -498,7 +498,10 @@ pub(crate) enum NoopConvertSledIneligibleReason {
 
     /// The inventory is stale, as indicated by its generation number: it has an
     /// older generation for this sled than the parent blueprint.
-    InventoryStale { parent_bp_gen: Generation, inventory_gen: Generation },
+    InventoryStale {
+        parent_bp_gen: SledConfigGeneration,
+        inventory_gen: SledConfigGeneration,
+    },
 
     /// An error occurred retrieving the sled's install dataset zone manifest.
     ManifestError { message: String },

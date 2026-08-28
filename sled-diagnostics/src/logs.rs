@@ -943,7 +943,7 @@ mod test {
             "bogus.log",
             "some/dir"
         ].into_iter().map(|l| {
-            oxlog::LogFile { path: Utf8PathBuf::from(l), size: None, modified: None }
+            oxlog::LogFile { path: Utf8PathBuf::from(l), size: None, modified: None, created: None }
         }).collect();
         let logs_map: HashMap<_, _> =
             logs.iter().map(|l| (l.path.as_str(), l)).collect();
@@ -1212,6 +1212,7 @@ mod illumos_tests {
                     .join(format!("var/svc/log/{}", logfile_to_data[0].0)),
                 size: None,
                 modified: None,
+                created: None,
             };
 
             loghandle
@@ -1306,7 +1307,12 @@ mod illumos_tests {
             let zipfile_path = mountpoint.join("test.zip");
             let zipfile = File::create_new(&zipfile_path).unwrap();
             let mut zip = ZipWriter::new(zipfile);
-            let log = LogFile { path: logfile, size: None, modified: None };
+            let log = LogFile {
+                path: logfile,
+                size: None,
+                modified: None,
+                created: None,
+            };
 
             loghandle
                 .process_logs(
@@ -1401,6 +1407,7 @@ mod illumos_tests {
                 path: log.parse().unwrap(),
                 size: None,
                 modified: None,
+                created: None,
             };
             let res = parse_extra_log(&logfile);
             assert_eq!(
@@ -1415,6 +1422,7 @@ mod illumos_tests {
                 path: log.parse().unwrap(),
                 size: None,
                 modified: None,
+                created: None,
             };
             let res = parse_extra_log(&logfile);
             assert_eq!(
@@ -1430,6 +1438,7 @@ mod illumos_tests {
                 path: log.parse().unwrap(),
                 size: None,
                 modified: None,
+                created: None,
             };
             let res = parse_extra_log(&logfile);
             assert!(res.is_none());

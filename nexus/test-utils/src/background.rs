@@ -518,9 +518,21 @@ pub async fn run_tuf_artifact_replication_step(
 pub async fn run_inventory_collection(
     lockstep_client: &ClientTestContext,
 ) -> CollectionUuid {
-    let last_background_task =
-        activate_background_task(&lockstep_client, "inventory_collection")
-            .await;
+    // Use a longer 60s timeout here.
+    //
+    // The wait covers an in-flight iteration too, and a single iteration can
+    // hit the collector's 15s cockroach-admin and the 60s Sled Agent client
+    // timeouts. In general we expect Sled Agent to be present, but
+    // cockroach-admin to not currently be present in tests (see
+    // https://github.com/oxidecomputer/omicron/issues/8496 -- we use an
+    // ephemeral port in tests but Nexus attempts to reach a hardcoded port). We
+    // may need to bump this timeout further if we continue to see flakes.
+    let last_background_task = activate_background_task_with_timeout(
+        &lockstep_client,
+        "inventory_collection",
+        Duration::from_secs(60),
+    )
+    .await;
 
     let LastResult::Completed(last_result_completed) =
         last_background_task.last

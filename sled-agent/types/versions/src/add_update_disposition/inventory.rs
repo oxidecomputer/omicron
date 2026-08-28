@@ -35,9 +35,9 @@ use chrono::DateTime;
 use chrono::Utc;
 use iddqd::IdOrdMap;
 use omicron_common::api::external::ByteCount;
-use omicron_common::api::external::Generation;
 use omicron_common::snake_case_result;
 use omicron_common::snake_case_result::SnakeCaseResult;
+use omicron_generation_kinds::Generation;
 use omicron_ledger::Ledgerable;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::MupdateOverrideUuid;
@@ -63,6 +63,7 @@ use std::time::Duration;
     Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq,
 )]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub enum OmicronSledUpdateDisposition {
     Available,
     Evacuating,
