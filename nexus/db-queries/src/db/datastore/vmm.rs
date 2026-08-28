@@ -845,13 +845,14 @@ mod tests {
             )
         };
 
-        // Insert a VMM in every possible state onto each of two sleds. All of
+        // Insert a VMM in every possible state onto each of three sleds. All of
         // them start out unmarked (i.e. `stop_for_update_disposition_generation`
         // is NULL).
         let sled_a = SledUuid::new_v4();
         let sled_b = SledUuid::new_v4();
+        let sled_c = SledUuid::new_v4();
         let mut vmms = Vec::new();
-        for sled_id in [sled_a, sled_b] {
+        for sled_id in [sled_a, sled_b, sled_c] {
             for &state in DbVmmState::ALL_STATES {
                 // The `failure_reason_iff_failed` constraint requires that a
                 // `Failed` VMM has a failure reason and that no other VMM does.
@@ -882,7 +883,7 @@ mod tests {
             }
         }
         let stoppable_per_sled =
-            vmms.iter().filter(|v| is_stoppable(v.state)).count() / 2;
+            vmms.iter().filter(|v| is_stoppable(v.state)).count() / 3;
         assert_eq!(stoppable_per_sled, 4);
 
         // Fetches every VMM's current row, keyed by VMM ID.
@@ -952,32 +953,49 @@ mod tests {
                 opctx,
                 RendezvousSledBpAvailabilityUpdate::new(
                     sled_b,
+                    ActiveSledBpAvailability::Unavailable,
+                    gen2,
+                    blueprint_id,
+                ),
+            )
+            .await
+            .expect("sled B availability should upsert");
+        datastore
+            .rendezvous_sled_bp_availability_upsert(
+                opctx,
+                RendezvousSledBpAvailabilityUpdate::new(
+                    sled_c,
                     ActiveSledBpAvailability::Available,
                     gen1,
                     blueprint_id,
                 ),
             )
             .await
-            .expect("sled B availability should upsert");
+            .expect("sled C availability should upsert");
 
-        // Sled A is evacuating (`unavailable`) and sled B is available, so only
-        // sled A's stoppable VMMs should be marked.
+        // Sleds A and B are both evacuating (`unavailable`), at different
+        // generations, and sled C is available. In a single pass the stoppable
+        // VMMs on both sled A and sled B should be marked, each at their own
+        // sled's generation, regardless of which generation that is.
         let marked = datastore
             .vmm_bulk_mark_stop_for_update(&opctx)
             .await
-            .expect("bulk mark for sled A should succeed");
+            .expect("bulk mark should succeed");
         assert_eq!(
-            marked, 4,
-            "only the 4 stoppable VMMs on sled A should be marked"
+            marked, 8,
+            "the 4 stoppable VMMs on each of sleds A and B should be marked"
         );
         for vmm in expected.values_mut() {
             if vmm.sled_id() == sled_a && is_stoppable(vmm.state) {
                 vmm.stop_for_update_disposition_generation = Some(gen1.into());
             }
+            if vmm.sled_id() == sled_b && is_stoppable(vmm.state) {
+                vmm.stop_for_update_disposition_generation = Some(gen2.into());
+            }
         }
 
-        // There should be 16 unmarked rows (6 unstoppable on sled A, plus all
-        // 10 on sled B).
+        // There should be 22 unmarked rows (6 unstoppable on each of sleds A
+        // and B, plus all 10 on sled C).
         let actual = fetch_all(datastore, opctx, &vmms).await;
         assert_rows(&actual, &expected);
         assert_eq!(
@@ -985,8 +1003,8 @@ mod tests {
                 .values()
                 .filter(|v| v.stop_for_update_disposition_generation.is_none())
                 .count(),
-            16,
-            "all rows other than sled A's stoppable VMMs remain unmarked"
+            22,
+            "all rows other than sleds A and B's stoppable VMMs remain unmarked"
         );
 
         // Nothing has changed so running again should make no changes
@@ -1002,34 +1020,34 @@ mod tests {
                 .values()
                 .filter(|v| v.stop_for_update_disposition_generation.is_none())
                 .count(),
-            16
+            22
         );
 
-        // Now sled B evacuates too, at a later generation.
+        // Now sled C evacuates too, moving from generation 1 to generation 2.
         datastore
             .rendezvous_sled_bp_availability_upsert(
                 opctx,
                 RendezvousSledBpAvailabilityUpdate::new(
-                    sled_b,
+                    sled_c,
                     ActiveSledBpAvailability::Unavailable,
                     gen2,
                     blueprint_id,
                 ),
             )
             .await
-            .expect("sled B availability should upsert");
+            .expect("sled C availability should upsert");
 
-        // Run again. Only sled B's stoppable VMMs should change.
-        let marked_b = datastore
+        // Run again. Only sled C's stoppable VMMs should change.
+        let marked_c = datastore
             .vmm_bulk_mark_stop_for_update(&opctx)
             .await
-            .expect("bulk mark for sled B should succeed");
+            .expect("bulk mark for sled C should succeed");
         assert_eq!(
-            marked_b, 4,
-            "only the 4 stoppable VMMs on sled B should be marked"
+            marked_c, 4,
+            "only the 4 stoppable VMMs on sled C should be marked"
         );
         for vmm in expected.values_mut() {
-            if vmm.sled_id() == sled_b && is_stoppable(vmm.state) {
+            if vmm.sled_id() == sled_c && is_stoppable(vmm.state) {
                 vmm.stop_for_update_disposition_generation = Some(gen2.into());
             }
         }
@@ -1053,15 +1071,11 @@ mod tests {
             .filter(|v| v.stop_for_update_disposition_generation.is_none())
             .count();
         assert_eq!(gen1_count, 4, "sled A's marked VMMs are unchanged");
-        assert_eq!(gen2_count, 4, "sled B's stoppable VMMs are newly marked");
-        assert_eq!(null_count, 12, "the unstoppable VMMs remain unmarked");
-        // Everything the last call did not touch is unchanged: sled A's 4
-        // marked rows plus the 12 still-unmarked rows.
         assert_eq!(
-            gen1_count + null_count,
-            16,
-            "rows untouched by the sled B call are unchanged"
+            gen2_count, 8,
+            "sled B's marked VMMs are unchanged and sled C's are newly marked"
         );
+        assert_eq!(null_count, 18, "the unstoppable VMMs remain unmarked");
 
         // Clean up.
         db.terminate().await;
