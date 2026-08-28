@@ -104,6 +104,8 @@ impl From<PhysicalDisk> for physical_disk_types::PhysicalDisk {
             policy: disk.disk_policy.into(),
             state: disk.disk_state.into(),
             sled_id: Some(disk.sled_id.into()),
+            // TODO: can we reliably copy the slot number from inventory collection?
+            slot: None,
             vendor: disk.vendor,
             serial: disk.serial,
             model: disk.model,
