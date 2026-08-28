@@ -23,17 +23,17 @@ use uuid::Uuid;
 #[derive(Debug)]
 pub struct PortData {
     /// Name of the port as identified by OPTE
-    pub(crate) name: String,
+    name: String,
     /// The VPC-private IP configuration for the port.
-    pub(crate) ip: PrivateIpConfig,
+    ip: PrivateIpConfig,
     /// VPC-private MAC address
-    pub(crate) mac: MacAddr6,
+    mac: MacAddr6,
     /// Emulated PCI slot for the guest NIC, passed to Propolis
-    pub(crate) slot: u8,
+    slot: u8,
     /// Geneve VNI for the VPC
-    pub(crate) vni: Vni,
+    vni: Vni,
     /// Information about the virtual gateway, aka OPTE
-    pub(crate) gateway: Gateway,
+    gateway: Gateway,
 }
 
 #[derive(Debug)]
@@ -79,7 +79,15 @@ pub struct Port {
 }
 
 impl Port {
-    pub fn new(data: PortData) -> Self {
+    pub fn new(
+        name: String,
+        ip: PrivateIpConfig,
+        mac: MacAddr6,
+        slot: u8,
+        vni: Vni,
+    ) -> Self {
+        let gateway = Gateway::from_ip_config(&ip);
+        let data = PortData { name, ip, mac, slot, vni, gateway };
         Self { inner: Arc::new(PortInner(data)) }
     }
 
