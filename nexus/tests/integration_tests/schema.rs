@@ -990,7 +990,7 @@ async fn validate_data_migration_from_version_to_target(
             before(&ctx).await;
         }
 
-        apply_update(log, &crdb, version, 1).await;
+        apply_update(log, &crdb, version, 2).await;
         assert_eq!(
             version.semver().to_string(),
             query_crdb_schema_version(&crdb).await
