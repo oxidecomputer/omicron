@@ -5667,45 +5667,44 @@ async fn cmd_nexus_support_bundles_create(
 ) -> Result<(), anyhow::Error> {
     use nexus_lockstep_client::types;
 
+    // No --include collects everything, matching `support-bundle collect`.
+    // The API's other reading of an empty selection, "collect nothing", has
+    // no spelling here: clap rejects --include without a value.
     let data = if args.include.is_empty() {
         types::SupportBundleData::All
     } else {
-        let mut data = types::SupportBundleData::Explicit {
-            reconfigurator: false,
-            sled_cubby_info: false,
-            sp_dumps: false,
-            host_info: None,
-            ereports: None,
-        };
-        let types::SupportBundleData::Explicit {
-            reconfigurator,
-            sled_cubby_info,
-            sp_dumps,
-            host_info,
-            ereports,
-        } = &mut data
-        else {
-            unreachable!("just constructed as Explicit");
-        };
+        let mut reconfigurator = false;
+        let mut sled_cubby_info = false;
+        let mut sp_dumps = false;
+        let mut host_info = None;
+        let mut ereports = None;
+
         for category in &args.include {
             match category {
-                BundleDataCategory::Reconfigurator => *reconfigurator = true,
-                BundleDataCategory::SledCubbyInfo => *sled_cubby_info = true,
-                BundleDataCategory::SpDumps => *sp_dumps = true,
+                BundleDataCategory::Reconfigurator => reconfigurator = true,
+                BundleDataCategory::SledCubbyInfo => sled_cubby_info = true,
+                BundleDataCategory::SpDumps => sp_dumps = true,
                 BundleDataCategory::HostInfo => {
-                    *host_info = Some(types::SupportBundleHostInfo {
+                    host_info = Some(types::SupportBundleHostInfo {
                         sleds: types::SupportBundleSledSelection::All,
                     })
                 }
                 BundleDataCategory::Ereports => {
-                    *ereports = Some(types::SupportBundleEreports {
+                    ereports = Some(types::SupportBundleEreports {
                         only_serials: Vec::new(),
                         only_classes: Vec::new(),
                     })
                 }
             }
         }
-        data
+
+        types::SupportBundleData::Explicit {
+            reconfigurator,
+            sled_cubby_info,
+            sp_dumps,
+            host_info,
+            ereports,
+        }
     };
 
     let window = args.window.bounds()?;
