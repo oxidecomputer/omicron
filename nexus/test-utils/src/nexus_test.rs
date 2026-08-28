@@ -7,7 +7,9 @@
 use crate::ControlPlaneStarter;
 use crate::ControlPlaneTestContextSledAgent;
 use crate::starter::PopulateCrdb;
+use crate::starter::SledIndexAllocator;
 use crate::starter::setup_with_config_impl;
+use crate::starter::start_sled_agent;
 #[cfg(feature = "omicron-dev")]
 use anyhow::Context;
 #[cfg(feature = "omicron-dev")]
@@ -35,6 +37,7 @@ use omicron_uuid_kinds::SledUuid;
 use oximeter_collector::Oximeter;
 use oximeter_producer::Server as ProducerServer;
 use sled_agent_types::early_networking::SwitchSlot;
+use sled_agent_types::inventory::SledCpuFamily;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -118,6 +121,7 @@ pub struct ControlPlaneTestContext<N> {
     pub clickhouse: dev::clickhouse::ClickHouseDeployment,
     pub logctx: LogContext,
     pub sled_agents: Vec<ControlPlaneTestContextSledAgent>,
+    pub(crate) sled_index_allocator: SledIndexAllocator,
     pub oximeter: Oximeter,
     pub producer: ProducerServer,
     pub gateway: BTreeMap<SwitchSlot, GatewayTestContext>,
@@ -210,6 +214,42 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
                 );
             }
         }
+    }
+
+    /// Start a simulated sled agent partway through a test, waiting for the
+    /// sled to be registered with Nexus.
+    ///
+    /// The returned server must be held for as long as the sled should exist
+    /// (dropping it shuts the sled agent down).
+    ///
+    /// Unlike sled agents started during setup, sleds added this way are not
+    /// included in [`Self::all_sled_agents`].
+    #[must_use = "dropping the returned server shuts the sled agent down"]
+    pub async fn add_sled(
+        &self,
+        sled_id: SledUuid,
+        sim_mode: sim::SimMode,
+        cpu_family: SledCpuFamily,
+    ) -> sim::Server {
+        let sled_index = self.sled_index_allocator.next();
+        let nexus_address = self.server.get_http_server_internal_address();
+
+        // `start_sled_agent` uses `NexusRegistration::WaitForCompletion`, so
+        // Nexus knows about the sled once this returns.
+        start_sled_agent(
+            self.logctx.log.new(slog::o!(
+                "component" => "omicron_sled_agent::sim::Server",
+                "sled_id" => sled_id.to_string(),
+            )),
+            nexus_address,
+            sled_id,
+            sled_index,
+            sim_mode,
+            cpu_family,
+            &self.first_sled_agent().simulated_upstairs,
+        )
+        .await
+        .expect("started simulated sled agent")
     }
 
     pub fn internal_client(&self) -> nexus_client::Client {
