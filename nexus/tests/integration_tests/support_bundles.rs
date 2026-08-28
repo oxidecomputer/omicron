@@ -1451,3 +1451,52 @@ async fn test_support_bundle_view_without_time_range_row(
         ],
     );
 }
+
+// Test that an unprivileged caller is turned away by the authorization
+// check, whatever the selection looks like. Validating the selection looks
+// sleds up, so an unauthorized request must be rejected before that runs,
+// rather than surfacing a lookup failure as a 400.
+#[nexus_test]
+async fn test_support_bundle_create_unauthorized_with_selection(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let _disk_test =
+        DiskTestBuilder::new(&cptestctx).with_zpool_count(1).build().await;
+    let sled_id = cptestctx.all_sled_agents().next().unwrap().sled_agent.id;
+
+    for (label, sleds) in [
+        ("no selection", None),
+        ("an existing sled", Some(vec![sled_id])),
+        ("a sled that does not exist", Some(vec![SledUuid::new_v4()])),
+    ] {
+        let create_params = SupportBundleCreate {
+            user_comment: None,
+            data_selection: sleds.map(|sleds| SupportBundleDataSelection {
+                data: SupportBundleData::Explicit {
+                    reconfigurator: false,
+                    sled_cubby_info: false,
+                    sp_dumps: false,
+                    host_info: Some(SupportBundleHostInfo {
+                        sleds: SupportBundleSledSelection::Specific { sleds },
+                    }),
+                    ereports: None,
+                },
+                start_time: None,
+                end_time: None,
+            }),
+        };
+
+        NexusRequest::new(
+            RequestBuilder::new(client, Method::POST, BUNDLES_URL)
+                .body(Some(&create_params))
+                .expect_status(Some(StatusCode::FORBIDDEN)),
+        )
+        .authn_as(AuthnMode::UnprivilegedUser)
+        .execute()
+        .await
+        .unwrap_or_else(|e| {
+            panic!("creating a bundle naming {label} should be forbidden: {e}")
+        });
+    }
+}

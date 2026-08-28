@@ -89,6 +89,11 @@ impl super::Nexus {
         user_comment: Option<String>,
         data_selection: Option<SupportBundleDataSelection>,
     ) -> CreateResult<SupportBundle> {
+        // Authorize before validating the selection. Validation looks sleds
+        // up, and an unauthorized caller must be turned away by this check
+        // rather than by a lookup failure further in.
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
         let data_selection = match data_selection {
             Some(data_selection) => data_selection.try_into()?,
             None => BundleDataSelection::all(),
