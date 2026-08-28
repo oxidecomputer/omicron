@@ -80,6 +80,10 @@ type DiskTest<'a> =
 
 pub static HARDWARE_RACK_URL: LazyLock<String> =
     LazyLock::new(|| format!("/v1/system/hardware/racks/{}", RACK_UUID));
+pub static HARDWARE_RACK_SUPPORT_SHELL_TUNNEL_URL: LazyLock<String> =
+    LazyLock::new(|| {
+        format!("/v1/system/hardware/racks/{}/support-shell/tunnel", RACK_UUID)
+    });
 pub const HARDWARE_UNINITIALIZED_SLEDS: &'static str =
     "/v1/system/hardware/sleds-uninitialized";
 pub static HARDWARE_SLED_URL: LazyLock<String> =
@@ -2955,6 +2959,12 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: &HARDWARE_RACK_SUPPORT_SHELL_TUNNEL_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::GetWebsocket],
             },
             VerifyEndpoint {
                 url: &HARDWARE_RACK_MEMBERSHIP_URL,

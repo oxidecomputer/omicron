@@ -104,6 +104,7 @@ mod snapshot;
 mod ssh_key;
 mod subnet_pool;
 pub(crate) mod support_bundles;
+mod support_shell;
 mod switch;
 mod switch_interface;
 mod switch_port;
@@ -1416,7 +1417,7 @@ pub(crate) async fn lldpd_clients(
 /// # Errors
 /// If we fail to resolve the ipv6 addresses of the Dendrite service we
 /// return an error
-async fn switch_zone_address_mappings(
+pub(crate) async fn switch_zone_address_mappings(
     resolver: &internal_dns_resolver::Resolver,
     log: &slog::Logger,
 ) -> Result<HashMap<SwitchSlot, Ipv6Addr>, String> {
