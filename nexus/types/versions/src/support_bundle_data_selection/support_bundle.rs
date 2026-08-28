@@ -15,7 +15,7 @@ use serde::Serialize;
 use uuid::Uuid;
 
 /// The sleds to collect host info from.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SupportBundleSledSelection {
     /// Collect from every sled.
@@ -35,7 +35,9 @@ impl Default for SupportBundleSledSelection {
 }
 
 /// Host info collection: diagnostic commands and zone logs from sleds.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
+)]
 pub struct SupportBundleHostInfo {
     /// The sleds to collect from. Every sled if omitted.
     #[serde(default)]
@@ -43,7 +45,9 @@ pub struct SupportBundleHostInfo {
 }
 
 /// Ereport collection.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
+)]
 pub struct SupportBundleEreports {
     /// Collect only ereports reported by systems with these serial numbers.
     /// Unfiltered when empty.
@@ -58,7 +62,7 @@ pub struct SupportBundleEreports {
 ///
 /// Each category's settings live within that category, so settings for a
 /// category that is not being collected cannot be expressed.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SupportBundleData {
     /// Collect every category of data, from every sled, unfiltered.
@@ -94,7 +98,9 @@ impl Default for SupportBundleData {
 /// When creating a bundle, an omitted field takes its default: everything,
 /// from every sled, unfiltered. When viewing a bundle, every field describes
 /// what was actually recorded for it.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
+)]
 pub struct SupportBundleDataSelection {
     /// The data to collect. Everything if omitted.
     #[serde(default)]

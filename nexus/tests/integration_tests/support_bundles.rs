@@ -19,7 +19,13 @@ use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::support_bundle::SupportBundleCreate;
+use nexus_types::external_api::support_bundle::SupportBundleData;
+use nexus_types::external_api::support_bundle::SupportBundleDataSelection;
+use nexus_types::external_api::support_bundle::SupportBundleEreports;
+use nexus_types::external_api::support_bundle::SupportBundleHostInfo;
 use nexus_types::external_api::support_bundle::SupportBundleInfo;
+use nexus_types::external_api::support_bundle::SupportBundleSledSelection;
 use nexus_types::external_api::support_bundle::SupportBundleState;
 use nexus_types::external_api::support_bundle::SupportBundleView;
 use nexus_types::internal_api::background::SupportBundleActivationReport;
@@ -31,6 +37,7 @@ use nexus_types::support_bundle::BundleDataSelection;
 use nexus_types::support_bundle::BundleTimeRange;
 use omicron_common::api::external::LookupType;
 use omicron_sled_agent::sim::SimLogEntry;
+use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use serde::Deserialize;
 use std::io::Cursor;
@@ -169,8 +176,6 @@ async fn bundle_create_with_comment(
     client: &ClientTestContext,
     user_comment: Option<String>,
 ) -> Result<SupportBundleInfo> {
-    use nexus_types::external_api::support_bundle::SupportBundleCreate;
-
     let create_params =
         SupportBundleCreate { user_comment, data_selection: None };
 
@@ -192,8 +197,6 @@ async fn bundle_create_expect_fail(
     expected_status: StatusCode,
     expected_message: &str,
 ) -> Result<()> {
-    use nexus_types::external_api::support_bundle::SupportBundleCreate;
-
     let create_params =
         SupportBundleCreate { user_comment: None, data_selection: None };
     let error = NexusRequest::new(
@@ -216,6 +219,53 @@ async fn bundle_create_expect_fail(
         );
     }
     Ok(())
+}
+
+async fn bundle_create_with_selection(
+    client: &ClientTestContext,
+    data_selection: SupportBundleDataSelection,
+) -> Result<SupportBundleInfo> {
+    let create_params = SupportBundleCreate {
+        user_comment: None,
+        data_selection: Some(data_selection),
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, BUNDLES_URL)
+            .body(Some(&create_params))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .context("failed to request bundle creation")?
+    .parsed_body()
+}
+
+/// Requests a bundle expected to be rejected, returning the error message.
+async fn bundle_create_with_selection_expect_fail(
+    client: &ClientTestContext,
+    data_selection: SupportBundleDataSelection,
+    expected_status: StatusCode,
+) -> Result<String> {
+    let create_params = SupportBundleCreate {
+        user_comment: None,
+        data_selection: Some(data_selection),
+    };
+
+    let error = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, BUNDLES_URL)
+            .body(Some(&create_params))
+            .expect_status(Some(expected_status)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .context("should have failed to create bundle")?
+    .parsed_body::<HttpErrorResponseBody>()
+    .context("failed to parse error from bundle creation")?;
+
+    Ok(error.message)
 }
 
 async fn bundle_download(
@@ -1107,5 +1157,297 @@ async fn test_support_bundle_delete_failed_bundle(
     assert!(
         !bundles.iter().any(|b| b.id == bundle.id),
         "Deleted bundle should not appear in bundle list"
+    );
+}
+
+/// Returns the categories a viewed selection reports, as a set of names, so
+/// tests can compare against what they asked for.
+fn viewed_categories(
+    selection: &SupportBundleDataSelection,
+) -> Vec<&'static str> {
+    let SupportBundleData::Explicit {
+        reconfigurator,
+        sled_cubby_info,
+        sp_dumps,
+        host_info,
+        ereports,
+    } = &selection.data
+    else {
+        panic!("a stored selection is always reported explicitly");
+    };
+
+    let mut categories = Vec::new();
+    if *reconfigurator {
+        categories.push("reconfigurator");
+    }
+    if *sled_cubby_info {
+        categories.push("sled_cubby_info");
+    }
+    if *sp_dumps {
+        categories.push("sp_dumps");
+    }
+    if host_info.is_some() {
+        categories.push("host_info");
+    }
+    if ereports.is_some() {
+        categories.push("ereports");
+    }
+    categories
+}
+
+// Test that a bundle created without a data selection collects everything,
+// and that the view reports the default lookback Nexus stamped for it.
+#[nexus_test]
+async fn test_support_bundle_default_data_selection(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let _disk_test =
+        DiskTestBuilder::new(&cptestctx).with_zpool_count(2).build().await;
+
+    // CockroachDB stores timestamps at microsecond precision, so bracket
+    // creation with the same truncated clock Nexus stamps with.
+    let before = omicron_common::now_db_precision();
+    let bundle = bundle_create(&client).await.unwrap();
+    let after = omicron_common::now_db_precision();
+
+    let selection =
+        bundle_view(&client, bundle.id).await.unwrap().data_selection;
+    assert_eq!(
+        viewed_categories(&selection),
+        [
+            "reconfigurator",
+            "sled_cubby_info",
+            "sp_dumps",
+            "host_info",
+            "ereports"
+        ],
+    );
+    assert_eq!(
+        selection.data,
+        SupportBundleData::Explicit {
+            reconfigurator: true,
+            sled_cubby_info: true,
+            sp_dumps: true,
+            host_info: Some(SupportBundleHostInfo {
+                sleds: SupportBundleSledSelection::All {}
+            }),
+            ereports: Some(SupportBundleEreports {
+                only_serials: vec![],
+                only_classes: vec![],
+            }),
+        },
+    );
+
+    // Nexus stamps a start bound seven days back, so an omitted window does
+    // not collect unbounded log history.
+    let lookback = chrono::Duration::days(7);
+    let start = selection.start_time.expect("creation stamps a start bound");
+    assert!(
+        start >= before - lookback && start <= after - lookback,
+        "stamped start {start} is not seven days before creation \
+         ({before} to {after})",
+    );
+    assert_eq!(selection.end_time, None);
+
+    // Asking for everything explicitly is the same thing.
+    let explicit = bundle_create_with_selection(
+        &client,
+        SupportBundleDataSelection {
+            data: SupportBundleData::All {},
+            start_time: None,
+            end_time: None,
+        },
+    )
+    .await
+    .unwrap();
+    let explicit =
+        bundle_view(&client, explicit.id).await.unwrap().data_selection;
+    assert_eq!(explicit.data, selection.data);
+}
+
+// Test that an explicit data selection round-trips through creation and
+// back out of the view endpoint.
+#[nexus_test]
+async fn test_support_bundle_explicit_data_selection(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let _disk_test =
+        DiskTestBuilder::new(&cptestctx).with_zpool_count(3).build().await;
+
+    let sled_id = cptestctx.all_sled_agents().next().unwrap().sled_agent.id;
+
+    // A subset of categories, each with its own settings.
+    let requested = SupportBundleData::Explicit {
+        reconfigurator: true,
+        sled_cubby_info: false,
+        sp_dumps: false,
+        host_info: Some(SupportBundleHostInfo {
+            sleds: SupportBundleSledSelection::Specific {
+                sleds: vec![sled_id],
+            },
+        }),
+        ereports: Some(SupportBundleEreports {
+            only_serials: vec!["BRM-FAKE-0".to_string()],
+            only_classes: vec!["fake.class".to_string()],
+        }),
+    };
+    // Microsecond precision: CockroachDB truncates anything finer, so a
+    // timestamp with nanoseconds would not come back as it was sent.
+    let now = omicron_common::now_db_precision();
+    let start = now - chrono::Duration::days(2);
+    let end = now - chrono::Duration::hours(1);
+
+    let bundle = bundle_create_with_selection(
+        &client,
+        SupportBundleDataSelection {
+            data: requested.clone(),
+            start_time: Some(start),
+            end_time: Some(end),
+        },
+    )
+    .await
+    .unwrap();
+
+    let selection =
+        bundle_view(&client, bundle.id).await.unwrap().data_selection;
+    assert_eq!(
+        viewed_categories(&selection),
+        ["reconfigurator", "host_info", "ereports"]
+    );
+    assert_eq!(selection.data, requested);
+    assert_eq!(selection.start_time, Some(start));
+    assert_eq!(selection.end_time, Some(end));
+
+    // An explicit selection naming nothing collects nothing. The bundle is
+    // still created; that is the caller's business.
+    let empty = SupportBundleData::Explicit {
+        reconfigurator: false,
+        sled_cubby_info: false,
+        sp_dumps: false,
+        host_info: None,
+        ereports: None,
+    };
+    let bundle = bundle_create_with_selection(
+        &client,
+        SupportBundleDataSelection {
+            data: empty.clone(),
+            start_time: None,
+            end_time: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    let selection =
+        bundle_view(&client, bundle.id).await.unwrap().data_selection;
+    assert_eq!(viewed_categories(&selection), Vec::<&str>::new());
+    assert_eq!(selection.data, empty);
+}
+
+// Test the data selections that creation rejects.
+#[nexus_test]
+async fn test_support_bundle_data_selection_bad_request(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let _disk_test =
+        DiskTestBuilder::new(&cptestctx).with_zpool_count(1).build().await;
+
+    // A window whose start is after its end.
+    let now = omicron_common::now_db_precision();
+    let message = bundle_create_with_selection_expect_fail(
+        &client,
+        SupportBundleDataSelection {
+            data: SupportBundleData::All {},
+            start_time: Some(now),
+            end_time: Some(now - chrono::Duration::hours(1)),
+        },
+        StatusCode::BAD_REQUEST,
+    )
+    .await
+    .unwrap();
+    assert!(
+        message.contains("must not be later than"),
+        "unexpected message: {message}"
+    );
+
+    // A sled that does not exist. Without this check, a mistyped UUID would
+    // produce a bundle that quietly collects nothing from that sled.
+    let missing_sled = SledUuid::new_v4();
+    let message = bundle_create_with_selection_expect_fail(
+        &client,
+        SupportBundleDataSelection {
+            data: SupportBundleData::Explicit {
+                reconfigurator: false,
+                sled_cubby_info: false,
+                sp_dumps: false,
+                host_info: Some(SupportBundleHostInfo {
+                    sleds: SupportBundleSledSelection::Specific {
+                        sleds: vec![missing_sled],
+                    },
+                }),
+                ereports: None,
+            },
+            start_time: None,
+            end_time: None,
+        },
+        StatusCode::BAD_REQUEST,
+    )
+    .await
+    .unwrap();
+    assert!(
+        message.contains(&format!("sled {missing_sled} does not exist")),
+        "unexpected message: {message}"
+    );
+}
+
+// Test that viewing a bundle with no time range row succeeds, reporting no
+// bounds. Bundles collected before time ranges were recorded have no such
+// row: the schema migration only creates rows for bundles still awaiting
+// collection.
+#[nexus_test]
+async fn test_support_bundle_view_without_time_range_row(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    use async_bb8_diesel::AsyncRunQueryDsl;
+    use diesel::ExpressionMethods;
+    use diesel::QueryDsl;
+    use omicron_uuid_kinds::GenericUuid;
+
+    let client = &cptestctx.external_client;
+    let _disk_test =
+        DiskTestBuilder::new(&cptestctx).with_zpool_count(1).build().await;
+
+    let bundle = bundle_create(&client).await.unwrap();
+
+    // Simulate such a bundle by deleting the row creation stamped.
+    let datastore = cptestctx.server.server_context().nexus.datastore();
+    let conn = datastore.pool_connection_for_tests().await.unwrap();
+    {
+        use nexus_db_schema::schema::support_bundle_data_selection_time_range::dsl;
+        diesel::delete(
+            dsl::support_bundle_data_selection_time_range
+                .filter(dsl::bundle_id.eq(bundle.id.into_untyped_uuid())),
+        )
+        .execute_async(&*conn)
+        .await
+        .expect("Should be able to delete time range row");
+    }
+
+    let selection =
+        bundle_view(&client, bundle.id).await.unwrap().data_selection;
+    assert_eq!(selection.start_time, None);
+    assert_eq!(selection.end_time, None);
+    assert_eq!(
+        viewed_categories(&selection),
+        [
+            "reconfigurator",
+            "sled_cubby_info",
+            "sp_dumps",
+            "host_info",
+            "ereports"
+        ],
     );
 }
