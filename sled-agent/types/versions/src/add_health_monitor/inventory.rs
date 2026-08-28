@@ -20,7 +20,6 @@ use crate::v1::inventory::InventoryDisk;
 use crate::v1::inventory::InventoryZpool;
 use crate::v50::inventory::SledRole;
 use crate::v1::inventory::ZoneImageResolverInventory;
-use crate::v11;
 pub use crate::v11::inventory::ConfigReconcilerInventory;
 pub use crate::v11::inventory::ConfigReconcilerInventoryStatus;
 pub use crate::v11::inventory::OmicronSledConfig;
@@ -44,46 +43,6 @@ pub struct Inventory {
     pub last_reconciliation: Option<ConfigReconcilerInventory>,
     pub zone_image_resolver: ZoneImageResolverInventory,
     pub health_monitor: HealthMonitorInventory,
-}
-
-impl From<Inventory> for v11::inventory::Inventory {
-    fn from(value: Inventory) -> Self {
-        let Inventory {
-            sled_id,
-            sled_agent_address,
-            sled_role,
-            baseboard,
-            usable_hardware_threads,
-            usable_physical_ram,
-            cpu_family,
-            reservoir_size,
-            disks,
-            zpools,
-            datasets,
-            ledgered_sled_config,
-            reconciler_status,
-            last_reconciliation,
-            zone_image_resolver,
-            health_monitor: _,
-        } = value;
-        Self {
-            sled_id,
-            sled_agent_address,
-            sled_role,
-            baseboard,
-            usable_hardware_threads,
-            usable_physical_ram,
-            cpu_family,
-            reservoir_size,
-            disks,
-            zpools,
-            datasets,
-            ledgered_sled_config,
-            reconciler_status,
-            last_reconciliation,
-            zone_image_resolver,
-        }
-    }
 }
 
 /// Fields of sled-agent inventory reported by the health monitor subsystem.

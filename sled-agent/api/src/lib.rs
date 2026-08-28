@@ -78,7 +78,6 @@ api_versions!([
     (15, ADD_TRUST_QUORUM_STATUS),
     (14, MEASUREMENTS),
     (13, ADD_TRUST_QUORUM),
-    (12, ADD_SMF_SERVICES_HEALTH_CHECK),
     // Versions before this have been retired. We no longer support in any
     // server, nor expect it from any client.
 ]);
@@ -1220,28 +1219,13 @@ pub trait SledAgentApi {
         operation_id = "inventory",
         method = GET,
         path = "/inventory",
-        versions = VERSION_ADD_SMF_SERVICES_HEALTH_CHECK..VERSION_MEASUREMENTS,
+        versions = ..VERSION_MEASUREMENTS,
     }]
     async fn inventory_v12(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<v12::inventory::Inventory>, HttpError> {
         let HttpResponseOk(inventory) = Self::inventory_v14(rqctx).await?;
         inventory.try_into().map_err(HttpError::from).map(HttpResponseOk)
-    }
-
-    /// Fetch basic information about this sled
-    #[endpoint {
-        operation_id = "inventory",
-        method = GET,
-        path = "/inventory",
-        versions = ..VERSION_ADD_SMF_SERVICES_HEALTH_CHECK,
-    }]
-    async fn inventory_v11(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<v11::inventory::Inventory>, HttpError> {
-        Self::inventory_v12(rqctx).await.map(|HttpResponseOk(inv)| {
-            HttpResponseOk(v11::inventory::Inventory::from(inv))
-        })
     }
 
     /// Fetch sled identifiers
