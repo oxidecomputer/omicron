@@ -74,24 +74,6 @@ pub struct InstanceSledLocalConfig {
     pub delegated_zvols: Vec<DelegatedZvol>,
 }
 
-impl TryFrom<v10::instance::InstanceEnsureBody> for InstanceEnsureBody {
-    type Error = external::Error;
-
-    fn try_from(
-        v10: v10::instance::InstanceEnsureBody,
-    ) -> Result<Self, Self::Error> {
-        Ok(Self {
-            vmm_spec: v10.vmm_spec,
-            local_config: v10.local_config.try_into()?,
-            vmm_runtime: v10.vmm_runtime,
-            instance_id: v10.instance_id,
-            migration_id: v10.migration_id,
-            propolis_addr: v10.propolis_addr,
-            metadata: v10.metadata,
-        })
-    }
-}
-
 impl TryFrom<v10::instance::InstanceSledLocalConfig>
     for InstanceSledLocalConfig
 {

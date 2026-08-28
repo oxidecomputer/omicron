@@ -3,21 +3,16 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::collections::HashSet;
-use std::net::{IpAddr, SocketAddr};
+use std::net::IpAddr;
 
 use omicron_common::api::external;
 use omicron_common::api::external::Hostname;
 use omicron_common::api::internal::nexus::HostIdentifier;
 use omicron_common::api::internal::shared::DhcpConfig;
-use omicron_uuid_kinds::InstanceUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 use super::inventory::NetworkInterface;
-use crate::v1::instance::InstanceMetadata;
-use crate::v1::instance::VmmRuntimeState;
-use crate::v1::instance::VmmSpec;
 use crate::v1::inventory::SourceNatConfig;
 use crate::v7::instance::InstanceMulticastMembership;
 use crate::v9;
@@ -64,36 +59,6 @@ pub struct ResolvedVpcFirewallRule {
     pub filter_protocols: Option<Vec<VpcFirewallRuleProtocol>>,
     pub action: external::VpcFirewallRuleAction,
     pub priority: external::VpcFirewallRulePriority,
-}
-
-/// The body of a request to ensure that a instance and VMM are known to a sled
-/// agent.
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct InstanceEnsureBody {
-    /// The virtual hardware configuration this virtual machine should have when
-    /// it is started.
-    pub vmm_spec: VmmSpec,
-
-    /// Information about the sled-local configuration that needs to be
-    /// established to make the VM's virtual hardware fully functional.
-    pub local_config: InstanceSledLocalConfig,
-
-    /// The initial VMM runtime state for the VMM being registered.
-    pub vmm_runtime: VmmRuntimeState,
-
-    /// The ID of the instance for which this VMM is being created.
-    pub instance_id: InstanceUuid,
-
-    /// The ID of the migration in to this VMM, if this VMM is being
-    /// ensured is part of a migration in. If this is `None`, the VMM is not
-    /// being created due to a migration.
-    pub migration_id: Option<Uuid>,
-
-    /// The address at which this VMM should serve a Propolis server API.
-    pub propolis_addr: SocketAddr,
-
-    /// Metadata used to track instance statistics.
-    pub metadata: InstanceMetadata,
 }
 
 /// Describes sled-local configuration that a sled-agent must establish to make

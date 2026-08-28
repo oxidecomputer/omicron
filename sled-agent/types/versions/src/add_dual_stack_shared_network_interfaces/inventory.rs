@@ -6,7 +6,6 @@ use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::time::Duration;
 
-use crate::v1::inventory::Baseboard;
 use chrono::{DateTime, Utc};
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
@@ -15,51 +14,27 @@ use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_common::api::internal::shared::PrivateIpv4Config;
 use omicron_common::api::internal::shared::PrivateIpv6Config;
 use omicron_common::{
-    api::external::{self, ByteCount, Name, Vni},
+    api::external::{self, Name, Vni},
     zpool_name::ZpoolName,
 };
 use omicron_generation_kinds::Generation;
 use omicron_ledger::Ledgerable;
-use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::{DatasetUuid, OmicronZoneUuid};
 use omicron_uuid_kinds::{MupdateOverrideUuid, PhysicalDiskUuid};
 use oxnet::IpNet;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use sled_hardware_types::SledCpuFamily;
 use uuid::Uuid;
 
 use crate::v1::disk::DatasetConfig;
 use crate::v1::disk::OmicronPhysicalDiskConfig;
 use crate::v1::inventory::{
     BootPartitionContents, ConfigReconcilerInventoryResult,
-    HostPhase2DesiredSlots, InventoryDataset, InventoryDisk, InventoryZpool,
-    NetworkInterfaceKind, OmicronZoneDataset, OmicronZoneImageSource,
-    OrphanedDataset, RemoveMupdateOverrideInventory, SourceNatConfig,
-    ZoneImageResolverInventory,
+    HostPhase2DesiredSlots, NetworkInterfaceKind, OmicronZoneDataset,
+    OmicronZoneImageSource, OrphanedDataset, RemoveMupdateOverrideInventory,
+    SourceNatConfig,
 };
 use crate::v4;
-use crate::v50::inventory::SledRole;
-
-/// Identity and basic status information about this sled agent
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
-pub struct Inventory {
-    pub sled_id: SledUuid,
-    pub sled_agent_address: SocketAddrV6,
-    pub sled_role: SledRole,
-    pub baseboard: Baseboard,
-    pub usable_hardware_threads: u32,
-    pub usable_physical_ram: ByteCount,
-    pub cpu_family: SledCpuFamily,
-    pub reservoir_size: ByteCount,
-    pub disks: Vec<InventoryDisk>,
-    pub zpools: Vec<InventoryZpool>,
-    pub datasets: Vec<InventoryDataset>,
-    pub ledgered_sled_config: Option<OmicronSledConfig>,
-    pub reconciler_status: ConfigReconcilerInventoryStatus,
-    pub last_reconciliation: Option<ConfigReconcilerInventory>,
-    pub zone_image_resolver: ZoneImageResolverInventory,
-}
 
 /// Describes the last attempt made by the sled-agent-config-reconciler to
 /// reconcile the current sled config against the actual state of the sled.
@@ -293,55 +268,6 @@ fn default_nexus_lockstep_port() -> u16 {
     omicron_common::address::NEXUS_LOCKSTEP_PORT
 }
 
-impl TryFrom<Inventory> for v4::inventory::Inventory {
-    type Error = external::Error;
-
-    fn try_from(value: Inventory) -> Result<Self, Self::Error> {
-        let ledgered_sled_config =
-            value.ledgered_sled_config.map(TryInto::try_into).transpose()?;
-        let reconciler_status = value.reconciler_status.try_into()?;
-        let last_reconciliation =
-            value.last_reconciliation.map(TryInto::try_into).transpose()?;
-        Ok(Self {
-            sled_id: value.sled_id,
-            sled_agent_address: value.sled_agent_address,
-            sled_role: value.sled_role,
-            baseboard: value.baseboard,
-            usable_hardware_threads: value.usable_hardware_threads,
-            usable_physical_ram: value.usable_physical_ram,
-            cpu_family: value.cpu_family,
-            reservoir_size: value.reservoir_size,
-            disks: value.disks,
-            zpools: value.zpools,
-            datasets: value.datasets,
-            ledgered_sled_config,
-            reconciler_status,
-            last_reconciliation,
-            zone_image_resolver: value.zone_image_resolver,
-        })
-    }
-}
-
-impl TryFrom<OmicronSledConfig> for v4::inventory::OmicronSledConfig {
-    type Error = external::Error;
-
-    fn try_from(value: OmicronSledConfig) -> Result<Self, Self::Error> {
-        let zones = value
-            .zones
-            .into_iter()
-            .map(TryInto::try_into)
-            .collect::<Result<_, _>>()?;
-        Ok(Self {
-            generation: value.generation,
-            disks: value.disks,
-            datasets: value.datasets,
-            zones,
-            remove_mupdate_override: value.remove_mupdate_override,
-            host_phase_2: value.host_phase_2,
-        })
-    }
-}
-
 impl TryFrom<OmicronZoneConfig> for v4::inventory::OmicronZoneConfig {
     type Error = external::Error;
 
@@ -457,55 +383,8 @@ impl TryFrom<OmicronZoneType> for v4::inventory::OmicronZoneType {
     }
 }
 
-impl TryFrom<ConfigReconcilerInventory>
-    for v4::inventory::ConfigReconcilerInventory
-{
-    type Error = external::Error;
-
-    fn try_from(value: ConfigReconcilerInventory) -> Result<Self, Self::Error> {
-        Ok(Self {
-            last_reconciled_config: value.last_reconciled_config.try_into()?,
-            external_disks: value.external_disks,
-            datasets: value.datasets,
-            orphaned_datasets: value.orphaned_datasets,
-            zones: value.zones,
-            boot_partitions: value.boot_partitions,
-            remove_mupdate_override: value.remove_mupdate_override,
-        })
-    }
-}
-
-impl TryFrom<ConfigReconcilerInventoryStatus>
-    for v4::inventory::ConfigReconcilerInventoryStatus
-{
-    type Error = external::Error;
-
-    fn try_from(
-        value: ConfigReconcilerInventoryStatus,
-    ) -> Result<Self, Self::Error> {
-        match value {
-            ConfigReconcilerInventoryStatus::NotYetRun => {
-                Ok(v4::inventory::ConfigReconcilerInventoryStatus::NotYetRun)
-            }
-            ConfigReconcilerInventoryStatus::Running {
-                config,
-                started_at,
-                running_for,
-            } => Ok(v4::inventory::ConfigReconcilerInventoryStatus::Running {
-                config: Box::new((*config).try_into()?),
-                started_at,
-                running_for,
-            }),
-            ConfigReconcilerInventoryStatus::Idle { completed_at, ran_for } => {
-                Ok(v4::inventory::ConfigReconcilerInventoryStatus::Idle {
-                    completed_at,
-                    ran_for,
-                })
-            }
-        }
-    }
-}
-
+// Required for the OmicronSledConfig conversion chain when reading old ledgered
+// config
 impl TryFrom<v4::inventory::OmicronSledConfig> for OmicronSledConfig {
     type Error = external::Error;
 
@@ -526,7 +405,6 @@ impl TryFrom<v4::inventory::OmicronSledConfig> for OmicronSledConfig {
         })
     }
 }
-
 impl TryFrom<v4::inventory::OmicronZoneConfig> for OmicronZoneConfig {
     type Error = external::Error;
 

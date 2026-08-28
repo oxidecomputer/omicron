@@ -20,7 +20,7 @@ use omicron_common::api::internal::{
     },
 };
 use sled_agent_types_versions::{
-    latest, v1, v9, v10, v11, v12, v14, v16, v17, v18, v20, v22,
+    latest, v1, v9, v11, v12, v14, v16, v17, v18, v20, v22,
     v24, v25, v26, v28, v29, v30, v31, v32, v33, v34, v37, v39, v40, v41, v42,
     v43, v46, v47, v48, v49,
 };
@@ -79,7 +79,6 @@ api_versions!([
     (14, MEASUREMENTS),
     (13, ADD_TRUST_QUORUM),
     (12, ADD_SMF_SERVICES_HEALTH_CHECK),
-    (11, ADD_DUAL_STACK_EXTERNAL_IP_CONFIG),
     // Versions before this have been retired. We no longer support in any
     // server, nor expect it from any client.
 ]);
@@ -405,8 +404,7 @@ pub trait SledAgentApi {
         operation_id = "omicron_config_put",
         method = PUT,
         path = "/omicron-config",
-        versions =
-            VERSION_ADD_DUAL_STACK_EXTERNAL_IP_CONFIG..VERSION_MEASUREMENTS,
+        versions = ..VERSION_MEASUREMENTS,
     }]
     async fn omicron_config_put_v11(
         rqctx: RequestContext<Self::Context>,
@@ -414,20 +412,6 @@ pub trait SledAgentApi {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let body = body.try_map(v14::inventory::OmicronSledConfig::try_from)?;
         Self::omicron_config_put_v14(rqctx, body).await
-    }
-
-    #[endpoint {
-        operation_id = "omicron_config_put",
-        method = PUT,
-        path = "/omicron-config",
-        versions = ..VERSION_ADD_DUAL_STACK_EXTERNAL_IP_CONFIG,
-    }]
-    async fn omicron_config_put_v10(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<v10::inventory::OmicronSledConfig>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let body = body.try_map(v11::inventory::OmicronSledConfig::try_from)?;
-        Self::omicron_config_put_v11(rqctx, body).await
     }
 
     #[endpoint {
@@ -532,7 +516,7 @@ pub trait SledAgentApi {
         operation_id = "vmm_register",
         method = PUT,
         path = "/vmms/{propolis_id}",
-        versions = VERSION_ADD_DUAL_STACK_EXTERNAL_IP_CONFIG..VERSION_TWO_TYPES_OF_DELEGATED_ZVOL
+        versions = ..VERSION_TWO_TYPES_OF_DELEGATED_ZVOL
     }]
     async fn vmm_register_v11(
         rqctx: RequestContext<Self::Context>,
@@ -540,21 +524,6 @@ pub trait SledAgentApi {
         body: TypedBody<v11::instance::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError> {
         Self::vmm_register_v17(rqctx, path_params, body.map(Into::into)).await
-    }
-
-    #[endpoint {
-        operation_id = "vmm_register",
-        method = PUT,
-        path = "/vmms/{propolis_id}",
-        versions = ..VERSION_ADD_DUAL_STACK_EXTERNAL_IP_CONFIG
-    }]
-    async fn vmm_register_v10(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::instance::VmmPathParam>,
-        body: TypedBody<v10::instance::InstanceEnsureBody>,
-    ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError> {
-        let body = body.try_map(v11::instance::InstanceEnsureBody::try_from)?;
-        Self::vmm_register_v11(rqctx, path_params, body).await
     }
 
     #[endpoint {
@@ -1265,7 +1234,7 @@ pub trait SledAgentApi {
         operation_id = "inventory",
         method = GET,
         path = "/inventory",
-        versions = VERSION_ADD_DUAL_STACK_EXTERNAL_IP_CONFIG..VERSION_ADD_SMF_SERVICES_HEALTH_CHECK,
+        versions = ..VERSION_ADD_SMF_SERVICES_HEALTH_CHECK,
     }]
     async fn inventory_v11(
         rqctx: RequestContext<Self::Context>,
@@ -1273,20 +1242,6 @@ pub trait SledAgentApi {
         Self::inventory_v12(rqctx).await.map(|HttpResponseOk(inv)| {
             HttpResponseOk(v11::inventory::Inventory::from(inv))
         })
-    }
-
-    /// Fetch basic information about this sled
-    #[endpoint {
-        operation_id = "inventory",
-        method = GET,
-        path = "/inventory",
-        versions = ..VERSION_ADD_DUAL_STACK_EXTERNAL_IP_CONFIG,
-    }]
-    async fn inventory_v10(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<v10::inventory::Inventory>, HttpError> {
-        let HttpResponseOk(inventory) = Self::inventory_v11(rqctx).await?;
-        inventory.try_into().map_err(HttpError::from).map(HttpResponseOk)
     }
 
     /// Fetch sled identifiers

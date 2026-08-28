@@ -292,36 +292,6 @@ fn default_nexus_lockstep_port() -> u16 {
 
 use omicron_common::api::external;
 
-impl TryFrom<v10::inventory::Inventory> for Inventory {
-    type Error = external::Error;
-
-    fn try_from(v10: v10::inventory::Inventory) -> Result<Self, Self::Error> {
-        Ok(Self {
-            sled_id: v10.sled_id,
-            sled_agent_address: v10.sled_agent_address,
-            sled_role: v10.sled_role,
-            baseboard: v10.baseboard,
-            usable_hardware_threads: v10.usable_hardware_threads,
-            usable_physical_ram: v10.usable_physical_ram,
-            cpu_family: v10.cpu_family,
-            reservoir_size: v10.reservoir_size,
-            disks: v10.disks,
-            zpools: v10.zpools,
-            datasets: v10.datasets,
-            ledgered_sled_config: v10
-                .ledgered_sled_config
-                .map(TryInto::try_into)
-                .transpose()?,
-            reconciler_status: v10.reconciler_status.try_into()?,
-            last_reconciliation: v10
-                .last_reconciliation
-                .map(TryInto::try_into)
-                .transpose()?,
-            zone_image_resolver: v10.zone_image_resolver,
-        })
-    }
-}
-
 impl TryFrom<v10::inventory::OmicronSledConfig> for OmicronSledConfig {
     type Error = external::Error;
 
@@ -524,37 +494,6 @@ impl TryFrom<v10::inventory::OmicronZonesConfig> for OmicronZonesConfig {
                 .into_iter()
                 .map(TryInto::try_into)
                 .collect::<Result<_, _>>()?,
-        })
-    }
-}
-
-// Conversions from v11 to v10 for response types
-impl TryFrom<Inventory> for v10::inventory::Inventory {
-    type Error = external::Error;
-
-    fn try_from(v11: Inventory) -> Result<Self, Self::Error> {
-        Ok(Self {
-            sled_id: v11.sled_id,
-            sled_agent_address: v11.sled_agent_address,
-            sled_role: v11.sled_role,
-            baseboard: v11.baseboard,
-            usable_hardware_threads: v11.usable_hardware_threads,
-            usable_physical_ram: v11.usable_physical_ram,
-            cpu_family: v11.cpu_family,
-            reservoir_size: v11.reservoir_size,
-            disks: v11.disks,
-            zpools: v11.zpools,
-            datasets: v11.datasets,
-            ledgered_sled_config: v11
-                .ledgered_sled_config
-                .map(TryInto::try_into)
-                .transpose()?,
-            reconciler_status: v11.reconciler_status.try_into()?,
-            last_reconciliation: v11
-                .last_reconciliation
-                .map(TryInto::try_into)
-                .transpose()?,
-            zone_image_resolver: v11.zone_image_resolver,
         })
     }
 }
