@@ -62,37 +62,6 @@ pub struct Inventory {
     pub health_monitor: HealthMonitorInventory,
 }
 
-impl TryFrom<Inventory> for v12::inventory::Inventory {
-    type Error = external::Error;
-
-    fn try_from(value: Inventory) -> Result<Self, Self::Error> {
-        let ledgered_sled_config =
-            value.ledgered_sled_config.map(TryInto::try_into).transpose()?;
-        let last_reconciliation =
-            value.last_reconciliation.map(TryInto::try_into).transpose()?;
-        let zone_image_resolver = value.file_source_resolver.try_into()?;
-        let reconciler_status = value.reconciler_status.try_into()?;
-        Ok(Self {
-            sled_id: value.sled_id,
-            sled_agent_address: value.sled_agent_address,
-            sled_role: value.sled_role,
-            baseboard: value.baseboard,
-            usable_hardware_threads: value.usable_hardware_threads,
-            usable_physical_ram: value.usable_physical_ram,
-            cpu_family: value.cpu_family,
-            reservoir_size: value.reservoir_size,
-            disks: value.disks,
-            zpools: value.zpools,
-            datasets: value.datasets,
-            ledgered_sled_config,
-            reconciler_status,
-            last_reconciliation,
-            zone_image_resolver,
-            health_monitor: value.health_monitor,
-        })
-    }
-}
-
 /// Inventory representation of zone image resolver and measurement resolver
 /// status and health. Previously known as `ZoneImageResolverInventory`
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]

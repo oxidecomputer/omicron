@@ -20,7 +20,7 @@ use omicron_common::api::internal::{
     },
 };
 use sled_agent_types_versions::{
-    latest, v1, v9, v11, v12, v14, v16, v17, v18, v20, v22,
+    latest, v1, v9, v11, v14, v16, v17, v18, v20, v22,
     v24, v25, v26, v28, v29, v30, v31, v32, v33, v34, v37, v39, v40, v41, v42,
     v43, v46, v47, v48, v49,
 };
@@ -76,7 +76,6 @@ api_versions!([
     (17, TWO_TYPES_OF_DELEGATED_ZVOL),
     (16, MEASUREMENT_PROPER_INVENTORY),
     (15, ADD_TRUST_QUORUM_STATUS),
-    (14, MEASUREMENTS),
     // Versions before this have been retired. We no longer support them in any
     // server, nor expect them from any client.
 ]);
@@ -389,27 +388,13 @@ pub trait SledAgentApi {
         operation_id = "omicron_config_put",
         method = PUT,
         path = "/omicron-config",
-        versions = VERSION_MEASUREMENTS..VERSION_ADD_UPDATE_DISPOSITION,
+        versions = ..VERSION_ADD_UPDATE_DISPOSITION,
     }]
     async fn omicron_config_put_v14(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<v14::inventory::OmicronSledConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         Self::omicron_config_put_v49(rqctx, body.map(Into::into)).await
-    }
-
-    #[endpoint {
-        operation_id = "omicron_config_put",
-        method = PUT,
-        path = "/omicron-config",
-        versions = ..VERSION_MEASUREMENTS,
-    }]
-    async fn omicron_config_put_v11(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<v11::inventory::OmicronSledConfig>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let body = body.try_map(v14::inventory::OmicronSledConfig::try_from)?;
-        Self::omicron_config_put_v14(rqctx, body).await
     }
 
     #[endpoint {
@@ -1204,26 +1189,12 @@ pub trait SledAgentApi {
         operation_id = "inventory",
         method = GET,
         path = "/inventory",
-        versions = VERSION_MEASUREMENTS..VERSION_MEASUREMENT_PROPER_INVENTORY,
+        versions = ..VERSION_MEASUREMENT_PROPER_INVENTORY,
     }]
     async fn inventory_v14(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<v14::inventory::Inventory>, HttpError> {
         let HttpResponseOk(inventory) = Self::inventory_v16(rqctx).await?;
-        inventory.try_into().map_err(HttpError::from).map(HttpResponseOk)
-    }
-
-    /// Fetch basic information about this sled
-    #[endpoint {
-        operation_id = "inventory",
-        method = GET,
-        path = "/inventory",
-        versions = ..VERSION_MEASUREMENTS,
-    }]
-    async fn inventory_v12(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<v12::inventory::Inventory>, HttpError> {
-        let HttpResponseOk(inventory) = Self::inventory_v14(rqctx).await?;
         inventory.try_into().map_err(HttpError::from).map(HttpResponseOk)
     }
 
