@@ -16208,14 +16208,14 @@
         "description": "Affinity policy used to describe \"what to do when a request cannot be satisfied\"\n\nUsed for both Affinity and Anti-Affinity Groups",
         "oneOf": [
           {
-            "description": "If the affinity request cannot be satisfied, allow it anyway.\n\nThis enables a \"best-effort\" attempt to satisfy the affinity policy.",
+            "description": "Best-effort: instances can start even when the group's constraints cannot be satisfied.",
             "type": "string",
             "enum": [
               "allow"
             ]
           },
           {
-            "description": "If the affinity request cannot be satisfied, fail explicitly.",
+            "description": "When the group's constraints cannot be satisfied, an instance start request will fail and the instance will remain stopped. Starting the instance may succeed later if conditions change, e.g., other instances stop.",
             "type": "string",
             "enum": [
               "fail"
