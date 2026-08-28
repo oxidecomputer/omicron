@@ -32,7 +32,7 @@ impl InstanceManagerJobsStatusReceiver {
 }
 
 #[derive(Debug)]
-pub(super) enum CanEnsureVmmResult<'a, T> {
+pub(super) enum CanEnsureVmm<'a, T> {
     Exists(&'a T),
     CannotRegister(VmmRegistrationDisallowedReason),
     CanRegister(RegisterNewVmm<'a, T>),
@@ -110,28 +110,28 @@ impl<T> Jobs<T> {
     pub(super) fn can_ensure_vmm(
         &mut self,
         propolis_id: PropolisUuid,
-    ) -> CanEnsureVmmResult<'_, T> {
+    ) -> CanEnsureVmm<'_, T> {
         match self.jobs.entry(propolis_id) {
             btree_map::Entry::Occupied(entry) => {
                 // If the instance already exists, just return it.
-                CanEnsureVmmResult::Exists(entry.into_mut())
+                CanEnsureVmm::Exists(entry.into_mut())
             }
             btree_map::Entry::Vacant(entry) => {
                 // Otherwise, are we allowed to ensure new VMMs?
                 match self.status.read().unwrap().update_disposition {
                     CurrentUpdateDisposition::ConfigNotAvailable => {
-                        CanEnsureVmmResult::CannotRegister(
+                        CanEnsureVmm::CannotRegister(
                             VmmRegistrationDisallowedReason::ConfigNotYetLoaded,
                         )
                     }
                     CurrentUpdateDisposition::Known(
                         OmicronSledUpdateDisposition::Evacuating,
-                    ) => CanEnsureVmmResult::CannotRegister(
+                    ) => CanEnsureVmm::CannotRegister(
                         VmmRegistrationDisallowedReason::SledEvacuating,
                     ),
                     CurrentUpdateDisposition::Known(
                         OmicronSledUpdateDisposition::Available,
-                    ) => CanEnsureVmmResult::CanRegister(RegisterNewVmm {
+                    ) => CanEnsureVmm::CanRegister(RegisterNewVmm {
                         entry,
                         status: &self.status,
                     }),
@@ -270,18 +270,18 @@ mod tests {
                     ) {
                         (
                             Ok(Some(expected_instance)),
-                            CanEnsureVmmResult::Exists(actual_instance),
+                            CanEnsureVmm::Exists(actual_instance),
                         ) => {
                             assert_eq!(expected_instance, actual_instance);
                         }
-                        (Ok(None), CanEnsureVmmResult::CanRegister(entry)) => {
+                        (Ok(None), CanEnsureVmm::CanRegister(entry)) => {
                             if insert_if_allowed {
                                 entry.insert(instance);
                             }
                         }
                         (
                             Err(expected_reason),
-                            CanEnsureVmmResult::CannotRegister(actual_reason),
+                            CanEnsureVmm::CannotRegister(actual_reason),
                         ) => {
                             assert_eq!(expected_reason, actual_reason);
                         }

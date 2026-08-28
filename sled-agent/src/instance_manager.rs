@@ -34,7 +34,7 @@ use uuid::Uuid;
 
 mod jobs;
 
-use self::jobs::CanEnsureVmmResult;
+use self::jobs::CanEnsureVmm;
 use self::jobs::InstanceManagerJobsStatusReceiver;
 use self::jobs::Jobs;
 
@@ -820,7 +820,7 @@ impl InstanceManagerRunner {
         );
 
         let instance = match self.jobs.can_ensure_vmm(propolis_id) {
-            CanEnsureVmmResult::Exists(existing_instance) => {
+            CanEnsureVmm::Exists(existing_instance) => {
                 if instance_id != existing_instance.id() {
                     info!(&self.log,
                           "Propolis ID already used by another instance";
@@ -840,7 +840,7 @@ impl InstanceManagerRunner {
                     existing_instance
                 }
             }
-            CanEnsureVmmResult::CanRegister(registration_slot) => {
+            CanEnsureVmm::CanRegister(registration_slot) => {
                 info!(&self.log,
                       "registering new instance";
                       "instance_id" => %instance_id,
@@ -885,7 +885,7 @@ impl InstanceManagerRunner {
                 )?;
                 registration_slot.insert(instance)
             }
-            CanEnsureVmmResult::CannotRegister(reason) => {
+            CanEnsureVmm::CannotRegister(reason) => {
                 // The VMM doesn't already exist, but we must disallow new
                 // registrations.
                 //
