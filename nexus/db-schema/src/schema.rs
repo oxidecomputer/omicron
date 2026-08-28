@@ -2747,8 +2747,6 @@ table! {
 
 allow_tables_to_appear_in_same_query!(instance, migration);
 allow_tables_to_appear_in_same_query!(migration, vmm);
-// TODO-K: Fix comment, Lets vmm_bulk_mark_stop_for_update read a sled's
-// rendezvous update-disposition generation in the same query as the vmm table.
 allow_tables_to_appear_in_same_query!(vmm, rendezvous_sled_bp_availability);
 joinable!(instance -> migration (migration_id));
 

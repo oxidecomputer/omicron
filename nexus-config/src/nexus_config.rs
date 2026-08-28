@@ -1677,7 +1677,7 @@ mod test {
                             period_secs: Duration::from_secs(31),
                         },
                         vmm_mark_stop_for_update: VmmMarkStopForUpdateConfig {
-                            period_secs: Duration::from_secs(33),
+                            period_secs: Duration::from_secs(300),
                             disable: false,
                         },
                     },

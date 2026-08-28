@@ -226,8 +226,14 @@ mod tests {
             get_marker_from_vmm(datastore, opctx, &should_mark).await,
             Some(generation)
         );
-        assert_eq!(get_marker_from_vmm(datastore, opctx, &already_stopped).await, None);
-        assert_eq!(get_marker_from_vmm(datastore, opctx, &other_sled).await, None);
+        assert_eq!(
+            get_marker_from_vmm(datastore, opctx, &already_stopped).await,
+            None
+        );
+        assert_eq!(
+            get_marker_from_vmm(datastore, opctx, &other_sled).await,
+            None
+        );
 
         // Running again is a no-op: the eligible VMM is already marked.
         let status = task.actually_activate(opctx).await;
@@ -237,8 +243,14 @@ mod tests {
             get_marker_from_vmm(datastore, opctx, &should_mark).await,
             Some(generation)
         );
-        assert_eq!(get_marker_from_vmm(datastore, opctx, &already_stopped).await, None);
-        assert_eq!(get_marker_from_vmm(datastore, opctx, &other_sled).await, None);
+        assert_eq!(
+            get_marker_from_vmm(datastore, opctx, &already_stopped).await,
+            None
+        );
+        assert_eq!(
+            get_marker_from_vmm(datastore, opctx, &other_sled).await,
+            None
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
