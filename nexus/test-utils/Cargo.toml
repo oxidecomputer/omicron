@@ -45,7 +45,7 @@ omicron-common.workspace = true
 omicron-debug-dropbox.workspace = true
 omicron-generation-kinds.workspace = true
 omicron-passwords.workspace = true
-omicron-sled-agent.workspace = true
+omicron-sled-agent = { workspace = true, features = ["testing"] }
 loopback-ip-mgr.workspace = true
 omicron-test-utils.workspace = true
 omicron-uuid-kinds.workspace = true

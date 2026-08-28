@@ -112,6 +112,17 @@ pub struct SledAgent {
     /// counter and return 503 Service Unavailable.
     local_storage_error_count: AtomicU32,
     pub bootstore_network_config: Mutex<bootstore::NetworkConfig>,
+    /// Watch channel that sends the deserialized [`SystemNetworkingConfig`]
+    /// whenever Nexus writes a new bootstore config. Only populated for
+    /// scrimlet sleds; used to drive the scrimlet reconcilers.
+    #[cfg(any(test, feature = "testing"))]
+    network_config_tx:
+        Option<tokio::sync::watch::Sender<SystemNetworkingConfig>>,
+    /// Keeps the scrimlet reconcilers alive once started.
+    #[cfg(any(test, feature = "testing"))]
+    scrimlet_reconcilers: std::sync::OnceLock<
+        Arc<sled_agent_scrimlet_reconcilers::ScrimletReconcilers>,
+    >,
     pub repo_depot: dropshot::HttpServer<ArtifactStore<SimArtifactStorage>>,
     pub log: Logger,
     health_monitor: HealthMonitorHandle,
@@ -135,29 +146,37 @@ impl SledAgent {
         let instance_log = log.new(o!("kind" => "instances"));
         let storage_log = log.new(o!("kind" => "storage"));
 
+        let placeholder_system_config = SystemNetworkingConfig {
+            rack_network_config: RackNetworkConfig {
+                rack_subnet: Ipv6Net::new(Ipv6Addr::UNSPECIFIED, 56).unwrap(),
+                infra_ip_first: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                infra_ip_last: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                // The simulated sled-agent doesn't do real uplink setup,
+                // but `UplinkPorts` must be non-empty, so use a single
+                // placeholder port.
+                ports: UplinkPorts::new(vec![PortConfig::empty_for_tests(
+                    "qsfp0",
+                )])
+                .expect("placeholder port list is non-empty"),
+                bgp: Vec::new(),
+                bfd: Vec::new(),
+            },
+            // TODO-correctness Can we fill this in for the simulated
+            // sled-agent?
+            blueprint_external_networking_config: None,
+        };
         let bootstore_network_config = Mutex::new(
-            EarlyNetworkConfigEnvelope::from(&SystemNetworkingConfig {
-                rack_network_config: RackNetworkConfig {
-                    rack_subnet: Ipv6Net::new(Ipv6Addr::UNSPECIFIED, 56)
-                        .unwrap(),
-                    infra_ip_first: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-                    infra_ip_last: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-                    // The simulated sled-agent doesn't do real uplink setup,
-                    // but `UplinkPorts` must be non-empty, so use a single
-                    // placeholder port.
-                    ports: UplinkPorts::new(vec![PortConfig::empty_for_tests(
-                        "qsfp0",
-                    )])
-                    .expect("placeholder port list is non-empty"),
-                    bgp: Vec::new(),
-                    bfd: Vec::new(),
-                },
-                // TODO-correctness Can we fill this in for the simulated
-                // sled-agent?
-                blueprint_external_networking_config: None,
-            })
-            .serialize_to_bootstore_with_generation(0),
+            EarlyNetworkConfigEnvelope::from(&placeholder_system_config)
+                .serialize_to_bootstore_with_generation(0),
         );
+        #[cfg(any(test, feature = "testing"))]
+        let network_config_tx = if config.is_scrimlet {
+            let (tx, _) =
+                tokio::sync::watch::channel(placeholder_system_config);
+            Some(tx)
+        } else {
+            None
+        };
 
         let storage = Storage::new(
             id.into_untyped_uuid(),
@@ -198,8 +217,83 @@ impl SledAgent {
             repo_depot,
             log,
             bootstore_network_config,
+            #[cfg(any(test, feature = "testing"))]
+            network_config_tx,
+            #[cfg(any(test, feature = "testing"))]
+            scrimlet_reconcilers: std::sync::OnceLock::new(),
             health_monitor,
         })
+    }
+
+    /// Notify reconcilers (if any) that the bootstore network config changed.
+    ///
+    /// Called after every `write_network_bootstore_config_vXX` handler updates
+    /// [`Self::bootstore_network_config`]. No-op when the `testing` feature is
+    /// not enabled or this sled is not a scrimlet.
+    pub(crate) fn notify_network_config_changed(&self) {
+        #[cfg(any(test, feature = "testing"))]
+        {
+            let Some(tx) = &self.network_config_tx else { return };
+            let config = self.bootstore_network_config.lock().unwrap().clone();
+            match sled_agent_types::early_networking::EarlyNetworkConfigEnvelope::deserialize_from_bootstore(&config)
+                .and_then(|e| e.deserialize_body())
+            {
+                Ok(system_config) => {
+                    tx.send_modify(|c| *c = system_config);
+                }
+                Err(e) => {
+                    slog::warn!(
+                        self.log,
+                        "failed to deserialize bootstore config for \
+                         scrimlet reconcilers (reconcilers may lag)";
+                        "error" => %e,
+                    );
+                }
+            }
+        }
+    }
+
+    /// Start the scrimlet reconcilers pointing at the given switch zone service
+    /// addresses. Must only be called once and only on scrimlet sleds.
+    ///
+    /// Only available under `cfg(any(test, feature = "testing"))` because it
+    /// uses [`sled_agent_scrimlet_reconcilers::ScrimletReconcilersMode::Test`].
+    #[cfg(any(test, feature = "testing"))]
+    pub fn start_scrimlet_reconcilers(
+        &self,
+        mgs_addr: std::net::SocketAddr,
+        dpd_addr: std::net::SocketAddr,
+        mgd_addr: std::net::SocketAddr,
+        bgp_dispatcher_addr: std::net::SocketAddr,
+    ) {
+        use sled_agent_scrimlet_reconcilers::{
+            ScrimletReconcilers, ScrimletReconcilersMode, ScrimletStatus,
+            SledAgentNetworkingInfo,
+        };
+
+        let tx = self
+            .network_config_tx
+            .as_ref()
+            .expect("network_config_tx must be Some for scrimlet sleds");
+
+        let reconcilers = ScrimletReconcilers::new(&self.log);
+        reconcilers.set_sled_agent_networking_info_once(
+            SledAgentNetworkingInfo {
+                system_networking_config_rx: tx.subscribe(),
+                mode: ScrimletReconcilersMode::Test {
+                    mgs_addr,
+                    dpd_addr,
+                    mgd_addr,
+                    bgp_dispatcher_addr,
+                },
+            },
+        );
+        reconcilers.set_scrimlet_status(ScrimletStatus::Scrimlet);
+
+        // Store to keep the reconcilers alive. Ignore the error: if called
+        // twice it is a programmer error and we just silently drop the second
+        // set (the first set is already running).
+        let _ = self.scrimlet_reconcilers.set(Arc::new(reconcilers));
     }
 
     pub async fn instance_register(

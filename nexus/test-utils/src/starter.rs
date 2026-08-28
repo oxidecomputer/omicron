@@ -191,7 +191,7 @@ pub struct ControlPlaneStarter<'a, N: NexusServer> {
     pub mgd_bgp_loopback:
         Option<Arc<Mutex<loopback_ip_mgr::LoopbackIpManager>>>,
     pub mgd_bgp_addrs: BTreeMap<SwitchSlot, Ipv4Addr>,
-    scrimlet_sled_ids: BTreeSet<SledUuid>,
+    scrimlet_sled_switch_slots: BTreeMap<SledUuid, SwitchSlot>,
 
     debug_dropbox_dir: TestTempDir,
 }
@@ -250,7 +250,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             )),
             mgd_bgp_loopback: None,
             mgd_bgp_addrs: BTreeMap::new(),
-            scrimlet_sled_ids: BTreeSet::new(),
+            scrimlet_sled_switch_slots: BTreeMap::new(),
             debug_dropbox_dir,
         }
     }
@@ -595,7 +595,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                 },
             )
             .unwrap();
-        self.scrimlet_sled_ids.insert(sled_id);
+        self.scrimlet_sled_switch_slots.insert(sled_id, switch_slot);
     }
 
     pub async fn start_oximeter(&mut self) {
@@ -1008,7 +1008,9 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         let nexus_address =
             self.nexus_internal_addr.expect("Must launch Nexus first");
 
-        let is_scrimlet = self.scrimlet_sled_ids.contains(&sled_id);
+        let scrimlet_switch_slot =
+            self.scrimlet_sled_switch_slots.get(&sled_id).copied();
+        let is_scrimlet = scrimlet_switch_slot.is_some();
         let sled_agent = start_sled_agent(
             self.logctx.log.new(o!(
                 "component" => "omicron_sled_agent::sim::Server",
@@ -1048,6 +1050,32 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                 sled_id,
                 repo_depot_addr_v6,
                 ServiceName::RepoDepot,
+            );
+        }
+
+        // Start the scrimlet reconcilers so that network config written by
+        // Nexus via write_network_bootstore_config is forwarded to the switch
+        // zone services (mgd, dpd, lldpd) that are running as real processes.
+        if let Some(slot) = scrimlet_switch_slot {
+            let mgs_addr: SocketAddr =
+                self.gateway.get(&slot).unwrap().address().into();
+            let dpd_addr: SocketAddr = self
+                .dendrite
+                .read()
+                .unwrap()
+                .get(&slot)
+                .unwrap()
+                .address()
+                .into();
+            let mgd_instance = self.mgd.get(&slot).unwrap();
+            let mgd_addr: SocketAddr = mgd_instance.address().into();
+            let bgp_dispatcher_addr: SocketAddr =
+                mgd_instance.bgp_dispatcher_addr;
+            sled_agent.sled_agent.start_scrimlet_reconcilers(
+                mgs_addr,
+                dpd_addr,
+                mgd_addr,
+                bgp_dispatcher_addr,
             );
         }
 

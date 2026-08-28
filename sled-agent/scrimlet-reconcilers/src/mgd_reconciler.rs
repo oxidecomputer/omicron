@@ -12,6 +12,7 @@ use bootstrap_agent_lockstep_types::scrimlet_reconcilers::mgd::MgdReconcilerStat
 use mg_admin_client::Client;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use slog::Logger;
+use std::net::SocketAddr;
 use std::time::Duration;
 
 mod bfd_reconciler;
@@ -22,6 +23,10 @@ mod static_route_reconciler;
 pub(crate) struct MgdReconciler {
     client: Client,
     switch_slot: ThisSledSwitchSlot,
+    /// The address the mgd bgp-dispatcher is listening on, used to set the
+    /// correct BGP port when creating routers and numbered neighbors. `None`
+    /// means use the standard BGP port 179.
+    bgp_dispatcher_addr: Option<SocketAddr>,
 }
 
 impl Reconciler for MgdReconciler {
@@ -35,7 +40,18 @@ impl Reconciler for MgdReconciler {
         switch_slot: ThisSledSwitchSlot,
         parent_log: &Logger,
     ) -> Self {
-        Self { client: mode.mgd_client(parent_log), switch_slot }
+        let bgp_dispatcher_addr = match mode {
+            ScrimletReconcilersMode::SwitchZone(_) => None,
+            #[cfg(any(test, feature = "testing"))]
+            ScrimletReconcilersMode::Test { bgp_dispatcher_addr, .. } => {
+                Some(bgp_dispatcher_addr)
+            }
+        };
+        Self {
+            client: mode.mgd_client(parent_log),
+            switch_slot,
+            bgp_dispatcher_addr,
+        }
     }
 
     async fn do_reconciliation(
@@ -55,6 +71,7 @@ impl Reconciler for MgdReconciler {
             &self.client,
             &system_networking_config.rack_network_config,
             self.switch_slot,
+            self.bgp_dispatcher_addr,
             log,
         )
         .await;

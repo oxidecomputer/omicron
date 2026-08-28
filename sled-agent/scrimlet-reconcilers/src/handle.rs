@@ -47,6 +47,10 @@ pub enum ScrimletReconcilersMode {
         mgs_addr: SocketAddr,
         dpd_addr: SocketAddr,
         mgd_addr: SocketAddr,
+        /// The address the mgd bgp-dispatcher is listening on. Used as the
+        /// router's listen address and to derive the remote BGP port for
+        /// numbered peers (replacing the standard port 179).
+        bgp_dispatcher_addr: SocketAddr,
     },
 }
 
