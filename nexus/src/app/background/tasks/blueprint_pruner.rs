@@ -119,13 +119,15 @@ use serde_json::json;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::num::NonZeroU32;
+use std::num::NonZeroUsize;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 use tokio::sync::watch::Receiver;
 
 /// Smallest number of recent target blueprints that we keep, no matter what the
 /// configured `blueprint_pruner_nkeep` says
-const MIN_NKEEP: usize = 3;
+// unwrap(): 3 is not zero
+const MIN_NKEEP: NonZeroUsize = NonZeroUsize::new(3).unwrap();
 
 /// Max number of bp_target rows to consider deleting per activation of the task
 ///
@@ -235,11 +237,11 @@ async fn prune_blueprints(
     batch_size: NonZeroU32,
 ) -> Result<BlueprintPrunerDetails, anyhow::Error> {
     // Keep at least `MIN_NKEEP` blueprints, no matter what we were told.
-    let nkeep = nkeep.max(MIN_NKEEP);
+    let nkeep =
+        NonZeroUsize::new(nkeep).map_or(MIN_NKEEP, |n| n.max(MIN_NKEEP));
     // Figure out the maximum version that we'd consider pruning.
-    let pruneable = datastore
-        .bp_target_determine_pruneable(opctx, nkeep, batch_size)
-        .await?;
+    let pruneable =
+        datastore.bp_target_determine_pruneable(opctx, nkeep).await?;
     let keep_version = match &pruneable.keep {
         KeepWhat::All => {
             info!(
@@ -720,7 +722,9 @@ impl<T> ControlFlowExt for ControlFlow<T, T> {
 
 #[cfg(test)]
 mod test {
+    use super::ReconfiguratorConfigLoaderState;
     use super::prune_blueprints;
+    use super::prune_blueprints_as_configured;
     use chrono::Utc;
     use nexus_auth::authz;
     use nexus_auth::context::OpContext;
@@ -732,16 +736,25 @@ mod test {
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_reconfigurator_planning::planner::PlannerRng;
     use nexus_test_utils::db::TestDatabase;
+    use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::BlueprintMetadata;
     use nexus_types::deployment::BlueprintSource;
     use nexus_types::deployment::BlueprintTarget;
+    use nexus_types::deployment::ReconfiguratorConfig;
+    use nexus_types::deployment::ReconfiguratorConfigParam;
+    use nexus_types::deployment::ReconfiguratorConfigView;
     use nexus_types::internal_api::background::BlueprintPrunerDetails;
+    use nexus_types::internal_api::background::BlueprintPrunerStatus;
     use omicron_test_utils::dev;
+    use omicron_test_utils::dev::poll::CondCheckError;
+    use omicron_test_utils::dev::poll::wait_for_condition;
     use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::GenericUuid;
     use std::collections::BTreeSet;
     use std::collections::VecDeque;
     use std::num::NonZeroU32;
+    use std::time::Duration;
+    use tokio::sync::watch;
 
     /// Describes the `bp_target` rows and blueprints stored in the database
     #[derive(Eq, PartialEq, Debug)]
@@ -990,6 +1003,29 @@ mod test {
             self.target_rows.push_back(target_row);
         }
 
+        /// Adds target blueprints, toggling the `enabled` bit `ntoggles` times
+        /// after each one
+        ///
+        /// The current target counts as the first of `nblueprints`: it already
+        /// exists, so it only gets toggled.  Every blueprint winds up with
+        /// `ntoggles + 1` rows in `bp_target`.
+        pub async fn add_target_blueprints_with_toggles(
+            &mut self,
+            opctx: &OpContext,
+            datastore: &DataStore,
+            nblueprints: usize,
+            ntoggles: usize,
+        ) {
+            for i in 0..nblueprints {
+                if i > 0 {
+                    self.add_target_blueprint(opctx, datastore).await;
+                }
+                for _ in 0..ntoggles {
+                    self.toggle_target_blueprint(opctx, datastore).await;
+                }
+            }
+        }
+
         /// Removes the oldest N target rows and their associated blueprints
         /// from just the in-memory state.
         pub fn drop_oldest(&mut self, count: usize) -> Vec<TargetRow> {
@@ -1092,6 +1128,114 @@ mod test {
         blueprints.verify_database_matches(opctx, datastore).await;
 
         details
+    }
+
+    /// Tests that the pruner does nothing unless the reconfigurator config says
+    /// that it's enabled, and that it uses the configured `nkeep`
+    #[tokio::test]
+    async fn test_config() {
+        let logctx = dev::test_setup_log("blueprint_pruner_config");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Load the initial state and add enough blueprints that there would be
+        // something to prune if the pruner were enabled.
+        add_initial_blueprint(opctx, datastore).await;
+        let nblueprints = 10usize;
+        let mut blueprints =
+            BlueprintDatabaseState::load(opctx, datastore).await;
+        for _ in 0..(nblueprints - 1) {
+            blueprints.add_target_blueprint(opctx, datastore).await;
+        }
+        blueprints.verify_database_matches(opctx, datastore).await;
+
+        let (tx_config, rx_config) =
+            watch::channel(ReconfiguratorConfigLoaderState::NotYetLoaded);
+
+        // With no config loaded yet, pruning should do nothing at all.
+        let status =
+            prune_blueprints_as_configured(opctx, datastore, &rx_config)
+                .await
+                .expect("prune with no config loaded");
+        match status {
+            BlueprintPrunerStatus::Disabled { reason } => {
+                assert_eq!(reason, "reconfigurator config not yet loaded");
+            }
+            BlueprintPrunerStatus::Enabled(details) => {
+                panic!("expected pruner to be disabled, but got {details:?}");
+            }
+        }
+        blueprints.verify_database_matches(opctx, datastore).await;
+
+        // With a config that explicitly disables the pruner, we should also do
+        // nothing.
+        let nkeep = 5usize;
+        let nkeep_config = u32::try_from(nkeep).expect("nkeep fits in a u32");
+        tx_config
+            .send(ReconfiguratorConfigLoaderState::Loaded(
+                ReconfiguratorConfigView {
+                    version: 1,
+                    config: ReconfiguratorConfig {
+                        blueprint_pruner_enabled: false,
+                        blueprint_pruner_nkeep: nkeep_config,
+                        ..Default::default()
+                    },
+                    time_modified: Utc::now(),
+                },
+            ))
+            .expect("sending config to pruner");
+        let status =
+            prune_blueprints_as_configured(opctx, datastore, &rx_config)
+                .await
+                .expect("prune with pruner disabled");
+        match status {
+            BlueprintPrunerStatus::Disabled { reason } => {
+                assert_eq!(reason, "explicitly disabled");
+            }
+            BlueprintPrunerStatus::Enabled(details) => {
+                panic!("expected pruner to be disabled, but got {details:?}");
+            }
+        }
+        blueprints.verify_database_matches(opctx, datastore).await;
+
+        // Now enable the pruner and try again.
+        tx_config
+            .send(ReconfiguratorConfigLoaderState::Loaded(
+                ReconfiguratorConfigView {
+                    version: 1,
+                    config: ReconfiguratorConfig {
+                        blueprint_pruner_enabled: true,
+                        blueprint_pruner_nkeep: nkeep_config,
+                        ..Default::default()
+                    },
+                    time_modified: Utc::now(),
+                },
+            ))
+            .expect("sending config to pruner");
+        let status =
+            prune_blueprints_as_configured(opctx, datastore, &rx_config)
+                .await
+                .expect("prune with pruner enabled");
+        let details = match status {
+            BlueprintPrunerStatus::Enabled(details) => details,
+            BlueprintPrunerStatus::Disabled { reason } => {
+                panic!(
+                    "expected pruner to be enabled, but it was disabled: \
+                    {reason}"
+                );
+            }
+        };
+        println!("{details:?}");
+        assert!(details.warnings.is_empty());
+        assert_eq!(details.nkept_by_policy, nkeep);
+        assert_eq!(details.deleted.len(), nblueprints - nkeep);
+
+        blueprints.drop_oldest(nblueprints - nkeep);
+        blueprints.verify_database_matches(opctx, datastore).await;
+        assert_eq!(blueprints.all_blueprint_ids.len(), nkeep);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
     }
 
     /// Tests basic behavior of pruner:
@@ -1392,11 +1536,14 @@ mod test {
         logctx.cleanup_successful();
     }
 
-    /// Tests when multiple SQL pagination requests are required to either find
-    /// the blueprints to keep or to prune a whole round of blueprints.
+    /// Tests pruning when it takes more than one batch to prune everything that
+    /// can be pruned
+    ///
+    /// Each batch fetches at most `batch_size` of the oldest `bp_target` rows,
+    /// so this happens whenever more than `batch_size` rows can be pruned.
     #[tokio::test]
-    async fn test_blueprint_pruner_pagination() {
-        let logctx = dev::test_setup_log("blueprint_pruner_pagination");
+    async fn test_blueprint_pruner_multiple_batches() {
+        let logctx = dev::test_setup_log("blueprint_pruner_multiple_batches");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
@@ -1413,17 +1560,13 @@ mod test {
         blueprints.verify_database_matches(opctx, datastore).await;
         let nblueprints = blueprints.all_blueprint_ids.len();
 
-        // Now do a prune operation where:
-        // - it requires scanning more than `batch_size` rows to find all the
-        //   target blueprints that we want to keep
-        // - we wind up pruning more than `batch_sized` bp_target rows
-        // To do this, we'll use a batch size of 3, keep 10 blueprints, and
-        // remove 9.
+        // Now do a prune operation that has to prune more than `batch_size`
+        // bp_target rows, so that it takes several batches.  To do this, we'll
+        // use a batch size of 3, keep 10 blueprints, and remove 9.
         let nkeep = 10;
         // unwrap(): 3 != 0
         let batch_size = NonZeroU32::new(3).unwrap();
         let ndelete = nblueprints - nkeep;
-        assert!(nkeep > 2 * usize::try_from(batch_size.get()).unwrap());
         assert!(ndelete > 2 * usize::try_from(batch_size.get()).unwrap());
         let details = prune_blueprints(
             opctx,
@@ -1574,17 +1717,15 @@ mod test {
         // enable/disable a few times.
         let mut blueprints =
             BlueprintDatabaseState::load(opctx, datastore).await;
-        blueprints.toggle_target_blueprint(opctx, datastore).await;
-        blueprints.toggle_target_blueprint(opctx, datastore).await;
-        blueprints.toggle_target_blueprint(opctx, datastore).await;
-
         let nblueprints = 15usize;
-        for _ in 0..(nblueprints - 1) {
-            blueprints.add_target_blueprint(opctx, datastore).await;
-            blueprints.toggle_target_blueprint(opctx, datastore).await;
-            blueprints.toggle_target_blueprint(opctx, datastore).await;
-            blueprints.toggle_target_blueprint(opctx, datastore).await;
-        }
+        blueprints
+            .add_target_blueprints_with_toggles(
+                opctx,
+                datastore,
+                nblueprints,
+                3,
+            )
+            .await;
         blueprints.verify_database_matches(opctx, datastore).await;
 
         // Prune and verify the results.
@@ -1631,6 +1772,177 @@ mod test {
         blueprints.verify_database_matches(opctx, datastore).await;
         assert_eq!(blueprints.all_blueprint_ids.len(), nkeep);
         assert_eq!(blueprints.target_rows.len(), 4 * nkeep);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Tests pruning when a batch boundary falls in the middle of one
+    /// blueprint's run of `bp_target` rows
+    ///
+    /// `test_blueprint_pruner_dups` covers duplicate rows and
+    /// `test_blueprint_pruner_multiple_batches` covers batching, but neither
+    /// combines them.  A batch that ends partway through one blueprint's rows
+    /// is where an off-by-one would show up.
+    #[tokio::test]
+    async fn test_blueprint_pruner_dups_multiple_batches() {
+        let logctx =
+            dev::test_setup_log("blueprint_pruner_dups_multiple_batches");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Load the initial state.
+        add_initial_blueprint(opctx, datastore).await;
+
+        // Add several more target blueprints, toggling enable/disable three
+        // times after each one.  That leaves four `bp_target` rows per
+        // blueprint.
+        let mut blueprints =
+            BlueprintDatabaseState::load(opctx, datastore).await;
+        let nblueprints = 8usize;
+        let nrows_per_blueprint = 4usize;
+        blueprints
+            .add_target_blueprints_with_toggles(
+                opctx,
+                datastore,
+                nblueprints,
+                nrows_per_blueprint - 1,
+            )
+            .await;
+        blueprints.verify_database_matches(opctx, datastore).await;
+
+        // Prune with a batch size that does not divide the number of rows per
+        // blueprint, so that batches end partway through a blueprint's rows.
+        let nkeep = 5;
+        let ndeleted = nblueprints - nkeep;
+        // unwrap(): 3 != 0
+        let batch_size = NonZeroU32::new(3).unwrap();
+        let details = prune_blueprints(
+            opctx,
+            datastore,
+            &opctx.log,
+            nkeep,
+            nrows_per_blueprint * nblueprints,
+            batch_size,
+        )
+        .await
+        .expect("successful prune");
+        println!("{details:?}");
+        assert!(details.warnings.is_empty());
+        assert_eq!(details.nkept_by_policy, nkeep);
+        assert_eq!(details.deleted.len(), ndeleted);
+        assert_eq!(details.ntargets_deleted, nrows_per_blueprint * ndeleted);
+        assert_eq!(details.ntargets_removable, nrows_per_blueprint * ndeleted);
+
+        // Verify that the blueprints we deleted were the oldest ones.  Ignore
+        // the duplicate ids that the toggling produced.
+        let mut oldest = blueprints.drop_oldest(nrows_per_blueprint * ndeleted);
+        oldest.dedup_by(|l, r| l.id == r.id);
+        for (old, pruned) in oldest.iter().zip(details.deleted.iter()) {
+            assert_eq!(old.id, pruned.id);
+        }
+        blueprints.verify_database_matches(opctx, datastore).await;
+        assert_eq!(blueprints.all_blueprint_ids.len(), nkeep);
+        assert_eq!(blueprints.target_rows.len(), nrows_per_blueprint * nkeep);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Tests pruning when the per-activation delete cap stops us partway
+    /// through one blueprint's run of `bp_target` rows
+    ///
+    /// The cap counts `bp_target` rows, not blueprints, so it can leave rows
+    /// behind that point at a blueprint we already deleted.  Those rows should
+    /// take the "already deleted" path on the next activation, and repeated
+    /// activations should converge on the same end state that one unconstrained
+    /// activation would reach.
+    #[tokio::test]
+    async fn test_blueprint_pruner_delete_cap_mid_blueprint() {
+        let logctx =
+            dev::test_setup_log("blueprint_pruner_delete_cap_mid_blueprint");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Load the initial state.
+        add_initial_blueprint(opctx, datastore).await;
+
+        // Add several more target blueprints, toggling enable/disable three
+        // times after each one.  That leaves four `bp_target` rows per
+        // blueprint.
+        let mut blueprints =
+            BlueprintDatabaseState::load(opctx, datastore).await;
+        let nblueprints = 6usize;
+        let nrows_per_blueprint = 4usize;
+        blueprints
+            .add_target_blueprints_with_toggles(
+                opctx,
+                datastore,
+                nblueprints,
+                nrows_per_blueprint - 1,
+            )
+            .await;
+        blueprints.verify_database_matches(opctx, datastore).await;
+
+        // Prune one `bp_target` row at a time.  Each activation should remove
+        // exactly the oldest row, and only the first row for each blueprint
+        // should actually delete a blueprint.
+        let nkeep = 3;
+        let nrows_to_delete = nrows_per_blueprint * (nblueprints - nkeep);
+        for i in 0..nrows_to_delete {
+            let expected_blueprint_id = blueprints.target_rows[0].id;
+            let details = prune_blueprints(
+                opctx,
+                datastore,
+                &opctx.log,
+                nkeep,
+                1,
+                SQL_BATCH_SIZE,
+            )
+            .await
+            .expect("successful prune");
+            println!("{details:?}");
+            assert!(details.warnings.is_empty());
+            assert_eq!(details.nkept_by_policy, nkeep);
+            assert_eq!(details.ntargets_removable, 1);
+            assert_eq!(details.ntargets_deleted, 1);
+
+            if i % nrows_per_blueprint == 0 {
+                // This row is the first one for its blueprint, so the blueprint
+                // itself was still there for us to delete.
+                assert_eq!(details.deleted.len(), 1);
+                assert_eq!(details.deleted[0].id, expected_blueprint_id);
+            } else {
+                // The blueprint was deleted during an earlier activation.
+                assert!(details.deleted.is_empty());
+            }
+
+            blueprints.drop_oldest(1);
+            blueprints.verify_database_matches(opctx, datastore).await;
+        }
+
+        // We should have converged on the same state that a single
+        // unconstrained activation would have produced.
+        assert_eq!(blueprints.all_blueprint_ids.len(), nkeep);
+        assert_eq!(blueprints.target_rows.len(), nrows_per_blueprint * nkeep);
+
+        // One more activation should find nothing left to do.
+        let details = prune_blueprints(
+            opctx,
+            datastore,
+            &opctx.log,
+            nkeep,
+            1,
+            SQL_BATCH_SIZE,
+        )
+        .await
+        .expect("successful prune");
+        println!("{details:?}");
+        assert!(details.warnings.is_empty());
+        assert!(details.deleted.is_empty());
+        assert_eq!(details.ntargets_removable, 0);
+        assert_eq!(details.ntargets_deleted, 0);
+        blueprints.verify_database_matches(opctx, datastore).await;
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -1722,5 +2034,99 @@ mod test {
 
         db.terminate().await;
         logctx.cleanup_successful();
+    }
+
+    type ControlPlaneTestContext =
+        nexus_test_utils::ControlPlaneTestContext<crate::Server>;
+
+    /// Tests the pruner running as a background task in a live Nexus
+    ///
+    /// The other tests here call the pruning functions directly.  This one
+    /// covers the wiring: that the task is registered, that a change to the
+    /// reconfigurator config wakes it up, and that it then prunes.
+    #[nexus_test(server = crate::Server)]
+    async fn test_blueprint_pruner_task(cptestctx: &ControlPlaneTestContext) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
+
+        // Add a few target blueprints on top of the one that rack setup
+        // created.
+        let nkeep = 3usize;
+        let nblueprints = 5usize;
+        let mut blueprints =
+            BlueprintDatabaseState::load(&opctx, datastore).await;
+        assert!(blueprints.target_rows.len() < nblueprints);
+        while blueprints.target_rows.len() < nblueprints {
+            blueprints.add_target_blueprint(&opctx, datastore).await;
+        }
+
+        // Figure out which blueprints the pruner ought to remove and which ones
+        // it ought to leave alone.
+        let ndeleted = nblueprints - nkeep;
+        let expect_deleted: BTreeSet<_> = blueprints
+            .target_rows
+            .iter()
+            .take(ndeleted)
+            .map(|r| r.id)
+            .collect();
+        let expect_kept: BTreeSet<_> = blueprints
+            .target_rows
+            .iter()
+            .skip(ndeleted)
+            .map(|r| r.id)
+            .collect();
+
+        // Enable the pruner and tell it to keep only `nkeep` blueprints.
+        let lockstep_client = cptestctx.lockstep_client();
+        let current = lockstep_client
+            .reconfigurator_config_show_current()
+            .await
+            .expect("fetching current reconfigurator config")
+            .into_inner();
+        let nkeep_config = u32::try_from(nkeep).expect("nkeep fits in a u32");
+        lockstep_client
+            .reconfigurator_config_set(&ReconfiguratorConfigParam {
+                version: current.version + 1,
+                config: ReconfiguratorConfig {
+                    blueprint_pruner_enabled: true,
+                    blueprint_pruner_nkeep: nkeep_config,
+                    ..current.config
+                },
+            })
+            .await
+            .expect("enabling blueprint pruner");
+
+        // That should have activated our task.  Now, wait for it to have done
+        // its job.
+        wait_for_condition(
+            || async {
+                let blueprints =
+                    BlueprintDatabaseState::load(&opctx, datastore).await;
+                let leftover: Vec<_> = expect_deleted
+                    .intersection(&blueprints.all_blueprint_ids)
+                    .collect();
+                if leftover.is_empty() {
+                    Ok(())
+                } else {
+                    Err(CondCheckError::<()>::NotYet {
+                        status: Some(format!(
+                            "blueprints not yet pruned: {leftover:?}"
+                        )),
+                    })
+                }
+            },
+            &Duration::from_millis(250),
+            &Duration::from_secs(60),
+        )
+        .await
+        .expect("timed out waiting for the pruner to prune old blueprints");
+
+        // The pruner should not have pruned any more than that.
+        let blueprints = BlueprintDatabaseState::load(&opctx, datastore).await;
+        assert!(expect_kept.is_subset(&blueprints.all_blueprint_ids));
     }
 }

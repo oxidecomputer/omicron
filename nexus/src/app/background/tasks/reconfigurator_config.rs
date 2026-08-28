@@ -98,6 +98,7 @@ mod test {
     use nexus_types::internal_api::background::TufRepoPrunerStatus;
     use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
     use serde::de::DeserializeOwned;
+    use slog_error_chain::InlineErrorChain;
     use std::time::Duration;
 
     type ControlPlaneTestContext =
@@ -394,8 +395,18 @@ mod test {
                 // some other shape of status altogether (e.g., an error).
                 // Treat that like any other status that we're not looking for.
                 let details = completed.details;
-                let status: T = serde_json::from_value(details.clone())
-                    .expect("failed to parse task status as JSON");
+                let status: T = match serde_json::from_value(details.clone()) {
+                    Ok(status) => status,
+                    Err(error) => {
+                        return Err(CondCheckError::NotYet {
+                            status: Some(format!(
+                                "task {task_name}: could not parse status \
+                                 ({}): {details}",
+                                InlineErrorChain::new(&error),
+                            )),
+                        });
+                    }
+                };
                 if check(&status) {
                     Ok(())
                 } else {
