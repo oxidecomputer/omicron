@@ -15179,7 +15179,7 @@ checksum = "3a0219bd7d979d58245a4f41f695e1ac9f8befdffadd7f61f1bae9e39abc6620"
 [[package]]
 name = "sprockets-tls"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sprockets.git?rev=b8782742d1bd91546887fbc1757a7d024a5469ef#b8782742d1bd91546887fbc1757a7d024a5469ef"
+source = "git+https://github.com/oxidecomputer/sprockets.git?rev=98615b86d51f74ce220198eb16c57932fd24e7cb#98615b86d51f74ce220198eb16c57932fd24e7cb"
 dependencies = [
  "anyhow",
  "attest-data 0.5.0 (git+https://github.com/oxidecomputer/dice-util?rev=4a39ef08d81e5177edee0bddb1146032aa21074d)",
@@ -15212,7 +15212,7 @@ dependencies = [
 [[package]]
 name = "sprockets-tls-test-utils"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sprockets.git?rev=b8782742d1bd91546887fbc1757a7d024a5469ef#b8782742d1bd91546887fbc1757a7d024a5469ef"
+source = "git+https://github.com/oxidecomputer/sprockets.git?rev=98615b86d51f74ce220198eb16c57932fd24e7cb#98615b86d51f74ce220198eb16c57932fd24e7cb"
 dependencies = [
  "camino",
  "pki-playground 0.2.0 (git+https://github.com/oxidecomputer/pki-playground?rev=7600756029ce046a02c6234aa84ce230cc5eaa04)",
@@ -15659,7 +15659,7 @@ checksum = "b7401a30af6cb5818bb64852270bb722533397edcfc7344954a38f420819ece2"
 [[package]]
 name = "sush-api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sush?rev=c8877830a8c2e3686f3416a4391caa036681855c#c8877830a8c2e3686f3416a4391caa036681855c"
+source = "git+https://github.com/oxidecomputer/sush?rev=48c7620709a2804bc30bb7d9aa90aabe3a9377ea#48c7620709a2804bc30bb7d9aa90aabe3a9377ea"
 dependencies = [
  "chrono",
  "dropshot",
@@ -15675,7 +15675,7 @@ dependencies = [
 [[package]]
 name = "sush-common"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sush?rev=c8877830a8c2e3686f3416a4391caa036681855c#c8877830a8c2e3686f3416a4391caa036681855c"
+source = "git+https://github.com/oxidecomputer/sush?rev=48c7620709a2804bc30bb7d9aa90aabe3a9377ea#48c7620709a2804bc30bb7d9aa90aabe3a9377ea"
 dependencies = [
  "bytes",
  "bytesize",
@@ -15737,7 +15737,7 @@ dependencies = [
 [[package]]
 name = "sush-server"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sush?rev=c8877830a8c2e3686f3416a4391caa036681855c#c8877830a8c2e3686f3416a4391caa036681855c"
+source = "git+https://github.com/oxidecomputer/sush?rev=48c7620709a2804bc30bb7d9aa90aabe3a9377ea#48c7620709a2804bc30bb7d9aa90aabe3a9377ea"
 dependencies = [
  "async-trait",
  "atomicwrites",

@@ -143,7 +143,7 @@ slog = { version = "2.8.2", features = ["dynamic-keys", "max_level_trace", "rele
 smallvec = { version = "1.15.1", default-features = false, features = ["const_new", "union"] }
 spin = { version = "0.9.8" }
 spki = { version = "0.7.3", default-features = false, features = ["pem", "std"] }
-sprockets-tls = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "b8782742d1bd91546887fbc1757a7d024a5469ef", default-features = false, features = ["ipcc"] }
+sprockets-tls = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "98615b86d51f74ce220198eb16c57932fd24e7cb", default-features = false, features = ["ipcc"] }
 string_cache = { version = "0.8.9" }
 strum-2f80eeee3b1b6c7e = { package = "strum", version = "0.26.3", features = ["derive"] }
 strum-754bda37e0fb3874 = { package = "strum", version = "0.27.2", features = ["derive"] }
@@ -305,7 +305,7 @@ slog = { version = "2.8.2", features = ["dynamic-keys", "max_level_trace", "rele
 smallvec = { version = "1.15.1", default-features = false, features = ["const_new", "union"] }
 spin = { version = "0.9.8" }
 spki = { version = "0.7.3", default-features = false, features = ["pem", "std"] }
-sprockets-tls = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "b8782742d1bd91546887fbc1757a7d024a5469ef", default-features = false, features = ["ipcc"] }
+sprockets-tls = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "98615b86d51f74ce220198eb16c57932fd24e7cb", default-features = false, features = ["ipcc"] }
 string_cache = { version = "0.8.9" }
 strum-2f80eeee3b1b6c7e = { package = "strum", version = "0.26.3", features = ["derive"] }
 strum-754bda37e0fb3874 = { package = "strum", version = "0.27.2", features = ["derive"] }

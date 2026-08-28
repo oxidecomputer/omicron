@@ -848,10 +848,8 @@ slog-term = "2.9.1"
 smf = "0.2"
 socket2 = { version = "0.5", features = ["all"] }
 sp-sim = { path = "sp-sim" }
-# Held at the rev sush c887783 pins: SprocketsConfig crosses the sush
-# boundary, so the two must advance in tandem.
-sprockets-tls = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "b8782742d1bd91546887fbc1757a7d024a5469ef", default-features = false }
-sprockets-tls-test-utils = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "b8782742d1bd91546887fbc1757a7d024a5469ef" }
+sprockets-tls = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "98615b86d51f74ce220198eb16c57932fd24e7cb", default-features = false }
+sprockets-tls-test-utils = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "98615b86d51f74ce220198eb16c57932fd24e7cb" }
 sqlformat = "0.3.5"
 sqlparser = { version = "0.61.0", features = [ "visitor" ] }
 static_assertions = "1.1.0"
@@ -865,9 +863,9 @@ subtle = "2.6.1"
 supports-color = "3.0.2"
 support-bundle-collection = { path = "support-bundle-collection" }
 support-bundle-viewer = "0.1.2"
-sush-api = { git = "https://github.com/oxidecomputer/sush", rev = "c8877830a8c2e3686f3416a4391caa036681855c" }
-sush-common = { git = "https://github.com/oxidecomputer/sush", rev = "c8877830a8c2e3686f3416a4391caa036681855c" }
-sush-server = { git = "https://github.com/oxidecomputer/sush", rev = "c8877830a8c2e3686f3416a4391caa036681855c", features = ["embedded"] }
+sush-api = { git = "https://github.com/oxidecomputer/sush", rev = "48c7620709a2804bc30bb7d9aa90aabe3a9377ea" }
+sush-common = { git = "https://github.com/oxidecomputer/sush", rev = "48c7620709a2804bc30bb7d9aa90aabe3a9377ea" }
+sush-server = { git = "https://github.com/oxidecomputer/sush", rev = "48c7620709a2804bc30bb7d9aa90aabe3a9377ea", features = ["embedded"] }
 swrite = "0.1.0"
 sync-ptr = "0.1.4"
 libsw = { version = "3.5.0", features = ["tokio"] }
