@@ -20,18 +20,16 @@ use installinator_common::{
     StepProgress, StepResult, StepSuccess, UpdateEngine, WriteComponent,
     WriteError, WriteOutput, WriteSpec, WriteStepId,
 };
-use omicron_common::{
-    disk::M2Slot,
-    update::{
-        MupdateOverrideInfo, OmicronInstallManifest,
-        OmicronInstallManifestSource, OmicronInstallMetadata,
-    },
+use omicron_common::update::{
+    MupdateOverrideInfo, OmicronInstallManifest, OmicronInstallManifestSource,
+    OmicronInstallMetadata,
 };
 use omicron_uuid_kinds::{MupdateOverrideUuid, MupdateUuid};
 use oxide_update_engine_types::errors::NestedEngineError;
 use oxide_update_engine_types::events::ProgressUnits;
 use oxide_update_engine_types::spec::EngineSpec;
 use sha2::{Digest, Sha256};
+use sled_agent_types::disk::M2Slot;
 use slog::{Logger, info, warn};
 use slog_error_chain::InlineErrorChain;
 use tokio::{

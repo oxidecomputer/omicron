@@ -18,8 +18,8 @@ use nexus_types::deployment::planning_report::FailedHostOsUpdateReason;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::SpType;
 use nexus_types::tuf_repo::TufRepoDescription;
-use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::SledUuid;
+use sled_agent_types::disk::M2Slot;
 use sled_hardware_types::BaseboardId;
 use sled_hardware_types::OxideSled;
 use slog::Logger;
@@ -504,7 +504,7 @@ mod tests {
     use nexus_types::deployment::PendingMgsUpdates;
     use nexus_types::deployment::TargetReleaseDescription;
     use nexus_types::inventory::SpType;
-    use omicron_common::disk::M2Slot;
+    use sled_agent_types::disk::M2Slot;
     use std::collections::BTreeSet;
 
     // Short hand-rolled update sequence that exercises some basic behavior for

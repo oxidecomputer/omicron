@@ -26,12 +26,27 @@ use nexus_types::external_api::update::TufRepoUploadStatus;
 use pretty_assertions::assert_eq;
 use semver::Version;
 use serde::Deserialize;
+use std::assert_matches;
 use std::collections::HashSet;
 use std::fmt::Debug;
 use tufaceous::edit::{Ed25519Key, RepositoryEditor, Root};
 use tufaceous_artifact::{Artifact, ArtifactSet, KnownArtifactTags, SpTags};
 
 use crate::integration_tests::target_release::set_target_release_for_mupdate_recovery_with_expected_status;
+use nexus_lockstep_client::types::BlueprintTargetSet;
+use nexus_lockstep_client::types::SledSelector;
+use nexus_test_utils::background::run_blueprint_planner;
+use nexus_types::deployment::ReconfiguratorConfig;
+use nexus_types::deployment::ReconfiguratorConfigParam;
+use nexus_types::deployment::ReconfiguratorStateInput;
+use nexus_types::deployment::UnstableReconfiguratorState;
+use nexus_types::internal_api::background::BlueprintPlannerStatus;
+use omicron_nexus::app::DEBUG_DROPBOX_PRODUCER_RECONFIGURATOR;
+use omicron_test_utils::dev::dropbox::DropboxReader;
+use omicron_test_utils::dev::poll::CondCheckError;
+use omicron_test_utils::dev::poll::wait_for_condition;
+use omicron_uuid_kinds::GenericUuid;
+use slog_error_chain::InlineErrorChain;
 
 const TRUST_ROOTS_URL: &str = "/v1/system/update/trust-roots";
 
@@ -1052,4 +1067,227 @@ async fn test_request_without_api_version(cptestctx: &ControlPlaneTestContext) {
         NexusRequest::new(req_builder).authn_as(AuthnMode::PrivilegedUser);
     let status: update::UpdateStatus = req.execute_and_parse_unwrap().await;
     assert_eq!(status.target_release.0, None);
+}
+
+/// Tests creation of debug files by the autoplanner and blueprint APIs
+// Define an extra sled agent so that we can expunge one.
+#[nexus_test(extra_sled_agents = 1)]
+async fn test_debug_files(cptestctx: &ControlPlaneTestContext) {
+    let datastore = cptestctx.server.server_context().nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+    let dropbox_path = cptestctx.debug_dropbox_path();
+    let mut dropbox = DropboxReader::new(
+        &dropbox_path,
+        DEBUG_DROPBOX_PRODUCER_RECONFIGURATOR,
+    );
+    let mut cli_inputs = Vec::new();
+
+    // Verify initial state of the dropbox.
+    let initial = dropbox.load_new::<UnstableReconfiguratorState>();
+    assert!(initial.is_empty(), "dropbox was not initially empty");
+
+    // Fetch the initial blueprint information.
+    let target_initial = datastore
+        .blueprint_target_get_current(&opctx)
+        .await
+        .expect("initial target blueprint");
+    let bp1_id = target_initial.target_id;
+
+    // We need an inventory collection for the next step.
+    cptestctx
+        .wait_for_at_least_one_inventory_collection(
+            std::time::Duration::from_secs(60),
+        )
+        .await;
+
+    // Case: creating a new blueprint via the lockstep API creates a debug file.
+    let nexus_client = cptestctx.lockstep_client();
+    let bp2_id = nexus_client
+        .blueprint_regenerate()
+        .await
+        .expect("creating new blueprint")
+        .into_inner()
+        .id;
+    let files = dropbox.load_new::<UnstableReconfiguratorState>();
+    assert_eq!(files.len(), 1);
+    let file = files.into_iter().next().expect("non-empty Vec");
+    cli_inputs.push(("file1", &file));
+    assert!(file.blueprints.contains_key(&bp2_id));
+    assert!(file.blueprints.contains_key(&bp1_id));
+    assert_eq!(file.target_blueprint.target_id, bp1_id);
+    assert!(file.intended_target_blueprint.is_none());
+
+    // Create a second blueprint for use later.
+    let bp3_id = nexus_client
+        .blueprint_regenerate()
+        .await
+        .expect("creating new blueprint")
+        .into_inner()
+        .id;
+    let files = dropbox.load_new::<UnstableReconfiguratorState>();
+    assert_eq!(files.len(), 1);
+    let file = files.into_iter().next().expect("non-empty Vec");
+    cli_inputs.push(("file2", &file));
+    assert!(file.blueprints.contains_key(&bp3_id));
+    assert!(file.blueprints.contains_key(&bp1_id));
+    assert_eq!(file.target_blueprint.target_id, bp1_id);
+    assert!(file.intended_target_blueprint.is_none());
+
+    // Case: making a blueprint the target creates another debug file.  (This
+    // process also creates an intent file, but removes it before we have a
+    // chance to observe it.)
+    nexus_client
+        .blueprint_target_set(&BlueprintTargetSet {
+            enabled: target_initial.enabled,
+            target_id: bp2_id,
+        })
+        .await
+        .expect("setting target bp2");
+    let files = dropbox.load_new::<UnstableReconfiguratorState>();
+    assert_eq!(files.len(), 1);
+    let file = files.into_iter().next().expect("non-empty Vec");
+    cli_inputs.push(("file3", &file));
+    assert!(file.blueprints.contains_key(&bp2_id));
+    assert_eq!(file.target_blueprint.target_id, bp2_id);
+    assert!(file.intended_target_blueprint.is_none());
+
+    // Case: failing to make a blueprint the target does not create any debug
+    // files (or rather, does not leave any around).  To test this, we'll use
+    // the second blueprint that we created earlier and try to set it as the
+    // target.  This will fail, since its parent is no longer the current
+    // target.  Then we'll verify that on net, no new files have been created.
+    let error = nexus_client
+        .blueprint_target_set(&BlueprintTargetSet {
+            enabled: target_initial.enabled,
+            target_id: bp3_id,
+        })
+        .await
+        .expect_err("unexpectedly succeeded in setting target bp3");
+    // Make sure that the error involved that it was the wrong parent blueprint.
+    // Otherwise, we're simulating a different failure mode than we intend.
+    let nexus_lockstep_client::Error::ErrorResponse(error_response) = error
+    else {
+        panic!("unexpected error setting stale blueprint as target: {error:?}");
+    };
+    assert!(
+        error_response
+            .into_inner()
+            .message
+            .contains("parent blueprint is not the current target blueprint")
+    );
+
+    let files = dropbox.load_new::<UnstableReconfiguratorState>();
+    assert!(files.is_empty());
+
+    // Case: autoplanner generates a new blueprint.
+    //
+    // The autoplanner is off by default in the test context.  First, enable it.
+    let config_initial = nexus_client
+        .reconfigurator_config_show_current()
+        .await
+        .expect("load initial reconfigurator config")
+        .into_inner();
+    let _ = nexus_client
+        .reconfigurator_config_set(&ReconfiguratorConfigParam {
+            version: config_initial.version + 1,
+            config: ReconfiguratorConfig {
+                planner_enabled: true,
+                ..config_initial.config
+            },
+        })
+        .await
+        .expect("enable blueprint planner");
+
+    // Now, expunge a sled to make sure there's something for the planner to do.
+    let _ = nexus_client
+        .sled_expunge(&SledSelector {
+            sled: cptestctx.second_sled_id().into_untyped_uuid(),
+        })
+        .await
+        .expect("expunge sled");
+
+    // We need to wait until there's a new target blueprint.  As usual, we wait
+    // for the thing we care about rather than waiting precisely for one more
+    // activation of the background task.  Expunging the sled activates the
+    // planner, but there's also other asynchrony involved here (e.g., the
+    // updated reconfigurator config needs to be loaded, too).
+    let bp4_id = wait_for_condition(
+        || async {
+            let target = datastore
+                .blueprint_target_get_current(&opctx)
+                .await
+                .expect("target blueprint");
+            if target.target_id == bp2_id {
+                Err(CondCheckError::<()>::NotYet { status: None })
+            } else {
+                Ok(target.target_id)
+            }
+        },
+        &std::time::Duration::from_secs(1),
+        &std::time::Duration::from_secs(60),
+    )
+    .await
+    .expect("autoplanner should have created new blueprint within 60s");
+
+    // We know that the planner has gotten far enough to set the new target
+    // blueprint, but it might still be saving out files.  Wait for it to come
+    // to rest.
+    let _ = run_blueprint_planner(&cptestctx.lockstep_client).await;
+    let files = dropbox.load_new::<UnstableReconfiguratorState>();
+    assert_eq!(files.len(), 1);
+    let file = files.into_iter().next().expect("non-empty Vec");
+    cli_inputs.push(("file4", &file));
+    assert!(file.blueprints.contains_key(&bp2_id));
+    assert!(file.blueprints.contains_key(&bp4_id));
+    assert_eq!(file.target_blueprint.target_id, bp4_id);
+    assert!(file.intended_target_blueprint.is_none());
+
+    // Case: autoplanner produces no files when it doesn't generate a new
+    // blueprint.
+    let status = run_blueprint_planner(&cptestctx.lockstep_client).await;
+    assert_matches!(status, BlueprintPlannerStatus::Unchanged { .. });
+    let files = dropbox.load_new::<UnstableReconfiguratorState>();
+    assert!(files.is_empty());
+
+    // Load all the files together and make sure we wind up with the expected
+    // combined state.
+    let inputs = cli_inputs.into_iter().map(|(label, state)| {
+        let bytes = serde_json::to_string(state).expect("serializable");
+        ReconfiguratorStateInput {
+            label: label.to_owned(),
+            reader: std::io::Cursor::new(bytes),
+        }
+    });
+
+    let st = UnstableReconfiguratorState::read_series(inputs)
+        .expect("reading inputs");
+    assert!(st.warnings.is_empty(), "no warnings loading state files");
+    assert!(st.state.intended_target_blueprint.is_none());
+    assert_eq!(st.state.target_blueprint.target_id, bp4_id);
+    assert!(st.state.blueprints.contains_key(&bp1_id));
+    assert!(st.state.blueprints.contains_key(&bp2_id));
+    assert!(st.state.blueprints.contains_key(&bp3_id));
+    assert!(st.state.blueprints.contains_key(&bp4_id));
+}
+
+/// Test that in a stock test environment, one can run the planner and get a new
+/// blueprint.
+#[nexus_test(configure_second_nexus = true)]
+async fn test_stock_planner(cptestctx: &ControlPlaneTestContext) {
+    let nexus_client = cptestctx.lockstep_client();
+    // We need an inventory collection available to do this.
+    cptestctx
+        .wait_for_at_least_one_inventory_collection(
+            std::time::Duration::from_secs(60),
+        )
+        .await;
+    let _blueprint =
+        nexus_client.blueprint_regenerate().await.unwrap_or_else(|error| {
+            panic!(
+                "unexpectedly failed to generate new blueprint in stock test \
+                 environment: {}",
+                InlineErrorChain::new(&error)
+            );
+        });
 }
