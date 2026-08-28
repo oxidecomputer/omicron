@@ -200,7 +200,6 @@ mod api_impl {
     use dropshot::StreamingBody;
     use dropshot::TypedBody;
     use iddqd::IdOrdMap;
-    use omicron_common::api::internal::nexus::DiskRuntimeState;
     use omicron_common::api::internal::shared::ExternalIpGatewayMap;
     use omicron_common::api::internal::shared::SledIdentifiers;
     use omicron_common::api::internal::shared::VirtualNetworkInterfaceHost;
@@ -221,8 +220,6 @@ mod api_impl {
     use sled_agent_types::debug::OperatorSwitchZonePolicy;
     use sled_agent_types::diagnostics::SledDiagnosticsLogsDownloadPathParm;
     use sled_agent_types::diagnostics::SledDiagnosticsLogsDownloadQueryParam;
-    use sled_agent_types::disk::DiskEnsureBody;
-    use sled_agent_types::disk::DiskPathParam;
     use sled_agent_types::firewall_rules::VpcFirewallRulesEnsureBody;
     use sled_agent_types::instance::InstanceEnsureBody;
     use sled_agent_types::instance::InstanceExternalIpBody;
@@ -251,7 +248,6 @@ mod api_impl {
     use sled_agent_types::inventory::OmicronSledConfig;
     use sled_agent_types::inventory::OmicronSledUpdateDisposition;
     use sled_agent_types::inventory::SledCpuFamily;
-    use sled_agent_types::inventory::SledRole;
     use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
     use sled_agent_types::probes::ProbeSet;
     use sled_agent_types::sled::AddSledRequest;
@@ -270,7 +266,6 @@ mod api_impl {
     use sled_agent_types::zone_bundle::ZoneBundleId;
     use sled_agent_types::zone_bundle::ZoneBundleMetadata;
     use sled_agent_types::zone_bundle::ZonePathParam;
-    use sled_agent_types_versions::v1;
     use sled_agent_types_versions::v20;
     use sled_agent_types_versions::v25;
     use sled_agent_types_versions::v26;
@@ -582,12 +577,6 @@ mod api_impl {
             unimplemented!()
         }
 
-        async fn sled_role_get_v1(
-            _rqctx: RequestContext<Self::Context>,
-        ) -> Result<HttpResponseOk<SledRole>, HttpError> {
-            unimplemented!()
-        }
-
         async fn vmm_register(
             _rqctx: RequestContext<Self::Context>,
             _path_params: Path<VmmPathParam>,
@@ -678,14 +667,6 @@ mod api_impl {
             }
         }
 
-        async fn disk_put(
-            _rqctx: RequestContext<Self::Context>,
-            _path_params: Path<DiskPathParam>,
-            _body: TypedBody<DiskEnsureBody>,
-        ) -> Result<HttpResponseOk<DiskRuntimeState>, HttpError> {
-            unimplemented!()
-        }
-
         async fn artifact_config_get(
             _rqctx: RequestContext<Self::Context>,
         ) -> Result<HttpResponseOk<ArtifactConfig>, HttpError> {
@@ -766,15 +747,6 @@ mod api_impl {
             unimplemented!()
         }
 
-        async fn read_network_bootstore_config_cache(
-            _rqctx: RequestContext<Self::Context>,
-        ) -> Result<
-            HttpResponseOk<v20::early_networking::EarlyNetworkConfig>,
-            HttpError,
-        > {
-            unimplemented!()
-        }
-
         async fn write_network_bootstore_config_v48(
             _rqctx: RequestContext<Self::Context>,
             _body: TypedBody<v48::system_networking::WriteNetworkConfigRequest>,
@@ -834,13 +806,6 @@ mod api_impl {
         async fn write_network_bootstore_config_v20(
             _rqctx: RequestContext<Self::Context>,
             _body: TypedBody<v20::early_networking::EarlyNetworkConfig>,
-        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-            unimplemented!()
-        }
-
-        async fn write_network_bootstore_config_v1(
-            _rqctx: RequestContext<Self::Context>,
-            _body: TypedBody<v1::early_networking::EarlyNetworkConfig>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }
