@@ -2,15 +2,14 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Background task that marks the VMMs on sleds the target blueprint is
-//! evacuating for an update as needing to be stopped.
+//! Background task that marks the VMMs on sleds that are evacuating for an
+//! update as needing to be stopped.
 //!
 //! The marker (`stop_for_update_disposition_generation` on the `vmm` table)
 //! records the sled's `update_disposition` generation and signals that the VMM
 //! must be stopped in order to update its sled. The set of evacuating sleds is
-//! read from the `rendezvous_sled_bp_availability` table, so this task is a
-//! consumer of that rendezvous table rather than of the blueprint directly. See
-//! RFD 739.
+//! read from the `rendezvous_sled_bp_availability` table. See RFD 739 for the
+//! full implementation of instance restart during live update.
 
 use crate::app::background::BackgroundTask;
 use futures::future::BoxFuture;
@@ -146,7 +145,7 @@ mod tests {
             .expect("VMM should be inserted")
     }
 
-    async fn marker(
+    async fn get_marker_from_vmm(
         datastore: &DataStore,
         opctx: &OpContext,
         vmm: &Vmm,
@@ -209,6 +208,13 @@ mod tests {
             .await
             .expect("available sled availability should upsert");
 
+        // First, verify that a disabled task does nothing
+        let mut task = VmmMarkStopForUpdate::new(datastore.clone(), true);
+        let status = task.actually_activate(opctx).await;
+        assert_eq!(status.vmms_marked, 0);
+        assert!(status.error.is_none());
+
+        // Enable the task
         let mut task = VmmMarkStopForUpdate::new(datastore.clone(), false);
 
         // The first activation marks the single eligible VMM at its sled's
@@ -217,22 +223,22 @@ mod tests {
         assert_eq!(status.vmms_marked, 1);
         assert!(status.error.is_none());
         assert_eq!(
-            marker(datastore, opctx, &should_mark).await,
+            get_marker_from_vmm(datastore, opctx, &should_mark).await,
             Some(generation)
         );
-        assert_eq!(marker(datastore, opctx, &already_stopped).await, None);
-        assert_eq!(marker(datastore, opctx, &other_sled).await, None);
+        assert_eq!(get_marker_from_vmm(datastore, opctx, &already_stopped).await, None);
+        assert_eq!(get_marker_from_vmm(datastore, opctx, &other_sled).await, None);
 
         // Running again is a no-op: the eligible VMM is already marked.
         let status = task.actually_activate(opctx).await;
         assert_eq!(status.vmms_marked, 0);
         assert!(status.error.is_none());
         assert_eq!(
-            marker(datastore, opctx, &should_mark).await,
+            get_marker_from_vmm(datastore, opctx, &should_mark).await,
             Some(generation)
         );
-        assert_eq!(marker(datastore, opctx, &already_stopped).await, None);
-        assert_eq!(marker(datastore, opctx, &other_sled).await, None);
+        assert_eq!(get_marker_from_vmm(datastore, opctx, &already_stopped).await, None);
+        assert_eq!(get_marker_from_vmm(datastore, opctx, &other_sled).await, None);
 
         db.terminate().await;
         logctx.cleanup_successful();
