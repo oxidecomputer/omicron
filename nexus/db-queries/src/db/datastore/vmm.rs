@@ -903,11 +903,7 @@ mod tests {
             actual
         }
 
-        // Asserts that every fetched VMM row matches the expected row. The
-        // expected rows are the inserted rows with only their
-        // `stop_for_update_disposition_generation` field advanced as marks are
-        // applied, so any other difference means the bulk mark touched a column
-        // it should not have.
+        // Asserts that every fetched VMM row matches the expected row.
         fn assert_rows(
             actual: &HashMap<Uuid, Vmm>,
             expected: &HashMap<Uuid, Vmm>,
