@@ -46,13 +46,13 @@ pub(super) enum CanEnsureVmm<'a, T> {
 ///
 /// 1. `Jobs` is able to act on the sled's update disposition, and knows that
 ///    new VMM registrations may be disallowed depending on the disposition.
-/// 2. Instead of a direct `insert()` method or `entry()` API,
-///    callers should use [`Jobs::can_ensure_vmm()`] when they want to ensure a
-///    VMM registration exists. Its return value can represent all three
+/// 2. To ensure that a VMM registration exists, callers use
+///    [`Jobs::can_ensure_vmm()`]. Its return value can represent all three
 ///    relevant cases: the VMM is already registered, VMM registrations are
 ///    disallowed by the disposition, or the VMM can be registered; in the third
 ///    case the returned value includes a [`RegisterNewVmm`] which provides
-///    [`RegisterNewVmm::insert()`].
+///    [`RegisterNewVmm::insert()`]. `can_ensure_vmm()` is what `Jobs` provides
+///    in place of `BTreeMap`'s `insert()` or `entry()` APIs.
 /// 3. The status of VMM registrations is available via receivers returned by
 ///    [`Jobs::status_receiver()`]. This contains information relevant to
 ///    Reconfigurator for determining when a sled is fully evacuated for an
