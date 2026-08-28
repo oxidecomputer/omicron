@@ -74,7 +74,6 @@ api_versions!([
     (19, ADD_ROT_ATTESTATION),
     (18, ADD_ATTACHED_SUBNETS),
     (17, TWO_TYPES_OF_DELEGATED_ZVOL),
-    (16, MEASUREMENT_PROPER_INVENTORY),
     // Versions before this have been retired. We no longer support them in any
     // server, nor expect them from any client.
 ]);
@@ -1173,7 +1172,7 @@ pub trait SledAgentApi {
         operation_id = "inventory",
         method = GET,
         path = "/inventory",
-        versions = VERSION_MEASUREMENT_PROPER_INVENTORY..VERSION_REMOVE_HEALTH_MONITOR_KEEP_CHECKS,
+        versions = ..VERSION_REMOVE_HEALTH_MONITOR_KEEP_CHECKS,
     }]
     async fn inventory_v16(
         rqctx: RequestContext<Self::Context>,
@@ -1181,20 +1180,6 @@ pub trait SledAgentApi {
         Self::inventory_v22(rqctx).await.map(|HttpResponseOk(inv)| {
             HttpResponseOk(v16::inventory::Inventory::from(inv))
         })
-    }
-
-    /// Fetch basic information about this sled
-    #[endpoint {
-        operation_id = "inventory",
-        method = GET,
-        path = "/inventory",
-        versions = ..VERSION_MEASUREMENT_PROPER_INVENTORY,
-    }]
-    async fn inventory_v14(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<v14::inventory::Inventory>, HttpError> {
-        let HttpResponseOk(inventory) = Self::inventory_v16(rqctx).await?;
-        inventory.try_into().map_err(HttpError::from).map(HttpResponseOk)
     }
 
     /// Fetch sled identifiers
