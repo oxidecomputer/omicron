@@ -20,7 +20,7 @@ use omicron_common::api::internal::{
     },
 };
 use sled_agent_types_versions::{
-    latest, v1, v11, v14, v16, v17, v18, v20, v22,
+    latest, v1, v11, v14, v16, v18, v20, v22,
     v24, v25, v26, v28, v29, v30, v31, v32, v33, v34, v37, v39, v40, v41, v42,
     v43, v46, v47, v48, v49,
 };
@@ -72,7 +72,6 @@ api_versions!([
     (21, REMOVE_DISK_PUT),
     (20, BGP_V6),
     (19, ADD_ROT_ATTESTATION),
-    (18, ADD_ATTACHED_SUBNETS),
     // Versions before this have been retired. We no longer support them in any
     // server, nor expect them from any client.
 ]);
@@ -466,8 +465,7 @@ pub trait SledAgentApi {
         operation_id = "vmm_register",
         method = PUT,
         path = "/vmms/{propolis_id}",
-        versions =
-            VERSION_ADD_ATTACHED_SUBNETS..VERSION_ADD_VSOCK_COMPONENT
+        versions = ..VERSION_ADD_VSOCK_COMPONENT
     }]
     async fn vmm_register_v18(
         rqctx: RequestContext<Self::Context>,
@@ -475,20 +473,6 @@ pub trait SledAgentApi {
         body: TypedBody<v18::instance::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError> {
         Self::vmm_register_v29(rqctx, path_params, body.map(Into::into)).await
-    }
-
-    #[endpoint {
-        operation_id = "vmm_register",
-        method = PUT,
-        path = "/vmms/{propolis_id}",
-        versions = ..VERSION_ADD_ATTACHED_SUBNETS
-    }]
-    async fn vmm_register_v17(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::instance::VmmPathParam>,
-        body: TypedBody<v17::instance::InstanceEnsureBody>,
-    ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError> {
-        Self::vmm_register_v18(rqctx, path_params, body.map(Into::into)).await
     }
 
     #[endpoint {
@@ -1508,7 +1492,6 @@ pub trait SledAgentApi {
     #[endpoint {
         method = PUT,
         path = "/vmms/{propolis_id}/attached-subnets",
-        versions = VERSION_ADD_ATTACHED_SUBNETS..,
     }]
     async fn vmm_put_attached_subnets(
         request_context: RequestContext<Self::Context>,
@@ -1520,7 +1503,6 @@ pub trait SledAgentApi {
     #[endpoint {
         method = DELETE,
         path = "/vmms/{propolis_id}/attached-subnets",
-        versions = VERSION_ADD_ATTACHED_SUBNETS..,
     }]
     async fn vmm_delete_attached_subnets(
         request_context: RequestContext<Self::Context>,
@@ -1531,7 +1513,6 @@ pub trait SledAgentApi {
     #[endpoint {
         method = POST,
         path = "/vmms/{propolis_id}/attached-subnets",
-        versions = VERSION_ADD_ATTACHED_SUBNETS..,
     }]
     async fn vmm_post_attached_subnet(
         request_context: RequestContext<Self::Context>,
@@ -1543,7 +1524,6 @@ pub trait SledAgentApi {
     #[endpoint {
         method = DELETE,
         path = "/vmms/{propolis_id}/attached-subnets/{subnet}",
-        versions = VERSION_ADD_ATTACHED_SUBNETS..,
     }]
     async fn vmm_delete_attached_subnet(
         request_context: RequestContext<Self::Context>,
