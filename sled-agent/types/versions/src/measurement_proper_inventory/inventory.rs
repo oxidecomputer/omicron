@@ -2,54 +2,22 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::v1::inventory::Baseboard;
 use camino::Utf8PathBuf;
 use iddqd::id_upcast;
 use iddqd::{IdOrdItem, IdOrdMap};
-use omicron_common::api::external::ByteCount;
 use omicron_uuid_kinds::PhysicalDiskUuid;
-use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::{DatasetUuid, OmicronZoneUuid};
 use schemars::{
     JsonSchema, SchemaGenerator, schema::Schema, schema::SchemaObject,
 };
 use serde::{Deserialize, Serialize};
-use sled_hardware_types::SledCpuFamily;
 use std::collections::BTreeMap;
-use std::net::SocketAddrV6;
 
 use crate::v1::inventory::{
-    BootPartitionContents, ConfigReconcilerInventoryResult, InventoryDataset,
-    InventoryDisk, InventoryZpool, OrphanedDataset,
+    BootPartitionContents, ConfigReconcilerInventoryResult, OrphanedDataset,
     RemoveMupdateOverrideInventory,
 };
-use crate::v50::inventory::SledRole;
-use crate::v14::inventory::{
-    ConfigReconcilerInventoryStatus, HealthMonitorInventory,
-    OmicronFileSourceResolverInventory, OmicronSledConfig,
-};
-
-/// Identity and basic status information about this sled agent
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
-pub struct Inventory {
-    pub sled_id: SledUuid,
-    pub sled_agent_address: SocketAddrV6,
-    pub sled_role: SledRole,
-    pub baseboard: Baseboard,
-    pub usable_hardware_threads: u32,
-    pub usable_physical_ram: ByteCount,
-    pub cpu_family: SledCpuFamily,
-    pub reservoir_size: ByteCount,
-    pub disks: Vec<InventoryDisk>,
-    pub zpools: Vec<InventoryZpool>,
-    pub datasets: Vec<InventoryDataset>,
-    pub ledgered_sled_config: Option<OmicronSledConfig>,
-    pub reconciler_status: ConfigReconcilerInventoryStatus,
-    pub last_reconciliation: Option<ConfigReconcilerInventory>,
-    pub file_source_resolver: OmicronFileSourceResolverInventory,
-    pub health_monitor: HealthMonitorInventory,
-    pub reference_measurements: IdOrdMap<SingleMeasurementInventory>,
-}
+use crate::v14::inventory::OmicronSledConfig;
 
 /// Describes the last attempt made by the sled-agent-config-reconciler to
 /// reconcile the current sled config against the actual state of the sled.
