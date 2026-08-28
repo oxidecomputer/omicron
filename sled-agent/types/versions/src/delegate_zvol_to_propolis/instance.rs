@@ -80,20 +80,6 @@ pub enum DelegatedZvol {
     LocalStorage { zpool_id: ExternalZpoolUuid, dataset_id: DatasetUuid },
 }
 
-impl From<v7::instance::InstanceEnsureBody> for InstanceEnsureBody {
-    fn from(v7: v7::instance::InstanceEnsureBody) -> Self {
-        Self {
-            vmm_spec: v7.vmm_spec,
-            local_config: v7.local_config.into(),
-            vmm_runtime: v7.vmm_runtime,
-            instance_id: v7.instance_id,
-            migration_id: v7.migration_id,
-            propolis_addr: v7.propolis_addr,
-            metadata: v7.metadata,
-        }
-    }
-}
-
 impl From<v7::instance::InstanceSledLocalConfig> for InstanceSledLocalConfig {
     fn from(v7: v7::instance::InstanceSledLocalConfig) -> Self {
         Self {

@@ -20,7 +20,7 @@ use omicron_common::api::internal::{
     },
 };
 use sled_agent_types_versions::{
-    latest, v1, v4, v6, v7, v9, v10, v11, v12, v14, v16, v17, v18, v20, v22,
+    latest, v1, v4, v6, v9, v10, v11, v12, v14, v16, v17, v18, v20, v22,
     v24, v25, v26, v28, v29, v30, v31, v32, v33, v34, v37, v39, v40, v41, v42,
     v43, v46, v47, v48, v49,
 };
@@ -81,7 +81,6 @@ api_versions!([
     (12, ADD_SMF_SERVICES_HEALTH_CHECK),
     (11, ADD_DUAL_STACK_EXTERNAL_IP_CONFIG),
     (10, ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES),
-    (9, DELEGATE_ZVOL_TO_PROPOLIS),
     // Versions before this have been retired. We no longer support in any
     // server, nor expect it from any client.
 ]);
@@ -580,8 +579,7 @@ pub trait SledAgentApi {
         method = PUT,
         path = "/vmms/{propolis_id}",
         operation_id = "vmm_register",
-        versions =
-            VERSION_DELEGATE_ZVOL_TO_PROPOLIS..VERSION_ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES
+        versions = ..VERSION_ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES
     }]
     async fn vmm_register_v9(
         rqctx: RequestContext<Self::Context>,
@@ -590,20 +588,6 @@ pub trait SledAgentApi {
     ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError> {
         let body = body.try_map(v10::instance::InstanceEnsureBody::try_from)?;
         Self::vmm_register_v10(rqctx, path_params, body).await
-    }
-
-    #[endpoint {
-        operation_id = "vmm_register",
-        method = PUT,
-        path = "/vmms/{propolis_id}",
-        versions = ..VERSION_DELEGATE_ZVOL_TO_PROPOLIS
-    }]
-    async fn vmm_register_v7(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::instance::VmmPathParam>,
-        body: TypedBody<v7::instance::InstanceEnsureBody>,
-    ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError> {
-        Self::vmm_register_v9(rqctx, path_params, body.map(Into::into)).await
     }
 
     #[endpoint {
@@ -1604,7 +1588,7 @@ pub trait SledAgentApi {
         operation_id = "local_storage_dataset_ensure",
         method = POST,
         path = "/local-storage/{zpool_id}/{dataset_id}",
-        versions = VERSION_DELEGATE_ZVOL_TO_PROPOLIS..VERSION_TWO_TYPES_OF_DELEGATED_ZVOL,
+        versions = ..VERSION_TWO_TYPES_OF_DELEGATED_ZVOL,
     }]
     async fn local_storage_dataset_ensure_v9(
         request_context: RequestContext<Self::Context>,
@@ -1643,7 +1627,7 @@ pub trait SledAgentApi {
         operation_id = "local_storage_dataset_delete",
         method = DELETE,
         path = "/local-storage/{zpool_id}/{dataset_id}",
-        versions = VERSION_DELEGATE_ZVOL_TO_PROPOLIS..VERSION_TWO_TYPES_OF_DELEGATED_ZVOL,
+        versions = ..VERSION_TWO_TYPES_OF_DELEGATED_ZVOL,
     }]
     async fn local_storage_dataset_delete_v9(
         request_context: RequestContext<Self::Context>,
