@@ -1230,7 +1230,7 @@ async fn test_support_bundle_default_data_selection(
             sled_cubby_info: true,
             sp_dumps: true,
             host_info: Some(SupportBundleHostInfo {
-                sleds: SupportBundleSledSelection::All {}
+                sleds: SupportBundleSledSelection::All
             }),
             ereports: Some(SupportBundleEreports {
                 only_serials: vec![],
@@ -1254,7 +1254,7 @@ async fn test_support_bundle_default_data_selection(
     let explicit = bundle_create_with_selection(
         &client,
         SupportBundleDataSelection {
-            data: SupportBundleData::All {},
+            data: SupportBundleData::All,
             start_time: None,
             end_time: None,
         },
@@ -1360,7 +1360,7 @@ async fn test_support_bundle_data_selection_bad_request(
     let message = bundle_create_with_selection_expect_fail(
         &client,
         SupportBundleDataSelection {
-            data: SupportBundleData::All {},
+            data: SupportBundleData::All,
             start_time: Some(now),
             end_time: Some(now - chrono::Duration::hours(1)),
         },

@@ -19,7 +19,7 @@ use uuid::Uuid;
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SupportBundleSledSelection {
     /// Collect from every sled.
-    All {},
+    All,
     /// Collect only from the listed sleds. An empty list collects from none
     /// of them.
     Specific {
@@ -66,7 +66,7 @@ pub struct SupportBundleEreports {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SupportBundleData {
     /// Collect every category of data, from every sled, unfiltered.
-    All {},
+    All,
     /// Collect exactly what is specified here. A category that is omitted is
     /// not collected.
     Explicit {

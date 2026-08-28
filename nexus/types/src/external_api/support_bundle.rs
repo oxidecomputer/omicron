@@ -19,7 +19,7 @@ impl TryFrom<SupportBundleDataSelection> for BundleDataSelection {
         let SupportBundleDataSelection { data, start_time, end_time } = api;
 
         let selection = match data {
-            SupportBundleData::All {} => BundleDataSelection::all(),
+            SupportBundleData::All => BundleDataSelection::all(),
             SupportBundleData::Explicit {
                 reconfigurator,
                 sled_cubby_info,
@@ -39,7 +39,7 @@ impl TryFrom<SupportBundleDataSelection> for BundleDataSelection {
                 }
                 if let Some(host_info) = host_info {
                     selection = match host_info.sleds {
-                        SupportBundleSledSelection::All {} => {
+                        SupportBundleSledSelection::All => {
                             selection.with_all_sleds()
                         }
                         SupportBundleSledSelection::Specific { sleds } => {
@@ -75,9 +75,7 @@ impl From<&BundleDataSelection> for SupportBundleDataSelection {
             host_info: selection.sled_selection().map(|sleds| {
                 SupportBundleHostInfo {
                     sleds: match sleds {
-                        SledSelection::All => {
-                            SupportBundleSledSelection::All {}
-                        }
+                        SledSelection::All => SupportBundleSledSelection::All,
                         SledSelection::Specific(sleds) => {
                             SupportBundleSledSelection::Specific {
                                 sleds: sleds.iter().copied().collect(),
@@ -120,7 +118,7 @@ mod tests {
     #[test]
     fn all_selects_every_category() {
         let api = SupportBundleDataSelection {
-            data: SupportBundleData::All {},
+            data: SupportBundleData::All,
             start_time: None,
             end_time: None,
         };
@@ -184,7 +182,7 @@ mod tests {
     fn an_inverted_time_range_is_a_bad_request() {
         let ts = |secs| DateTime::<Utc>::from_timestamp(secs, 0).unwrap();
         let api = SupportBundleDataSelection {
-            data: SupportBundleData::All {},
+            data: SupportBundleData::All,
             start_time: Some(ts(200)),
             end_time: Some(ts(100)),
         };

@@ -5668,8 +5668,8 @@ async fn cmd_nexus_support_bundles_create(
     use nexus_lockstep_client::types;
 
     // No --include collects everything, matching `support-bundle collect`.
-    // The API's other reading of an empty selection, "collect nothing", has
-    // no spelling here: clap rejects --include without a value.
+    // The API's other reading of an empty selection, "collect nothing",
+    // cannot be specified by clap, which rejects --include without a value.
     let data = if args.include.is_empty() {
         types::SupportBundleData::All
     } else {
