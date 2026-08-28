@@ -14,7 +14,7 @@
 
 use crate::artifact_store::{ArtifactStore, SledAgentArtifactStoreWrapper};
 use crate::bootstrap::bootstore_setup::{
-    new_bootstore_config, poll_ddmd_for_bootstore_and_tq_peer_update,
+    new_bootstore_config, poll_ddmd_for_peer_updates,
 };
 use crate::bootstrap::secret_retriever::{
     ConfigurableSecretRetriever, ConfigurableSecretRetrieverHandle,
@@ -24,6 +24,7 @@ use crate::config::Config;
 use crate::hardware_monitor::{HardwareMonitor, HardwareMonitorHandle};
 use crate::services::ServiceManager;
 use crate::sled_agent::SledAgent;
+use crate::sush::{GossipInputs, SushHandles, spawn_sush_tasks};
 use crate::zone_bundle::ZoneBundler;
 use bootstore::schemes::v0 as bootstore;
 use key_manager::{KeyManager, StorageKeyRequester};
@@ -41,9 +42,10 @@ use sled_storage::config::MountConfig;
 use sled_storage::disk::RawSyntheticDisk;
 use slog::{Logger, info};
 use sprockets_tls::keys::SprocketsConfig;
-use std::net::Ipv6Addr;
+use std::collections::BTreeSet;
+use std::net::{Ipv6Addr, SocketAddrV6};
 use std::sync::Arc;
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, watch};
 use trust_quorum;
 
 /// A mechanism for interacting with all long running tasks that can be shared
@@ -91,6 +93,9 @@ pub struct LongRunningTaskHandles {
 
     /// Handle to access the set of reference measurements
     pub measurements: Arc<MeasurementsHandle>,
+
+    /// Handles to the Support Shell server, if it is running
+    pub sush: Option<SushHandles>,
 }
 
 pub struct LongRunningTaskResult {
@@ -196,16 +201,49 @@ pub async fn spawn_all_longrunning_tasks(
     )
     .await;
 
+    let (sush_gossip_peers_tx, sush_gossip_peers_rx) =
+        watch::channel(BTreeSet::new());
     let bootstore = spawn_bootstore_tasks(
         log,
         &config_reconciler,
         &hardware_manager,
         global_zone_bootstrap_ip,
         trust_quorum.clone(),
+        sush_gossip_peers_tx,
     )
     .await;
 
     let health_monitor = spawn_health_monitor_tasks(log).await;
+
+    // sush must work when the control plane doesn't, so it starts here rather
+    // than waiting for rack membership. Its API is served once we know our
+    // underlay address (see `crate::server::Server::start`).
+    let sush = match &config.sush {
+        Some(sush_config) => {
+            spawn_sush_tasks(
+                log,
+                sush_config,
+                hardware_manager.baseboard().into(),
+                GossipInputs {
+                    sprockets: config.sprockets.clone(),
+                    measurements: measurements.clone(),
+                    bootstrap_ip: global_zone_bootstrap_ip,
+                    peers: sush_gossip_peers_rx,
+                    bookmark_dirs: config_reconciler
+                        .internal_disks_rx()
+                        .current()
+                        .all_cluster_datasets()
+                        .collect(),
+                },
+                config_reconciler.available_datasets_rx(),
+            )
+            .await
+        }
+        None => {
+            info!(log, "sush not configured");
+            None
+        }
+    };
 
     LongRunningTaskResult {
         long_running_task_handles: LongRunningTaskHandles {
@@ -221,6 +259,7 @@ pub async fn spawn_all_longrunning_tasks(
             secret_retriever: secret_retriever_config,
             artifact_store,
             measurements,
+            sush,
         },
         config_reconciler_spawn_token,
         sled_agent_started_tx,
@@ -324,6 +363,7 @@ async fn spawn_bootstore_tasks(
     hardware_manager: &HardwareManager,
     global_zone_bootstrap_ip: Ipv6Addr,
     tq_handle: trust_quorum::NodeTaskHandle,
+    sush_gossip_tx: watch::Sender<BTreeSet<SocketAddrV6>>,
 ) -> bootstore::NodeHandle {
     let config = new_bootstore_config(
         &config_reconciler
@@ -346,7 +386,7 @@ async fn spawn_bootstore_tasks(
     let log = log.new(o!("component" => "bootstore_ddmd_poller"));
     let node_handle2 = node_handle.clone();
     tokio::spawn(async move {
-        poll_ddmd_for_bootstore_and_tq_peer_update(log, node_handle2, tq_handle)
+        poll_ddmd_for_peer_updates(log, node_handle2, tq_handle, sush_gossip_tx)
             .await
     });
 

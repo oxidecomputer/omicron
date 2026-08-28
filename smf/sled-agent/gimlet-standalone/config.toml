@@ -84,3 +84,7 @@ resolve = { which = "ipcc" }
 attest = { which = "ipcc" }
 roots = ["/usr/share/oxide/idcerts/staging.pem", "/usr/share/oxide/idcerts/production.pem"]
 enforce = "Enforced"
+
+# Support Shell (RFD 620). TODO: replace sandbox cert with prod.
+[sush]
+roots = ["/opt/oxide/sled-agent/pkg/sush-sandbox.pem"]
