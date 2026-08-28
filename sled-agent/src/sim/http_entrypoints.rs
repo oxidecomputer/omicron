@@ -89,7 +89,6 @@ use sled_agent_types_versions::v42;
 use sled_agent_types_versions::v47;
 use sled_agent_types_versions::v48;
 use sled_diagnostics::SledDiagnosticsQueryOutput;
-use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use trust_quorum_types::messages::{
@@ -369,60 +368,6 @@ impl SledAgentApi for SledAgentSimImpl {
         let vnics = sa.list_virtual_nics().map_err(HttpError::from)?;
 
         Ok(HttpResponseOk(vnics))
-    }
-
-    async fn read_network_bootstore_config_cache(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<
-        HttpResponseOk<v20::early_networking::EarlyNetworkConfig>,
-        HttpError,
-    > {
-        // Read the current envelope, then convert it back down to the version
-        // we have to report for this (now-removed!) API endpoint.
-        use v20::early_networking::EarlyNetworkConfigBody as BodyV20;
-        use v26::early_networking::EarlyNetworkConfigBody as BodyV26;
-        use v30::early_networking::EarlyNetworkConfigBody as BodyV30;
-        use v33::system_networking::SystemNetworkingConfig as BodyV33;
-        use v39::system_networking::SystemNetworkingConfig as BodyV39;
-        use v42::system_networking::SystemNetworkingConfig as BodyV42;
-        use v47::system_networking::SystemNetworkingConfig as BodyV47;
-
-        let config =
-            rqctx.context().bootstore_network_config.lock().unwrap().clone();
-
-        let envelope =
-            EarlyNetworkConfigEnvelope::deserialize_from_bootstore(&config)
-                .map_err(|err| {
-                    HttpError::for_internal_error(format!(
-                        "could not deserialize bootstore contents: {}",
-                        InlineErrorChain::new(&err)
-                    ))
-                })?;
-        let latest_version_body =
-            envelope.deserialize_body().map_err(|err| {
-                HttpError::for_internal_error(format!(
-                    "could not deserialize early network config body: {}",
-                    InlineErrorChain::new(&err)
-                ))
-            })?;
-
-        // Downconvert from the current version to the v20 version we have to
-        // return from this endpoint.
-        let body_v42 = BodyV42::try_from(BodyV47::from(latest_version_body))
-            .map_err(|err| {
-                HttpError::for_internal_error(format!(
-                    "failed to downconvert early network config: {err:#}"
-                ))
-            })?;
-        let body = BodyV20::from(BodyV26::from(BodyV30::from(BodyV33::from(
-            BodyV39::from(body_v42),
-        ))));
-
-        Ok(HttpResponseOk(v20::early_networking::EarlyNetworkConfig {
-            generation: config.generation,
-            schema_version: BodyV20::SCHEMA_VERSION,
-            body,
-        }))
     }
 
     async fn write_network_bootstore_config_v48(

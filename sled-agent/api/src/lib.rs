@@ -66,7 +66,6 @@ api_versions!([
     (26, RACK_NETWORK_CONFIG_NOT_OPTIONAL),
     (25, BOOTSTORE_VERSIONING),
     (24, ADD_ZPOOL_HEALTH_TO_INVENTORY),
-    (23, REMOVE_READ_BOOTSTORE_CONFIG_CACHE),
     // Versions before this have been retired. We no longer support them in any
     // server, nor expect them from any client.
 ]);
@@ -713,25 +712,6 @@ pub trait SledAgentApi {
         )
         .await
     }
-
-    /// This API endpoint is only reading the local sled agent's view of the
-    /// bootstore. The boostore is a distributed data store that is eventually
-    /// consistent. Reads from individual nodes may not represent the latest state.
-    // THIS HAS BEEN REMOVED AND SHOULD NOT BE RESTORED. Reading from the
-    // bootstore cache is inherently racy; the bootstore is eventually
-    // consistent, and reads from different nodes may return different values.
-    // Instead, callers should read from CRDB.
-    #[endpoint {
-        method = GET,
-        path = "/network-bootstore-config",
-        versions = ..VERSION_REMOVE_READ_BOOTSTORE_CONFIG_CACHE,
-    }]
-    async fn read_network_bootstore_config_cache(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<
-        HttpResponseOk<v20::early_networking::EarlyNetworkConfig>,
-        HttpError,
-    >;
 
     // -------------------------------------------------------------------------
     // WARNING WARNING WARNING
