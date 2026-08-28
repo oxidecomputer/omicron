@@ -81,8 +81,6 @@ use sled_agent_types::zone_bundle::{
     ZoneBundleFilter, ZoneBundleId, ZoneBundleMetadata, ZonePathParam,
 };
 use sled_hardware_types::BaseboardId;
-// Fixed identifiers for prior versions only
-use sled_agent_types_versions::v1;
 use sled_agent_types_versions::v20;
 use sled_agent_types_versions::v25;
 use sled_agent_types_versions::v26;
@@ -554,19 +552,6 @@ impl SledAgentApi for SledAgentSimImpl {
     async fn write_network_bootstore_config_v20(
         _rqctx: RequestContext<Self::Context>,
         _body: TypedBody<v20::early_networking::EarlyNetworkConfig>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        // Real sled-agent has to support this endpoint for backwards
-        // compatibility during an update; sim-sled-agent doesn't.
-        Err(HttpError::for_bad_request(
-            None,
-            "old bootstore APIs not supported in simulated sled-agent"
-                .to_string(),
-        ))
-    }
-
-    async fn write_network_bootstore_config_v1(
-        _rqctx: RequestContext<Self::Context>,
-        _body: TypedBody<v1::early_networking::EarlyNetworkConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         // Real sled-agent has to support this endpoint for backwards
         // compatibility during an update; sim-sled-agent doesn't.

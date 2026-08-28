@@ -78,9 +78,7 @@ use trust_quorum_types::messages::{
 use trust_quorum_types::status::{CommitStatus, CoordinatorStatus, NodeStatus};
 
 // Fixed identifiers for prior versions only
-use sled_agent_types_versions::{
-    v1, v20, v25, v26, v30, v33, v39, v42, v47, v48,
-};
+use sled_agent_types_versions::{v20, v25, v26, v30, v33, v39, v42, v47, v48};
 use sled_diagnostics::{
     SledDiagnosticsCommandHttpOutput, SledDiagnosticsQueryOutput,
 };
@@ -1179,31 +1177,6 @@ impl SledAgentApi for SledAgentImpl {
         )?;
 
         Ok(HttpResponseUpdatedNoContent())
-    }
-
-    // As explained in `sled-agent-api`, we must faithfully implement old
-    // versions of `write_network_bootstore_config()` _without_ upconverting the
-    // request into the latest bootstore `NetworkConfig` we understand.
-    async fn write_network_bootstore_config_v1(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<v1::early_networking::EarlyNetworkConfig>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let sa = rqctx.context();
-        let config = body.into_inner();
-        sa.latencies()
-            .instrument_dropshot_handler(&rqctx, async {
-                let bs = sa.bootstore();
-                bs.update_network_config(NetworkConfig::from(config))
-                    .await
-                    .map_err(|e| {
-                        HttpError::for_internal_error(format!(
-                            "failed to write updated config to boot store: {}",
-                            InlineErrorChain::new(&e)
-                        ))
-                    })?;
-                Ok(HttpResponseUpdatedNoContent())
-            })
-            .await
     }
 
     async fn sled_add(

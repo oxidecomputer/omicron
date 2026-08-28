@@ -4,48 +4,10 @@
 
 //! Types for network setup required to bring up the control plane.
 
-use bootstore::schemes::v0 as bootstore;
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::{IpAddr, Ipv4Addr};
-
-/// Network configuration required to bring up the control plane
-///
-/// The fields in this structure are those from
-/// `RackInitializeRequest` necessary for use beyond RSS.
-/// This is just for the initial rack configuration and cold boot purposes.
-/// Updates come from Nexus.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-pub struct EarlyNetworkConfig {
-    // The current generation number of data as stored in CRDB.
-    // The initial generation is set during RSS time and then only mutated
-    // by Nexus.
-    pub generation: u64,
-
-    // Which version of the data structure do we have. This is to help with
-    // deserialization and conversion in future updates.
-    pub schema_version: u32,
-
-    // The actual configuration details
-    pub body: EarlyNetworkConfigBody,
-}
-
-impl From<EarlyNetworkConfig> for bootstore::NetworkConfig {
-    fn from(value: EarlyNetworkConfig) -> Self {
-        // We're serializing in-memory; this can only fail if
-        // `EarlyNetworkConfig` contains types that can't be represented as
-        // JSON, which (a) should never happen and (b) we should catch
-        // immediately in tests.
-        let blob = serde_json::to_vec(&value)
-            .expect("EarlyNetworkConfig can always be serialized as JSON");
-
-        // Yes this is duplicated, but that seems fine.
-        let generation = value.generation;
-
-        bootstore::NetworkConfig { generation, blob }
-    }
-}
 
 /// This is the actual configuration of EarlyNetworking.
 ///

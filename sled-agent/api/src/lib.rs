@@ -70,7 +70,6 @@ api_versions!([
     (23, REMOVE_READ_BOOTSTORE_CONFIG_CACHE),
     (22, REMOVE_HEALTH_MONITOR_KEEP_CHECKS),
     (21, REMOVE_DISK_PUT),
-    (20, BGP_V6),
     // Versions before this have been retired. We no longer support them in any
     // server, nor expect them from any client.
 ]);
@@ -711,7 +710,7 @@ pub trait SledAgentApi {
     #[endpoint {
         method = POST,
         path = "/switch-ports",
-        versions = VERSION_BGP_V6..VERSION_STRONGER_BGP_UNNUMBERED_TYPES,
+        versions = ..VERSION_STRONGER_BGP_UNNUMBERED_TYPES,
     }]
     async fn uplink_ensure_v20(
         rqctx: RequestContext<Self::Context>,
@@ -729,18 +728,6 @@ pub trait SledAgentApi {
         .await
     }
 
-    #[endpoint {
-        method = POST,
-        path = "/switch-ports",
-        versions = ..VERSION_BGP_V6,
-    }]
-    async fn uplink_ensure_v1(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<v1::uplink::SwitchPorts>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        Self::uplink_ensure_v20(rqctx, body.map(From::from)).await
-    }
-
     /// This API endpoint is only reading the local sled agent's view of the
     /// bootstore. The boostore is a distributed data store that is eventually
     /// consistent. Reads from individual nodes may not represent the latest state.
@@ -751,7 +738,7 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/network-bootstore-config",
-        versions = VERSION_BGP_V6..VERSION_REMOVE_READ_BOOTSTORE_CONFIG_CACHE,
+        versions = ..VERSION_REMOVE_READ_BOOTSTORE_CONFIG_CACHE,
     }]
     async fn read_network_bootstore_config_cache(
         rqctx: RequestContext<Self::Context>,
@@ -759,35 +746,6 @@ pub trait SledAgentApi {
         HttpResponseOk<v20::early_networking::EarlyNetworkConfig>,
         HttpError,
     >;
-
-    /// This API endpoint is only reading the local sled agent's view of the
-    /// bootstore. The boostore is a distributed data store that is eventually
-    /// consistent. Reads from individual nodes may not represent the latest state.
-    #[endpoint {
-        method = GET,
-        path = "/network-bootstore-config",
-        versions = ..VERSION_BGP_V6,
-    }]
-    async fn read_network_bootstore_config_cache_v1(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<
-        HttpResponseOk<v1::early_networking::EarlyNetworkConfig>,
-        HttpError,
-    > {
-        let result: v1::early_networking::EarlyNetworkConfig =
-            Self::read_network_bootstore_config_cache(rqctx)
-                .await?
-                .0
-                .try_into()
-                .map_err(|e| {
-                    HttpError::for_bad_request(
-                        None,
-                        format!("error getting v1 config: {e}"),
-                    )
-                })?;
-
-        Ok(HttpResponseOk(result))
-    }
 
     // -------------------------------------------------------------------------
     // WARNING WARNING WARNING
@@ -945,25 +903,12 @@ pub trait SledAgentApi {
     #[endpoint {
         method = PUT,
         path = "/network-bootstore-config",
-        versions = VERSION_BGP_V6..VERSION_BOOTSTORE_VERSIONING,
+        versions = ..VERSION_BOOTSTORE_VERSIONING,
         operation_id = "write_network_bootstore_config",
     }]
     async fn write_network_bootstore_config_v20(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<v20::early_networking::EarlyNetworkConfig>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
-
-    // As described above, this must not forward to newer versions; sled-agent
-    // must implement this by faithfully serializing the requested version.
-    #[endpoint {
-        method = PUT,
-        path = "/network-bootstore-config",
-        versions = ..VERSION_BGP_V6,
-        operation_id = "write_network_bootstore_config",
-    }]
-    async fn write_network_bootstore_config_v1(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<v1::early_networking::EarlyNetworkConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Add a sled to a rack that was already initialized via RSS
