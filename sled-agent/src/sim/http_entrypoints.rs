@@ -78,7 +78,6 @@ use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupContextUpdate, CleanupCount,
     ZoneBundleFilter, ZoneBundleId, ZoneBundleMetadata, ZonePathParam,
 };
-use sled_hardware_types::BaseboardId;
 use sled_agent_types_versions::v20;
 use sled_agent_types_versions::v25;
 use sled_agent_types_versions::v26;
@@ -89,6 +88,7 @@ use sled_agent_types_versions::v42;
 use sled_agent_types_versions::v47;
 use sled_agent_types_versions::v48;
 use sled_diagnostics::SledDiagnosticsQueryOutput;
+use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use trust_quorum_types::messages::{

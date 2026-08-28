@@ -12,11 +12,9 @@ use dropshot::{
     StreamingBody, TypedBody,
 };
 use dropshot_api_manager_types::api_versions;
-use omicron_common::api::internal::{
-    shared::{
-        ExternalIpGatewayMap, ResolvedVpcRouteSet, ResolvedVpcRouteState,
-        SledIdentifiers, VirtualNetworkInterfaceHost,
-    },
+use omicron_common::api::internal::shared::{
+    ExternalIpGatewayMap, ResolvedVpcRouteSet, ResolvedVpcRouteState,
+    SledIdentifiers, VirtualNetworkInterfaceHost,
 };
 use sled_agent_types_versions::{
     latest, v1, v11, v14, v18, v20, v22,

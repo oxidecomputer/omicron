@@ -6,7 +6,6 @@
 
 /// Types here were moved from retired versions because they were the latest
 /// version of that type.
-
 pub mod debug;
 pub mod instance;
 pub mod inventory;

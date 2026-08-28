@@ -16,7 +16,6 @@ use strum::EnumIter;
 
 use crate::v1::inventory::InventoryDataset;
 use crate::v1::inventory::InventoryDisk;
-use crate::v50::inventory::SledRole;
 use crate::v14::inventory::ConfigReconcilerInventoryStatus;
 use crate::v14::inventory::OmicronFileSourceResolverInventory;
 use crate::v14::inventory::OmicronSledConfig;
@@ -25,6 +24,7 @@ use crate::v16::inventory::SingleMeasurementInventory;
 use crate::v24::inventory::InventoryZpool;
 use crate::v34;
 use crate::v34::inventory::SvcsError;
+use crate::v50::inventory::SledRole;
 
 /// Each service instance is always in a well-defined state based on its
 /// dependencies, the results of the execution of its methods, and its potential

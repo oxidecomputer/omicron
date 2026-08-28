@@ -107,7 +107,6 @@ pub mod instance {
     pub use crate::v1::instance::VmmIssueDiskSnapshotRequestBody;
     pub use crate::v1::instance::VmmIssueDiskSnapshotRequestPathParam;
     pub use crate::v1::instance::VmmIssueDiskSnapshotRequestResponse;
-    pub use crate::v50::instance::VmmPathParam;
     pub use crate::v1::instance::VmmPutStateBody;
     pub use crate::v1::instance::VmmPutStateResponse;
     pub use crate::v1::instance::VmmRuntimeState;
@@ -115,6 +114,7 @@ pub mod instance {
     pub use crate::v1::instance::VmmStateRequested;
     pub use crate::v1::instance::VmmUnregisterResponse;
     pub use crate::v1::instance::VpcPathParam;
+    pub use crate::v50::instance::VmmPathParam;
 
     pub use crate::v7::instance::InstanceMulticastBody;
     pub use crate::v7::instance::InstanceMulticastMembership;
@@ -153,9 +153,9 @@ pub mod inventory {
     pub use crate::v1::inventory::RemoveMupdateOverrideBootSuccessInventory;
     pub use crate::v1::inventory::RemoveMupdateOverrideInventory;
     pub use crate::v1::inventory::SledCpuFamily;
-    pub use crate::v50::inventory::SledRole;
     pub use crate::v1::inventory::ZoneArtifactInventory;
     pub use crate::v1::inventory::ZoneKind;
+    pub use crate::v50::inventory::SledRole;
 
     pub use crate::v10::inventory::NetworkInterface;
 

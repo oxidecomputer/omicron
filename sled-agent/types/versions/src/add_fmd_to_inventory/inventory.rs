@@ -15,7 +15,6 @@ use std::net::SocketAddrV6;
 use crate::v1::inventory::Baseboard;
 use crate::v1::inventory::InventoryDataset;
 use crate::v1::inventory::InventoryDisk;
-use crate::v50::inventory::SledRole;
 use crate::v14::inventory::ConfigReconcilerInventoryStatus;
 use crate::v14::inventory::OmicronFileSourceResolverInventory;
 use crate::v14::inventory::OmicronSledConfig;
@@ -23,6 +22,7 @@ use crate::v16::inventory::ConfigReconcilerInventory;
 use crate::v16::inventory::SingleMeasurementInventory;
 use crate::v24::inventory::InventoryZpool;
 use crate::v37;
+use crate::v50::inventory::SledRole;
 
 /// A diagnosed fault case from the illumos Fault Management Daemon on a sled.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]

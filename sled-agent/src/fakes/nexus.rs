@@ -18,8 +18,8 @@ use omicron_common::api::external::Error;
 use omicron_uuid_kinds::{OmicronZoneUuid, PropolisUuid, SledUuid};
 use schemars::JsonSchema;
 use serde::Deserialize;
-use sled_agent_types_versions::v1::instance::SledVmmState;
 use sled_agent_types::instance::VmmPathParam;
+use sled_agent_types_versions::v1::instance::SledVmmState;
 use transient_dns_server::TransientDnsServer;
 
 /// Implements a fake Nexus.

@@ -15,7 +15,6 @@ use std::net::SocketAddrV6;
 use crate::v1::inventory::Baseboard;
 use crate::v1::inventory::InventoryDataset;
 use crate::v1::inventory::InventoryDisk;
-use crate::v50::inventory::SledRole;
 use crate::v14::inventory::ConfigReconcilerInventoryStatus;
 use crate::v14::inventory::OmicronFileSourceResolverInventory;
 use crate::v14::inventory::OmicronSledConfig;
@@ -25,6 +24,7 @@ use crate::v24::inventory::InventoryZpool;
 use crate::v37::inventory::SvcsEnabledNotOnlineResult;
 use crate::v40;
 use crate::v40::inventory::{FmdInventory, FmdInventoryError};
+use crate::v50::inventory::SledRole;
 
 /// Identity and basic status information about this sled agent
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]

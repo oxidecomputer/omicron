@@ -11,4 +11,3 @@ use serde::Deserialize;
 pub struct VmmPathParam {
     pub propolis_id: PropolisUuid,
 }
-

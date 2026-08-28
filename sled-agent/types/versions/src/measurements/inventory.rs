@@ -22,9 +22,8 @@ use crate::v1::disk::DatasetConfig;
 use crate::v1::disk::OmicronPhysicalDiskConfig;
 use crate::v1::inventory::{
     BootPartitionContents, ConfigReconcilerInventoryResult,
-    HostPhase2DesiredSlots,
-    ManifestInventory, MupdateOverrideInventory, OrphanedDataset,
-    RemoveMupdateOverrideInventory,
+    HostPhase2DesiredSlots, ManifestInventory, MupdateOverrideInventory,
+    OrphanedDataset, RemoveMupdateOverrideInventory,
 };
 use crate::v11::inventory::OmicronZoneConfig;
 use crate::v12;

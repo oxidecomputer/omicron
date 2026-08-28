@@ -2,8 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 /// Describes the role of the sled within the rack.
 ///
@@ -20,4 +20,3 @@ pub enum SledRole {
     /// responsibilities.
     Scrimlet,
 }
-
