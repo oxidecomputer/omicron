@@ -30,8 +30,8 @@ pub struct PhysicalDisk {
     #[schemars(with = "Option<Uuid>")]
     pub sled_id: Option<SledUuid>,
 
-    /// Where this disk sits in the sled chassis, e.g. "N5". Absent when the disk has no labeled
-    /// location, or could not be read.
+    /// The physical location in the sled at the time of the last inventory
+    /// collection, e.g. "N0" or "N4". Null if a location was not observed.
     pub location: Option<String>,
 
     pub vendor: String,

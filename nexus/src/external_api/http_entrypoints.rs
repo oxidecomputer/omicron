@@ -6921,10 +6921,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                     &opctx,
                     &data_page_params_for(&rqctx, &query)?,
                 )
-                .await?
-                .into_iter()
-                .map(|s| s.into())
-                .collect();
+                .await?;
             Ok(HttpResponseOk(ScanById::results_page(
                 &query,
                 disks,
@@ -6949,9 +6946,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
 
-            let (.., physical_disk) =
-                nexus.physical_disk_lookup(&opctx, &path)?.fetch().await?;
-            Ok(HttpResponseOk(physical_disk.into()))
+            let physical_disk = nexus.physical_disk_view(&opctx, &path).await?;
+
+            Ok(HttpResponseOk(physical_disk))
         };
         apictx
             .context
@@ -7144,10 +7141,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                     path.sled_id,
                     &data_page_params_for(&rqctx, &query)?,
                 )
-                .await?
-                .into_iter()
-                .map(|s| s.into())
-                .collect();
+                .await?;
             Ok(HttpResponseOk(ScanById::results_page(
                 &query,
                 disks,
