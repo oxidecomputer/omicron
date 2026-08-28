@@ -28,9 +28,10 @@ use crate::v1::inventory::{
     BootPartitionContents, ConfigReconcilerInventoryResult,
     HostPhase2DesiredSlots, InventoryDataset, InventoryDisk, InventoryZpool,
     NetworkInterface, OmicronZoneDataset, OmicronZoneImageSource,
-    OrphanedDataset, RemoveMupdateOverrideInventory, SledRole, SourceNatConfig,
+    OrphanedDataset, RemoveMupdateOverrideInventory, SourceNatConfig,
     ZoneImageResolverInventory,
 };
+use crate::v50::inventory::SledRole;
 use sled_hardware_types::SledCpuFamily;
 
 /// Identity and basic status information about this sled agent

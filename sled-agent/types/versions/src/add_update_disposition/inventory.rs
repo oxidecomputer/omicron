@@ -22,7 +22,7 @@ use crate::v1::inventory::InventoryDisk;
 use crate::v1::inventory::OrphanedDataset;
 use crate::v1::inventory::RemoveMupdateOverrideInventory;
 use crate::v1::inventory::SledCpuFamily;
-use crate::v1::inventory::SledRole;
+use crate::v50::inventory::SledRole;
 use crate::v11::inventory::OmicronZoneConfig;
 use crate::v14::inventory::OmicronFileSourceResolverInventory;
 use crate::v14::inventory::OmicronSingleMeasurement;

@@ -35,10 +35,11 @@ use crate::v1::inventory::{
     BootPartitionContents, ConfigReconcilerInventoryResult,
     HostPhase2DesiredSlots, InventoryDataset, InventoryDisk, InventoryZpool,
     NetworkInterfaceKind, OmicronZoneDataset, OmicronZoneImageSource,
-    OrphanedDataset, RemoveMupdateOverrideInventory, SledRole, SourceNatConfig,
+    OrphanedDataset, RemoveMupdateOverrideInventory, SourceNatConfig,
     ZoneImageResolverInventory,
 };
 use crate::v4;
+use crate::v50::inventory::SledRole;
 
 /// Identity and basic status information about this sled agent
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]

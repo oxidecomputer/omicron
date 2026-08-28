@@ -16,7 +16,7 @@ use std::net::SocketAddrV6;
 use crate::v1::inventory::InventoryDataset;
 use crate::v1::inventory::InventoryDisk;
 use crate::v1::inventory::InventoryZpool;
-use crate::v1::inventory::SledRole;
+use crate::v50::inventory::SledRole;
 use crate::v12::inventory::SvcsInMaintenanceResult;
 use crate::v14::inventory::ConfigReconcilerInventoryStatus;
 use crate::v14::inventory::HealthMonitorInventory;

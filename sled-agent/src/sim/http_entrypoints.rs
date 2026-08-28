@@ -971,12 +971,6 @@ impl SledAgentApi for SledAgentSimImpl {
         method_unimplemented()
     }
 
-    async fn sled_role_get_v1(
-        _rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<v1::inventory::SledRole>, HttpError> {
-        method_unimplemented()
-    }
-
     async fn sled_identifiers(
         _rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<SledIdentifiers>, HttpError> {

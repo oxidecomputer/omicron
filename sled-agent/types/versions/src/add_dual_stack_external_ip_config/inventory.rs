@@ -31,8 +31,9 @@ use crate::v1::inventory::{
     BootPartitionContents, ConfigReconcilerInventoryResult,
     HostPhase2DesiredSlots, InventoryDataset, InventoryDisk, InventoryZpool,
     OmicronZoneDataset, OmicronZoneImageSource, OrphanedDataset,
-    RemoveMupdateOverrideInventory, SledRole, ZoneImageResolverInventory,
+    RemoveMupdateOverrideInventory, ZoneImageResolverInventory,
 };
+use crate::v50::inventory::SledRole;
 use crate::v10;
 use crate::v10::inventory::NetworkInterface;
 use sled_hardware_types::SledCpuFamily;

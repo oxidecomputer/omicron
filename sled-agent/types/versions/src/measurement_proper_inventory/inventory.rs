@@ -22,8 +22,9 @@ use std::net::SocketAddrV6;
 use crate::v1::inventory::{
     BootPartitionContents, ConfigReconcilerInventoryResult, InventoryDataset,
     InventoryDisk, InventoryZpool, OrphanedDataset,
-    RemoveMupdateOverrideInventory, SledRole,
+    RemoveMupdateOverrideInventory,
 };
+use crate::v50::inventory::SledRole;
 use crate::v14;
 use crate::v14::inventory::{
     ConfigReconcilerInventoryStatus, HealthMonitorInventory,

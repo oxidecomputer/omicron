@@ -29,8 +29,9 @@ use crate::v1::inventory::{
     BootPartitionContents, ConfigReconcilerInventoryResult,
     HostPhase2DesiredSlots, InventoryDataset, InventoryDisk, InventoryZpool,
     ManifestInventory, MupdateOverrideInventory, OrphanedDataset,
-    RemoveMupdateOverrideInventory, SledRole,
+    RemoveMupdateOverrideInventory,
 };
+use crate::v50::inventory::SledRole;
 use crate::v11::inventory::OmicronZoneConfig;
 use crate::v12;
 pub use crate::v12::inventory::HealthMonitorInventory;

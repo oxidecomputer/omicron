@@ -1049,15 +1049,6 @@ impl SledAgent {
         self.inner.config_reconciler.set_sled_config(config).await
     }
 
-    /// Returns whether or not the sled believes itself to be a scrimlet
-    pub fn get_role(&self) -> SledRole {
-        if self.inner.hardware.is_scrimlet() {
-            SledRole::Scrimlet
-        } else {
-            SledRole::Gimlet
-        }
-    }
-
     /// Idempotently ensures that a given instance is registered with this sled,
     /// i.e., that it can be addressed by future calls to
     /// [`Self::instance_ensure_state`].

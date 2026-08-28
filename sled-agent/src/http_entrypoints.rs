@@ -604,17 +604,6 @@ impl SledAgentApi for SledAgentImpl {
             .await
     }
 
-    async fn sled_role_get_v1(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<v1::inventory::SledRole>, HttpError> {
-        let sa = rqctx.context();
-        sa.latencies()
-            .instrument_dropshot_handler(&rqctx, async {
-                Ok(HttpResponseOk(sa.get_role()))
-            })
-            .await
-    }
-
     async fn vmm_register(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VmmPathParam>,

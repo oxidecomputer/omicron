@@ -82,7 +82,6 @@ api_versions!([
     (11, ADD_DUAL_STACK_EXTERNAL_IP_CONFIG),
     (10, ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES),
     (9, DELEGATE_ZVOL_TO_PROPOLIS),
-    (8, REMOVE_SLED_ROLE),
     // Versions before this have been retired. We no longer support in any
     // server, nor expect it from any client.
 ]);
@@ -448,16 +447,6 @@ pub trait SledAgentApi {
         let body = body.try_map(v10::inventory::OmicronSledConfig::try_from)?;
         Self::omicron_config_put_v10(rqctx, body).await
     }
-
-    #[endpoint {
-        operation_id = "sled_role_get",
-        method = GET,
-        path = "/sled-role",
-        versions = ..VERSION_REMOVE_SLED_ROLE,
-    }]
-    async fn sled_role_get_v1(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<v1::inventory::SledRole>, HttpError>;
 
     #[endpoint {
         operation_id = "vmm_register",

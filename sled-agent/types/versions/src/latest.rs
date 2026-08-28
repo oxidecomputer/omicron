@@ -157,7 +157,7 @@ pub mod inventory {
     pub use crate::v1::inventory::RemoveMupdateOverrideBootSuccessInventory;
     pub use crate::v1::inventory::RemoveMupdateOverrideInventory;
     pub use crate::v1::inventory::SledCpuFamily;
-    pub use crate::v1::inventory::SledRole;
+    pub use crate::v50::inventory::SledRole;
     pub use crate::v1::inventory::ZoneArtifactInventory;
     pub use crate::v1::inventory::ZoneKind;
 
