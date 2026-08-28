@@ -20,7 +20,7 @@ use omicron_common::api::internal::{
     },
 };
 use sled_agent_types_versions::{
-    latest, v1, v9, v11, v14, v16, v17, v18, v20, v22,
+    latest, v1, v11, v14, v16, v17, v18, v20, v22,
     v24, v25, v26, v28, v29, v30, v31, v32, v33, v34, v37, v39, v40, v41, v42,
     v43, v46, v47, v48, v49,
 };
@@ -73,7 +73,6 @@ api_versions!([
     (20, BGP_V6),
     (19, ADD_ROT_ATTESTATION),
     (18, ADD_ATTACHED_SUBNETS),
-    (17, TWO_TYPES_OF_DELEGATED_ZVOL),
     // Versions before this have been retired. We no longer support them in any
     // server, nor expect them from any client.
 ]);
@@ -482,8 +481,7 @@ pub trait SledAgentApi {
         operation_id = "vmm_register",
         method = PUT,
         path = "/vmms/{propolis_id}",
-        versions =
-            VERSION_TWO_TYPES_OF_DELEGATED_ZVOL..VERSION_ADD_ATTACHED_SUBNETS
+        versions = ..VERSION_ADD_ATTACHED_SUBNETS
     }]
     async fn vmm_register_v17(
         rqctx: RequestContext<Self::Context>,
@@ -491,20 +489,6 @@ pub trait SledAgentApi {
         body: TypedBody<v17::instance::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError> {
         Self::vmm_register_v18(rqctx, path_params, body.map(Into::into)).await
-    }
-
-    #[endpoint {
-        operation_id = "vmm_register",
-        method = PUT,
-        path = "/vmms/{propolis_id}",
-        versions = ..VERSION_TWO_TYPES_OF_DELEGATED_ZVOL
-    }]
-    async fn vmm_register_v11(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::instance::VmmPathParam>,
-        body: TypedBody<v11::instance::InstanceEnsureBody>,
-    ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError> {
-        Self::vmm_register_v17(rqctx, path_params, body.map(Into::into)).await
     }
 
     #[endpoint {
@@ -1384,78 +1368,22 @@ pub trait SledAgentApi {
         operation_id = "local_storage_dataset_ensure",
         method = POST,
         path = "/local-storage",
-        versions = VERSION_TWO_TYPES_OF_DELEGATED_ZVOL..,
     }]
     async fn local_storage_dataset_ensure(
         request_context: RequestContext<Self::Context>,
         body: TypedBody<latest::dataset::LocalStorageDatasetEnsureRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
-    /// Create a local storage dataset
-    #[endpoint {
-        operation_id = "local_storage_dataset_ensure",
-        method = POST,
-        path = "/local-storage/{zpool_id}/{dataset_id}",
-        versions = ..VERSION_TWO_TYPES_OF_DELEGATED_ZVOL,
-    }]
-    async fn local_storage_dataset_ensure_v9(
-        request_context: RequestContext<Self::Context>,
-        path_params: Path<v9::dataset::LocalStoragePathParam>,
-        body: TypedBody<v9::dataset::LocalStorageDatasetEnsureRequest>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let path_params = path_params.into_inner();
-        let body = body.into_inner();
-
-        Self::local_storage_dataset_ensure(
-            request_context,
-            latest::dataset::LocalStorageDatasetEnsureRequest::from(
-                path_params.zpool_id,
-                path_params.dataset_id,
-                body,
-            )
-            .into(),
-        )
-        .await
-    }
-
     /// Delete a local storage dataset
     #[endpoint {
         operation_id = "local_storage_dataset_delete",
         method = DELETE,
         path = "/local-storage",
-        versions = VERSION_TWO_TYPES_OF_DELEGATED_ZVOL..,
     }]
     async fn local_storage_dataset_delete(
         request_context: RequestContext<Self::Context>,
         body: TypedBody<latest::dataset::LocalStorageDatasetDeleteRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
-
-    /// Delete a local storage dataset
-    #[endpoint {
-        operation_id = "local_storage_dataset_delete",
-        method = DELETE,
-        path = "/local-storage/{zpool_id}/{dataset_id}",
-        versions = ..VERSION_TWO_TYPES_OF_DELEGATED_ZVOL,
-    }]
-    async fn local_storage_dataset_delete_v9(
-        request_context: RequestContext<Self::Context>,
-        path_params: Path<v9::dataset::LocalStoragePathParam>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let path_params = path_params.into_inner();
-
-        Self::local_storage_dataset_delete(
-            request_context,
-            latest::dataset::LocalStorageDatasetDeleteRequest {
-                zpool_id: path_params.zpool_id,
-                dataset_id: path_params.dataset_id,
-                // This version of the API assumed it would be using the
-                // encrypted dataset.
-                encrypted_at_rest: true,
-            }
-            .into(),
-        )
-        .await
-    }
 
     /// Initiate a trust quorum reconfiguration
     #[endpoint {

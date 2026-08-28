@@ -27,7 +27,6 @@ pub mod bootstore {
 }
 
 pub mod dataset {
-    pub use crate::v9::dataset::LocalStoragePathParam;
     pub use crate::v17::dataset::LocalStorageDatasetDeleteRequest;
     pub use crate::v17::dataset::LocalStorageDatasetEnsureRequest;
 }

@@ -81,20 +81,6 @@ impl From<v9::instance::DelegatedZvol> for DelegatedZvol {
     }
 }
 
-impl From<v11::instance::InstanceEnsureBody> for InstanceEnsureBody {
-    fn from(v11: v11::instance::InstanceEnsureBody) -> InstanceEnsureBody {
-        InstanceEnsureBody {
-            vmm_spec: v11.vmm_spec,
-            local_config: v11.local_config.into(),
-            vmm_runtime: v11.vmm_runtime,
-            instance_id: v11.instance_id,
-            migration_id: v11.migration_id,
-            propolis_addr: v11.propolis_addr,
-            metadata: v11.metadata,
-        }
-    }
-}
-
 impl From<v11::instance::InstanceSledLocalConfig> for InstanceSledLocalConfig {
     fn from(
         v11: v11::instance::InstanceSledLocalConfig,
