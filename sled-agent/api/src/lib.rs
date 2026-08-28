@@ -13,7 +13,6 @@ use dropshot::{
 };
 use dropshot_api_manager_types::api_versions;
 use omicron_common::api::internal::{
-    nexus::DiskRuntimeState,
     shared::{
         ExternalIpGatewayMap, ResolvedVpcRouteSet, ResolvedVpcRouteState,
         SledIdentifiers, VirtualNetworkInterfaceHost,
@@ -69,7 +68,6 @@ api_versions!([
     (24, ADD_ZPOOL_HEALTH_TO_INVENTORY),
     (23, REMOVE_READ_BOOTSTORE_CONFIG_CACHE),
     (22, REMOVE_HEALTH_MONITOR_KEEP_CHECKS),
-    (21, REMOVE_DISK_PUT),
     // Versions before this have been retired. We no longer support them in any
     // server, nor expect them from any client.
 ]);
@@ -543,17 +541,6 @@ pub trait SledAgentApi {
         path_params: Path<latest::instance::VmmPathParam>,
         body: TypedBody<latest::instance::InstanceMulticastBody>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
-
-    #[endpoint {
-        method = PUT,
-        path = "/disks/{disk_id}",
-        versions = ..VERSION_REMOVE_DISK_PUT,
-    }]
-    async fn disk_put(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::disk::DiskPathParam>,
-        body: TypedBody<latest::disk::DiskEnsureBody>,
-    ) -> Result<HttpResponseOk<DiskRuntimeState>, HttpError>;
 
     #[endpoint {
         method = GET,

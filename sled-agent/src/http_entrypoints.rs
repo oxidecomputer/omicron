@@ -17,7 +17,6 @@ use dropshot::{
     Query, RequestContext, StreamingBody, TypedBody,
 };
 use omicron_common::api::external::Error;
-use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::shared::{
     ExternalIpGatewayMap, ResolvedVpcRouteSet, ResolvedVpcRouteState,
     SledIdentifiers, VirtualNetworkInterfaceHost,
@@ -40,7 +39,6 @@ use sled_agent_types::debug::OperatorSwitchZonePolicy;
 use sled_agent_types::diagnostics::{
     SledDiagnosticsLogsDownloadPathParam, SledDiagnosticsLogsDownloadQueryParam,
 };
-use sled_agent_types::disk::{DiskEnsureBody, DiskPathParam};
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::firewall_rules::VpcFirewallRulesEnsureBody;
 use sled_agent_types::instance::SledVmmState;
@@ -723,29 +721,6 @@ impl SledAgentApi for SledAgentImpl {
             .instrument_dropshot_handler(&rqctx, async {
                 sa.instance_leave_multicast_group(id, &body_args).await?;
                 Ok(HttpResponseUpdatedNoContent())
-            })
-            .await
-    }
-
-    async fn disk_put(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<DiskPathParam>,
-        body: TypedBody<DiskEnsureBody>,
-    ) -> Result<HttpResponseOk<DiskRuntimeState>, HttpError> {
-        let sa = rqctx.context();
-        let disk_id = path_params.into_inner().disk_id;
-        let body_args = body.into_inner();
-        sa.latencies()
-            .instrument_dropshot_handler(&rqctx, async {
-                Ok(HttpResponseOk(
-                    sa.disk_ensure(
-                        disk_id,
-                        body_args.initial_runtime.clone(),
-                        body_args.target.clone(),
-                    )
-                    .await
-                    .map_err(|e| Error::from(e))?,
-                ))
             })
             .await
     }
