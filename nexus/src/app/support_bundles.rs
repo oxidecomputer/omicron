@@ -13,7 +13,9 @@ use nexus_db_model::SupportBundleState;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::SupportBundleCreateParams;
+use nexus_types::external_api::support_bundle::SupportBundleDataSelection;
 use nexus_types::support_bundle::BundleDataSelection;
+use nexus_types::support_bundle::SledSelection;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -59,12 +61,45 @@ impl super::Nexus {
         Ok(db_bundle)
     }
 
+    /// Looks up a support bundle along with the data selection it was
+    /// created with.
+    pub async fn support_bundle_view_with_data_selection(
+        &self,
+        opctx: &OpContext,
+        id: SupportBundleUuid,
+    ) -> LookupResult<(SupportBundle, BundleDataSelection)> {
+        let (authz_bundle, db_bundle) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .support_bundle(id)
+                .fetch()
+                .await?;
+
+        let data_selection = self
+            .db_datastore
+            .support_bundle_data_selection_get(opctx, &authz_bundle)
+            .await?;
+
+        Ok((db_bundle, data_selection))
+    }
+
     pub async fn support_bundle_create(
         &self,
         opctx: &OpContext,
         reason: &'static str,
         user_comment: Option<String>,
+        data_selection: Option<SupportBundleDataSelection>,
     ) -> CreateResult<SupportBundle> {
+        // Authorize before validating the selection. Validation looks sleds
+        // up, and an unauthorized caller must be turned away by this check
+        // rather than by a lookup failure further in.
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
+        let data_selection = match data_selection {
+            Some(data_selection) => data_selection.try_into()?,
+            None => BundleDataSelection::all(),
+        };
+        self.support_bundle_validate_sleds(opctx, &data_selection).await?;
+
         self.db_datastore
             .support_bundle_create(
                 &opctx,
@@ -72,11 +107,39 @@ impl super::Nexus {
                     reason,
                     nexus_id: self.id,
                     user_comment,
-                    // TODO: eventually allow user-selectable data selection from the API.
-                    data_selection: BundleDataSelection::all(),
+                    data_selection,
                 },
             )
             .await
+    }
+
+    /// Rejects a selection naming a sled that does not exist.
+    ///
+    /// Without this, a mistyped UUID produces a bundle that quietly collects
+    /// nothing from that sled.
+    async fn support_bundle_validate_sleds(
+        &self,
+        opctx: &OpContext,
+        data_selection: &BundleDataSelection,
+    ) -> Result<(), Error> {
+        let Some(SledSelection::Specific(sled_ids)) =
+            data_selection.sled_selection()
+        else {
+            return Ok(());
+        };
+
+        for sled_id in sled_ids {
+            self.sled_lookup(opctx, sled_id)?
+                .lookup_for(authz::Action::Read)
+                .await
+                .map_err(|e| match e {
+                    Error::ObjectNotFound { .. } => Error::invalid_request(
+                        format!("sled {sled_id} does not exist"),
+                    ),
+                    e => e,
+                })?;
+        }
+        Ok(())
     }
 
     pub async fn support_bundle_download(

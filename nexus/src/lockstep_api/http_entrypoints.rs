@@ -881,6 +881,7 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
                     &opctx,
                     "Created by internal API",
                     create_params.user_comment,
+                    create_params.data_selection,
                 )
                 .await?;
             Ok(HttpResponseCreated(bundle.into()))

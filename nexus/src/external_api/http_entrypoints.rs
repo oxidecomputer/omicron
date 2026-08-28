@@ -8066,7 +8066,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn support_bundle_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<support_bundle::SupportBundlePath>,
-    ) -> Result<HttpResponseOk<support_bundle::SupportBundleInfo>, HttpError>
+    ) -> Result<HttpResponseOk<support_bundle::SupportBundleView>, HttpError>
     {
         let apictx = rqctx.context();
         let handler = async {
@@ -8076,14 +8076,17 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
 
-            let bundle = nexus
-                .support_bundle_view(
+            let (bundle, data_selection) = nexus
+                .support_bundle_view_with_data_selection(
                     &opctx,
                     SupportBundleUuid::from_untyped_uuid(path.bundle_id),
                 )
                 .await?;
 
-            Ok(HttpResponseOk(bundle.into()))
+            Ok(HttpResponseOk(support_bundle::SupportBundleView {
+                bundle: bundle.into(),
+                data_selection: (&data_selection).into(),
+            }))
         };
         apictx
             .context
@@ -8281,6 +8284,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                     &opctx,
                     "Created by external API",
                     create_params.user_comment,
+                    create_params.data_selection,
                 )
                 .await?;
             Ok(HttpResponseCreated(bundle.into()))
