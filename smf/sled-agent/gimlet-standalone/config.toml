@@ -87,4 +87,7 @@ enforce = "Enforced"
 
 # Support Shell (RFD 620). TODO: replace sandbox cert with prod.
 [sush]
-roots = ["/opt/oxide/sled-agent/pkg/sush-sandbox.pem"]
+roots = [
+    "/opt/oxide/sled-agent/pkg/sush-sandbox.pem",
+    "/opt/oxide/sled-agent/pkg/sush-weekend.pem",
+]
