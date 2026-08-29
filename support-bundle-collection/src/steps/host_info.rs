@@ -376,12 +376,13 @@ async fn save_zone_log_zip_or_error(
         Ok(res) => {
             let bytestream = res.into_inner();
             let output_dir = path.join(format!("logs/{zone}"));
-            let zipfile_path = output_dir.join("logs.zip");
 
-            // Ensure the logs output directory exists.
-            tokio::fs::create_dir_all(&output_dir).await.with_context(
-                || format!("failed to create output directory: {output_dir}"),
-            )?;
+            // Stream the zip somewhere outside the zone's output directory:
+            // a zone can legitimately produce an empty archive (its listing
+            // and its download race against log rotation and archival), and
+            // an empty archive must leave no trace in the bundle, not even
+            // an empty directory.
+            let zipfile_path = path.join(format!("{zone}.logs.zip.partial"));
 
             // Stream the log zip file to disk.
             let mut file =
@@ -396,7 +397,8 @@ async fn save_zone_log_zip_or_error(
             let _nbytes = tokio::io::copy(&mut reader, &mut file).await?;
             file.flush().await?;
 
-            // Unzip the log file into the same directory.
+            // Unzip the log file into the zone's output directory, unless
+            // the archive turns out to be empty.
             let zip_path = zipfile_path.clone();
             tokio::task::spawn_blocking(move || {
                 extract_zip_file(&output_dir, &zip_path)
@@ -435,6 +437,11 @@ fn extract_zip_file(
     let mut zip = std::fs::File::open(&zip_file)
         .with_context(|| format!("failed to open zip file: {zip_file}"))?;
     let mut archive = zip::ZipArchive::new(&mut zip)?;
+    // An empty archive contributes nothing to the bundle; extraction would
+    // only leave an empty directory behind.
+    if archive.is_empty() {
+        return Ok(());
+    }
     archive.extract(&output_dir).with_context(|| {
         format!("failed to extract log zip file to: {output_dir}")
     })?;
