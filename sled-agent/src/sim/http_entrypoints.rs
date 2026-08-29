@@ -49,7 +49,8 @@ use sled_agent_types::dataset::{
 };
 use sled_agent_types::debug::OperatorSwitchZonePolicy;
 use sled_agent_types::diagnostics::{
-    SledDiagnosticsLogsDownloadPathParam, SledDiagnosticsLogsDownloadQueryParam,
+    SledDiagnosticsLogZonesQueryParam, SledDiagnosticsLogsDownloadPathParam,
+    SledDiagnosticsLogsDownloadQueryParam,
 };
 use sled_agent_types::disk::{DiskEnsureBody, DiskPathParam};
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
@@ -1057,10 +1058,19 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn support_logs(
         request_context: RequestContext<Self::Context>,
+        query_params: Query<SledDiagnosticsLogZonesQueryParam>,
     ) -> Result<HttpResponseOk<Vec<String>>, HttpError> {
-        // Return the zones tests have injected logs for (empty by default).
+        // Return the zones tests have injected logs for (empty by default),
+        // limited to zones with an entry inside the requested window.
         let sa = request_context.context();
-        Ok(HttpResponseOk(sa.support_log_zones()))
+        let SledDiagnosticsLogZonesQueryParam { start_time, end_time } =
+            query_params.into_inner();
+        Ok(HttpResponseOk(sa.support_log_zones(
+            &sled_diagnostics::LogTimeWindow {
+                start: start_time,
+                end: end_time,
+            },
+        )))
     }
 
     async fn support_logs_download(

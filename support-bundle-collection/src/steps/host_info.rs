@@ -237,9 +237,22 @@ async fn collect_data_from_sled(
         }
     }
 
+    // Ask the sled-agent only for zones with log content in the bundle's
+    // time window: a sled accumulates log directories for every zone that
+    // has ever run on it, and there is no point requesting logs from zones
+    // whose files all fall outside the window.
+    //
+    // Bind with names so the positional Progenitor call below can't
+    // accidentally swap start and end: query parameters are supplied in
+    // alphabetical order, which is why "end time" comes before
+    // "start time".
+    let (start, end) = (time_range.start(), time_range.end());
     let zones = tokio::select! {
         _ = collection.cancelled() => return Ok(CollectionStepOutput::None),
-        result = sled_client.support_logs() => result?.into_inner(),
+        result = sled_client.support_logs(
+            end.as_ref(),
+            start.as_ref(),
+        ) => result?.into_inner(),
     };
 
     // For each zone we fire off a request to its sled-agent to collect

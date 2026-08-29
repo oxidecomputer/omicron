@@ -43,6 +43,8 @@ pub mod diagnostics {
     pub use crate::v1::diagnostics::SledDiagnosticsLogsDownloadPathParm;
 
     pub use crate::v51::diagnostics::SledDiagnosticsLogsDownloadQueryParam;
+
+    pub use crate::v52::diagnostics::SledDiagnosticsLogZonesQueryParam;
 }
 
 pub mod disk {

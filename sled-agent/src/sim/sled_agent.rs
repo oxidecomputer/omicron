@@ -228,9 +228,23 @@ impl SledAgent {
             .push(entry);
     }
 
-    /// Returns the names of zones with injected support logs.
-    pub(super) fn support_log_zones(&self) -> Vec<String> {
-        self.support_logs.lock().unwrap().keys().cloned().collect()
+    /// Returns the names of zones with at least one injected support log
+    /// inside `window`, mirroring the real endpoint's time filtering.
+    pub(super) fn support_log_zones(
+        &self,
+        window: &sled_diagnostics::LogTimeWindow,
+    ) -> Vec<String> {
+        self.support_logs
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, entries)| {
+                entries.iter().any(|e| {
+                    super::sim_support_logs::entry_in_window(e, window)
+                })
+            })
+            .map(|(zone, _)| zone.clone())
+            .collect()
     }
 
     pub async fn instance_register(
