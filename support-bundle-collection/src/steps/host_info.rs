@@ -447,3 +447,47 @@ fn extract_zip_file(
     })?;
     Ok(())
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use std::io::Write;
+
+    fn write_zip(path: &Utf8Path, entries: &[(&str, &str)]) {
+        let file = std::fs::File::create(path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        for (name, contents) in entries {
+            let opts: zip::write::FileOptions<'_, ()> =
+                zip::write::FileOptions::default();
+            zip.start_file(*name, opts).unwrap();
+            zip.write_all(contents.as_bytes()).unwrap();
+        }
+        zip.finish().unwrap();
+    }
+
+    #[test]
+    fn extract_zip_file_skips_empty_archives() {
+        let dir = camino_tempfile::tempdir().unwrap();
+        let zip_path = dir.path().join("logs.zip");
+        let output_dir = dir.path().join("logs/oxz_test");
+
+        // An empty archive leaves nothing behind, not even the output
+        // directory: an empty logs/<zone>/ entry would otherwise survive
+        // into the final bundle.
+        write_zip(&zip_path, &[]);
+        extract_zip_file(&output_dir, &zip_path).unwrap();
+        assert!(
+            !output_dir.exists(),
+            "empty archive must not create {output_dir}"
+        );
+
+        // A non-empty archive extracts under the output directory as usual.
+        write_zip(&zip_path, &[("svc/current/svc.log", "hello")]);
+        extract_zip_file(&output_dir, &zip_path).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(output_dir.join("svc/current/svc.log"))
+                .unwrap(),
+            "hello"
+        );
+    }
+}

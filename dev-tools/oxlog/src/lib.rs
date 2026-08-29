@@ -678,6 +678,71 @@ mod tests {
     pub use super::oxide_smf_service_name_from_log_file_name;
 
     #[test]
+    fn test_zones_with_matching_logs() {
+        use super::{DateRange, Filter, Paths, Zones};
+        use jiff::Timestamp;
+        use std::collections::BTreeMap;
+
+        let dir = camino_tempfile::tempdir().unwrap();
+        let mtime = |secs: u64| {
+            std::time::SystemTime::UNIX_EPOCH
+                + std::time::Duration::from_secs(secs)
+        };
+
+        // Three zones: one whose log was last written long ago, one
+        // written recently, and one whose only log is empty.
+        let mut zones = BTreeMap::new();
+        for (zone, mtime_secs, contents) in [
+            ("oxz_old", 1_000, "stale but real data"),
+            ("oxz_recent", 2_000_000, "fresh data"),
+            ("oxz_empty", 2_000_000, ""),
+        ] {
+            let logdir = dir.path().join(zone).join("var/svc/log");
+            std::fs::create_dir_all(&logdir).unwrap();
+            let logfile = logdir.join("oxide-svc:default.log");
+            std::fs::write(&logfile, contents).unwrap();
+            std::fs::File::open(&logfile)
+                .unwrap()
+                .set_modified(mtime(mtime_secs))
+                .unwrap();
+            zones.insert(
+                zone.to_string(),
+                Paths { primary: logdir, debug: vec![], extra: vec![] },
+            );
+        }
+        let zones = Zones { zones };
+
+        let filter = |date_range| Filter {
+            current: true,
+            archived: true,
+            extra: true,
+            show_empty: false,
+            date_range,
+        };
+        let ts = |secs| Timestamp::from_second(secs).unwrap();
+
+        // With no date range, every zone with a non-empty log matches.
+        assert_eq!(
+            zones.zones_with_matching_logs(filter(None)),
+            ["oxz_old", "oxz_recent"]
+        );
+
+        // A range covering only the recent mtime excludes the old zone.
+        let recent_only = DateRange::new(ts(3_000_000), ts(1_000_000));
+        assert_eq!(
+            zones.zones_with_matching_logs(filter(Some(recent_only))),
+            ["oxz_recent"]
+        );
+
+        // A range predating every mtime matches no zone at all.
+        let before_everything = DateRange::new(ts(900), ts(0));
+        assert_eq!(
+            zones.zones_with_matching_logs(filter(Some(before_everything))),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
     fn test_is_oxide_smf_log_file() {
         assert!(is_oxide_smf_log_file("oxide-blah:default.log"));
         assert!(is_oxide_smf_log_file("oxide-blah:default.log.0"));
