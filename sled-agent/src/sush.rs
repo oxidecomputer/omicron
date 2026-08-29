@@ -70,7 +70,7 @@ use sush_common::keys::{EphemeralKey, KeyType, pem_cert_chain};
 use sush_common::targets::{Cubbies, MAX_CUBBY};
 use sush_server::bookmark::BookmarkSource;
 use sush_server::executor::PathIsolation;
-use sush_server::gossip::{GossipConfig, isolated, spawn_gossip};
+use sush_server::gossip::{GossipConfig, isolated, lonely, spawn_gossip};
 use sush_server::link::CorpusSource;
 use sush_server::output::{JobOutputDir, OutputDirs};
 use sush_server::server::ApiServer;
@@ -215,7 +215,7 @@ pub async fn spawn_sush_tasks(
         bookmark_dirs.iter().map(|dir| dir.join("sush-bookmark")).collect(),
     );
     let listen_addr = SocketAddrV6::new(bootstrap_ip, SUSH_GOSSIP_PORT, 0, 0);
-    let universe = match spawn_gossip(
+    let (universe, linked) = match spawn_gossip(
         &log,
         GossipConfig::default(),
         sprockets,
@@ -228,14 +228,14 @@ pub async fn spawn_sush_tasks(
     )
     .await
     {
-        Ok((_, universe)) => universe,
+        Ok((_, universe, linked)) => (universe, linked),
         Err(err) => {
             warn!(
                 log,
                 "gossip disabled, this sled serves local jobs only";
                 "error" => InlineErrorChain::new(&err),
             );
-            isolated(seed_gossip(&BookmarkSource::null()).await)
+            (isolated(seed_gossip(&BookmarkSource::null()).await), lonely())
         }
     };
 
@@ -247,6 +247,7 @@ pub async fn spawn_sush_tasks(
         own_baseboard,
         rx_cubbies,
         universe,
+        linked,
         &config.roots,
         shutdown.clone(),
     )
