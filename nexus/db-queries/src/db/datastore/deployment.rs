@@ -2468,7 +2468,7 @@ impl DataStore {
             }
         }
 
-        return Ok(BpTargetPruneable {
+        Ok(BpTargetPruneable {
             nscanned,
             nfound: blueprint_ids_to_keep.len(),
             keep: KeepWhat::All,
@@ -2476,7 +2476,7 @@ impl DataStore {
                 // This should be impossible since we always have a target.
                 Error::internal_error("no bp_target rows found")
             })?,
-        });
+        })
     }
 
     /// Delete `bp_target` rows not newer than the specified version

@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Background task for pruning old blueprints
-
+//!
 //! This task prunes rows from two closely related sets of tables:
 //!
 //! - `bp_target`, the list of historical target blueprints.  At any given
@@ -297,6 +297,7 @@ async fn prune_blueprints(
         }
     };
 
+    info!(log, "finished pruning blueprints"; &details);
     Ok(details)
 }
 
@@ -342,12 +343,7 @@ impl PruneTracker {
             return ControlFlow::Break(self);
         }
 
-        match stop_reason {
-            BatchStopReason::EndOfBatch => ControlFlow::Continue(self),
-            BatchStopReason::OutOfPruneable
-            | BatchStopReason::DeleteLimit
-            | BatchStopReason::Error => ControlFlow::Break(self),
-        }
+        stop_reason.control_flow(self)
     }
 
     pub fn record_targets_deleted(mut self, count: usize) -> Self {
@@ -413,7 +409,7 @@ async fn prune_batch(
         //
         // It's okay to do this even if `prune_batch_blueprints` ran into an
         // error because its contract is that there were no errors up through
-        // `highest_deleted`.
+        // `highest_version_deleted`.
         let result = datastore
             .bp_target_delete_up_to(opctx, &pargs.pruneable, deleted_up_to)
             .await
@@ -458,6 +454,19 @@ enum BatchStopReason {
     DeleteLimit,
     /// we ran into an error
     Error,
+}
+
+impl BatchStopReason {
+    /// Wraps `value` in the `ControlFlow` variant that tells the caller whether
+    /// to proceed with another batch
+    fn control_flow<T>(self, value: T) -> ControlFlow<T, T> {
+        match self {
+            BatchStopReason::EndOfBatch => ControlFlow::Continue(value),
+            BatchStopReason::OutOfPruneable
+            | BatchStopReason::DeleteLimit
+            | BatchStopReason::Error => ControlFlow::Break(value),
+        }
+    }
 }
 
 /// Tracks the state of pruning one batch of blueprints from `bp_target`
@@ -570,18 +579,12 @@ impl BatchTracker {
         self,
         stop_reason: BatchStopReason,
     ) -> ControlFlow<BatchResult, BatchResult> {
-        let value = self.finish_value(stop_reason);
-        match stop_reason {
-            BatchStopReason::EndOfBatch => ControlFlow::Continue(value),
-            BatchStopReason::OutOfPruneable
-            | BatchStopReason::DeleteLimit
-            | BatchStopReason::Error => ControlFlow::Break(value),
-        }
+        stop_reason.control_flow(self.finish_value(stop_reason))
     }
 }
 
 /// Summarizes the result of pruning one batch of `bp_target` rows
-pub struct BatchResult {
+struct BatchResult {
     /// tracks overall operation state (actions taken, errors, etc.)
     pop: PruneTracker,
 
@@ -909,8 +912,8 @@ mod test {
                 .await
                 .expect("loaded blueprint");
 
-            // Build a new blueprint with no meaningful changes from that one.
-            // Insert it and make it the new target.
+            // Build a new blueprint with no meaningful changes from that one
+            // and insert it.  The caller decides whether to make it the target.
             let builder = BlueprintBuilder::new_based_on(
                 &opctx.log,
                 &parent_blueprint,
@@ -1260,9 +1263,9 @@ mod test {
         blueprints.verify_blueprints_referenced_by_targets();
         blueprints.verify_targets_referenced_by_blueprints();
 
-        // Trivial case: pruning at this point should do nothing, even if we
-        // choose to keep 0.  That's because we'll never remove the last few
-        // blueprints.
+        // Trivial case: with only one blueprint in the database, pruning should
+        // do nothing, even though we ask to keep only one.  We'll never remove
+        // the last few blueprints.
         let details =
             verify_prune(opctx, datastore, &mut blueprints, 1, 100).await;
         assert_eq!(details.nkept_by_policy, 1);
