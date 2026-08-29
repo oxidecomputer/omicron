@@ -639,8 +639,12 @@ async fn test_support_bundle_zone_log_time_range(
         OpContext::for_tests(cptestctx.logctx.log.clone(), datastore.clone());
 
     // Inject synthetic zone logs into the first simulated sled-agent at
-    // three ages: 30 minutes, 6 hours, and 30 days.
+    // three ages: 30 minutes, 6 hours, and 30 days. A second zone holds
+    // only the 30-day log, standing in for the many zones on a real sled
+    // (dead propolis zones especially) whose logs all predate a typical
+    // collection window.
     const ZONE: &str = "oxz_fake_test_zone";
+    const STALE_ZONE: &str = "oxz_fake_stale_zone";
     let now = chrono::Utc::now();
     let sled_agent = cptestctx.sled_agents[0].sled_agent();
     for (filename, age) in [
@@ -657,10 +661,35 @@ async fn test_support_bundle_zone_log_time_range(
             },
         );
     }
+    sled_agent.insert_support_log(
+        STALE_ZONE,
+        SimLogEntry {
+            filename: "fake-svc.log.30-days-old".to_string(),
+            contents: b"totally fake stale log data".to_vec(),
+            mtime: now - chrono::Duration::days(30),
+        },
+    );
+
+    // Names of regular files under logs/<zone>/ within the archive.
+    fn zone_log_files(names: &[String], zone: &str) -> Vec<String> {
+        let prefix = format!("logs/{zone}/");
+        names
+            .iter()
+            .filter(|name| name.contains(&prefix) && !name.ends_with('/'))
+            .cloned()
+            .collect()
+    }
+
+    // True if the archive holds any entry for the zone: a log file, or
+    // even just its (empty) directory.
+    fn has_zone_entry(names: &[String], zone: &str) -> bool {
+        let needle = format!("logs/{zone}");
+        names.iter().any(|name| name.contains(&needle))
+    }
 
     // Creates a bundle with the given window, collects it, and returns the
-    // names of the collected zone-log files.
-    async fn collect_zone_logs_with_range(
+    // names of every entry in the bundle archive.
+    async fn collect_bundle_with_range(
         cptestctx: &ControlPlaneTestContext,
         client: &ClientTestContext,
         opctx: &OpContext,
@@ -692,12 +721,7 @@ async fn test_support_bundle_zone_log_time_range(
 
         let contents = bundle_download(client, bundle.id.into()).await.unwrap();
         let archive = ZipArchive::new(Cursor::new(&contents)).unwrap();
-        let log_prefix = format!("logs/{ZONE}/");
-        let logs = archive
-            .file_names()
-            .filter(|name| name.contains(&log_prefix) && !name.ends_with('/'))
-            .map(String::from)
-            .collect();
+        let names = archive.file_names().map(String::from).collect();
 
         // Delete the bundle (and run the cleanup pass) so the next
         // collection has a free debug dataset to land on.
@@ -706,12 +730,13 @@ async fn test_support_bundle_zone_log_time_range(
             activate_bundle_collection_background_task(&cptestctx).await;
         assert_eq!(output.cleanup_err, None);
 
-        logs
+        names
     }
 
     // A 24-hour window includes the 30-minute and 6-hour logs, but not the
-    // 30-day log.
-    let logs = collect_zone_logs_with_range(
+    // 30-day log. The stale zone has nothing in the window, so it leaves
+    // no trace in the bundle: no log files, and no empty directory either.
+    let names = collect_bundle_with_range(
         &cptestctx,
         client,
         &opctx,
@@ -719,13 +744,19 @@ async fn test_support_bundle_zone_log_time_range(
             .unwrap(),
     )
     .await;
+    let logs = zone_log_files(&names, ZONE);
     assert_eq!(logs.len(), 2, "expected 2 in-window logs, got: {logs:?}");
     assert!(logs.iter().any(|l| l.ends_with("fake-svc.log.30-minutes-old")));
     assert!(logs.iter().any(|l| l.ends_with("fake-svc.log.6-hours-old")));
+    assert!(
+        !has_zone_entry(&names, STALE_ZONE),
+        "out-of-window zone should leave no bundle entry, got: {names:?}"
+    );
 
-    // A window that ends a day ago includes only the 30-day log, exercising
-    // the end bound.
-    let logs = collect_zone_logs_with_range(
+    // A window that ends a day ago includes only the 30-day logs,
+    // exercising the end bound. The stale zone's only log is now in the
+    // window, so the zone is collected.
+    let names = collect_bundle_with_range(
         &cptestctx,
         client,
         &opctx,
@@ -736,22 +767,34 @@ async fn test_support_bundle_zone_log_time_range(
         .unwrap(),
     )
     .await;
+    let logs = zone_log_files(&names, ZONE);
     assert_eq!(logs.len(), 1, "expected 1 in-window log, got: {logs:?}");
     assert!(logs.iter().any(|l| l.ends_with("fake-svc.log.30-days-old")));
+    let stale_logs = zone_log_files(&names, STALE_ZONE);
+    assert_eq!(
+        stale_logs.len(),
+        1,
+        "expected 1 in-window stale-zone log, got: {stale_logs:?}"
+    );
 
     // A window with no bounds does not collect unbounded history: bundle
     // creation fills in the default lookback as the start bound, so the
-    // 30-day log stays excluded.
-    let logs = collect_zone_logs_with_range(
+    // 30-day log stays excluded and the stale zone stays absent.
+    let names = collect_bundle_with_range(
         &cptestctx,
         client,
         &opctx,
         BundleTimeRange::new(None, None).unwrap(),
     )
     .await;
+    let logs = zone_log_files(&names, ZONE);
     assert_eq!(logs.len(), 2, "expected 2 in-lookback logs, got: {logs:?}");
     assert!(logs.iter().any(|l| l.ends_with("fake-svc.log.30-minutes-old")));
     assert!(logs.iter().any(|l| l.ends_with("fake-svc.log.6-hours-old")));
+    assert!(
+        !has_zone_entry(&names, STALE_ZONE),
+        "out-of-lookback zone should leave no bundle entry, got: {names:?}"
+    );
 }
 
 // Test range requests on a bundle

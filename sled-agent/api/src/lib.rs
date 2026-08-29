@@ -39,6 +39,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (52, FILTER_LOG_ZONE_LIST),
     (51, ADD_LOG_TIME_RANGE),
     (50, TYPED_SLED_CONFIG_GENERATION),
     (49, ADD_UPDATE_DISPOSITION),
@@ -1563,10 +1564,37 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/support/logs/zones",
+        versions = VERSION_FILTER_LOG_ZONE_LIST..,
     }]
     async fn support_logs(
         request_context: RequestContext<Self::Context>,
+        query_params: Query<
+            latest::diagnostics::SledDiagnosticsLogZonesQueryParam,
+        >,
     ) -> Result<HttpResponseOk<Vec<String>>, HttpError>;
+
+    /// This endpoint returns a list of known zones on a sled that have service
+    /// logs that can be collected into a support bundle.
+    #[endpoint {
+        operation_id = "support_logs",
+        method = GET,
+        path = "/support/logs/zones",
+        versions = ..VERSION_FILTER_LOG_ZONE_LIST,
+    }]
+    async fn support_logs_v1(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<String>>, HttpError> {
+        Self::support_logs(
+            request_context,
+            Query::from(
+                latest::diagnostics::SledDiagnosticsLogZonesQueryParam {
+                    start_time: None,
+                    end_time: None,
+                },
+            ),
+        )
+        .await
+    }
 
     /// This endpoint returns a zip file of a zone's logs organized by service.
     #[endpoint {

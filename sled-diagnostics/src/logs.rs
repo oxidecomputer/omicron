@@ -399,11 +399,26 @@ impl LogsHandle {
         }
     }
 
-    /// Get all of the zones on a sled containing logs.
-    pub fn get_zones() -> Result<Vec<String>, LogError> {
-        oxlog::Zones::load()
-            .map(|z| z.zones.into_keys().collect())
-            .map_err(|e| LogError::OxLog(e))
+    /// Get all of the zones on a sled containing logs with content in
+    /// `window`.
+    ///
+    /// This applies the same per-file predicate as
+    /// [`LogsHandle::get_zone_logs`] (oxlog's date-range filter, skipping
+    /// empty files), so a zone omitted here would only ever produce an
+    /// empty archive. The converse is not guaranteed: a listed zone can
+    /// still yield an empty archive in corner cases (such as a zone whose
+    /// only in-window file is a rotated log that was never archived), so
+    /// callers collecting from listed zones should still tolerate empty
+    /// results. This is a metadata-only scan; no ZFS snapshots are taken.
+    pub fn get_zones(window: LogTimeWindow) -> Result<Vec<String>, LogError> {
+        let zones = oxlog::Zones::load().map_err(LogError::OxLog)?;
+        Ok(zones.zones_with_matching_logs(oxlog::Filter {
+            current: true,
+            archived: true,
+            extra: true,
+            show_empty: false,
+            date_range: window.to_date_range(),
+        }))
     }
 
     async fn find_log_in_snapshot(

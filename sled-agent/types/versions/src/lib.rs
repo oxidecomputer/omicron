@@ -107,6 +107,8 @@ pub mod v49;
 pub mod v50;
 #[path = "add_log_time_range/mod.rs"]
 pub mod v51;
+#[path = "filter_log_zone_list/mod.rs"]
+pub mod v52;
 #[path = "add_probe_put_endpoint/mod.rs"]
 pub mod v6;
 #[path = "multicast_support/mod.rs"]

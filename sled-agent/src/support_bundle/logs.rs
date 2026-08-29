@@ -57,13 +57,16 @@ impl<'a> SupportBundleLogs<'a> {
     }
 
     /// Get a list of zones on a sled containing logs that we want to include in
-    /// a support bundle.
-    pub async fn zones_list(&self) -> Result<Vec<String>, Error> {
+    /// a support bundle, limited to zones with log content in `window`.
+    pub async fn zones_list(
+        &self,
+        window: sled_diagnostics::LogTimeWindow,
+    ) -> Result<Vec<String>, Error> {
         tokio::task::spawn_blocking(move || {
             // We rely on sled-diagnostics to tell us about zones because other
             // methods within sled-agent usually do some sort of filtering and
             // we want all logs, even those in the global zone.
-            sled_diagnostics::LogsHandle::get_zones()
+            sled_diagnostics::LogsHandle::get_zones(window)
         })
         .await
         .map_err(Error::Join)?
