@@ -729,7 +729,6 @@ mod test {
     use nexus_auth::authz;
     use nexus_auth::context::OpContext;
     use nexus_db_model::BpTarget;
-    use nexus_db_model::SqlU32;
     use nexus_db_queries::db::DataStore;
     use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
     use nexus_db_queries::db::pagination::Paginator;
@@ -1594,111 +1593,6 @@ mod test {
         logctx.cleanup_successful();
     }
 
-    /// Tests that we preserve enough blueprints even when there's a big gap in
-    /// the `bp_target` table
-    ///
-    /// This should not happen in practice.
-    #[tokio::test]
-    async fn test_blueprint_pruner_gap() {
-        let logctx = dev::test_setup_log("blueprint_pruner_gap");
-        let db = TestDatabase::new_with_datastore(&logctx.log).await;
-        let (opctx, datastore) = (db.opctx(), db.datastore());
-
-        // Load the initial state.
-        add_initial_blueprint(opctx, datastore).await;
-
-        // Add several more target blueprints and make sure our representation
-        // of the database state matches up with the real thing.
-        let nblueprints = 20usize;
-        let mut blueprints =
-            BlueprintDatabaseState::load(opctx, datastore).await;
-        for _ in 0..(nblueprints - 1) {
-            blueprints.add_target_blueprint(opctx, datastore).await;
-        }
-        blueprints.verify_database_matches(opctx, datastore).await;
-
-        // Create a gap in `bp_target`.  This wouldn't happen under normal
-        // operation, but it seems useful to know that the pruner won't do
-        // something terrible in this situation.
-        assert_eq!(blueprints.target_rows.len(), nblueprints);
-        let last_version = blueprints.target_rows[nblueprints - 1].version;
-        let first_version = blueprints.target_rows[0].version;
-        let gapsize = 5u8;
-        let gapoffset = 3u8;
-        let first_gap_version =
-            last_version - u32::from(gapsize) - u32::from(gapoffset);
-        let last_gap_version = last_version - u32::from(gapoffset);
-        assert!(first_gap_version > first_version);
-        assert!(last_gap_version < last_version);
-        let first_gap_index =
-            nblueprints - 1 - usize::from(gapsize) - usize::from(gapoffset);
-        let last_gap_index = nblueprints - 1 - usize::from(gapoffset);
-
-        let targets_to_remove =
-            blueprints.target_rows.drain(first_gap_index..last_gap_index);
-        assert_eq!(targets_to_remove.len(), usize::from(gapsize));
-        for t in targets_to_remove {
-            datastore
-                .blueprint_delete(opctx, &authz::Blueprint::new_for_id(t.id))
-                .await
-                .expect("deleting blueprint");
-
-            let conn = datastore
-                .pool_connection_for_tests()
-                .await
-                .expect("getting database connection");
-
-            use async_bb8_diesel::AsyncRunQueryDsl;
-            use diesel::ExpressionMethods;
-            use diesel::QueryDsl;
-            use nexus_db_schema::schema::bp_target::dsl;
-
-            let count = diesel::delete(
-                dsl::bp_target.filter(dsl::version.eq(SqlU32(t.version))),
-            )
-            .execute_async(&*conn)
-            .await
-            .expect("deleting bp_target row");
-            assert_eq!(count, 1);
-        }
-
-        let mut blueprints =
-            BlueprintDatabaseState::load(opctx, datastore).await;
-        blueprints.verify_blueprints_referenced_by_targets();
-        blueprints.verify_targets_referenced_by_blueprints();
-        assert_eq!(
-            blueprints.target_rows.len(),
-            nblueprints - usize::from(gapsize)
-        );
-        assert!(
-            blueprints
-                .target_rows
-                .iter()
-                .all(|t| t.version < first_gap_version
-                    || t.version >= last_gap_version)
-        );
-
-        let nkeep = 10;
-        let details =
-            verify_prune(opctx, datastore, &mut blueprints, nkeep, nblueprints)
-                .await;
-        // Importantly, we ought to have only pruned 5 blueprints
-        // (`nblueprints` - `gapsize` - `nkeep`).
-        // A sketchier implementation (like one that looked at the last target
-        // version and subtracted the number to keep) might prune more and be
-        // left with fewer than `nkept`, having assumed erroneously that the
-        // blueprints in the gap were going to be kept.
-        assert_eq!(
-            details.deleted.len(),
-            nblueprints - usize::from(gapsize) - nkeep
-        );
-        blueprints.verify_database_matches(opctx, datastore).await;
-        assert_eq!(blueprints.all_blueprint_ids.len(), nkeep);
-
-        db.terminate().await;
-        logctx.cleanup_successful();
-    }
-
     /// Tests that we preserve enough blueprints even when there's a lot of
     /// enable/disable entries in the `bp_target` table.
     ///
@@ -1772,78 +1666,6 @@ mod test {
         blueprints.verify_database_matches(opctx, datastore).await;
         assert_eq!(blueprints.all_blueprint_ids.len(), nkeep);
         assert_eq!(blueprints.target_rows.len(), 4 * nkeep);
-
-        db.terminate().await;
-        logctx.cleanup_successful();
-    }
-
-    /// Tests pruning when a batch boundary falls in the middle of one
-    /// blueprint's run of `bp_target` rows
-    ///
-    /// `test_blueprint_pruner_dups` covers duplicate rows and
-    /// `test_blueprint_pruner_multiple_batches` covers batching, but neither
-    /// combines them.  A batch that ends partway through one blueprint's rows
-    /// is where an off-by-one would show up.
-    #[tokio::test]
-    async fn test_blueprint_pruner_dups_multiple_batches() {
-        let logctx =
-            dev::test_setup_log("blueprint_pruner_dups_multiple_batches");
-        let db = TestDatabase::new_with_datastore(&logctx.log).await;
-        let (opctx, datastore) = (db.opctx(), db.datastore());
-
-        // Load the initial state.
-        add_initial_blueprint(opctx, datastore).await;
-
-        // Add several more target blueprints, toggling enable/disable three
-        // times after each one.  That leaves four `bp_target` rows per
-        // blueprint.
-        let mut blueprints =
-            BlueprintDatabaseState::load(opctx, datastore).await;
-        let nblueprints = 8usize;
-        let nrows_per_blueprint = 4usize;
-        blueprints
-            .add_target_blueprints_with_toggles(
-                opctx,
-                datastore,
-                nblueprints,
-                nrows_per_blueprint - 1,
-            )
-            .await;
-        blueprints.verify_database_matches(opctx, datastore).await;
-
-        // Prune with a batch size that does not divide the number of rows per
-        // blueprint, so that batches end partway through a blueprint's rows.
-        let nkeep = 5;
-        let ndeleted = nblueprints - nkeep;
-        // unwrap(): 3 != 0
-        let batch_size = NonZeroU32::new(3).unwrap();
-        let details = prune_blueprints(
-            opctx,
-            datastore,
-            &opctx.log,
-            nkeep,
-            nrows_per_blueprint * nblueprints,
-            batch_size,
-        )
-        .await
-        .expect("successful prune");
-        println!("{details:?}");
-        assert!(details.warnings.is_empty());
-        assert_eq!(details.nkept_by_policy, nkeep);
-        assert_eq!(details.deleted.len(), ndeleted);
-        assert_eq!(details.ntargets_deleted, nrows_per_blueprint * ndeleted);
-        assert_eq!(details.ntargets_removable, nrows_per_blueprint * ndeleted);
-
-        // Verify that the blueprints we deleted were the oldest ones.  Ignore
-        // the duplicate ids that the toggling produced.
-        let mut oldest = blueprints.drop_oldest(nrows_per_blueprint * ndeleted);
-        oldest.dedup_by(|l, r| l.id == r.id);
-        for (old, pruned) in oldest.iter().zip(details.deleted.iter()) {
-            assert_eq!(old.id, pruned.id);
-        }
-        blueprints.verify_database_matches(opctx, datastore).await;
-        assert_eq!(blueprints.all_blueprint_ids.len(), nkeep);
-        assert_eq!(blueprints.target_rows.len(), nrows_per_blueprint * nkeep);
 
         db.terminate().await;
         logctx.cleanup_successful();

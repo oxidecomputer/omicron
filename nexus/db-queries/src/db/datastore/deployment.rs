@@ -4937,7 +4937,8 @@ mod tests {
     ///
     /// This is the query that decides how much of the history the blueprint
     /// pruner may delete, so the cases that matter most are the ones where it
-    /// should decide to keep everything and the boundary around `nkeep`.
+    /// should decide to keep everything, the boundary around `nkeep`, and a
+    /// history with a gap in the version sequence.
     #[tokio::test]
     async fn test_bp_target_determine_pruneable() {
         let logctx = dev::test_setup_log("test_bp_target_determine_pruneable");
@@ -5025,6 +5026,59 @@ mod tests {
             // discover that we've found `nkeep` distinct blueprints.
             assert_eq!(pruneable.nscanned, nkeep + 1);
             assert_eq!(pruneable.target_id, blueprint_ids[nblueprints - 1]);
+        }
+
+        // Punch a gap in the version sequence and check that we still keep
+        // `nkeep` blueprints.  This should not happen under normal operation.
+        // But an implementation that subtracted `nkeep` from the latest
+        // version, instead of counting the rows it actually saw, would decide
+        // to keep too few here.
+        let gap_start = 3;
+        let gap_size = 4;
+        let gap_versions: Vec<u32> = rows[gap_start..gap_start + gap_size]
+            .iter()
+            .map(|r| *r.version)
+            .collect();
+        {
+            use nexus_db_schema::schema::bp_target::dsl;
+            let conn = datastore
+                .pool_connection_for_tests()
+                .await
+                .expect("getting database connection");
+            let ndeleted = diesel::delete(
+                dsl::bp_target.filter(
+                    dsl::version
+                        .eq_any(gap_versions.iter().copied().map(SqlU32::new)),
+                ),
+            )
+            .execute_async(&*conn)
+            .await
+            .expect("deleting bp_target rows");
+            assert_eq!(ndeleted, gap_size);
+        }
+
+        let mut remaining_ids = blueprint_ids;
+        remaining_ids.drain(gap_start..gap_start + gap_size);
+        let nremaining = nblueprints - gap_size;
+        let rows = all_bp_target_rows(opctx, datastore).await;
+        assert_eq!(rows.len(), nremaining);
+
+        for nkeep in 1..nremaining {
+            let pruneable = datastore
+                .bp_target_determine_pruneable(opctx, nonzero(nkeep))
+                .await
+                .expect("determining pruneable rows");
+            let oldest_kept = remaining_ids[nremaining - nkeep];
+            assert_eq!(
+                pruneable.keep,
+                KeepWhat::StartingFromVersion(first_version_for(
+                    &rows,
+                    oldest_kept
+                ))
+            );
+            assert_eq!(pruneable.nfound, nkeep);
+            assert_eq!(pruneable.nscanned, nkeep + 1);
+            assert_eq!(pruneable.target_id, remaining_ids[nremaining - 1]);
         }
 
         db.terminate().await;
