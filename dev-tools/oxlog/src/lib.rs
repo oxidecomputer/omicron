@@ -504,6 +504,21 @@ impl Zones {
             .map(|(zone, _)| self.zone_logs(zone, filter))
             .collect()
     }
+
+    /// Return the names of zones with at least one log file matching
+    /// `filter`, in sorted order.
+    ///
+    /// A zone appears here exactly when [`Self::zone_logs`] with the same
+    /// filter would return at least one file for it, so callers can use
+    /// this to skip zones whose per-zone log retrieval would come back
+    /// empty.
+    pub fn zones_with_matching_logs(&self, filter: Filter) -> Vec<ZoneName> {
+        self.zones
+            .par_iter()
+            .filter(|(zone, _)| !self.zone_logs(zone, filter).is_empty())
+            .map(|(zone, _)| zone.clone())
+            .collect()
+    }
 }
 
 fn sort_logs(output: &mut BTreeMap<String, SvcLogs>) {
