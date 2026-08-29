@@ -98,10 +98,12 @@ impl super::Nexus {
         rack_id: &RackUuid,
         log: &Logger,
     ) -> Result<TcpStream, Error> {
-        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
-        // The lookup only validates existence: like lldpd_clients, we
-        // assume the single rack is ours (omicron#1276).
+        // The lookup comes first so an unauthorized caller gets the
+        // same 404 as for a rack that does not exist. It otherwise
+        // only validates existence: like lldpd_clients, we assume the
+        // single rack is ours (omicron#1276).
         self.rack_lookup(opctx, rack_id).await?;
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let proxy_addrs =
             switch_zone_address_mappings(&self.internal_resolver, log)
                 .await

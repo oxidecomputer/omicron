@@ -1756,6 +1756,11 @@ pub enum AllowedMethod {
     GetVolatile,
     /// HTTP "GET" method with websocket handshake headers.
     GetWebsocket,
+    /// HTTP "GET" method with websocket handshake headers, for an
+    /// endpoint that tunnels to a service the test environment does
+    /// not run. Privileged requests are expected to fail with 503
+    /// after authorization, rather than upgrade.
+    GetWebsocketUnavailable,
     /// HTTP "HEAD" method
     #[allow(dead_code)]
     Head,
@@ -1783,7 +1788,8 @@ impl AllowedMethod {
             | AllowedMethod::GetNonexistent
             | AllowedMethod::GetUnimplemented
             | AllowedMethod::GetVolatile
-            | AllowedMethod::GetWebsocket => &Method::GET,
+            | AllowedMethod::GetWebsocket
+            | AllowedMethod::GetWebsocketUnavailable => &Method::GET,
             AllowedMethod::Head | AllowedMethod::HeadNonexistent => {
                 &Method::HEAD
             }
@@ -1805,6 +1811,7 @@ impl AllowedMethod {
             | AllowedMethod::GetUnimplemented
             | AllowedMethod::GetVolatile
             | AllowedMethod::GetWebsocket
+            | AllowedMethod::GetWebsocketUnavailable
             | AllowedMethod::Head
             | AllowedMethod::HeadNonexistent => None,
             AllowedMethod::Post(body) => Some(&body),
@@ -2964,7 +2971,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 url: &HARDWARE_RACK_SUPPORT_SHELL_TUNNEL_URL,
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
-                allowed_methods: vec![AllowedMethod::GetWebsocket],
+                allowed_methods: vec![AllowedMethod::GetWebsocketUnavailable],
             },
             VerifyEndpoint {
                 url: &HARDWARE_RACK_MEMBERSHIP_URL,
