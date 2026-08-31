@@ -16,10 +16,10 @@ use daft::Diffable;
 use iddqd::IdOrdItem;
 use iddqd::id_upcast;
 use indent_write::fmt::IndentWriter;
-use omicron_common::api::external::Generation;
 use omicron_common::policy::BOUNDARY_NTP_REDUNDANCY;
 use omicron_common::policy::COCKROACHDB_REDUNDANCY;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
+use omicron_generation_kinds::NexusGeneration;
 use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -1602,7 +1602,7 @@ impl fmt::Display for ZoneUnsafeToShutdown {
 #[serde(rename_all = "snake_case", tag = "type")]
 #[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum ZoneWaitingToExpunge {
-    Nexus { zone_generation: Generation },
+    Nexus { zone_generation: NexusGeneration },
 }
 
 impl fmt::Display for ZoneWaitingToExpunge {
@@ -1633,7 +1633,7 @@ pub enum PlanningNexusGenerationBumpReport {
     WaitingOn(NexusGenerationBumpWaitingOn),
 
     /// We are bumping the Nexus generation number to this value.
-    BumpingGeneration(Generation),
+    BumpingGeneration(NexusGeneration),
 }
 
 impl PlanningNexusGenerationBumpReport {
@@ -1649,7 +1649,7 @@ impl PlanningNexusGenerationBumpReport {
         *self = Self::WaitingOn(why);
     }
 
-    pub fn set_next_generation(&mut self, next_generation: Generation) {
+    pub fn set_next_generation(&mut self, next_generation: NexusGeneration) {
         *self = Self::BumpingGeneration(next_generation);
     }
 }

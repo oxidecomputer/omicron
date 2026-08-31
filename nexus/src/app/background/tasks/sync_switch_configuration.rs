@@ -636,8 +636,8 @@ fn does_bootstore_need_update(
 mod tests {
     use super::*;
     use iddqd::IdOrdMap;
-    use omicron_common::api::external::Generation;
     use omicron_common::api::external::Vni;
+    use omicron_generation_kinds::Generation;
     use omicron_test_utils::dev::test_setup_log;
     use sled_agent_types::early_networking::PortConfig;
     use sled_agent_types::early_networking::UplinkPorts;

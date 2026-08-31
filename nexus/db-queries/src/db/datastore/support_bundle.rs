@@ -970,7 +970,7 @@ mod test {
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::LookupType;
     use omicron_common::api::internal::shared::DatasetKind::Debug as DebugDatasetKind;
-    use omicron_generation_kinds::AlertGeneration;
+    use omicron_generation_kinds::{AlertGeneration, SledConfigGeneration};
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::DatasetUuid;
@@ -1599,7 +1599,7 @@ mod test {
             for mut zone in &mut sled.zones {
                 if zone.id == bundle.assigned_nexus.unwrap().into() {
                     zone.disposition = BlueprintZoneDisposition::Expunged {
-                        as_of_generation: *Generation::new(),
+                        as_of_generation: SledConfigGeneration::new(),
                         ready_for_cleanup: true,
                     };
                 }

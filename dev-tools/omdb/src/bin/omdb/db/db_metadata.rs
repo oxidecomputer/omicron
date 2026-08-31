@@ -17,7 +17,7 @@ use nexus_db_model::DbMetadataNexusState;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
-use omicron_common::api::external::Generation;
+use omicron_generation_kinds::NexusGeneration;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use std::collections::BTreeMap;
@@ -88,8 +88,8 @@ struct DbMetadataNexusRow {
 }
 
 fn get_intended_nexus_state(
-    bp_nexus_generation: Generation,
-    bp_nexus_generation_by_zone: &BTreeMap<OmicronZoneUuid, Generation>,
+    bp_nexus_generation: NexusGeneration,
+    bp_nexus_generation_by_zone: &BTreeMap<OmicronZoneUuid, NexusGeneration>,
     id: OmicronZoneUuid,
 ) -> Option<DbMetadataNexusState> {
     let Some(generation) = bp_nexus_generation_by_zone.get(&id) else {

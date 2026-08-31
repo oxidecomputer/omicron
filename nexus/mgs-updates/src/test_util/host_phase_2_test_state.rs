@@ -200,7 +200,6 @@ mod api_impl {
     use dropshot::StreamingBody;
     use dropshot::TypedBody;
     use iddqd::IdOrdMap;
-    use omicron_common::api::external::Generation;
     use omicron_common::api::internal::nexus::DiskRuntimeState;
     use omicron_common::api::internal::shared::ExternalIpGatewayMap;
     use omicron_common::api::internal::shared::SledIdentifiers;
@@ -208,6 +207,7 @@ mod api_impl {
     use omicron_common::api::internal::shared::{
         ResolvedVpcRouteSet, ResolvedVpcRouteState,
     };
+    use omicron_generation_kinds::SledConfigGeneration;
     use sled_agent_types::artifact::ArtifactConfig;
     use sled_agent_types::artifact::ArtifactCopyFromDepotBody;
     use sled_agent_types::artifact::ArtifactCopyFromDepotResponse;
@@ -250,6 +250,7 @@ mod api_impl {
     use sled_agent_types::inventory::MupdateOverrideInventory;
     use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
     use sled_agent_types::inventory::OmicronSledConfig;
+    use sled_agent_types::inventory::OmicronSledUpdateDisposition;
     use sled_agent_types::inventory::SledCpuFamily;
     use sled_agent_types::inventory::SledRole;
     use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
@@ -345,7 +346,7 @@ mod api_impl {
             // The rest of the inventory fields are irrelevant; fill them in
             // with something quasi-reasonable (or empty, if we can).
             let config = OmicronSledConfig {
-                generation: Generation::new(),
+                generation: SledConfigGeneration::new(),
                 disks: IdOrdMap::new(),
                 datasets: IdOrdMap::new(),
                 zones: IdOrdMap::new(),
@@ -355,6 +356,7 @@ mod api_impl {
                     slot_b: HostPhase2DesiredContents::CurrentContents,
                 },
                 measurements: BTreeSet::new(),
+                update_disposition: OmicronSledUpdateDisposition::Available,
             };
 
             Ok(HttpResponseOk(Inventory {

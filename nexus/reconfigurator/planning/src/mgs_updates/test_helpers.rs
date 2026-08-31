@@ -26,7 +26,7 @@ use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::SpType;
 use nexus_types::tuf_repo::TufRepoDescription;
-use omicron_common::api::external::Generation;
+use omicron_generation_kinds::SledConfigGeneration;
 use omicron_uuid_kinds::SledUuid;
 use sled_agent_types::disk::M2Slot;
 use sled_agent_types::inventory::BootImageHeader;
@@ -39,6 +39,7 @@ use sled_agent_types::inventory::HostPhase2DesiredSlots;
 use sled_agent_types::inventory::Inventory;
 use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
 use sled_agent_types::inventory::OmicronSledConfig;
+use sled_agent_types::inventory::OmicronSledUpdateDisposition;
 use sled_agent_types::inventory::SledCpuFamily;
 use sled_agent_types::inventory::SledRole;
 use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
@@ -1247,13 +1248,14 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                     )
                     .unwrap();
                 let fake_sled_config = OmicronSledConfig {
-                    generation: Generation::new(),
+                    generation: SledConfigGeneration::new(),
                     disks: IdOrdMap::new(),
                     datasets: IdOrdMap::new(),
                     zones: IdOrdMap::new(),
                     remove_mupdate_override: None,
                     host_phase_2: HostPhase2DesiredSlots::current_contents(),
                     measurements: BTreeSet::new(),
+                    update_disposition: OmicronSledUpdateDisposition::Available,
                 };
 
                 // The only sled-agent fields that matter for the purposes of

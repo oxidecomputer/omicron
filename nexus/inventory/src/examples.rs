@@ -27,6 +27,7 @@ use omicron_cockroach_metrics::PrometheusMetrics;
 use omicron_common::api::external::ByteCount;
 use omicron_common::disk::DatasetKind;
 use omicron_common::disk::DatasetName;
+use omicron_generation_kinds::{GenericGeneration, SledConfigGeneration};
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -59,6 +60,7 @@ use sled_agent_types::inventory::InventoryDisk;
 use sled_agent_types::inventory::InventoryZpool;
 use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
 use sled_agent_types::inventory::OmicronSledConfig;
+use sled_agent_types::inventory::OmicronSledUpdateDisposition;
 use sled_agent_types::inventory::OmicronZonesConfig;
 use sled_agent_types::inventory::OrphanedDataset;
 use sled_agent_types::inventory::SingleMeasurementInventory;
@@ -406,31 +408,40 @@ pub fn representative() -> Representative {
     // Convert these to `OmicronSledConfig`s. We'll start with empty disks and
     // datasets for now, and add to them below for sled14.
     let mut sled14 = OmicronSledConfig {
-        generation: sled14.generation,
+        generation: SledConfigGeneration::from_untyped_generation(
+            sled14.generation,
+        ),
         disks: Default::default(),
         datasets: Default::default(),
         zones: sled14.zones.into_iter().collect(),
         remove_mupdate_override: None,
         host_phase_2: HostPhase2DesiredSlots::current_contents(),
         measurements: Default::default(),
+        update_disposition: OmicronSledUpdateDisposition::Available,
     };
     let sled16 = OmicronSledConfig {
-        generation: sled16.generation,
+        generation: SledConfigGeneration::from_untyped_generation(
+            sled16.generation,
+        ),
         disks: Default::default(),
         datasets: Default::default(),
         zones: sled16.zones.into_iter().collect(),
         remove_mupdate_override: None,
         host_phase_2: HostPhase2DesiredSlots::current_contents(),
         measurements: Default::default(),
+        update_disposition: OmicronSledUpdateDisposition::Available,
     };
     let sled17 = OmicronSledConfig {
-        generation: sled17.generation,
+        generation: SledConfigGeneration::from_untyped_generation(
+            sled17.generation,
+        ),
         disks: Default::default(),
         datasets: Default::default(),
         zones: sled17.zones.into_iter().collect(),
         remove_mupdate_override: None,
         host_phase_2: HostPhase2DesiredSlots::current_contents(),
         measurements: Default::default(),
+        update_disposition: OmicronSledUpdateDisposition::Evacuating,
     };
 
     // Create iterator producing fixed IDs.
