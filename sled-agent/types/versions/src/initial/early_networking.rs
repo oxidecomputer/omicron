@@ -7,60 +7,7 @@
 use oxnet::IpNet;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::net::{IpAddr, Ipv4Addr};
-
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
-pub struct BgpPeerConfig {
-    /// The autonomous system number of the router the peer belongs to.
-    pub asn: u32,
-    /// Switch port the peer is reachable on.
-    pub port: String,
-    /// Address of the peer. Use `Ipv4Addr::UNSPECIFIED` to indicate an
-    /// unnumbered BGP session established over the interface specified by
-    /// `port`.
-    pub addr: Ipv4Addr,
-    /// How long to keep a session alive without a keepalive in seconds.
-    /// Defaults to 6.
-    pub hold_time: Option<u64>,
-    /// How long to keep a peer in idle after a state machine reset in seconds.
-    pub idle_hold_time: Option<u64>,
-    /// How long to delay sending open messages to a peer. In seconds.
-    pub delay_open: Option<u64>,
-    /// The interval in seconds between peer connection retry attempts.
-    pub connect_retry: Option<u64>,
-    /// The interval to send keepalive messages at.
-    pub keepalive: Option<u64>,
-    /// Require that a peer has a specified ASN.
-    #[serde(default)]
-    pub remote_asn: Option<u32>,
-    /// Require messages from a peer have a minimum IP time to live field.
-    #[serde(default)]
-    pub min_ttl: Option<u8>,
-    /// Use the given key for TCP-MD5 authentication with the peer.
-    #[serde(default)]
-    pub md5_auth_key: Option<String>,
-    /// Apply the provided multi-exit discriminator (MED) updates sent to the peer.
-    #[serde(default)]
-    pub multi_exit_discriminator: Option<u32>,
-    /// Include the provided communities in updates sent to the peer.
-    #[serde(default)]
-    pub communities: Vec<u32>,
-    /// Apply a local preference to routes received from this peer.
-    #[serde(default)]
-    pub local_pref: Option<u32>,
-    /// Enforce that the first AS in paths received from this peer is the peer's AS.
-    #[serde(default)]
-    pub enforce_first_as: bool,
-    /// Define import policy for a peer.
-    #[serde(default)]
-    pub allowed_import: ImportExportPolicy,
-    /// Define export policy for a peer.
-    #[serde(default)]
-    pub allowed_export: ImportExportPolicy,
-    /// Associate a VLAN ID with a BGP peer session.
-    #[serde(default)]
-    pub vlan_id: Option<u16>,
-}
+use std::net::IpAddr;
 
 #[derive(
     Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Hash, JsonSchema,
