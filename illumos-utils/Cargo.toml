@@ -30,6 +30,7 @@ libc.workspace = true
 macaddr.workspace = true
 nix.workspace = true
 omicron-common.workspace = true
+omicron-generation-kinds.workspace = true
 omicron-uuid-kinds.workspace = true
 oxide-vpc.workspace = true
 oxlog.workspace = true

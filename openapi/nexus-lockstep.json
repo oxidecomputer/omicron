@@ -2126,7 +2126,7 @@
             "description": "The generation of the active group of Nexuses\n\nIf a Nexus instance notices it has a nexus_generation less than this value, it will start to quiesce in preparation for handing off control to the newer generation (see: RFD 588).",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Generation"
+                "$ref": "#/components/schemas/NexusGeneration"
               }
             ]
           },
@@ -2182,7 +2182,7 @@
             "description": "The minimum release generation to accept for target release configuration. Target release configuration with a generation less than this number will be ignored.\n\nFor example, let's say that the current target release generation is 5. Then, when reconfigurator detects a MUPdate:\n\n* the target release is ignored in favor of the install dataset * this field is set to 6\n\nOnce an operator sets a new target release, its generation will be 6 or higher. Reconfigurator will then know that it is back in charge of driving the system to the target release.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Generation"
+                "$ref": "#/components/schemas/TargetReleaseGeneration"
               }
             ]
           },
@@ -2496,7 +2496,7 @@
             "description": "The Nexus generation number\n\nSee [`Blueprint::nexus_generation`].",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Generation"
+                "$ref": "#/components/schemas/NexusGeneration"
               }
             ]
           },
@@ -2521,7 +2521,7 @@
             "description": "The minimum generation for the target release.\n\nSee [`Blueprint::target_release_minimum_generation`].",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Generation"
+                "$ref": "#/components/schemas/TargetReleaseGeneration"
               }
             ]
           },
@@ -2616,7 +2616,7 @@
                 "description": "Generation of the parent config in which this disk became expunged.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/Generation"
+                    "$ref": "#/components/schemas/SledConfigGeneration"
                   }
                 ]
               },
@@ -2719,7 +2719,7 @@
             "description": "Generation number used when this type is converted into an `OmicronSledConfig` for use by sled-agent.\n\nThis field is explicitly named `sled_agent_generation` to indicate that it is only required to cover information that changes what Reconfigurator sends to sled agent. For example, changing the sled `state` from `Active` to `Decommissioned` would not require a bump to `sled_agent_generation`, because a `Decommissioned` sled will never be sent an `OmicronSledConfig`.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Generation"
+                "$ref": "#/components/schemas/SledConfigGeneration"
               }
             ]
           },
@@ -2772,7 +2772,7 @@
             "description": "A generation number bumped whenever `kind` changes.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Generation"
+                "$ref": "#/components/schemas/UpdateDispositionGeneration"
               }
             ]
           },
@@ -3071,7 +3071,7 @@
                 "description": "Generation of the parent config in which this zone became expunged.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/Generation"
+                    "$ref": "#/components/schemas/SledConfigGeneration"
                   }
                 ]
               },
@@ -3455,7 +3455,7 @@
                 "description": "Generation number for this Nexus zone. This is used to coordinate handoff between old and new Nexus instances during updates. See RFD 588.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/Generation"
+                    "$ref": "#/components/schemas/NexusGeneration"
                   }
                 ]
               },
@@ -6612,6 +6612,17 @@
         "description": "Password hashes must be in PHC (Password Hashing Competition) string format.  Passwords must be hashed with Argon2id.  Password hashes may be rejected if the parameters appear not to be secure enough.",
         "type": "string"
       },
+      "NexusGeneration": {
+        "description": "Generation numbers stored in the database, used for optimistic concurrency control",
+        "x-rust-type": {
+          "crate": "omicron-generation-kinds",
+          "path": "omicron_generation_kinds::NexusGeneration",
+          "version": "*"
+        },
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0
+      },
       "NexusGenerationBumpWaitingOn": {
         "oneOf": [
           {
@@ -7949,7 +7960,7 @@
                 ]
               },
               "value": {
-                "$ref": "#/components/schemas/Generation"
+                "$ref": "#/components/schemas/NexusGeneration"
               }
             },
             "required": [
@@ -9680,6 +9691,17 @@
           "zones"
         ]
       },
+      "SledConfigGeneration": {
+        "description": "Generation numbers stored in the database, used for optimistic concurrency control",
+        "x-rust-type": {
+          "crate": "omicron-generation-kinds",
+          "path": "omicron_generation_kinds::SledConfigGeneration",
+          "version": "*"
+        },
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0
+      },
       "SledPolicy": {
         "description": "The operator-defined policy of a sled.",
         "oneOf": [
@@ -9999,6 +10021,17 @@
           }
         ]
       },
+      "TargetReleaseGeneration": {
+        "description": "Generation numbers stored in the database, used for optimistic concurrency control",
+        "x-rust-type": {
+          "crate": "omicron-generation-kinds",
+          "path": "omicron_generation_kinds::TargetReleaseGeneration",
+          "version": "*"
+        },
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0
+      },
       "TrustQuorumConfig": {
         "type": "object",
         "properties": {
@@ -10297,6 +10330,17 @@
           "waited_for_concurrent_update",
           "took_over_concurrent_update"
         ]
+      },
+      "UpdateDispositionGeneration": {
+        "description": "Generation numbers stored in the database, used for optimistic concurrency control",
+        "x-rust-type": {
+          "crate": "omicron-generation-kinds",
+          "path": "omicron_generation_kinds::UpdateDispositionGeneration",
+          "version": "*"
+        },
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0
       },
       "UpdateStatus": {
         "type": "object",
@@ -10685,7 +10729,7 @@
                 ]
               },
               "zone_generation": {
-                "$ref": "#/components/schemas/Generation"
+                "$ref": "#/components/schemas/NexusGeneration"
               }
             },
             "required": [

@@ -257,8 +257,8 @@ pub mod multicast {
     pub use crate::v2026_03_14_00::multicast::MulticastGroupCreate;
     pub use crate::v2026_03_14_00::multicast::MulticastGroupUpdate;
 
-    pub use crate::v2026_08_20_02::multicast::MulticastGroupMember;
-    pub use crate::v2026_08_20_02::multicast::MulticastGroupMemberParentKind;
+    pub use crate::v2026_08_31_02::multicast::MulticastGroupMember;
+    pub use crate::v2026_08_31_02::multicast::MulticastGroupMemberParentKind;
 
     pub use crate::impls::multicast::validate_multicast_ip;
     pub use crate::impls::multicast::validate_source_ip;
@@ -366,7 +366,7 @@ pub mod probe {
 
     pub use crate::v2026_01_03_00::probe::ProbeInfo;
 
-    pub use crate::v2026_08_20_02::probe::ProbeCreate;
+    pub use crate::v2026_08_31_02::probe::ProbeCreate;
 }
 
 pub mod project {

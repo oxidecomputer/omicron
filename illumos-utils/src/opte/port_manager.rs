@@ -32,6 +32,7 @@ use omicron_common::api::internal::shared::RouterKind;
 use omicron_common::api::internal::shared::RouterTarget as ApiRouterTarget;
 use omicron_common::api::internal::shared::RouterVersion;
 use omicron_common::api::internal::shared::VirtualNetworkInterfaceHost;
+use omicron_generation_kinds::Generation;
 use oxide_vpc::api::AddRouterEntryReq;
 use oxide_vpc::api::AttachedSubnetConfig;
 use oxide_vpc::api::ClearMcast2PhysReq;
@@ -336,20 +337,20 @@ struct EipGatewayState {
     /// IGW IDs are specific to the VPC of each NIC.
     mappings: HashMap<Uuid, HashMap<IpAddr, HashSet<Uuid>>>,
     /// Advanced each time the mappings change.
-    generation: external::Generation,
+    generation: Generation,
     /// Latest generation whose port refresh completed successfully.
     /// While this trails `generation`, a refresh remains pending, so an
     /// identical re-push after a failed refresh retries instead of
     /// leaving ports keyed to stale mappings until the next change.
-    refreshed_generation: external::Generation,
+    refreshed_generation: Generation,
 }
 
 impl Default for EipGatewayState {
     fn default() -> Self {
         Self {
             mappings: HashMap::new(),
-            generation: external::Generation::new(),
-            refreshed_generation: external::Generation::new(),
+            generation: Generation::new(),
+            refreshed_generation: Generation::new(),
         }
     }
 }
@@ -1107,7 +1108,7 @@ impl PortManager {
     pub fn set_eip_gateways(
         &self,
         mappings: ExternalIpGatewayMap,
-    ) -> Option<external::Generation> {
+    ) -> Option<Generation> {
         let mut state = self.inner.eip_gateways.lock().unwrap();
         if state.mappings != mappings.mappings {
             state.mappings = mappings.mappings;
@@ -1120,7 +1121,7 @@ impl PortManager {
     /// Record that ports were successfully refreshed against the mappings
     /// at `generation`. A newer push may have raced the refresh, in which
     /// case the pending state is preserved.
-    pub fn eip_gateways_refreshed(&self, generation: external::Generation) {
+    pub fn eip_gateways_refreshed(&self, generation: Generation) {
         let mut state = self.inner.eip_gateways.lock().unwrap();
         state.refreshed_generation = state.refreshed_generation.max(generation);
     }

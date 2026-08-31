@@ -3,12 +3,15 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::impl_enum_type;
+use crate::typed_generation::DbTypedGeneration;
 use crate::typed_uuid::DbTypedUuid;
 use anyhow::{Context, bail};
 use chrono::{DateTime, Utc};
 use iddqd::{IdOrdItem, id_upcast};
 use nexus_db_schema::schema::rendezvous_sled_bp_availability;
-use omicron_common::api::external::Generation;
+use omicron_generation_kinds::{
+    UpdateDispositionGeneration, UpdateDispositionGenerationKind,
+};
 use omicron_uuid_kinds::BlueprintKind;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::SledKind;
@@ -84,7 +87,7 @@ pub enum SledBpAvailabilityState {
         availability: ActiveSledBpAvailability,
 
         /// The update disposition generation of the sled.
-        update_disposition_generation: Generation,
+        update_disposition_generation: UpdateDispositionGeneration,
     },
     /// The sled is decommissioned.
     Decommissioned,
@@ -100,7 +103,8 @@ pub enum SledBpAvailabilityState {
 pub struct RendezvousSledBpAvailability {
     sled_id: DbTypedUuid<SledKind>,
     bp_availability: DbSledBpAvailability,
-    update_disposition_generation: Option<crate::Generation>,
+    update_disposition_generation:
+        Option<DbTypedGeneration<UpdateDispositionGenerationKind>>,
     blueprint_id: DbTypedUuid<BlueprintKind>,
     time_created: DateTime<Utc>,
     time_modified: DateTime<Utc>,
@@ -117,7 +121,10 @@ impl RendezvousSledBpAvailability {
     /// See [`RendezvousSledBpAvailability::state`] for the inverse.
     fn state_columns(
         state: SledBpAvailabilityState,
-    ) -> (DbSledBpAvailability, Option<crate::Generation>) {
+    ) -> (
+        DbSledBpAvailability,
+        Option<DbTypedGeneration<UpdateDispositionGenerationKind>>,
+    ) {
         match state {
             SledBpAvailabilityState::Active {
                 availability,
@@ -159,19 +166,21 @@ impl RendezvousSledBpAvailability {
 
 fn reassemble_state(
     bp_availability: DbSledBpAvailability,
-    update_disposition_generation: Option<crate::Generation>,
+    update_disposition_generation: Option<
+        DbTypedGeneration<UpdateDispositionGenerationKind>,
+    >,
 ) -> anyhow::Result<SledBpAvailabilityState> {
     match (bp_availability, update_disposition_generation) {
         (DbSledBpAvailability::Available, Some(generation)) => {
             Ok(SledBpAvailabilityState::Active {
                 availability: ActiveSledBpAvailability::Available,
-                update_disposition_generation: *generation,
+                update_disposition_generation: generation.into(),
             })
         }
         (DbSledBpAvailability::Unavailable, Some(generation)) => {
             Ok(SledBpAvailabilityState::Active {
                 availability: ActiveSledBpAvailability::Unavailable,
-                update_disposition_generation: *generation,
+                update_disposition_generation: generation.into(),
             })
         }
         (DbSledBpAvailability::Decommissioned, None) => {
@@ -189,8 +198,8 @@ fn reassemble_state(
         ),
         (DbSledBpAvailability::Decommissioned, Some(generation)) => bail!(
             "bp_availability is 'decommissioned' but \
-             update_disposition_generation is {} (expected NULL)",
-            *generation,
+             update_disposition_generation is {:?} (expected NULL)",
+            generation,
         ),
     }
 }
@@ -211,7 +220,7 @@ impl IdOrdItem for RendezvousSledBpAvailability {
 pub struct RendezvousSledBpAvailabilityUpdate {
     sled_id: SledUuid,
     availability: ActiveSledBpAvailability,
-    update_disposition_generation: Generation,
+    update_disposition_generation: UpdateDispositionGeneration,
     blueprint_id: BlueprintUuid,
 }
 
@@ -219,7 +228,7 @@ impl RendezvousSledBpAvailabilityUpdate {
     pub fn new(
         sled_id: SledUuid,
         availability: ActiveSledBpAvailability,
-        update_disposition_generation: Generation,
+        update_disposition_generation: UpdateDispositionGeneration,
         blueprint_id: BlueprintUuid,
     ) -> Self {
         Self {
@@ -230,7 +239,7 @@ impl RendezvousSledBpAvailabilityUpdate {
         }
     }
 
-    pub fn update_disposition_generation(&self) -> Generation {
+    pub fn update_disposition_generation(&self) -> UpdateDispositionGeneration {
         self.update_disposition_generation
     }
 

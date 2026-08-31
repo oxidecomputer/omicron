@@ -27,6 +27,7 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::{Error, InternalContext};
+use omicron_generation_kinds::InstanceStateGeneration;
 use omicron_uuid_kinds::{
     AntiAffinityGroupUuid, GenericUuid, InstanceUuid, MulticastGroupUuid,
 };
@@ -1499,9 +1500,11 @@ async fn sic_move_to_stopped(
     // of date.
     let new_state = db::model::InstanceRuntimeState {
         nexus_state: db::model::InstanceState::NoVmm,
-        generation: db::model::Generation::from(
-            instance_record.state_generation.next(),
-        ),
+        generation: InstanceStateGeneration::from(
+            instance_record.state_generation,
+        )
+        .next()
+        .into(),
         ..instance_record.runtime()
     };
 
