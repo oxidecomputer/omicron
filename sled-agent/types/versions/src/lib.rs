@@ -103,8 +103,10 @@ pub mod v47;
 pub mod v48;
 #[path = "add_update_disposition/mod.rs"]
 pub mod v49;
-#[path = "mcast_m2p_forwarding/mod.rs"]
+#[path = "typed_sled_config_generation/mod.rs"]
 pub mod v50;
+#[path = "mcast_m2p_forwarding/mod.rs"]
+pub mod v51;
 #[path = "add_probe_put_endpoint/mod.rs"]
 pub mod v6;
 #[path = "multicast_support/mod.rs"]

@@ -716,8 +716,8 @@ mod test {
     use iddqd::id_ord_map;
     use nexus_types::inventory::Collection;
     use omicron_cockroach_metrics::CockroachClusterAdminClient;
-    use omicron_common::api::external::Generation;
     use omicron_common::zpool_name::ZpoolName;
+    use omicron_generation_kinds::SledConfigGeneration;
     use omicron_sled_agent::sim;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::SledUuid;
@@ -977,10 +977,15 @@ mod test {
             SledCpuFamily::AmdMilan,
         );
 
-        let agent =
-            sim::Server::start(&config, &log, false, &simulated_upstairs, 0)
-                .await
-                .unwrap();
+        let agent = sim::Server::start(
+            &config,
+            &log,
+            sim::NexusRegistration::Background,
+            &simulated_upstairs,
+            0,
+        )
+        .await
+        .unwrap();
 
         // Pretend to put some zones onto this sled.  We don't need to test this
         // exhaustively here because there are builder tests that exercise a
@@ -994,7 +999,7 @@ mod test {
         let zone_address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0);
         client
             .omicron_config_put(&OmicronSledConfig {
-                generation: Generation::from(3),
+                generation: SledConfigGeneration::from_u32(3),
                 disks: IdOrdMap::default(),
                 datasets: IdOrdMap::default(),
                 zones: id_ord_map! {

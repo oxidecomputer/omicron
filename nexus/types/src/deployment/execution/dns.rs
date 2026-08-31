@@ -9,7 +9,8 @@ use internal_dns_types::{
     config::DnsConfigBuilder,
     names::{ServiceName, ZONE_APEX_NAME},
 };
-use omicron_common::api::external::{Generation, Name};
+use omicron_common::api::external::Name;
+use omicron_generation_kinds::NexusGeneration;
 
 use crate::{
     deployment::{
@@ -28,7 +29,7 @@ use super::{
 pub fn blueprint_internal_dns_config(
     blueprint: &Blueprint,
     sleds_by_id: &IdOrdMap<Sled>,
-    active_nexus_generation: Generation,
+    active_nexus_generation: NexusGeneration,
     overrides: &Overridables,
 ) -> anyhow::Result<DnsConfigZone> {
     // The DNS names configured here should match what RSS configures for the
@@ -198,7 +199,7 @@ pub fn blueprint_external_dns_config<'a>(
     blueprint: &Blueprint,
     silos: impl IntoIterator<Item = &'a Name>,
     external_dns_zone_name: String,
-    active_nexus_generation: Generation,
+    active_nexus_generation: NexusGeneration,
 ) -> DnsConfigZone {
     let nexus_external_ips =
         blueprint_nexus_external_ips(blueprint, active_nexus_generation);

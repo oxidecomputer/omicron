@@ -377,7 +377,7 @@ mod test {
     use chrono::Utc;
     use dropshot::test_util::LogContext;
     use futures::channel::mpsc::Receiver;
-    use omicron_common::api::external::Generation;
+    use omicron_generation_kinds::Generation;
     use omicron_test_utils::dev::test_setup_log;
     use sled_agent_types::instance::SledVmmState;
     use sled_agent_types::instance::VmmRuntimeState;

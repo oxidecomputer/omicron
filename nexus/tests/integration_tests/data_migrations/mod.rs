@@ -44,6 +44,7 @@ mod ereporter_restart_rack_id;
 mod fix_leaked_bp_oximeter_read_policy_rows;
 mod fix_session_token_column_order;
 mod inv_clear_mupdate_override;
+mod inventory_zone_multiple_external_ips;
 mod normalize_service_external_ips;
 mod one_big_ereport_table;
 mod populate_db_metadata_nexus;
@@ -110,6 +111,7 @@ pub(crate) fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     register!(add_sled_update_disposition);
     register!(normalize_service_external_ips);
     register!(add_rendezvous_sled_bp_availability);
+    register!(inventory_zone_multiple_external_ips);
 
     map
 }

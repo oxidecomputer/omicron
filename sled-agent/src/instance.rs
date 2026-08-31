@@ -2751,29 +2751,37 @@ impl InstanceRunner {
 mod tests {
     use super::*;
     use crate::fakes::nexus::{FakeNexusServer, ServerContext};
+    use crate::instance_manager::{
+        InstanceManagerJobsStatus, VmmRegistrationDisallowedReason,
+    };
     use crate::metrics;
     use crate::nexus::make_nexus_client_with_port;
     use crate::vmm_reservoir::VmmReservoirManagerHandle;
+    use assert_matches::assert_matches;
     use camino_tempfile::Utf8TempDir;
     use dropshot::HttpServer;
     use internal_dns_resolver::Resolver;
     use omicron_common::FileKv;
-    use omicron_common::api::external::{Generation, Hostname};
+    use omicron_common::api::external::Hostname;
     use omicron_common::api::internal::shared::{DhcpConfig, SledIdentifiers};
+    use omicron_generation_kinds::Generation;
 
+    use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
     use omicron_uuid_kinds::InternalZpoolUuid;
     use propolis_client::ClientInfo;
     use propolis_client::types::{
         InstanceMigrateStatusResponse, InstanceStateMonitorResponse,
     };
+    use sled_agent_config_reconciler::UpdateDispositionReceiver;
     use sled_agent_config_reconciler::{
-        CurrentlyManagedZpoolsReceiver, InternalDiskDetails,
-        InternalDisksReceiver,
+        CurrentUpdateDisposition, CurrentlyManagedZpoolsReceiver,
+        InternalDiskDetails, InternalDisksReceiver,
     };
     use sled_agent_types::disk::DiskIdentity;
     use sled_agent_types::instance::ExternalIpv4Config;
     use sled_agent_types::instance::ExternalIpv6Config;
     use sled_agent_types::instance::InstanceEnsureBody;
+    use sled_agent_types::inventory::OmicronSledUpdateDisposition;
     use sled_agent_types::inventory::SourceNatConfigV6;
     use sled_agent_types::zone_bundle::CleanupContext;
     use sled_agent_types_versions::v1;
@@ -3017,6 +3025,52 @@ mod tests {
         }
     }
 
+    /// Build an `InstanceEnsureBody` (and matching `SledIdentifiers`) suitable
+    /// for registering a VMM with an `InstanceManager`.
+    fn fake_instance_ensure_body(
+        instance_id: InstanceUuid,
+        propolis_addr: SocketAddr,
+    ) -> (InstanceEnsureBody, SledIdentifiers) {
+        let InstanceInitialState {
+            vmm_spec,
+            local_config,
+            vmm_runtime,
+            propolis_addr,
+            migration_id: _,
+        } = fake_instance_initial_state(propolis_addr);
+
+        let metadata = InstanceMetadata {
+            silo_id: Uuid::new_v4(),
+            project_id: Uuid::new_v4(),
+        };
+        let sled_identifiers = SledIdentifiers {
+            rack_id: Uuid::new_v4(),
+            sled_id: Uuid::new_v4(),
+            model: "fake-model".into(),
+            revision: 1,
+            serial: "fake-serial".into(),
+        };
+
+        (
+            InstanceEnsureBody {
+                vmm_spec,
+                local_config,
+                instance_id,
+                migration_id: None,
+                vmm_runtime,
+                propolis_addr,
+                metadata,
+            },
+            sled_identifiers,
+        )
+    }
+
+    /// A propolis address for tests that never start their VMMs. Neither
+    /// registering a VMM nor terminating a never-started VMM contact propolis.
+    fn dummy_propolis_addr() -> SocketAddr {
+        SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 12400, 0, 0))
+    }
+
     // Helper alias for the receive-side of the metrics request queue.
     type MetricsRx = mpsc::Receiver<metrics::Message>;
 
@@ -3088,6 +3142,19 @@ mod tests {
 
     impl InstanceTestObjects {
         async fn new(log: &slog::Logger) -> Self {
+            Self::new_with_disposition_rx(
+                log,
+                UpdateDispositionReceiver::fake_static(
+                    OmicronSledUpdateDisposition::Available,
+                ),
+            )
+            .await
+        }
+
+        async fn new_with_disposition_rx(
+            log: &slog::Logger,
+            update_disposition_rx: UpdateDispositionReceiver,
+        ) -> Self {
             let nexus = FakeNexusParts::new(&log).await;
             let temp_guard = Utf8TempDir::new().unwrap();
             let (services, metrics_rx) = fake_instance_manager_services(
@@ -3126,6 +3193,7 @@ mod tests {
                     zone_builder_factory,
                     vmm_reservoir_manager,
                     metrics_queue,
+                    update_disposition_rx,
                 )
                 .unwrap();
 
@@ -3329,41 +3397,12 @@ mod tests {
 
         let instance_id = InstanceUuid::new_v4();
         let propolis_id = PropolisUuid::from_untyped_uuid(PROPOLIS_ID);
-        let InstanceInitialState {
-            vmm_spec,
-            local_config,
-            vmm_runtime,
-            propolis_addr,
-            migration_id: _,
-        } = fake_instance_initial_state(propolis_addr);
-
-        let metadata = InstanceMetadata {
-            silo_id: Uuid::new_v4(),
-            project_id: Uuid::new_v4(),
-        };
-        let sled_identifiers = SledIdentifiers {
-            rack_id: Uuid::new_v4(),
-            sled_id: Uuid::new_v4(),
-            model: "fake-model".into(),
-            revision: 1,
-            serial: "fake-serial".into(),
-        };
+        let (ensure_body, sled_identifiers) =
+            fake_instance_ensure_body(instance_id, propolis_addr);
 
         test_objects
             .instance_manager
-            .ensure_registered(
-                propolis_id,
-                InstanceEnsureBody {
-                    vmm_spec,
-                    local_config,
-                    instance_id,
-                    migration_id: None,
-                    vmm_runtime,
-                    propolis_addr,
-                    metadata,
-                },
-                sled_identifiers,
-            )
+            .ensure_registered(propolis_id, ensure_body, sled_identifiers)
             .await
             .unwrap();
 
@@ -3432,41 +3471,12 @@ mod tests {
 
         let instance_id = InstanceUuid::new_v4();
         let propolis_id = PropolisUuid::from_untyped_uuid(PROPOLIS_ID);
-        let InstanceInitialState {
-            vmm_spec,
-            local_config,
-            vmm_runtime,
-            propolis_addr,
-            migration_id: _,
-        } = fake_instance_initial_state(propolis_addr);
-
-        let metadata = InstanceMetadata {
-            silo_id: Uuid::new_v4(),
-            project_id: Uuid::new_v4(),
-        };
-        let sled_identifiers = SledIdentifiers {
-            rack_id: Uuid::new_v4(),
-            sled_id: Uuid::new_v4(),
-            model: "fake-model".into(),
-            revision: 1,
-            serial: "fake-serial".into(),
-        };
+        let (ensure_body, sled_identifiers) =
+            fake_instance_ensure_body(instance_id, propolis_addr);
 
         test_objects
             .instance_manager
-            .ensure_registered(
-                propolis_id,
-                InstanceEnsureBody {
-                    vmm_spec,
-                    local_config,
-                    instance_id,
-                    migration_id: None,
-                    vmm_runtime,
-                    propolis_addr,
-                    metadata,
-                },
-                sled_identifiers,
-            )
+            .ensure_registered(propolis_id, ensure_body, sled_identifiers)
             .await
             .unwrap();
 
@@ -3553,6 +3563,298 @@ mod tests {
         .await
         .expect("timed out waiting for VmmState::Stopped in FakeNexus")
         .expect("failed to receive FakeNexus' InstanceState");
+
+        logctx.cleanup_successful();
+    }
+
+    /// Register (or idempotently re-register) a VMM with the test objects'
+    /// `InstanceManager`, using a dummy propolis address.
+    async fn try_ensure_registered(
+        test_objects: &InstanceTestObjects,
+        propolis_id: PropolisUuid,
+        instance_id: InstanceUuid,
+    ) -> Result<SledVmmState, crate::instance_manager::Error> {
+        let (ensure_body, sled_identifiers) =
+            fake_instance_ensure_body(instance_id, dummy_propolis_addr());
+        test_objects
+            .instance_manager
+            .ensure_registered(propolis_id, ensure_body, sled_identifiers)
+            .await
+    }
+
+    /// Wait (with a timeout) until the `InstanceManager`'s jobs status
+    /// satisfies `pred`.
+    async fn wait_for_jobs_status(
+        instance_manager: &crate::instance_manager::InstanceManager,
+        pred: fn(&InstanceManagerJobsStatus) -> bool,
+    ) {
+        wait_for_condition(
+            || async {
+                let status = instance_manager.jobs_status();
+                if pred(&status) {
+                    Ok(())
+                } else {
+                    Err(CondCheckError::<()>::NotYet {
+                        status: Some(format!("current status: {status:?}")),
+                    })
+                }
+            },
+            &Duration::from_millis(100),
+            &TIMEOUT_DURATION,
+        )
+        .await
+        .expect("timed out waiting for expected job status");
+    }
+
+    #[tokio::test]
+    async fn test_instance_manager_rejects_registration_while_evacuating() {
+        let logctx = omicron_test_utils::dev::test_setup_log(
+            "test_instance_manager_rejects_registration_while_evacuating",
+        );
+        let log = logctx.log.new(o!(FileKv));
+
+        let (disposition_rx, _disposition_tx) =
+            UpdateDispositionReceiver::fake_dynamic(
+                CurrentUpdateDisposition::Known(
+                    OmicronSledUpdateDisposition::Evacuating,
+                ),
+            );
+        let test_objects =
+            InstanceTestObjects::new_with_disposition_rx(&log, disposition_rx)
+                .await;
+
+        let err = try_ensure_registered(
+            &test_objects,
+            PropolisUuid::new_v4(),
+            InstanceUuid::new_v4(),
+        )
+        .await
+        .expect_err("registration should be rejected while evacuating");
+        assert_matches!(
+            err,
+            crate::instance_manager::Error::VmmRegistrationDisallowed(
+                VmmRegistrationDisallowedReason::SledEvacuating
+            )
+        );
+
+        let status = test_objects.instance_manager.jobs_status();
+        assert_eq!(status.num_registered_vmms, 0);
+        assert_eq!(
+            status.update_disposition,
+            CurrentUpdateDisposition::Known(
+                OmicronSledUpdateDisposition::Evacuating
+            )
+        );
+
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_instance_manager_rejects_registration_before_config_loaded() {
+        let logctx = omicron_test_utils::dev::test_setup_log(
+            "test_instance_manager_rejects_registration_before_config_loaded",
+        );
+        let log = logctx.log.new(o!(FileKv));
+
+        let (disposition_rx, disposition_tx) =
+            UpdateDispositionReceiver::fake_dynamic(
+                CurrentUpdateDisposition::ConfigNotAvailable,
+            );
+        let test_objects =
+            InstanceTestObjects::new_with_disposition_rx(&log, disposition_rx)
+                .await;
+
+        let propolis_id = PropolisUuid::new_v4();
+        let instance_id = InstanceUuid::new_v4();
+
+        let err =
+            try_ensure_registered(&test_objects, propolis_id, instance_id)
+                .await
+                .expect_err(
+                    "registration should be rejected before a config loads",
+                );
+        assert_matches!(
+            err,
+            crate::instance_manager::Error::VmmRegistrationDisallowed(
+                VmmRegistrationDisallowedReason::ConfigNotYetLoaded
+            )
+        );
+
+        // "Load" a config marking the sled available, then wait until the
+        // runner has observed it before retrying: the disposition change is
+        // asynchronous relative to the request queue.
+        disposition_tx.set(CurrentUpdateDisposition::Known(
+            OmicronSledUpdateDisposition::Available,
+        ));
+        wait_for_jobs_status(&test_objects.instance_manager, |status| {
+            status.update_disposition
+                == CurrentUpdateDisposition::Known(
+                    OmicronSledUpdateDisposition::Available,
+                )
+        })
+        .await;
+
+        try_ensure_registered(&test_objects, propolis_id, instance_id)
+            .await
+            .expect("registration should succeed once the sled is available");
+        wait_for_jobs_status(&test_objects.instance_manager, |status| {
+            status.num_registered_vmms == 1
+        })
+        .await;
+
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_instance_manager_allows_existing_vmm_while_evacuating() {
+        let logctx = omicron_test_utils::dev::test_setup_log(
+            "test_instance_manager_allows_existing_vmm_while_evacuating",
+        );
+        let log = logctx.log.new(o!(FileKv));
+
+        let (disposition_rx, disposition_tx) =
+            UpdateDispositionReceiver::fake_dynamic(
+                CurrentUpdateDisposition::Known(
+                    OmicronSledUpdateDisposition::Available,
+                ),
+            );
+        let test_objects =
+            InstanceTestObjects::new_with_disposition_rx(&log, disposition_rx)
+                .await;
+
+        let propolis_id_a = PropolisUuid::new_v4();
+        let instance_id_a = InstanceUuid::new_v4();
+        try_ensure_registered(&test_objects, propolis_id_a, instance_id_a)
+            .await
+            .expect("registration should succeed while available");
+        wait_for_jobs_status(&test_objects.instance_manager, |status| {
+            status.num_registered_vmms == 1
+        })
+        .await;
+
+        disposition_tx.set(CurrentUpdateDisposition::Known(
+            OmicronSledUpdateDisposition::Evacuating,
+        ));
+        wait_for_jobs_status(&test_objects.instance_manager, |status| {
+            status.update_disposition
+                == CurrentUpdateDisposition::Known(
+                    OmicronSledUpdateDisposition::Evacuating,
+                )
+        })
+        .await;
+
+        // Idempotent re-registration of an existing VMM must still succeed
+        // while evacuating...
+        try_ensure_registered(&test_objects, propolis_id_a, instance_id_a)
+            .await
+            .expect("re-registration should succeed while evacuating");
+        assert_eq!(
+            test_objects.instance_manager.jobs_status().num_registered_vmms,
+            1
+        );
+
+        // ...but a new VMM must be rejected.
+        let propolis_id_b = PropolisUuid::new_v4();
+        let instance_id_b = InstanceUuid::new_v4();
+        let err =
+            try_ensure_registered(&test_objects, propolis_id_b, instance_id_b)
+                .await
+                .expect_err(
+                    "new registration should be rejected while evacuating",
+                );
+        assert_matches!(
+            err,
+            crate::instance_manager::Error::VmmRegistrationDisallowed(
+                VmmRegistrationDisallowedReason::SledEvacuating
+            )
+        );
+        assert_eq!(
+            test_objects.instance_manager.jobs_status().num_registered_vmms,
+            1
+        );
+
+        // Flip back to available; the new VMM can now register.
+        disposition_tx.set(CurrentUpdateDisposition::Known(
+            OmicronSledUpdateDisposition::Available,
+        ));
+        wait_for_jobs_status(&test_objects.instance_manager, |status| {
+            status.update_disposition
+                == CurrentUpdateDisposition::Known(
+                    OmicronSledUpdateDisposition::Available,
+                )
+        })
+        .await;
+        try_ensure_registered(&test_objects, propolis_id_b, instance_id_b)
+            .await
+            .expect("registration should succeed once available again");
+        wait_for_jobs_status(&test_objects.instance_manager, |status| {
+            status.num_registered_vmms == 2
+        })
+        .await;
+
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_instance_manager_vmm_count_tracks_registration() {
+        let logctx = omicron_test_utils::dev::test_setup_log(
+            "test_instance_manager_vmm_count_tracks_registration",
+        );
+        let log = logctx.log.new(o!(FileKv));
+
+        let test_objects = InstanceTestObjects::new(&log).await;
+
+        let propolis_id_a = PropolisUuid::new_v4();
+        let instance_id_a = InstanceUuid::new_v4();
+        try_ensure_registered(&test_objects, propolis_id_a, instance_id_a)
+            .await
+            .expect("registration A should succeed");
+        wait_for_jobs_status(&test_objects.instance_manager, |status| {
+            status.num_registered_vmms == 1
+        })
+        .await;
+
+        let propolis_id_b = PropolisUuid::new_v4();
+        try_ensure_registered(
+            &test_objects,
+            propolis_id_b,
+            InstanceUuid::new_v4(),
+        )
+        .await
+        .expect("registration B should succeed");
+        wait_for_jobs_status(&test_objects.instance_manager, |status| {
+            status.num_registered_vmms == 2
+        })
+        .await;
+
+        // Idempotent re-registration doesn't change the count.
+        try_ensure_registered(&test_objects, propolis_id_a, instance_id_a)
+            .await
+            .expect("re-registration A should succeed");
+        assert_eq!(
+            test_objects.instance_manager.jobs_status().num_registered_vmms,
+            2
+        );
+
+        test_objects
+            .instance_manager
+            .ensure_unregistered(propolis_id_a)
+            .await
+            .expect("unregistration A should succeed");
+        wait_for_jobs_status(&test_objects.instance_manager, |status| {
+            status.num_registered_vmms == 1
+        })
+        .await;
+
+        test_objects
+            .instance_manager
+            .ensure_unregistered(propolis_id_b)
+            .await
+            .expect("unregistration B should succeed");
+        wait_for_jobs_status(&test_objects.instance_manager, |status| {
+            status.num_registered_vmms == 0
+        })
+        .await;
 
         logctx.cleanup_successful();
     }
