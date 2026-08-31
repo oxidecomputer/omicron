@@ -173,12 +173,7 @@ impl DataStore {
         let updated = diesel::update(dsl::vmm)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::stop_for_update_disposition_generation.is_null())
-            .filter(dsl::state.eq_any([
-                DbVmmState::Creating,
-                DbVmmState::Starting,
-                DbVmmState::Running,
-                DbVmmState::Rebooting,
-            ]))
+            .filter(dsl::state.eq_any(DbVmmState::stoppable_states()))
             .filter(
                 dsl::sled_id.eq_any(
                     rz_dsl::rendezvous_sled_bp_availability
