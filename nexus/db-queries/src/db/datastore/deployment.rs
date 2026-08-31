@@ -5089,10 +5089,11 @@ mod tests {
     /// refer to the same blueprint, which happens when the enabled bit is
     /// toggled
     ///
-    /// This is the subtle case: having found `nkeep` distinct blueprints, we
-    /// have to keep scanning backwards until we see a *different* blueprint id.
-    /// Otherwise we'd report that the older rows for the oldest blueprint we're
-    /// keeping could be pruned, and the caller would delete that blueprint.
+    /// This includes a subtle case: having found `nkeep` distinct blueprints,
+    /// we have to keep scanning backwards until we see a *different* blueprint
+    /// id.  Otherwise we'd report that the older rows for the oldest blueprint
+    /// we're keeping could be pruned, and the caller would delete that
+    /// blueprint.
     #[tokio::test]
     async fn test_bp_target_determine_pruneable_dups() {
         let logctx =
@@ -5223,7 +5224,9 @@ mod tests {
             assert_matches!(
                 &error,
                 Error::InternalError { internal_message }
-                    if internal_message.contains("when determination was to keep")
+                    if internal_message.contains(
+                        "when determination was to keep"
+                    )
             );
         }
 

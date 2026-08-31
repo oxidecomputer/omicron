@@ -120,13 +120,6 @@ pub struct ReconfiguratorConfig {
     pub tuf_repo_pruner_enabled: bool,
     pub disruption_policy: ReconfiguratorDisruptionPolicy,
     pub blueprint_pruner_enabled: bool,
-
-    /// number of recent target blueprints that the blueprint pruner keeps
-    ///
-    /// The pruner stops pruning once this many recent target blueprints are
-    /// left.  It has a floor of its own (currently 3), so setting this any
-    /// lower keeps a handful of blueprints rather than none.  Blueprints that
-    /// were never made the target are never pruned and are not counted here.
     pub blueprint_pruner_nkeep: u32,
 }
 

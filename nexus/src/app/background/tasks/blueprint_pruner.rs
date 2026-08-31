@@ -92,7 +92,9 @@
 //! expensive resource).
 //!
 //! Finally, note too that none of this needs to be transactional because the
-//! approach is conservative.
+//! approach is conservative.  Since we're only deleting blueprints that were
+//! once the target and are no longer the target, they're not necessary for
+//! system operation -- and can never be again.
 
 use super::reconfigurator_config::ReconfiguratorConfigLoaderState;
 use crate::app::background::BackgroundTask;
@@ -793,7 +795,7 @@ mod test {
             // Note that we're not testing blueprint deletion itself here.  We
             // assume that a blueprint is either fully present (if its row
             // exists in `blueprint`) or it's fully deleted (if not).  Other
-            // code in the datastore tests that deletion is atomic across the
+            // code in the datastore verifies that deletion is atomic across the
             // various blueprint-related tables.
             let mut all_blueprint_ids = BTreeSet::new();
             let mut paginator = Paginator::new(

@@ -8891,7 +8891,6 @@
             "type": "boolean"
           },
           "blueprint_pruner_nkeep": {
-            "description": "number of recent target blueprints that the blueprint pruner keeps\n\nThe pruner stops pruning once this many recent target blueprints are left.  It has a floor of its own (currently 3), so setting this any lower keeps a handful of blueprints rather than none.  Blueprints that were never made the target are never pruned and are not counted here.",
             "type": "integer",
             "format": "uint32",
             "minimum": 0
