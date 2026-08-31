@@ -110,9 +110,10 @@ impl VmmState {
     /// Returns the states from which a VMM can still be stopped during sled
     /// evacuation.
     pub fn stoppable_states() -> Vec<Self> {
-        let mut stoppable = vec![];
-        for state in Self::ALL_STATES.iter().copied() {
-            let is_stoppable = match state {
+        Self::ALL_STATES
+            .iter()
+            .copied()
+            .filter(|state| match state {
                 // A VMM in one of these states is on its way, or is already
                 // running, and can be stopped.
                 VmmState::Creating
@@ -127,12 +128,8 @@ impl VmmState {
                 | VmmState::Failed
                 | VmmState::Destroyed
                 | VmmState::SagaUnwound => false,
-            };
-            if is_stoppable {
-                stoppable.push(state);
-            }
-        }
-        stoppable
+            })
+            .collect()
     }
 }
 
