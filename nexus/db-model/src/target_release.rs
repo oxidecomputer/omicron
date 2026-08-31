@@ -2,11 +2,14 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::Generation;
+use crate::typed_generation::DbTypedGeneration;
 use crate::typed_uuid::DbTypedUuid;
 use anyhow::Context;
 use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::target_release;
+use omicron_generation_kinds::{
+    TargetReleaseGeneration, TargetReleaseGenerationKind,
+};
 use omicron_uuid_kinds::{TufRepoKind, TufRepoUuid};
 
 use crate::impl_enum_type;
@@ -32,7 +35,10 @@ pub struct TargetRelease {
     /// Each change to the target release is recorded as a row with
     /// a monotonically increasing generation number. The row with
     /// the largest generation is the current target release.
-    pub generation: Generation,
+    ///
+    /// Strongly consider using `TargetRelease::generation()` instead of
+    /// accessing this field; this is `pub` to allow database queries.
+    pub generation: DbTypedGeneration<TargetReleaseGenerationKind>,
 
     /// The time at which this target release was requested.
     pub time_requested: DateTime<Utc>,
@@ -57,9 +63,14 @@ pub enum TargetReleaseSource {
 }
 
 impl TargetRelease {
+    /// Returns the generation number of this target release.
+    pub fn generation(&self) -> TargetReleaseGeneration {
+        self.generation.into()
+    }
+
     pub fn new_unspecified(prev: &TargetRelease) -> Self {
         Self {
-            generation: Generation(prev.generation.next()),
+            generation: prev.generation().next().into(),
             time_requested: Utc::now(),
             release_source: DbTargetReleaseSource::Unspecified,
             tuf_repo_id: None,
@@ -71,7 +82,7 @@ impl TargetRelease {
         tuf_repo_id: DbTypedUuid<TufRepoKind>,
     ) -> Self {
         Self {
-            generation: Generation(prev.generation.next()),
+            generation: prev.generation().next().into(),
             time_requested: Utc::now(),
             release_source: DbTargetReleaseSource::SystemVersion,
             tuf_repo_id: Some(tuf_repo_id),
@@ -89,7 +100,7 @@ impl TargetRelease {
                         "invalid database contents: target release generation \
                          {} has release source `system_version` with no \
                          `tuf_repo_id`",
-                        *self.generation
+                        self.generation()
                     )
                 })?;
                 Ok(TargetReleaseSource::SystemVersion(repo_id.into()))

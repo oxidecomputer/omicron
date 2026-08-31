@@ -67,6 +67,7 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
+use omicron_generation_kinds::InstanceStateGeneration;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::MulticastGroupUuid;
@@ -1587,11 +1588,11 @@ impl super::Nexus {
                         InstanceStateChangeRequestAction::UpdateRuntime(
                             db::model::InstanceRuntimeState {
                                 time_updated: chrono::Utc::now(),
-                                generation: prev_runtime
-                                    .generation
-                                    .0
-                                    .next()
-                                    .into(),
+                                generation: InstanceStateGeneration::from(
+                                    prev_runtime.generation,
+                                )
+                                .next()
+                                .into(),
                                 nexus_state: db::model::InstanceState::NoVmm,
                                 ..prev_runtime.clone()
                             },

@@ -13,6 +13,7 @@ use sled_agent_types::inventory::InventoryDataset;
 use sled_agent_types::inventory::InventoryDisk;
 use sled_agent_types::inventory::InventoryZpool;
 use sled_agent_types::inventory::OmicronSledConfig;
+use sled_agent_types::inventory::OmicronSledUpdateDisposition;
 use sled_storage::config::MountConfig;
 use sled_storage::disk::Disk;
 use sled_storage::nested_dataset::NestedDatasetConfig;
@@ -105,6 +106,139 @@ pub struct LedgerTaskSpawnToken {
 pub struct ConfigReconcilerSpawnToken {
     common: SpawnTokenCommon,
     ledger_rx: watch::Receiver<CurrentSledConfig>,
+}
+
+impl ConfigReconcilerSpawnToken {
+    /// Create a new watch channel receiver containing this sled's update
+    /// disposition.
+    pub fn subscribe_update_disposition(&self) -> UpdateDispositionReceiver {
+        UpdateDispositionReceiver::new(self.ledger_rx.clone())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
+pub enum CurrentUpdateDisposition {
+    ConfigNotAvailable,
+    Known(OmicronSledUpdateDisposition),
+}
+
+#[derive(Debug, Clone)]
+pub struct UpdateDispositionReceiver {
+    // We act as a forwarding watch receiver for the ledger channel that reports
+    // the full sled config. To avoid spurious `changed()` wakeups, we cache the
+    // most-recently-returned update disposition, allowing us to swallow any
+    // config changes that don't affect the disposition.
+    ledger_rx: watch::Receiver<CurrentSledConfig>,
+    most_recently_returned_disposition: Option<CurrentUpdateDisposition>,
+}
+
+impl UpdateDispositionReceiver {
+    pub(crate) fn new(ledger_rx: watch::Receiver<CurrentSledConfig>) -> Self {
+        Self { ledger_rx, most_recently_returned_disposition: None }
+    }
+
+    /// Read the current update disposition, if available, and mark the
+    /// underlying watch channel value as seen.
+    pub fn current_and_update(&mut self) -> CurrentUpdateDisposition {
+        let disposition = match &*self.ledger_rx.borrow_and_update() {
+            CurrentSledConfig::WaitingForInternalDisks
+            | CurrentSledConfig::WaitingForInitialConfig => {
+                CurrentUpdateDisposition::ConfigNotAvailable
+            }
+            CurrentSledConfig::Ledgered(config) => {
+                CurrentUpdateDisposition::Known(config.update_disposition)
+            }
+        };
+        self.most_recently_returned_disposition = Some(disposition);
+        disposition
+    }
+
+    /// Waits for a change notification in the underlying watch channel, then
+    /// marks the current value as seen and returns it.
+    pub async fn changed_value(
+        &mut self,
+    ) -> Result<CurrentUpdateDisposition, watch::error::RecvError> {
+        let prev_disposition = self.most_recently_returned_disposition;
+        loop {
+            self.ledger_rx.changed().await?;
+
+            // Did the config change actually affect the disposition?
+            let disposition = self.current_and_update();
+            if Some(disposition) != prev_disposition {
+                return Ok(disposition);
+            }
+        }
+    }
+
+    /// Create a fake receiver with the given `update_disposition`. It will
+    /// never change.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn fake_static(
+        update_disposition: OmicronSledUpdateDisposition,
+    ) -> Self {
+        let (receiver, sender) = Self::fake_dynamic(
+            CurrentUpdateDisposition::Known(update_disposition),
+        );
+        // spawn a task that keeps the tx channel alive as long as there are any
+        // receivers. this allows receivers to call `.changed_value()` - it
+        // won't return (because we never change the contents), but would fail
+        // if we dropped tx entirely.
+        tokio::spawn(async move {
+            sender.ledger_tx.closed().await;
+            std::mem::drop(sender);
+        });
+        receiver
+    }
+
+    /// Create a fake receiver whose observed disposition can be changed by the
+    /// test via the returned [`FakeUpdateDispositionSender`].
+    #[cfg(any(test, feature = "testing"))]
+    pub fn fake_dynamic(
+        initial: CurrentUpdateDisposition,
+    ) -> (Self, FakeUpdateDispositionSender) {
+        let (ledger_tx, ledger_rx) =
+            watch::channel(fake_config_for_disposition(initial));
+        (Self::new(ledger_rx), FakeUpdateDispositionSender { ledger_tx })
+    }
+}
+
+/// The only config field that matters here is `update_disposition`; it's the
+/// only thing read by `current_and_update`.
+#[cfg(any(test, feature = "testing"))]
+fn fake_config_for_disposition(
+    disposition: CurrentUpdateDisposition,
+) -> CurrentSledConfig {
+    match disposition {
+        CurrentUpdateDisposition::ConfigNotAvailable => {
+            CurrentSledConfig::WaitingForInitialConfig
+        }
+        CurrentUpdateDisposition::Known(update_disposition) => {
+            CurrentSledConfig::Ledgered(Box::new(OmicronSledConfig {
+                update_disposition,
+                ..Default::default()
+            }))
+        }
+    }
+}
+
+/// Test-only handle controlling the disposition observed by
+/// receivers created via [`UpdateDispositionReceiver::fake_dynamic`].
+///
+/// Dropping this sender closes the underlying watch channel, which will
+/// cause `UpdateDispositionReceiver::changed_value()` to return a RecvError.
+#[cfg(any(test, feature = "testing"))]
+#[derive(Debug)]
+pub struct FakeUpdateDispositionSender {
+    ledger_tx: watch::Sender<CurrentSledConfig>,
+}
+
+#[cfg(any(test, feature = "testing"))]
+impl FakeUpdateDispositionSender {
+    /// Set the disposition observed by receivers.
+    pub fn set(&self, disposition: CurrentUpdateDisposition) {
+        self.ledger_tx.send_replace(fake_config_for_disposition(disposition));
+    }
 }
 
 #[derive(Debug)]

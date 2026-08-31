@@ -19,7 +19,6 @@ use crate::db::datastore::multicast::MulticastMembershipChange;
 use crate::db::datastore::multicast::ops::member_attach::AttachMemberError;
 use crate::db::identity::Resource;
 use crate::db::model::ByteCount;
-use crate::db::model::Generation;
 use crate::db::model::Instance;
 use crate::db::model::InstanceAutoRestart;
 use crate::db::model::InstanceAutoRestartPolicy;
@@ -51,6 +50,7 @@ use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::Disk;
+use nexus_db_model::to_db_typed_generation;
 use nexus_types::external_api::instance as instance_types;
 use nexus_types::internal_api::background::ReincarnationReason;
 use omicron_common::api;
@@ -67,6 +67,8 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::bail_unless;
+use omicron_generation_kinds::InstanceStateGeneration;
+use omicron_generation_kinds::InstanceUpdaterGeneration;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
@@ -218,7 +220,7 @@ pub struct InstanceGestalt {
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct UpdaterLock {
     pub updater_id: Uuid,
-    locked_gen: Generation,
+    locked_gen: InstanceUpdaterGeneration,
 }
 
 /// Errors returned by [`DataStore::instance_updater_lock`].
@@ -1806,7 +1808,8 @@ impl DataStore {
         // *same* instance at the same time. So, idempotency is probably more
         // important than handling that extremely unlikely edge case.
         let mut did_lock = false;
-        let mut locked_gen = instance.updater_gen;
+        let mut locked_gen =
+            InstanceUpdaterGeneration::from(instance.updater_gen);
         loop {
             match instance.updater_id {
                 // If the `updater_id` field is not null and the ID equals this
@@ -1840,8 +1843,9 @@ impl DataStore {
             }
 
             // Okay, now attempt to acquire the lock
-            let current_gen = instance.updater_gen;
-            locked_gen = Generation(current_gen.0.next());
+            let current_gen =
+                InstanceUpdaterGeneration::from(instance.updater_gen);
+            locked_gen = current_gen.next();
             slog::debug!(
                 &opctx.log,
                 "attempting to acquire instance updater lock";
@@ -1864,9 +1868,12 @@ impl DataStore {
                     // This query is used equivalently to an atomic
                     // compare-and-swap instruction in the implementation of a
                     // non-distributed, single-process mutex.
-                    .filter(dsl::updater_gen.eq(current_gen))
+                    .filter(
+                        dsl::updater_gen
+                            .eq(to_db_typed_generation(current_gen)),
+                    )
                     .set((
-                        dsl::updater_gen.eq(locked_gen),
+                        dsl::updater_gen.eq(to_db_typed_generation(locked_gen)),
                         dsl::updater_id.eq(Some(updater_id)),
                     ))
                     .check_if_exists::<Instance>(instance_id)
@@ -1968,15 +1975,15 @@ impl DataStore {
         use nexus_db_schema::schema::instance::dsl;
         let &UpdaterLock { updater_id: parent_id, locked_gen } = parent_lock;
         let instance_id = authz_instance.id();
-        let new_gen = Generation(locked_gen.0.next());
+        let new_gen = locked_gen.next();
 
         let result = diesel::update(dsl::instance)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(instance_id))
-            .filter(dsl::updater_gen.eq(locked_gen))
+            .filter(dsl::updater_gen.eq(to_db_typed_generation(locked_gen)))
             .filter(dsl::updater_id.eq(parent_id))
             .set((
-                dsl::updater_gen.eq(new_gen),
+                dsl::updater_gen.eq(to_db_typed_generation(new_gen)),
                 dsl::updater_id.eq(Some(child_lock_id)),
             ))
             .check_if_exists::<Instance>(instance_id)
@@ -2037,7 +2044,10 @@ impl DataStore {
                     "parent_id" => %parent_id,
                     "parent_gen" => ?locked_gen,
                 );
-                debug_assert_eq!(found.updater_gen, new_gen);
+                debug_assert_eq!(
+                    InstanceUpdaterGeneration::from(found.updater_gen),
+                    new_gen
+                );
                 Ok(UpdaterLock {
                     updater_id: child_lock_id,
                     locked_gen: new_gen,
@@ -2085,9 +2095,9 @@ impl DataStore {
             .filter(dsl::updater_id.eq(Some(updater_id)))
             // - the provided updater generation matches the current updater
             //   generation.
-            .filter(dsl::updater_gen.eq(locked_gen))
+            .filter(dsl::updater_gen.eq(to_db_typed_generation(locked_gen)))
             .set((
-                dsl::updater_gen.eq(Generation(locked_gen.0.next())),
+                dsl::updater_gen.eq(to_db_typed_generation(locked_gen.next())),
                 dsl::updater_id.eq(None::<Uuid>),
             ))
             .check_if_exists::<Instance>(instance_id)
@@ -2137,7 +2147,9 @@ impl DataStore {
             UpdateAndQueryResult { ref found, .. }
                 if found.updater_id != Some(updater_id) =>
             {
-                if found.updater_gen > locked_gen {
+                if InstanceUpdaterGeneration::from(found.updater_gen)
+                    > locked_gen
+                {
                     // The generation has advanced past the generation where we
                     // acquired the lock. That's totally fine: a previous
                     // execution of the same saga action must have unlocked it,
@@ -2246,10 +2258,10 @@ impl DataStore {
             .filter(dsl::updater_id.eq(Some(updater_id)))
             // - the provided updater generation matches the current updater
             //   generation.
-            .filter(dsl::updater_gen.eq(locked_gen))
+            .filter(dsl::updater_gen.eq(to_db_typed_generation(locked_gen)))
             .filter(dsl::state_generation.lt(new_runtime.generation))
             .set((
-                dsl::updater_gen.eq(Generation(locked_gen.0.next())),
+                dsl::updater_gen.eq(to_db_typed_generation(locked_gen.next())),
                 dsl::updater_id.eq(None::<Uuid>),
                 new_runtime.clone(),
                 IntentUpdate { intended_state: new_intent },
@@ -2270,7 +2282,9 @@ impl DataStore {
         // The expected state generation number of the instance record *before*
         // applying the update.
         let prev_state_gen =
-            u64::from(new_runtime.generation.0).saturating_sub(1);
+            InstanceStateGeneration::from(new_runtime.generation)
+                .as_u64()
+                .saturating_sub(1);
         match result {
             // If we updated the record, the lock has been released! Return
             // `Ok(true)` to indicate that we released the lock successfully.
@@ -2301,9 +2315,13 @@ impl DataStore {
             // another execution of the same saga action has already updated the
             // instance record.
             UpdateAndQueryResult { ref found, .. }
-                if u64::from(found.runtime().generation.0)
+                if InstanceStateGeneration::from(
+                    found.runtime().generation,
+                )
+                .as_u64()
                     != prev_state_gen
-                    && found.updater_gen != locked_gen =>
+                    && InstanceUpdaterGeneration::from(found.updater_gen)
+                        != locked_gen =>
             {
                 debug_assert_ne!(found.updater_id, Some(updater_id));
                 debug!(
@@ -2326,9 +2344,13 @@ impl DataStore {
             // longer update the instance, as its state has changed, potentially
             // invalidating the updates. We need to unwind.
             UpdateAndQueryResult { ref found, .. }
-                if u64::from(found.runtime().generation.0)
+                if InstanceStateGeneration::from(
+                    found.runtime().generation,
+                )
+                .as_u64()
                     != prev_state_gen
-                    && found.updater_gen == locked_gen
+                    && InstanceUpdaterGeneration::from(found.updater_gen)
+                        == locked_gen
                     && found.updater_id == Some(updater_id) =>
             {
                 info!(
@@ -2484,6 +2506,7 @@ impl DataStore {
 mod tests {
     use super::*;
     use crate::db::datastore::sled;
+    use crate::db::model::Generation;
     use crate::db::pagination::Paginator;
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::pub_test_utils::multicast;
@@ -2499,7 +2522,6 @@ mod tests {
     use nexus_types::external_api::project;
     use nexus_types::identity::Asset;
     use nexus_types::silo::DEFAULT_SILO_ID;
-    use omicron_common::api::external;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev;
@@ -2620,7 +2642,7 @@ mod tests {
                 &instance_id,
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    generation: Generation(Generation::new().next()),
+                    generation: InstanceStateGeneration::new().next().into(),
                     nexus_state: InstanceState::Vmm,
                     propolis_id: Some(vmm.id),
                     dst_propolis_id: None,
@@ -2832,7 +2854,7 @@ mod tests {
                 &InstanceUuid::from_untyped_uuid(authz_instance.id()),
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    generation: Generation(external::Generation::from_u32(2)),
+                    generation: InstanceStateGeneration::from_u32(2).into(),
                     propolis_id: None,
                     dst_propolis_id: None,
                     migration_id: None,
@@ -2932,9 +2954,12 @@ mod tests {
             dbg!(datastore.instance_refetch(&opctx, &authz_instance).await)
                 .expect("instance should exist");
         assert_eq!(instance.updater_id, Some(saga1));
-        assert_eq!(instance.updater_gen, lock1.locked_gen);
+        assert_eq!(
+            InstanceUpdaterGeneration::from(instance.updater_gen),
+            lock1.locked_gen
+        );
 
-        let next_gen = Generation(lock1.locked_gen.0.next());
+        let next_gen = lock1.locked_gen.next();
 
         // unlocking with the correct ID should succeed.
         let unlocked = dbg!(
@@ -2949,7 +2974,10 @@ mod tests {
             dbg!(datastore.instance_refetch(&opctx, &authz_instance).await)
                 .expect("instance should exist");
         assert_eq!(instance.updater_id, None);
-        assert_eq!(instance.updater_gen, next_gen);
+        assert_eq!(
+            InstanceUpdaterGeneration::from(instance.updater_gen),
+            next_gen
+        );
 
         // unlocking with the lock holder's ID *again* at a new generation
         // (where the lock is no longer held) shouldn't do anything
@@ -3002,7 +3030,7 @@ mod tests {
                 &InstanceUuid::from_untyped_uuid(authz_instance.id()),
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    generation: Generation(external::Generation::from_u32(2)),
+                    generation: InstanceStateGeneration::from_u32(2).into(),
                     propolis_id: None,
                     dst_propolis_id: None,
                     migration_id: None,
@@ -3047,7 +3075,7 @@ mod tests {
                 &InstanceUuid::from_untyped_uuid(authz_instance.id()),
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    generation: Generation(external::Generation::from_u32(2)),
+                    generation: InstanceStateGeneration::from_u32(2).into(),
                     propolis_id: None,
                     dst_propolis_id: None,
                     migration_id: None,
@@ -3123,7 +3151,7 @@ mod tests {
                 &InstanceUuid::from_untyped_uuid(authz_instance.id()),
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    generation: Generation(external::Generation::from_u32(2)),
+                    generation: InstanceStateGeneration::from_u32(2).into(),
                     propolis_id: None,
                     dst_propolis_id: None,
                     migration_id: None,
@@ -3185,7 +3213,7 @@ mod tests {
         .expect("instance should be locked");
         let new_runtime = &InstanceRuntimeState {
             time_updated: Utc::now(),
-            generation: Generation(external::Generation::from_u32(2)),
+            generation: InstanceStateGeneration::from_u32(2).into(),
             propolis_id: Some(Uuid::new_v4()),
             dst_propolis_id: None,
             migration_id: None,
@@ -3290,7 +3318,7 @@ mod tests {
         // acquired.
         let new_runtime = &InstanceRuntimeState {
             time_updated: Utc::now(),
-            generation: Generation(external::Generation::from_u32(2)),
+            generation: InstanceStateGeneration::from_u32(2).into(),
             propolis_id: Some(Uuid::new_v4()),
             dst_propolis_id: Some(Uuid::new_v4()),
             migration_id: Some(Uuid::new_v4()),
@@ -3319,9 +3347,7 @@ mod tests {
                     &lock,
                     &InstanceRuntimeState {
                         time_updated: Utc::now(),
-                        generation: Generation(external::Generation::from_u32(
-                            2
-                        )),
+                        generation: InstanceStateGeneration::from_u32(2).into(),
                         propolis_id: None,
                         dst_propolis_id: None,
                         migration_id: None,
@@ -3420,9 +3446,11 @@ mod tests {
                 &instance_id,
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    generation: Generation(
-                        snapshot.instance.state_generation.0.next(),
-                    ),
+                    generation: InstanceStateGeneration::from(
+                        snapshot.instance.state_generation,
+                    )
+                    .next()
+                    .into(),
                     nexus_state: InstanceState::Vmm,
                     propolis_id: Some(active_vmm.id),
                     ..snapshot.instance.runtime()
@@ -3493,9 +3521,11 @@ mod tests {
                 &instance_id,
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    generation: Generation(
-                        snapshot.instance.state_generation.0.next(),
-                    ),
+                    generation: InstanceStateGeneration::from(
+                        snapshot.instance.state_generation,
+                    )
+                    .next()
+                    .into(),
                     nexus_state: InstanceState::Vmm,
                     propolis_id: Some(active_vmm.id),
                     dst_propolis_id: Some(target_vmm.id),
@@ -3585,7 +3615,11 @@ mod tests {
                 &instance_id,
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    generation: Generation(instance.state_generation.0.next()),
+                    generation: InstanceStateGeneration::from(
+                        instance.state_generation,
+                    )
+                    .next()
+                    .into(),
                     nexus_state: InstanceState::Vmm,
                     propolis_id: Some(vmm1.id),
                     ..instance.runtime()

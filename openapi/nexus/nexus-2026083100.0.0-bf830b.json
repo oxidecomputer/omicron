@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026082001.0.0"
+    "version": "2026083100.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -4477,7 +4477,7 @@
           "experimental"
         ],
         "summary": "Join multicast group by name, IP address, or UUID",
-        "description": "Groups can be referenced by name, IP address, or UUID. If the group doesn't exist, it's implicitly created with an auto-allocated IP from a multicast pool linked to the caller's silo. When referencing by UUID, the group must already exist.\n\nSource IPs are optional for ASM addresses but required for SSM addresses (232.0.0.0/8 for IPv4, ff3x::/32 for IPv6). Duplicate source IPs in a single request are rejected. Per-member source list is capped at 32, and the union of source IPs across all members of a single group is capped at 256.",
+        "description": "Groups can be referenced by name, IP address, or UUID. If the group doesn't exist, it's implicitly created with an auto-allocated IP from a multicast pool linked to the caller's silo. When referencing by UUID, the group must already exist.\n\nSource IPs are optional for ASM addresses but required for SSM addresses (232.0.0.0/8 for IPv4, ff3x::/32 for IPv6). Duplicate IPs in the request are automatically deduplicated, with a maximum of 64 source IPs allowed.",
         "operationId": "instance_multicast_group_join",
         "parameters": [
           {
@@ -7342,13 +7342,13 @@
           "system/audit-log"
         ],
         "summary": "View audit log",
-        "description": "A single item in the audit log represents both the beginning and end of the logged operation (represented by `time_started` and `time_completed`) so that clients do not have to find multiple entries and match them up by request ID to get the full picture of an operation. Because timestamps may not be unique, entries have also have a unique `id` that can be used to deduplicate items fetched from overlapping time intervals.\n\nAudit log entries are designed to be immutable: once you see an entry, fetching it again will never get you a different result. The list is ordered by `time_completed`, not `time_started`. If you fetch the audit log for a time range that is fully in the past, the resulting list is guaranteed to be complete, i.e., fetching the same timespan again later will always produce the same set of entries.",
+        "description": "A single item in the audit log represents both the beginning and end of the logged operation (represented by `time_started` and `time_completed`) so that clients do not have to find multiple entries and match them up by request ID to get the full picture of an operation. Because timestamps may not be unique, entries have also have a unique `id` that can be used to deduplicate items fetched from overlapping time intervals.\n\nAudit log entries are designed to be immutable: once you see an entry, fetching it again will never get you a different result. The list is ordered and filtered by `time_completed`, not `time_started`. If you fetch the audit log for a time range that is fully in the past, the resulting list is guaranteed to be complete, i.e., fetching the same timespan again later will always produce the same set of entries.",
         "operationId": "audit_log_list",
         "parameters": [
           {
             "in": "query",
             "name": "end_time",
-            "description": "Exclusive",
+            "description": "End of time range (exclusive). Filters on `time_completed`. If omitted, the range extends to the present.",
             "schema": {
               "nullable": true,
               "type": "string",
@@ -7385,7 +7385,7 @@
           {
             "in": "query",
             "name": "start_time",
-            "description": "Required, inclusive",
+            "description": "Start of time range (inclusive). Filters on `time_completed`.",
             "schema": {
               "type": "string",
               "format": "date-time"
@@ -13465,7 +13465,7 @@
         "tags": [
           "system/silos"
         ],
-        "summary": "List built-in (system) users in silo",
+        "summary": "List users in silo",
         "operationId": "silo_user_list",
         "parameters": [
           {
@@ -13534,7 +13534,7 @@
         "tags": [
           "system/silos"
         ],
-        "summary": "Fetch built-in (system) user",
+        "summary": "Fetch user in silo",
         "operationId": "silo_user_view",
         "parameters": [
           {
@@ -16208,14 +16208,14 @@
         "description": "Affinity policy used to describe \"what to do when a request cannot be satisfied\"\n\nUsed for both Affinity and Anti-Affinity Groups",
         "oneOf": [
           {
-            "description": "If the affinity request cannot be satisfied, allow it anyway.\n\nThis enables a \"best-effort\" attempt to satisfy the affinity policy.",
+            "description": "Best-effort: instances can start even when the group's constraints cannot be satisfied.",
             "type": "string",
             "enum": [
               "allow"
             ]
           },
           {
-            "description": "If the affinity request cannot be satisfied, fail explicitly.",
+            "description": "When the group's constraints cannot be satisfied, an instance start request will fail and the instance will remain stopped. Starting the instance may succeed later if conditions change, e.g., other instances stop.",
             "type": "string",
             "enum": [
               "fail"
@@ -23111,7 +23111,7 @@
             }
           },
           "enable_jumbo_frames": {
-            "description": "Enable jumbo frames (8500 byte MTU) on the instance's primary OPTE interface. Requires the fleet-wide jumbo-frames opt-in to be enabled by an operator; otherwise this field must be `false`. Changes only take effect on the next instance restart.",
+            "description": "Enable jumbo frames (8500 byte MTU) on the instance's primary network interface. Requires the fleet-wide jumbo-frames opt-in to be enabled by an operator; otherwise this field must be `false`. Changes only take effect on the next instance restart.",
             "default": false,
             "type": "boolean"
           },
@@ -27594,7 +27594,7 @@
             "type": "string"
           },
           "discoverable": {
-            "description": "A silo where discoverable is false can be retrieved only by its id - it will not be part of the \"list all silos\" output.",
+            "description": "A non-discoverable silo can only be retrieved by ID - it will not be part of the \"list all silos\" output.",
             "type": "boolean"
           },
           "id": {
@@ -27700,6 +27700,7 @@
             "type": "string"
           },
           "discoverable": {
+            "description": "A non-discoverable silo can only be retrieved by ID - it will not be part of the \"list all silos\" output.",
             "type": "boolean"
           },
           "identity_mode": {
@@ -29943,7 +29944,7 @@
         "type": "object",
         "properties": {
           "external_jumbo_frames_opt_in_enabled": {
-            "description": "When true, end users may opt in to jumbo frames (8500 byte MTU) on the primary interface of an instance. When false, instance-level opt-in is ignored and OPTE ports are created with the default MTU.",
+            "description": "When true, end users may opt in to jumbo frames (8500 byte MTU) on the primary interface of an instance. When false, instance-level opt-in is ignored and the primary interface uses the default MTU.",
             "type": "boolean"
           }
         },

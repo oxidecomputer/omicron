@@ -15,9 +15,10 @@ use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_common::api::internal::shared::PrivateIpv4Config;
 use omicron_common::api::internal::shared::PrivateIpv6Config;
 use omicron_common::{
-    api::external::{self, ByteCount, Generation, Name, Vni},
+    api::external::{self, ByteCount, Name, Vni},
     zpool_name::ZpoolName,
 };
+use omicron_generation_kinds::Generation;
 use omicron_ledger::Ledgerable;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::{DatasetUuid, OmicronZoneUuid};

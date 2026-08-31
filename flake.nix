@@ -442,6 +442,9 @@
             OPENSSL_DIR = "${openssl.dev}";
             OPENSSL_LIB_DIR = "${openssl.out}/lib";
 
+            # Needed so `pq-sys` uses Nix's `libpq` instead of the host's.
+            PQ_LIB_DIR = "${postgresql.lib}/lib";
+
             # Needed by rustfmt-wrapper, see:
             # https://github.com/oxidecomputer/rustfmt-wrapper/blob/main/src/lib.rs
             RUSTFMT = "${rustToolchain}/bin/rustfmt";
