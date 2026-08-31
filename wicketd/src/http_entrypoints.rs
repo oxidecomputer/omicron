@@ -7,7 +7,6 @@
 use crate::SmfConfigValues;
 use crate::context::CommonConfigContainer;
 use crate::context::RssOrMultirackJoinConfig;
-use crate::helpers::baseboard_id_matches_sp_state;
 use crate::http_helpers::ba_lockstep_client;
 use crate::http_helpers::ba_lockstep_error_to_http;
 use crate::http_helpers::mgs_inventory_or_unavail;
@@ -16,7 +15,6 @@ use crate::mgs::GetInventoryResponse as GetMgsInventoryResponse;
 use crate::mgs::records_to_mgs_inventory;
 use crate::multirack_config::CurrentMultirackJoinConfig;
 use crate::transceivers::GetTransceiversResponse;
-use bootstrap_agent_lockstep_client::ClientInfo as _;
 use bootstrap_agent_lockstep_types::RackOperationStatus;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
@@ -24,12 +22,9 @@ use dropshot::HttpResponseOk;
 use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Path;
 use dropshot::RequestContext;
-use dropshot::StreamingBody;
 use dropshot::TypedBody;
 use internal_dns_resolver::Resolver;
-use omicron_uuid_kinds::RackInitUuid;
 use sled_agent_types::early_networking::SwitchSlot;
-use sled_hardware_types::Baseboard;
 use slog::o;
 use std::sync::Arc;
 use wicket_common::inventory::MgsV1InventorySnapshot;
@@ -43,8 +38,6 @@ use wicket_common::rack_setup::GetBgpAuthKeyInfoResponse;
 use wicket_common::rack_update::AbortUpdateOptions;
 use wicket_common::update_events::EventReport;
 use wicketd_api::*;
-use wicketd_commission_types::rack_setup::CertificateUploadResponse;
-use wicketd_commission_types::rack_setup::PutRssUserConfigInsensitive;
 use wicketd_commission_types::update::ClearUpdateStateResponse;
 
 use crate::ServerContext;
@@ -123,35 +116,6 @@ impl WicketdApi for WicketdApiImpl {
         Ok(HttpResponseOk(config.into()))
     }
 
-    async fn put_rss_config(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<PutRssUserConfigInsensitive>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let ctx = rqctx.context();
-
-        // We can't run RSS if we don't have an inventory from MGS yet; we always
-        // need to fill in the bootstrap sleds first.
-        let inventory = mgs_inventory_or_unavail(&ctx.mgs_handle).await?;
-
-        let mut config = ctx.rss_or_multirack_join_config.lock().unwrap();
-
-        // Overwrite any non-rss config
-        let rss_config = config.rss_config_mut_or_default();
-
-        let ddm_discovered_sleds = &ctx.bootstrap_peers.sleds();
-        rss_config
-            .update(
-                body.into_inner(),
-                &ctx.baseboard_id,
-                &inventory,
-                &ddm_discovered_sleds,
-                &ctx.log,
-            )
-            .map_err(|err| HttpError::for_bad_request(None, err))?;
-
-        Ok(HttpResponseUpdatedNoContent())
-    }
-
     async fn put_multirack_join_config(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<MultirackJoinConfigBaseUserInput>,
@@ -194,43 +158,6 @@ impl WicketdApi for WicketdApiImpl {
         Ok(HttpResponseUpdatedNoContent())
     }
 
-    async fn post_rss_config_cert(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<String>,
-    ) -> Result<HttpResponseOk<CertificateUploadResponse>, HttpError> {
-        let ctx = rqctx.context();
-
-        let mut config = ctx.rss_or_multirack_join_config.lock().unwrap();
-
-        let rss_config = config.rss_config_mut_or_conflict(
-            "cannot post certificates when not preparing for RSS",
-        )?;
-
-        let response = rss_config
-            .push_cert(body.into_inner())
-            .map_err(|err| HttpError::for_bad_request(None, err))?;
-
-        Ok(HttpResponseOk(response))
-    }
-
-    async fn post_rss_config_key(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<String>,
-    ) -> Result<HttpResponseOk<CertificateUploadResponse>, HttpError> {
-        let ctx = rqctx.context();
-
-        let mut config = ctx.rss_or_multirack_join_config.lock().unwrap();
-        let rss_config = config.rss_config_mut_or_conflict(
-            "cannot post private keys when not preparing for RSS",
-        )?;
-
-        let response = rss_config
-            .push_key(body.into_inner())
-            .map_err(|err| HttpError::for_bad_request(None, err))?;
-
-        Ok(HttpResponseOk(response))
-    }
-
     async fn get_bgp_auth_key_info(
         rqctx: RequestContext<Self::Context>,
         // A bit weird for a GET request to have a TypedBody, but there's no other
@@ -249,54 +176,6 @@ impl WicketdApi for WicketdApiImpl {
         Ok(HttpResponseOk(GetBgpAuthKeyInfoResponse { data }))
     }
 
-    async fn put_bgp_auth_key(
-        rqctx: RequestContext<Self::Context>,
-        params: Path<PutBgpAuthKeyParams>,
-        body: TypedBody<PutBgpAuthKeyBody>,
-    ) -> Result<HttpResponseOk<PutBgpAuthKeyResponse>, HttpError> {
-        let ctx = rqctx.context();
-        let params = params.into_inner();
-
-        let mut config = ctx.rss_or_multirack_join_config.lock().unwrap();
-        let status = config
-            .set_bgp_auth_key(params.key_id, body.into_inner().key)
-            .map_err(|err| HttpError::for_bad_request(None, err.to_string()))?;
-
-        Ok(HttpResponseOk(PutBgpAuthKeyResponse { status }))
-    }
-
-    async fn put_rss_config_recovery_user_password_hash(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<PutRssRecoveryUserPasswordHash>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let ctx = rqctx.context();
-
-        let mut config = ctx.rss_or_multirack_join_config.lock().unwrap();
-
-        let rss_config = config.rss_config_mut_or_conflict(
-            "cannot put recovery user password when not preparing for RSS",
-        )?;
-
-        rss_config.set_recovery_user_password_hash(body.into_inner().hash);
-
-        Ok(HttpResponseUpdatedNoContent())
-    }
-
-    async fn delete_rss_config(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let ctx = rqctx.context();
-
-        let mut config = ctx.rss_or_multirack_join_config.lock().unwrap();
-        let rss_config = config.rss_config_mut_or_conflict(
-            "cannot delete RSS config when not preparing for RSS",
-        )?;
-
-        *rss_config = Default::default();
-
-        Ok(HttpResponseUpdatedNoContent())
-    }
-
     async fn get_rack_setup_state(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<RackOperationStatus>, HttpError> {
@@ -310,40 +189,6 @@ impl WicketdApi for WicketdApiImpl {
             .into_inner();
 
         Ok(HttpResponseOk(op_status))
-    }
-
-    async fn post_run_rack_setup(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<RackInitUuid>, HttpError> {
-        let ctx = rqctx.context();
-        let log = &rqctx.log;
-
-        let client = ba_lockstep_client(ctx);
-        let request = {
-            let mut config = ctx.rss_or_multirack_join_config.lock().unwrap();
-
-            let rss_config = config.rss_config_mut_or_conflict(
-                "cannot run rack setup when not preparing for RSS",
-            )?;
-
-            rss_config.start_rss_request(&ctx.bootstrap_peers, log).map_err(
-                |err| HttpError::for_bad_request(None, format!("{err:#}")),
-            )?
-        };
-
-        slog::info!(
-            ctx.log,
-            "Sending RSS initialize request to {}",
-            client.baseurl()
-        );
-
-        let init_id = client
-            .rack_initialize(&request)
-            .await
-            .map_err(|err| ba_lockstep_error_to_http(err, "rack setup"))?
-            .into_inner();
-
-        Ok(HttpResponseOk(init_id))
     }
 
     async fn get_inventory(
@@ -428,17 +273,6 @@ impl WicketdApi for WicketdApiImpl {
         Ok(HttpResponseOk(GetInventoryResponse::Response { inventory }))
     }
 
-    async fn put_repository(
-        rqctx: RequestContext<Self::Context>,
-        body: StreamingBody,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let rqctx = rqctx.context();
-
-        rqctx.update_tracker.put_repository(body.into_stream()).await?;
-
-        Ok(HttpResponseUpdatedNoContent())
-    }
-
     async fn get_artifacts_and_event_reports(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<GetArtifactsAndEventReportsResponse>, HttpError>
@@ -454,49 +288,6 @@ impl WicketdApi for WicketdApiImpl {
         let rqctx = rqctx.context();
         Ok(HttpResponseOk(GetBaseboardResponse {
             baseboard: rqctx.baseboard_id.clone(),
-        }))
-    }
-
-    async fn get_location(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<GetLocationResponse>, HttpError> {
-        let rqctx = rqctx.context();
-        let inventory = mgs_inventory_or_unavail(&rqctx.mgs_handle).await?;
-
-        // We don't error out in get_location on the local switch ID not being
-        // available, so discard the error here (it's already logged in
-        // local_switch_id).
-        let switch_id = rqctx.local_switch_id().await.ok();
-        let sled_baseboard_id = rqctx.baseboard_id.clone();
-
-        let mut switch_baseboard = None;
-        let mut sled_id = None;
-
-        // Safety: `inventory_or_unavail` returns an error if there is no
-        // MGS-derived inventory, so option is always `Some(_)`.
-        for sp in &inventory.sps {
-            if Some(sp.id) == switch_id {
-                switch_baseboard = sp.state.as_ref().map(|state| {
-                    // TODO-correctness `new_gimlet` isn't the right name: this is a
-                    // sidecar baseboard.
-                    Baseboard::new_gimlet(
-                        state.serial_number.clone(),
-                        state.model.clone(),
-                        state.revision,
-                    )
-                });
-            } else if let Some(state) = sp.state.as_ref() {
-                if baseboard_id_matches_sp_state(&sled_baseboard_id, state) {
-                    sled_id = Some(sp.id);
-                }
-            }
-        }
-
-        Ok(HttpResponseOk(GetLocationResponse {
-            sled_id,
-            sled_baseboard_id,
-            switch_baseboard,
-            switch_id,
         }))
     }
 

@@ -11,7 +11,7 @@ use dropshot::{
     RequestContext, StreamingBody, TypedBody,
 };
 use dropshot_api_manager_types::api_versions;
-use wicketd_commission_types_versions::latest;
+use wicketd_commission_types_versions::{latest, v1, v2};
 
 // NOTE: The commission API is server-side versioned, but changing it requires
 // coordinating with rkdeploy (it must stay on the oldest version supported
@@ -29,6 +29,8 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (3, BGP_PEER_SRC_ADDR),
+    (2, FULL_SERVICE_IP_POOL_DETAILS),
     (1, INITIAL),
 ]);
 
@@ -197,11 +199,38 @@ pub trait WicketdCommissionApi {
     #[endpoint {
         method = PUT,
         path = "/rack-setup/config",
+        versions = VERSION_BGP_PEER_SRC_ADDR..,
     }]
     async fn put_rss_config(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<latest::rack_setup::PutRssUserConfigInsensitive>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        operation_id = "put_rss_config",
+        method = PUT,
+        path = "/rack-setup/config",
+        versions = VERSION_FULL_SERVICE_IP_POOL_DETAILS..VERSION_BGP_PEER_SRC_ADDR,
+    }]
+    async fn put_rss_config_v2(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v2::rack_setup::PutRssUserConfigInsensitive>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::put_rss_config(rqctx, body.map(Into::into)).await
+    }
+
+    #[endpoint {
+        operation_id = "put_rss_config",
+        method = PUT,
+        path = "/rack-setup/config",
+        versions = ..VERSION_FULL_SERVICE_IP_POOL_DETAILS,
+    }]
+    async fn put_rss_config_v1(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v1::rack_setup::PutRssUserConfigInsensitive>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::put_rss_config_v2(rqctx, body.map(Into::into)).await
+    }
 
     /// Reset all RSS configuration to default values
     #[endpoint {

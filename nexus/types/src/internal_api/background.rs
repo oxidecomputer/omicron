@@ -10,7 +10,7 @@ use gateway_types::component::SpType;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
-use omicron_common::api::external::Generation;
+use omicron_generation_kinds::Generation;
 use omicron_uuid_kinds::AlertReceiverUuid;
 use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::BlueprintUuid;
@@ -630,6 +630,105 @@ pub struct BlueprintRendezvousStats {
     pub crucible_dataset: CrucibleDatasetsRendezvousStats,
     pub local_storage_dataset: DatasetsRendezvousStats,
     pub local_storage_unencrypted_dataset: DatasetsRendezvousStats,
+    pub sled_blueprint_availability: SledBlueprintAvailabilityRendezvousStats,
+}
+
+/// Stats for a sled availability rendezvous run.
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize,
+)]
+pub struct SledBlueprintAvailabilityRendezvousStats {
+    /// Number of sleds recorded as available for provisioning.
+    ///
+    /// This can be a fresh row or an update at a newer generation; the
+    /// availability value itself may be unchanged.
+    pub num_marked_available: usize,
+
+    /// Number of sleds recorded as unavailable for provisioning.
+    ///
+    /// This can be a fresh row or an update at a newer generation; the
+    /// availability value itself may be unchanged.
+    pub num_marked_unavailable: usize,
+
+    /// Number of sleds whose row was left as-is.
+    ///
+    /// This can be for any of the following reasons:
+    ///
+    /// * The blueprint's update generation wasn't newer.
+    /// * The row is already in a terminal state (while the blueprint still
+    ///   lists the sled as active).
+    /// * A concurrent Nexus won the write.
+    pub num_unchanged: usize,
+
+    /// Number of active sleds whose stored row and blueprint entry together
+    /// violate the generation invariant (equal generation but different
+    /// availability, indicating a planner bug). These rows are left untouched.
+    pub num_invariant_violations: usize,
+
+    /// Number of sleds newly moved to the terminal `decommissioned` state.
+    pub num_decommissioned: usize,
+
+    /// Number of decommissioned sleds in the blueprint whose row was already a
+    /// tombstone (possibly written by a concurrent Nexus during this pass).
+    pub num_already_decommissioned: usize,
+
+    /// Number of active rows for sleds the target blueprint doesn't mention.
+    /// These are left untouched.
+    ///
+    /// This can only happen if this Nexus is acting on a stale blueprint that
+    /// predates a sled another Nexus already recorded.
+    pub num_not_in_blueprint: usize,
+
+    /// Number of decommissioned rows for sleds the target blueprint doesn't
+    /// mention. These are terminal tombstones and are left untouched.
+    ///
+    /// Today the blueprint never prunes decommissioned sleds, so this is
+    /// expected to be zero; once it does, this becomes the steady state for
+    /// every pruned sled.
+    pub num_decommissioned_not_in_blueprint: usize,
+}
+
+impl slog::KV for SledBlueprintAvailabilityRendezvousStats {
+    fn serialize(
+        &self,
+        _record: &slog::Record,
+        serializer: &mut dyn slog::Serializer,
+    ) -> slog::Result {
+        let Self {
+            num_marked_available,
+            num_marked_unavailable,
+            num_unchanged,
+            num_invariant_violations,
+            num_decommissioned,
+            num_already_decommissioned,
+            num_not_in_blueprint,
+            num_decommissioned_not_in_blueprint,
+        } = *self;
+        serializer
+            .emit_usize("num_marked_available".into(), num_marked_available)?;
+        serializer.emit_usize(
+            "num_marked_unavailable".into(),
+            num_marked_unavailable,
+        )?;
+        serializer.emit_usize("num_unchanged".into(), num_unchanged)?;
+        serializer.emit_usize(
+            "num_invariant_violations".into(),
+            num_invariant_violations,
+        )?;
+        serializer
+            .emit_usize("num_decommissioned".into(), num_decommissioned)?;
+        serializer.emit_usize(
+            "num_already_decommissioned".into(),
+            num_already_decommissioned,
+        )?;
+        serializer
+            .emit_usize("num_not_in_blueprint".into(), num_not_in_blueprint)?;
+        serializer.emit_usize(
+            "num_decommissioned_not_in_blueprint".into(),
+            num_decommissioned_not_in_blueprint,
+        )?;
+        Ok(())
+    }
 }
 
 /// Stats for the rendezvous table that stores Crucible datasets
@@ -893,6 +992,35 @@ pub struct EreporterStatus {
     pub errors: Vec<String>,
 }
 
+/// The status of a `fm_config_loader` background task activation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub enum FmConfigLoadStatus {
+    /// An error occurred querying the database.
+    Error(String),
+
+    /// The latest config override in the database could not be converted to
+    /// the domain type. The previously loaded config (or the default, if no
+    /// config was previously loaded) is still in effect.
+    LatestConfigInvalid {
+        /// What's wrong with it?
+        error: String,
+        fallback: CurrentFmConfig,
+    },
+
+    /// A fault management configuration was loaded (as of `time_loaded`).
+    Loaded(CurrentFmConfig),
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct CurrentFmConfig {
+    /// The current configuration.
+    pub config: crate::fm::FmConfigView,
+    /// The time at which the current config was loaded.
+    pub time_loaded: DateTime<Utc>,
+    /// Whether the config was updated in this activation.
+    pub updated: bool,
+}
+
 /// The status of a `fm_sitrep_loader` background task activation.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub enum SitrepLoadStatus {
@@ -932,16 +1060,22 @@ pub mod fm_sitrep_gc {
 
 /// The status of a `fm_sitrep_history_pruner` background task activation.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub struct SitrepHistoryPrunerStatus {
-    /// The maximum number of entries to retain in the history table.
-    pub history_limit: u32,
-    /// The maximum number of history table entries deleted per query.
-    pub batch_size: u32,
-    /// Tracks how many sitreps were deleted during this activation.
-    pub pruned: fm_sitrep_history_pruner::SitrepsPruned,
-    /// The outcome of this activation (i.e. why it ended, and the last observed
-    /// history table count).
-    pub outcome: fm_sitrep_history_pruner::Outcome,
+pub enum SitrepHistoryPrunerStatus {
+    /// The FM config has not yet been loaded from the database, so the pruning
+    /// task is waiting for the config to be available.
+    WaitingForConfig,
+    /// The pruning task has activated normally.
+    Activated {
+        /// The configuration values used for this pruning pass.
+        cfg: crate::fm::FmConfig,
+        /// The maximum number of history table entries deleted per query.
+        batch_size: u32,
+        /// Tracks how many sitreps were deleted during this activation.
+        pruned: fm_sitrep_history_pruner::SitrepsPruned,
+        /// The outcome of this activation (i.e. why it ended, and the last
+        /// observed history table count).
+        outcome: fm_sitrep_history_pruner::Outcome,
+    },
 }
 
 pub mod fm_sitrep_history_pruner {
@@ -996,22 +1130,26 @@ pub struct FmAnalysisStatus {
 
 pub mod fm_analysis {
     use super::*;
-    use crate::fm::analysis_reports;
-    use std::num::NonZeroU64;
+    use crate::fm::FmConfigSource;
+    use std::num::{NonZeroU32, NonZeroU64};
 
     #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
     pub struct PreparationStatus {
         /// Errors encountered during the preparation step which did *not*
         /// prevent the analysis step from completing.
         pub warnings: Vec<String>,
-        pub report: analysis_reports::InputReport,
     }
 
     #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
     #[allow(clippy::large_enum_variant)]
     pub enum Outcome {
         /// The task is disabled by config.
-        Disabled,
+        Disabled(FmConfigSource),
+
+        /// Fault management analysis was not performed, as the fault
+        /// management configuration has not yet been loaded from the
+        /// database.
+        WaitingForConfig,
 
         /// Fault management analysis was not performed, as no inventory
         /// collection has been loaded.
@@ -1040,7 +1178,6 @@ pub mod fm_analysis {
     pub struct AnalysisStatus {
         pub start_time: DateTime<Utc>,
         pub end_time: DateTime<Utc>,
-        pub report: crate::fm::analysis_reports::AnalysisReport,
         pub outcome: AnalysisOutcome,
         pub capacity: Option<SitrepCapacity>,
     }
@@ -1048,7 +1185,7 @@ pub mod fm_analysis {
     #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
     pub struct SitrepCapacity {
         pub count: u64,
-        pub limit: NonZeroU64,
+        pub limit: NonZeroU32,
     }
 
     impl SitrepCapacity {
@@ -1056,7 +1193,7 @@ pub mod fm_analysis {
         // decimal places, but I don't really think we need to be that precise,
         // and matching on ranges nicely is cute...
         pub fn usage_percent(&self) -> u64 {
-            self.count.saturating_mul(100) / self.limit
+            self.count.saturating_mul(100) / NonZeroU64::from(self.limit)
         }
     }
 
@@ -1071,7 +1208,7 @@ pub mod fm_analysis {
 
         /// Analysis produced a new sitrep, but the sitrep limit has been
         /// reached, so it was not written to the database.
-        LimitReached { limit: NonZeroU64 },
+        LimitReached { limit: NonZeroU32 },
 
         /// Analysis produced a new sitrep, but we failed to make it
         /// the current sitrep.

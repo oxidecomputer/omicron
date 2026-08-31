@@ -2378,6 +2378,40 @@ CREATE INDEX IF NOT EXISTS lookup_ip_pool_by_type ON omicron.public.ip_pool (
 ) WHERE
     time_deleted IS NULL;
 
+/*
+ * The external services whose external addresses are drawn from IP pools.
+ */
+CREATE TYPE IF NOT EXISTS omicron.public.external_service_kind AS ENUM (
+    'nexus',
+    'boundary_ntp',
+    'external_dns'
+);
+
+/*
+ * Join table assigning IP pools to external services.
+ *
+ * This represents the operator's intent about which pools should be used for
+ * those services, but we're intentionally not specifying the semantics yet
+ * (e.g., an assignment means we MUST use an IP from the pool, vs MAY do so).
+ * We'll flesh that out per-service as needed during implementation.
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.external_service_ip_pool (
+    service omicron.public.external_service_kind NOT NULL,
+    ip_pool_id UUID NOT NULL,
+    -- Most commonly want to look up per-service first, e.g., during blueprint
+    -- planning
+    PRIMARY KEY (service, ip_pool_id)
+);
+
+/*
+ * Index supporting fast lookup of a pool, e.g. to list services assigned to it.
+ * Also used when deleting the actual `ip_pool` row, failing the query if it's
+ * still assigned to anything.
+ */
+CREATE INDEX IF NOT EXISTS external_service_ip_pool_by_ip_pool_id ON omicron.public.external_service_ip_pool (
+    ip_pool_id
+);
+
 -- The order here is most-specific first, and it matters because we use this
 -- fact to select the most specific default in the case where there is both a
 -- silo default and a fleet default. If we were to add a project type, it should
@@ -2560,16 +2594,19 @@ CREATE TABLE IF NOT EXISTS omicron.public.external_ip (
 
     is_probe BOOL NOT NULL DEFAULT false,
 
-    /* The name must be non-NULL iff this is a floating IP. */
-    CONSTRAINT null_fip_name CHECK (
-        (kind != 'floating' AND name IS NULL) OR
-        (kind = 'floating' AND name IS NOT NULL)
+    /*
+     * Names and descriptions are required for instance floating IPs,
+     * and service IPs of any kind.
+     */
+    CONSTRAINT fips_and_services_need_names CHECK (
+        (is_service = TRUE AND name IS NOT NULL) OR
+        (is_service = FALSE AND kind != 'floating' AND name IS NULL) OR
+        (is_service = FALSE AND kind = 'floating' AND name IS NOT NULL)
     ),
-
-    /* The description must be non-NULL iff this is a floating IP. */
-    CONSTRAINT null_fip_description CHECK (
-        (kind != 'floating' AND description IS NULL) OR
-        (kind = 'floating' AND description IS NOT NULL)
+    CONSTRAINT fips_and_services_need_descriptions CHECK (
+        (is_service = TRUE AND description IS NOT NULL) OR
+        (is_service = FALSE AND kind != 'floating' AND description IS NULL) OR
+        (is_service = FALSE AND kind = 'floating' AND description IS NOT NULL)
     ),
 
     /* Only floating IPs can be attached to a project, and
@@ -2926,7 +2963,9 @@ CREATE TYPE IF NOT EXISTS omicron.public.saga_abandon_reason AS ENUM (
     /* the saga was explicitly abandoned via omdb */
     'omdb',
     /* during saga recovery, the persistent state was unable to processed */
-    'unrecoverable'
+    'unrecoverable',
+    /* the saga was discovered assigned to an SEC that's been long-expunged */
+    'orphaned'
 );
 
 
@@ -3081,15 +3120,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.tuf_repo (
     -- implementation detail of our ZIP archives.
     sha256 STRING(64) NOT NULL,
 
-    -- The version of the targets.json role that was used to generate the repo.
-    targets_role_version INT NOT NULL,
-
-    -- The valid_until time for the repo.
-    -- TODO: Figure out timestamp validity policy for uploaded repos vs those
-    -- fetched over HTTP; my (iliana's) current presumption is that we will make
-    -- this NULL for uploaded ZIP archives of repos.
-    valid_until TIMESTAMPTZ NOT NULL,
-
     -- The system version described in the TUF repo.
     --
     -- This is the "true" primary key, but is not treated as such in the
@@ -3115,18 +3145,23 @@ CREATE UNIQUE INDEX IF NOT EXISTS tuf_repo_not_pruned
     ON omicron.public.tuf_repo (id)
     WHERE time_pruned IS NULL;
 
+-- Describes the contents of the `metadata` member of `artifacts-v2.json` in a
+-- TUF repo.
+CREATE TABLE IF NOT EXISTS omicron.public.tuf_repo_metadata (
+    tuf_repo_id UUID NOT NULL,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+
+    PRIMARY KEY (tuf_repo_id, key)
+);
+
 -- Describes an individual artifact from an uploaded TUF repo.
 --
--- In the future, this may also be used to describe artifacts that are fetched
--- from a remote TUF repo, but that requires some additional design work.
+-- A row in this table represents a set of tags for a given artifact hash. (This
+-- is ideally a unique set of tags, which Nexus attempts to ensure, but this
+-- cannot be guaranteed by the schema.)
 CREATE TABLE IF NOT EXISTS omicron.public.tuf_artifact (
     id UUID PRIMARY KEY,
-    name STRING(63) NOT NULL,
-    version STRING(64) NOT NULL,
-    -- This used to be an enum but is now a string, because it can represent
-    -- artifact kinds currently unknown to a particular version of Nexus as
-    -- well.
-    kind STRING(63) NOT NULL,
 
     -- The time this artifact was first recorded.
     time_created TIMESTAMPTZ NOT NULL,
@@ -3134,29 +3169,34 @@ CREATE TABLE IF NOT EXISTS omicron.public.tuf_artifact (
     -- The SHA256 hash of the artifact, typically obtained from the TUF
     -- targets.json (and validated at extract time).
     sha256 STRING(64) NOT NULL,
-    -- The length of the artifact, in bytes.
-    artifact_size INT8 NOT NULL,
 
     -- The generation number this artifact was added for.
-    generation_added INT8 NOT NULL,
-
-    -- Sign (root key hash table) hash of a signed RoT or RoT bootloader image.
-    sign BYTES, -- nullable
-
-    -- Board (caboose BORD) for artifacts that are Hubris archives.
-    board TEXT, -- nullable (null for non-Hubris artifacts)
-
-    CONSTRAINT unique_name_version_kind UNIQUE (name, version, kind)
+    generation_added INT8 NOT NULL
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS tuf_artifact_added
-    ON omicron.public.tuf_artifact (generation_added, id)
-    STORING (name, version, kind, time_created, sha256, artifact_size);
+CREATE UNIQUE INDEX IF NOT EXISTS tuf_artifact_sha256
+    ON omicron.public.tuf_artifact (sha256, id);
 
--- RFD 554: (kind, hash) is unique for artifacts. This index is used while
--- looking up artifacts.
-CREATE UNIQUE INDEX IF NOT EXISTS tuf_artifact_kind_sha256
-    ON omicron.public.tuf_artifact (kind, sha256);
+-- Describes the version and length for a given artifact SHA256 hash.
+--
+-- This is a separate table to enforce the one-to-one mapping between SHA256
+-- hash and version/length. Per RFD 554, artifacts must be stamped with their
+-- version (or a similar identifier) to ensure that they change when the version
+-- changes.
+CREATE TABLE IF NOT EXISTS omicron.public.tuf_artifact_file (
+    sha256 STRING(64) PRIMARY KEY,
+    version STRING(64) NOT NULL,
+    artifact_size INT8 NOT NULL
+);
+
+-- Describes a single tag in the set of tags that describe an artifact.
+CREATE TABLE IF NOT EXISTS omicron.public.tuf_artifact_tag (
+    tuf_artifact_id UUID NOT NULL,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+
+    PRIMARY KEY (tuf_artifact_id, key)
+);
 
 -- Reflects that a particular artifact was provided by a particular TUF repo.
 -- This is a many-many mapping.
@@ -3746,7 +3786,8 @@ CREATE TYPE IF NOT EXISTS omicron.public.switch_port_geometry AS ENUM (
 
 CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_port_config (
     port_settings_id UUID PRIMARY KEY,
-    geometry omicron.public.switch_port_geometry
+    geometry omicron.public.switch_port_geometry,
+    allow_ddm_traffic BOOL NOT NULL
 );
 
 CREATE TYPE IF NOT EXISTS omicron.public.switch_link_fec AS ENUM (
@@ -3870,11 +3911,23 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config (
     id UUID NOT NULL,
     -- Maximum valid router lifetime is 9000 seconds (2.5 hours) per RFC 4861
     router_lifetime INT4 NOT NULL CHECK (router_lifetime >= 0 AND router_lifetime <= 9000),
+    -- Similarly to `addr`, we perform additional validations here and in the Rust logic.
+    src_addr INET CHECK (host(src_addr) != '0.0.0.0' AND host(src_addr) != '::' ),
 
     -- router_lifetime is only meaningful to set for unnumbered peers; ensure
     -- it's left at 0 for numbered peers
     CONSTRAINT router_lifetime_only_for_unnumbered_peers CHECK (
         router_lifetime = 0 OR addr IS NULL
+    ),
+
+    -- Only allow configuration of src_addr for "numbered" peers
+    CONSTRAINT src_addr_only_for_numbered_peers CHECK (
+        src_addr IS NULL OR addr IS NOT NULL
+    ),
+
+    -- src_addr's address family must match the peer's addr
+    CONSTRAINT src_addr_family_must_match_peer CHECK (
+        family(src_addr) = family(addr)
     ),
 
     PRIMARY KEY (id)
@@ -4810,6 +4863,19 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_dataset (
     PRIMARY KEY (inv_collection_id, sled_id, name)
 );
 
+-- A sled's update disposition in inventory.
+--
+-- This is analogous to the `sled_update_availability` enum used as a part of
+-- storing update disposition in blueprints. We use a separate enum (despite
+-- currently having identical variants) because there are separate Rust
+-- types, and it allows the two to evolve independently.
+CREATE TYPE IF NOT EXISTS omicron.public.inv_sled_update_disposition AS ENUM (
+    -- Available for use for all provisions.
+    'available',
+    -- Disallowed for all use + migratable instances are being evacuated.
+    'evacuating'
+);
+
 CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config (
     -- where this observation came from
     -- (foreign key into `inv_collection` table)
@@ -4833,6 +4899,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config (
 
     -- the set of artifact hashes used with trust quorum, can be empty
     measurements STRING(64)[],
+
+    -- current update disposition, controlling whether new VMM registrations are
+    -- accepted
+    update_disposition omicron.public.inv_sled_update_disposition NOT NULL,
 
     PRIMARY KEY (inv_collection_id, id)
 );
@@ -5132,7 +5202,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config_zone (
     -- worthwhile.
 
     -- Some zones have a second service.  Like the primary one, the meaning of
-    -- this is zone-type-dependent.
+    -- this is zone-type-dependent.  This should be used for additional underlay
+    -- IPs, _not_ external IP addresses.  Those are stored in the child table
+    -- `inv_omicron_sled_config_zone_external_ip` with a reference to this row.
     second_service_ip INET,
     second_service_port INT4
         CHECK (second_service_port IS NULL
@@ -5161,13 +5233,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config_zone (
     -- Properties specific to Nexus zones
     nexus_external_tls BOOLEAN,
     nexus_external_dns_servers INET ARRAY,
-
-    -- Source NAT configuration (currently used for boundary NTP only)
-    snat_ip INET,
-    snat_first_port INT4
-        CHECK (snat_first_port IS NULL OR snat_first_port BETWEEN 0 AND 65535),
-    snat_last_port INT4
-        CHECK (snat_last_port IS NULL OR snat_last_port BETWEEN 0 AND 65535),
 
     -- TODO: This is nullable for backwards compatibility.
     -- Eventually, that nullability should be removed.
@@ -5202,8 +5267,7 @@ CREATE INDEX IF NOT EXISTS inv_omicron_sled_config_zone_nic_id
     ON omicron.public.inv_omicron_sled_config_zone (nic_id)
     STORING (
         primary_service_ip,
-        second_service_ip,
-        snat_ip
+        second_service_ip
     );
 
 CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config_zone_nic (
@@ -5213,14 +5277,78 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config_zone_nic (
     sled_config_id UUID NOT NULL,
     id UUID NOT NULL,
     name TEXT NOT NULL,
-    ip INET NOT NULL,
+    -- NOTE: `ip` and `subnet` hold the IPv4 address and subnet, despite the
+    -- names. We kept the original names because renaming columns is not
+    -- idempotent in CRDB as of today.
+    ip INET,
     mac INT8 NOT NULL,
-    subnet INET NOT NULL,
+    subnet INET,
     vni INT8 NOT NULL,
     is_primary BOOLEAN NOT NULL,
     slot INT2 NOT NULL,
+    ipv6 INET,
+    ipv6_subnet INET,
 
-    PRIMARY KEY (inv_collection_id, sled_config_id, id)
+    PRIMARY KEY (inv_collection_id, sled_config_id, id),
+
+    -- A NIC must have at least one IP family, and may have both.
+    CONSTRAINT at_least_one_ip_address CHECK (
+        ip IS NOT NULL OR ipv6 IS NOT NULL
+    ),
+
+    -- Each family's address and subnet are present together or not at all.
+    CONSTRAINT ip_and_subnet_consistent CHECK (
+        (ip IS NULL) = (subnet IS NULL) AND
+        (ipv6 IS NULL) = (ipv6_subnet IS NULL)
+    )
+);
+
+-- The external IP addresses of a zone in an `inv_omicron_sled_config_zone`.
+--
+-- Zones with external networking (Nexus, external DNS, boundary NTP) have one
+-- or more external IPs.  There is one row here per external IP.  The kind of
+-- external IP is inferred from the owning zone's `zone_type` together with
+-- which ports are set:
+--
+--   - Nexus:        a floating IP (`ip` only).
+--   - External DNS: a floating IP with a port (`ip` + `port`). Note that the
+--     port here isn't really part of the external IP definition, but it's used
+--     to tell the DNS server which port to listen on.
+--   - Boundary NTP: an SNAT IP (`ip` + `snat_first_port` + `snat_last_port`).
+CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config_zone_external_ip (
+    -- where this observation came from
+    inv_collection_id UUID NOT NULL,
+
+    -- foreign key into the `inv_omicron_sled_config` table
+    sled_config_id UUID NOT NULL,
+
+    -- foreign key into the `inv_omicron_sled_config_zone` table
+    zone_id UUID NOT NULL,
+
+    -- the external IP address itself
+    ip INET NOT NULL,
+
+    -- the port for a floating IP with an address (external DNS); NULL otherwise
+    port INT4
+        CHECK (port IS NULL OR port BETWEEN 0 AND 65535),
+
+    -- the SNAT port range (boundary NTP); NULL otherwise
+    snat_first_port INT4
+        CHECK (snat_first_port IS NULL OR snat_first_port BETWEEN 0 AND 65535),
+    snat_last_port INT4
+        CHECK (snat_last_port IS NULL OR snat_last_port BETWEEN 0 AND 65535),
+
+    -- must provide both SNAT ports
+    CONSTRAINT both_snat_ports CHECK (
+        (snat_first_port IS NULL) = (snat_last_port IS NULL)
+    ),
+
+    -- may not provide _both_ `port` and any SNAT port
+    CONSTRAINT only_port_or_snat_ports CHECK (
+        NOT ((port IS NOT NULL) AND (snat_first_port IS NOT NULL))
+    ),
+
+    PRIMARY KEY (inv_collection_id, sled_config_id, zone_id, ip)
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config_dataset (
@@ -5301,7 +5429,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_internal_dns (
 CREATE TYPE IF NOT EXISTS omicron.public.inv_svc_enabled_not_online_state AS ENUM (
     'offline',
     'degraded',
-    'maintenance'
+    'maintenance',
+    'unrecognized'
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.inv_svc_enabled_not_online (
@@ -5587,6 +5716,14 @@ CREATE TYPE IF NOT EXISTS omicron.public.bp_sled_measurements AS ENUM (
     'artifacts'
 );
 
+-- The availability half of a sled's update disposition in a blueprint.
+CREATE TYPE IF NOT EXISTS omicron.public.sled_update_availability AS ENUM (
+    -- Available for use for all provisions.
+    'available',
+    -- Disallowed for all use + migratable instances are being evacuated.
+    'evacuating'
+);
+
 -- metadata associated with a single sled in a blueprint
 CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_metadata (
     -- foreign key into `blueprint` table
@@ -5594,6 +5731,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_metadata (
 
     sled_id UUID NOT NULL,
     sled_state omicron.public.sled_state NOT NULL,
+
     sled_agent_generation INT8 NOT NULL,
     -- NULL means do not remove any overrides
     remove_mupdate_override UUID,
@@ -5614,6 +5752,17 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_metadata (
 
     -- the measurements for this sled
     measurements omicron.public.bp_sled_measurements NOT NULL,
+
+    -- the sled's update disposition
+    update_disposition_generation INT8 NOT NULL,
+    update_availability omicron.public.sled_update_availability NOT NULL,
+    update_disruption_policy omicron.public.reconfigurator_disruption_policy,
+
+    -- a disruption policy is recorded iff the sled is evacuating
+    CONSTRAINT update_disruption_policy_set_iff_evacuating CHECK (
+        (update_availability = 'evacuating')
+            = (update_disruption_policy IS NOT NULL)
+    ),
 
     PRIMARY KEY (blueprint_id, sled_id)
 );
@@ -5834,14 +5983,30 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone_nic (
     blueprint_id UUID NOT NULL,
     id UUID NOT NULL,
     name TEXT NOT NULL,
-    ip INET NOT NULL,
+    -- NOTE: `ip` and `subnet` hold the IPv4 address and subnet, despite the
+    -- names. We kept the original names because renaming columns is not
+    -- idempotent in CRDB as of today.
+    ip INET,
     mac INT8 NOT NULL,
-    subnet INET NOT NULL,
+    subnet INET,
     vni INT8 NOT NULL,
     is_primary BOOLEAN NOT NULL,
     slot INT2 NOT NULL,
+    ipv6 INET,
+    ipv6_subnet INET,
 
-    PRIMARY KEY (blueprint_id, id)
+    PRIMARY KEY (blueprint_id, id),
+
+    -- A NIC must have at least one IP family, and may have both.
+    CONSTRAINT at_least_one_ip_address CHECK (
+        ip IS NOT NULL OR ipv6 IS NOT NULL
+    ),
+
+    -- Each family's address and subnet are present together or not at all.
+    CONSTRAINT ip_and_subnet_consistent CHECK (
+        (ip IS NULL) = (subnet IS NULL) AND
+        (ipv6 IS NULL) = (ipv6_subnet IS NULL)
+    )
 );
 
 -- Blueprint information related to clickhouse cluster management
@@ -6110,6 +6275,97 @@ CREATE INDEX IF NOT EXISTS lookup_usable_rendezvous_debug_dataset
 /*******************************************************************/
 
 /*
+ * The availability state of a sled in the `rendezvous_sled_bp_availability` table.
+ *
+ *   available     - the sled may be used to provision new instances
+ *   unavailable   - the sled is an active sled but is not currently a
+ *                   provisioning target (e.g. it is being evacuated for an
+ *                   update)
+ *   decommissioned - the sled is marked decommissioned in the blueprint; this
+ *                    is a terminal state (see the table comment below)
+ */
+CREATE TYPE IF NOT EXISTS omicron.public.sled_bp_availability AS ENUM (
+    'available',
+    'unavailable',
+    'decommissioned'
+);
+
+/*
+ * Per-sled provisioning availability as of the target blueprint.
+ *
+ * This is a Reconfigurator rendezvous table reflecting which sleds the
+ * target blueprint considers available for provisioning. Once wired up, the
+ * instance-start allocation path will consult this table alongside `sled`.
+ *
+ * Unlike the other rendezvous tables, sled availability is not monotonic: a sled
+ * becomes unavailable while evacuated for an update, then available again
+ * afterwards. This means that we can't use one-way tombstones. We keep one row
+ * per sled and move its `bp_availability` between `available` and
+ * `unavailable`.
+ *
+ * To prevent duelling Nexuses from trampling over each other's state, we use
+ * the following mechanisms:
+ *
+ * - The available/unavailable flip is guarded by
+ *   `update_disposition_generation`, so that a write takes effect only if its
+ *   generation is greater than the stored one.
+ *
+ * - A decommissioned sled's row moves to the terminal `decommissioned` state
+ *   rather than being deleted. Like the other rendezvous tables' tombstones,
+ *   this stops a stale Nexus from resurrecting the sled by re-inserting it.
+ *
+ * A sled is moved to the terminal `decommissioned` state only when the
+ * blueprint marks it as decommissioned. In particular, the absence
+ * of a sled from the target blueprint does not cause it to be moved to the
+ * decommissioned state, because that sled might have just been added by a
+ * different instance of Nexus and not be in this Nexus's target blueprint.
+ *
+ * When blueprint sled pruning for decommission is implemented, as a
+ * precondition to pruning, we must ensure that the sled has been marked as
+ * decommissioned in this table.
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.rendezvous_sled_bp_availability (
+    /* ID of the sled */
+    sled_id UUID PRIMARY KEY,
+
+    /* The sled's availability state (see the enum and comment above) */
+    bp_availability omicron.public.sled_bp_availability NOT NULL,
+
+    /*
+     * The sled's `update_disposition` generation from the blueprint this row was
+     * last written from.
+     *
+     * NULL if and only if the sled is decommissioned (see the CHECK constraint
+     * below).
+     */
+    update_disposition_generation INT8,
+
+    /*
+     * ID of the target blueprint the Reconfigurator reconciliation RPW was
+     * acting on when this row was last written.
+     */
+    blueprint_id UUID NOT NULL,
+
+    /* Time this row was created */
+    time_created TIMESTAMPTZ NOT NULL,
+
+    /* Time this row was last modified */
+    time_modified TIMESTAMPTZ NOT NULL,
+
+    CONSTRAINT decommissioned_has_no_generation CHECK (
+        (bp_availability = 'decommissioned')
+        = (update_disposition_generation IS NULL)
+    )
+);
+
+/* Add an index which lets instance allocation find available sleds */
+CREATE INDEX IF NOT EXISTS lookup_available_sled
+    ON omicron.public.rendezvous_sled_bp_availability (sled_id)
+    WHERE bp_availability = 'available';
+
+/*******************************************************************/
+
+/*
  * The `sled_instance` view's definition needs to be modified in a separate
  * transaction from the transaction that created it.
  */
@@ -6257,6 +6513,24 @@ CREATE TABLE IF NOT EXISTS omicron.public.vmm (
     state omicron.public.vmm_state NOT NULL,
     cpu_platform omicron.public.vmm_cpu_platform NOT NULL,
     failure_reason omicron.public.vmm_failure_reason,
+    /*
+     * The sled's `update_disposition` generation at which this VMM was marked
+     * as needing to be stopped in order to update the sled.
+     *
+     * This is set when the sled begins evacuating its VMs. It indicates two
+     * things: that the VMM needs to be stopped, and that when it is stopped,
+     * this was in order to update the sled.
+     *
+     * This field is set just as a blueprint containing sleds to be updated
+     * is executed. So, depending on _when_ this field is observed, the sled
+     * and/or associated VMMs may not have been stopped yet.
+     *
+     * The `update_disposition` generation number is used primarily for
+     * debugging purposes. During the process to stop VMMs for an update, we
+     * only care if this field is stopped or not. THe field is NULL when its
+     * state has not been modified by an update.
+     */
+    stop_for_update_disposition_generation INT8,
 
     -- If a VMM is in the 'failed' state, it must have a failure reason; if it
     -- is not in the failed state, it must not have a failure reason.
@@ -6305,6 +6579,11 @@ WHERE
 
 CREATE SEQUENCE IF NOT EXISTS omicron.public.nat_version START 1 INCREMENT 1;
 
+-- This table only holds NAT entries for instances, and is used in the dpd ->
+-- Nexus "pull" API we eventually want to rework
+-- (<https://github.com/oxidecomputer/dendrite/issues/83>). Omicron services
+-- that require NAT entries (NTP, Nexus, etc.) are managed by sled-agent on the
+-- scrimlets based on information in the bootstore.
 CREATE TABLE IF NOT EXISTS omicron.public.nat_entry (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     external_address INET NOT NULL,
@@ -6572,30 +6851,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.bootstore_config (
 
 CREATE INDEX IF NOT EXISTS address_lot_names ON omicron.public.address_lot(name);
 
-CREATE VIEW IF NOT EXISTS omicron.public.bgp_peer_view
-AS
-SELECT
- sp.switch_slot,
- sp.port_name,
- bpc.addr,
- bpc.hold_time,
- bpc.idle_hold_time,
- bpc.delay_open,
- bpc.connect_retry,
- bpc.keepalive,
- bpc.remote_asn,
- bpc.min_ttl,
- bpc.md5_auth_key,
- bpc.multi_exit_discriminator,
- bpc.local_pref,
- bpc.enforce_first_as,
- bpc.vlan_id,
- bpc.router_lifetime,
- bc.asn
-FROM omicron.public.switch_port sp
-JOIN omicron.public.switch_port_settings_bgp_peer_config bpc
-ON sp.port_settings_id = bpc.port_settings_id
-JOIN omicron.public.bgp_config bc ON bc.id = bpc.bgp_config_id;
 
 CREATE INDEX IF NOT EXISTS switch_port_id_and_name
 ON omicron.public.switch_port (port_settings_id, port_name) STORING (switch_slot);
@@ -7970,7 +8225,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_sitrep_analysis_report (
 
 CREATE TYPE IF NOT EXISTS omicron.public.diagnosis_engine AS ENUM (
     'power_shelf',
-    'physical_disk'
+    'physical_disk',
+    'saga'
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.fm_case (
@@ -8037,15 +8293,80 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_fact_physical_disk (
 
     PRIMARY KEY (sitrep_id, id),
 
-    -- Each variant validates that the columns it expects are present.
-    -- Future variants should add their own constraint like this one,
-    -- leaving existing constraints untouched.
+    -- Each kind's constraint checks only that its own columns are present,
+    -- not that others are NULL, so future kinds may share columns.
     CONSTRAINT zpool_unhealthy_columns_present CHECK (
         kind != 'zpool_unhealthy' OR (
             zpool_id IS NOT NULL
             AND last_seen_health IS NOT NULL
             AND observed_in_inv IS NOT NULL
             AND time_observed IS NOT NULL
+        )
+    )
+);
+
+-- The saga diagnosis engine's facts. See the comment on the physical-disk
+-- engine above: one table per engine, fact content as typed columns.
+CREATE TYPE IF NOT EXISTS omicron.public.fm_fact_saga_kind AS ENUM (
+    'not_progressing',
+    'owner_not_current_generation',
+    'abandoned'
+);
+
+CREATE TYPE IF NOT EXISTS omicron.public.fm_fact_saga_orphan_reason AS ENUM (
+    'quiesced',
+    'expunged'
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.fm_fact_saga (
+    -- Stable UUID for this fact across sitreps.
+    id UUID NOT NULL,
+    -- Sitrep this row belongs to.
+    sitrep_id UUID NOT NULL,
+    -- UUID of the case this fact attaches to.
+    case_id UUID NOT NULL,
+    -- UUID of the sitrep in which this fact was first added. Preserved
+    -- unchanged when the fact is carried forward into a child sitrep.
+    -- Debug-only.
+    created_sitrep_id UUID NOT NULL,
+    -- Free-form, debug-only comment.
+    comment TEXT NOT NULL,
+
+    -- The saga this fact is about. Common to every kind of saga fact (the
+    -- case is keyed by it), so it is always present regardless of `kind`.
+    --
+    -- Fact payloads carry only the fields that define the condition; data
+    -- that merely describes the saga (e.g., its name) is looked up from the
+    -- saga table when a case is acted on.
+    saga_id UUID NOT NULL,
+
+    -- Which saga fact this row represents. The columns below are populated
+    -- according to this discriminant (see the CHECK constraint).
+    kind omicron.public.fm_fact_saga_kind NOT NULL,
+
+    -- Columns for a 'not_progressing' fact. NULL for any other kind.
+    saga_state omicron.public.saga_state,
+    last_event_time TIMESTAMPTZ,
+
+    -- Columns for an 'owner_not_current_generation' fact. NULL for any other
+    -- kind.
+    current_sec UUID,
+    orphan_reason omicron.public.fm_fact_saga_orphan_reason,
+
+    PRIMARY KEY (sitrep_id, id),
+
+    -- Each kind's constraint checks only that its own columns are present,
+    -- not that others are NULL, so future kinds may share columns.
+    CONSTRAINT not_progressing_columns_present CHECK (
+        kind != 'not_progressing' OR (
+            saga_state IN ('running', 'unwinding')
+            AND last_event_time IS NOT NULL
+        )
+    ),
+    CONSTRAINT owner_not_current_generation_columns_present CHECK (
+        kind != 'owner_not_current_generation' OR (
+            current_sec IS NOT NULL
+            AND orphan_reason IS NOT NULL
         )
     )
 );
@@ -9070,6 +9391,70 @@ CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_member (
     PRIMARY KEY (rack_id, epoch DESC, hw_baseboard_id)
 );
 
+
+-- Overrides to the fault management system's global configuration.
+--
+-- If no overrides are set, this table is empty and the system uses the default
+-- configuration. Otherwise, the row in this table with the highest `version` is
+-- selected and used as the active configuration.
+--
+-- All values that represent config settings (i.e. every column except for
+-- `version` and `comment`) are nullable. If they are NULL, the system will use
+-- the default value defined in the current software version for that setting.
+CREATE TABLE IF NOT EXISTS omicron.public.fm_config (
+    -- The version number of the configuration.
+    --
+    -- Configuration changes are made by inserting a new row with a higher
+    -- version number.
+    version INT8 PRIMARY KEY,
+    -- A comment describing why this override was created.
+    comment TEXT NOT NULL,
+    -- The time at which this config version was created.
+    time_modified TIMESTAMPTZ NOT NULL,
+    -- BREAK GLASS TO COMPLETELY DISABLE FAULT MANAGEMENT ANALYSIS
+    analysis_enabled BOOL,
+    -- The maximum number of sitreps to keep in the database.
+    --
+    -- If the number of records in the `omicron.public.fm_sitrep` table
+    -- (including both sitreps in the history and orphaned sitreps that have
+    -- yet to be garbage-collected) exceeds this limit, the FM analysis
+    -- background task will not produce a new sitrep until old ones are
+    -- deleted.
+    sitrep_limit INT8,
+    -- The number of entries in the `omicron.public.fm_sitrep_history` table at
+    -- which the `fm_sitrep_history_pruner` background task will begin deleting
+    -- the oldest sitreps from the history.
+    --
+    -- This must be less than `sitrep_limit`, and must be at least 2.
+    history_pruning_threshold INT8,
+
+    CONSTRAINT versions_are_positive CHECK (version > 0),
+
+    -- Comments are mandatory when overriding the default config, so we enforce
+    -- that this is both non-NULL and not the empty string. We can't force the
+    -- operator to write a *good* comment, but at least we can force you to type
+    -- SOMETHING if you really don't want to say anything... :)
+    CONSTRAINT comment_required CHECK (comment != '' AND comment != ' '),
+
+    CONSTRAINT sitrep_limit_validity CHECK (
+        sitrep_limit IS NULL OR (
+            sitrep_limit >= 5 AND
+            sitrep_limit <= 5000
+        )
+    ),
+    CONSTRAINT history_pruning_threshold_validity CHECK (
+        history_pruning_threshold IS NULL OR (
+            history_pruning_threshold <= 5000 AND
+            history_pruning_threshold >= 2
+        )
+    ),
+    CONSTRAINT history_limit_is_less_than_sirep_limit CHECK (
+        (history_pruning_threshold IS NULL OR sitrep_limit IS NULL) OR
+            history_pruning_threshold < sitrep_limit
+    )
+);
+
+
 -- Keep this at the end of file so that the database does not contain a version
 -- until it is fully populated.
 INSERT INTO omicron.public.db_metadata (
@@ -9079,7 +9464,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '280.0.0', NULL)
+    (TRUE, NOW(), NOW(), '297.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

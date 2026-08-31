@@ -132,7 +132,8 @@ fn filter_out_overlapping_arbitrary_service_entries(
 ) -> bool {
     let mut entry_ips = BTreeSet::new();
     for entry in entries {
-        if desired_service_nat_entries.contains_key(&entry.zone_id) {
+        let key = (entry.zone_id, entry.kind.external_ip());
+        if desired_service_nat_entries.contains_key(&key) {
             return false;
         }
         if !entry_ips.insert(collapse_ipv4_mapped(entry.kind.external_ip())) {
@@ -386,11 +387,20 @@ async fn proptest_full_reconciliation() {
         match status {
             DpdNatReconcilerStatus::NoNatEntriesConfig
             | DpdNatReconcilerStatus::FailedReadingCurrentDpdNatEntries(_)
-            | DpdNatReconcilerStatus::InvalidSystemNetworkingConfig(_)
-            | DpdNatReconcilerStatus::PartialSuccess { .. } => {
+            | DpdNatReconcilerStatus::InvalidSystemNetworkingConfig(_) => {
                 panic!("unexpected reconciler status: {status:?}");
             }
-            DpdNatReconcilerStatus::Success { .. } => {
+            DpdNatReconcilerStatus::Complete {
+                // checked by `validate_post_reconciliation()`
+                unchanged: _,
+                removed: _,
+                created: _,
+
+                remove_failures,
+                create_failures,
+            } => {
+                assert_eq!(remove_failures, Vec::new());
+                assert_eq!(create_failures, BTreeMap::new());
                 input
                     .validate_post_reconciliation(&client)
                     .await

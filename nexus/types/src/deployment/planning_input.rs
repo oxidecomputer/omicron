@@ -24,6 +24,7 @@ use crate::external_api::physical_disk::PhysicalDiskState;
 use crate::external_api::sled::SledPolicy;
 use crate::external_api::sled::SledProvisionPolicy;
 use crate::external_api::sled::SledState;
+use crate::tuf_repo::TufRepoDescription;
 use chrono::DateTime;
 use chrono::TimeDelta;
 use chrono::Utc;
@@ -35,11 +36,8 @@ use omicron_common::address::Ipv4Range;
 use omicron_common::address::Ipv6Range;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX_LENGTH;
-use omicron_common::api::external::Generation;
-use omicron_common::api::external::TufRepoDescription;
-use omicron_common::disk::DiskIdentity;
 use omicron_common::policy::SINGLE_NODE_CLICKHOUSE_REDUNDANCY;
-use omicron_common::update::ArtifactId;
+use omicron_generation_kinds::{Generation, TargetReleaseGeneration};
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -47,6 +45,7 @@ use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use sled_agent_types::disk::DiskIdentity;
 use sled_agent_types_versions::latest::inventory::SourceNatConfigError;
 use sled_agent_types_versions::latest::inventory::ZoneKind;
 use sled_hardware_types::BaseboardId;
@@ -59,6 +58,7 @@ use std::net::IpAddr;
 use std::sync::Arc;
 use strum::Display;
 use strum::IntoEnumIterator;
+use tufaceous_artifact::ZoneTags;
 
 /// Amount of time we're willing to let an MGS-managed update sit in an
 /// "impossible preconditions" state waiting for it to settle.
@@ -102,7 +102,7 @@ const MGS_UPDATE_SETTLE_TIMEOUT: TimeDelta = TimeDelta::minutes(5);
 /// - Each Omicron zone has at most one external IP and at most one vNIC.
 /// - A given external IP or vNIC is only associated with a single Omicron
 ///   zone.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlanningInput {
     /// current target blueprint, used as the parent in the next planning run
     parent_blueprint: Arc<Blueprint>,
@@ -727,7 +727,7 @@ impl From<CockroachDbClusterVersion> for CockroachDbPreserveDowngrade {
 }
 
 /// Describes a single disk already managed by the sled.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SledDisk {
     pub disk_identity: DiskIdentity,
     pub disk_id: PhysicalDiskUuid,
@@ -843,7 +843,7 @@ impl ZpoolFilter {
 }
 
 /// Describes the resources available on each sled for the planner
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SledResources {
     /// zpools (and their backing disks) on this sled
     ///
@@ -1108,7 +1108,7 @@ impl SledFilter {
 /// supposed to be part of the system and their individual [`SledPolicy`]s;
 /// however, those are tracked as a separate part of [`PlanningInput`] as each
 /// sled additionally has non-policy [`SledResources`] needed for planning.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Policy {
     /// configuration for externally-visible control plane services (IP
     /// pools, upstream NTP / DNS servers, Nexus TLS).
@@ -1199,7 +1199,7 @@ pub struct Policy {
 // NOTE: The fields of the struct are private and we manually implement
 // `Deserialize` to maintain invariants (e.g., that every `external_dns_ip` is
 // contained in one of the service pool ranges).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ExternalIpPolicy {
     service_pool_ipv4_ranges: Vec<Ipv4Range>,
     service_pool_ipv6_ranges: Vec<Ipv6Range>,
@@ -1489,7 +1489,7 @@ pub enum ExternalIpPolicyError {
 /// (per-service IP pool assignment), and
 /// <https://github.com/oxidecomputer/omicron/issues/3732> (upstream NTP /
 /// DNS server lists).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExternalServiceNetworkingPolicy {
     /// IP pools available for Oxide-managed services, plus the addresses that
     /// external DNS zones listen on.
@@ -1553,7 +1553,7 @@ impl ExternalServiceNetworkingPolicy {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct OximeterReadPolicy {
     // We set the version as `u32` instead of `Generation` because we later need
     // to convert to `SqlU32` and the value of `Generation` is u64.
@@ -1576,7 +1576,7 @@ impl OximeterReadPolicy {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TufRepoPolicy {
     /// The generation of the target release for the TUF repo.
-    pub target_release_generation: Generation,
+    pub target_release_generation: TargetReleaseGeneration,
 
     /// A description of the target release.
     pub description: TargetReleaseDescription,
@@ -1590,7 +1590,7 @@ impl TufRepoPolicy {
     #[inline]
     pub fn initial() -> Self {
         Self {
-            target_release_generation: Generation::new(),
+            target_release_generation: TargetReleaseGeneration::new(),
             description: TargetReleaseDescription::Initial,
         }
     }
@@ -1628,23 +1628,13 @@ impl TargetReleaseDescription {
         match self {
             Self::Initial => Ok(BlueprintZoneImageSource::InstallDataset),
             Self::TufRepo(tuf_repo) => {
-                // We should have exactly one artifact for a given zone kind in
-                // every TUF repo; return an error if we have 0 or more than 1.
-                let mut matching_artifacts =
-                    tuf_repo.artifacts.iter().filter(|artifact| {
-                        zone_kind.is_control_plane_zone_artifact(&artifact.id)
-                    });
-                let artifact = matching_artifacts
-                    .next()
-                    .ok_or(TufRepoContentsError::MissingZoneKind(zone_kind))?;
-                if let Some(extra_artifact) = matching_artifacts.next() {
-                    return Err(
-                        TufRepoContentsError::MultipleArtifactsSameZoneKind {
-                            artifact1: artifact.id.clone(),
-                            artifact2: extra_artifact.id.clone(),
-                        },
-                    );
-                }
+                let tags = ZoneTags {
+                    zone_name: zone_kind.artifact_id_name().to_owned(),
+                };
+                let artifact =
+                    tuf_repo.artifacts.get_only(&tags.into()).map_err(
+                        |source| TufRepoContentsError { zone_kind, source },
+                    )?;
                 Ok(BlueprintZoneImageSource::from_available_artifact(artifact))
             }
         }
@@ -1652,17 +1642,12 @@ impl TargetReleaseDescription {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum TufRepoContentsError {
-    #[error("TUF repo is missing an artifact for zone kind {0:?}")]
-    MissingZoneKind(ZoneKind),
-    #[error(
-        "TUF repo contains 2 or more artifacts for the same zone kind: \
-         {artifact1:?}, {artifact2:?}"
-    )]
-    MultipleArtifactsSameZoneKind {
-        artifact1: ArtifactId,
-        artifact2: ArtifactId,
-    },
+#[error(
+    "TUF repo does not contain exactly 1 artifact for zone kind {zone_kind:?}"
+)]
+pub struct TufRepoContentsError {
+    zone_kind: ZoneKind,
+    source: tufaceous_artifact::artifact_set::GetError,
 }
 
 /// Where oximeter should read from
@@ -1700,7 +1685,7 @@ impl OximeterReadMode {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ClickhousePolicy {
     pub version: u32,
     pub mode: ClickhouseMode,
@@ -1708,7 +1693,7 @@ pub struct ClickhousePolicy {
 }
 
 /// How to deploy clickhouse nodes
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", tag = "type", content = "value")]
 pub enum ClickhouseMode {
     SingleNodeOnly,
@@ -1755,7 +1740,7 @@ impl ClickhouseMode {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SledDetails {
     /// current sled policy
     pub policy: SledPolicy,

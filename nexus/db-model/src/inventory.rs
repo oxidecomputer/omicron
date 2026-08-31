@@ -10,6 +10,7 @@ use crate::PhysicalDiskKind;
 use crate::omicron_zone_config::{self, OmicronZoneNic};
 use crate::sled_cpu_family::SledCpuFamily;
 use crate::to_db_typed_uuid;
+use crate::typed_generation::DbTypedGeneration;
 use crate::typed_uuid::DbTypedUuid;
 use crate::{
     ByteCount, MacAddr, Name, ServiceKind, SqlU8, SqlU16, SqlU32,
@@ -43,9 +44,10 @@ use nexus_db_schema::schema::{
     inv_mupdate_override_non_boot, inv_ntp_timesync, inv_nvme_disk_firmware,
     inv_omicron_sled_config, inv_omicron_sled_config_dataset,
     inv_omicron_sled_config_disk, inv_omicron_sled_config_zone,
-    inv_omicron_sled_config_zone_nic, inv_physical_disk, inv_root_of_trust,
-    inv_root_of_trust_page, inv_service_processor, inv_single_measurements,
-    inv_sled_agent, inv_sled_boot_partition, inv_sled_config_reconciler,
+    inv_omicron_sled_config_zone_external_ip, inv_omicron_sled_config_zone_nic,
+    inv_physical_disk, inv_root_of_trust, inv_root_of_trust_page,
+    inv_service_processor, inv_single_measurements, inv_sled_agent,
+    inv_sled_boot_partition, inv_sled_config_reconciler,
     inv_svc_enabled_not_online, inv_svc_enabled_not_online_parse_error,
     inv_svc_enabled_not_online_service, inv_zone_manifest_measurement,
     inv_zpool, sw_caboose, sw_root_of_trust_page,
@@ -55,14 +57,12 @@ use nexus_types::inventory::{
     Caboose, CockroachStatus, Collection, InternalDnsGenerationStatus,
     NvmeFirmware, PowerState, RotPage, RotSlot, TimeSync,
 };
-use omicron_common::api::external;
-use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetName;
-use omicron_common::disk::DiskIdentity;
-use omicron_common::disk::M2Slot;
-use omicron_common::disk::OmicronPhysicalDiskConfig;
 use omicron_common::update::OmicronInstallManifestSource;
 use omicron_common::zpool_name::ZpoolName;
+use omicron_generation_kinds::{
+    SledConfigGeneration, SledConfigGenerationKind,
+};
 use omicron_uuid_kinds::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::FmdHostCaseKind;
@@ -85,6 +85,11 @@ use omicron_uuid_kinds::SvcEnabledNotOnlineUuid;
 use omicron_uuid_kinds::ZpoolKind;
 use omicron_uuid_kinds::{CollectionKind, OmicronZoneKind};
 use omicron_uuid_kinds::{CollectionUuid, OmicronZoneUuid};
+use sled_agent_types::disk::DatasetConfig;
+use sled_agent_types::disk::DiskIdentity;
+use sled_agent_types::disk::M2Slot;
+use sled_agent_types::disk::OmicronPhysicalDiskConfig;
+use sled_agent_types::disk::SharedDatasetConfig;
 use sled_agent_types::inventory::BootImageHeader;
 use sled_agent_types::inventory::BootPartitionDetails;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
@@ -103,6 +108,7 @@ use sled_agent_types::inventory::MupdateOverrideNonBootInventory;
 use sled_agent_types::inventory::NetworkInterface;
 use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
 use sled_agent_types::inventory::OmicronSingleMeasurement;
+use sled_agent_types::inventory::OmicronSledUpdateDisposition;
 use sled_agent_types::inventory::OrphanedDataset;
 use sled_agent_types::inventory::RemoveMupdateOverrideBootSuccessInventory;
 use sled_agent_types::inventory::RemoveMupdateOverrideInventory;
@@ -118,7 +124,7 @@ use sled_agent_types::inventory::{
 };
 use sled_hardware_types::BaseboardId;
 use std::collections::BTreeSet;
-use std::net::{IpAddr, SocketAddrV6};
+use std::net::{IpAddr, SocketAddr, SocketAddrV6};
 use std::time::Duration;
 use thiserror::Error;
 use tufaceous_artifact::ArtifactHash as ExternalArtifactHash;
@@ -2303,6 +2309,7 @@ impl_enum_type!(
     Offline => b"offline"
     Degraded => b"degraded"
     Maintenance => b"maintenance"
+    Unrecognized => b"unrecognized"
 );
 
 impl From<SvcEnabledNotOnlineState> for InvSvcEnabledNotOnlineState {
@@ -2316,6 +2323,9 @@ impl From<SvcEnabledNotOnlineState> for InvSvcEnabledNotOnlineState {
             }
             SvcEnabledNotOnlineState::Maintenance => {
                 InvSvcEnabledNotOnlineState::Maintenance
+            }
+            SvcEnabledNotOnlineState::Unrecognized => {
+                InvSvcEnabledNotOnlineState::Unrecognized
             }
         }
     }
@@ -2332,6 +2342,9 @@ impl From<InvSvcEnabledNotOnlineState> for SvcEnabledNotOnlineState {
             }
             InvSvcEnabledNotOnlineState::Maintenance => {
                 SvcEnabledNotOnlineState::Maintenance
+            }
+            InvSvcEnabledNotOnlineState::Unrecognized => {
+                SvcEnabledNotOnlineState::Unrecognized
             }
         }
     }
@@ -2701,37 +2714,77 @@ impl From<InvDataset> for nexus_types::inventory::Dataset {
     }
 }
 
+impl_enum_type!(
+    InvSledUpdateDispositionEnum:
+
+    /// Database representation of a sled's `update_disposition`.
+    #[derive(
+        Copy,
+        Clone,
+        Debug,
+        PartialEq,
+        AsExpression,
+        FromSqlRow,
+    )]
+    pub enum DbInvSledUpdateDisposition;
+
+    Available => b"available"
+    Evacuating => b"evacuating"
+);
+
+impl From<OmicronSledUpdateDisposition> for DbInvSledUpdateDisposition {
+    fn from(value: OmicronSledUpdateDisposition) -> Self {
+        match value {
+            OmicronSledUpdateDisposition::Available => Self::Available,
+            OmicronSledUpdateDisposition::Evacuating => Self::Evacuating,
+        }
+    }
+}
+
+impl From<DbInvSledUpdateDisposition> for OmicronSledUpdateDisposition {
+    fn from(value: DbInvSledUpdateDisposition) -> Self {
+        match value {
+            DbInvSledUpdateDisposition::Available => Self::Available,
+            DbInvSledUpdateDisposition::Evacuating => Self::Evacuating,
+        }
+    }
+}
+
 /// Top-level information contained in an [`OmicronSledConfig`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_omicron_sled_config)]
 pub struct InvOmicronSledConfig {
     pub inv_collection_id: DbTypedUuid<CollectionKind>,
     pub id: DbTypedUuid<OmicronSledConfigKind>,
-    pub generation: Generation,
+    pub generation: DbTypedGeneration<SledConfigGenerationKind>,
     pub remove_mupdate_override: Option<DbTypedUuid<MupdateOverrideKind>>,
 
     #[diesel(embed)]
     pub host_phase_2: DbHostPhase2DesiredSlots,
     #[diesel(embed)]
     pub measurements: DbOmicronMeasurements,
+
+    pub update_disposition: DbInvSledUpdateDisposition,
 }
 
 impl InvOmicronSledConfig {
     pub fn new(
         inv_collection_id: CollectionUuid,
         id: OmicronSledConfigUuid,
-        generation: external::Generation,
+        generation: SledConfigGeneration,
         remove_mupdate_override: Option<MupdateOverrideUuid>,
         host_phase_2: HostPhase2DesiredSlots,
         measurements: BTreeSet<OmicronSingleMeasurement>,
+        update_disposition: OmicronSledUpdateDisposition,
     ) -> Self {
         Self {
             inv_collection_id: inv_collection_id.into(),
             id: id.into(),
-            generation: Generation(generation),
+            generation: generation.into(),
             remove_mupdate_override: remove_mupdate_override.map(From::from),
             host_phase_2: host_phase_2.into(),
             measurements: measurements.into(),
+            update_disposition: update_disposition.into(),
         }
     }
 }
@@ -2880,7 +2933,7 @@ impl From<sled_agent_types::inventory::ZoneKind> for ZoneType {
     }
 }
 
-/// See [`omicron_common::disk::OmicronPhysicalDiskConfig`].
+/// See [`OmicronPhysicalDiskConfig`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_omicron_sled_config_disk)]
 pub struct InvOmicronSledConfigDisk {
@@ -2927,7 +2980,7 @@ impl From<InvOmicronSledConfigDisk> for OmicronPhysicalDiskConfig {
     }
 }
 
-/// See [`omicron_common::disk::DatasetConfig`].
+/// See [`DatasetConfig`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_omicron_sled_config_dataset)]
 pub struct InvOmicronSledConfigDataset {
@@ -2979,7 +3032,7 @@ impl TryFrom<InvOmicronSledConfigDataset> for DatasetConfig {
         Ok(Self {
             id: dataset.id.into(),
             name: DatasetName::new(pool, kind),
-            inner: omicron_common::disk::SharedDatasetConfig {
+            inner: SharedDatasetConfig {
                 quota: dataset.quota.map(|b| b.into()),
                 reservation: dataset.reservation.map(|b| b.into()),
                 compression: dataset.compression.parse()?,
@@ -3020,9 +3073,6 @@ pub struct InvOmicronSledConfigZone {
     pub ntp_domain: Option<String>,
     pub nexus_external_tls: Option<bool>,
     pub nexus_external_dns_servers: Option<Vec<IpNetwork>>,
-    pub snat_ip: Option<IpNetwork>,
-    pub snat_first_port: Option<SqlU16>,
-    pub snat_last_port: Option<SqlU16>,
     pub filesystem_pool: Option<DbTypedUuid<ZpoolKind>>,
     pub image_source: InvZoneImageSource,
     pub image_artifact_sha256: Option<ArtifactHash>,
@@ -3075,9 +3125,6 @@ impl InvOmicronSledConfigZone {
             ntp_domain: None,
             nexus_external_tls: None,
             nexus_external_dns_servers: None,
-            snat_ip: None,
-            snat_first_port: None,
-            snat_last_port: None,
             image_source,
             image_artifact_sha256,
             nexus_lockstep_port: None,
@@ -3090,13 +3137,14 @@ impl InvOmicronSledConfigZone {
                 dns_servers,
                 domain,
                 nic,
-                snat_cfg,
+                // Stored in the inv_omicron_sled_config_zone_external_ip child
+                // table, not here.
+                snat_cfg: _,
             } => {
                 // Set the common fields
                 inv_omicron_zone.set_primary_service_ip_and_port(address);
 
                 // Set the zone specific fields
-                let (first_port, last_port) = snat_cfg.port_range_raw();
                 inv_omicron_zone.ntp_ntp_servers = Some(ntp_servers.clone());
                 inv_omicron_zone.ntp_dns_servers = Some(
                     dns_servers
@@ -3106,10 +3154,6 @@ impl InvOmicronSledConfigZone {
                         .collect(),
                 );
                 inv_omicron_zone.ntp_domain.clone_from(domain);
-                inv_omicron_zone.snat_ip = Some(IpNetwork::from(snat_cfg.ip));
-                inv_omicron_zone.snat_first_port =
-                    Some(SqlU16::from(first_port));
-                inv_omicron_zone.snat_last_port = Some(SqlU16::from(last_port));
                 inv_omicron_zone.nic_id = Some(nic.id);
             }
             OmicronZoneType::Clickhouse { address, dataset } => {
@@ -3144,7 +3188,9 @@ impl InvOmicronSledConfigZone {
             OmicronZoneType::ExternalDns {
                 dataset,
                 http_address,
-                dns_address,
+                // Stored in the inv_omicron_sled_config_zone_external_ip child
+                // table, not here.
+                dns_address: _,
                 nic,
             } => {
                 // Set the common fields
@@ -3153,10 +3199,6 @@ impl InvOmicronSledConfigZone {
 
                 // Set the zone specific fields
                 inv_omicron_zone.nic_id = Some(nic.id);
-                inv_omicron_zone.second_service_ip =
-                    Some(IpNetwork::from(dns_address.ip()));
-                inv_omicron_zone.second_service_port =
-                    Some(SqlU16::from(dns_address.port()));
             }
             OmicronZoneType::InternalDns {
                 dataset,
@@ -3187,7 +3229,9 @@ impl InvOmicronSledConfigZone {
             OmicronZoneType::Nexus {
                 internal_address,
                 lockstep_port,
-                external_ip,
+                // Stored in the inv_omicron_sled_config_zone_external_ip child
+                // table, not here.
+                external_ip: _,
                 nic,
                 external_tls,
                 external_dns_servers,
@@ -3198,8 +3242,6 @@ impl InvOmicronSledConfigZone {
 
                 // Set the zone specific fields
                 inv_omicron_zone.nic_id = Some(nic.id);
-                inv_omicron_zone.second_service_ip =
-                    Some(IpNetwork::from(*external_ip));
                 inv_omicron_zone.nexus_external_tls = Some(*external_tls);
                 inv_omicron_zone.nexus_external_dns_servers = Some(
                     external_dns_servers
@@ -3234,6 +3276,7 @@ impl InvOmicronSledConfigZone {
     pub fn into_omicron_zone_config(
         self,
         nic_row: Option<InvOmicronSledConfigZoneNic>,
+        external_ip_rows: Vec<InvOmicronSledConfigZoneExternalIp>,
     ) -> Result<OmicronZoneConfig, anyhow::Error> {
         // Build up a set of common fields for our `OmicronZoneType`s
         //
@@ -3277,24 +3320,29 @@ impl InvOmicronSledConfigZone {
 
         let zone_type = match self.zone_type {
             ZoneType::BoundaryNtp => {
-                let snat_cfg = match (
-                    self.snat_ip,
-                    self.snat_first_port,
-                    self.snat_last_port,
+                let external_ip =
+                    exactly_one_external_ip(self.id.into(), external_ip_rows)?;
+                let (first_port, last_port) = match (
+                    external_ip.snat_first_port,
+                    external_ip.snat_last_port,
                 ) {
-                    (Some(ip), Some(first_port), Some(last_port)) => {
-                        SourceNatConfigGeneric::new(
-                            ip.ip(),
-                            *first_port,
-                            *last_port,
-                        )
-                        .context("bad SNAT config for boundary NTP")?
+                    (Some(first_port), Some(last_port)) => {
+                        (first_port, last_port)
                     }
-                    _ => bail!(
-                        "expected non-NULL snat properties, \
-                         found at least one NULL"
+                    (first_port, last_port) => bail!(
+                        "expected non-NULL SNAT ports for boundary NTP \
+                         external IP {}, found first_port={:?}, last_port={:?}",
+                        external_ip.ip,
+                        first_port,
+                        last_port,
                     ),
                 };
+                let snat_cfg = SourceNatConfigGeneric::new(
+                    external_ip.ip.ip(),
+                    *first_port,
+                    *last_port,
+                )
+                .context("bad SNAT config for boundary NTP")?;
                 OmicronZoneType::BoundaryNtp {
                     address: primary_address,
                     ntp_servers: ntp_servers?,
@@ -3327,12 +3375,22 @@ impl InvOmicronSledConfigZone {
             ZoneType::CruciblePantry => {
                 OmicronZoneType::CruciblePantry { address: primary_address }
             }
-            ZoneType::ExternalDns => OmicronZoneType::ExternalDns {
-                dataset: dataset?,
-                http_address: primary_address,
-                dns_address: dns_address?,
-                nic: nic?,
-            },
+            ZoneType::ExternalDns => {
+                let external_ip =
+                    exactly_one_external_ip(self.id.into(), external_ip_rows)?;
+                let Some(port) = external_ip.port else {
+                    bail!(
+                        "expected non-NULL port for external DNS external IP {}",
+                        external_ip.ip,
+                    );
+                };
+                OmicronZoneType::ExternalDns {
+                    dataset: dataset?,
+                    http_address: primary_address,
+                    dns_address: SocketAddr::new(external_ip.ip.ip(), *port),
+                    nic: nic?,
+                }
+            }
             ZoneType::InternalDns => OmicronZoneType::InternalDns {
                 dataset: dataset?,
                 http_address: primary_address,
@@ -3349,26 +3407,29 @@ impl InvOmicronSledConfigZone {
             ZoneType::InternalNtp => {
                 OmicronZoneType::InternalNtp { address: primary_address }
             }
-            ZoneType::Nexus => OmicronZoneType::Nexus {
-                internal_address: primary_address,
-                lockstep_port: *self
-                    .nexus_lockstep_port
-                    .ok_or_else(|| anyhow!("expected 'nexus_lockstep_port'"))?,
-                external_ip: self
-                    .second_service_ip
-                    .ok_or_else(|| anyhow!("expected second service IP"))?
-                    .ip(),
-                nic: nic?,
-                external_tls: self
-                    .nexus_external_tls
-                    .ok_or_else(|| anyhow!("expected 'external_tls'"))?,
-                external_dns_servers: self
-                    .nexus_external_dns_servers
-                    .ok_or_else(|| anyhow!("expected 'external_dns_servers'"))?
-                    .into_iter()
-                    .map(|i| i.ip())
-                    .collect(),
-            },
+            ZoneType::Nexus => {
+                let external_ip =
+                    exactly_one_external_ip(self.id.into(), external_ip_rows)?;
+                OmicronZoneType::Nexus {
+                    internal_address: primary_address,
+                    lockstep_port: *self.nexus_lockstep_port.ok_or_else(
+                        || anyhow!("expected 'nexus_lockstep_port'"),
+                    )?,
+                    external_ip: external_ip.ip.ip(),
+                    nic: nic?,
+                    external_tls: self
+                        .nexus_external_tls
+                        .ok_or_else(|| anyhow!("expected 'external_tls'"))?,
+                    external_dns_servers: self
+                        .nexus_external_dns_servers
+                        .ok_or_else(|| {
+                            anyhow!("expected 'external_dns_servers'")
+                        })?
+                        .into_iter()
+                        .map(|i| i.ip())
+                        .collect(),
+                }
+            }
             ZoneType::Oximeter => {
                 OmicronZoneType::Oximeter { address: primary_address }
             }
@@ -3403,6 +3464,85 @@ impl InvOmicronSledConfigZone {
     }
 }
 
+/// Returns the single external IP row for a zone, erroring if there is not
+/// exactly one.
+///
+/// Inventory tables can store more than one IP address, but the Rust types we
+/// convert to have zero or one external IP. This is a temporary sanity check
+/// used when deserializing until the Rust types support multiple IPs.
+fn exactly_one_external_ip(
+    zone_id: OmicronZoneUuid,
+    external_ip_rows: Vec<InvOmicronSledConfigZoneExternalIp>,
+) -> Result<InvOmicronSledConfigZoneExternalIp, anyhow::Error> {
+    let mut iter = external_ip_rows.into_iter();
+    match (iter.next(), iter.next()) {
+        (Some(external_ip), None) => Ok(external_ip),
+        (None, _) => bail!(
+            "expected exactly one external IP for zone {zone_id}, found none"
+        ),
+        (Some(_), Some(_)) => bail!(
+            "expected exactly one external IP for zone {zone_id}, found {}",
+            2 + iter.count(),
+        ),
+    }
+}
+
+/// The external IP addresses of a zone in an `inv_omicron_sled_config_zone`.
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_omicron_sled_config_zone_external_ip)]
+pub struct InvOmicronSledConfigZoneExternalIp {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub sled_config_id: DbTypedUuid<OmicronSledConfigKind>,
+    pub zone_id: DbTypedUuid<OmicronZoneKind>,
+    pub ip: IpNetwork,
+    pub port: Option<SqlU16>,
+    pub snat_first_port: Option<SqlU16>,
+    pub snat_last_port: Option<SqlU16>,
+}
+
+impl InvOmicronSledConfigZoneExternalIp {
+    /// Build the external IP rows for a zone.
+    ///
+    /// Zones without external networking return an empty array.
+    pub fn for_zone(
+        inv_collection_id: CollectionUuid,
+        sled_config_id: OmicronSledConfigUuid,
+        zone: &OmicronZoneConfig,
+    ) -> Vec<InvOmicronSledConfigZoneExternalIp> {
+        let (ip, port, snat_first_port, snat_last_port) = match &zone.zone_type
+        {
+            OmicronZoneType::Nexus { external_ip, .. } => {
+                (IpNetwork::from(*external_ip), None, None, None)
+            }
+            OmicronZoneType::ExternalDns { dns_address, .. } => (
+                IpNetwork::from(dns_address.ip()),
+                Some(SqlU16::from(dns_address.port())),
+                None,
+                None,
+            ),
+            OmicronZoneType::BoundaryNtp { snat_cfg, .. } => {
+                let (first_port, last_port) = snat_cfg.port_range_raw();
+                (
+                    IpNetwork::from(snat_cfg.ip),
+                    None,
+                    Some(SqlU16::from(first_port)),
+                    Some(SqlU16::from(last_port)),
+                )
+            }
+            _ => return Vec::new(),
+        };
+        vec![InvOmicronSledConfigZoneExternalIp {
+            inv_collection_id: inv_collection_id.into(),
+            sled_config_id: sled_config_id.into(),
+            zone_id: zone.id.into(),
+            ip,
+            port,
+            snat_first_port,
+            snat_last_port,
+        }]
+    }
+}
+
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_omicron_sled_config_zone_nic)]
 pub struct InvOmicronSledConfigZoneNic {
@@ -3410,12 +3550,19 @@ pub struct InvOmicronSledConfigZoneNic {
     pub sled_config_id: DbTypedUuid<OmicronSledConfigKind>,
     pub id: Uuid,
     name: Name,
-    ip: IpNetwork,
+    // The `ipv4`/`ipv4_subnet` fields map to the `ip`/`subnet` columns, which
+    // predate dual-stack support: CRDB can't idempotently rename columns, so we
+    // keep the original names rather than rename them to `ipv4`/`ipv4_subnet`.
+    #[diesel(column_name = ip)]
+    ipv4: Option<IpNetwork>,
+    #[diesel(column_name = subnet)]
+    ipv4_subnet: Option<IpNetwork>,
     mac: MacAddr,
-    subnet: IpNetwork,
     vni: SqlU32,
     is_primary: bool,
     slot: SqlU8,
+    ipv6: Option<IpNetwork>,
+    ipv6_subnet: Option<IpNetwork>,
 }
 
 impl From<InvOmicronSledConfigZoneNic> for OmicronZoneNic {
@@ -3423,9 +3570,11 @@ impl From<InvOmicronSledConfigZoneNic> for OmicronZoneNic {
         OmicronZoneNic {
             id: value.id,
             name: value.name,
-            ip: value.ip,
+            ipv4: value.ipv4,
+            ipv4_subnet: value.ipv4_subnet,
+            ipv6: value.ipv6,
+            ipv6_subnet: value.ipv6_subnet,
             mac: value.mac,
-            subnet: value.subnet,
             vni: value.vni,
             is_primary: value.is_primary,
             slot: value.slot,
@@ -3448,9 +3597,11 @@ impl InvOmicronSledConfigZoneNic {
             sled_config_id: sled_config_id.into(),
             id: nic.id,
             name: nic.name,
-            ip: nic.ip,
+            ipv4: nic.ipv4,
+            ipv4_subnet: nic.ipv4_subnet,
+            ipv6: nic.ipv6,
+            ipv6_subnet: nic.ipv6_subnet,
             mac: nic.mac,
-            subnet: nic.subnet,
             vni: nic.vni,
             is_primary: nic.is_primary,
             slot: nic.slot,
@@ -3651,7 +3802,22 @@ mod test {
     use nexus_types::inventory::NvmeFirmware;
     use omicron_uuid_kinds::{CollectionKind, SledUuid, TypedUuid};
 
+    use crate::InvOmicronSledConfigZoneNic;
     use crate::{InvNvmeDiskFirmware, InvNvmeDiskFirmwareError, typed_uuid};
+    use omicron_common::api::external::Vni;
+    use omicron_common::api::internal::shared::PrivateIpConfig;
+    use omicron_common::api::internal::shared::PrivateIpv4Config;
+    use omicron_common::api::internal::shared::PrivateIpv6Config;
+    use omicron_uuid_kinds::CollectionUuid;
+    use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::OmicronSledConfigUuid;
+    use omicron_uuid_kinds::OmicronZoneUuid;
+    use sled_agent_types::inventory::NetworkInterface;
+    use sled_agent_types::inventory::NetworkInterfaceKind;
+    use sled_agent_types::inventory::OmicronZoneConfig;
+    use sled_agent_types::inventory::OmicronZoneImageSource;
+    use sled_agent_types::inventory::OmicronZoneType;
+    use uuid::Uuid;
 
     #[test]
     fn test_inv_nvme_disk_firmware() {
@@ -3860,5 +4026,59 @@ mod test {
             )
             .is_ok()
         )
+    }
+
+    #[test]
+    fn dual_stack_zone_nic_round_trips_through_inventory() {
+        let zone_id = OmicronZoneUuid::new_v4();
+        let ip_config = PrivateIpConfig::DualStack {
+            v4: PrivateIpv4Config::new(
+                "172.30.2.5".parse().unwrap(),
+                "172.30.2.0/24".parse().unwrap(),
+            )
+            .unwrap(),
+            v6: PrivateIpv6Config::new(
+                "fd00:1122:3344:100::5".parse().unwrap(),
+                "fd00:1122:3344:100::/64".parse().unwrap(),
+            )
+            .unwrap(),
+        };
+        let nic = NetworkInterface {
+            id: Uuid::new_v4(),
+            kind: NetworkInterfaceKind::Service {
+                id: zone_id.into_untyped_uuid(),
+            },
+            name: "test-service-nic".parse().unwrap(),
+            ip_config,
+            mac: "a8:40:25:ff:00:01".parse().unwrap(),
+            vni: Vni::try_from(100).unwrap(),
+            primary: true,
+            slot: 0,
+        };
+        let zone = OmicronZoneConfig {
+            id: zone_id,
+            filesystem_pool: None,
+            zone_type: OmicronZoneType::Nexus {
+                internal_address: "[::1]:12345".parse().unwrap(),
+                lockstep_port: 12346,
+                external_ip: "192.0.2.1".parse().unwrap(),
+                nic: nic.clone(),
+                external_tls: false,
+                external_dns_servers: vec![],
+            },
+            image_source: OmicronZoneImageSource::InstallDataset,
+        };
+
+        let row = InvOmicronSledConfigZoneNic::new(
+            CollectionUuid::new_v4(),
+            OmicronSledConfigUuid::new_v4(),
+            &zone,
+        )
+        .expect("built inventory NIC row")
+        .expect("zone has a service NIC");
+        let round_tripped = row
+            .into_network_interface_for_zone(zone_id)
+            .expect("rebuilt NIC from inventory row");
+        assert_eq!(nic, round_tripped);
     }
 }

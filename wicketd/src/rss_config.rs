@@ -22,16 +22,17 @@ use bootstrap_agent_lockstep_types::ServiceIpPoolConfig;
 use display_error_chain::DisplayErrorChain;
 use iddqd::IdOrdMap;
 use omicron_certificates::CertificateError;
-use omicron_common::address;
 use omicron_common::address::IpRange;
 use omicron_common::address::Ipv4Range;
 use omicron_common::address::Ipv6Range;
 use omicron_common::api::external::AllowedSourceIps;
 use oxnet::Ipv6Net;
+use sled_agent_types::early_networking::AddressFamilyMismatchError;
+use sled_agent_types::early_networking::NumberedRouter;
 use sled_agent_types::early_networking::PortConfig;
 use sled_agent_types::early_networking::RouterLifetimeConfig;
-use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
+use sled_agent_types::early_networking::UnnumberedRouter;
 use sled_agent_types::early_networking::UplinkAddress;
 use sled_agent_types::early_networking::UplinkPorts;
 use sled_hardware_types::BaseboardId;
@@ -45,62 +46,16 @@ use wicket_common::rack_setup::GetBgpAuthKeyInfoResponse;
 use wicketd_api::CurrentRssUserConfig;
 use wicketd_api::CurrentRssUserConfigSensitive;
 use wicketd_commission_types::rack_setup::BgpAuthKey;
+use wicketd_commission_types::rack_setup::CertificatePem;
 use wicketd_commission_types::rack_setup::CertificateUploadResponse;
 use wicketd_commission_types::rack_setup::ManualPortConfig;
+use wicketd_commission_types::rack_setup::PrivateKeyPem;
 use wicketd_commission_types::rack_setup::PutRssUserConfigInsensitive;
 use wicketd_commission_types::rack_setup::UserSpecifiedRackNetworkConfig;
 use wicketd_commission_types::rack_setup::UserSpecifiedRouterPeerAddr;
 
 const RECOVERY_SILO_NAME: &str = "recovery";
 const RECOVERY_SILO_USERNAME: &str = "recovery";
-
-// TODO(#8946) Remove these when we plumb the names all the way from the RSS
-// config file.
-const SERVICE_POOL_IPV4_NAME: &str = "oxide-service-pool-v4";
-const SERVICE_POOL_IPV6_NAME: &str = "oxide-service-pool-v6";
-
-// Synthesize the system-service IP pool configuration from a flat list of IP
-// ranges.
-//
-// TODO(#8946): IP Pools need to be plumbed all the way from the RSS
-// configuration file. In the meantime, we synthesize the pool configuration
-// here using our well-known names and descriptions. One pool is created per
-// IP version that has at least one range; a version with no ranges is
-// omitted, so a v4-only or v6-only rack produces a single pool.
-fn service_ip_pools_from_ranges(
-    ranges: &[address::IpRange],
-) -> Result<IdOrdMap<ServiceIpPoolConfig>> {
-    let (service_ipv4_ranges, service_ipv6_ranges): (Vec<_>, Vec<_>) =
-        ranges.iter().partition(|range| range.is_ipv4());
-    let mut service_ip_pools = IdOrdMap::new();
-    if !service_ipv4_ranges.is_empty() {
-        let service_ipv4_pool = ServiceIpPoolConfig::new(
-            SERVICE_POOL_IPV4_NAME.parse().unwrap(),
-            String::from("IPv4 IP Pool for Oxide Services"),
-            service_ipv4_ranges,
-        )
-        .context("creating IPv4 service pool config")?;
-        if service_ip_pools.insert_unique(service_ipv4_pool).is_err() {
-            anyhow::bail!(
-                "duplicate IPv4 service pool name: '{SERVICE_POOL_IPV4_NAME}'"
-            );
-        }
-    }
-    if !service_ipv6_ranges.is_empty() {
-        let service_ipv6_pool = ServiceIpPoolConfig::new(
-            SERVICE_POOL_IPV6_NAME.parse().unwrap(),
-            String::from("IPv6 IP Pool for Oxide Services"),
-            service_ipv6_ranges,
-        )
-        .context("creating IPv6 service pool config")?;
-        if service_ip_pools.insert_unique(service_ipv6_pool).is_err() {
-            anyhow::bail!(
-                "duplicate IPv6 service pool name: '{SERVICE_POOL_IPV6_NAME}'"
-            );
-        }
-    }
-    Ok(service_ip_pools)
-}
 
 #[derive(Default)]
 struct PartialCertificate {
@@ -115,7 +70,7 @@ pub(crate) struct CurrentRssConfig {
     pub common: RssOrMultirackJoinConfigCommon,
     ntp_servers: Vec<String>,
     dns_servers: Vec<IpAddr>,
-    internal_services_ip_pool_ranges: Vec<address::IpRange>,
+    service_ip_pools: IdOrdMap<ServiceIpPoolConfig>,
     external_dns_ips: Vec<IpAddr>,
     external_dns_zone_name: String,
     external_certificates: Vec<Certificate>,
@@ -164,8 +119,8 @@ impl CurrentRssConfig {
         if self.dns_servers.is_empty() {
             bail!("at least one DNS server is required");
         }
-        if self.internal_services_ip_pool_ranges.is_empty() {
-            bail!("at least one internal services IP pool range is required");
+        if self.service_ip_pools.is_empty() {
+            bail!("at least one service IP pool is required");
         }
         if self.external_dns_ips.is_empty() {
             bail!("at least one external DNS IP address is required");
@@ -257,9 +212,7 @@ impl CurrentRssConfig {
                 recovery_silo_password_hash.to_string(),
             );
 
-        let service_ip_pools = service_ip_pools_from_ranges(
-            &self.internal_services_ip_pool_ranges,
-        )?;
+        let service_ip_pools = self.service_ip_pools.clone();
 
         let request = RackInitializeRequest {
             trust_quorum_peers,
@@ -298,17 +251,17 @@ impl CurrentRssConfig {
 
     pub(crate) fn push_cert(
         &mut self,
-        cert: String,
+        cert: CertificatePem,
     ) -> Result<CertificateUploadResponse, String> {
-        self.partial_external_certificate.cert = Some(cert);
+        self.partial_external_certificate.cert = Some(cert.0);
         self.maybe_promote_external_certificate()
     }
 
     pub(crate) fn push_key(
         &mut self,
-        key: String,
+        key: PrivateKeyPem,
     ) -> Result<CertificateUploadResponse, String> {
-        self.partial_external_certificate.key = Some(key);
+        self.partial_external_certificate.key = Some(key.0.to_string());
         self.maybe_promote_external_certificate()
     }
 
@@ -392,8 +345,7 @@ impl CurrentRssConfig {
 
         self.ntp_servers = config.ntp_servers;
         self.dns_servers = config.dns_servers;
-        self.internal_services_ip_pool_ranges =
-            config.internal_services_ip_pool_ranges;
+        self.service_ip_pools = config.service_ip_pools;
         self.external_dns_ips = config.external_dns_ips;
         self.external_dns_zone_name = config.external_dns_zone_name;
         self.allowed_source_ips = Some(config.allowed_source_ips);
@@ -435,9 +387,7 @@ impl From<&'_ CurrentRssConfig> for CurrentRssUserConfig {
                 bootstrap_sleds,
                 ntp_servers: rss.ntp_servers.clone(),
                 dns_servers: rss.dns_servers.clone(),
-                internal_services_ip_pool_ranges: rss
-                    .internal_services_ip_pool_ranges
-                    .clone(),
+                service_ip_pools: rss.service_ip_pools.clone(),
                 external_dns_ips: rss.external_dns_ips.clone(),
                 external_dns_zone_name: rss.external_dns_zone_name.clone(),
                 rack_network_config: rss.rack_network_config.clone(),
@@ -516,6 +466,45 @@ fn validate_rack_network_config(
                 }
             }
         }
+
+        // Check that the src_addr is only specified for numbered peers and
+        // that the address families for addr and src_addr match
+        for peer in &port_config.bgp_peers {
+            match peer.addr {
+                UserSpecifiedRouterPeerAddr::Unnumbered => {
+                    if peer.src_addr.is_some() {
+                        let port = &peer.port;
+                        bail!(
+                            "unnumbered BGP peer for {port} specifies a \
+                             src_addr, but src_addr is only supported \
+                             for numbered BGP peers"
+                        );
+                    }
+                }
+                UserSpecifiedRouterPeerAddr::Numbered(ip) => {
+                    if let Some(src_addr) = peer.src_addr {
+                        match (src_addr.is_ipv4(), ip.is_ipv4()) {
+                            (true, false) => {
+                                bail!(
+                                    "numbered BGP peer {ip} specifies \
+                                    an IPv4 src_addr when it should be \
+                                    IPv6"
+                                );
+                            }
+                            (false, true) => {
+                                bail!(
+                                    "numbered BGP peer {ip} specifies \
+                                    an IPv6 src_addr when it should be \
+                                    IPv4"
+                                );
+                            }
+                            (true, true) => (),
+                            (false, false) => (),
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // Check that all auth keys are present.
@@ -532,12 +521,17 @@ fn validate_rack_network_config(
 
     // TODO Add more client side checks on `rack_network_config` contents?
 
-    let ports = config
+    let ports = match config
         .iter_uplinks()
         .map(|(switch, port, config)| {
             build_port_config(switch, port, config, bgp_auth_keys)
         })
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>, AddressFamilyMismatchError>>()
+    {
+        Ok(v) => v,
+        Err(e) => bail!(e),
+    };
+
     let ports = UplinkPorts::new(ports)
         .context("rack network config must specify at least one uplink port")?;
 
@@ -614,76 +608,73 @@ fn build_port_config(
     port: &str,
     config: &ManualPortConfig,
     bgp_auth_keys: &BgpAuthKeys,
-) -> PortConfig {
+) -> Result<PortConfig, AddressFamilyMismatchError> {
     use sled_agent_types::early_networking::BgpPeerConfig;
 
-    PortConfig {
+    let mut bgp_peers = vec![];
+    for p in &config.bgp_peers {
+        let md5_auth_key = p.auth_key_id.as_ref().map(|key_id| {
+            let BgpAuthKey::TcpMd5 { key } = bgp_auth_keys
+                .get(key_id)
+                .unwrap_or_else(|| {
+                    panic!("invariant violation: auth key ID {} exists", key_id)
+                })
+                .clone()
+                .unwrap_or_else(|| {
+                    panic!(
+                        "invariant violation: auth key ID {} has a key",
+                        key_id
+                    )
+                });
+            key
+        });
+
+        let addr = match p.addr {
+            UserSpecifiedRouterPeerAddr::Unnumbered => {
+                UnnumberedRouter { router_lifetime: p.router_lifetime }.into()
+            }
+            UserSpecifiedRouterPeerAddr::Numbered(ip) => {
+                NumberedRouter::new(ip, p.src_addr)?.into()
+            }
+        };
+
+        let config = BgpPeerConfig {
+            addr,
+            asn: p.asn,
+            port: p.port.clone(),
+            hold_time: p.hold_time,
+            connect_retry: p.connect_retry,
+            delay_open: p.delay_open,
+            idle_hold_time: p.idle_hold_time,
+            keepalive: p.keepalive,
+            communities: Vec::new(),
+            enforce_first_as: p.enforce_first_as,
+            local_pref: p.local_pref,
+            md5_auth_key,
+            min_ttl: p.min_ttl,
+            multi_exit_discriminator: p.multi_exit_discriminator,
+            remote_asn: p.remote_asn,
+            allowed_export: p.allowed_export.clone().into(),
+            allowed_import: p.allowed_import.clone().into(),
+            vlan_id: p.vlan_id,
+        };
+
+        bgp_peers.push(config);
+    }
+
+    Ok(PortConfig {
         port: port.to_owned(),
         routes: config.routes.clone(),
         addresses: config.addresses.iter().copied().map(From::from).collect(),
-        bgp_peers: config
-            .bgp_peers
-            .iter()
-            .map(|p| {
-                let md5_auth_key = p.auth_key_id.as_ref().map(|key_id| {
-                    let BgpAuthKey::TcpMd5 { key } = bgp_auth_keys
-                        .get(key_id)
-                        .unwrap_or_else(|| {
-                            panic!(
-                                "invariant violation: auth key ID {} exists",
-                                key_id
-                            )
-                        })
-                        .clone()
-                        .unwrap_or_else(|| {
-                            panic!(
-                                "invariant violation: auth key ID {} has a key",
-                                key_id
-                            )
-                        });
-                    key
-                });
-
-                let addr = match p.addr {
-                    UserSpecifiedRouterPeerAddr::Unnumbered => {
-                        RouterPeerType::Unnumbered {
-                            router_lifetime: p.router_lifetime,
-                        }
-                    }
-                    UserSpecifiedRouterPeerAddr::Numbered(ip) => {
-                        RouterPeerType::Numbered { ip }
-                    }
-                };
-
-                BgpPeerConfig {
-                    addr,
-                    asn: p.asn,
-                    port: p.port.clone(),
-                    hold_time: p.hold_time,
-                    connect_retry: p.connect_retry,
-                    delay_open: p.delay_open,
-                    idle_hold_time: p.idle_hold_time,
-                    keepalive: p.keepalive,
-                    communities: Vec::new(),
-                    enforce_first_as: p.enforce_first_as,
-                    local_pref: p.local_pref,
-                    md5_auth_key,
-                    min_ttl: p.min_ttl,
-                    multi_exit_discriminator: p.multi_exit_discriminator,
-                    remote_asn: p.remote_asn,
-                    allowed_export: p.allowed_export.clone().into(),
-                    allowed_import: p.allowed_import.clone().into(),
-                    vlan_id: p.vlan_id,
-                }
-            })
-            .collect(),
+        bgp_peers,
         switch,
         uplink_port_speed: config.uplink_port_speed,
         uplink_port_fec: config.uplink_port_fec,
         autoneg: config.autoneg,
         lldp: config.lldp.clone(),
         tx_eq: config.tx_eq,
-    }
+        allow_ddm_traffic: false,
+    })
 }
 
 // Thin wrapper around an `omicron_certificates::CertificateValidator` that we
@@ -739,6 +730,7 @@ mod tests {
     use wicket_common::rack_setup::BgpAuthKeyStatus;
     use wicketd_commission_types::rack_setup::BgpAuthKeyId;
     use wicketd_commission_types::rack_setup::SetBgpAuthKeyStatus;
+    use zeroize::Zeroizing;
 
     use super::*;
 
@@ -1118,11 +1110,13 @@ mod tests {
         let mut config = CurrentRssConfig::default();
 
         assert_eq!(
-            config.push_cert(cert.clone()).unwrap(),
+            config.push_cert(CertificatePem(cert.clone())).unwrap(),
             CertificateUploadResponse::WaitingOnKey,
         );
         assert_eq!(
-            config.push_key(key.clone()).unwrap(),
+            config
+                .push_key(PrivateKeyPem(Zeroizing::new(key.clone())))
+                .unwrap(),
             CertificateUploadResponse::CertKeyAccepted,
         );
         assert_eq!(config.external_certificates.len(), 1);
@@ -1130,11 +1124,13 @@ mod tests {
         // Re-uploading the same pair reports CertKeyDuplicateIgnored and adds
         // no second entry.
         assert_eq!(
-            config.push_cert(cert.clone()).unwrap(),
+            config.push_cert(CertificatePem(cert.clone())).unwrap(),
             CertificateUploadResponse::WaitingOnKey,
         );
         assert_eq!(
-            config.push_key(key.clone()).unwrap(),
+            config
+                .push_key(PrivateKeyPem(Zeroizing::new(key.clone())))
+                .unwrap(),
             CertificateUploadResponse::CertKeyDuplicateIgnored,
         );
         assert_eq!(config.external_certificates.len(), 1);
@@ -1147,11 +1143,13 @@ mod tests {
         let other_key = other.end_cert_private_key_as_pem();
         assert_ne!(other_cert, cert);
         assert_eq!(
-            config.push_cert(other_cert.clone()).unwrap(),
+            config.push_cert(CertificatePem(other_cert.clone())).unwrap(),
             CertificateUploadResponse::WaitingOnKey,
         );
         assert_eq!(
-            config.push_key(other_key.clone()).unwrap(),
+            config
+                .push_key(PrivateKeyPem(Zeroizing::new(other_key.clone())))
+                .unwrap(),
             CertificateUploadResponse::CertKeyAccepted,
         );
         assert_eq!(config.external_certificates.len(), 2);
@@ -1159,94 +1157,5 @@ mod tests {
         assert_eq!(config.external_certificates[0].key, key);
         assert_eq!(config.external_certificates[1].cert, other_cert);
         assert_eq!(config.external_certificates[1].key, other_key);
-    }
-
-    fn v4_range(first: &str, last: &str) -> address::IpRange {
-        address::IpRange::try_from((
-            first.parse::<std::net::Ipv4Addr>().unwrap(),
-            last.parse::<std::net::Ipv4Addr>().unwrap(),
-        ))
-        .unwrap()
-    }
-
-    fn v6_range(first: &str, last: &str) -> address::IpRange {
-        address::IpRange::try_from((
-            first.parse::<std::net::Ipv6Addr>().unwrap(),
-            last.parse::<std::net::Ipv6Addr>().unwrap(),
-        ))
-        .unwrap()
-    }
-
-    fn find_pool<'a>(
-        pools: &'a IdOrdMap<ServiceIpPoolConfig>,
-        name: &str,
-    ) -> Option<&'a ServiceIpPoolConfig> {
-        pools.iter().find(|p| p.name.as_str() == name)
-    }
-
-    // A rack whose service ranges are all IPv4 should produce a single IPv4
-    // service pool and no IPv6 pool.
-    #[test]
-    fn service_ip_pools_v4_only() {
-        let range = v4_range("192.168.1.20", "192.168.1.29");
-        let pools = service_ip_pools_from_ranges(&[range])
-            .expect("v4-only ranges should synthesize a pool");
-
-        assert_eq!(pools.len(), 1);
-        let pool =
-            find_pool(&pools, SERVICE_POOL_IPV4_NAME).expect("v4 pool present");
-        assert_eq!(pool.ranges(), &[range]);
-        assert!(
-            find_pool(&pools, SERVICE_POOL_IPV6_NAME).is_none(),
-            "no v6 pool expected"
-        );
-    }
-
-    // A rack whose service ranges are all IPv6 should produce a single IPv6
-    // service pool and no IPv4 pool.
-    #[test]
-    fn service_ip_pools_v6_only() {
-        let range = v6_range("fd00::20", "fd00::29");
-        let pools = service_ip_pools_from_ranges(&[range])
-            .expect("v6-only ranges should synthesize a pool");
-
-        assert_eq!(pools.len(), 1);
-        let pool =
-            find_pool(&pools, SERVICE_POOL_IPV6_NAME).expect("v6 pool present");
-        assert_eq!(pool.ranges(), &[range]);
-        assert!(
-            find_pool(&pools, SERVICE_POOL_IPV4_NAME).is_none(),
-            "no v4 pool expected"
-        );
-    }
-
-    // A dual-stack rack should produce one pool per version.
-    #[test]
-    fn service_ip_pools_dual_stack() {
-        let v4 = v4_range("192.168.1.20", "192.168.1.29");
-        let v6 = v6_range("fd00::20", "fd00::29");
-        let pools = service_ip_pools_from_ranges(&[v4, v6])
-            .expect("dual-stack ranges should synthesize both pools");
-
-        assert_eq!(pools.len(), 2);
-        assert_eq!(
-            find_pool(&pools, SERVICE_POOL_IPV4_NAME).unwrap().ranges(),
-            &[v4]
-        );
-        assert_eq!(
-            find_pool(&pools, SERVICE_POOL_IPV6_NAME).unwrap().ranges(),
-            &[v6]
-        );
-    }
-
-    // With no ranges the helper produces no pools. The requirement that a real
-    // rack init request carry at least one pool is enforced separately, both by
-    // `start_rss_request` (on the flat range list) and by
-    // `RackInitializeRequest`'s validation at deserialization time.
-    #[test]
-    fn service_ip_pools_empty() {
-        let pools = service_ip_pools_from_ranges(&[])
-            .expect("empty ranges should synthesize no pools");
-        assert!(pools.is_empty());
     }
 }

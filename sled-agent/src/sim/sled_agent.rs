@@ -11,6 +11,7 @@ use super::instance::{self, SimInstance};
 use super::storage::CrucibleData;
 use super::storage::Storage;
 use crate::artifact_store::ArtifactStore;
+use crate::instance_manager::VmmRegistrationDisallowedReason;
 use crate::nexus::NexusClient;
 use crate::sim::SimulatedUpstairs;
 use crate::sim::simulatable::Simulatable;
@@ -24,15 +25,13 @@ use dropshot::Body;
 use dropshot::HttpError;
 use futures::Stream;
 use iddqd::IdOrdMap;
-use omicron_common::api::external::{
-    ByteCount, Error, Generation, ResourceType,
-};
+use omicron_common::api::external::{ByteCount, Error, ResourceType};
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::shared::{
     ResolvedVpcRoute, ResolvedVpcRouteSet, ResolvedVpcRouteState, RouterId,
     RouterKind, RouterVersion, VirtualNetworkInterfaceHost,
 };
-use omicron_common::disk::{DiskIdentity, DiskVariant};
+use omicron_generation_kinds::Generation;
 use omicron_uuid_kinds::{
     DatasetUuid, GenericUuid, PhysicalDiskUuid, PropolisUuid, SledUuid,
     SupportBundleUuid, ZpoolUuid,
@@ -47,7 +46,9 @@ use range_requests::PotentialRange;
 use sled_agent_health_monitor::HealthMonitorHandle;
 use sled_agent_types::attached_subnet::{AttachedSubnet, AttachedSubnets};
 use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
+use sled_agent_types::disk::DiskIdentity;
 use sled_agent_types::disk::DiskStateRequested;
+use sled_agent_types::disk::DiskVariant;
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::early_networking::PortConfig;
 use sled_agent_types::early_networking::RackNetworkConfig;
@@ -61,12 +62,14 @@ use sled_agent_types::inventory::{
     ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
     ConfigReconcilerInventoryStatus, FmdInventory, Inventory, InventoryDataset,
     InventoryDisk, InventoryZpool, OmicronFileSourceResolverInventory,
-    OmicronSledConfig, SingleMeasurementInventory, SledRole, ZpoolHealth,
+    OmicronSledConfig, OmicronSledUpdateDisposition,
+    SingleMeasurementInventory, SledRole, ZpoolHealth,
 };
 use sled_agent_types::support_bundle::SupportBundleMetadata;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
@@ -112,8 +115,7 @@ pub struct SledAgent {
     /// counter and return 503 Service Unavailable.
     local_storage_error_count: AtomicU32,
     pub bootstore_network_config: Mutex<bootstore::NetworkConfig>,
-    pub(super) repo_depot:
-        dropshot::HttpServer<ArtifactStore<SimArtifactStorage>>,
+    pub repo_depot: dropshot::HttpServer<ArtifactStore<SimArtifactStorage>>,
     pub log: Logger,
     health_monitor: HealthMonitorHandle,
 }
@@ -207,7 +209,7 @@ impl SledAgent {
         self: &Arc<Self>,
         propolis_id: PropolisUuid,
         instance: InstanceEnsureBody,
-    ) -> Result<SledVmmState, Error> {
+    ) -> Result<SledVmmState, HttpError> {
         let InstanceEnsureBody {
             vmm_spec,
             local_config,
@@ -222,10 +224,31 @@ impl SledAgent {
         // with more than 16 CPUs.
         let ncpus = spec.board.cpus;
         if ncpus > 16 {
-            return Err(Error::internal_error(
-                "could not allocate an instance: ran out of CPUs!",
+            return Err(HttpError::for_internal_error(
+                "could not allocate an instance: ran out of CPUs!".to_owned(),
             ));
         };
+
+        // Respond with a fake 503 failure if we're evacuating. This is
+        // less-than-fully-faithful to real sled-agent in at least one way: real
+        // sled-agent will also return a 503 if it has no config. We don't do
+        // that here because sim-sled-agent never gets a config if it isn't
+        // explicitly given one.
+        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
+            if let Some(config) = self.omicron_sled_config() {
+                match config.update_disposition {
+                    OmicronSledUpdateDisposition::Available => (),
+                    OmicronSledUpdateDisposition::Evacuating => {
+                        let reason =
+                            VmmRegistrationDisallowedReason::SledEvacuating;
+                        return Err(HttpError::for_unavail(
+                            Some(reason.http_error_code().to_string()),
+                            "sim sled-agent is evacuating".to_owned(),
+                        ));
+                    }
+                }
+            }
+        }
 
         // Make sure each file backend was ensured before changing any state
         for (_id, disk) in vmm_spec.file_backends() {
@@ -339,7 +362,12 @@ impl SledAgent {
                 unreachable!("already verified Crucible disks have UUID keys");
             };
 
-            let vcr = serde_json::from_str(&disk_request.request_json)?;
+            let vcr = serde_json::from_str(&disk_request.request_json)
+                .map_err(|err| {
+                    HttpError::for_internal_error(
+                        InlineErrorChain::new(&err).to_string(),
+                    )
+                })?;
             self.simulated_upstairs.map_id_to_vcr(*id, &vcr);
         }
 

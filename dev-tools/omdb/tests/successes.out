@@ -89,9 +89,9 @@ EXECUTING COMMAND: omdb ["db", "sleds"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
- SERIAL       IP           ROLE      POLICY      STATE   ID                                   
- SimGimlet01  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
- SimGimlet00  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
+ SERIAL       IP           ROLE      POLICY      STATE   BP AVAIL   ID                                   
+ SimGimlet01  [::1]:REDACTED_PORT  scrimlet  in service  active  available  ..........<REDACTED_UUID>........... 
+ SimGimlet00  [::1]:REDACTED_PORT  scrimlet  in service  active  available  ..........<REDACTED_UUID>........... 
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
@@ -102,9 +102,9 @@ EXECUTING COMMAND: omdb ["db", "sleds", "-F", "discretionary"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
- SERIAL       IP           ROLE      POLICY      STATE   ID                                   
- SimGimlet01  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
- SimGimlet00  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
+ SERIAL       IP           ROLE      POLICY      STATE   BP AVAIL   ID                                   
+ SimGimlet01  [::1]:REDACTED_PORT  scrimlet  in service  active  available  ..........<REDACTED_UUID>........... 
+ SimGimlet00  [::1]:REDACTED_PORT  scrimlet  in service  active  available  ..........<REDACTED_UUID>........... 
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
@@ -282,11 +282,6 @@ task: "audit_log_timeout_incomplete"
     become visible in the audit log
 
 
-task: "bfd_manager"
-    Manages bidirectional fowarding detection (BFD) configuration on rack
-    switches
-
-
 task: "blueprint_executor"
     Executes the target blueprint
 
@@ -349,6 +344,10 @@ task: "external_endpoints"
 
 task: "fm_analysis"
     performs fault management analysis and updates the sitrep
+
+
+task: "fm_config_loader"
+    loads the current fault management configuration from the database
 
 
 task: "fm_rendezvous"
@@ -467,10 +466,6 @@ task: "service_firewall_rule_propagation"
     connectivity
 
 
-task: "service_zone_nat_tracker"
-    ensures service zone nat records are recorded in NAT RPW table
-
-
 task: "session_cleanup"
     hard-deletes expired console sessions based on absolute timeout
 
@@ -484,7 +479,7 @@ task: "support_bundle_collector"
 
 
 task: "switch_port_config_manager"
-    manages switch port settings for rack switches
+    propagates networking config to the bootstore
 
 
 task: "trust_quorum_manager"
@@ -632,12 +627,6 @@ task: "audit_log_timeout_incomplete"
     cutoff:                       <REDACTED_TIMESTAMP>
     max_timed_out_per_activation: 1000
 
-task: "bfd_manager"
-  configured period: every <REDACTED_DURATION>s
-  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
-    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: proto error: no records found for Query { name: Name("_mgd._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
-
 task: "blueprint_planner"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
@@ -672,6 +661,15 @@ task: "blueprint_rendezvous"
         num_not_in_inventory:   0
         num_tombstoned:         0
         num_already_tombstoned: 0
+    sled_blueprint_availability rendezvous counts:
+        num_marked_available:                0
+        num_marked_unavailable:              0
+        num_unchanged:                       2
+        num_invariant_violations:            0
+        num_decommissioned:                  0
+        num_already_decommissioned:          0
+        num_not_in_blueprint:                0
+        num_decommissioned_not_in_blueprint: 0
 
 task: "crdb_node_id_collector"
   configured period: every <REDACTED_DURATION>m
@@ -714,21 +712,19 @@ task: "fm_analysis"
     =================================
     no changes from the current situation report (Some(..........<REDACTED_UUID>........... (sitrep)))
 
-    preparation report:
-      parent sitrep:        ..........<REDACTED_UUID>...........
-      inventory collection: ..........<REDACTED_UUID>...........
-      <FM_INPUT_INV_COMPARISON_REDACTED>
-      total known ereport restart IDs: 0
-      no new ereports since the parent sitrep
-      no cases copied forward
-
-      no in-service control plane disks
-
-    analysis report:
-      sitrep ID: ..........<REDACTED_UUID>...........
-      no analysis log
-      no cases changed in this analysis step
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+
+task: "fm_config_loader"
+  configured period: every <REDACTED_DURATION>s
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    config last loaded at:       <REDACTED_TIMESTAMP>
+      loaded by this activation: false
+    current config:
+      source:                    default
+      analysis enabled:          true (default)
+      sitrep limit:              2500 (default)
+      history pruning threshold: 2000 (default)
 
 task: "fm_rendezvous"
   configured period: every <REDACTED_DURATION>m
@@ -784,6 +780,8 @@ task: "fm_sitrep_gc"
       batches:                                                                   1
     orphaned fm_fact_physical_disk rows deleted:                                 0
       batches:                                                                   1
+    orphaned fm_fact_saga rows deleted:                                          0
+      batches:                                                                   1
     orphaned fm_sitrep_analysis_report rows deleted:                             <ORPHANED_FMSITREPANALYSISREPORT_ROWS_DELETED_REDACTED>
       batches:                                                                   1
     orphaned fm_support_bundle_request rows deleted:                             0
@@ -799,7 +797,10 @@ task: "fm_sitrep_history_pruner"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    max sitreps to keep: 2000
+    configuration:
+      analysis enabled:          true (default)
+      sitrep limit:              2500 (default)
+      history pruning threshold: 2000 (default)
     deletion batch size: 1000
     status: within limit (nothing was deleted)
       current count:        1
@@ -997,12 +998,6 @@ task: "service_firewall_rule_propagation"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-
-task: "service_zone_nat_tracker"
-  configured period: every <REDACTED_DURATION>s
-  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
-    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: inventory collection is None
 
 task: "session_cleanup"
   configured period: every <REDACTED_DURATION>m
@@ -1354,12 +1349,6 @@ task: "audit_log_timeout_incomplete"
     cutoff:                       <REDACTED_TIMESTAMP>
     max_timed_out_per_activation: 1000
 
-task: "bfd_manager"
-  configured period: every <REDACTED_DURATION>s
-  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
-    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: proto error: no records found for Query { name: Name("_mgd._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
-
 task: "blueprint_planner"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
@@ -1394,6 +1383,15 @@ task: "blueprint_rendezvous"
         num_not_in_inventory:   0
         num_tombstoned:         0
         num_already_tombstoned: 0
+    sled_blueprint_availability rendezvous counts:
+        num_marked_available:                0
+        num_marked_unavailable:              0
+        num_unchanged:                       2
+        num_invariant_violations:            0
+        num_decommissioned:                  0
+        num_already_decommissioned:          0
+        num_not_in_blueprint:                0
+        num_decommissioned_not_in_blueprint: 0
 
 task: "crdb_node_id_collector"
   configured period: every <REDACTED_DURATION>m
@@ -1436,21 +1434,19 @@ task: "fm_analysis"
     =================================
     no changes from the current situation report (Some(..........<REDACTED_UUID>........... (sitrep)))
 
-    preparation report:
-      parent sitrep:        ..........<REDACTED_UUID>...........
-      inventory collection: ..........<REDACTED_UUID>...........
-      <FM_INPUT_INV_COMPARISON_REDACTED>
-      total known ereport restart IDs: 0
-      no new ereports since the parent sitrep
-      no cases copied forward
-
-      no in-service control plane disks
-
-    analysis report:
-      sitrep ID: ..........<REDACTED_UUID>...........
-      no analysis log
-      no cases changed in this analysis step
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+
+task: "fm_config_loader"
+  configured period: every <REDACTED_DURATION>s
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    config last loaded at:       <REDACTED_TIMESTAMP>
+      loaded by this activation: false
+    current config:
+      source:                    default
+      analysis enabled:          true (default)
+      sitrep limit:              2500 (default)
+      history pruning threshold: 2000 (default)
 
 task: "fm_rendezvous"
   configured period: every <REDACTED_DURATION>m
@@ -1506,6 +1502,8 @@ task: "fm_sitrep_gc"
       batches:                                                                   1
     orphaned fm_fact_physical_disk rows deleted:                                 0
       batches:                                                                   1
+    orphaned fm_fact_saga rows deleted:                                          0
+      batches:                                                                   1
     orphaned fm_sitrep_analysis_report rows deleted:                             <ORPHANED_FMSITREPANALYSISREPORT_ROWS_DELETED_REDACTED>
       batches:                                                                   1
     orphaned fm_support_bundle_request rows deleted:                             0
@@ -1521,7 +1519,10 @@ task: "fm_sitrep_history_pruner"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    max sitreps to keep: 2000
+    configuration:
+      analysis enabled:          true (default)
+      sitrep limit:              2500 (default)
+      history pruning threshold: 2000 (default)
     deletion batch size: 1000
     status: within limit (nothing was deleted)
       current count:        1
@@ -1720,12 +1721,6 @@ task: "service_firewall_rule_propagation"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 
-task: "service_zone_nat_tracker"
-  configured period: every <REDACTED_DURATION>s
-  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
-    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: inventory collection is None
-
 task: "session_cleanup"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
@@ -1901,10 +1896,11 @@ blueprint  ......<REDACTED_BLUEPRINT_ID>.......
 parent:    <none>
 
   sled: ..........<REDACTED_UUID>...........
-    state:::::::::::::   active
-    config generation:   2
-    subnet::::::::::::   ::/64
-    last allocated IP:   ::2
+    state::::::::::::::   active
+    update disposition:   available (generation 1)
+    config generation::   2
+    subnet:::::::::::::   ::/64
+    last allocated IP::   ::2
 
     host phase 2 contents:
     ------------------------
@@ -1951,10 +1947,11 @@ parent:    <none>
 
 
   sled: ..........<REDACTED_UUID>...........
-    state:::::::::::::   active
-    config generation:   2
-    subnet::::::::::::   ::/64
-    last allocated IP:   ::2
+    state::::::::::::::   active
+    update disposition:   available (generation 1)
+    config generation::   2
+    subnet:::::::::::::   ::/64
+    last allocated IP::   ::2
 
     host phase 2 contents:
     ------------------------
@@ -2048,10 +2045,11 @@ blueprint  ......<REDACTED_BLUEPRINT_ID>.......
 parent:    <none>
 
   sled: ..........<REDACTED_UUID>...........
-    state:::::::::::::   active
-    config generation:   2
-    subnet::::::::::::   ::/64
-    last allocated IP:   ::2
+    state::::::::::::::   active
+    update disposition:   available (generation 1)
+    config generation::   2
+    subnet:::::::::::::   ::/64
+    last allocated IP::   ::2
 
     host phase 2 contents:
     ------------------------
@@ -2098,10 +2096,11 @@ parent:    <none>
 
 
   sled: ..........<REDACTED_UUID>...........
-    state:::::::::::::   active
-    config generation:   2
-    subnet::::::::::::   ::/64
-    last allocated IP:   ::2
+    state::::::::::::::   active
+    update disposition:   available (generation 1)
+    config generation::   2
+    subnet:::::::::::::   ::/64
+    last allocated IP::   ::2
 
     host phase 2 contents:
     ------------------------
@@ -2396,4 +2395,95 @@ Marked ..........<REDACTED_UUID>........... quiesced
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
 note: database schema version matches expected (<redacted database version>)
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "fm-config", "show", "current"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+current fault management configuration:
+  source:                    default
+  analysis enabled:          true (default)
+  sitrep limit:              2500 (default)
+  history pruning threshold: 2000 (default)
+
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["-w", "nexus", "fm-config", "set", "--sitrep-limit", "3000", "--comment", "I am altering the config. Pray I do not alter it further."]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+fault management config updated to version 1:
+  analysis enabled:          true (default)
+  sitrep limit:              3000 (overriden)
+  history pruning threshold: 2000 (default)
+
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "fm-config", "current"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+current fault management configuration:
+  source:                    version 1
+    modified at:             <REDACTED_TIMESTAMP>
+    comment:                
+      I am altering the config. Pray I do not alter it further.
+  analysis enabled:          true (default)
+  sitrep limit:              3000 (overriden)
+  history pruning threshold: 2000 (default)
+
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["-w", "nexus", "fm-config", "set", "--analysis-enabled", "false", "--comment", "oops i altered it further"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+fault management config updated to version 2:
+  analysis enabled:          false (overriden)
+  sitrep limit:              3000 (overriden)
+  history pruning threshold: 2000 (default)
+
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "fm-config", "current"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+current fault management configuration:
+  source:                    version 2
+    modified at:             <REDACTED_TIMESTAMP>
+    comment:                
+      oops i altered it further
+  analysis enabled:          false (overriden)
+  sitrep limit:              3000 (overriden)
+  history pruning threshold: 2000 (default)
+
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "fm-config", "show", "v1"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+fault management configuration v1:
+  source:                    version 1
+    modified at:             <REDACTED_TIMESTAMP>
+    comment:                
+      I am altering the config. Pray I do not alter it further.
+  analysis enabled:          true (default)
+  sitrep limit:              3000 (overriden)
+  history pruning threshold: 2000 (default)
+
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
 =============================================

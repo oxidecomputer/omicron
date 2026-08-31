@@ -57,6 +57,7 @@ use nexus_types::external_api::policy::SiloRole;
 use nexus_types::external_api::silo::Silo;
 use nexus_types::external_api::silo::SiloIdentityMode;
 use nexus_types::identity::Resource;
+use nexus_types_versions::v2025_11_20_00;
 use omicron_common::address::Ipv6Range;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
@@ -67,6 +68,7 @@ use omicron_nexus::TestInterfaces;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use sled_agent_client::TestInterfaces as SledTestInterfaces;
+use std::collections::BTreeSet;
 use uuid::Uuid;
 
 type ControlPlaneTestContext =
@@ -95,14 +97,12 @@ async fn test_ip_pool_basic_crud_impl(
     let ip_pool_ranges_url = format!("{}/ranges", ip_pool_url);
     let ip_pool_add_range_url = format!("{}/add", ip_pool_ranges_url);
 
-    // TODO-cleanup: Remove this when we remove the builtin system IP Pools
-    //
-    // See https://github.com/oxidecomputer/omicron/issues/8950.
+    // The `ControlPlaneTestContext` creates two system-service IP pools.
     let original_ip_pools = get_ip_pools(&client, Some(assignment)).await;
     let count = original_ip_pools.len();
     match assignment {
         IpPoolAssignment::SystemServices => {
-            assert_eq!(count, 2, "Expected 2 predefined services IP pools");
+            assert_eq!(count, 2, "Expected 2 service IP pools");
         }
         IpPoolAssignment::Silos => {
             assert_eq!(count, 0, "Expected empty list of IP pools");
@@ -275,6 +275,52 @@ async fn get_ip_pools(
     }
 }
 
+#[nexus_test]
+async fn test_old_ip_pool_api_excludes_system_service_pools(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let pool1 = create_ipv4_pool(client, "zz-old-client-pool-1").await;
+    let pool2 = create_ipv4_pool(client, "zz-old-client-pool-2").await;
+    let old_api_version =
+        nexus_external_api::VERSION_RENAME_POOL_ENDPOINTS.to_string();
+
+    // The old general IP Pool list predates API support for assigning pools to
+    // silos or system services. It should retain its original semantics and
+    // return only pools available to silos, while the separate service-pool
+    // endpoint remains available to old clients.
+    let page = NexusRequest::new(
+        RequestBuilder::new(client, Method::GET, "/v1/system/ip-pools?limit=2")
+            .header(
+                omicron_common::api::VERSION_HEADER,
+                old_api_version.as_str(),
+            )
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap::<ResultsPage<v2025_11_20_00::ip_pool::IpPool>>()
+    .await;
+    assert_eq!(page.items.len(), 2);
+    assert_eq!(
+        page.items.iter().map(|pool| pool.id()).collect::<BTreeSet<_>>(),
+        BTreeSet::from([pool1.id(), pool2.id()]),
+    );
+
+    let service_pool = NexusRequest::new(
+        RequestBuilder::new(client, Method::GET, "/v1/system/ip-pools-service")
+            .header(
+                omicron_common::api::VERSION_HEADER,
+                old_api_version.as_str(),
+            )
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap::<v2025_11_20_00::ip_pool::IpPool>()
+    .await;
+    assert_eq!(service_pool.ip_version, IpVersion::V4);
+    assert!(![pool1.id(), pool2.id()].contains(&service_pool.id()));
+}
+
 // this test exists primarily because of a bug in the initial implementation
 // where we included a duplicate of each pool in the list response for every
 // associated silo
@@ -378,9 +424,6 @@ async fn test_ip_pool_silo_link(cptestctx: &ControlPlaneTestContext) {
     let assocs_p0 = silos_for_pool(client, "p0").await;
     assert_eq!(assocs_p0.items.len(), 0);
 
-    // we need to use a discoverable silo because non-discoverable silos, while
-    // linkable, are filtered out of the list of linked silos for a pool. the
-    // test silo at cptestctx.silo_name is non-discoverable.
     let silo =
         create_silo(&client, "my-silo", true, SiloIdentityMode::SamlJit).await;
 
@@ -598,11 +641,8 @@ async fn cannot_unlink_ip_pool_with_outstanding_floating_ips(
     object_delete(client, &url).await;
 }
 
-/// Non-discoverable silos can be linked to a pool, but they do not show up
-/// in the list of silos for that pool, just as they do not show up in the
-/// top-level list of silos
 #[nexus_test]
-async fn test_ip_pool_silo_list_only_discoverable(
+async fn test_ip_pool_silo_list_includes_non_discoverable(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
@@ -623,8 +663,11 @@ async fn test_ip_pool_silo_list_only_discoverable(
     link_ip_pool(client, "p0", &silo_non_disc.id(), false).await;
 
     let silos_p0 = silos_for_pool(client, "p0").await;
-    assert_eq!(silos_p0.items.len(), 1);
-    assert_eq!(silos_p0.items[0].silo_id, silo_disc.id());
+    assert_eq!(silos_p0.items.len(), 2);
+    assert_eq!(
+        silos_p0.items.iter().map(|link| link.silo_id).collect::<BTreeSet<_>>(),
+        BTreeSet::from([silo_disc.id(), silo_non_disc.id()]),
+    );
 }
 
 #[nexus_test]
@@ -641,9 +684,6 @@ async fn test_ip_pool_update_default(cptestctx: &ControlPlaneTestContext) {
     let silos_p1 = silos_for_pool(client, "p1").await;
     assert_eq!(silos_p1.items.len(), 0);
 
-    // we need to use a discoverable silo because non-discoverable silos, while
-    // linkable, are filtered out of the list of linked silos for a pool. the
-    // test silo at cptestctx.silo_name is non-discoverable.
     let silo =
         create_silo(&client, "my-silo", true, SiloIdentityMode::SamlJit).await;
 
@@ -740,9 +780,7 @@ async fn test_ip_pool_pagination(cptestctx: &ControlPlaneTestContext) {
     let base_url = "/v1/system/ip-pools";
     let first_page = objects_list_page_authz::<IpPool>(client, &base_url).await;
 
-    // we start out with two hardcoded system pools.
-    //
-    // TODO-cleanup: https://github.com/oxidecomputer/omicron/issues/8950.
+    // The `ControlPlaneTestContext` creates two system-service IP pools.
     assert_eq!(first_page.items.len(), 2);
 
     let mut pool_names = vec![];
@@ -794,9 +832,7 @@ async fn test_ip_pool_silos_pagination(cptestctx: &ControlPlaneTestContext) {
     let silos_p0 = silos_for_pool(client, "p0").await;
     assert_eq!(silos_p0.items.len(), 0);
 
-    // create and link some silos. we need to use discoverable silos because
-    // non-discoverable silos, while linkable, are filtered out of the list of
-    // linked silos for a pool
+    // Create and link some silos.
     let mut silo_ids = vec![];
     for i in 1..=8 {
         let name = format!("silo-{}", i);

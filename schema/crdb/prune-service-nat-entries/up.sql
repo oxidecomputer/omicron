@@ -1,0 +1,14 @@
+-- This migration accompanies the removal of Nexus's `sync_service_zone_nat`
+-- task: synchronizing service zone NAT entries are now the responsibility of
+-- sled-agent (specifically the dpd NAT scrimlet reconciler), and Nexus
+-- communicates the required entries to sled-agent via the bootstore. The
+-- `nat_entry` table now exclusively contains entries for instances.
+--
+-- We don't need any structural changes here, but we do need to delete any NAT
+-- entries that still reference services: failure to do so means when dpd pulls
+-- NAT entries from Nexus, it would continue to see the last service entries
+-- created by the now-gone `sync_service_zone_nat` task, create them, only for
+-- the dpd NAT scrimlet reconciler to come along and remove them later.
+--
+-- All service zone NAT entries use the hardcoded `SERVICES_VNI` (100).
+DELETE FROM nat_entry WHERE vni = 100;

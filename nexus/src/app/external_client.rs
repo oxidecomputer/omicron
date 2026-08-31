@@ -118,6 +118,78 @@ impl ExternalIpPolicy {
         Self { underlay_subnets, loopback_policy }
     }
 
+    /// Returns an [`Err`]`(`[`ExternalUrlError`]`)`if the provided `url`'s host
+    /// is an underlay or loopback IP address, or [`Ok`]`(())` if it is not one.
+    ///
+    /// # Notes
+    ///
+    /// This method does *not* resolve domain names! To conclusively determine
+    /// if a URL points to an external or internal endpoint, domain names must
+    /// be resolved to addresses, which must then also be checked against the
+    /// external IP policy. This method doesn't do that: it only checks that the
+    /// URL's actual string value does not contain an internal IP. Use
+    /// [`external_dns::Resolver`] when resolving the URL's domain name to
+    /// addresses to also ensure that the URL does not resolve to an underlay or
+    /// loopback IP address. This is necessary because a URL which resolves to
+    /// an external IP when this method is called may later resolve to an
+    /// underlay IP at the time when a connection to that URL is actually
+    /// established, so this method cannot ensure that it is external based on
+    /// the static properties of the URL string.
+    ///
+    /// # Returns
+    ///
+    /// * `Err`(`[`ExternalUrlError::Localhost`]`)` if the URL's host is a
+    ///    domain name in   the `localhost.` zone.
+    /// * `Err`(`[`ExternalUrlError::NotExternalIp`]`(`[`ExternalIpError`]`))`
+    ///    if the URL's host is an IP address and the external URL policy
+    ///    rejects that address.
+    /// * `Ok(())` if the URL's host is an external IP address, or if it is a
+    ///    domain name. As described [above](#notes), this method does not
+    ///    resolve the URL's domain name to an IP address, so URLs which have
+    ///    DNS names as their host must be resolved using
+    ///    [`external_dns::Resolver`] when they are actually connected to.
+    pub fn ensure_external_url(
+        &self,
+        url: &Url,
+    ) -> Result<(), ExternalUrlError> {
+        match url.host() {
+            // Domain names are mostly allowed here: if the name *resolves* to a
+            // non-external IP, that will be rejected by `external_dns::Resolver`,
+            // later. The exception is, of course, "localhost". As per RFC 6761 §
+            // 6.3, resolvers may answer names in it with loopback addresses without
+            // consulting DNS at all, so reject it eagerly here rather than relying
+            // on the resolver --- unless the loopback policy permits it, in which
+            // case the name is passed through to the resolver like any other.
+            Some(url::Host::Domain(domain))
+                if self.loopback_policy == TreatLoopbackAsExternal::No =>
+            {
+                let name = domain.trim_end_matches('.');
+                // The special-use "localhost." zone can, according to RFC 6761 §
+                // 6.3, contain subdomains. Although this usage is pretty uncommon,
+                // it would also resolve to a loopback address and therefore must be
+                // rejected as well.
+                let last_label = name.rsplit('.').next().unwrap_or(name);
+                if last_label.eq_ignore_ascii_case("localhost") {
+                    return Err(ExternalUrlError::Localhost {
+                        host: domain.to_string(),
+                    });
+                }
+            }
+            Some(url::Host::Domain(_)) => {}
+            // If the host is an IP address, check that it is considered an external
+            // IP.
+            Some(url::Host::Ipv6(v6)) => {
+                self.ensure_external_ip(IpAddr::V6(v6))?;
+            }
+            Some(url::Host::Ipv4(v4)) => {
+                self.ensure_external_ip(IpAddr::V4(v4))?;
+            }
+            None => {}
+        }
+
+        Ok(())
+    }
+
     /// Returns `Ok(ip)` if `ip` is external to the rack, and an
     /// error describing why it is not otherwise.
     ///
@@ -335,7 +407,7 @@ impl ExternalClientBuilder {
             let inner = redirect.unwrap_or_default();
             let ip_policy = ip_policy.clone();
             redirect::Policy::custom(move |attempt| {
-                match ensure_external_url(attempt.url(), &ip_policy) {
+                match ip_policy.ensure_external_url(attempt.url()) {
                     Ok(()) => inner.redirect(attempt),
                     Err(error) => attempt.error(error),
                 }
@@ -483,7 +555,7 @@ impl ExternalHttpClient {
         url: U,
     ) -> Result<reqwest::RequestBuilder, ExternalUrlError> {
         let url = url.into_url()?;
-        ensure_external_url(&url, &self.ip_policy)?;
+        self.ip_policy.ensure_external_url(&url)?;
         Ok(self.client.request(method, url))
     }
 
@@ -559,52 +631,10 @@ impl ExternalHttpClient {
         // really my favorite thing?
         //
         // Sigh. Whatever. It's fine.
-        ensure_external_url(request.url(), &self.ip_policy)?;
+        self.ip_policy.ensure_external_url(request.url())?;
         let client = self.client.clone();
         Ok(async move { client.execute(request).await })
     }
-}
-
-fn ensure_external_url(
-    url: &Url,
-    policy: &ExternalIpPolicy,
-) -> Result<(), ExternalUrlError> {
-    match url.host() {
-        // Domain names are mostly allowed here: if the name *resolves* to a
-        // non-external IP, that will be rejected by `external_dns::Resolver`,
-        // later. The exception is, of course, "localhost". As per RFC 6761 §
-        // 6.3, resolvers may answer names in it with loopback addresses without
-        // consulting DNS at all, so reject it eagerly here rather than relying
-        // on the resolver --- unless the loopback policy permits it, in which
-        // case the name is passed through to the resolver like any other.
-        Some(url::Host::Domain(domain))
-            if policy.loopback_policy == TreatLoopbackAsExternal::No =>
-        {
-            let name = domain.trim_end_matches('.');
-            // The special-use "localhost." zone can, according to RFC 6761 §
-            // 6.3, contain subdomains. Although this usage is pretty uncommon,
-            // it would also resolve to a loopback address and therefore must be
-            // rejected as well.
-            let last_label = name.rsplit('.').next().unwrap_or(name);
-            if last_label.eq_ignore_ascii_case("localhost") {
-                return Err(ExternalUrlError::Localhost {
-                    host: domain.to_string(),
-                });
-            }
-        }
-        Some(url::Host::Domain(_)) => {}
-        // If the host is an IP address, check that it is considered an external
-        // IP.
-        Some(url::Host::Ipv6(v6)) => {
-            policy.ensure_external_ip(IpAddr::V6(v6))?;
-        }
-        Some(url::Host::Ipv4(v4)) => {
-            policy.ensure_external_ip(IpAddr::V4(v4))?;
-        }
-        None => {}
-    }
-
-    Ok(())
 }
 
 #[cfg(test)]
@@ -630,7 +660,7 @@ mod test {
             TreatLoopbackAsExternal::No,
         );
         let url = "http://[2001:db8::1]/".parse::<Url>().unwrap();
-        let result = ensure_external_url(&url, &policy);
+        let result = policy.ensure_external_url(&url);
         assert!(
             matches!(
                 &result,
@@ -1305,7 +1335,7 @@ mod test {
             .parse::<Url>()
             .unwrap_or_else(|e| panic!("test URL {url:?} must parse: {e}"));
         let result =
-            ensure_external_url(&url, &test_policy(loopback)).map(|()| url);
+            test_policy(loopback).ensure_external_url(&url).map(|()| url);
         eprintln!("  --> {result:?};\n");
         result
     }
@@ -1367,7 +1397,7 @@ mod test {
     ) -> (TransientDnsServer, ExternalHttpClient) {
         use internal_dns_types::config::DnsConfigParams;
         use internal_dns_types::config::DnsConfigZone;
-        use omicron_common::api::external::Generation;
+        use omicron_generation_kinds::Generation;
 
         let dns =
             TransientDnsServer::new(log).await.expect("DNS server must start");

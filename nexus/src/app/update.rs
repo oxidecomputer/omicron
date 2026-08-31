@@ -10,11 +10,12 @@ use bytes::Bytes;
 use chrono::DateTime;
 use chrono::TimeDelta;
 use chrono::Utc;
+use display_error_chain::DisplayErrorChain;
 use dropshot::HttpError;
 use futures::Stream;
+use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use nexus_auth::authz;
 use nexus_db_lookup::LookupPath;
-use nexus_db_model::Generation;
 use nexus_db_model::TufRepoUpload;
 use nexus_db_model::TufTrustRoot;
 use nexus_db_model::saga_types::Saga;
@@ -25,11 +26,13 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::TargetReleaseDescription;
 use nexus_types::external_api::update;
+use nexus_types::external_api::update::TargetRelease;
 use nexus_types::external_api::update::TufSignedRootRole;
 use nexus_types::identity::Asset;
 use nexus_types::internal_api::views as internal_views;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::Zpool;
+use nexus_types::tuf_repo::TufRepoDescription;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::Nullable;
 use omicron_common::api::external::{DataPageParams, Error};
@@ -44,12 +47,13 @@ use slog::info;
 use slog::warn;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::error::Error as _;
 use std::iter;
 use std::sync::Arc;
 use tokio::sync::watch;
-use update_common::artifacts::{
-    ArtifactsWithPlan, ControlPlaneZonesMode, VerificationMode,
-};
+use tufaceous::ExpirationEnforcement;
+use tufaceous::RepositoryLoader;
+use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
 /// Threshold at which we consider an active saga stuck.
@@ -104,7 +108,7 @@ struct UpdateContactSupportChecksInput {
     stuck_sagas: Result<Vec<Saga>, Error>,
     blueprint: Arc<Blueprint>,
     // None when no target release has ever been set on the system.
-    current_target_version: Option<Version>,
+    current_target_release: Option<TargetRelease>,
     internal_update_status: internal_views::UpdateStatus,
 }
 
@@ -115,7 +119,7 @@ impl UpdateContactSupportChecksInput {
         let stuck_update_last_blueprint_created_time =
             match UpdateActivityState::new(
                 &self.blueprint,
-                self.current_target_version.as_ref(),
+                self.current_target_release.as_ref(),
             ) {
                 UpdateActivityState::Stuck => Some(self.blueprint.time_created),
                 UpdateActivityState::Idle | UpdateActivityState::InProgress => {
@@ -167,11 +171,42 @@ impl UpdateContactSupportChecksInput {
             .map(|(sled, zpools)| (sled, zpools.into_iter().cloned().collect()))
             .collect();
 
-        let enabled_smf_services_not_online_by_sled = self
+        let smf_services_in_maintenance_by_sled = self
             .inventory
             .enabled_smf_services_not_online()
             .into_iter()
-            .map(|(sled, svcs)| (sled, svcs.clone()))
+            .filter_map(|(sled, svcs_result)| {
+                let mut svcs_result = svcs_result.clone();
+                match &mut svcs_result {
+                    SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(svcs) => {
+                        // Propolis zones are continuously torn down depending
+                        // on the VMM state. When one of these zones is being
+                        // torn down, it can cause false-positives with the
+                        // contact_support field. In addition, offline services
+                        // in these zones do not affect an update. We remove all
+                        // services from propolis zones from the problems list.
+                        svcs.services
+                            .retain(|svc| !is_propolis_zone(&svc.zone));
+
+                        // From the remaining services, we only report those in maintenace
+                        svcs.retain_in_maintenance();
+
+                        // If there are no services or errors left then we drop
+                        // the sled entirely.
+                        if svcs.is_empty() {
+                            None
+                        } else {
+                            Some((sled, svcs_result))
+                        }
+                    }
+                    // Command errors and unavailable data aren't
+                    // propolis-specific, so they're always retained.
+                    SvcsEnabledNotOnlineResult::DataUnavailable
+                    | SvcsEnabledNotOnlineResult::SvcsCmdError(_) => {
+                        Some((sled, svcs_result))
+                    }
+                }
+            })
             .collect();
 
         UpdateStatusProblems {
@@ -180,10 +215,24 @@ impl UpdateContactSupportChecksInput {
             stuck_update_last_blueprint_created_time,
             stale_inventory_last_collection_time_done,
             unhealthy_zpools_by_sled,
-            enabled_smf_services_not_online_by_sled,
+            smf_services_in_maintenance_by_sled,
             missing_sleds,
         }
     }
+}
+
+// String matching here because it is the most straightforward way to check
+// if a zone is a propolis zone or not. This way of identifying a zone is not
+// ideal but in this case it makes sense. This `contact_support` field will only
+// be in use until a proper FM implementation is in place. The only consequence
+// of this pattern matching failing (e.g. the propolis zone prefix changes and
+// is also no longer set by this constant) would be that the contact_support
+// field reports a false positive, but would have no further impact than that.
+//
+// This function should not be used for anything other than filtering propolis
+// zones out of the `enabled_smf_services_not_online_by_sled` field
+fn is_propolis_zone(zone: &str) -> bool {
+    zone.starts_with(PROPOLIS_ZONE_PREFIX)
 }
 
 /// Identifies a saga that has been running or unwinding for too long.
@@ -209,8 +258,8 @@ struct UpdateStatusProblems {
     stale_inventory_last_collection_time_done: Option<DateTime<Utc>>,
     /// Zpools that are not in an `Online` state.
     unhealthy_zpools_by_sled: BTreeMap<SledUuid, Vec<Zpool>>,
-    /// Enabled SMF services that are not in an `online` state.
-    enabled_smf_services_not_online_by_sled:
+    /// Enabled SMF services that are in a `maintenance` state.
+    smf_services_in_maintenance_by_sled:
         BTreeMap<SledUuid, SvcsEnabledNotOnlineResult>,
     /// IDs of sleds that aren't present in inventory or haven't reported a
     /// reconciliation result yet.
@@ -225,7 +274,7 @@ impl UpdateStatusProblems {
             stuck_update_last_blueprint_created_time,
             stale_inventory_last_collection_time_done,
             unhealthy_zpools_by_sled,
-            enabled_smf_services_not_online_by_sled,
+            smf_services_in_maintenance_by_sled,
             missing_sleds,
         } = self;
         stuck_sagas.is_empty()
@@ -233,7 +282,7 @@ impl UpdateStatusProblems {
             && stuck_update_last_blueprint_created_time.is_none()
             && stale_inventory_last_collection_time_done.is_none()
             && unhealthy_zpools_by_sled.is_empty()
-            && enabled_smf_services_not_online_by_sled.is_empty()
+            && smf_services_in_maintenance_by_sled.is_empty()
             && missing_sleds.is_empty()
     }
 }
@@ -252,7 +301,7 @@ impl KV for UpdateStatusProblems {
             stuck_update_last_blueprint_created_time,
             stale_inventory_last_collection_time_done,
             unhealthy_zpools_by_sled,
-            enabled_smf_services_not_online_by_sled,
+            smf_services_in_maintenance_by_sled,
             missing_sleds,
         } = self;
 
@@ -290,10 +339,10 @@ impl KV for UpdateStatusProblems {
                 &format_args!("{:?}", unhealthy_zpools_by_sled),
             )?;
         }
-        if !enabled_smf_services_not_online_by_sled.is_empty() {
+        if !smf_services_in_maintenance_by_sled.is_empty() {
             serializer.emit_arguments(
-                "enabled_smf_services_not_online_by_sled".into(),
-                &format_args!("{:?}", enabled_smf_services_not_online_by_sled),
+                "smf_services_in_maintenance_by_sled".into(),
+                &format_args!("{:?}", smf_services_in_maintenance_by_sled),
             )?;
         }
         if !missing_sleds.is_empty() {
@@ -329,16 +378,16 @@ fn is_update_in_progress(
     // their updates, so if we were to get stuck while still updating Hubris
     // components, the check below will sitll be sufficient.
     let blueprint_in_progress = match current_target_version {
-        Some(v) => match BlueprintTargetReleaseStatus::new(
-            blueprint,
-            &v.to_string(),
-        ) {
-            BlueprintTargetReleaseStatus::PreviousUpdateInProgress(_) => true,
+        Some(v) => match BlueprintTargetReleaseStatus::new(blueprint, v) {
+            BlueprintTargetReleaseStatus::FoundDifferentVersion { .. } => true,
             // We don't consider a Mupdate as an "update in-progress" because
             // recofigurator is not driving this update.
-            BlueprintTargetReleaseStatus::WaitingForMupdateToBeCleared { .. }
-            | BlueprintTargetReleaseStatus::AllComponentsOnCurrentTargetRelease
-                => false,
+            BlueprintTargetReleaseStatus::WaitingForMupdateToBeCleared {
+                ..
+            }
+            | BlueprintTargetReleaseStatus::AllComponentsMatchTargetRelease => {
+                false
+            }
         },
         // When `current_target_version` is `None` no target release has ever
         // been set. We can safely assume no update is in progress.
@@ -358,16 +407,36 @@ enum UpdateActivityState {
 impl UpdateActivityState {
     fn new(
         blueprint: &Blueprint,
-        current_target_version: Option<&Version>,
+        current_target_release: Option<&TargetRelease>,
     ) -> Self {
         // First, we determine if an update is not in progress.
-        if !is_update_in_progress(blueprint, current_target_version) {
+        if !is_update_in_progress(
+            blueprint,
+            current_target_release.map(|t| &t.version),
+        ) {
             return UpdateActivityState::Idle;
         }
 
-        // An update is considered "stuck" if it is in progress but the last
-        // created blueprint is older than `STUCK_UPDATE_THRESHOLD`.
-        if blueprint.time_created < Utc::now() - STUCK_UPDATE_THRESHOLD {
+        // An update is in progress. It is only considered "stuck" when the last
+        // blueprint's creation time, and the target release request time are
+        // both older than the `STUCK_UPDATE_THRESHOLD`.
+        //
+        // We care about the target release request time because during a short
+        // window of time between a user requesting a new target release and the
+        // planner producing the first blueprint for it, the latest blueprint is
+        // still the one from the previous update (which could be pretty old).
+        // If a user happens to check the update status during that window, it
+        // could end up as a spurious "stuck" update.
+        let threshold = Utc::now() - STUCK_UPDATE_THRESHOLD;
+        let blueprint_stale = blueprint.time_created < threshold;
+        let target_release_old = match current_target_release {
+            Some(target_release) => target_release.time_requested < threshold,
+            // Unreachable in practice. With no target release, the update is
+            // not in progress and we returned `Idle` above. Fall back to the
+            // blueprint-only check.
+            None => true,
+        };
+        if blueprint_stale && target_release_old {
             UpdateActivityState::Stuck
         } else {
             UpdateActivityState::InProgress
@@ -382,7 +451,7 @@ impl super::Nexus {
         body: impl Stream<Item = Result<Bytes, HttpError>> + Send + Sync + 'static,
         file_name: String,
     ) -> Result<TufRepoUpload, HttpError> {
-        let mut trusted_roots = Vec::new();
+        let mut loader = RepositoryLoader::new();
         let mut paginator = Paginator::new(
             SQL_BATCH_SIZE,
             dropshot::PaginationOrder::Ascending,
@@ -394,50 +463,82 @@ impl super::Nexus {
                 .await?;
             paginator = p.found_batch(&batch, &|a| a.id.into_untyped_uuid());
             for root in batch {
-                trusted_roots.push(root.root_role.0.to_bytes());
+                loader = loader.trust_root(root.root_role.0.to_bytes());
             }
         }
 
-        let artifacts_with_plan = ArtifactsWithPlan::from_stream(
-            body,
-            Some(file_name),
-            ControlPlaneZonesMode::Split,
-            VerificationMode::TrustStore(&trusted_roots),
-            &self.log,
-        )
-        .await
-        .map_err(|error| error.to_http_error())?;
+        let repo = loader
+            .compute_archive_sha256(true)
+            // Expiration enforcement is disabled for uploaded repos; see
+            // RFD 721.
+            .expiration_enforcement(ExpirationEnforcement::Unsafe)
+            .v1_compatibility(true)
+            .load_zip_stream(body, None, &self.log)
+            .await
+            .map_err(|err| {
+                // Downcast to an underlying `dropshot::HttpError` if possible.
+                if let Some(source) = err.source()
+                    && let Some(err) = source.downcast_ref::<HttpError>()
+                {
+                    // manual Clone::clone
+                    HttpError {
+                        status_code: err.status_code,
+                        error_code: err.error_code.clone(),
+                        external_message: err.external_message.clone(),
+                        internal_message: err.internal_message.clone(),
+                        headers: err.headers.clone(),
+                    }
+                } else {
+                    let message = DisplayErrorChain::new(&err).to_string();
+                    if err.is_repository_error() {
+                        // Error is due to bad repository contents.
+                        HttpError::for_bad_request(None, message)
+                    } else {
+                        // Error is likely due to something else.
+                        HttpError::for_unavail(None, message)
+                    }
+                }
+            })?;
 
         // Now store the artifacts in the database.
+        let description = TufRepoDescription {
+            artifacts: repo.artifacts().clone(),
+            metadata: repo.metadata().clone(),
+            system_version: repo.system_version().clone(),
+            hash: ArtifactHash(*repo.archive_sha256().ok_or_else(|| {
+                HttpError::for_unavail(
+                    None,
+                    "tufaceous should have calculated repo hash but didn't"
+                        .to_owned(),
+                )
+            })?),
+            file_name,
+        };
         let response = self
             .db_datastore
-            .tuf_repo_insert(opctx, artifacts_with_plan.description())
+            .tuf_repo_insert(opctx, &description)
             .await
             .map_err(HttpError::from)?;
 
-        // Move the `ArtifactsWithPlan` (which carries with it the
-        // `Utf8TempDir`s storing the artifacts) into the artifact replication
-        // background task, then immediately activate the task. (If this repo
-        // was already uploaded, the artifacts should immediately be dropped by
-        // the task.)
-        self.tuf_artifact_replication_tx
-            .send(artifacts_with_plan)
-            .await
-            .map_err(|err| {
-                // This error can only happen while Nexus's Tokio runtime is
-                // shutting down; Sender::send returns an error only if the
-                // receiver has hung up, and the receiver should live for
-                // as long as Nexus does (it belongs to the background task
-                // driver.)
-                //
-                // In the unlikely event that it does happen within this narrow
-                // window, the impact is that the database has recorded a
-                // repository for which we no longer have the artifacts. The fix
-                // would be to reupload the repository.
-                Error::internal_error(&format!(
-                    "failed to send artifacts for replication: {err}"
-                ))
-            })?;
+        // Move the `tufaceous::Repository` (which carries with it the temporary
+        // file storing the artifacts) into the artifact replication background
+        // task, then immediately activate the task. (If this repo was already
+        // uploaded, the artifacts should immediately be dropped by the task.)
+        self.tuf_artifact_replication_tx.send(repo).await.map_err(|err| {
+            // This error can only happen while Nexus's Tokio runtime is
+            // shutting down; Sender::send returns an error only if the
+            // receiver has hung up, and the receiver should live for
+            // as long as Nexus does (it belongs to the background task
+            // driver.)
+            //
+            // In the unlikely event that it does happen within this narrow
+            // window, the impact is that the database has recorded a
+            // repository for which we no longer have the artifacts. The fix
+            // would be to reupload the repository.
+            Error::internal_error(&format!(
+                "failed to send artifacts for replication: {err}"
+            ))
+        })?;
         self.background_tasks.task_tuf_artifact_replication.activate();
 
         Ok(response)
@@ -567,7 +668,7 @@ impl super::Nexus {
 
         // Update activity is suspended if the current target release generation
         // is less than the blueprint's minimum generation
-        let suspended = *db_target_release.generation
+        let suspended = db_target_release.generation()
             < blueprint_target.blueprint.target_release_minimum_generation;
 
         // Decide whether to surface a "contact support" signal based on health
@@ -577,7 +678,7 @@ impl super::Nexus {
                 opctx,
                 inventory,
                 Arc::clone(&blueprint_target.blueprint),
-                target_release.as_ref().map(|t| &t.version),
+                target_release.as_ref(),
                 internal_status,
             )
             .await?;
@@ -610,13 +711,13 @@ impl super::Nexus {
         opctx: &OpContext,
         inventory: Arc<Collection>,
         blueprint: Arc<Blueprint>,
-        current_target_version: Option<&Version>,
+        current_target_release: Option<&TargetRelease>,
         internal_update_status: internal_views::UpdateStatus,
     ) -> Result<bool, Error> {
         // If an update is in progress but not stuck, the remaining checks
         // could fail mid-update and shouldn't trigger a contact-support
         // signal.
-        match UpdateActivityState::new(&blueprint, current_target_version) {
+        match UpdateActivityState::new(&blueprint, current_target_release) {
             UpdateActivityState::InProgress => {
                 info!(
                     opctx.log,
@@ -640,7 +741,7 @@ impl super::Nexus {
             // saga reporting for now.
             stuck_sagas: Ok(vec![]),
             blueprint,
-            current_target_version: current_target_version.cloned(),
+            current_target_release: current_target_release.cloned(),
             internal_update_status,
         };
 
@@ -670,9 +771,7 @@ impl super::Nexus {
         // and only if target_release_source is 'unspecified', which should only
         // happen in the initial state before any target release has been set
         let curr_target_desc = match current_tuf_repo {
-            Some(repo) => {
-                TargetReleaseDescription::TufRepo(repo.into_external())
-            }
+            Some(repo) => TargetReleaseDescription::TufRepo(repo.into()),
             None => TargetReleaseDescription::Initial,
         };
 
@@ -680,9 +779,9 @@ impl super::Nexus {
         // TargetReleaseDescription from the previous generation if available,
         // otherwise fall back to Initial.
         let prev_repo_id =
-            if let Some(prev_gen) = target_release.generation.prev() {
+            if let Some(prev_gen) = target_release.generation().prev() {
                 self.datastore()
-                    .target_release_get_generation(opctx, Generation(prev_gen))
+                    .target_release_get_generation(opctx, prev_gen)
                     .await
                     .internal_context("fetching previous target release")?
                     .and_then(|r| r.tuf_repo_id)
@@ -705,7 +804,7 @@ impl super::Nexus {
                 self.datastore()
                     .tuf_repo_get_by_id(opctx, id.into())
                     .await?
-                    .into_external(),
+                    .into(),
             ),
             None => TargetReleaseDescription::Initial,
         };
@@ -815,8 +914,10 @@ mod test {
     use nexus_types::deployment::BlueprintZoneImageSource;
     use omicron_common::api::external::ByteCount;
     use omicron_test_utils::dev::test_setup_log;
+    use omicron_uuid_kinds::PropolisUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
+    use sled_agent_types::disk::M2Slot;
     use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
     use sled_agent_types::inventory::FmdInventory;
     use sled_agent_types::inventory::Inventory;
@@ -828,6 +929,7 @@ mod test {
     use sled_agent_types::inventory::SvcEnabledNotOnlineState;
     use sled_agent_types::inventory::SvcsEnabledNotOnline;
     use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
+    use sled_agent_types::inventory::SvcsError;
     use sled_agent_types::inventory::ZpoolHealth;
     use slog::Logger;
     use slog::o;
@@ -916,6 +1018,29 @@ mod test {
             errors: vec![],
             time_of_status: Utc::now(),
         })
+    }
+
+    fn unhealthy_services_not_in_maintenance() -> SvcsEnabledNotOnlineResult {
+        SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(SvcsEnabledNotOnline {
+            services: vec![
+                SvcEnabledNotOnline {
+                    fmri: "svc:/system/test:default".to_string(),
+                    zone: "global".to_string(),
+                    state: SvcEnabledNotOnlineState::Degraded,
+                },
+                SvcEnabledNotOnline {
+                    fmri: "svc:/system/test2:default".to_string(),
+                    zone: "global".to_string(),
+                    state: SvcEnabledNotOnlineState::Offline,
+                },
+            ],
+            errors: vec![],
+            time_of_status: Utc::now(),
+        })
+    }
+
+    fn propolis_zone_name() -> String {
+        format!("{PROPOLIS_ZONE_PREFIX}{}", PropolisUuid::new_v4())
     }
 
     fn fake_opctx(cptestctx: &ControlPlaneTestContext) -> OpContext {
@@ -1028,7 +1153,7 @@ mod test {
         // To make the blueprint look like an update is in progress, override
         // the first zone's `image_source` to an older artifact version. That
         // single zone is enough for `BlueprintTargetReleaseStatus::new` to
-        // return `PreviousUpdateInProgress` against `version`.
+        // return `FoundDifferentVersion` against `version`.
         if in_progress {
             let older_zone_artifact = BlueprintZoneImageSource::Artifact {
                 version: BlueprintArtifactVersion::Available {
@@ -1090,7 +1215,7 @@ mod test {
             sled_id,
             zones: iddqd::IdOrdMap::new(),
             host_phase_2: internal_views::HostPhase2Status {
-                boot_disk: Ok(omicron_common::disk::M2Slot::A),
+                boot_disk: Ok(M2Slot::A),
                 slot_a_version: internal_views::TufRepoVersion::Version(
                     fake_target_version(),
                 ),
@@ -1159,7 +1284,10 @@ mod test {
                     &opctx,
                     inventory,
                     blueprint,
-                    Some(&version),
+                    Some(&TargetRelease {
+                        time_requested: Utc::now() - TimeDelta::hours(10),
+                        version: version.clone(),
+                    }),
                     empty_internal_update_status(),
                 )
                 .await
@@ -1199,7 +1327,10 @@ mod test {
                     &opctx,
                     inventory,
                     blueprint,
-                    Some(&version),
+                    Some(&TargetRelease {
+                        time_requested: Utc::now(),
+                        version: version.clone(),
+                    }),
                     empty_internal_update_status(),
                 )
                 .await
@@ -1239,7 +1370,211 @@ mod test {
                     &opctx,
                     inventory,
                     blueprint,
-                    Some(&version),
+                    Some(&TargetRelease {
+                        time_requested: Utc::now(),
+                        version: version.clone(),
+                    }),
+                    empty_internal_update_status(),
+                )
+                .await
+                .unwrap()
+        );
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_contact_support_only_propolis_services(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let opctx = fake_opctx(cptestctx);
+        let services = SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(
+            SvcsEnabledNotOnline {
+                services: vec![SvcEnabledNotOnline {
+                    fmri: "svc:/system/illumos/propolis-server:default"
+                        .to_string(),
+                    zone: propolis_zone_name(),
+                    state: SvcEnabledNotOnlineState::Maintenance,
+                }],
+                errors: vec![],
+                time_of_status: Utc::now(),
+            },
+        );
+
+        insert_fake_collection(cptestctx, &opctx, healthy_zpools(), services)
+            .await;
+        let inventory = Arc::new(
+            nexus
+                .datastore()
+                .inventory_get_latest_collection(&opctx)
+                .await
+                .unwrap()
+                .unwrap(),
+        );
+        let version = fake_target_version();
+        let blueprint =
+            fake_blueprint(&cptestctx.logctx.log, &version, Utc::now(), false);
+
+        // The only unhealthy service is a propolis service, so it is ignored
+        // and contact support should be false.
+        assert!(
+            !nexus
+                .contact_support(
+                    &opctx,
+                    inventory,
+                    blueprint,
+                    Some(&TargetRelease {
+                        time_requested: Utc::now(),
+                        version: version.clone(),
+                    }),
+                    empty_internal_update_status(),
+                )
+                .await
+                .unwrap()
+        );
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_contact_support_unhealthy_svcs_not_in_maintenace(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let opctx = fake_opctx(cptestctx);
+
+        insert_fake_collection(
+            cptestctx,
+            &opctx,
+            healthy_zpools(),
+            unhealthy_services_not_in_maintenance(),
+        )
+        .await;
+        let inventory = Arc::new(
+            nexus
+                .datastore()
+                .inventory_get_latest_collection(&opctx)
+                .await
+                .unwrap()
+                .unwrap(),
+        );
+        let version = fake_target_version();
+        let blueprint =
+            fake_blueprint(&cptestctx.logctx.log, &version, Utc::now(), false);
+
+        // None of the unhealthy services are in maintenance, so they are
+        // ignored and contact support should be false.
+        assert!(
+            !nexus
+                .contact_support(
+                    &opctx,
+                    inventory,
+                    blueprint,
+                    Some(&TargetRelease {
+                        time_requested: Utc::now(),
+                        version: version.clone(),
+                    }),
+                    empty_internal_update_status(),
+                )
+                .await
+                .unwrap()
+        );
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_contact_support_mixed_propolis_and_other_services(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let opctx = fake_opctx(cptestctx);
+        let services = SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(
+            SvcsEnabledNotOnline {
+                services: vec![
+                    SvcEnabledNotOnline {
+                        fmri: "svc:/system/illumos/propolis-server:default"
+                            .to_string(),
+                        zone: propolis_zone_name(),
+                        state: SvcEnabledNotOnlineState::Maintenance,
+                    },
+                    SvcEnabledNotOnline {
+                        fmri: "svc:/system/test:default".to_string(),
+                        zone: "global".to_string(),
+                        state: SvcEnabledNotOnlineState::Maintenance,
+                    },
+                ],
+                errors: vec![],
+                time_of_status: Utc::now(),
+            },
+        );
+        insert_fake_collection(cptestctx, &opctx, healthy_zpools(), services)
+            .await;
+        let inventory = Arc::new(
+            nexus
+                .datastore()
+                .inventory_get_latest_collection(&opctx)
+                .await
+                .unwrap()
+                .unwrap(),
+        );
+        let version = fake_target_version();
+        let blueprint =
+            fake_blueprint(&cptestctx.logctx.log, &version, Utc::now(), false);
+
+        // An unhealthy propolis service should be filtered out, but a non
+        // propolis service is still there. Contact support should be true.
+        assert!(
+            nexus
+                .contact_support(
+                    &opctx,
+                    inventory,
+                    blueprint,
+                    Some(&TargetRelease {
+                        time_requested: Utc::now(),
+                        version: version.clone(),
+                    }),
+                    empty_internal_update_status(),
+                )
+                .await
+                .unwrap()
+        );
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_contact_support_services_errors_only(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let opctx = fake_opctx(cptestctx);
+        let services = SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(
+            SvcsEnabledNotOnline {
+                services: vec![],
+                errors: vec!["failed to read service status".to_string()],
+                time_of_status: Utc::now(),
+            },
+        );
+        insert_fake_collection(cptestctx, &opctx, healthy_zpools(), services)
+            .await;
+        let inventory = Arc::new(
+            nexus
+                .datastore()
+                .inventory_get_latest_collection(&opctx)
+                .await
+                .unwrap()
+                .unwrap(),
+        );
+        let version = fake_target_version();
+        let blueprint =
+            fake_blueprint(&cptestctx.logctx.log, &version, Utc::now(), false);
+
+        // There are errors gathering service status, so contact support should
+        // be true even though no individual service is listed.
+        assert!(
+            nexus
+                .contact_support(
+                    &opctx,
+                    inventory,
+                    blueprint,
+                    Some(&TargetRelease {
+                        time_requested: Utc::now(),
+                        version: version.clone(),
+                    }),
                     empty_internal_update_status(),
                 )
                 .await
@@ -1357,16 +1692,22 @@ mod test {
             Utc::now() - STUCK_UPDATE_THRESHOLD - TimeDelta::seconds(10),
             true,
         );
-        // Components are split across multiple non-initial versions and the
-        // last step planned is older than `STUCK_UPDATE_THRESHOLD`, so the
-        // update is considered stuck and contact support is true.
+        // Components are split across multiple non-initial versions. Both the
+        // last step planned and the time the target release was requested are
+        // older than `STUCK_UPDATE_THRESHOLD`, so the update is considered
+        // stuck and contact support is true.
         assert!(
             nexus
                 .contact_support(
                     &opctx,
                     inventory,
                     blueprint,
-                    Some(&version),
+                    Some(&TargetRelease {
+                        time_requested: Utc::now()
+                            - STUCK_UPDATE_THRESHOLD
+                            - TimeDelta::seconds(10),
+                        version: version.clone(),
+                    }),
                     empty_internal_update_status(),
                 )
                 .await
@@ -1406,15 +1747,19 @@ mod test {
 
         let inventory = Arc::new(collection);
         let version = fake_target_version();
+        let blueprint_creation_time =
+            Utc::now() - STUCK_UPDATE_THRESHOLD - TimeDelta::seconds(10);
         let blueprint = fake_blueprint(
             &cptestctx.logctx.log,
             &version,
-            Utc::now() - STUCK_UPDATE_THRESHOLD - TimeDelta::seconds(10),
+            blueprint_creation_time,
             true,
         );
         // Every health check is unhealthy: stuck saga, stuck update, stale
         // inventory, unhealthy zpools, and unhealthy SMF services, plus a
-        // missing sled. Contact support should be true.
+        // missing sled. Contact support should be true. The target release was
+        // requested longer than the stuck update threshold, so it doesn't reset
+        // the stuck "clock".
         let missing_sled_id = SledUuid::new_v4();
         assert!(
             nexus
@@ -1422,7 +1767,11 @@ mod test {
                     &opctx,
                     inventory,
                     blueprint,
-                    Some(&version),
+                    Some(&TargetRelease {
+                        time_requested: blueprint_creation_time
+                            - TimeDelta::seconds(10),
+                        version: version.clone(),
+                    }),
                     internal_update_status_with_missing_sleds(
                         [missing_sled_id],
                         [sled_id()],
@@ -1466,7 +1815,10 @@ mod test {
                     &opctx,
                     inventory,
                     blueprint,
-                    Some(&version),
+                    Some(&TargetRelease {
+                        time_requested: Utc::now() - TimeDelta::hours(10),
+                        version: version.clone(),
+                    }),
                     empty_internal_update_status(),
                 )
                 .await
@@ -1507,7 +1859,10 @@ mod test {
                     &opctx,
                     inventory,
                     blueprint,
-                    Some(&version),
+                    Some(&TargetRelease {
+                        time_requested: Utc::now(),
+                        version: version.clone(),
+                    }),
                     internal_update_status_with_missing_sleds(
                         [missing_sled_id],
                         [sled_id()],
@@ -1546,10 +1901,13 @@ mod test {
 
         let prev_version: Version =
             "8.0.0-0.ci+gitprev0000000".parse().unwrap();
-        let target_release = fake_target_version();
+        let target_release = TargetRelease {
+            time_requested: Utc::now(),
+            version: fake_target_version(),
+        };
         // The whole blueprint is on `prev_version`, which differs from the
         // current target `target_release` we pass below — that's what makes
-        // `BlueprintTargetReleaseStatus::new` return `PreviousUpdateInProgress`
+        // `BlueprintTargetReleaseStatus::new` return `FoundDifferentVersion`
         // and the system look mid-update. `in_progress: false` is fine here
         // because the version mismatch alone is sufficient.
         let blueprint = fake_blueprint(
@@ -1559,6 +1917,64 @@ mod test {
             false,
         );
 
+        assert!(
+            !nexus
+                .contact_support(
+                    &opctx,
+                    inventory,
+                    blueprint,
+                    Some(&target_release),
+                    empty_internal_update_status(),
+                )
+                .await
+                .unwrap()
+        );
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_contact_support_target_recently_requested_stale_blueprint(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let opctx = fake_opctx(cptestctx);
+        // Unhealthy system: if the health checks ran, contact support would be
+        // true.
+        insert_fake_collection(
+            cptestctx,
+            &opctx,
+            unhealthy_zpools(),
+            unhealthy_services(),
+        )
+        .await;
+        let inventory = Arc::new(
+            nexus
+                .datastore()
+                .inventory_get_latest_collection(&opctx)
+                .await
+                .unwrap()
+                .unwrap(),
+        );
+
+        // The blueprint's artifacts are all on the version from the previous
+        // update and it was created before the `STUCK_UPDATE_THRESHOLD`. The
+        // version is different from the current target release below, so
+        // `is_update_in_progress` returns true.
+        let prev_version: Version =
+            "8.0.0-0.ci+gitprev0000000".parse().unwrap();
+        let blueprint = fake_blueprint(
+            &cptestctx.logctx.log,
+            &prev_version,
+            Utc::now() - STUCK_UPDATE_THRESHOLD - TimeDelta::minutes(5),
+            false,
+        );
+
+        // The target release was requested just now, so even though the latest
+        // blueprint is old, the update is considered in progress, and contact
+        // support should be false.
+        let target_release = TargetRelease {
+            time_requested: Utc::now(),
+            version: fake_target_version(),
+        };
         assert!(
             !nexus
                 .contact_support(
@@ -1591,7 +2007,10 @@ mod test {
             )),
             stuck_sagas: Ok(vec![]),
             blueprint,
-            current_target_version: Some(fake_target_version()),
+            current_target_release: Some(TargetRelease {
+                time_requested: Utc::now(),
+                version: fake_target_version(),
+            }),
             internal_update_status: empty_internal_update_status(),
         };
         assert_eq!(checks.problems(), UpdateStatusProblems::default());
@@ -1620,7 +2039,10 @@ mod test {
             )),
             stuck_sagas: Ok(vec![saga]),
             blueprint,
-            current_target_version: Some(fake_target_version()),
+            current_target_release: Some(TargetRelease {
+                time_requested: Utc::now(),
+                version: fake_target_version(),
+            }),
             internal_update_status: empty_internal_update_status(),
         };
 
@@ -1653,7 +2075,10 @@ mod test {
             )),
             stuck_sagas: Err(err),
             blueprint,
-            current_target_version: Some(fake_target_version()),
+            current_target_release: Some(TargetRelease {
+                time_requested: Utc::now(),
+                version: fake_target_version(),
+            }),
             internal_update_status: empty_internal_update_status(),
         };
 
@@ -1686,7 +2111,11 @@ mod test {
             )),
             stuck_sagas: Ok(vec![]),
             blueprint,
-            current_target_version: Some(fake_target_version()),
+            current_target_release: Some(TargetRelease {
+                time_requested: time_last_blueprint_created
+                    - TimeDelta::minutes(5),
+                version: fake_target_version(),
+            }),
             internal_update_status: empty_internal_update_status(),
         };
 
@@ -1697,6 +2126,43 @@ mod test {
             ..Default::default()
         };
         assert_eq!(checks.problems(), expected);
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_problems_target_recently_requested_stale_blueprint() {
+        let logctx = test_setup_log(
+            "test_problems_target_recently_requested_stale_blueprint",
+        );
+        let time_last_blueprint_created =
+            Utc::now() - STUCK_UPDATE_THRESHOLD - TimeDelta::seconds(10);
+        let blueprint = fake_blueprint(
+            &logctx.log,
+            &fake_target_version(),
+            time_last_blueprint_created,
+            true,
+        );
+
+        let checks = UpdateContactSupportChecksInput {
+            inventory: Arc::new(fake_collection_with_ids(
+                sled_id(),
+                healthy_zpools(),
+                healthy_services(),
+            )),
+            stuck_sagas: Ok(vec![]),
+            blueprint,
+            current_target_release: Some(TargetRelease {
+                time_requested: Utc::now(),
+                version: fake_target_version(),
+            }),
+            internal_update_status: empty_internal_update_status(),
+        };
+
+        // The stale blueprint alone would look stuck, but the recent target
+        // release request keeps the update "in progress", so there are no
+        // problems.
+        assert_eq!(checks.problems(), UpdateStatusProblems::default());
 
         logctx.cleanup_successful();
     }
@@ -1721,7 +2187,10 @@ mod test {
             )),
             stuck_sagas: Ok(vec![]),
             blueprint,
-            current_target_version: Some(fake_target_version()),
+            current_target_release: Some(TargetRelease {
+                time_requested: Utc::now() - TimeDelta::hours(10),
+                version: fake_target_version(),
+            }),
             internal_update_status: empty_internal_update_status(),
         };
         assert_eq!(checks.problems(), UpdateStatusProblems::default());
@@ -1751,7 +2220,10 @@ mod test {
             inventory: Arc::new(collection),
             stuck_sagas: Ok(vec![]),
             blueprint,
-            current_target_version: Some(fake_target_version()),
+            current_target_release: Some(TargetRelease {
+                time_requested: Utc::now(),
+                version: fake_target_version(),
+            }),
             internal_update_status: empty_internal_update_status(),
         };
 
@@ -1788,7 +2260,10 @@ mod test {
             )),
             stuck_sagas: Ok(vec![]),
             blueprint,
-            current_target_version: Some(fake_target_version()),
+            current_target_release: Some(TargetRelease {
+                time_requested: Utc::now(),
+                version: fake_target_version(),
+            }),
             internal_update_status: empty_internal_update_status(),
         };
 
@@ -1831,16 +2306,286 @@ mod test {
             inventory: Arc::new(collection),
             stuck_sagas: Ok(vec![]),
             blueprint,
-            current_target_version: Some(fake_target_version()),
+            current_target_release: Some(TargetRelease {
+                time_requested: Utc::now(),
+                version: fake_target_version(),
+            }),
+            internal_update_status: empty_internal_update_status(),
+        };
+
+        let expected_services = match services {
+            SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(mut svcs) => {
+                svcs.retain_in_maintenance();
+                SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(svcs)
+            }
+            _ => panic!(
+                "found unexpected variant {services:?}; should be SvcsEnabledNotOnline"
+            ),
+        };
+
+        let expected = UpdateStatusProblems {
+            smf_services_in_maintenance_by_sled: BTreeMap::from([(
+                sled_id,
+                expected_services,
+            )]),
+            ..Default::default()
+        };
+        assert_eq!(checks.problems(), expected);
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_problems_unhealthy_services_propolis_and_other() {
+        let logctx = test_setup_log(
+            "test_problems_unhealthy_services_propolis_and_other",
+        );
+        let blueprint = fake_blueprint(
+            &logctx.log,
+            &fake_target_version(),
+            Utc::now(),
+            false,
+        );
+        let sled_id = sled_id();
+
+        let propolis_svc = SvcEnabledNotOnline {
+            fmri: "svc:/system/illumos/propolis-server:default".to_string(),
+            zone: propolis_zone_name(),
+            state: SvcEnabledNotOnlineState::Maintenance,
+        };
+        let non_propolis_svc = SvcEnabledNotOnline {
+            fmri: "svc:/system/test:default".to_string(),
+            zone: "global".to_string(),
+            state: SvcEnabledNotOnlineState::Maintenance,
+        };
+        let non_propolis_svc2 = SvcEnabledNotOnline {
+            fmri: "svc:/system/test2:default".to_string(),
+            zone: "global".to_string(),
+            state: SvcEnabledNotOnlineState::Maintenance,
+        };
+
+        let time_of_status = Utc::now();
+        let services = SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(
+            SvcsEnabledNotOnline {
+                services: vec![
+                    propolis_svc,
+                    non_propolis_svc.clone(),
+                    non_propolis_svc2.clone(),
+                ],
+                errors: vec![],
+                time_of_status,
+            },
+        );
+        let collection =
+            fake_collection_with_ids(sled_id, healthy_zpools(), services);
+
+        let checks = UpdateContactSupportChecksInput {
+            inventory: Arc::new(collection),
+            stuck_sagas: Ok(vec![]),
+            blueprint,
+            current_target_release: Some(TargetRelease {
+                time_requested: Utc::now(),
+                version: fake_target_version(),
+            }),
+            internal_update_status: empty_internal_update_status(),
+        };
+
+        // Only the non-propolis services should remain for this sled.
+        let expected_services =
+            SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(
+                SvcsEnabledNotOnline {
+                    services: vec![non_propolis_svc, non_propolis_svc2],
+                    errors: vec![],
+                    time_of_status,
+                },
+            );
+        let expected = UpdateStatusProblems {
+            smf_services_in_maintenance_by_sled: BTreeMap::from([(
+                sled_id,
+                expected_services,
+            )]),
+            ..Default::default()
+        };
+        assert_eq!(checks.problems(), expected);
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_problems_unhealthy_services_only_propolis() {
+        let logctx = test_setup_log("test_problems_services_only_propolis");
+        let blueprint = fake_blueprint(
+            &logctx.log,
+            &fake_target_version(),
+            Utc::now(),
+            false,
+        );
+        let sled_id = sled_id();
+
+        let services = SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(
+            SvcsEnabledNotOnline {
+                services: vec![SvcEnabledNotOnline {
+                    fmri: "svc:/system/illumos/propolis-server:default"
+                        .to_string(),
+                    zone: propolis_zone_name(),
+                    state: SvcEnabledNotOnlineState::Maintenance,
+                }],
+                errors: vec![],
+                time_of_status: Utc::now(),
+            },
+        );
+        let collection =
+            fake_collection_with_ids(sled_id, healthy_zpools(), services);
+
+        let checks = UpdateContactSupportChecksInput {
+            inventory: Arc::new(collection),
+            stuck_sagas: Ok(vec![]),
+            blueprint,
+            current_target_release: Some(TargetRelease {
+                time_requested: Utc::now(),
+                version: fake_target_version(),
+            }),
+            internal_update_status: empty_internal_update_status(),
+        };
+
+        // All unhealthy services were from the propolis zone. The sled drops
+        // out of the map entirely and there are no problems.
+        assert_eq!(checks.problems(), UpdateStatusProblems::default());
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_problems_unhealthy_svcs_not_in_maintenace() {
+        let logctx =
+            test_setup_log("test_problems_unhealthy_svcs_not_in_maintenace");
+        let blueprint = fake_blueprint(
+            &logctx.log,
+            &fake_target_version(),
+            Utc::now(),
+            false,
+        );
+        let sled_id = sled_id();
+
+        let collection = fake_collection_with_ids(
+            sled_id,
+            healthy_zpools(),
+            unhealthy_services_not_in_maintenance(),
+        );
+
+        let checks = UpdateContactSupportChecksInput {
+            inventory: Arc::new(collection),
+            stuck_sagas: Ok(vec![]),
+            blueprint,
+            current_target_release: Some(TargetRelease {
+                time_requested: Utc::now(),
+                version: fake_target_version(),
+            }),
+            internal_update_status: empty_internal_update_status(),
+        };
+
+        // Neither unhealthy service is in maintenance, so the sled drops out
+        // of the map entirely and there are no problems.
+        assert_eq!(checks.problems(), UpdateStatusProblems::default());
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_problems_unhealthy_services_command_error() {
+        let logctx = test_setup_log("test_problems_services_command_error");
+        let blueprint = fake_blueprint(
+            &logctx.log,
+            &fake_target_version(),
+            Utc::now(),
+            false,
+        );
+        let sled_id = sled_id();
+
+        let svcs_result = SvcsEnabledNotOnlineResult::SvcsCmdError(SvcsError {
+            error: "test".to_string(),
+            time_of_status: Utc::now(),
+        });
+        let collection = fake_collection_with_ids(
+            sled_id,
+            healthy_zpools(),
+            svcs_result.clone(),
+        );
+
+        let checks = UpdateContactSupportChecksInput {
+            inventory: Arc::new(collection),
+            stuck_sagas: Ok(vec![]),
+            blueprint,
+            current_target_release: Some(TargetRelease {
+                time_requested: Utc::now(),
+                version: fake_target_version(),
+            }),
             internal_update_status: empty_internal_update_status(),
         };
 
         let expected = UpdateStatusProblems {
-            enabled_smf_services_not_online_by_sled: BTreeMap::from([(
-                sled_id, services,
+            smf_services_in_maintenance_by_sled: BTreeMap::from([(
+                sled_id,
+                svcs_result,
             )]),
             ..Default::default()
         };
+
+        // There are no unhealthy services that we know of, but there was a
+        // problem running the command to retrieve them. The error should be
+        // part of the update status problems.
+        assert_eq!(checks.problems(), expected);
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_problems_unhealthy_services_errors_only() {
+        let logctx =
+            test_setup_log("test_problems_unhealthy_services_errors_only");
+        let blueprint = fake_blueprint(
+            &logctx.log,
+            &fake_target_version(),
+            Utc::now(),
+            false,
+        );
+        let sled_id = sled_id();
+
+        let svcs_result = SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(
+            SvcsEnabledNotOnline {
+                services: vec![],
+                errors: vec!["failed to read service status".to_string()],
+                time_of_status: Utc::now(),
+            },
+        );
+
+        let collection = fake_collection_with_ids(
+            sled_id,
+            healthy_zpools(),
+            svcs_result.clone(),
+        );
+
+        let checks = UpdateContactSupportChecksInput {
+            inventory: Arc::new(collection),
+            stuck_sagas: Ok(vec![]),
+            blueprint,
+            current_target_release: Some(TargetRelease {
+                time_requested: Utc::now(),
+                version: fake_target_version(),
+            }),
+            internal_update_status: empty_internal_update_status(),
+        };
+
+        let expected = UpdateStatusProblems {
+            smf_services_in_maintenance_by_sled: BTreeMap::from([(
+                sled_id,
+                svcs_result,
+            )]),
+            ..Default::default()
+        };
+
+        // The sled reported errors while gathering service status. The errors
+        // alone should still count as a problem.
         assert_eq!(checks.problems(), expected);
 
         logctx.cleanup_successful();
@@ -1873,7 +2618,10 @@ mod test {
             )),
             stuck_sagas: Ok(vec![saga]),
             blueprint,
-            current_target_version: Some(fake_target_version()),
+            current_target_release: Some(TargetRelease {
+                time_requested: Utc::now(),
+                version: fake_target_version(),
+            }),
             internal_update_status: empty_internal_update_status(),
         };
 
@@ -1931,7 +2679,11 @@ mod test {
             inventory: Arc::new(collection),
             stuck_sagas: Ok(vec![saga]),
             blueprint,
-            current_target_version: Some(fake_target_version()),
+            current_target_release: Some(TargetRelease {
+                time_requested: time_last_blueprint_created
+                    - TimeDelta::minutes(5),
+                version: fake_target_version(),
+            }),
             internal_update_status: internal_update_status_with_missing_sleds(
                 [missing_sled_id],
                 [sled_id],
@@ -1944,6 +2696,17 @@ mod test {
             total_size: ByteCount::from(1024 * 1024),
             health: ZpoolHealth::Degraded,
         };
+
+        let expected_services = match services {
+            SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(mut svcs) => {
+                svcs.retain_in_maintenance();
+                SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(svcs)
+            }
+            _ => panic!(
+                "found unexpected variant {services:?}; should be SvcsEnabledNotOnline"
+            ),
+        };
+
         let expected = UpdateStatusProblems {
             stuck_sagas: BTreeSet::from([expected_stuck_saga]),
             stuck_sagas_error_message: None,
@@ -1957,8 +2720,9 @@ mod test {
                 sled_id,
                 vec![expected_zpool],
             )]),
-            enabled_smf_services_not_online_by_sled: BTreeMap::from([(
-                sled_id, services,
+            smf_services_in_maintenance_by_sled: BTreeMap::from([(
+                sled_id,
+                expected_services,
             )]),
             missing_sleds: BTreeSet::from([missing_sled_id]),
         };
@@ -1989,7 +2753,10 @@ mod test {
             )),
             stuck_sagas: Ok(vec![]),
             blueprint,
-            current_target_version: Some(fake_target_version()),
+            current_target_release: Some(TargetRelease {
+                time_requested: Utc::now(),
+                version: fake_target_version(),
+            }),
             internal_update_status: internal_update_status_with_missing_sleds(
                 [missing_sled_id],
                 [healthy_sled_id],

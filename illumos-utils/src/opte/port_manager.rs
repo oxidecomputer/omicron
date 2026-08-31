@@ -13,7 +13,6 @@ use crate::opte::Handle;
 use crate::opte::Port;
 use crate::opte::Vni;
 use crate::opte::opte_firewall_rules;
-use crate::opte::port::PortData;
 use ipnetwork::Ipv4Network;
 use ipnetwork::Ipv6Network;
 use macaddr::MacAddr6;
@@ -419,14 +418,13 @@ impl PortManager {
         };
         let (port, ticket) = {
             let ticket = PortTicket::new(nic.id, nic.kind, self.inner.clone());
-            let port = Port::new(PortData {
-                name: port_name.clone(),
-                ip: nic.ip_config.clone(),
+            let port = Port::new(
+                port_name.clone(),
+                nic.ip_config.clone(),
                 mac,
-                slot: nic.slot,
+                nic.slot,
                 vni,
-                gateway,
-            });
+            );
 
             // NOTE: We may add external IPs below, which can fail. If that
             // does, we drop the `ticket` on the way out of this block. That
@@ -1154,6 +1152,14 @@ impl PortTicket {
         manager: Arc<PortManagerInner>,
     ) -> Self {
         Self { id, kind, manager }
+    }
+
+    pub fn id(&self) -> Uuid {
+        self.id
+    }
+
+    pub fn kind(&self) -> NetworkInterfaceKind {
+        self.kind
     }
 
     fn release_inner(&mut self) -> Result<(), Error> {

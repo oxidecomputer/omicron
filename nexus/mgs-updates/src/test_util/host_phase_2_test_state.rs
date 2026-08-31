@@ -9,8 +9,8 @@ use anyhow::Context as _;
 use dropshot::ConfigDropshot;
 use dropshot::HttpServer;
 use dropshot::ServerBuilder;
-use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::SledUuid;
+use sled_agent_types::disk::M2Slot;
 use sled_agent_types::inventory::SledRole;
 use sled_hardware_types::BaseboardId;
 use slog::Logger;
@@ -200,7 +200,6 @@ mod api_impl {
     use dropshot::StreamingBody;
     use dropshot::TypedBody;
     use iddqd::IdOrdMap;
-    use omicron_common::api::external::Generation;
     use omicron_common::api::internal::nexus::DiskRuntimeState;
     use omicron_common::api::internal::shared::ExternalIpGatewayMap;
     use omicron_common::api::internal::shared::SledIdentifiers;
@@ -208,6 +207,7 @@ mod api_impl {
     use omicron_common::api::internal::shared::{
         ResolvedVpcRouteSet, ResolvedVpcRouteState,
     };
+    use omicron_generation_kinds::SledConfigGeneration;
     use sled_agent_types::artifact::ArtifactConfig;
     use sled_agent_types::artifact::ArtifactCopyFromDepotBody;
     use sled_agent_types::artifact::ArtifactCopyFromDepotResponse;
@@ -250,6 +250,7 @@ mod api_impl {
     use sled_agent_types::inventory::MupdateOverrideInventory;
     use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
     use sled_agent_types::inventory::OmicronSledConfig;
+    use sled_agent_types::inventory::OmicronSledUpdateDisposition;
     use sled_agent_types::inventory::SledCpuFamily;
     use sled_agent_types::inventory::SledRole;
     use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
@@ -262,7 +263,6 @@ mod api_impl {
     use sled_agent_types::support_bundle::SupportBundleMetadata;
     use sled_agent_types::support_bundle::SupportBundlePathParam;
     use sled_agent_types::support_bundle::SupportBundleTransferQueryParams;
-    use sled_agent_types::uplink::SwitchPorts;
     use sled_agent_types::zone_bundle::BundleUtilization;
     use sled_agent_types::zone_bundle::CleanupContext;
     use sled_agent_types::zone_bundle::CleanupContextUpdate;
@@ -279,6 +279,8 @@ mod api_impl {
     use sled_agent_types_versions::v33;
     use sled_agent_types_versions::v39;
     use sled_agent_types_versions::v42;
+    use sled_agent_types_versions::v47;
+    use sled_agent_types_versions::v48;
     use sled_diagnostics::SledDiagnosticsQueryOutput;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
@@ -344,7 +346,7 @@ mod api_impl {
             // The rest of the inventory fields are irrelevant; fill them in
             // with something quasi-reasonable (or empty, if we can).
             let config = OmicronSledConfig {
-                generation: Generation::new(),
+                generation: SledConfigGeneration::new(),
                 disks: IdOrdMap::new(),
                 datasets: IdOrdMap::new(),
                 zones: IdOrdMap::new(),
@@ -354,6 +356,7 @@ mod api_impl {
                     slot_b: HostPhase2DesiredContents::CurrentContents,
                 },
                 measurements: BTreeSet::new(),
+                update_disposition: OmicronSledUpdateDisposition::Available,
             };
 
             Ok(HttpResponseOk(Inventory {
@@ -764,19 +767,26 @@ mod api_impl {
             unimplemented!()
         }
 
-        async fn uplink_ensure(
-            _rqctx: RequestContext<Self::Context>,
-            _body: TypedBody<SwitchPorts>,
-        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-            unimplemented!()
-        }
-
         async fn read_network_bootstore_config_cache(
             _rqctx: RequestContext<Self::Context>,
         ) -> Result<
             HttpResponseOk<v20::early_networking::EarlyNetworkConfig>,
             HttpError,
         > {
+            unimplemented!()
+        }
+
+        async fn write_network_bootstore_config_v48(
+            _rqctx: RequestContext<Self::Context>,
+            _body: TypedBody<v48::system_networking::WriteNetworkConfigRequest>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn write_network_bootstore_config_v47(
+            _rqctx: RequestContext<Self::Context>,
+            _body: TypedBody<v47::system_networking::WriteNetworkConfigRequest>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }
 

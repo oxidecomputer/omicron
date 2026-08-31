@@ -14,25 +14,26 @@ use omicron_common::api::internal::shared::RouterId;
 use omicron_common::api::internal::shared::RouterKind;
 use oxnet::Ipv4Net;
 use oxnet::Ipv6Net;
-use std::net::IpAddr;
+use sled_agent_types::inventory::NetworkInterfaceKind;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::sync::Arc;
+use uuid::Uuid;
 
 #[derive(Debug)]
 pub struct PortData {
     /// Name of the port as identified by OPTE
-    pub(crate) name: String,
+    name: String,
     /// The VPC-private IP configuration for the port.
-    pub(crate) ip: PrivateIpConfig,
+    ip: PrivateIpConfig,
     /// VPC-private MAC address
-    pub(crate) mac: MacAddr6,
+    mac: MacAddr6,
     /// Emulated PCI slot for the guest NIC, passed to Propolis
-    pub(crate) slot: u8,
+    slot: u8,
     /// Geneve VNI for the VPC
-    pub(crate) vni: Vni,
+    vni: Vni,
     /// Information about the virtual gateway, aka OPTE
-    pub(crate) gateway: Gateway,
+    gateway: Gateway,
 }
 
 #[derive(Debug)]
@@ -78,7 +79,15 @@ pub struct Port {
 }
 
 impl Port {
-    pub fn new(data: PortData) -> Self {
+    pub fn new(
+        name: String,
+        ip: PrivateIpConfig,
+        mac: MacAddr6,
+        slot: u8,
+        vni: Vni,
+    ) -> Self {
+        let gateway = Gateway::from_ip_config(&ip);
+        let data = PortData { name, ip, mac, slot, vni, gateway };
         Self { inner: Arc::new(PortInner(data)) }
     }
 
@@ -92,28 +101,23 @@ impl Port {
         self.inner.ip.ipv6_addr()
     }
 
-    /// Return the VPC-private IPv4 address, if it exits, or the IPv6 address.
-    ///
-    /// One of these always exists.
-    pub fn ipv4_or_ipv6_addr(&self) -> IpAddr {
-        self.inner.ip.ipv4_addr().copied().map(IpAddr::V4).unwrap_or_else(
-            || {
-                self.inner
-                    .ip
-                    .ipv6_addr()
-                    .copied()
-                    .expect("At least one address always exists")
-                    .into()
-            },
-        )
-    }
-
     pub fn name(&self) -> &str {
         &self.inner.name
     }
 
-    pub fn gateway(&self) -> &Gateway {
-        &self.inner.gateway
+    /// Return the OPTE gateway IPv4 address and the private IPv4 address.
+    ///
+    /// If the port is not configured for IPv4, None is returned.
+    // TODO-remove: <https://github.com/oxidecomputer/omicron/issues/2931>
+    pub fn gateway_and_private_ipv4(&self) -> Option<(&Ipv4Addr, &Ipv4Addr)> {
+        match (self.inner.gateway.ipv4_addr(), self.ipv4_addr()) {
+            (None, None) => None,
+            (None, Some(_)) => unreachable!(),
+            (Some(_), None) => unreachable!(),
+            (Some(gateway_ip), Some(private_ip)) => {
+                Some((gateway_ip, private_ip))
+            }
+        }
     }
 
     #[allow(dead_code)]
@@ -158,4 +162,11 @@ impl Port {
             ..self.system_router_key()
         })
     }
+}
+
+/// An OPTE port, along with its control plane metadata.
+pub struct PortInfo {
+    pub port: Port,
+    pub nic_id: Uuid,
+    pub nic_kind: NetworkInterfaceKind,
 }

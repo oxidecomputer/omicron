@@ -310,9 +310,6 @@ impl DataStore {
     /// 3. Save the new allocation, if there isn't one for the given
     ///    `hw_baseboard_id`
     /// 4. Return the new allocation
-    ///
-    // TODO: This could all actually be done in SQL using a `next_item` query.
-    // See https://github.com/oxidecomputer/omicron/issues/4544
     pub async fn allocate_sled_underlay_subnet_octets(
         &self,
         opctx: &OpContext,
@@ -540,21 +537,17 @@ impl DataStore {
         let zone_type = &zone_config.zone_type;
         let zone_report_str = zone_type.kind().report_str();
 
-        // TODO-completeness: Support dual-stack NICs for services. See
-        // https://github.com/oxidecomputer/omicron/issues/9313.
         let extract_ip_config =
-            |nic: &NetworkInterface| -> Result<PrivateIpStackCreate, Error> {
+            |nic: &NetworkInterface| -> PrivateIpStackCreate {
                 match &nic.ip_config {
                     PrivateIpConfig::V4(ipv4) => {
-                        Ok(PrivateIpStackCreate::from_ipv4(*ipv4.ip()))
+                        PrivateIpStackCreate::from_ipv4(*ipv4.ip())
                     }
                     PrivateIpConfig::V6(ipv6) => {
-                        Ok(PrivateIpStackCreate::from_ipv6(*ipv6.ip()))
+                        PrivateIpStackCreate::from_ipv6(*ipv6.ip())
                     }
-                    PrivateIpConfig::DualStack { .. } => {
-                        Err(Error::invalid_request(
-                            "Dual-stack service NICs are not yet supported",
-                        ))
+                    PrivateIpConfig::DualStack { v4, v6 } => {
+                        PrivateIpStackCreate::new_dual_stack(*v4.ip(), *v6.ip())
                     }
                 }
             };
@@ -565,8 +558,7 @@ impl DataStore {
             ) => {
                 let external_ip =
                     OmicronZoneExternalIp::Floating(dns_address.into_ip());
-                let ip_config =
-                    extract_ip_config(nic).map_err(RackInitError::AddingNic)?;
+                let ip_config = extract_ip_config(nic);
                 let db_nic = IncompleteNetworkInterface::new_service(
                     nic.id,
                     zone_config.id.into_untyped_uuid(),
@@ -591,8 +583,7 @@ impl DataStore {
                 ..
             }) => {
                 let external_ip = OmicronZoneExternalIp::Floating(*external_ip);
-                let ip_config =
-                    extract_ip_config(nic).map_err(RackInitError::AddingNic)?;
+                let ip_config = extract_ip_config(nic);
                 let db_nic = IncompleteNetworkInterface::new_service(
                     nic.id,
                     zone_config.id.into_untyped_uuid(),
@@ -615,8 +606,7 @@ impl DataStore {
                 blueprint_zone_type::BoundaryNtp { external_ip, nic, .. },
             ) => {
                 let external_ip = OmicronZoneExternalIp::Snat(*external_ip);
-                let ip_config =
-                    extract_ip_config(nic).map_err(RackInitError::AddingNic)?;
+                let ip_config = extract_ip_config(nic);
                 let db_nic = IncompleteNetworkInterface::new_service(
                     nic.id,
                     zone_config.id.into_untyped_uuid(),
@@ -1070,8 +1060,6 @@ impl DataStore {
 mod test {
     use super::*;
     use crate::db::datastore::Discoverability;
-    use crate::db::datastore::SERVICE_IPV4_POOL_NAME;
-    use crate::db::datastore::SERVICE_IPV6_POOL_NAME;
     use crate::db::model::ExternalIp;
     use crate::db::model::IpKind;
     use crate::db::model::IpPoolRange;
@@ -1104,10 +1092,14 @@ mod test {
     use omicron_common::address::Ipv4Range;
     use omicron_common::address::Ipv6Range;
     use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
+    use omicron_common::address::NEXUS_OPTE_IPV6_SUBNET;
     use omicron_common::api::external::http_pagination::PaginatedBy;
     use omicron_common::api::external::{
         IdentityMetadataCreateParams, MacAddr,
     };
+    use omicron_common::api::internal::shared::PrivateIpv4Config;
+    use omicron_common::api::internal::shared::PrivateIpv6Config;
+    use omicron_generation_kinds::{NexusGeneration, TargetReleaseGeneration};
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::GenericUuid;
@@ -1136,8 +1128,9 @@ mod test {
                     parent_blueprint_id: None,
                     internal_dns_version: *Generation::new(),
                     external_dns_version: *Generation::new(),
-                    target_release_minimum_generation: *Generation::new(),
-                    nexus_generation: *Generation::new(),
+                    target_release_minimum_generation:
+                        TargetReleaseGeneration::new(),
+                    nexus_generation: NexusGeneration::new(),
                     external_networking_generation: *Generation::new(),
                     cockroachdb_fingerprint: String::new(),
                     clickhouse_cluster_config: None,
@@ -1506,7 +1499,7 @@ mod test {
                 sled2.id(),
                 BlueprintZoneImageSource::InstallDataset,
                 nexus_networking,
-                *Generation::new(),
+                NexusGeneration::new(),
                 &OperatorNexusConfig {
                     external_tls: false,
                     external_dns_servers: &[],
@@ -1593,7 +1586,7 @@ mod test {
                     blueprint: blueprint.clone(),
                     service_ip_pools: IdOrdMap::from_iter_unique([
                         service_pool_config(
-                            SERVICE_IPV4_POOL_NAME,
+                            "oxide-service-pool-v4",
                             vec![service_ip_pool_range],
                         ),
                     ])
@@ -1667,7 +1660,7 @@ mod test {
             .await
             .unwrap();
         let svc_pool = &svc_pools.first().expect("v4 service ip pool").db_pool;
-        assert_eq!(svc_pool.name().as_str(), SERVICE_IPV4_POOL_NAME);
+        assert_eq!(svc_pool.name().as_str(), "oxide-service-pool-v4");
 
         let observed_ip_pool_ranges = get_all_ip_pool_ranges(&datastore).await;
         assert_eq!(observed_ip_pool_ranges.len(), 1);
@@ -1750,7 +1743,7 @@ mod test {
                     external_networking_alloc
                         .for_new_nexus()
                         .expect("got Nexus IP"),
-                    *Generation::new(),
+                    NexusGeneration::new(),
                     &OperatorNexusConfig {
                         external_tls: false,
                         external_dns_servers: &[],
@@ -1791,7 +1784,7 @@ mod test {
                     datasets: vec![],
                     service_ip_pools: IdOrdMap::from_iter_unique([
                         service_pool_config(
-                            SERVICE_IPV4_POOL_NAME,
+                            "oxide-service-pool-v4",
                             vec![service_ip_pool_range],
                         ),
                     ])
@@ -1874,7 +1867,7 @@ mod test {
             .await
             .unwrap();
         let svc_pool = &svc_pools.first().expect("v4 service ip pool").db_pool;
-        assert_eq!(svc_pool.name().as_str(), SERVICE_IPV4_POOL_NAME);
+        assert_eq!(svc_pool.name().as_str(), "oxide-service-pool-v4");
 
         let observed_ip_pool_ranges = get_all_ip_pool_ranges(&datastore).await;
         assert_eq!(observed_ip_pool_ranges.len(), 1);
@@ -1909,6 +1902,126 @@ mod test {
         assert_eq!(
             dns_config_external.zones[0].records.get("api.sys"),
             Some(&external_records)
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn rack_set_initialized_with_dual_stack_private_nexus_addresses() {
+        let test_name =
+            "rack_set_initialized_with_dual_stack_private_nexus_addresses";
+        let logctx = dev::test_setup_log(test_name);
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let sled = create_test_sled(&datastore, SledUuid::new_v4()).await;
+
+        // The Nexus zone's external IP is IPv4. Its private NIC is dual-stack.
+        let nexus_external_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
+        let service_ip_pool_range = IpRange::from(nexus_external_ip);
+        let external_ip_policy = ExternalIpPolicy::single_pool_no_external_dns(
+            service_ip_pool_range,
+        );
+
+        let mut system = SystemDescription::new();
+        system
+            .set_external_ip_policy(external_ip_policy.clone())
+            .sled(SledBuilder::new().id(sled.id()))
+            .expect("failed to add sled");
+
+        let mut builder =
+            blueprint_builder_with_empty_parent(&opctx.log, &system, test_name);
+
+        // Build the dual-stack private NIC by hand. The
+        // `ExternalNetworkingAllocator` would otherwise generate a single-stack
+        // NIC matching just the external IP.
+        let v4 = PrivateIpv4Config::new(
+            NEXUS_OPTE_IPV4_SUBNET
+                .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES)
+                .unwrap(),
+            *NEXUS_OPTE_IPV4_SUBNET,
+        )
+        .unwrap();
+        let expected_v4_address = *v4.ip();
+        let v6 = PrivateIpv6Config::new(
+            NEXUS_OPTE_IPV6_SUBNET
+                .nth(u128::try_from(NUM_INITIAL_RESERVED_IP_ADDRESSES).unwrap())
+                .unwrap(),
+            *NEXUS_OPTE_IPV6_SUBNET,
+        )
+        .unwrap();
+        let expected_v6_address = *v6.ip();
+        let nexus_nic_ip_config = PrivateIpConfig::DualStack { v4, v6 };
+        let mut macs = MacAddr::iter_system();
+        builder
+            .sled_add_zone_nexus(
+                sled.id(),
+                BlueprintZoneImageSource::InstallDataset,
+                ExternalNetworkingChoice {
+                    external_ip: nexus_external_ip,
+                    nic_ip_config: nexus_nic_ip_config,
+                    nic_mac: macs.next().unwrap(),
+                },
+                NexusGeneration::new(),
+                &OperatorNexusConfig {
+                    external_tls: false,
+                    external_dns_servers: &[],
+                },
+            )
+            .expect("added Nexus");
+
+        let mut blueprint = builder.build(BlueprintSource::Test);
+        blueprint.parent_blueprint_id = None; // treat this as the initial bp
+
+        let rack = datastore
+            .rack_set_initialized(
+                &opctx,
+                RackInit {
+                    blueprint: blueprint.clone(),
+                    service_ip_pools: IdOrdMap::from_iter_unique([
+                        service_pool_config(
+                            "oxide-service-pool-v4",
+                            vec![service_ip_pool_range],
+                        ),
+                    ])
+                    .unwrap(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("an initialized rack");
+        assert!(rack.initialized);
+
+        // The Nexus zone's (IPv4) external IP was allocated.
+        let external_ips = get_all_external_ips(&datastore).await;
+        assert_eq!(external_ips.len(), 1);
+        assert!(external_ips[0].is_service);
+        assert_eq!(external_ips[0].ip.ip(), nexus_external_ip);
+
+        // Its service NIC was allocated with *both* private IP families, i.e.
+        // the dual-stack NIC round-tripped through rack init.
+        let zone_id =
+            blueprint.in_service_zones().next().expect("a Nexus zone").1.id;
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        let nics = datastore
+            .service_list_network_interfaces_on_connection(
+                &conn,
+                zone_id.into_untyped_uuid(),
+            )
+            .await
+            .expect("listed service NICs");
+        assert_eq!(nics.len(), 1);
+        assert_eq!(
+            nics[0].ipv4.expect("a private IPv4 address"),
+            expected_v4_address.into(),
+            "Nexus dual-stack service NIC has incorrect private IPv4 address",
+        );
+        assert_eq!(
+            nics[0].ipv6.expect("a private IPv6 address"),
+            expected_v6_address.into(),
+            "Nexus dual-stack service NIC has incorrect private IPv6 address",
         );
 
         db.terminate().await;
@@ -1958,7 +2071,7 @@ mod test {
                 external_networking_alloc
                     .for_new_nexus()
                     .expect("got Nexus IP"),
-                *Generation::new(),
+                NexusGeneration::new(),
                 &OperatorNexusConfig {
                     external_tls: false,
                     external_dns_servers: &[],
@@ -2000,7 +2113,7 @@ mod test {
                     datasets: datasets.clone(),
                     service_ip_pools: IdOrdMap::from_iter_unique([
                         service_pool_config(
-                            SERVICE_IPV6_POOL_NAME,
+                            "oxide-service-pool-v6",
                             vec![service_ip_pool_range],
                         ),
                     ])
@@ -2071,7 +2184,7 @@ mod test {
             .await
             .unwrap();
         let svc_pool = &svc_pools.first().expect("v6 service ip pool").db_pool;
-        assert_eq!(svc_pool.name().as_str(), SERVICE_IPV6_POOL_NAME);
+        assert_eq!(svc_pool.name().as_str(), "oxide-service-pool-v6");
 
         let observed_ip_pool_ranges = get_all_ip_pool_ranges(&datastore).await;
         assert_eq!(observed_ip_pool_ranges.len(), 1);
@@ -2149,7 +2262,7 @@ mod test {
                     nic_ip_config: nexus_pip_config,
                     nic_mac: macs.next().unwrap(),
                 },
-                *Generation::new(),
+                NexusGeneration::new(),
                 &OperatorNexusConfig {
                     external_tls: false,
                     external_dns_servers: &[],
@@ -2176,7 +2289,7 @@ mod test {
                     blueprint: blueprint.clone(),
                     service_ip_pools: IdOrdMap::from_iter_unique([
                         service_pool_config(
-                            SERVICE_IPV4_POOL_NAME,
+                            "oxide-service-pool-v4",
                             vec![service_ip_pool_range],
                         ),
                     ])
@@ -2237,7 +2350,7 @@ mod test {
                     sled.id(),
                     BlueprintZoneImageSource::InstallDataset,
                     nexus_external_ip.clone(),
-                    *Generation::new(),
+                    NexusGeneration::new(),
                     &OperatorNexusConfig {
                         external_tls: false,
                         external_dns_servers: &[],
@@ -2257,7 +2370,7 @@ mod test {
                     blueprint: blueprint.clone(),
                     service_ip_pools: IdOrdMap::from_iter_unique([
                         service_pool_config(
-                            SERVICE_IPV4_POOL_NAME,
+                            "oxide-service-pool-v4",
                             vec![service_ip_pool_range],
                         ),
                     ])

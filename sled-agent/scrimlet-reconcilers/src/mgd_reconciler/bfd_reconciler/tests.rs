@@ -51,6 +51,7 @@ fn any_uplink_ports() -> UplinkPorts {
         autoneg: false,
         lldp: None,
         tx_eq: None,
+        allow_ddm_traffic: false,
     }])
     .unwrap()
 }
@@ -507,7 +508,17 @@ async fn run_one_proptest_input(
     match reconcile(client, &desired_config, ThisSledSwitchSlot::TEST_FAKE, log)
         .await
     {
-        MgdBfdReconcilerStatus::Success { .. } => {}
+        MgdBfdReconcilerStatus::Complete {
+            unchanged: _,
+            remove_success: _,
+            add_success: _,
+
+            remove_failure,
+            add_failure,
+        } => {
+            assert_eq!(remove_failure, Vec::new());
+            assert_eq!(add_failure, Vec::new());
+        }
         status => {
             panic!("unexpected status: {status:?}")
         }

@@ -10,7 +10,6 @@ use crate::DropshotServer;
 use crate::app::background::BackgroundTasksData;
 use crate::app::background::CurrentSitrep;
 use crate::app::background::SagaRecoveryHelpers;
-use crate::app::background::resolve_mgd_clients;
 use crate::app::update::UpdateStatusHandle;
 use crate::populate::PopulateArgs;
 use crate::populate::PopulateStatus;
@@ -33,11 +32,11 @@ use nexus_mgs_updates::ArtifactCache;
 use nexus_mgs_updates::MgsUpdateDriver;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::ReconfiguratorConfigParam;
-
 use omicron_common::address::MGS_PORT;
 use omicron_common::address::UnderlaySubnets;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Error;
+use omicron_debug_dropbox::DebugDropbox;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::RackUuid;
 use oximeter_producer::Server as ProducerServer;
@@ -54,7 +53,7 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
-use update_common::artifacts::ArtifactsWithPlan;
+use tufaceous::Repository;
 use uuid::Uuid;
 
 // The implementation of Nexus is large, and split into a number of submodules
@@ -99,7 +98,7 @@ pub(crate) mod saga;
 mod scim;
 mod session;
 mod silo;
-mod sled;
+pub(crate) mod sled;
 mod sled_instance;
 mod snapshot;
 mod ssh_key;
@@ -126,6 +125,7 @@ pub(crate) mod sagas;
 // TODO: When referring to API types, we should try to include
 // the prefix unless it is unambiguous.
 
+pub(crate) use self::deployment::BlueprintDebugAction;
 pub(crate) use self::deployment::SetTargetReleaseIntent;
 use crate::app::quiesce::NexusQuiesceHandle;
 pub(crate) use nexus_db_model::MAX_NICS_PER_INSTANCE;
@@ -183,6 +183,9 @@ pub const MAX_SSH_KEYS_PER_INSTANCE: u32 = 100;
 /// See oxidecomputer/omicron#7875 for the 250G determination.
 pub const CONTROL_PLANE_STORAGE_BUFFER: ByteCount =
     ByteCount::from_gibibytes_u32(250);
+
+/// Name of the Debug Dropbox producer for Reconfiguator
+pub const DEBUG_DROPBOX_PRODUCER_RECONFIGURATOR: &str = "reconfigurator";
 
 /// Manages an Oxide fleet -- the heart of the control plane
 pub struct Nexus {
@@ -292,7 +295,7 @@ pub struct Nexus {
 
     /// Sender for TUF repository artifacts temporarily stored in this zone to
     /// be replicated out to sleds in the background
-    tuf_artifact_replication_tx: mpsc::Sender<ArtifactsWithPlan>,
+    tuf_artifact_replication_tx: mpsc::Sender<Repository>,
 
     /// reports status of pending MGS-managed updates
     mgs_update_status_rx: watch::Receiver<MgsUpdateDriverStatus>,
@@ -319,6 +322,9 @@ pub struct Nexus {
     /// state of overall Nexus quiesce activity
     quiesce: NexusQuiesceHandle,
 
+    /// dropbox producer for Reconfigurator
+    debug_dropbox_reconfigurator: Arc<omicron_debug_dropbox::Producer>,
+
     /// the underlay subnets (rack and AZ), set once they have been loaded, or
     /// once the rack has been initialized (if RSS has not already finished when
     /// this Nexus process starts).
@@ -340,6 +346,7 @@ impl Nexus {
         producer_registry: &ProducerRegistry,
         config: &NexusConfig,
         authz: Arc<authz::Authz>,
+        debug_dropbox: DebugDropbox,
     ) -> Result<Arc<Nexus>, String> {
         let all_versions = config
             .pkg
@@ -534,6 +541,18 @@ impl Nexus {
 
         let (sitrep_load_tx, sitrep_load_rx) = watch::channel(None);
 
+        let debug_dropbox_reconfigurator = Arc::new(
+            debug_dropbox
+                .initialize_producer(DEBUG_DROPBOX_PRODUCER_RECONFIGURATOR)
+                .await
+                .map_err(|message| {
+                    format!(
+                        "failed to create reconfigurator dropbox \
+                         producer: {message}"
+                    )
+                })?,
+        );
+
         let nexus = Nexus {
             id: config.deployment.id,
             rack_id,
@@ -597,6 +616,7 @@ impl Nexus {
             update_status: UpdateStatusHandle::new(blueprint_load_rx),
             quiesce,
             sitrep_load_rx,
+            debug_dropbox_reconfigurator: debug_dropbox_reconfigurator.clone(),
             underlay_subnets,
         };
 
@@ -694,6 +714,7 @@ impl Nexus {
                     mgs_updates_tx,
                     blueprint_load_tx,
                     sitrep_load_tx,
+                    debug_dropbox_reconfigurator,
                     console_session_absolute_timeout,
                 },
             );
@@ -1191,7 +1212,47 @@ impl Nexus {
         &self,
     ) -> Result<HashMap<SwitchSlot, mg_admin_client::Client>, ResolveError>
     {
-        resolve_mgd_clients(self.resolver(), &self.log).await
+        let mgd_addrs =
+            self.resolver().lookup_all_socket_v6(ServiceName::Mgd).await?;
+        let mut clients = HashMap::new();
+        for addr in mgd_addrs {
+            let client = mg_admin_client::Client::new(
+                &format!("http://{addr}"),
+                self.log.clone(),
+            );
+            let switch_slot = match client.switch_identifiers().await {
+                Ok(response) => match response.slot {
+                    Some(0) => SwitchSlot::Switch0,
+                    Some(1) => SwitchSlot::Switch1,
+                    Some(n) => {
+                        warn!(
+                            self.log, "failed to determine switch slot for mgd";
+                            "addr" => %addr,
+                            "error" => format!("mgd returned unknown slot {n}"),
+                        );
+                        continue;
+                    }
+                    None => {
+                        warn!(
+                            self.log, "failed to determine switch slot for mgd";
+                            "addr" => %addr,
+                            "error" => "mgd does not yet know its switch slot",
+                        );
+                        continue;
+                    }
+                },
+                Err(err) => {
+                    warn!(
+                        self.log, "failed to determine switch slot for mgd";
+                        "addr" => %addr,
+                        InlineErrorChain::new(&err),
+                    );
+                    continue;
+                }
+            };
+            clients.insert(switch_slot, client);
+        }
+        Ok(clients)
     }
 
     pub(crate) fn demo_sagas(

@@ -20,6 +20,7 @@ indent_write.workspace = true
 ipnetwork.workspace = true
 itertools.workspace = true
 omicron-common.workspace = true
+omicron-generation-kinds.workspace = true
 omicron-ledger.workspace = true
 omicron-passwords.workspace = true
 omicron-uuid-kinds.workspace = true

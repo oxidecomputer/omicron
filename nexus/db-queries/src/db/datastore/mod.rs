@@ -94,8 +94,10 @@ mod disk;
 mod dns;
 mod ereport;
 mod external_ip;
+mod external_service_ip_pool;
 mod external_subnet;
 pub mod fm;
+mod fm_config;
 mod fm_rendezvous_gc;
 mod identity_provider;
 mod image;
@@ -122,6 +124,7 @@ mod region_replacement;
 mod region_snapshot;
 pub mod region_snapshot_replacement;
 mod rendezvous_debug_dataset;
+mod rendezvous_sled_bp_availability;
 mod role;
 mod saga;
 mod scim;
@@ -213,12 +216,6 @@ pub use webhook_delivery::WebhookDeliveryFilters;
 // Number of unique datasets required to back a region.
 // TODO: This should likely turn into a configuration option.
 pub const REGION_REDUNDANCY_THRESHOLD: usize = 3;
-
-/// The name of the built-in IPv4 IP pool for Oxide services.
-pub const SERVICE_IPV4_POOL_NAME: &str = "oxide-service-pool-v4";
-
-/// The name of the built-in IPv6 IP pool for Oxide services.
-pub const SERVICE_IPV6_POOL_NAME: &str = "oxide-service-pool-v6";
 
 /// "limit" to be used in SQL queries that paginate through large result sets
 ///
@@ -694,7 +691,6 @@ mod test {
     use nexus_config::RegionAllocationStrategy;
     use nexus_db_fixed_data::silo::DEFAULT_SILO;
     use nexus_db_lookup::LookupPath;
-    use nexus_db_model::IpAttachState;
     use nexus_db_model::to_db_typed_uuid;
     use nexus_types::deployment::Blueprint;
     use nexus_types::deployment::BlueprintTarget;
@@ -2292,254 +2288,6 @@ mod test {
                 .await
                 .is_err()
         );
-
-        db.terminate().await;
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn test_external_ip_check_constraints() {
-        use crate::db::model::IpKind;
-        use diesel::result::DatabaseErrorKind::CheckViolation;
-        use diesel::result::DatabaseErrorKind::UniqueViolation;
-        use diesel::result::Error::DatabaseError;
-        use nexus_db_schema::schema::external_ip::dsl;
-
-        let logctx = dev::test_setup_log("test_external_ip_check_constraints");
-        let db = TestDatabase::new_with_datastore(&logctx.log).await;
-        let datastore = db.datastore();
-        let conn = datastore.pool_connection_for_tests().await.unwrap();
-        let now = Utc::now();
-
-        // Create a mostly-populated record, for a floating IP
-        let subnet = ipnetwork::IpNetwork::new(
-            IpAddr::from(Ipv4Addr::new(10, 0, 0, 0)),
-            8,
-        )
-        .unwrap();
-        let mut addresses = subnet.iter();
-        let ip = ExternalIp {
-            id: Uuid::new_v4(),
-            name: None,
-            description: None,
-            time_created: now,
-            time_modified: now,
-            time_deleted: None,
-            ip_pool_id: Uuid::new_v4(),
-            ip_pool_range_id: Uuid::new_v4(),
-            project_id: None,
-            is_service: false,
-            parent_id: Some(Uuid::new_v4()),
-            kind: IpKind::Floating,
-            ip: addresses.next().unwrap().into(),
-            first_port: crate::db::model::SqlU16(0),
-            last_port: crate::db::model::SqlU16(10),
-            state: nexus_db_model::IpAttachState::Attached,
-            is_probe: false,
-        };
-
-        // Combinations of NULL and non-NULL for:
-        // - name
-        // - description
-        // - parent (instance / service) UUID
-        // - project UUID
-        // - attach state
-        let names = [None, Some("foo")];
-        let descriptions = [None, Some("foo".to_string())];
-        let parent_ids = [None, Some(Uuid::new_v4())];
-        let project_ids = [None, Some(Uuid::new_v4())];
-
-        let mut seen_pairs = HashSet::new();
-
-        // For Floating IPs, both name and description must be non-NULL
-        // If they are instance FIPs, they *must* have a project id.
-        for (
-            name,
-            description,
-            parent_id,
-            is_service,
-            project_id,
-            modify_name,
-        ) in itertools::iproduct!(
-            &names,
-            &descriptions,
-            &parent_ids,
-            [false, true],
-            &project_ids,
-            [false, true]
-        ) {
-            // Both choices of parent_id are valid, so we need a unique name for each.
-            let name_local = name.map(|v| {
-                let name = if modify_name {
-                    v.to_string()
-                } else {
-                    format!("{v}-with-parent")
-                };
-                nexus_db_model::Name(Name::try_from(name).unwrap())
-            });
-
-            // We do name duplicate checking on the `Some` branch, don't steal the
-            // name intended for another floating IP.
-            if parent_id.is_none() && modify_name {
-                continue;
-            }
-
-            let state = if parent_id.is_some() {
-                IpAttachState::Attached
-            } else {
-                IpAttachState::Detached
-            };
-
-            let new_ip = ExternalIp {
-                id: Uuid::new_v4(),
-                name: name_local.clone(),
-                description: description.clone(),
-                ip: addresses.next().unwrap().into(),
-                is_service,
-                parent_id: *parent_id,
-                project_id: *project_id,
-                state,
-                ..ip
-            };
-
-            let key = (*project_id, name_local);
-
-            let res = diesel::insert_into(dsl::external_ip)
-                .values(new_ip)
-                .execute_async(&*conn)
-                .await;
-
-            let project_as_expected = (is_service && project_id.is_none())
-                || (!is_service && project_id.is_some());
-
-            let valid_expression =
-                name.is_some() && description.is_some() && project_as_expected;
-            let name_exists = seen_pairs.contains(&key);
-
-            if valid_expression && !name_exists {
-                // Name/description must be non-NULL, instance ID can be
-                // either
-                // Names must be unique at fleet level and at project level.
-                // Project must be NULL if service, non-NULL if instance.
-                res.unwrap_or_else(|e| {
-                    panic!(
-                        "Failed to insert Floating IP with valid \
-                         name, description, project ID, and {} ID:\
-                         {name:?} {description:?} {project_id:?} {:?}\n{e}",
-                        if is_service { "Service" } else { "Instance" },
-                        ip.parent_id
-                    )
-                });
-
-                seen_pairs.insert(key);
-            } else if !valid_expression {
-                // Several permutations are invalid and we want to detect them all.
-                // NOTE: CHECK violation will supersede UNIQUE violation below.
-                let err = res.expect_err(
-                    "Expected a CHECK violation when inserting a \
-                     Floating IP record with NULL name and/or description, \
-                     and incorrect project parent relation",
-                );
-                assert!(
-                    matches!(err, DatabaseError(CheckViolation, _)),
-                    "Expected a CHECK violation when inserting a \
-                     Floating IP record with NULL name and/or description, \
-                     and incorrect project parent relation",
-                );
-            } else {
-                let err = res.expect_err(
-                    "Expected a UNIQUE violation when inserting a \
-                     Floating IP record with existing (name, project_id)",
-                );
-                assert!(
-                    matches!(err, DatabaseError(UniqueViolation, _)),
-                    "Expected a UNIQUE violation when inserting a \
-                     Floating IP record with existing (name, project_id)",
-                );
-            }
-        }
-
-        // For other IP types: name, description and project must be NULL
-        for (kind, name, description, parent_id, is_service, project_id) in itertools::iproduct!(
-            [IpKind::SNat, IpKind::Ephemeral],
-            &names,
-            &descriptions,
-            &parent_ids,
-            [false, true],
-            &project_ids
-        ) {
-            let name_local = name.map(|v| {
-                nexus_db_model::Name(Name::try_from(v.to_string()).unwrap())
-            });
-            let state = if parent_id.is_some() {
-                IpAttachState::Attached
-            } else {
-                IpAttachState::Detached
-            };
-            let new_ip = ExternalIp {
-                id: Uuid::new_v4(),
-                name: name_local,
-                description: description.clone(),
-                kind,
-                ip: addresses.next().unwrap().into(),
-                is_service,
-                parent_id: *parent_id,
-                project_id: *project_id,
-                state,
-                ..ip
-            };
-            let res = diesel::insert_into(dsl::external_ip)
-                .values(new_ip.clone())
-                .execute_async(&*conn)
-                .await;
-            let ip_type = if is_service { "Service" } else { "Instance" };
-            let null_snat_parent = parent_id.is_none() && kind == IpKind::SNat;
-            if name.is_none()
-                && description.is_none()
-                && !null_snat_parent
-                && project_id.is_none()
-            {
-                // Name/description must be NULL, instance ID cannot
-                // be NULL.
-
-                if kind == IpKind::Ephemeral && is_service {
-                    // Ephemeral Service IPs aren't supported.
-                    let err = res.unwrap_err();
-                    assert!(
-                        matches!(err, DatabaseError(CheckViolation, _)),
-                        "Expected a CHECK violation when inserting an \
-                         Ephemeral Service IP",
-                    );
-                } else {
-                    assert!(
-                        res.is_ok(),
-                        "Failed to insert {:?} IP with valid \
-                         name, description, and {} ID",
-                        kind,
-                        ip_type,
-                    );
-                }
-            } else {
-                // One is not valid, we expect a check violation
-                assert!(
-                    res.is_err(),
-                    "Expected a CHECK violation when inserting a \
-                     {:?} IP record with non-NULL name, description, \
-                     and/or {} ID",
-                    kind,
-                    ip_type,
-                );
-                let err = res.unwrap_err();
-                assert!(
-                    matches!(err, DatabaseError(CheckViolation, _)),
-                    "Expected a CHECK violation when inserting a \
-                     {:?} IP record with non-NULL name, description, \
-                     and/or {} ID",
-                    kind,
-                    ip_type,
-                );
-            }
-        }
 
         db.terminate().await;
         logctx.cleanup_successful();

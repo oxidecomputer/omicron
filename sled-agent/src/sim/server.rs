@@ -38,7 +38,6 @@ use omicron_common::address::Ipv4Range;
 use omicron_common::address::Ipv6Range;
 use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
 use omicron_common::address::{DNS_OPTE_IPV4_SUBNET, Ipv6Subnet};
-use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::nexus::Certificate;
@@ -46,7 +45,7 @@ use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
 };
-use omicron_common::disk::DiskIdentity;
+use omicron_generation_kinds::{Generation, NexusGeneration};
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -59,6 +58,7 @@ use sled_agent_rack_setup::{
     from_ipaddr_to_external_floating_ip,
     from_sockaddr_to_external_floating_addr,
 };
+use sled_agent_types::disk::DiskIdentity;
 use sled_agent_types::early_networking::PortConfig;
 use sled_agent_types::early_networking::UplinkPorts;
 use sled_agent_types::inventory::NetworkInterface;
@@ -74,9 +74,31 @@ use std::sync::Arc;
 use transient_dns_server::TransientDnsServer;
 use uuid::Uuid;
 
-// TODO(#8950) Remove or move these names somewhere common.
+// Well-known service IP pool names the simulated sled-agent creates, mirroring
+// what real rack setup produces.
 const SERVICE_POOL_IPV4_NAME: &str = "oxide-service-pool-v4";
 const SERVICE_POOL_IPV6_NAME: &str = "oxide-service-pool-v6";
+
+/// How [`Server::start`] handles the sled agent's registration with Nexus.
+///
+/// A simulated sled agent announces itself to Nexus with `sled_agent_put`,
+/// retrying until Nexus accepts it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NexusRegistration {
+    /// Wait until Nexus has accepted the registration, so that the sled exists
+    /// in the db's `sled` table by the time [`Server::start`] returns.
+    ///
+    /// If registration fails, [`Server::start`] will return an error.
+    WaitForCompletion,
+    /// Return immediately, retrying registration in the background.
+    ///
+    /// Since registration becomes asynchronous, if it fails [`Server::start`]
+    /// cannot return an error.
+    ///
+    /// Use this in cases where Nexus might not be reachable (for example, a
+    /// sled agent started against a placeholder Nexus address).
+    Background,
+}
 
 /// Packages up a [`SledAgent`], running the sled agent API under a Dropshot
 /// server wired up to the sled agent
@@ -101,7 +123,7 @@ impl Server {
     pub async fn start(
         config: &Config,
         log: &Logger,
-        wait_for_nexus: bool,
+        nexus_registration: NexusRegistration,
         simulated_upstairs: &Arc<SimulatedUpstairs>,
         sled_index: u16,
     ) -> Result<Server, anyhow::Error> {
@@ -211,8 +233,11 @@ impl Server {
             .expect("Expected an infinite retry loop contacting Nexus");
         });
 
-        if wait_for_nexus {
-            task.await.unwrap();
+        match nexus_registration {
+            NexusRegistration::WaitForCompletion => {
+                task.await.context("registering with Nexus")?;
+            }
+            NexusRegistration::Background => {}
         }
 
         let mut datasets = vec![];
@@ -364,8 +389,14 @@ pub async fn run_standalone_server(
 
     // Start the sled agent
     let simulated_upstairs = Arc::new(SimulatedUpstairs::new(log.clone()));
-    let mut server =
-        Server::start(config, &log, true, &simulated_upstairs, 0).await?;
+    let mut server = Server::start(
+        config,
+        &log,
+        NexusRegistration::WaitForCompletion,
+        &simulated_upstairs,
+        0,
+    )
+    .await?;
     info!(log, "sled agent started successfully");
 
     // Start the Internal DNS server
@@ -486,7 +517,7 @@ pub async fn run_standalone_server(
                         },
                         external_tls: false,
                         external_dns_servers: vec![],
-                        nexus_generation: Generation::new(),
+                        nexus_generation: NexusGeneration::new(),
                     },
                 ),
                 filesystem_pool: get_random_zpool(),

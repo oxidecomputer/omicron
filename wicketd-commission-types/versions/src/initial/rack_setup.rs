@@ -19,6 +19,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize, Serializer};
 use slog_error_chain::InlineErrorChain;
 use uuid::Uuid;
+use zeroize::Zeroizing;
 
 // Re-exports of pinned types from sled-agent-types-versions.
 pub use sled_agent_types_versions::v1::early_networking::{
@@ -653,7 +654,12 @@ pub struct CertificatePem(pub String);
 ///
 /// The key material is redacted from the `Debug` output.
 #[derive(Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-pub struct PrivateKeyPem(pub String);
+pub struct PrivateKeyPem(
+    // Zeroizing wipes the backing allocation on drop. Serialization and
+    // deserialization are transparent, so schemars(with = "String") is
+    // reasonable.
+    #[schemars(with = "String")] pub Zeroizing<String>,
+);
 
 impl fmt::Debug for PrivateKeyPem {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -734,8 +740,8 @@ impl RackOperationKind {
     /// The well-known kind for a rack initialization operation.
     pub const INITIALIZE: Self = Self(Cow::Borrowed("initialize"));
 
-    /// The well-known kind for a rack reset operation.
-    pub const RESET: Self = Self(Cow::Borrowed("reset"));
+    /// The well-known kind for a multirack join operation
+    pub const MULTIRACK_JOIN: Self = Self(Cow::Borrowed("multirack-join"));
 
     /// Returns the operation kind as a string.
     pub fn as_str(&self) -> &str {

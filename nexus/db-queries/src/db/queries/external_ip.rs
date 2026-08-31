@@ -1528,6 +1528,7 @@ mod tests {
         let service_pool = create_service_ip_pool(
             context.db.opctx(),
             context.db.datastore(),
+            "oxide-service-pool-v4",
             IpVersion::V4,
         )
         .await;
@@ -1745,6 +1746,7 @@ mod tests {
         let service_pool = create_service_ip_pool(
             context.db.opctx(),
             context.db.datastore(),
+            "oxide-service-pool-v4",
             IpVersion::V4,
         )
         .await;
@@ -2444,6 +2446,7 @@ mod tests {
         let service_pool = create_service_ip_pool(
             context.db.opctx(),
             context.db.datastore(),
+            "oxide-service-pool-v6",
             IpVersion::V6,
         )
         .await;

@@ -982,6 +982,89 @@
         }
       }
     },
+    "/fm/config": {
+      "get": {
+        "operationId": "fm_config_show_current",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FmConfigView"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Update the fault management config at the latest version",
+        "operationId": "fm_config_set",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FmConfigParam"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/fm/config/versions/{version}": {
+      "get": {
+        "operationId": "fm_config_show_version",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FmConfigView"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/fm/known-ereport-classes": {
       "get": {
         "summary": "List ereport classes that this Nexus's diagnosis engines consume.",
@@ -1456,16 +1539,15 @@
         }
       }
     },
-    "/trust-quorum/remove/{sled}": {
+    "/trust-quorum/remove/{rack_id}": {
       "post": {
         "summary": "Remove a sled from the trust quorum",
-        "description": "This is a required first step towards expunging a sled\n\nReturn the epoch of the proposed configuration so it can be polled asynchronously.",
+        "description": "This is a required first step towards expunging a sled\n\nThe sled is identified by its baseboard, since trust quorum membership is tracked by baseboard and the sled may have no database record.\n\nReturn the epoch of the proposed configuration so it can be polled asynchronously.",
         "operationId": "trust_quorum_remove_sled",
         "parameters": [
           {
             "in": "path",
-            "name": "sled",
-            "description": "ID of the sled",
+            "name": "rack_id",
             "required": true,
             "schema": {
               "type": "string",
@@ -1473,6 +1555,16 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BaseboardId"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "successful operation",
@@ -1770,10 +1862,11 @@
         ]
       },
       "BgpPeerConfig": {
+        "description": "A BGP peer configuration for a port.",
         "type": "object",
         "properties": {
           "addr": {
-            "description": "Address of the peer.",
+            "description": "Address of the peer (numbered or unnumbered).",
             "allOf": [
               {
                 "$ref": "#/components/schemas/RouterPeerType"
@@ -2009,7 +2102,7 @@
             "description": "The generation of the active group of Nexuses\n\nIf a Nexus instance notices it has a nexus_generation less than this value, it will start to quiesce in preparation for handing off control to the newer generation (see: RFD 588).",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Generation"
+                "$ref": "#/components/schemas/NexusGeneration"
               }
             ]
           },
@@ -2065,7 +2158,7 @@
             "description": "The minimum release generation to accept for target release configuration. Target release configuration with a generation less than this number will be ignored.\n\nFor example, let's say that the current target release generation is 5. Then, when reconfigurator detects a MUPdate:\n\n* the target release is ignored in favor of the install dataset * this field is set to 6\n\nOnce an operator sets a new target release, its generation will be 6 or higher. Reconfigurator will then know that it is back in charge of driving the system to the target release.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Generation"
+                "$ref": "#/components/schemas/TargetReleaseGeneration"
               }
             ]
           },
@@ -2379,7 +2472,7 @@
             "description": "The Nexus generation number\n\nSee [`Blueprint::nexus_generation`].",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Generation"
+                "$ref": "#/components/schemas/NexusGeneration"
               }
             ]
           },
@@ -2404,7 +2497,7 @@
             "description": "The minimum generation for the target release.\n\nSee [`Blueprint::target_release_minimum_generation`].",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Generation"
+                "$ref": "#/components/schemas/TargetReleaseGeneration"
               }
             ]
           },
@@ -2499,7 +2592,7 @@
                 "description": "Generation of the parent config in which this disk became expunged.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/Generation"
+                    "$ref": "#/components/schemas/SledConfigGeneration"
                   }
                 ]
               },
@@ -2602,7 +2695,7 @@
             "description": "Generation number used when this type is converted into an `OmicronSledConfig` for use by sled-agent.\n\nThis field is explicitly named `sled_agent_generation` to indicate that it is only required to cover information that changes what Reconfigurator sends to sled agent. For example, changing the sled `state` from `Active` to `Decommissioned` would not require a bump to `sled_agent_generation`, because a `Decommissioned` sled will never be sent an `OmicronSledConfig`.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Generation"
+                "$ref": "#/components/schemas/SledConfigGeneration"
               }
             ]
           },
@@ -2611,6 +2704,9 @@
           },
           "subnet": {
             "$ref": "#/components/schemas/Ipv6Subnet"
+          },
+          "update_disposition": {
+            "$ref": "#/components/schemas/BlueprintSledUpdateDisposition"
           },
           "zones": {
             "title": "IdOrdMap",
@@ -2640,7 +2736,73 @@
           "sled_agent_generation",
           "state",
           "subnet",
+          "update_disposition",
           "zones"
+        ]
+      },
+      "BlueprintSledUpdateDisposition": {
+        "description": "Controls a sled's availability for provisioning and whether its migratable instances are evacuated during an update, along with a generation number bumped whenever that disposition changes.\n\nStored in [`BlueprintSledConfig::update_disposition`]. See RFD 666.",
+        "type": "object",
+        "properties": {
+          "generation": {
+            "description": "A generation number bumped whenever `kind` changes.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UpdateDispositionGeneration"
+              }
+            ]
+          },
+          "kind": {
+            "description": "The disposition itself.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BlueprintSledUpdateDispositionKind"
+              }
+            ]
+          }
+        },
+        "required": [
+          "generation",
+          "kind"
+        ]
+      },
+      "BlueprintSledUpdateDispositionKind": {
+        "description": "The content of a sled's update disposition: whether the sled is available for provisioning, and if being evacuated, which disruption policy applies.\n\nThe \"kind\" half of [`BlueprintSledUpdateDisposition`].",
+        "oneOf": [
+          {
+            "description": "The sled is available for use for all provisions.",
+            "type": "object",
+            "properties": {
+              "availability": {
+                "type": "string",
+                "enum": [
+                  "available"
+                ]
+              }
+            },
+            "required": [
+              "availability"
+            ]
+          },
+          {
+            "description": "The sled is disallowed for all use, and its migratable instances are evacuated according to `policy`.",
+            "type": "object",
+            "properties": {
+              "availability": {
+                "type": "string",
+                "enum": [
+                  "evacuating"
+                ]
+              },
+              "policy": {
+                "$ref": "#/components/schemas/ReconfiguratorDisruptionPolicy"
+              }
+            },
+            "required": [
+              "availability",
+              "policy"
+            ]
+          }
         ]
       },
       "BlueprintSource": {
@@ -2885,7 +3047,7 @@
                 "description": "Generation of the parent config in which this zone became expunged.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/Generation"
+                    "$ref": "#/components/schemas/SledConfigGeneration"
                   }
                 ]
               },
@@ -3269,7 +3431,7 @@
                 "description": "Generation number for this Nexus zone. This is used to coordinate handoff between old and new Nexus instances during updates. See RFD 588.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/Generation"
+                    "$ref": "#/components/schemas/NexusGeneration"
                   }
                 ]
               },
@@ -4746,10 +4908,33 @@
                 "enum": [
                   "no_matching_artifact_found"
                 ]
+              },
+              "value": {
+                "type": "string"
               }
             },
             "required": [
-              "type"
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "Too many artifacts with the required conditions for the component were found",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "too_many_matching_artifacts"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "value"
             ]
           },
           {
@@ -4850,10 +5035,33 @@
                 "enum": [
                   "no_matching_artifact_found"
                 ]
+              },
+              "value": {
+                "type": "string"
               }
             },
             "required": [
-              "type"
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "Too many artifacts with the required conditions for the component were found",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "too_many_matching_artifacts"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "value"
             ]
           },
           {
@@ -4950,10 +5158,33 @@
                 "enum": [
                   "no_matching_artifact_found"
                 ]
+              },
+              "value": {
+                "type": "string"
               }
             },
             "required": [
-              "type"
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "Too many artifacts with the required conditions for the component were found",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "too_many_matching_artifacts"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "value"
             ]
           },
           {
@@ -4990,6 +5221,214 @@
               "value"
             ]
           }
+        ]
+      },
+      "FmConfig": {
+        "description": "A fault management configuration.\n\n# Validation\n\nFor a config to be valid, the following requirements must be upheld:\n\n- [`Self::sitrep_limit`] must be at least [`Self::MIN_SITREP_LIMIT`], and no more than [`Self::MAX_LIMIT`], - [`Self::history_pruning_threshold`] must be at least [`Self::MIN_HISTORY_PRUNING_THRESHOLD`], and no more than [`Self::MAX_LIMIT`], - [`Self::history_pruning_threshold`] must be strictly less than [`Self::sitrep_limit`],\n\nThese rules are checked by the [`Self::validate`] method, which is called prior to accepting a config update.",
+        "type": "object",
+        "properties": {
+          "analysis_enabled": {
+            "description": "BREAK GLASS TO COMPLETELY DISABLE FM ANALYSIS",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FmConfigBooleanSetting"
+              }
+            ]
+          },
+          "history_pruning_threshold": {
+            "description": "The maximum number of sitreps committed to the `fm_sitrep_history` table. If the number of sitreps exceeds this threshold, the `fm_sitrep_history_pruner` background task will remove the oldest entries from the history.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FmConfigNonZeroU32Setting"
+              }
+            ]
+          },
+          "sitrep_limit": {
+            "description": "The maximum number of sitreps to keep in the database.\n\nIf the number of sitreps exceeds this limit, the FM analysis background task will not produce a new sitrep until old ones are deleted.\n\nThis limit applies to both committed sitreps in the history *and* orphaned sitreps left behind when multiple Nexuses race to commit a sitrep.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FmConfigNonZeroU32Setting"
+              }
+            ]
+          }
+        },
+        "required": [
+          "analysis_enabled",
+          "history_pruning_threshold",
+          "sitrep_limit"
+        ]
+      },
+      "FmConfigBooleanSetting": {
+        "description": "A single configuration setting that is either explicitly overridden or inherits the system-defined default.\n\nThis is generic over a `V: `[`SettingValue`] type parameter, which represents a particular config setting. This trait defines both the type of the actual configuration value *and* the value of its default. Implementations of this trait for each field in [`FmConfig`] are defined in the [`settings`] module using the `define_setting!` macro. This may seem a bit more complex than just having a [`Default`] implementation for [`FmConfig`]. However, it is designed to allow us to define the default value for each setting in a single place, rather than having to keep them in sync between cases where *some* settings are the defaults and others are overridden, and cases where the entire config is the default because no overrides exist.\n\n[`Self::Default`] and [`Self::Override`] have different semantics even when an overridden value *happens* to be equal to the default value for that setting. This is because the default value for a given setting may change across multiple Oxide system software releases. Just because the *current* default for the sitrep limit is 2500 (for example) does not mean that we will not change this default value in the future. Therefore, it is necessary to represent that a particular config setting is explicitly set to \"whatever the default value in the current release happens to be\", rather than being set to a concrete value that is equal to the current default. In the database, this is represented using `NULL`s to indicate the default value (which is why [`Setting::into_override`] and the `From<Option>` impl exist).",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string",
+                "enum": [
+                  "override"
+                ]
+              },
+              "value": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "source",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string",
+                "enum": [
+                  "default"
+                ]
+              }
+            },
+            "required": [
+              "source"
+            ]
+          }
+        ]
+      },
+      "FmConfigNonZeroU32Setting": {
+        "description": "A single configuration setting that is either explicitly overridden or inherits the system-defined default.\n\nThis is generic over a `V: `[`SettingValue`] type parameter, which represents a particular config setting. This trait defines both the type of the actual configuration value *and* the value of its default. Implementations of this trait for each field in [`FmConfig`] are defined in the [`settings`] module using the `define_setting!` macro. This may seem a bit more complex than just having a [`Default`] implementation for [`FmConfig`]. However, it is designed to allow us to define the default value for each setting in a single place, rather than having to keep them in sync between cases where *some* settings are the defaults and others are overridden, and cases where the entire config is the default because no overrides exist.\n\n[`Self::Default`] and [`Self::Override`] have different semantics even when an overridden value *happens* to be equal to the default value for that setting. This is because the default value for a given setting may change across multiple Oxide system software releases. Just because the *current* default for the sitrep limit is 2500 (for example) does not mean that we will not change this default value in the future. Therefore, it is necessary to represent that a particular config setting is explicitly set to \"whatever the default value in the current release happens to be\", rather than being set to a concrete value that is equal to the current default. In the database, this is represented using `NULL`s to indicate the default value (which is why [`Setting::into_override`] and the `From<Option>` impl exist).",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string",
+                "enum": [
+                  "override"
+                ]
+              },
+              "value": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 1
+              }
+            },
+            "required": [
+              "source",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string",
+                "enum": [
+                  "default"
+                ]
+              }
+            },
+            "required": [
+              "source"
+            ]
+          }
+        ]
+      },
+      "FmConfigParam": {
+        "description": "Parameters to insert a new FM configuration override at a particular version.\n\nA config override is accepted if and only if:\n\n- [`Self::version`] is exactly one greater than the current latest override version (or 1, if no overrides exist), - [`Self::comment`] is a non-empty string, and does not  consist entirely of whitespace characters, and, - The values in [`Self::config`] pass [validation](FmConfig#validation).\n\nThe [`FmConfigParam::validate`] method checks all of these requirements and is called prior to inserting a new config.",
+        "type": "object",
+        "properties": {
+          "comment": {
+            "description": "A comment describing why the default configuration was overridden.\n\nA comment is mandatory when overriding the default configuration, so this must be non-empty.",
+            "type": "string"
+          },
+          "config": {
+            "description": "The configuration itself.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FmConfig"
+              }
+            ]
+          },
+          "version": {
+            "description": "The version of the configuration.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "comment",
+          "config",
+          "version"
+        ]
+      },
+      "FmConfigSource": {
+        "description": "Where a [`FmConfigView`]'s configuration came from.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "default"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "The fault management configuration was overridden.",
+            "type": "object",
+            "properties": {
+              "comment": {
+                "description": "A comment describing why the default configuration was overridden.",
+                "type": "string"
+              },
+              "time_modified": {
+                "description": "The time at which this override was created.",
+                "type": "string",
+                "format": "date-time"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "override"
+                ]
+              },
+              "version": {
+                "description": "The version of the override.",
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 1
+              }
+            },
+            "required": [
+              "comment",
+              "time_modified",
+              "type",
+              "version"
+            ]
+          }
+        ]
+      },
+      "FmConfigView": {
+        "description": "A view of the current fault management configuration.",
+        "type": "object",
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/FmConfig"
+          },
+          "source": {
+            "$ref": "#/components/schemas/FmConfigSource"
+          }
+        },
+        "required": [
+          "config",
+          "source"
         ]
       },
       "Generation": {
@@ -6077,6 +6516,17 @@
         "description": "Password hashes must be in PHC (Password Hashing Competition) string format.  Passwords must be hashed with Argon2id.  Password hashes may be rejected if the parameters appear not to be secure enough.",
         "type": "string"
       },
+      "NexusGeneration": {
+        "description": "Generation numbers stored in the database, used for optimistic concurrency control",
+        "x-rust-type": {
+          "crate": "omicron-generation-kinds",
+          "path": "omicron_generation_kinds::NexusGeneration",
+          "version": "*"
+        },
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0
+      },
       "NexusGenerationBumpWaitingOn": {
         "oneOf": [
           {
@@ -6905,7 +7355,7 @@
             "description": "what `reassignment_generation` was when this recovery started",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Generation"
+                "$ref": "#/components/schemas/SagaReassignmentGeneration"
               }
             ]
           }
@@ -7414,7 +7864,7 @@
                 ]
               },
               "value": {
-                "$ref": "#/components/schemas/Generation"
+                "$ref": "#/components/schemas/NexusGeneration"
               }
             },
             "required": [
@@ -7810,6 +8260,11 @@
             "items": {
               "$ref": "#/components/schemas/UplinkAddressConfig"
             }
+          },
+          "allow_ddm_traffic": {
+            "description": "Whether or not to allow DDM traffic on this port",
+            "default": false,
+            "type": "boolean"
           },
           "autoneg": {
             "description": "Whether or not to set autonegotiation",
@@ -8695,8 +9150,15 @@
           {
             "type": "object",
             "properties": {
-              "ip": {
-                "description": "IP address for numbered BGP peers.",
+              "src_addr": {
+                "nullable": true,
+                "description": "Optional local IP address to bind when establishing outbound TCP connections to this peer. If `None`, the OS selects the source address.",
+                "default": null,
+                "type": "string",
+                "format": "ip"
+              },
+              "target_addr": {
+                "description": "Target IP address for numbered BGP peers.",
                 "type": "string",
                 "format": "ip"
               },
@@ -8708,7 +9170,7 @@
               }
             },
             "required": [
-              "ip",
+              "target_addr",
               "type"
             ]
           }
@@ -8856,7 +9318,7 @@
             "description": "generation number for the saga reassignment\n\nThis gets bumped whenever a saga reassignment operation completes that may have re-assigned us some sagas.  It's used to keep track of when we've recovered all sagas that could be assigned to us.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Generation"
+                "$ref": "#/components/schemas/SagaReassignmentGeneration"
               }
             ]
           },
@@ -8877,7 +9339,7 @@
             "description": "\"saga reassignment generation number\" that was \"caught up to\" by the last recovery pass\n\nThis is used with `reassignment_generation` to help us know when we've recovered all the sagas that may have been assigned to us during a given reassignment pass.  See `reassignment_done()` for details.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Generation"
+                "$ref": "#/components/schemas/SagaReassignmentGeneration"
               }
             ]
           },
@@ -8918,6 +9380,17 @@
           "recovered_reassignment_generation",
           "sagas_pending"
         ]
+      },
+      "SagaReassignmentGeneration": {
+        "description": "Generation numbers stored in the database, used for optimistic concurrency control",
+        "x-rust-type": {
+          "crate": "omicron-generation-kinds",
+          "path": "omicron_generation_kinds::SagaReassignmentGeneration",
+          "version": "*"
+        },
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0
       },
       "SagaResultsPage": {
         "description": "A single page of results",
@@ -9121,6 +9594,17 @@
           "sled_id",
           "zones"
         ]
+      },
+      "SledConfigGeneration": {
+        "description": "Generation numbers stored in the database, used for optimistic concurrency control",
+        "x-rust-type": {
+          "crate": "omicron-generation-kinds",
+          "path": "omicron_generation_kinds::SledConfigGeneration",
+          "version": "*"
+        },
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0
       },
       "SledPolicy": {
         "description": "The operator-defined policy of a sled.",
@@ -9441,6 +9925,17 @@
           }
         ]
       },
+      "TargetReleaseGeneration": {
+        "description": "Generation numbers stored in the database, used for optimistic concurrency control",
+        "x-rust-type": {
+          "crate": "omicron-generation-kinds",
+          "path": "omicron_generation_kinds::TargetReleaseGeneration",
+          "version": "*"
+        },
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0
+      },
       "TrustQuorumConfig": {
         "type": "object",
         "properties": {
@@ -9739,6 +10234,17 @@
           "waited_for_concurrent_update",
           "took_over_concurrent_update"
         ]
+      },
+      "UpdateDispositionGeneration": {
+        "description": "Generation numbers stored in the database, used for optimistic concurrency control",
+        "x-rust-type": {
+          "crate": "omicron-generation-kinds",
+          "path": "omicron_generation_kinds::UpdateDispositionGeneration",
+          "version": "*"
+        },
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0
       },
       "UpdateStatus": {
         "type": "object",
@@ -10127,7 +10633,7 @@
                 ]
               },
               "zone_generation": {
-                "$ref": "#/components/schemas/Generation"
+                "$ref": "#/components/schemas/NexusGeneration"
               }
             },
             "required": [
