@@ -9984,6 +9984,7 @@ dependencies = [
  "ipnet",
  "ipnetwork",
  "itertools 0.13.0",
+ "itertools 0.15.0",
  "jiff",
  "lalrpop-util",
  "lazy_static",
