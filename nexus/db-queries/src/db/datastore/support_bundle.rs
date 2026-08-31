@@ -827,11 +827,11 @@ impl DataStore {
                 | BundleData::SpDumps => {
                     // Handled by flags row above.
                 }
-                BundleData::HostInfo { sleds, zones: _ } => {
+                BundleData::HostInfo { sleds, zones } => {
                     diesel::insert_into(
                         host_info_dsl::support_bundle_data_selection_host_info,
                     )
-                    .values(HostInfo::new(bundle_id, sleds))
+                    .values(HostInfo::new(bundle_id, sleds, zones))
                     .execute_async(conn)
                     .await?;
                 }
@@ -1529,6 +1529,63 @@ mod test {
             .support_bundle_data_selection_get(&opctx, &authz_bundle)
             .await
             .expect_err("Data selection should not exist after bundle delete");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// A selection restricting host info to specific sleds and zone types
+    /// reads back as it was written, and so does one selecting no zone
+    /// types at all.
+    #[tokio::test]
+    async fn test_data_selection_zone_types_round_trip() {
+        use nexus_types::support_bundle::BundleZoneType;
+        use nexus_types::support_bundle::SledSelection;
+        use nexus_types::support_bundle::ZoneSelection;
+
+        let logctx =
+            dev::test_setup_log("test_data_selection_zone_types_round_trip");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Two zpools, so both bundles have a place to live.
+        let test_sled = create_sled_and_zpools(&datastore, &opctx, 2).await;
+        let sled_id = test_sled.sled;
+
+        for types in [
+            vec![BundleZoneType::Nexus, BundleZoneType::Global],
+            Vec::new(),
+        ] {
+            let zones = ZoneSelection::Types(types.iter().copied().collect());
+            let data_selection = BundleDataSelection::new()
+                .with_specific_sleds([sled_id])
+                .with_zone_types(types);
+            let bundle = datastore
+                .support_bundle_create(
+                    &opctx,
+                    SupportBundleCreateParams {
+                        reason: "Bundle for test",
+                        nexus_id: OmicronZoneUuid::new_v4(),
+                        user_comment: None,
+                        data_selection,
+                    },
+                )
+                .await
+                .expect("Should be able to create bundle");
+
+            let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
+            let selection = datastore
+                .support_bundle_data_selection_get(&opctx, &authz_bundle)
+                .await
+                .expect("Should be able to query data selection");
+            assert_eq!(selection.zone_selection(), Some(&zones));
+            assert_eq!(
+                selection.sled_selection(),
+                Some(&SledSelection::Specific(
+                    [sled_id].into_iter().collect()
+                ))
+            );
+        }
 
         db.terminate().await;
         logctx.cleanup_successful();

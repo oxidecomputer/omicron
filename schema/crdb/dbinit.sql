@@ -3364,10 +3364,17 @@ CREATE TABLE IF NOT EXISTS omicron.public.support_bundle_data_selection_host_inf
     bundle_id UUID NOT NULL,
     all_sleds BOOL NOT NULL,
     sled_ids UUID[] NOT NULL DEFAULT ARRAY[],
+    all_zone_types BOOL NOT NULL,
+    -- Zone types bounding zone-log collection, as the stable strings of
+    -- nexus_types::support_bundle::BundleZoneType.
+    zone_types TEXT[] NOT NULL DEFAULT ARRAY[],
 
     PRIMARY KEY (bundle_id),
     CONSTRAINT all_sleds_and_specific_sleds_are_mutually_exclusive CHECK (
         NOT (all_sleds AND cardinality(sled_ids) > 0)
+    ),
+    CONSTRAINT all_zone_types_and_specific_zone_types_are_mutually_exclusive CHECK (
+        NOT (all_zone_types AND cardinality(zone_types) > 0)
     )
 );
 
@@ -8477,10 +8484,17 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_support_bundle_request_data_selecti
     request_id UUID NOT NULL,
     all_sleds BOOL NOT NULL,
     sled_ids UUID[] NOT NULL DEFAULT ARRAY[],
+    all_zone_types BOOL NOT NULL,
+    -- Zone types bounding zone-log collection, as the stable strings of
+    -- nexus_types::support_bundle::BundleZoneType.
+    zone_types TEXT[] NOT NULL DEFAULT ARRAY[],
 
     PRIMARY KEY (sitrep_id, request_id),
     CONSTRAINT all_sleds_and_specific_sleds_are_mutually_exclusive CHECK (
         NOT (all_sleds AND cardinality(sled_ids) > 0)
+    ),
+    CONSTRAINT all_zone_types_and_specific_zone_types_are_mutually_exclusive CHECK (
+        NOT (all_zone_types AND cardinality(zone_types) > 0)
     )
 );
 
@@ -9445,7 +9459,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '297.0.0', NULL)
+    (TRUE, NOW(), NOW(), '298.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

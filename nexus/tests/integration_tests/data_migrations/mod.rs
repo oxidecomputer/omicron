@@ -52,6 +52,7 @@ mod prune_service_nat_entries;
 mod rename_default_igw_ip_pool;
 mod route_config_rib_priority;
 mod sled_resource_vmm_state;
+mod support_bundle_zone_types;
 mod tufaceous_v2;
 mod vpc_firewall_icmp;
 mod zone_image_resolver_inventory;
@@ -110,6 +111,7 @@ pub(crate) fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     register!(add_sled_update_disposition);
     register!(normalize_service_external_ips);
     register!(add_rendezvous_sled_bp_availability);
+    register!(support_bundle_zone_types);
 
     map
 }

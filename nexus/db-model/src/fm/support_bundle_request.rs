@@ -96,6 +96,8 @@ pub struct HostInfo {
     pub request_id: DbTypedUuid<SupportBundleKind>,
     pub all_sleds: bool,
     pub sled_ids: Vec<uuid::Uuid>,
+    pub all_zone_types: bool,
+    pub zone_types: Vec<String>,
 }
 
 impl HostInfo {
@@ -103,6 +105,7 @@ impl HostInfo {
         sitrep_id: impl Into<DbTypedUuid<SitrepKind>>,
         request_id: impl Into<DbTypedUuid<SupportBundleKind>>,
         sleds: SledSelection,
+        zones: ZoneSelection,
     ) -> Self {
         let (all_sleds, sled_ids) = match sleds {
             SledSelection::All => (true, Vec::new()),
@@ -111,18 +114,31 @@ impl HostInfo {
                 ids.into_iter().map(|id| id.into_untyped_uuid()).collect(),
             ),
         };
+        let (all_zone_types, zone_types) =
+            crate::support_bundle::zone_selection_to_columns(zones);
         HostInfo {
             sitrep_id: sitrep_id.into(),
             request_id: request_id.into(),
             all_sleds,
             sled_ids,
+            all_zone_types,
+            zone_types,
         }
     }
 }
 
-impl From<HostInfo> for BundleData {
-    fn from(row: HostInfo) -> Self {
-        let HostInfo { sitrep_id: _, request_id: _, all_sleds, sled_ids } = row;
+impl TryFrom<HostInfo> for BundleData {
+    type Error = omicron_common::api::external::Error;
+
+    fn try_from(row: HostInfo) -> Result<Self, Self::Error> {
+        let HostInfo {
+            sitrep_id: _,
+            request_id: _,
+            all_sleds,
+            sled_ids,
+            all_zone_types,
+            zone_types,
+        } = row;
         let sleds = if all_sleds {
             SledSelection::All
         } else {
@@ -130,7 +146,11 @@ impl From<HostInfo> for BundleData {
                 sled_ids.into_iter().map(SledUuid::from_untyped_uuid).collect(),
             )
         };
-        BundleData::HostInfo { sleds, zones: ZoneSelection::All }
+        let zones = crate::support_bundle::zone_selection_from_columns(
+            all_zone_types,
+            zone_types,
+        )?;
+        Ok(BundleData::HostInfo { sleds, zones })
     }
 }
 
@@ -241,7 +261,7 @@ impl TryFrom<BundleDataSelection>
             selection.insert(BundleData::SpDumps);
         }
         if let Some(host_info) = row.host_info {
-            selection.insert(host_info.into());
+            selection.insert(host_info.try_into()?);
         }
         if let Some(ereports) = row.ereports {
             selection.insert(ereports.into());

@@ -183,12 +183,15 @@ pub struct HostInfo {
     pub bundle_id: DbTypedUuid<SupportBundleKind>,
     pub all_sleds: bool,
     pub sled_ids: Vec<uuid::Uuid>,
+    pub all_zone_types: bool,
+    pub zone_types: Vec<String>,
 }
 
 impl HostInfo {
     pub fn new(
         bundle_id: impl Into<DbTypedUuid<SupportBundleKind>>,
         sleds: SledSelection,
+        zones: ZoneSelection,
     ) -> Self {
         let (all_sleds, sled_ids) = match sleds {
             SledSelection::All => (true, Vec::new()),
@@ -197,13 +200,28 @@ impl HostInfo {
                 ids.into_iter().map(|id| id.into_untyped_uuid()).collect(),
             ),
         };
-        HostInfo { bundle_id: bundle_id.into(), all_sleds, sled_ids }
+        let (all_zone_types, zone_types) = zone_selection_to_columns(zones);
+        HostInfo {
+            bundle_id: bundle_id.into(),
+            all_sleds,
+            sled_ids,
+            all_zone_types,
+            zone_types,
+        }
     }
 }
 
-impl From<HostInfo> for BundleData {
-    fn from(row: HostInfo) -> Self {
-        let HostInfo { bundle_id: _, all_sleds, sled_ids } = row;
+impl TryFrom<HostInfo> for BundleData {
+    type Error = omicron_common::api::external::Error;
+
+    fn try_from(row: HostInfo) -> Result<Self, Self::Error> {
+        let HostInfo {
+            bundle_id: _,
+            all_sleds,
+            sled_ids,
+            all_zone_types,
+            zone_types,
+        } = row;
         let sleds = if all_sleds {
             SledSelection::All
         } else {
@@ -211,8 +229,45 @@ impl From<HostInfo> for BundleData {
                 sled_ids.into_iter().map(SledUuid::from_untyped_uuid).collect(),
             )
         };
-        BundleData::HostInfo { sleds, zones: ZoneSelection::All }
+        let zones = zone_selection_from_columns(all_zone_types, zone_types)?;
+        Ok(BundleData::HostInfo { sleds, zones })
     }
+}
+
+/// Converts a [`ZoneSelection`] into its host-info column pair.
+pub(crate) fn zone_selection_to_columns(
+    zones: ZoneSelection,
+) -> (bool, Vec<String>) {
+    match zones {
+        ZoneSelection::All => (true, Vec::new()),
+        ZoneSelection::Types(types) => (
+            false,
+            types.into_iter().map(|t| t.as_str().to_string()).collect(),
+        ),
+    }
+}
+
+/// Converts a host-info column pair back into a [`ZoneSelection`],
+/// erroring on a stored zone type this version does not recognize
+/// (rather than silently dropping it from the selection).
+pub(crate) fn zone_selection_from_columns(
+    all_zone_types: bool,
+    zone_types: Vec<String>,
+) -> Result<ZoneSelection, omicron_common::api::external::Error> {
+    if all_zone_types {
+        return Ok(ZoneSelection::All);
+    }
+    zone_types
+        .iter()
+        .map(|s| {
+            s.parse().map_err(|err| {
+                omicron_common::api::external::Error::internal_error(&format!(
+                    "reading stored zone-type selection: {err}"
+                ))
+            })
+        })
+        .collect::<Result<_, _>>()
+        .map(ZoneSelection::Types)
 }
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
@@ -309,7 +364,7 @@ impl TryFrom<BundleDataSelection>
             selection.insert(BundleData::SpDumps);
         }
         if let Some(host_info) = row.host_info {
-            selection.insert(host_info.into());
+            selection.insert(host_info.try_into()?);
         }
         if let Some(ereports) = row.ereports {
             selection.insert(ereports.into());
