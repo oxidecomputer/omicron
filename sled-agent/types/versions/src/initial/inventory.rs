@@ -27,7 +27,7 @@ use omicron_common::zpool_name::ZpoolName;
 use omicron_generation_kinds::Generation;
 use omicron_uuid_kinds::{
     DatasetUuid, InternalZpoolUuid, MupdateOverrideUuid, OmicronZoneUuid,
-    PhysicalDiskUuid, SledUuid, ZpoolUuid,
+    PhysicalDiskUuid, ZpoolUuid,
 };
 use oxnet::IpNet;
 use schemars::schema::{Schema, SchemaObject};
@@ -46,7 +46,6 @@ use super::disk::DiskVariant;
 use super::disk::M2Slot;
 use super::disk::OmicronPhysicalDiskConfig;
 use crate::impls::inventory::SourceNatConfigError;
-use crate::v50::inventory::SledRole;
 
 /// Describes properties that should uniquely identify a Gimlet.
 ///
@@ -630,26 +629,6 @@ fn path_schema(generator: &mut SchemaGenerator) -> Schema {
     schema.into()
 }
 
-/// Identity and basic status information about this sled agent
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
-pub struct Inventory {
-    pub sled_id: SledUuid,
-    pub sled_agent_address: SocketAddrV6,
-    pub sled_role: SledRole,
-    pub baseboard: Baseboard,
-    pub usable_hardware_threads: u32,
-    pub usable_physical_ram: ByteCount,
-    pub cpu_family: SledCpuFamily,
-    pub reservoir_size: ByteCount,
-    pub disks: Vec<InventoryDisk>,
-    pub zpools: Vec<InventoryZpool>,
-    pub datasets: Vec<InventoryDataset>,
-    pub ledgered_sled_config: Option<OmicronSledConfig>,
-    pub reconciler_status: ConfigReconcilerInventoryStatus,
-    pub last_reconciliation: Option<ConfigReconcilerInventory>,
-    pub zone_image_resolver: ZoneImageResolverInventory,
-}
-
 /// Describes the set of Reconfigurator-managed configuration elements of a sled
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 pub struct OmicronSledConfig {
@@ -834,25 +813,6 @@ pub enum ConfigReconcilerInventoryStatus {
     /// attempt, because that's always available via
     /// [`ConfigReconcilerInventory::last_reconciled_config`].
     Idle { completed_at: DateTime<Utc>, ran_for: Duration },
-}
-
-/// Describes the set of Omicron-managed zones running on a sled
-#[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
-)]
-pub struct OmicronZonesConfig {
-    /// generation number of this configuration
-    ///
-    /// This generation number is owned by the control plane (i.e., RSS or
-    /// Nexus, depending on whether RSS-to-Nexus handoff has happened).  It
-    /// should not be bumped within Sled Agent.
-    ///
-    /// Sled Agent rejects attempts to set the configuration to a generation
-    /// older than the one it's currently running.
-    pub generation: Generation,
-
-    /// list of running zones
-    pub zones: Vec<OmicronZoneConfig>,
 }
 
 /// An IP address and port range used for source NAT, i.e., making

@@ -11,48 +11,23 @@ use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use omicron_common::address::NEXUS_LOCKSTEP_PORT;
-use omicron_common::api::external::ByteCount;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_generation_kinds::Generation;
 use omicron_ledger::Ledgerable;
 use omicron_uuid_kinds::{DatasetUuid, MupdateOverrideUuid, OmicronZoneUuid};
-use omicron_uuid_kinds::{PhysicalDiskUuid, SledUuid};
+use omicron_uuid_kinds::PhysicalDiskUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::v1;
 use crate::v1::disk::DatasetConfig;
 use crate::v1::disk::OmicronPhysicalDiskConfig;
-use crate::v1::inventory::Baseboard;
 use crate::v1::inventory::{
     BootPartitionContents, ConfigReconcilerInventoryResult,
-    HostPhase2DesiredSlots, InventoryDataset, InventoryDisk, InventoryZpool,
+    HostPhase2DesiredSlots,
     NetworkInterface, OmicronZoneDataset, OmicronZoneImageSource,
     OrphanedDataset, RemoveMupdateOverrideInventory, SourceNatConfig,
-    ZoneImageResolverInventory,
 };
-use crate::v50::inventory::SledRole;
-use sled_hardware_types::SledCpuFamily;
-
-/// Identity and basic status information about this sled agent
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
-pub struct Inventory {
-    pub sled_id: SledUuid,
-    pub sled_agent_address: SocketAddrV6,
-    pub sled_role: SledRole,
-    pub baseboard: Baseboard,
-    pub usable_hardware_threads: u32,
-    pub usable_physical_ram: ByteCount,
-    pub cpu_family: SledCpuFamily,
-    pub reservoir_size: ByteCount,
-    pub disks: Vec<InventoryDisk>,
-    pub zpools: Vec<InventoryZpool>,
-    pub datasets: Vec<InventoryDataset>,
-    pub ledgered_sled_config: Option<OmicronSledConfig>,
-    pub reconciler_status: ConfigReconcilerInventoryStatus,
-    pub last_reconciliation: Option<ConfigReconcilerInventory>,
-    pub zone_image_resolver: ZoneImageResolverInventory,
-}
 
 /// Describes the set of Reconfigurator-managed configuration elements of a sled
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]

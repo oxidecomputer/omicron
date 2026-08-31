@@ -9,22 +9,6 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::{IpAddr, Ipv4Addr};
 
-/// This is the actual configuration of EarlyNetworking.
-///
-/// We nest it below the "header" of `generation` and `schema_version` so that
-/// we can perform partial deserialization of `EarlyNetworkConfig` to only read
-/// the header and defer deserialization of the body once we know the schema
-/// version. This is possible via the use of [`serde_json::value::RawValue`] in
-/// future (post-v1) deserialization paths.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-pub struct EarlyNetworkConfigBody {
-    /// The external NTP server addresses.
-    pub ntp_servers: Vec<String>,
-
-    // Rack network configuration as delivered from RSS or Nexus
-    pub rack_network_config: Option<RackNetworkConfig>,
-}
-
 /// Initial network configuration
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
 pub struct RackNetworkConfig {
