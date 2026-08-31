@@ -19,10 +19,13 @@ use itertools::Itertools;
 use omicron_uuid_kinds::{
     DatasetUuid, OmicronZoneUuid, PhysicalDiskUuid, ZpoolUuid,
 };
-use sled_agent_types::disk::M2Slot;
 use sled_agent_types::inventory::{
-    SvcEnabledNotOnlineState, SvcsEnabledNotOnline, SvcsEnabledNotOnlineResult,
-    SvcsError,
+    InstanceManagerStatus, SvcEnabledNotOnlineState, SvcsEnabledNotOnline,
+    SvcsEnabledNotOnlineResult, SvcsError,
+};
+use sled_agent_types::{
+    disk::M2Slot,
+    inventory::{CurrentUpdateDisposition, OmicronSledUpdateDisposition},
 };
 use sled_agent_types_versions::latest::inventory::{
     BootImageHeader, BootPartitionContents, BootPartitionDetails,
@@ -622,6 +625,7 @@ fn display_sleds(
             ledgered_sled_config,
             reconciler_status,
             last_reconciliation,
+            instance_manager_status,
             file_source_resolver,
             smf_services_enabled_not_online,
             reference_measurements,
@@ -903,6 +907,28 @@ fn display_sleds(
                     )
                 )?;
             }
+        }
+
+        writeln!(indented, "instance manager status:")?;
+        {
+            let InstanceManagerStatus {
+                update_disposition,
+                num_registered_vmms,
+            } = instance_manager_status;
+            let mut indent2 = IndentWriter::new("    ", &mut indented);
+            let disposition = match update_disposition {
+                CurrentUpdateDisposition::ConfigNotAvailable => {
+                    "unknown (no config loaded)"
+                }
+                CurrentUpdateDisposition::Known(
+                    OmicronSledUpdateDisposition::Available,
+                ) => "available",
+                CurrentUpdateDisposition::Known(
+                    OmicronSledUpdateDisposition::Evacuating,
+                ) => "evacuating",
+            };
+            writeln!(indent2, "update disposition: {disposition}")?;
+            writeln!(indent2, "VMMs registered: {num_registered_vmms}")?;
         }
 
         writeln!(indented, "reference measurements:")?;
