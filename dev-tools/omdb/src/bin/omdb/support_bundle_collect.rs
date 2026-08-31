@@ -32,6 +32,7 @@ use nexus_types::fm::ereport::EreportFilters;
 use nexus_types::support_bundle::BundleDataCategory;
 use nexus_types::support_bundle::BundleDataSelection;
 use nexus_types::support_bundle::BundleTimeRange;
+use nexus_types::support_bundle::BundleZoneType;
 use omicron_uuid_kinds::SupportBundleUuid;
 use std::io::Write;
 use std::sync::Arc;
@@ -81,6 +82,12 @@ struct CollectArgs {
     #[clap(long, value_enum)]
     include: Vec<BundleDataCategory>,
 
+    /// Only collect logs from zones of these types. May be supplied
+    /// multiple times. Defaults to all zones. Requires host-info
+    /// collection.
+    #[clap(long, value_enum)]
+    zone_type: Vec<BundleZoneType>,
+
     #[command(flatten)]
     window: TimeWindowArgs,
 }
@@ -104,6 +111,15 @@ impl CollectArgs {
                     sel.with_ereports(EreportFilters::new())
                 }
             };
+        }
+
+        if !self.zone_type.is_empty() {
+            anyhow::ensure!(
+                categories.contains(&BundleDataCategory::HostInfo),
+                "--zone-type only affects zone logs, which are part of \
+                 host-info collection; add --include host-info",
+            );
+            sel = sel.with_zone_types(self.zone_type.iter().copied());
         }
 
         let window = self.window.bounds()?;

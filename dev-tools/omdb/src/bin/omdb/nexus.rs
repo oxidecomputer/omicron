@@ -97,6 +97,7 @@ use nexus_types::internal_api::background::TufArtifactReplicationStatus;
 use nexus_types::internal_api::background::TufRepoPrunerStatus;
 use nexus_types::internal_api::background::fm_rendezvous;
 use nexus_types::support_bundle::BundleDataCategory;
+use nexus_types::support_bundle::BundleZoneType;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DemoSagaUuid;
@@ -672,6 +673,12 @@ struct SupportBundleCreateArgs {
     /// Defaults to all categories.
     #[clap(long, value_enum)]
     include: Vec<BundleDataCategory>,
+
+    /// Only collect logs from zones of these types. May be supplied
+    /// multiple times. Defaults to all zones. Requires host-info
+    /// collection.
+    #[clap(long, value_enum)]
+    zone_type: Vec<BundleZoneType>,
 
     #[command(flatten)]
     window: TimeWindowArgs,
@@ -5659,6 +5666,29 @@ async fn lookup_sled_by_id(
     Ok(sled)
 }
 
+/// Maps the zone-type flag values onto the generated client enum.
+fn zone_type_to_api(
+    zone_type: BundleZoneType,
+) -> nexus_lockstep_client::types::SupportBundleZoneType {
+    use nexus_lockstep_client::types::SupportBundleZoneType as Api;
+    match zone_type {
+        BundleZoneType::Global => Api::Global,
+        BundleZoneType::Switch => Api::Switch,
+        BundleZoneType::Propolis => Api::Propolis,
+        BundleZoneType::Ntp => Api::Ntp,
+        BundleZoneType::Clickhouse => Api::Clickhouse,
+        BundleZoneType::ClickhouseKeeper => Api::ClickhouseKeeper,
+        BundleZoneType::ClickhouseServer => Api::ClickhouseServer,
+        BundleZoneType::CockroachDb => Api::Cockroachdb,
+        BundleZoneType::Crucible => Api::Crucible,
+        BundleZoneType::CruciblePantry => Api::CruciblePantry,
+        BundleZoneType::ExternalDns => Api::ExternalDns,
+        BundleZoneType::InternalDns => Api::InternalDns,
+        BundleZoneType::Nexus => Api::Nexus,
+        BundleZoneType::Oximeter => Api::Oximeter,
+    }
+}
+
 /// Runs `omdb nexus support-bundles create`
 async fn cmd_nexus_support_bundles_create(
     client: &nexus_lockstep_client::Client,
@@ -5670,7 +5700,7 @@ async fn cmd_nexus_support_bundles_create(
     // No --include collects everything, matching `support-bundle collect`.
     // The API's other reading of an empty selection, "collect nothing",
     // cannot be specified by clap, which rejects --include without a value.
-    let data = if args.include.is_empty() {
+    let data = if args.include.is_empty() && args.zone_type.is_empty() {
         types::SupportBundleData::All
     } else {
         let mut reconfigurator = false;
@@ -5679,7 +5709,14 @@ async fn cmd_nexus_support_bundles_create(
         let mut host_info = None;
         let mut ereports = None;
 
-        for category in &args.include {
+        // A zone-type restriction needs the explicit form to be expressed,
+        // so with no --include it applies to every category.
+        let categories: &[BundleDataCategory] = if args.include.is_empty() {
+            clap::ValueEnum::value_variants()
+        } else {
+            args.include.as_slice()
+        };
+        for category in categories {
             match category {
                 BundleDataCategory::Reconfigurator => reconfigurator = true,
                 BundleDataCategory::SledCubbyInfo => sled_cubby_info = true,
@@ -5697,6 +5734,18 @@ async fn cmd_nexus_support_bundles_create(
                     })
                 }
             }
+        }
+
+        if !args.zone_type.is_empty() {
+            let Some(host_info) = host_info.as_mut() else {
+                bail!(
+                    "--zone-type only affects zone logs, which are part of \
+                     host-info collection; add --include host-info"
+                );
+            };
+            host_info.zones = types::SupportBundleZoneSelection::Specific(
+                args.zone_type.iter().copied().map(zone_type_to_api).collect(),
+            );
         }
 
         types::SupportBundleData::Explicit {
