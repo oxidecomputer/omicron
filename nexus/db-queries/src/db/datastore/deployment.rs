@@ -71,6 +71,7 @@ use nexus_db_model::Ipv6Addr;
 use nexus_db_model::SpMgsSlot;
 use nexus_db_model::SpType;
 use nexus_db_model::SqlU16;
+use nexus_db_model::SqlU32;
 use nexus_db_model::TufArtifactFile;
 use nexus_db_model::to_db_typed_uuid;
 use nexus_db_schema::enums::HwM2SlotEnum;
@@ -100,6 +101,7 @@ use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::ZoneRunningStatus;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
@@ -116,6 +118,8 @@ use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::num::NonZeroU32;
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 use thiserror::Error;
 use uuid::Uuid;
@@ -2332,6 +2336,255 @@ impl DataStore {
 
         Ok(current_target.into())
     }
+
+    /// List a page of rows from `bp_target`
+    ///
+    /// Generally, only the last `bp_target` row is meaningful.  You only want
+    /// this if you're explicitly looking at history for debugging, cleanup,
+    /// etc.
+    pub async fn bp_target_list_page(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, SqlU32>,
+    ) -> ListResultVec<BpTarget> {
+        opctx.authorize(authz::Action::Read, &authz::BLUEPRINT_CONFIG).await?;
+
+        use nexus_db_schema::schema::bp_target::dsl;
+        paginated(dsl::bp_target, dsl::version, pagparams)
+            .select(BpTarget::as_select())
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Fetch information about most recent target blueprints
+    ///
+    /// This looks at the most recent rows from the `bp_target` table and
+    /// determines which version(s) can be deleted, assuming we want to keep
+    /// `nkeep` distinct blueprints.
+    // This could arguably live in the pruner itself, which could build it atop
+    // a public `bp_target_list_page`.  It lives here instead because it goes
+    // with `bp_target_delete_up_to`, and that _can't_ be built atop a
+    // comparably safe interface.
+    pub async fn bp_target_determine_pruneable(
+        &self,
+        opctx: &OpContext,
+        nkeep: NonZeroUsize,
+    ) -> Result<BpTargetPruneable, Error> {
+        self.bp_target_determine_pruneable_batched(opctx, nkeep, SQL_BATCH_SIZE)
+            .await
+    }
+
+    /// Implementation of `bp_target_determine_pruneable()` that allows the
+    /// caller to control the size of each database page
+    ///
+    /// This exists so that tests can exercise the paging behavior without
+    /// creating thousands of rows.
+    async fn bp_target_determine_pruneable_batched(
+        &self,
+        opctx: &OpContext,
+        nkeep: NonZeroUsize,
+        batch_size: NonZeroU32,
+    ) -> Result<BpTargetPruneable, Error> {
+        opctx.authorize(authz::Action::Read, &authz::BLUEPRINT_CONFIG).await?;
+        let nkeep = nkeep.get();
+
+        // There are lots of ways to do this.  We'll do it by paging backwards
+        // through the table until we identify `nkeep` distinct blueprints.
+        //
+        // Alternative considered: take MAX(version) and subtract `nkeep`.  This
+        // is easy to do, but might result in keeping fewer blueprints if some
+        // of those rows just involve having enabled or disabled the target.
+        // It's uncommon to enable/disable the target, so this matters most when
+        // `nkeep` is small.  It could also be *very* wrong if for whatever
+        // reason somebody has already removed rows near the end of the table.
+        // This too should be impossible, but there's no need to rely on it.
+        //
+        // Alternative considered: have the database tell us the version that's
+        // `nkeep` rows from the end.  e.g., something like
+        //
+        //   SELECT version FROM bp_target \
+        //       ORDER BY version DESC OFFSET `nkeep`
+        //
+        // That query is somewhat expensive (well, proportional to `nkeep`) and
+        // still has the problem of not keeping enough blueprints if some of
+        // these rows correspond to just enabling/disabling the current target.
+        //
+        // By comparison, the approach we pick here is just a paginated scan (no
+        // exotic SQL), each query's cost is proportional to the page size
+        // (rather than `nkeep`), and it allows us to keep the right number of
+        // distinct blueprints.
+
+        let mut nscanned = 0;
+        let mut blueprint_ids_to_keep: BTreeSet<BlueprintUuid> =
+            BTreeSet::new();
+        let mut paginator =
+            Paginator::new(batch_size, dropshot::PaginationOrder::Descending);
+        let mut last_version_seen = None;
+        let mut latest_target_id = None;
+
+        while let Some(p) = paginator.next() {
+            let records_batch = self
+                .bp_target_list_page(opctx, &p.current_pagparams())
+                .await
+                .internal_context("fetching page of bp_target rows")?;
+            paginator =
+                p.found_batch(&records_batch, &|m: &BpTarget| m.version);
+            for row in records_batch {
+                nscanned += 1;
+                let blueprint_id = BlueprintUuid::from(row.blueprint_id);
+                if latest_target_id.is_none() {
+                    latest_target_id = Some(blueprint_id);
+                }
+
+                // This is pretty subtle: we don't want to stop as soon as we
+                // find the Nth distinct blueprint id.  That's because if we
+                // keep going, we might find more rows that refer to the same
+                // blueprint id (if someone toggled the enabled/disabled bit).
+                // If we stopped here, the caller would see those rows and
+                // erroneously determine they could prune this blueprint, but we
+                // were counting on it being one of the ones being kept.
+                //
+                // Instead, we need to go far enough back to see a different
+                // blueprint id.
+                if blueprint_ids_to_keep.len() >= nkeep
+                    && !blueprint_ids_to_keep.contains(&row.blueprint_id.into())
+                {
+                    // unwrap(): `nkeep` is non-zero, so we cannot get here
+                    // until we have processed at least one row, and processing
+                    // a row sets both of these.
+                    let version = last_version_seen.unwrap();
+                    let target_id = latest_target_id.unwrap();
+                    return Ok(BpTargetPruneable {
+                        nscanned,
+                        nfound: blueprint_ids_to_keep.len(),
+                        keep: KeepWhat::StartingFromVersion(version),
+                        target_id,
+                    });
+                }
+
+                blueprint_ids_to_keep.insert(row.blueprint_id.into());
+                last_version_seen = Some(*row.version);
+            }
+        }
+
+        Ok(BpTargetPruneable {
+            nscanned,
+            nfound: blueprint_ids_to_keep.len(),
+            keep: KeepWhat::All,
+            target_id: latest_target_id.ok_or_else(|| {
+                // This should be impossible since we always have a target.
+                Error::internal_error("no bp_target rows found")
+            })?,
+        })
+    }
+
+    /// Delete `bp_target` rows not newer than the specified version
+    ///
+    /// The caller must have previously used `bp_target_determine_pruneable()`
+    /// to figure out what can be safely pruned and supply that here.
+    pub async fn bp_target_delete_up_to(
+        &self,
+        opctx: &OpContext,
+        pruneable: &BpTargetPruneable,
+        version: u32,
+    ) -> Result<usize, Error> {
+        opctx
+            .authorize(authz::Action::Modify, &authz::BLUEPRINT_CONFIG)
+            .await?;
+
+        match pruneable.keep {
+            KeepWhat::All => {
+                return Err(Error::internal_error(
+                    "cannot delete from bp_targets when determination \
+                     was to keep all rows",
+                ));
+            }
+            KeepWhat::StartingFromVersion(v) => {
+                if version >= v {
+                    return Err(Error::internal_error(&format!(
+                        "cannot delete up to bp_target version {version} \
+                         when determination was to keep starting at version \
+                         {v}"
+                    )));
+                }
+            }
+        }
+
+        #[derive(Debug, Error)]
+        enum TargetDeleteError {
+            #[error("database error")]
+            Diesel(#[from] DieselError),
+
+            #[error("cannot delete latest bp_target row")]
+            LastRow,
+        }
+
+        // Although the Rust interface makes it hard to invoke this in a way
+        // that would prune the last rows in the table, since the consequences
+        // would be so dire, we use a transaction to ensure that we're not
+        // doing that.
+        let conn = self.pool_connection_authorized(&opctx).await?;
+        let ndeleted = self
+            .transaction_non_retry_wrapper("bp_target_delete")
+            .transaction(&conn, |conn| async move {
+                use nexus_db_schema::schema::bp_target::dsl;
+                let latest_version: SqlU32 = dsl::bp_target
+                    .select(dsl::version)
+                    .order_by(dsl::version.desc())
+                    .limit(1)
+                    .first_async(&conn)
+                    .await?;
+
+                if version >= *latest_version {
+                    return Err(TargetDeleteError::LastRow);
+                }
+
+                let ndeleted = diesel::delete(
+                    dsl::bp_target.filter(dsl::version.le(SqlU32(version))),
+                )
+                .execute_async(&conn)
+                .await?;
+
+                Ok(ndeleted)
+            })
+            .await
+            .map_err(|e| match e {
+                TargetDeleteError::Diesel(e) => {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                }
+                e @ TargetDeleteError::LastRow => {
+                    // This variant is always an internal error and has no
+                    // causes so we don't need to use InlineErrorChain here.
+                    Error::internal_error(&e.to_string())
+                }
+            })?;
+
+        Ok(ndeleted)
+    }
+}
+
+/// Summarizes the most recent rows of the `bp_target` table
+#[derive(Debug)]
+pub struct BpTargetPruneable {
+    /// how many rows we scanned (starting at the end of the table)
+    pub nscanned: usize,
+    /// how many distinct blueprint ids we found
+    pub nfound: usize,
+    /// which rows to keep
+    pub keep: KeepWhat,
+    /// id of the latest target blueprint
+    pub target_id: BlueprintUuid,
+}
+
+/// Describes which versions in `bp_target` to keep, based on how many were
+/// requested to be kept and what we actually found in the table
+#[derive(Debug, Eq, PartialEq)]
+pub enum KeepWhat {
+    /// Keep everything because there aren't more than the requested number
+    All,
+    /// Keep only rows after (and including) the provided version
+    StartingFromVersion(u32),
 }
 
 // Helper for reporting "should never happen" errors while inserting blueprints.
@@ -3137,6 +3390,7 @@ mod tests {
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::pub_test_utils::helpers::create_service_ip_pool;
     use crate::db::raw_query_builder::QueryBuilder;
+    use assert_matches::assert_matches;
     use gateway_types::rot::RotSlot;
     use nexus_inventory::now_db_precision;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
@@ -4442,6 +4696,578 @@ mod tests {
         }
 
         // Clean up.
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Creates a `bp_target` history for testing the pruning-related queries
+    ///
+    /// Creates `nblueprints` blueprints, each one a child of the last, making
+    /// each one the target as it goes.  After making each one the target,
+    /// toggles the enabled bit `ntoggles` times.  Each toggle adds another
+    /// `bp_target` row referring to the same blueprint, which is the main way
+    /// that `bp_target` rows and blueprints fail to correspond one-to-one.
+    ///
+    /// If the system already has a target blueprint, the new blueprints chain
+    /// onto it, so a test can call this more than once.
+    ///
+    /// Returns the ids of the blueprints created, oldest first.
+    async fn create_bp_target_history(
+        opctx: &OpContext,
+        datastore: &DataStore,
+        log: &Logger,
+        nblueprints: usize,
+        ntoggles: usize,
+    ) -> Vec<BlueprintUuid> {
+        let mut blueprint_ids = Vec::with_capacity(nblueprints);
+        let mut enabled = false;
+        let mut parent: Option<Blueprint> =
+            if all_bp_target_rows(opctx, datastore).await.is_empty() {
+                None
+            } else {
+                let (target, blueprint) = datastore
+                    .blueprint_target_get_current_full(opctx)
+                    .await
+                    .expect("reading current target blueprint");
+                enabled = target.enabled;
+                Some(blueprint)
+            };
+
+        for _ in 0..nblueprints {
+            let blueprint = match &parent {
+                None => BlueprintBuilder::build_empty("test-suite"),
+                Some(parent) => BlueprintBuilder::new_based_on(
+                    log,
+                    parent,
+                    "test-suite",
+                    PlannerRng::from_entropy(),
+                )
+                .expect("creating BlueprintBuilder")
+                .build(BlueprintSource::Test),
+            };
+
+            datastore
+                .blueprint_insert(opctx, &blueprint)
+                .await
+                .expect("inserting blueprint");
+            datastore
+                .blueprint_target_set_current(
+                    opctx,
+                    BlueprintTarget {
+                        target_id: blueprint.id,
+                        enabled,
+                        time_made_target: now_db_precision(),
+                    },
+                )
+                .await
+                .expect("setting target blueprint");
+
+            for _ in 0..ntoggles {
+                enabled = !enabled;
+                datastore
+                    .blueprint_target_set_current_enabled(
+                        opctx,
+                        BlueprintTarget {
+                            target_id: blueprint.id,
+                            enabled,
+                            time_made_target: now_db_precision(),
+                        },
+                    )
+                    .await
+                    .expect("toggling target blueprint");
+            }
+
+            blueprint_ids.push(blueprint.id);
+            parent = Some(blueprint);
+        }
+
+        blueprint_ids
+    }
+
+    /// Returns all rows of `bp_target`, oldest first
+    async fn all_bp_target_rows(
+        opctx: &OpContext,
+        datastore: &DataStore,
+    ) -> Vec<BpTarget> {
+        let mut rv = Vec::new();
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
+        while let Some(p) = paginator.next() {
+            let batch = datastore
+                .bp_target_list_page(opctx, &p.current_pagparams())
+                .await
+                .expect("listing bp_target rows");
+            paginator = p.found_batch(&batch, &|b: &BpTarget| b.version);
+            rv.extend(batch);
+        }
+        rv
+    }
+
+    /// Returns the version of the first `bp_target` row referring to
+    /// `blueprint_id`
+    fn first_version_for(
+        rows: &[BpTarget],
+        blueprint_id: BlueprintUuid,
+    ) -> u32 {
+        rows.iter()
+            .find(|r| BlueprintUuid::from(r.blueprint_id) == blueprint_id)
+            .map(|r| *r.version)
+            .unwrap_or_else(|| {
+                panic!("no bp_target row for blueprint {blueprint_id}")
+            })
+    }
+
+    /// Converts a `usize` to a `NonZeroUsize` for tests that know the value is
+    /// not zero
+    fn nonzero(n: usize) -> NonZeroUsize {
+        NonZeroUsize::new(n).expect("test used a zero value for nkeep")
+    }
+
+    /// Tests `bp_target_list_page()`, including correct pagination in both
+    /// directions
+    #[tokio::test]
+    async fn test_bp_target_list_page() {
+        let logctx = dev::test_setup_log("test_bp_target_list_page");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // An empty table produces no rows in either direction.
+        for direction in [
+            dropshot::PaginationOrder::Ascending,
+            dropshot::PaginationOrder::Descending,
+        ] {
+            let rows = datastore
+                .bp_target_list_page(
+                    opctx,
+                    &DataPageParams {
+                        marker: None,
+                        direction,
+                        limit: SQL_BATCH_SIZE,
+                    },
+                )
+                .await
+                .expect("listing bp_target rows");
+            assert!(rows.is_empty());
+        }
+
+        // With one blueprint, both directions return the one row.  Note that
+        // the first target blueprint is always version 1.
+        let blueprint_ids =
+            create_bp_target_history(opctx, datastore, &logctx.log, 1, 0).await;
+        for direction in [
+            dropshot::PaginationOrder::Ascending,
+            dropshot::PaginationOrder::Descending,
+        ] {
+            let rows = datastore
+                .bp_target_list_page(
+                    opctx,
+                    &DataPageParams {
+                        marker: None,
+                        direction,
+                        limit: SQL_BATCH_SIZE,
+                    },
+                )
+                .await
+                .expect("listing bp_target rows");
+            assert_eq!(rows.len(), 1);
+            assert_eq!(*rows[0].version, 1);
+            assert_eq!(
+                BlueprintUuid::from(rows[0].blueprint_id),
+                blueprint_ids[0]
+            );
+        }
+
+        // Add more blueprints, with toggles, so that there are more rows than
+        // blueprints.
+        let ntoggles = 2;
+        let more_ids = create_bp_target_history(
+            opctx,
+            datastore,
+            &logctx.log,
+            4,
+            ntoggles,
+        )
+        .await;
+        // The first blueprint has one row.  Each of the others has one row for
+        // being made the target plus one for each toggle.
+        let nrows = 1 + more_ids.len() * (1 + ntoggles);
+
+        // Paging all the way through in either direction visits every row
+        // exactly once, in order.
+        for direction in [
+            dropshot::PaginationOrder::Ascending,
+            dropshot::PaginationOrder::Descending,
+        ] {
+            // Use a page size that does not evenly divide the number of rows so
+            // that the last page is a partial one.
+            // unwrap(): 3 != 0
+            let batch_size = NonZeroU32::new(3).unwrap();
+            assert_ne!(nrows % usize::try_from(batch_size.get()).unwrap(), 0);
+
+            let mut versions_found = Vec::new();
+            let mut paginator = Paginator::new(batch_size, direction);
+            while let Some(p) = paginator.next() {
+                let batch = datastore
+                    .bp_target_list_page(opctx, &p.current_pagparams())
+                    .await
+                    .expect("listing bp_target rows");
+                assert!(
+                    batch.len() <= usize::try_from(batch_size.get()).unwrap()
+                );
+                paginator = p.found_batch(&batch, &|b: &BpTarget| b.version);
+                versions_found.extend(batch.into_iter().map(|b| *b.version));
+            }
+
+            let mut expected: Vec<u32> =
+                (1..=u32::try_from(nrows).unwrap()).collect();
+            if matches!(direction, dropshot::PaginationOrder::Descending) {
+                expected.reverse();
+            }
+            assert_eq!(versions_found, expected);
+        }
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Tests `bp_target_determine_pruneable()` on histories where each
+    /// `bp_target` row refers to a different blueprint
+    ///
+    /// This is the query that decides how much of the history the blueprint
+    /// pruner may delete, so the cases that matter most are the ones where it
+    /// should decide to keep everything, the boundary around `nkeep`, and a
+    /// history with a gap in the version sequence.
+    #[tokio::test]
+    async fn test_bp_target_determine_pruneable() {
+        let logctx = dev::test_setup_log("test_bp_target_determine_pruneable");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // With no rows at all, we report an internal error.  This should be
+        // impossible on a real system, where RSS always sets an initial target
+        // blueprint before any of this code can run.
+        let error = datastore
+            .bp_target_determine_pruneable(opctx, nonzero(3))
+            .await
+            .expect_err("determining pruneable rows with an empty table");
+        assert_matches!(
+            &error,
+            Error::InternalError { internal_message }
+                if internal_message == "no bp_target rows found"
+        );
+
+        // With one blueprint, there's nothing to prune, whatever `nkeep` is.
+        let blueprint_ids =
+            create_bp_target_history(opctx, datastore, &logctx.log, 1, 0).await;
+        for nkeep in [1, 2, 100] {
+            let pruneable = datastore
+                .bp_target_determine_pruneable(opctx, nonzero(nkeep))
+                .await
+                .expect("determining pruneable rows");
+            assert_eq!(pruneable.keep, KeepWhat::All);
+            assert_eq!(pruneable.nfound, 1);
+            assert_eq!(pruneable.nscanned, 1);
+            assert_eq!(pruneable.target_id, blueprint_ids[0]);
+        }
+
+        // Now build up a longer history with no toggles, so that `bp_target`
+        // rows and blueprints correspond one-to-one.
+        let nblueprints = 10;
+        let mut blueprint_ids = blueprint_ids;
+        blueprint_ids.extend(
+            create_bp_target_history(
+                opctx,
+                datastore,
+                &logctx.log,
+                nblueprints - 1,
+                0,
+            )
+            .await,
+        );
+        assert_eq!(blueprint_ids.len(), nblueprints);
+        let rows = all_bp_target_rows(opctx, datastore).await;
+        assert_eq!(rows.len(), nblueprints);
+
+        // Keeping at least as many as we have means keeping everything.  The
+        // `nkeep == nblueprints` case is a boundary: we have to scan the whole
+        // table to discover that there's nothing to prune.
+        for nkeep in [nblueprints, nblueprints + 1] {
+            let pruneable = datastore
+                .bp_target_determine_pruneable(opctx, nonzero(nkeep))
+                .await
+                .expect("determining pruneable rows");
+            assert_eq!(pruneable.keep, KeepWhat::All);
+            assert_eq!(pruneable.nfound, nblueprints);
+            assert_eq!(pruneable.nscanned, nblueprints);
+            assert_eq!(pruneable.target_id, blueprint_ids[nblueprints - 1]);
+        }
+
+        // Keeping fewer than we have means pruning the oldest ones.  Check
+        // every value of `nkeep` that prunes something, including the
+        // `nblueprints - 1` boundary.
+        for nkeep in 1..nblueprints {
+            let pruneable = datastore
+                .bp_target_determine_pruneable(opctx, nonzero(nkeep))
+                .await
+                .expect("determining pruneable rows");
+            // The oldest blueprint we keep is `nkeep` from the end.
+            let oldest_kept = blueprint_ids[nblueprints - nkeep];
+            assert_eq!(
+                pruneable.keep,
+                KeepWhat::StartingFromVersion(first_version_for(
+                    &rows,
+                    oldest_kept
+                ))
+            );
+            assert_eq!(pruneable.nfound, nkeep);
+            // We scan the rows we're keeping plus one more, which is how we
+            // discover that we've found `nkeep` distinct blueprints.
+            assert_eq!(pruneable.nscanned, nkeep + 1);
+            assert_eq!(pruneable.target_id, blueprint_ids[nblueprints - 1]);
+        }
+
+        // Punch a gap in the version sequence and check that we still keep
+        // `nkeep` blueprints.  This should not happen under normal operation.
+        // But an implementation that subtracted `nkeep` from the latest
+        // version, instead of counting the rows it actually saw, would decide
+        // to keep too few here.
+        let gap_start = 3;
+        let gap_size = 4;
+        let gap_versions: Vec<u32> = rows[gap_start..gap_start + gap_size]
+            .iter()
+            .map(|r| *r.version)
+            .collect();
+        {
+            use nexus_db_schema::schema::bp_target::dsl;
+            let conn = datastore
+                .pool_connection_for_tests()
+                .await
+                .expect("getting database connection");
+            let ndeleted = diesel::delete(
+                dsl::bp_target.filter(
+                    dsl::version
+                        .eq_any(gap_versions.iter().copied().map(SqlU32::new)),
+                ),
+            )
+            .execute_async(&*conn)
+            .await
+            .expect("deleting bp_target rows");
+            assert_eq!(ndeleted, gap_size);
+        }
+
+        let mut remaining_ids = blueprint_ids;
+        remaining_ids.drain(gap_start..gap_start + gap_size);
+        let nremaining = nblueprints - gap_size;
+        let rows = all_bp_target_rows(opctx, datastore).await;
+        assert_eq!(rows.len(), nremaining);
+
+        for nkeep in 1..nremaining {
+            let pruneable = datastore
+                .bp_target_determine_pruneable(opctx, nonzero(nkeep))
+                .await
+                .expect("determining pruneable rows");
+            let oldest_kept = remaining_ids[nremaining - nkeep];
+            assert_eq!(
+                pruneable.keep,
+                KeepWhat::StartingFromVersion(first_version_for(
+                    &rows,
+                    oldest_kept
+                ))
+            );
+            assert_eq!(pruneable.nfound, nkeep);
+            assert_eq!(pruneable.nscanned, nkeep + 1);
+            assert_eq!(pruneable.target_id, remaining_ids[nremaining - 1]);
+        }
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Tests `bp_target_determine_pruneable()` when several `bp_target` rows
+    /// refer to the same blueprint, which happens when the enabled bit is
+    /// toggled
+    ///
+    /// This includes a subtle case: having found `nkeep` distinct blueprints,
+    /// we have to keep scanning backwards until we see a *different* blueprint
+    /// id.  Otherwise we'd report that the older rows for the oldest blueprint
+    /// we're keeping could be pruned, and the caller would delete that
+    /// blueprint.
+    #[tokio::test]
+    async fn test_bp_target_determine_pruneable_dups() {
+        let logctx =
+            dev::test_setup_log("test_bp_target_determine_pruneable_dups");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create a history where every blueprint has several `bp_target` rows.
+        let nblueprints = 8;
+        let ntoggles = 3;
+        let blueprint_ids = create_bp_target_history(
+            opctx,
+            datastore,
+            &logctx.log,
+            nblueprints,
+            ntoggles,
+        )
+        .await;
+        let rows = all_bp_target_rows(opctx, datastore).await;
+        assert_eq!(rows.len(), nblueprints * (1 + ntoggles));
+
+        // Try this with a range of batch sizes.  The interesting ones are those
+        // where a page boundary falls inside one blueprint's run of rows, and
+        // where a whole page can be filled with rows for a single blueprint.
+        let batch_sizes = [1, 2, 3, 4, 5, SQL_BATCH_SIZE.get()];
+        for batch_size in batch_sizes {
+            // unwrap(): none of `batch_sizes` is zero
+            let batch_size = NonZeroU32::new(batch_size).unwrap();
+
+            for nkeep in 1..=nblueprints {
+                let pruneable = datastore
+                    .bp_target_determine_pruneable_batched(
+                        opctx,
+                        nonzero(nkeep),
+                        batch_size,
+                    )
+                    .await
+                    .expect("determining pruneable rows");
+                let label = format!("batch_size {batch_size}, nkeep {nkeep}");
+
+                assert_eq!(pruneable.nfound, nkeep, "{label}");
+                assert_eq!(
+                    pruneable.target_id,
+                    blueprint_ids[nblueprints - 1],
+                    "{label}"
+                );
+
+                if nkeep == nblueprints {
+                    assert_eq!(pruneable.keep, KeepWhat::All, "{label}");
+                    continue;
+                }
+
+                // This is the crux of the test: the version we keep from must
+                // be the *first* row for the oldest blueprint we're keeping,
+                // not one of its later toggle rows.
+                let oldest_kept = blueprint_ids[nblueprints - nkeep];
+                let expected = first_version_for(&rows, oldest_kept);
+                assert_eq!(
+                    pruneable.keep,
+                    KeepWhat::StartingFromVersion(expected),
+                    "{label}"
+                );
+            }
+        }
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Tests `bp_target_delete_up_to()`, including both failure cases and the
+    /// basic success case
+    #[tokio::test]
+    async fn test_bp_target_delete_up_to() {
+        let logctx = dev::test_setup_log("test_bp_target_delete_up_to");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let nblueprints = 6;
+        let blueprint_ids = create_bp_target_history(
+            opctx,
+            datastore,
+            &logctx.log,
+            nblueprints,
+            0,
+        )
+        .await;
+        let rows_before = all_bp_target_rows(opctx, datastore).await;
+        assert_eq!(rows_before.len(), nblueprints);
+        let latest_version = *rows_before[nblueprints - 1].version;
+
+        // If the determination was to keep everything, we refuse to delete
+        // anything.
+        let keep_all = BpTargetPruneable {
+            nscanned: nblueprints,
+            nfound: nblueprints,
+            keep: KeepWhat::All,
+            target_id: blueprint_ids[nblueprints - 1],
+        };
+        let error = datastore
+            .bp_target_delete_up_to(opctx, &keep_all, 1)
+            .await
+            .expect_err("deleting rows when the determination was to keep all");
+        assert_matches!(
+            &error,
+            Error::InternalError { internal_message }
+                if internal_message.contains(
+                    "cannot delete from bp_targets when determination \
+                     was to keep all rows"
+                )
+        );
+
+        // If the caller asks to delete a version that the determination said to
+        // keep, we refuse.  Try both the first version to keep and one newer
+        // than that.
+        let nkeep = 3;
+        let keep_from = *rows_before[nblueprints - nkeep].version;
+        let pruneable = BpTargetPruneable {
+            nscanned: nkeep + 1,
+            nfound: nkeep,
+            keep: KeepWhat::StartingFromVersion(keep_from),
+            target_id: blueprint_ids[nblueprints - 1],
+        };
+        for version in [keep_from, keep_from + 1, latest_version] {
+            let error = datastore
+                .bp_target_delete_up_to(opctx, &pruneable, version)
+                .await
+                .expect_err("deleting rows that were to be kept");
+            assert_matches!(
+                &error,
+                Error::InternalError { internal_message }
+                    if internal_message.contains(
+                        "when determination was to keep"
+                    )
+            );
+        }
+
+        // None of the failed attempts changed anything.
+        assert_eq!(rows_before, all_bp_target_rows(opctx, datastore).await);
+
+        // Now exercise the transaction's last-ditch check that we're not
+        // deleting the newest row.  The interface above makes this hard to do
+        // by accident, so we have to construct a bogus determination that says
+        // to keep only rows newer than the newest one there is.
+        let bogus = BpTargetPruneable {
+            nscanned: 0,
+            nfound: 0,
+            keep: KeepWhat::StartingFromVersion(latest_version + 1),
+            target_id: blueprint_ids[nblueprints - 1],
+        };
+        let error = datastore
+            .bp_target_delete_up_to(opctx, &bogus, latest_version)
+            .await
+            .expect_err("deleting the latest bp_target row");
+        assert_matches!(
+            &error,
+            Error::InternalError { internal_message }
+                if internal_message == "cannot delete latest bp_target row"
+        );
+        assert_eq!(rows_before, all_bp_target_rows(opctx, datastore).await);
+
+        // Finally, the happy path: delete everything older than `keep_from`.
+        let ndeleted = datastore
+            .bp_target_delete_up_to(opctx, &pruneable, keep_from - 1)
+            .await
+            .expect("deleting old bp_target rows");
+        assert_eq!(ndeleted, nblueprints - nkeep);
+        let rows_after = all_bp_target_rows(opctx, datastore).await;
+        assert_eq!(
+            rows_after,
+            rows_before[nblueprints - nkeep..],
+            "expected exactly the oldest {} rows to be deleted",
+            nblueprints - nkeep
+        );
+
         db.terminate().await;
         logctx.cleanup_successful();
     }
