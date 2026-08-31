@@ -73,6 +73,7 @@ pub enum BundleDataCategory {
     clap::ValueEnum,
 )]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum BundleZoneType {
     /// The global zone.
     Global,
@@ -202,6 +203,7 @@ impl FromStr for BundleZoneType {
 
 /// The zones whose logs to collect, selected by zone type.
 #[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum ZoneSelection {
     /// Every zone holding logs, including zones whose name classifies to no
     /// [`BundleZoneType`]. Such zones are only ever collected under this
@@ -696,18 +698,6 @@ pub(crate) mod test_utils {
         (min..=max).prop_map(|secs| DateTime::from_timestamp(secs, 0).unwrap())
     }
 
-    impl Arbitrary for ZoneSelection {
-        type Parameters = ();
-        type Strategy = BoxedStrategy<Self>;
-
-        fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
-            // Only the All variant: the external API type cannot express a
-            // zone selection yet, so its round-trip proptest would report
-            // any other value as a drop.
-            Just(ZoneSelection::All).boxed()
-        }
-    }
-
     impl Arbitrary for BundleTimeRange {
         type Parameters = ();
         type Strategy = BoxedStrategy<Self>;
@@ -903,9 +893,8 @@ mod tests {
         assert!(all.contains("global"));
         assert!(all.contains(unknown_zone));
 
-        let only_nexus = ZoneSelection::Types(
-            [BundleZoneType::Nexus].into_iter().collect(),
-        );
+        let only_nexus =
+            ZoneSelection::Types([BundleZoneType::Nexus].into_iter().collect());
         assert!(only_nexus.contains(&nexus_zone));
         assert!(!only_nexus.contains(&crucible_zone));
         assert!(!only_nexus.contains("global"));

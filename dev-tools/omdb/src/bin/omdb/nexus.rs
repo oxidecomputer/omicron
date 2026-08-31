@@ -5687,6 +5687,7 @@ async fn cmd_nexus_support_bundles_create(
                 BundleDataCategory::HostInfo => {
                     host_info = Some(types::SupportBundleHostInfo {
                         sleds: types::SupportBundleSledSelection::All,
+                        zones: types::SupportBundleZoneSelection::All,
                     })
                 }
                 BundleDataCategory::Ereports => {

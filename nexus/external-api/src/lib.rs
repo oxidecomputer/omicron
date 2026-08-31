@@ -38,6 +38,7 @@ use nexus_types_versions::v2026_02_13_01;
 use nexus_types_versions::v2026_04_16_00;
 use nexus_types_versions::v2026_05_07_00;
 use nexus_types_versions::v2026_06_05_00;
+use nexus_types_versions::v2026_08_27_00;
 use omicron_common::address::IpRange;
 use omicron_common::api::external::{
     http_pagination::{
@@ -87,6 +88,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_08_31_00, SUPPORT_BUNDLE_ZONE_TYPES),
     (2026_08_27_00, SUPPORT_BUNDLE_DATA_SELECTION),
     (2026_08_19_01, BGP_PEER_SRC_ADDR),
     (2026_08_17_00, SUPPORT_BUNDLES_STABLE),
@@ -8575,7 +8577,7 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/support-bundles/{bundle_id}",
         tags = ["system/support-bundles"],
-        versions = VERSION_SUPPORT_BUNDLE_DATA_SELECTION..,
+        versions = VERSION_SUPPORT_BUNDLE_ZONE_TYPES..,
     }]
     async fn support_bundle_view(
         rqctx: RequestContext<Self::Context>,
@@ -8584,6 +8586,26 @@ pub trait NexusExternalApi {
         HttpResponseOk<latest::support_bundle::SupportBundleView>,
         HttpError,
     >;
+
+    /// View support bundle
+    #[endpoint {
+        operation_id = "support_bundle_view",
+        method = GET,
+        path = "/v1/system/support-bundles/{bundle_id}",
+        tags = ["system/support-bundles"],
+        versions = VERSION_SUPPORT_BUNDLE_DATA_SELECTION..VERSION_SUPPORT_BUNDLE_ZONE_TYPES,
+    }]
+    async fn support_bundle_view_v2026_08_27_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::support_bundle::SupportBundlePath>,
+    ) -> Result<
+        HttpResponseOk<v2026_08_27_00::support_bundle::SupportBundleView>,
+        HttpError,
+    > {
+        Ok(Self::support_bundle_view(rqctx, path_params)
+            .await?
+            .map(v2026_08_27_00::support_bundle::SupportBundleView::from))
+    }
 
     /// View support bundle
     #[endpoint {
@@ -8600,7 +8622,7 @@ pub trait NexusExternalApi {
         HttpResponseOk<v2025_11_20_00::support_bundle::SupportBundleInfo>,
         HttpError,
     > {
-        Ok(Self::support_bundle_view(rqctx, path_params)
+        Ok(Self::support_bundle_view_v2026_08_27_00(rqctx, path_params)
             .await?
             .map(v2025_11_20_00::support_bundle::SupportBundleInfo::from))
     }
@@ -8777,7 +8799,7 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/system/support-bundles",
         tags = ["system/support-bundles"],
-        versions = VERSION_SUPPORT_BUNDLE_DATA_SELECTION..,
+        versions = VERSION_SUPPORT_BUNDLE_ZONE_TYPES..,
     }]
     async fn support_bundle_create(
         rqctx: RequestContext<Self::Context>,
@@ -8786,6 +8808,24 @@ pub trait NexusExternalApi {
         HttpResponseCreated<latest::support_bundle::SupportBundleInfo>,
         HttpError,
     >;
+
+    /// Create support bundle
+    #[endpoint {
+        operation_id = "support_bundle_create",
+        method = POST,
+        path = "/v1/system/support-bundles",
+        tags = ["system/support-bundles"],
+        versions = VERSION_SUPPORT_BUNDLE_DATA_SELECTION..VERSION_SUPPORT_BUNDLE_ZONE_TYPES,
+    }]
+    async fn support_bundle_create_v2026_08_27_00(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v2026_08_27_00::support_bundle::SupportBundleCreate>,
+    ) -> Result<
+        HttpResponseCreated<v2025_11_20_00::support_bundle::SupportBundleInfo>,
+        HttpError,
+    > {
+        Self::support_bundle_create(rqctx, body.map(Into::into)).await
+    }
 
     /// Create support bundle
     #[endpoint {
@@ -8802,7 +8842,8 @@ pub trait NexusExternalApi {
         HttpResponseCreated<v2025_11_20_00::support_bundle::SupportBundleInfo>,
         HttpError,
     > {
-        Self::support_bundle_create(rqctx, body.map(Into::into)).await
+        Self::support_bundle_create_v2026_08_27_00(rqctx, body.map(Into::into))
+            .await
     }
 
     /// Create support bundle

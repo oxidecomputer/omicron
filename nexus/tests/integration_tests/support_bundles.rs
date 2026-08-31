@@ -28,6 +28,8 @@ use nexus_types::external_api::support_bundle::SupportBundleInfo;
 use nexus_types::external_api::support_bundle::SupportBundleSledSelection;
 use nexus_types::external_api::support_bundle::SupportBundleState;
 use nexus_types::external_api::support_bundle::SupportBundleView;
+use nexus_types::external_api::support_bundle::SupportBundleZoneSelection;
+use nexus_types::external_api::support_bundle::SupportBundleZoneType;
 use nexus_types::internal_api::background::SupportBundleActivationReport;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionStep;
@@ -1366,7 +1368,8 @@ async fn test_support_bundle_default_data_selection(
             sled_cubby_info: true,
             sp_dumps: true,
             host_info: Some(SupportBundleHostInfo {
-                sleds: SupportBundleSledSelection::All
+                sleds: SupportBundleSledSelection::All,
+                zones: SupportBundleZoneSelection::All,
             }),
             ereports: Some(SupportBundleEreports {
                 only_serials: vec![],
@@ -1423,6 +1426,12 @@ async fn test_support_bundle_explicit_data_selection(
             sleds: SupportBundleSledSelection::Specific {
                 sleds: vec![sled_id],
             },
+            zones: SupportBundleZoneSelection::Specific {
+                types: vec![
+                    SupportBundleZoneType::Nexus,
+                    SupportBundleZoneType::Global,
+                ],
+            },
         }),
         ereports: Some(SupportBundleEreports {
             only_serials: vec!["BRM-FAKE-0".to_string()],
@@ -1452,7 +1461,23 @@ async fn test_support_bundle_explicit_data_selection(
         viewed_categories(&selection),
         ["reconfigurator", "host_info", "ereports"]
     );
-    assert_eq!(selection.data, requested);
+    // The zone types are stored as a set, so the view reports them in a
+    // canonical order regardless of the order they were requested in.
+    let mut expected = requested.clone();
+    let SupportBundleData::Explicit {
+        host_info: Some(SupportBundleHostInfo { zones, .. }),
+        ..
+    } = &mut expected
+    else {
+        panic!("requested selection names host info");
+    };
+    *zones = SupportBundleZoneSelection::Specific {
+        types: vec![
+            SupportBundleZoneType::Global,
+            SupportBundleZoneType::Nexus,
+        ],
+    };
+    assert_eq!(selection.data, expected);
     assert_eq!(selection.start_time, Some(start));
     assert_eq!(selection.end_time, Some(end));
 
@@ -1523,6 +1548,7 @@ async fn test_support_bundle_data_selection_bad_request(
                     sleds: SupportBundleSledSelection::Specific {
                         sleds: vec![missing_sled],
                     },
+                    zones: SupportBundleZoneSelection::All,
                 }),
                 ereports: None,
             },
@@ -1615,6 +1641,7 @@ async fn test_support_bundle_create_unauthorized_with_selection(
                     sp_dumps: false,
                     host_info: Some(SupportBundleHostInfo {
                         sleds: SupportBundleSledSelection::Specific { sleds },
+                        zones: SupportBundleZoneSelection::All,
                     }),
                     ereports: None,
                 },

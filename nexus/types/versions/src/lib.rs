@@ -105,3 +105,5 @@ pub mod v2026_08_14_00;
 pub mod v2026_08_14_01;
 #[path = "support_bundle_data_selection/mod.rs"]
 pub mod v2026_08_27_00;
+#[path = "support_bundle_zone_types/mod.rs"]
+pub mod v2026_08_31_00;
