@@ -1111,9 +1111,8 @@ mod tests {
             "the unstoppable and deleted VMMs remain unmarked"
         );
 
-        // Sled A finishes evacuating and becomes available again. The query
-        // only marks VMMs, and never unmarks them, so sled A's original VMMs
-        // stay marked at their original generation.
+        // Sled A finishes evacuating and becomes available again. Sled A's
+        // original VMMs should stay marked at their original generation.
         datastore
             .rendezvous_sled_bp_availability_upsert(
                 opctx,

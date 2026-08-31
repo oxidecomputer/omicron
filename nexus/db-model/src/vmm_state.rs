@@ -113,8 +113,8 @@ impl VmmState {
         let mut stoppable = vec![];
         for state in Self::ALL_STATES.iter().copied() {
             let is_stoppable = match state {
-                // A VMM in one of these states is on its way to the `running`
-                // state, or already `running`, and can be stopped.
+                // A VMM in one of these states is on its way, or is already
+                // running, and can be stopped.
                 VmmState::Creating
                 | VmmState::Starting
                 | VmmState::Running
