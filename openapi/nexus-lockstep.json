@@ -9931,6 +9931,17 @@
                 "$ref": "#/components/schemas/SupportBundleSledSelection"
               }
             ]
+          },
+          "zones": {
+            "description": "The zones to collect logs from, by zone type. Every zone if omitted. Diagnostic commands are sled-wide and are not affected.",
+            "default": {
+              "type": "all"
+            },
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SupportBundleZoneSelection"
+              }
+            ]
           }
         }
       },
@@ -10082,6 +10093,151 @@
             "type": "string"
           }
         }
+      },
+      "SupportBundleZoneSelection": {
+        "description": "The zones whose logs host info collects, selected by zone type.",
+        "oneOf": [
+          {
+            "description": "Collect logs from every zone, including zones of types not listed in `SupportBundleZoneType`.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "all"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Collect logs only from zones of the listed types. An empty list collects from none of them. The list is treated as a set: duplicates are ignored, and a bundle's view reports it in a canonical order.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "specific"
+                ]
+              },
+              "types": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/SupportBundleZoneType"
+                }
+              }
+            },
+            "required": [
+              "type",
+              "types"
+            ]
+          }
+        ]
+      },
+      "SupportBundleZoneType": {
+        "description": "A type of zone whose logs a support bundle can collect.\n\nA zone's type is derived from its name, which cannot distinguish boundary from internal NTP zones; `ntp` covers both.",
+        "oneOf": [
+          {
+            "description": "The global zone.",
+            "type": "string",
+            "enum": [
+              "global"
+            ]
+          },
+          {
+            "description": "The switch zone.",
+            "type": "string",
+            "enum": [
+              "switch"
+            ]
+          },
+          {
+            "description": "Instance zones (propolis-server).",
+            "type": "string",
+            "enum": [
+              "propolis"
+            ]
+          },
+          {
+            "description": "NTP zones, boundary and internal alike.",
+            "type": "string",
+            "enum": [
+              "ntp"
+            ]
+          },
+          {
+            "description": "Single-node ClickHouse zones.",
+            "type": "string",
+            "enum": [
+              "clickhouse"
+            ]
+          },
+          {
+            "description": "ClickHouse keeper zones.",
+            "type": "string",
+            "enum": [
+              "clickhouse_keeper"
+            ]
+          },
+          {
+            "description": "Replicated ClickHouse server zones.",
+            "type": "string",
+            "enum": [
+              "clickhouse_server"
+            ]
+          },
+          {
+            "description": "CockroachDB zones.",
+            "type": "string",
+            "enum": [
+              "cockroachdb"
+            ]
+          },
+          {
+            "description": "Crucible zones.",
+            "type": "string",
+            "enum": [
+              "crucible"
+            ]
+          },
+          {
+            "description": "Crucible pantry zones.",
+            "type": "string",
+            "enum": [
+              "crucible_pantry"
+            ]
+          },
+          {
+            "description": "External DNS zones.",
+            "type": "string",
+            "enum": [
+              "external_dns"
+            ]
+          },
+          {
+            "description": "Internal DNS zones.",
+            "type": "string",
+            "enum": [
+              "internal_dns"
+            ]
+          },
+          {
+            "description": "Nexus zones.",
+            "type": "string",
+            "enum": [
+              "nexus"
+            ]
+          },
+          {
+            "description": "Oximeter zones.",
+            "type": "string",
+            "enum": [
+              "oximeter"
+            ]
+          }
+        ]
       },
       "SwitchSlot": {
         "description": "Identifies switch physical location",

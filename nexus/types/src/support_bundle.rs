@@ -13,9 +13,14 @@ use chrono::Utc;
 use itertools::Itertools;
 use omicron_uuid_kinds::SledUuid;
 use serde::{Deserialize, Serialize};
+use sled_agent_types::inventory::ZoneKind;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::fmt;
+use std::str::FromStr;
+use strum::IntoEnumIterator;
+use uuid::Uuid;
 
 /// Describes the category of support bundle data.
 #[derive(
@@ -47,6 +52,202 @@ pub enum BundleDataCategory {
     Ereports,
 }
 
+/// A category of zone whose logs a support bundle can collect.
+///
+/// Zone log directories are typed only by the zone's name: they outlive the
+/// zones themselves, so no inventory or blueprint record describes them. The
+/// variants here are therefore the categories distinguishable from a zone
+/// name: one per Omicron zone-name prefix, plus the global zone, the switch
+/// zone, and instance zones.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Hash,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+    clap::ValueEnum,
+)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
+pub enum BundleZoneType {
+    /// The global zone.
+    Global,
+    /// The switch zone.
+    Switch,
+    /// Instance zones (propolis-server).
+    Propolis,
+    /// NTP zones, boundary and internal alike: their zone names do not
+    /// distinguish the two.
+    Ntp,
+    /// Single-node ClickHouse zones.
+    Clickhouse,
+    /// ClickHouse keeper zones.
+    ClickhouseKeeper,
+    /// Replicated ClickHouse server zones.
+    ClickhouseServer,
+    /// CockroachDB zones.
+    #[serde(rename = "cockroachdb")]
+    #[value(name = "cockroachdb")]
+    CockroachDb,
+    /// Crucible zones.
+    Crucible,
+    /// Crucible pantry zones.
+    CruciblePantry,
+    /// External DNS zones.
+    ExternalDns,
+    /// Internal DNS zones.
+    InternalDns,
+    /// Nexus zones.
+    Nexus,
+    /// Oximeter zones.
+    Oximeter,
+}
+
+impl From<ZoneKind> for BundleZoneType {
+    fn from(kind: ZoneKind) -> Self {
+        match kind {
+            ZoneKind::BoundaryNtp | ZoneKind::InternalNtp => Self::Ntp,
+            ZoneKind::Clickhouse => Self::Clickhouse,
+            ZoneKind::ClickhouseKeeper => Self::ClickhouseKeeper,
+            ZoneKind::ClickhouseServer => Self::ClickhouseServer,
+            ZoneKind::CockroachDb => Self::CockroachDb,
+            ZoneKind::Crucible => Self::Crucible,
+            ZoneKind::CruciblePantry => Self::CruciblePantry,
+            ZoneKind::ExternalDns => Self::ExternalDns,
+            ZoneKind::InternalDns => Self::InternalDns,
+            ZoneKind::Nexus => Self::Nexus,
+            ZoneKind::Oximeter => Self::Oximeter,
+        }
+    }
+}
+
+impl BundleZoneType {
+    /// Returns a stable string for this zone type, used for persistence.
+    ///
+    /// For Omicron zones this is the `ZoneKind::zone_prefix()` string; it
+    /// also matches this type's serde representation (a unit test pins
+    /// both).
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Global => "global",
+            Self::Switch => "switch",
+            Self::Propolis => "propolis",
+            Self::Ntp => "ntp",
+            Self::Clickhouse => "clickhouse",
+            Self::ClickhouseKeeper => "clickhouse_keeper",
+            Self::ClickhouseServer => "clickhouse_server",
+            Self::CockroachDb => "cockroachdb",
+            Self::Crucible => "crucible",
+            Self::CruciblePantry => "crucible_pantry",
+            Self::ExternalDns => "external_dns",
+            Self::InternalDns => "internal_dns",
+            Self::Nexus => "nexus",
+            Self::Oximeter => "oximeter",
+        }
+    }
+
+    /// Classifies a zone name (equivalently, a zone log directory name).
+    ///
+    /// Zone names follow `illumos_utils::zone::zone_name`: `oxz_` followed
+    /// by the zone type's prefix and, except for the switch zone, `_` and
+    /// the zone's UUID. The global zone is named just "global". Returns
+    /// `None` for a name matching no known shape.
+    pub fn classify(zone_name: &str) -> Option<Self> {
+        if zone_name == "global" {
+            return Some(Self::Global);
+        }
+        let rest = zone_name.strip_prefix("oxz_")?;
+        if rest == "switch" {
+            return Some(Self::Switch);
+        }
+        if let Some(id) = rest.strip_prefix("propolis-server_") {
+            return id.parse::<Uuid>().ok().map(|_| Self::Propolis);
+        }
+        // The remainder of an Omicron zone name is `<zone_prefix>_<uuid>`.
+        // The prefix must be compared exactly, after splitting off the
+        // UUID: several prefixes shadow each other under a starts_with
+        // comparison ("crucible" and "crucible_pantry", "clickhouse" and
+        // both "clickhouse_keeper" and "clickhouse_server").
+        let (prefix, id) = rest.rsplit_once('_')?;
+        if id.parse::<Uuid>().is_err() {
+            return None;
+        }
+        ZoneKind::iter().find(|k| k.zone_prefix() == prefix).map(Self::from)
+    }
+}
+
+impl fmt::Display for BundleZoneType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for BundleZoneType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // ValueEnum's value_variants covers every variant, so this stays
+        // exhaustive as variants are added.
+        <Self as clap::ValueEnum>::value_variants()
+            .iter()
+            .find(|v| v.as_str() == s)
+            .copied()
+            .ok_or_else(|| format!("unknown zone type: {s:?}"))
+    }
+}
+
+/// The zones whose logs to collect, selected by zone type.
+#[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
+pub enum ZoneSelection {
+    /// Every zone holding logs, including zones whose name classifies to no
+    /// [`BundleZoneType`]. Such zones are only ever collected under this
+    /// variant.
+    #[default]
+    All,
+    /// Only zones whose name classifies to one of these types. An empty set
+    /// selects no zones.
+    Types(BTreeSet<BundleZoneType>),
+}
+
+impl ZoneSelection {
+    /// Returns `true` if this selection includes the zone with the
+    /// given name.
+    pub fn contains(&self, zone_name: &str) -> bool {
+        match self {
+            Self::All => true,
+            Self::Types(types) => BundleZoneType::classify(zone_name)
+                .is_some_and(|t| types.contains(&t)),
+        }
+    }
+
+    pub fn display(&self) -> DisplayZoneSelection<'_> {
+        DisplayZoneSelection { selection: self }
+    }
+}
+
+/// Displayer for pretty-printing [`ZoneSelection`].
+#[must_use = "this struct does nothing unless displayed"]
+pub struct DisplayZoneSelection<'a> {
+    selection: &'a ZoneSelection,
+}
+
+impl fmt::Display for DisplayZoneSelection<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.selection {
+            ZoneSelection::All => write!(f, "all"),
+            ZoneSelection::Types(types) => {
+                write!(f, "{}", types.iter().format(", "))
+            }
+        }
+    }
+}
+
 /// Specifies what data to collect for a bundle data category.
 ///
 /// Each variant corresponds to a BundleDataCategory.
@@ -57,7 +258,7 @@ pub enum BundleDataCategory {
 #[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum BundleData {
     Reconfigurator,
-    HostInfo(SledSelection),
+    HostInfo { sleds: SledSelection, zones: ZoneSelection },
     SledCubbyInfo,
     SpDumps,
     Ereports(EreportFilters),
@@ -67,7 +268,7 @@ impl BundleData {
     fn category(&self) -> BundleDataCategory {
         match self {
             Self::Reconfigurator => BundleDataCategory::Reconfigurator,
-            Self::HostInfo(_) => BundleDataCategory::HostInfo,
+            Self::HostInfo { .. } => BundleDataCategory::HostInfo,
             Self::SledCubbyInfo => BundleDataCategory::SledCubbyInfo,
             Self::SpDumps => BundleDataCategory::SpDumps,
             Self::Ereports(_) => BundleDataCategory::Ereports,
@@ -91,8 +292,13 @@ impl fmt::Display for DisplayBundleData<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.data {
             BundleData::Reconfigurator => write!(f, "reconfigurator"),
-            BundleData::HostInfo(selection) => {
-                write!(f, "host_info({})", selection.display())
+            BundleData::HostInfo { sleds, zones } => {
+                write!(
+                    f,
+                    "host_info(sleds: {}, zones: {})",
+                    sleds.display(),
+                    zones.display()
+                )
             }
             BundleData::SledCubbyInfo => write!(f, "sled_cubby_info"),
             BundleData::SpDumps => write!(f, "sp_dumps"),
@@ -251,20 +457,40 @@ impl BundleDataSelection {
         self
     }
 
-    /// Adds host info collection from all sleds.
-    pub fn with_all_sleds(mut self) -> Self {
-        self.insert(BundleData::HostInfo(SledSelection::All));
+    /// Adds host info collection from all sleds, preserving any zone
+    /// selection already set.
+    pub fn with_all_sleds(self) -> Self {
+        self.with_sleds(SledSelection::All)
+    }
+
+    /// Adds host info collection from specific sleds, preserving any zone
+    /// selection already set.
+    pub fn with_specific_sleds(
+        self,
+        sleds: impl IntoIterator<Item = SledUuid>,
+    ) -> Self {
+        self.with_sleds(SledSelection::Specific(sleds.into_iter().collect()))
+    }
+
+    fn with_sleds(mut self, sleds: SledSelection) -> Self {
+        let zones = self.zone_selection().cloned().unwrap_or_default();
+        self.insert(BundleData::HostInfo { sleds, zones });
         self
     }
 
-    /// Adds host info collection from specific sleds.
-    pub fn with_specific_sleds(
+    /// Restricts host info's zone-log collection to zones of the given
+    /// types, preserving any sled selection already set (and selecting all
+    /// sleds when none is).
+    pub fn with_zone_types(
         mut self,
-        sleds: impl IntoIterator<Item = SledUuid>,
+        types: impl IntoIterator<Item = BundleZoneType>,
     ) -> Self {
-        self.insert(BundleData::HostInfo(SledSelection::Specific(
-            sleds.into_iter().collect(),
-        )));
+        let sleds =
+            self.sled_selection().cloned().unwrap_or(SledSelection::All);
+        self.insert(BundleData::HostInfo {
+            sleds,
+            zones: ZoneSelection::Types(types.into_iter().collect()),
+        });
         self
     }
 
@@ -302,7 +528,16 @@ impl BundleDataSelection {
     /// is not in the selection.
     pub fn sled_selection(&self) -> Option<&SledSelection> {
         match self.data.get(&BundleDataCategory::HostInfo) {
-            Some(BundleData::HostInfo(sel)) => Some(sel),
+            Some(BundleData::HostInfo { sleds, .. }) => Some(sleds),
+            _ => None,
+        }
+    }
+
+    /// Returns the zone selection bounding host info's zone-log collection,
+    /// or `None` if host info is not in the selection.
+    pub fn zone_selection(&self) -> Option<&ZoneSelection> {
+        match self.data.get(&BundleDataCategory::HostInfo) {
+            Some(BundleData::HostInfo { zones, .. }) => Some(zones),
             _ => None,
         }
     }
@@ -561,6 +796,144 @@ mod tests {
         let range = selection.time_range();
         assert_eq!(range.start(), Some(DateTime::<Utc>::MIN_UTC));
         assert_eq!(range.end(), Some(DateTime::<Utc>::MIN_UTC));
+    }
+
+    #[test]
+    fn classify_recognizes_every_zone_name_shape() {
+        let classify = BundleZoneType::classify;
+        let id = Uuid::nil();
+
+        assert_eq!(classify("global"), Some(BundleZoneType::Global));
+        assert_eq!(classify("oxz_switch"), Some(BundleZoneType::Switch));
+        assert_eq!(
+            classify(&format!("oxz_propolis-server_{id}")),
+            Some(BundleZoneType::Propolis)
+        );
+        assert_eq!(
+            classify(&format!("oxz_ntp_{id}")),
+            Some(BundleZoneType::Ntp)
+        );
+
+        // Prefixes that shadow each other under a starts_with comparison
+        // classify to distinct types.
+        assert_eq!(
+            classify(&format!("oxz_crucible_{id}")),
+            Some(BundleZoneType::Crucible)
+        );
+        assert_eq!(
+            classify(&format!("oxz_crucible_pantry_{id}")),
+            Some(BundleZoneType::CruciblePantry)
+        );
+        assert_eq!(
+            classify(&format!("oxz_clickhouse_{id}")),
+            Some(BundleZoneType::Clickhouse)
+        );
+        assert_eq!(
+            classify(&format!("oxz_clickhouse_keeper_{id}")),
+            Some(BundleZoneType::ClickhouseKeeper)
+        );
+        assert_eq!(
+            classify(&format!("oxz_clickhouse_server_{id}")),
+            Some(BundleZoneType::ClickhouseServer)
+        );
+    }
+
+    #[test]
+    fn classify_rejects_unknown_names() {
+        let classify = BundleZoneType::classify;
+        let id = Uuid::nil();
+
+        assert_eq!(classify(""), None);
+        assert_eq!(classify("globalzone"), None);
+        assert_eq!(classify("oxz_"), None);
+        // A known prefix without a UUID, or with a malformed one.
+        assert_eq!(classify("oxz_nexus"), None);
+        assert_eq!(classify("oxz_nexus_not-a-uuid"), None);
+        assert_eq!(classify("oxz_propolis-server_not-a-uuid"), None);
+        // An unknown prefix with a well-formed UUID.
+        assert_eq!(classify(&format!("oxz_fake_test_zone_{id}")), None);
+        assert_eq!(classify(&format!("oxz_switch_{id}")), None);
+    }
+
+    /// Every Omicron zone kind classifies to some [`BundleZoneType`], so a
+    /// future `ZoneKind` cannot silently fall outside the filter.
+    #[test]
+    fn classify_covers_every_zone_kind() {
+        for kind in ZoneKind::iter() {
+            let name = format!("oxz_{}_{}", kind.zone_prefix(), Uuid::nil());
+            assert_eq!(
+                BundleZoneType::classify(&name),
+                Some(BundleZoneType::from(kind)),
+                "zone name {name:?} (from {kind:?}) must classify"
+            );
+        }
+    }
+
+    /// The serde representation, `as_str`, and `FromStr` agree for every
+    /// variant. `as_str` is the persisted form, so this pins all three.
+    #[test]
+    fn bundle_zone_type_string_forms_agree() {
+        for variant in <BundleZoneType as clap::ValueEnum>::value_variants() {
+            let json = serde_json::to_value(variant).unwrap();
+            assert_eq!(json.as_str(), Some(variant.as_str()));
+            assert_eq!(variant.as_str().parse(), Ok(*variant));
+        }
+        assert!("not-a-zone-type".parse::<BundleZoneType>().is_err());
+    }
+
+    #[test]
+    fn zone_selection_filters_by_classified_type() {
+        let id = Uuid::nil();
+        let nexus_zone = format!("oxz_nexus_{id}");
+        let crucible_zone = format!("oxz_crucible_{id}");
+        let unknown_zone = "oxz_fake_test_zone";
+
+        let all = ZoneSelection::All;
+        assert!(all.contains(&nexus_zone));
+        assert!(all.contains("global"));
+        assert!(all.contains(unknown_zone));
+
+        let only_nexus =
+            ZoneSelection::Types([BundleZoneType::Nexus].into_iter().collect());
+        assert!(only_nexus.contains(&nexus_zone));
+        assert!(!only_nexus.contains(&crucible_zone));
+        assert!(!only_nexus.contains("global"));
+        assert!(!only_nexus.contains(unknown_zone));
+
+        let none = ZoneSelection::Types(BTreeSet::new());
+        assert!(!none.contains(&nexus_zone));
+        assert!(!none.contains(unknown_zone));
+    }
+
+    /// The host-info builders each preserve what the other set.
+    #[test]
+    fn host_info_builders_compose() {
+        let sled = SledUuid::nil();
+        let types = || [BundleZoneType::Nexus];
+
+        // Zone types survive a later sled selection, in both orders.
+        let selection = BundleDataSelection::new()
+            .with_zone_types(types())
+            .with_specific_sleds([sled]);
+        assert_eq!(
+            selection.zone_selection(),
+            Some(&ZoneSelection::Types(types().into_iter().collect()))
+        );
+        assert_eq!(
+            selection.sled_selection(),
+            Some(&SledSelection::Specific([sled].into_iter().collect()))
+        );
+        let flipped = BundleDataSelection::new()
+            .with_specific_sleds([sled])
+            .with_zone_types(types());
+        assert_eq!(selection, flipped);
+
+        // Zone types alone imply collecting from all sleds; sleds alone
+        // imply collecting logs from all zones.
+        let selection = BundleDataSelection::new().with_zone_types(types());
+        assert_eq!(selection.sled_selection(), Some(&SledSelection::All));
+        let selection = BundleDataSelection::new().with_all_sleds();
+        assert_eq!(selection.zone_selection(), Some(&ZoneSelection::All));
     }
 
     #[test]

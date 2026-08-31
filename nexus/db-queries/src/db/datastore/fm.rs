@@ -1123,9 +1123,9 @@ impl DataStore {
                     BundleData::Reconfigurator
                     | BundleData::SledCubbyInfo
                     | BundleData::SpDumps => {}
-                    BundleData::HostInfo(sleds) => {
+                    BundleData::HostInfo { sleds, zones } => {
                         host_info_rows.push(HostInfo::from_sitrep(
-                            sitrep_id, req_id, sleds,
+                            sitrep_id, req_id, sleds, zones,
                         ));
                     }
                     BundleData::Ereports(filters) => {
@@ -3193,8 +3193,9 @@ mod tests {
                 comment: String::new(),
             })
             .unwrap();
-        // A request with HostInfo(Specific), Ereports with serial and class
-        // filters, SpDumps, and a bundle-wide time range.
+        // A request with host info restricted to specific sleds and zone
+        // types, Ereports with serial and class filters, SpDumps, and a
+        // bundle-wide time range.
         {
             use nexus_types::fm::ereport::EreportFilters;
             use nexus_types::support_bundle::*;
@@ -3204,6 +3205,10 @@ mod tests {
             let sel = BundleDataSelection::new()
                 .with_sp_dumps()
                 .with_specific_sleds([sled1, sled2])
+                .with_zone_types([
+                    BundleZoneType::Crucible,
+                    BundleZoneType::Switch,
+                ])
                 .with_ereports(
                     EreportFilters::new()
                         .with_serials(["BRM42"])
@@ -3696,6 +3701,8 @@ mod tests {
                 request_id: ghost_request_id.into(),
                 all_sleds: true,
                 sled_ids: Vec::new(),
+                all_zone_types: true,
+                zone_types: Vec::new(),
             })
             .execute_async(&*conn)
             .await

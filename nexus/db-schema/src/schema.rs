@@ -1659,6 +1659,8 @@ table! {
         bundle_id -> Uuid,
         all_sleds -> Bool,
         sled_ids -> Array<Uuid>,
+        all_zone_types -> Bool,
+        zone_types -> Array<Text>,
     }
 }
 
@@ -3468,6 +3470,8 @@ table! {
         request_id -> Uuid,
         all_sleds -> Bool,
         sled_ids -> Array<Uuid>,
+        all_zone_types -> Bool,
+        zone_types -> Array<Text>,
     }
 }
 

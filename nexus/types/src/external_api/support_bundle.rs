@@ -7,10 +7,54 @@
 use crate::fm::ereport::EreportFilters;
 use crate::support_bundle::BundleDataSelection;
 use crate::support_bundle::BundleTimeRange;
+use crate::support_bundle::BundleZoneType;
 use crate::support_bundle::SledSelection;
+use crate::support_bundle::ZoneSelection;
 use omicron_common::api::external::Error;
 
 pub use nexus_types_versions::latest::support_bundle::*;
+
+impl From<SupportBundleZoneType> for BundleZoneType {
+    fn from(api: SupportBundleZoneType) -> Self {
+        match api {
+            SupportBundleZoneType::Global => Self::Global,
+            SupportBundleZoneType::Switch => Self::Switch,
+            SupportBundleZoneType::Propolis => Self::Propolis,
+            SupportBundleZoneType::Ntp => Self::Ntp,
+            SupportBundleZoneType::Clickhouse => Self::Clickhouse,
+            SupportBundleZoneType::ClickhouseKeeper => Self::ClickhouseKeeper,
+            SupportBundleZoneType::ClickhouseServer => Self::ClickhouseServer,
+            SupportBundleZoneType::CockroachDb => Self::CockroachDb,
+            SupportBundleZoneType::Crucible => Self::Crucible,
+            SupportBundleZoneType::CruciblePantry => Self::CruciblePantry,
+            SupportBundleZoneType::ExternalDns => Self::ExternalDns,
+            SupportBundleZoneType::InternalDns => Self::InternalDns,
+            SupportBundleZoneType::Nexus => Self::Nexus,
+            SupportBundleZoneType::Oximeter => Self::Oximeter,
+        }
+    }
+}
+
+impl From<BundleZoneType> for SupportBundleZoneType {
+    fn from(zone_type: BundleZoneType) -> Self {
+        match zone_type {
+            BundleZoneType::Global => Self::Global,
+            BundleZoneType::Switch => Self::Switch,
+            BundleZoneType::Propolis => Self::Propolis,
+            BundleZoneType::Ntp => Self::Ntp,
+            BundleZoneType::Clickhouse => Self::Clickhouse,
+            BundleZoneType::ClickhouseKeeper => Self::ClickhouseKeeper,
+            BundleZoneType::ClickhouseServer => Self::ClickhouseServer,
+            BundleZoneType::CockroachDb => Self::CockroachDb,
+            BundleZoneType::Crucible => Self::Crucible,
+            BundleZoneType::CruciblePantry => Self::CruciblePantry,
+            BundleZoneType::ExternalDns => Self::ExternalDns,
+            BundleZoneType::InternalDns => Self::InternalDns,
+            BundleZoneType::Nexus => Self::Nexus,
+            BundleZoneType::Oximeter => Self::Oximeter,
+        }
+    }
+}
 
 impl TryFrom<SupportBundleDataSelection> for BundleDataSelection {
     type Error = Error;
@@ -46,6 +90,15 @@ impl TryFrom<SupportBundleDataSelection> for BundleDataSelection {
                             selection.with_specific_sleds(sleds)
                         }
                     };
+                    // The sled builders default the zone selection to All,
+                    // so only a specific selection needs to be applied.
+                    if let SupportBundleZoneSelection::Specific { types } =
+                        host_info.zones
+                    {
+                        selection = selection.with_zone_types(
+                            types.into_iter().map(BundleZoneType::from),
+                        );
+                    }
                 }
                 if let Some(ereports) = ereports {
                     selection = selection.with_ereports(
@@ -79,6 +132,23 @@ impl From<&BundleDataSelection> for SupportBundleDataSelection {
                         SledSelection::Specific(sleds) => {
                             SupportBundleSledSelection::Specific {
                                 sleds: sleds.iter().copied().collect(),
+                            }
+                        }
+                    },
+                    // The zone selection lives on the same host-info entry
+                    // as the sled selection, so it is present here; None
+                    // would only mean host info is absent entirely.
+                    zones: match selection.zone_selection() {
+                        None | Some(ZoneSelection::All) => {
+                            SupportBundleZoneSelection::All
+                        }
+                        Some(ZoneSelection::Types(types)) => {
+                            SupportBundleZoneSelection::Specific {
+                                types: types
+                                    .iter()
+                                    .copied()
+                                    .map(Into::into)
+                                    .collect(),
                             }
                         }
                     },
@@ -155,6 +225,12 @@ mod tests {
                     sleds: SupportBundleSledSelection::Specific {
                         sleds: vec![sled],
                     },
+                    zones: SupportBundleZoneSelection::Specific {
+                        types: vec![
+                            SupportBundleZoneType::Nexus,
+                            SupportBundleZoneType::Global,
+                        ],
+                    },
                 }),
                 ereports: Some(SupportBundleEreports {
                     only_serials: vec!["BRM-FAKE-0".to_string()],
@@ -172,6 +248,14 @@ mod tests {
         assert_eq!(
             selection.sled_selection(),
             Some(&SledSelection::Specific([sled].into_iter().collect()))
+        );
+        assert_eq!(
+            selection.zone_selection(),
+            Some(&ZoneSelection::Types(
+                [BundleZoneType::Nexus, BundleZoneType::Global]
+                    .into_iter()
+                    .collect()
+            ))
         );
         let filters = selection.ereport_filters().unwrap();
         assert_eq!(filters.only_serials(), ["BRM-FAKE-0"]);
