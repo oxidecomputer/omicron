@@ -242,6 +242,17 @@ async fn collect_data_from_sled(
         result = sled_client.support_logs() => result?.into_inner(),
     };
 
+    // Drop the zones the bundle's zone-type selection excludes before
+    // requesting anything for them: each log download makes the
+    // sled-agent take ZFS snapshots and assemble a zip file.
+    let zone_selection = collection
+        .data_selection()
+        .zone_selection()
+        .cloned()
+        .unwrap_or_default();
+    let zones =
+        zones.into_iter().filter(|zone| zone_selection.contains(zone));
+
     // For each zone we fire off a request to its sled-agent to collect
     // its logs in a zip file and write the result to the support
     // bundle.

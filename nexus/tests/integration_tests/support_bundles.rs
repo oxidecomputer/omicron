@@ -35,6 +35,7 @@ use nexus_types::internal_api::background::SupportBundleCollectionStepStatus;
 use nexus_types::internal_api::background::SupportBundleEreportStatus;
 use nexus_types::support_bundle::BundleDataSelection;
 use nexus_types::support_bundle::BundleTimeRange;
+use nexus_types::support_bundle::BundleZoneType;
 use omicron_common::api::external::LookupType;
 use omicron_sled_agent::sim::SimLogEntry;
 use omicron_uuid_kinds::SledUuid;
@@ -812,6 +813,141 @@ async fn test_support_bundle_zone_log_time_range(
     assert_eq!(logs.len(), 2, "expected 2 in-lookback logs, got: {logs:?}");
     assert!(logs.iter().any(|l| l.ends_with("fake-svc.log.30-minutes-old")));
     assert!(logs.iter().any(|l| l.ends_with("fake-svc.log.6-hours-old")));
+}
+
+// Test that the zone-type selection bounds which zones' logs are collected
+// from a sled.
+#[nexus_test]
+async fn test_support_bundle_zone_type_filtering(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let _disk_test =
+        DiskTestBuilder::new(&cptestctx).with_zpool_count(1).build().await;
+
+    let nexus = &cptestctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.clone(), datastore.clone());
+
+    // Inject a recent synthetic log into the first simulated sled-agent for
+    // one zone of each name shape: Omicron zones, the global zone, an
+    // instance zone, and a name that classifies to no known zone type.
+    const ZONES: [&str; 5] = [
+        "oxz_nexus_00000000-0000-0000-0000-000000000001",
+        "oxz_crucible_00000000-0000-0000-0000-000000000002",
+        "oxz_propolis-server_00000000-0000-0000-0000-000000000003",
+        "global",
+        "oxz_fake_test_zone",
+    ];
+    let now = chrono::Utc::now();
+    let sled_agent = cptestctx.sled_agents[0].sled_agent();
+    for zone in ZONES {
+        sled_agent.insert_support_log(
+            zone,
+            SimLogEntry {
+                filename: "fake-svc.log.0".to_string(),
+                contents: b"totally fake log data".to_vec(),
+                mtime: now - chrono::Duration::minutes(30),
+            },
+        );
+    }
+
+    // Creates a bundle with the given selection, collects it, and returns
+    // the zones with any entry under logs/ in the collected archive.
+    async fn collect_zones_with_selection(
+        cptestctx: &ControlPlaneTestContext,
+        client: &ClientTestContext,
+        opctx: &OpContext,
+        data_selection: BundleDataSelection,
+    ) -> Vec<&'static str> {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let bundle = nexus
+            .datastore()
+            .support_bundle_create(
+                opctx,
+                SupportBundleCreateParams {
+                    reason: "Testing zone-type filtering",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                    data_selection,
+                },
+            )
+            .await
+            .expect("Couldn't allocate a support bundle");
+
+        let output =
+            activate_bundle_collection_background_task(&cptestctx).await;
+        assert_eq!(output.collection_err, None);
+        let report = output.collection_report.as_ref().expect("Missing report");
+        assert_eq!(report.collection.bundle, bundle.id.into());
+        assert!(report.activated_in_db_ok);
+
+        let contents = bundle_download(client, bundle.id.into()).await.unwrap();
+        let archive = ZipArchive::new(Cursor::new(&contents)).unwrap();
+        let names: Vec<String> =
+            archive.file_names().map(String::from).collect();
+        let zones = ZONES
+            .into_iter()
+            .filter(|zone| {
+                let needle = format!("logs/{zone}");
+                names.iter().any(|name| name.contains(&needle))
+            })
+            .collect();
+
+        // Delete the bundle (and run the cleanup pass) so the next
+        // collection has a free debug dataset to land on.
+        bundle_delete(client, bundle.id.into()).await.unwrap();
+        let output =
+            activate_bundle_collection_background_task(&cptestctx).await;
+        assert_eq!(output.cleanup_err, None);
+
+        zones
+    }
+
+    // With no zone-type selection, every zone is collected, including the
+    // one that classifies to no known type.
+    let zones = collect_zones_with_selection(
+        &cptestctx,
+        client,
+        &opctx,
+        BundleDataSelection::new().with_all_sleds(),
+    )
+    .await;
+    assert_eq!(zones, ZONES, "expected every zone to be collected");
+
+    // Selecting specific types collects exactly the matching zones. The
+    // unclassifiable zone does not match any type.
+    let zones = collect_zones_with_selection(
+        &cptestctx,
+        client,
+        &opctx,
+        BundleDataSelection::new().with_all_sleds().with_zone_types([
+            BundleZoneType::Nexus,
+            BundleZoneType::Propolis,
+            BundleZoneType::Global,
+        ]),
+    )
+    .await;
+    assert_eq!(
+        zones,
+        [
+            "oxz_nexus_00000000-0000-0000-0000-000000000001",
+            "oxz_propolis-server_00000000-0000-0000-0000-000000000003",
+            "global",
+        ],
+        "expected only the zones of the selected types"
+    );
+
+    // Selecting no types collects logs from no zones at all.
+    let zones = collect_zones_with_selection(
+        &cptestctx,
+        client,
+        &opctx,
+        BundleDataSelection::new().with_all_sleds().with_zone_types([]),
+    )
+    .await;
+    assert_eq!(zones, [] as [&str; 0], "expected no zone logs at all");
 }
 
 // Test range requests on a bundle
