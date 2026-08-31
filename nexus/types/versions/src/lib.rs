@@ -104,4 +104,4 @@ pub mod v2026_08_14_00;
 #[path = "bgp_peer_src_addr/mod.rs"]
 pub mod v2026_08_14_01;
 #[path = "probe_multicast/mod.rs"]
-pub mod v2026_08_20_02;
+pub mod v2026_08_31_02;

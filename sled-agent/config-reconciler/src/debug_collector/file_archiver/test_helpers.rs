@@ -14,7 +14,6 @@ use anyhow::anyhow;
 use anyhow::bail;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
-use camino_tempfile::Utf8TempDir;
 use chrono::DateTime;
 use chrono::Utc;
 use iddqd::IdOrdItem;
@@ -31,45 +30,6 @@ use strum::EnumDiscriminants;
 use strum::EnumIter;
 use strum::IntoDiscriminant;
 use strum::IntoEnumIterator;
-
-/// Temporary directory that is preserved on test failure.
-///
-/// The path is printed to stderr on creation.  Call `cleanup()` at the end
-/// of a successful test to delete it.  If `cleanup()` is never called
-/// (e.g., the test panicked), the directory is preserved for inspection.
-pub struct TestDir {
-    dir: Option<Utf8TempDir>,
-}
-
-impl TestDir {
-    pub fn new() -> Self {
-        let dir =
-            camino_tempfile::tempdir().expect("failed to create temp dir");
-        eprintln!("test directory: {}", dir.path());
-        TestDir { dir: Some(dir) }
-    }
-
-    pub fn path(&self) -> &Utf8Path {
-        // unwrap(): this is only `None` after `cleanup()`, but it's
-        // immediately dropped at that point.
-        self.dir.as_ref().unwrap().path()
-    }
-
-    pub fn cleanup(mut self) {
-        drop(self.dir.take());
-    }
-}
-
-impl Drop for TestDir {
-    fn drop(&mut self) {
-        if let Some(dir) = self.dir.take() {
-            let path = dir.keep();
-            eprintln!(
-                "test directory preserved (test may have failed): {path}"
-            );
-        }
-    }
-}
 
 /// Loads the filenames in the test data
 pub(crate) fn load_test_files() -> anyhow::Result<IdOrdMap<TestFile>> {

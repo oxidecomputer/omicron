@@ -1839,7 +1839,9 @@ mod tests {
                         time_deleted: None,
                     },
                     vpc_id: authz_vpc.id(),
-                    rcgen: Generation(external::Generation::new()),
+                    rcgen: Generation(
+                        omicron_generation_kinds::Generation::new(),
+                    ),
                     ipv4_block: Ipv4Net("192.168.1.0/24".parse().unwrap()),
                     ipv6_block: Ipv6Net("fd00::/64".parse().unwrap()),
                     custom_router_id: None,

@@ -11,6 +11,7 @@ workspace = true
 anyhow.workspace = true
 async-trait.workspace = true
 chrono.workspace = true
+omicron-generation-kinds.workspace = true
 sled-agent-types-versions.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true

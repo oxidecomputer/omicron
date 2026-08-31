@@ -763,7 +763,7 @@ pub struct InternalDnsGenerationStatus {
     /// Zone ID of the internal DNS server contacted
     pub zone_id: OmicronZoneUuid,
     /// Generation number of the DNS configuration
-    pub generation: omicron_common::api::external::Generation,
+    pub generation: omicron_generation_kinds::Generation,
 }
 
 impl IdOrdItem for InternalDnsGenerationStatus {

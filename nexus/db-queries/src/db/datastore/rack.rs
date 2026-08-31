@@ -1099,6 +1099,7 @@ mod test {
     };
     use omicron_common::api::internal::shared::PrivateIpv4Config;
     use omicron_common::api::internal::shared::PrivateIpv6Config;
+    use omicron_generation_kinds::{NexusGeneration, TargetReleaseGeneration};
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::GenericUuid;
@@ -1127,8 +1128,9 @@ mod test {
                     parent_blueprint_id: None,
                     internal_dns_version: *Generation::new(),
                     external_dns_version: *Generation::new(),
-                    target_release_minimum_generation: *Generation::new(),
-                    nexus_generation: *Generation::new(),
+                    target_release_minimum_generation:
+                        TargetReleaseGeneration::new(),
+                    nexus_generation: NexusGeneration::new(),
                     external_networking_generation: *Generation::new(),
                     cockroachdb_fingerprint: String::new(),
                     clickhouse_cluster_config: None,
@@ -1497,7 +1499,7 @@ mod test {
                 sled2.id(),
                 BlueprintZoneImageSource::InstallDataset,
                 nexus_networking,
-                *Generation::new(),
+                NexusGeneration::new(),
                 &OperatorNexusConfig {
                     external_tls: false,
                     external_dns_servers: &[],
@@ -1741,7 +1743,7 @@ mod test {
                     external_networking_alloc
                         .for_new_nexus()
                         .expect("got Nexus IP"),
-                    *Generation::new(),
+                    NexusGeneration::new(),
                     &OperatorNexusConfig {
                         external_tls: false,
                         external_dns_servers: &[],
@@ -1962,7 +1964,7 @@ mod test {
                     nic_ip_config: nexus_nic_ip_config,
                     nic_mac: macs.next().unwrap(),
                 },
-                *Generation::new(),
+                NexusGeneration::new(),
                 &OperatorNexusConfig {
                     external_tls: false,
                     external_dns_servers: &[],
@@ -2069,7 +2071,7 @@ mod test {
                 external_networking_alloc
                     .for_new_nexus()
                     .expect("got Nexus IP"),
-                *Generation::new(),
+                NexusGeneration::new(),
                 &OperatorNexusConfig {
                     external_tls: false,
                     external_dns_servers: &[],
@@ -2260,7 +2262,7 @@ mod test {
                     nic_ip_config: nexus_pip_config,
                     nic_mac: macs.next().unwrap(),
                 },
-                *Generation::new(),
+                NexusGeneration::new(),
                 &OperatorNexusConfig {
                     external_tls: false,
                     external_dns_servers: &[],
@@ -2348,7 +2350,7 @@ mod test {
                     sled.id(),
                     BlueprintZoneImageSource::InstallDataset,
                     nexus_external_ip.clone(),
-                    *Generation::new(),
+                    NexusGeneration::new(),
                     &OperatorNexusConfig {
                         external_tls: false,
                         external_dns_servers: &[],

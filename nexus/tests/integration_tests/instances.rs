@@ -22,7 +22,6 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_db_queries::db::queries::disk::MAX_DISKS_PER_INSTANCE;
-use nexus_test_interface::NexusServer;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
@@ -47,7 +46,6 @@ use nexus_test_utils::resource_helpers::object_put;
 use nexus_test_utils::resource_helpers::object_put_error;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::test_params;
-use nexus_test_utils::start_sled_agent_with_config;
 use nexus_test_utils::wait_for_producer;
 use nexus_types::external_api::affinity;
 use nexus_types::external_api::disk;
@@ -1659,18 +1657,14 @@ async fn test_instance_migration_compatible_cpu_platforms(
     // Set up a second sled-agent representing a sled with a Turin processor.
     // The instance itself requires only Milan, so it should be able to migrate
     // both directions.
-    let nexus_address = cptestctx.server.get_http_server_internal_address();
-
-    let config = omicron_sled_agent::sim::Config::for_testing(
-        SledUuid::new_v4(),
-        omicron_sled_agent::sim::SimMode::Explicit,
-        Some(nexus_address),
-        omicron_sled_agent::sim::ZpoolConfig::None,
-        sled_agent_types::inventory::SledCpuFamily::AmdTurin,
-    );
-    let new_sled_id = config.id;
-
-    let _turin_sled = start_sled_and_wait(cptestctx, config).await;
+    let new_sled_id = SledUuid::new_v4();
+    let _turin_sled = cptestctx
+        .add_sled(
+            new_sled_id,
+            omicron_sled_agent::sim::SimMode::Explicit,
+            sled_agent_types::inventory::SledCpuFamily::AmdTurin,
+        )
+        .await;
 
     let first_sled_id = cptestctx.first_sled_id();
 
@@ -1845,18 +1839,14 @@ async fn test_instance_migration_incompatible_cpu_platforms(
 
     // Set up a second sled-agent representing a sled with a Turin processor.
     // The instance will require Turin, so it will be placed here.
-    let nexus_address = cptestctx.server.get_http_server_internal_address();
-
-    let config = omicron_sled_agent::sim::Config::for_testing(
-        SledUuid::new_v4(),
-        omicron_sled_agent::sim::SimMode::Explicit,
-        Some(nexus_address),
-        omicron_sled_agent::sim::ZpoolConfig::None,
-        sled_agent_types::inventory::SledCpuFamily::AmdTurin,
-    );
-    let turin_sled_id = config.id;
-
-    let _turin_sled = start_sled_and_wait(cptestctx, config).await;
+    let turin_sled_id = SledUuid::new_v4();
+    let _turin_sled = cptestctx
+        .add_sled(
+            turin_sled_id,
+            omicron_sled_agent::sim::SimMode::Explicit,
+            sled_agent_types::inventory::SledCpuFamily::AmdTurin,
+        )
+        .await;
 
     let milan_sled_id = cptestctx.first_sled_id();
 
@@ -1920,18 +1910,14 @@ async fn test_instance_migration_unknown_sled_type(
 
     // Set up a second sled-agent representing a sled with unknown processor
     // type. We won't be able to migrate to (or from) here.
-    let nexus_address = cptestctx.server.get_http_server_internal_address();
-
-    let config = omicron_sled_agent::sim::Config::for_testing(
-        SledUuid::new_v4(),
-        omicron_sled_agent::sim::SimMode::Explicit,
-        Some(nexus_address),
-        omicron_sled_agent::sim::ZpoolConfig::None,
-        sled_agent_types::inventory::SledCpuFamily::Unknown,
-    );
-    let new_sled_id = config.id;
-
-    let _unknown_sled = start_sled_and_wait(cptestctx, config).await;
+    let new_sled_id = SledUuid::new_v4();
+    let _unknown_sled = cptestctx
+        .add_sled(
+            new_sled_id,
+            omicron_sled_agent::sim::SimMode::Explicit,
+            sled_agent_types::inventory::SledCpuFamily::Unknown,
+        )
+        .await;
 
     let first_sled_id = cptestctx.first_sled_id();
 
@@ -7666,53 +7652,6 @@ async fn test_cannot_provision_instance_beyond_ram_capacity(
     expect_instance_start_ok(client, configs[2].0).await;
 }
 
-async fn start_sled_and_wait(
-    cptestctx: &ControlPlaneTestContext,
-    config: omicron_sled_agent::sim::Config,
-) -> omicron_sled_agent::sim::Server {
-    let client = &cptestctx.external_client;
-
-    // List the number of sleds currently; we'll wait until this is one higher
-    // as evidence the simulated sled-agent is fully ready.
-    let items = objects_list_page_authz::<Sled>(&client, SLEDS_URL).await.items;
-
-    let initial_sled_count = items.len();
-
-    let new_sled_agent_log =
-        cptestctx.logctx.log.new(o!( "sled_id" => config.id.to_string() ));
-
-    // We have to hold on to the new simulated sled-agent otherwise it will be
-    // immediately dropped and shut down.
-    let agent = start_sled_agent_with_config(
-        new_sled_agent_log,
-        &config,
-        3,
-        &cptestctx.first_sled_agent().simulated_upstairs,
-    )
-    .await
-    .expect("can start test sled-agent");
-
-    // Wait for Nexus to report that the new sled is present..
-    poll::wait_for_condition(
-        || async {
-            let items =
-                objects_list_page_authz::<Sled>(&client, SLEDS_URL).await.items;
-
-            if items.len() == initial_sled_count + 1 {
-                Ok(())
-            } else {
-                Err(CondCheckError::<()>::NotYet { status: None })
-            }
-        },
-        &Duration::from_secs(5),
-        &Duration::from_secs(60),
-    )
-    .await
-    .unwrap();
-
-    agent
-}
-
 #[nexus_test]
 async fn test_can_start_instance_with_cpu_platform(
     cptestctx: &ControlPlaneTestContext,
@@ -7800,18 +7739,14 @@ async fn test_can_start_instance_with_cpu_platform(
         1
     );
 
-    let nexus_address = cptestctx.server.get_http_server_internal_address();
-
-    let config = omicron_sled_agent::sim::Config::for_testing(
-        SledUuid::new_v4(),
-        omicron_sled_agent::sim::SimMode::Explicit,
-        Some(nexus_address),
-        omicron_sled_agent::sim::ZpoolConfig::None,
-        sled_agent_types::inventory::SledCpuFamily::AmdTurin,
-    );
-    let new_sled_id = config.id;
-
-    let _turin_sled = start_sled_and_wait(cptestctx, config).await;
+    let new_sled_id = SledUuid::new_v4();
+    let _turin_sled = cptestctx
+        .add_sled(
+            new_sled_id,
+            omicron_sled_agent::sim::SimMode::Explicit,
+            sled_agent_types::inventory::SledCpuFamily::AmdTurin,
+        )
+        .await;
 
     // Finally, start the Turin-requiring instance for real!
     expect_instance_start_ok(client, instance.identity.name.as_str()).await;

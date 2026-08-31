@@ -27,12 +27,14 @@ installinator-common.workspace = true
 key-manager.workspace = true
 key-manager-types.workspace = true
 libc.workspace = true
+omicron-generation-kinds.workspace = true
 sled-agent-types-versions.workspace = true
 ntp-admin-client.workspace = true
 omicron-common.workspace = true
 omicron-debug-dropbox.workspace = true
 omicron-ledger.workspace = true
 omicron-uuid-kinds.workspace = true
+proptest = { workspace = true, optional = true }
 rand.workspace = true
 regex.workspace = true
 secrecy.workspace = true
@@ -45,6 +47,7 @@ sled-storage.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true
 strum.workspace = true
+test-strategy = { workspace = true, optional = true }
 thiserror.workspace = true
 tokio.workspace = true
 trust-quorum-types.workspace = true
@@ -66,10 +69,15 @@ schemars.workspace = true
 scopeguard.workspace = true
 serde_json.workspace = true
 sled-agent-resolvable-files-examples.workspace = true
+sled-agent-types = { workspace = true, features = ["testing"] }
 sled-storage = { workspace = true, features = ["testing"] }
 test-strategy.workspace = true
 walkdir.workspace = true
 xshell.workspace = true
 
 [features]
-testing = []
+testing = [
+    "dep:proptest",
+    "dep:test-strategy",
+    "sled-agent-types/testing",
+]
