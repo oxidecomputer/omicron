@@ -98,10 +98,15 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     }
                 };
 
-                let sled_agent_addrs: Vec<_> = sleds.into_iter().map(|s| s.address()).collect();
-
-                // TODO https://github.com/oxidecomputer/omicron/issues/5201
-                let sled_agent_clients = build_sled_agent_clients(&sled_agent_addrs, &log);
+                let scrimlet_clients = sleds
+                    .into_iter()
+                    .filter(|s| s.is_scrimlet())
+                    .map(|s| {
+                        sled_agent_client::Client::new(
+                            &format!("http://{}", s.address()),
+                            log.clone(),
+                        )
+                    });
 
                 //
                 // calculate and apply bootstore changes
@@ -330,21 +335,19 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         }
                     };
 
-                    // Update the bootstore. We can move on once we have updated a
-                    // single sled agent.
+                    // Update the bootstore. We eagerly push updates to both scrimlets.
                     let mut one_succeeded = false;
-                    for client in &sled_agent_clients {
+                    for client in scrimlet_clients {
                         if let Err(e) = client.write_network_bootstore_config(&write_request).await {
                             error!(
                                 log,
                                 "error updating bootstore";
-                                "switch_slot" => ?client,
+                                "scrimlet_client" => ?client,
                                 "request" => ?write_request,
                                 "error" => %e,
                             )
                         } else {
                             one_succeeded = true;
-                            break;
                         }
                     }
 
@@ -401,21 +404,6 @@ where
     let left = left.iter().collect::<HashSet<&T>>();
     let right = right.iter().collect::<HashSet<&T>>();
     left == right
-}
-
-fn build_sled_agent_clients(
-    addrs: &[std::net::SocketAddrV6],
-    log: &slog::Logger,
-) -> Vec<sled_agent_client::Client> {
-    addrs
-        .iter()
-        .map(|addr| {
-            sled_agent_client::Client::new(
-                &format!("http://{}", addr),
-                log.clone(),
-            )
-        })
-        .collect()
 }
 
 // Helper to decide whether we should update the replicated bootstore.

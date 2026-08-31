@@ -21,6 +21,8 @@ use omicron_common::api::external::Name;
 use omicron_common::api::external::{
     IdentityMetadataCreateParams, IdentityMetadataUpdateParams, NameOrId,
 };
+use omicron_test_utils::dev::poll::CondCheckError;
+use omicron_test_utils::dev::poll::wait_for_condition;
 use oxnet::IpNet;
 use sled_agent_types::early_networking::ImportExportPolicy;
 use sled_agent_types::early_networking::LinkFec;
@@ -30,6 +32,7 @@ use sled_agent_types::early_networking::NumberedRouter;
 use sled_agent_types::early_networking::RouterLifetimeConfig;
 use sled_agent_types::early_networking::UnnumberedRouter;
 use std::str::FromStr;
+use std::time::Duration;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -655,6 +658,30 @@ async fn test_port_settings_basic_v6_crud(ctx: &ControlPlaneTestContext) {
 
     let rack_id = racks[0].identity.id;
 
+    for (i, sled_agent) in ctx.sled_agents.iter().enumerate() {
+        let sled_agent = sled_agent.sled_agent().clone();
+        wait_for_condition(
+            || async {
+                let generation = sled_agent
+                    .bootstore_network_config
+                    .lock()
+                    .unwrap()
+                    .generation;
+                if generation == 3 {
+                    Ok(())
+                } else {
+                    Err(CondCheckError::<()>::NotYet { status: None })
+                }
+            },
+            &Duration::from_millis(50),
+            &Duration::from_secs(60),
+        )
+        .await
+        .unwrap_or_else(|_| {
+            panic!("sled-agent {i}'s bootstore should be 3 prior to update")
+        });
+    }
+
     NexusRequest::new(
         RequestBuilder::new(
             client,
@@ -699,19 +726,35 @@ async fn test_port_settings_basic_v6_crud(ctx: &ControlPlaneTestContext) {
     );
 
     // The task only writes to the sled-agent if it can build a valid config.
-    // Check the sim sled-agent's in-memory bootstore was actually updated,
-    // confirming it was successfully contacted.
-    let bootstore_generation = ctx
-        .first_sled_agent()
-        .bootstore_network_config
-        .lock()
-        .unwrap()
-        .generation;
-    assert!(
-        bootstore_generation > 0,
-        "sync_switch_configuration should have written to the sled-agent \
-         bootstore (generation was still 0, indicating it was never contacted)",
-    );
+    // Check the sim sled-agents' in-memory bootstores were actually updated,
+    // confirming both scrimlets were successfully contacted.
+    for (i, sled_agent) in ctx.sled_agents.iter().enumerate() {
+        let sled_agent = sled_agent.sled_agent().clone();
+        wait_for_condition(
+            || async {
+                let generation = sled_agent
+                    .bootstore_network_config
+                    .lock()
+                    .unwrap()
+                    .generation;
+                if generation == 4 {
+                    Ok(())
+                } else {
+                    Err(CondCheckError::<()>::NotYet { status: None })
+                }
+            },
+            &Duration::from_millis(50),
+            &Duration::from_secs(60),
+        )
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "sync_switch_configuration should have written to sled-agent \
+                 {i}'s bootstore (generation was still 3, indicating it was \
+                 never contacted)",
+            )
+        });
+    }
 }
 
 #[nexus_test]
