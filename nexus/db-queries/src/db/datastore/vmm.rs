@@ -1111,6 +1111,81 @@ mod tests {
             "the unstoppable and deleted VMMs remain unmarked"
         );
 
+        // Sled A finishes evacuating and becomes available again. The query
+        // only marks VMMs, and never unmarks them, so sled A's original VMMs
+        // stay marked at their original generation.
+        datastore
+            .rendezvous_sled_bp_availability_upsert(
+                opctx,
+                RendezvousSledBpAvailabilityUpdate::new(
+                    sled_a,
+                    ActiveSledBpAvailability::Available,
+                    UpdateDispositionGeneration::from(3),
+                    blueprint_id,
+                ),
+            )
+            .await
+            .expect("sled A availability should upsert");
+
+        let marked = datastore
+            .vmm_bulk_mark_stop_for_update(&opctx)
+            .await
+            .expect("bulk mark should succeed");
+        assert_eq!(
+            marked, 0,
+            "no VMMs should be marked while sled A is available"
+        );
+        let actual = fetch_all(datastore).await;
+        assert_rows(&actual, &expected);
+
+        // Sled A evacuates again at a higher generation. It has no new VMMs.
+        // Its already-marked VMMs are skipped, so they keep their original
+        // generation rather than the new one the sled has.
+        datastore
+            .rendezvous_sled_bp_availability_upsert(
+                opctx,
+                RendezvousSledBpAvailabilityUpdate::new(
+                    sled_a,
+                    ActiveSledBpAvailability::Unavailable,
+                    UpdateDispositionGeneration::from(4),
+                    blueprint_id,
+                ),
+            )
+            .await
+            .expect("sled A unavailability should upsert");
+
+        let marked = datastore
+            .vmm_bulk_mark_stop_for_update(&opctx)
+            .await
+            .expect("bulk mark should succeed");
+        assert_eq!(
+            marked, 0,
+            "sled A's VMMs are already marked, nothing new should be marked"
+        );
+        let actual = fetch_all(datastore).await;
+        assert_rows(&actual, &expected);
+
+        let sled_a_marked: Vec<_> = actual
+            .values()
+            .filter(|v| {
+                v.sled_id() == sled_a
+                    && v.time_deleted.is_none()
+                    && is_stoppable(v.state)
+            })
+            .collect();
+
+        // We have the same marked VMMs, nothing has changed
+        assert_eq!(sled_a_marked.len(), 4);
+        for vmm in sled_a_marked {
+            assert_eq!(
+                vmm.stop_for_update_disposition_generation,
+                Some(gen1.into()),
+                "sled A VMM {} in state {:?} should keep its original generation",
+                vmm.id,
+                vmm.state,
+            );
+        }
+
         // Clean up.
         db.terminate().await;
         logctx.cleanup_successful();
