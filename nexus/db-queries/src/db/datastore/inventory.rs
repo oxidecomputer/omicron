@@ -44,6 +44,7 @@ use nexus_db_model::InvFmdResource;
 use nexus_db_model::InvFmdStatus;
 use nexus_db_model::InvHostPhase1ActiveSlot;
 use nexus_db_model::InvHostPhase1FlashHash;
+use nexus_db_model::InvInstanceManagerStatusCols;
 use nexus_db_model::InvInternalDns;
 use nexus_db_model::InvLastReconciliationDatasetResult;
 use nexus_db_model::InvLastReconciliationDiskResult;
@@ -85,16 +86,17 @@ use nexus_db_model::{
 use nexus_db_model::{HwPowerState, InvZoneManifestNonBoot};
 use nexus_db_model::{HwRotSlot, InvMupdateOverrideNonBoot};
 use nexus_db_model::{InvCaboose, InvRemoveMupdateOverride};
+use nexus_db_schema::enums::CabooseWhichEnum;
 use nexus_db_schema::enums::HwM2SlotEnum;
+use nexus_db_schema::enums::HwPowerStateEnum;
 use nexus_db_schema::enums::HwRotSlotEnum;
+use nexus_db_schema::enums::InvConfigReconcilerStatusKindEnum;
+use nexus_db_schema::enums::InvSledUpdateDispositionEnum;
+use nexus_db_schema::enums::InvZoneManifestSourceEnum;
 use nexus_db_schema::enums::RotImageErrorEnum;
 use nexus_db_schema::enums::RotPageWhichEnum;
 use nexus_db_schema::enums::SledRoleEnum;
 use nexus_db_schema::enums::SpTypeEnum;
-use nexus_db_schema::enums::{
-    CabooseWhichEnum, InvConfigReconcilerStatusKindEnum,
-};
-use nexus_db_schema::enums::{HwPowerStateEnum, InvZoneManifestSourceEnum};
 use nexus_types::inventory::CockroachStatus;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::InternalDnsGenerationStatus;
@@ -1810,6 +1812,10 @@ impl DataStore {
                     } = config_reconciler_fields_by_sled
                         .remove(&sled_agent.sled_id)
                         .expect("all sled IDs should exist");
+                    let InvInstanceManagerStatusCols {
+                        update_disposition: instance_manager_update_disposition,
+                        num_registered_vmms: instance_manager_num_registered_vmms,
+                    } = sled_agent.instance_manager_status.into();
                     let file_source_resolver = InvOmicronFileSourceResolver::new(&sled_agent.file_source_resolver);
                     let selection = nexus_db_schema::schema::hw_baseboard_id::table
                         .select((
@@ -1879,6 +1885,10 @@ impl DataStore {
                                 .into_sql::<Nullable<diesel::sql_types::Uuid>>(),
                             file_source_resolver.mupdate_override_boot_disk_error
                                 .into_sql::<Nullable<diesel::sql_types::Text>>(),
+                            instance_manager_update_disposition
+                                .into_sql::<Nullable<InvSledUpdateDispositionEnum>>(),
+                            instance_manager_num_registered_vmms
+                                .into_sql::<diesel::sql_types::Int8>(),
                         ))
                         .filter(
                             baseboard_dsl::part_number
@@ -1921,6 +1931,8 @@ impl DataStore {
                                 sa_dsl::mupdate_override_boot_disk_path,
                                 sa_dsl::mupdate_override_id,
                                 sa_dsl::mupdate_override_boot_disk_error,
+                                sa_dsl::instance_manager_update_disposition,
+                                sa_dsl::instance_manager_num_registered_vmms,
                             ))
                             .execute_async(&conn)
                             .await?;
@@ -1957,6 +1969,8 @@ impl DataStore {
                         _mupdate_override_boot_disk_path,
                         _mupdate_override_boot_disk_id,
                         _mupdate_override_boot_disk_error,
+                        _instance_manager_update_disposition,
+                        _instance_manager_num_registered_vmms,
                     ) = sa_dsl::inv_sled_agent::all_columns();
                 }
 
@@ -4849,6 +4863,8 @@ impl DataStore {
                 })
                 .transpose()?;
 
+            let instance_manager_status = s.instance_manager_status();
+
             let file_source_resolver = s
                 .file_source_resolver
                 .into_inventory(
@@ -4954,6 +4970,7 @@ impl DataStore {
                 ledgered_sled_config,
                 reconciler_status,
                 last_reconciliation,
+                instance_manager_status,
                 file_source_resolver,
                 smf_services_enabled_not_online,
                 reference_measurements: last_reconciliation_measurements

@@ -4464,6 +4464,19 @@ CREATE TYPE IF NOT EXISTS omicron.public.inv_zone_manifest_source AS ENUM (
     'sled-agent'
 );
 
+-- A sled's update disposition in inventory.
+--
+-- This is analogous to the `sled_update_availability` enum used as a part of
+-- storing update disposition in blueprints. We use a separate enum (despite
+-- currently having identical variants) because there are separate Rust
+-- types, and it allows the two to evolve independently.
+CREATE TYPE IF NOT EXISTS omicron.public.inv_sled_update_disposition AS ENUM (
+    -- Available for use for all provisions.
+    'available',
+    -- Disallowed for all use + migratable instances are being evacuated.
+    'evacuating'
+);
+
 -- observations from and about sled agents
 CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     -- where this observation came from
@@ -4547,19 +4560,34 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     --
     -- The path to the boot disk file
     measurement_manifest_boot_disk_path TEXT NOT NULL,
-    -- The source of the measurement manifest on the boot disk: from installinator or
-    -- sled-agent (synthetic). NULL means there is an error reading the measurement manifest.
+    -- The source of the measurement manifest on the boot disk: from
+    -- installinator or sled-agent (synthetic). NULL means there is an error
+    -- reading the measurement manifest.
     measurement_manifest_source omicron.public.inv_zone_manifest_source,
-    -- The mupdate ID that created the measurement manifest if this is from installinator. If
-    -- this is NULL, then either the measurement manifest is synthetic or there was an
-    -- error reading the measurement manifest.
+    -- The mupdate ID that created the measurement manifest if this is from
+    -- installinator. If this is NULL, then either the measurement manifest is
+    -- synthetic or there was an error reading the measurement manifest.
     measurement_manifest_mupdate_id UUID,
-    -- Message describing the status of the measurement manifest on the boot disk. If
-    -- this is NULL, then the measurement manifest was successfully read, and the
-    -- inv_zone_manifest_measurement table has entries corresponding to the zone
-    -- manifest.
+    -- Message describing the status of the measurement manifest on the boot
+    -- disk. If this is NULL, then the measurement manifest was successfully
+    -- read, and the inv_zone_manifest_measurement table has entries
+    -- corresponding to the zone manifest.
     measurement_manifest_boot_disk_error TEXT,
 
+    -- Columns making up the instance manager status on this sled
+    --
+    -- The update disposition as observed (and acted upon) by the instance
+    -- manager. This should usually match the update disposition in the
+    -- most-recently-ledgered config, but there can be a lag between the
+    -- ledgered config updating and the instance manager being aware of it if
+    -- the instance manager is busy.
+    --
+    -- NULL in this column maps to
+    -- `CurrentUpdateDisposition::ConfigNotAvailable`. A non-`NULL` value maps
+    -- to `CurrentUpdateDisposition::Known(the_disposition)`.
+    instance_manager_update_disposition omicron.public.inv_sled_update_disposition,
+    -- Number of VMMs currently registered with the instance manager.
+    instance_manager_num_registered_vmms INT8 NOT NULL,
 
     CONSTRAINT reconciler_status_sled_config_present_if_running CHECK (
         (reconciler_status_kind = 'running'
@@ -4861,19 +4889,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_dataset (
     -- - The sled reporting the disk
     -- - The name of this dataset
     PRIMARY KEY (inv_collection_id, sled_id, name)
-);
-
--- A sled's update disposition in inventory.
---
--- This is analogous to the `sled_update_availability` enum used as a part of
--- storing update disposition in blueprints. We use a separate enum (despite
--- currently having identical variants) because there are separate Rust
--- types, and it allows the two to evolve independently.
-CREATE TYPE IF NOT EXISTS omicron.public.inv_sled_update_disposition AS ENUM (
-    -- Available for use for all provisions.
-    'available',
-    -- Disallowed for all use + migratable instances are being evacuated.
-    'evacuating'
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config (
@@ -9500,7 +9515,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '298.0.0', NULL)
+    (TRUE, NOW(), NOW(), '299.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

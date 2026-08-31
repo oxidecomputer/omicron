@@ -93,6 +93,7 @@ use sled_agent_types::disk::SharedDatasetConfig;
 use sled_agent_types::inventory::BootImageHeader;
 use sled_agent_types::inventory::BootPartitionDetails;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+use sled_agent_types::inventory::CurrentUpdateDisposition;
 use sled_agent_types::inventory::ExternalDnsAddrs;
 use sled_agent_types::inventory::FmdHostCase;
 use sled_agent_types::inventory::FmdInventory;
@@ -100,6 +101,7 @@ use sled_agent_types::inventory::FmdInventoryError;
 use sled_agent_types::inventory::FmdResource;
 use sled_agent_types::inventory::HostPhase2DesiredContents;
 use sled_agent_types::inventory::HostPhase2DesiredSlots;
+use sled_agent_types::inventory::InstanceManagerStatus;
 use sled_agent_types::inventory::ManifestBootInventory;
 use sled_agent_types::inventory::ManifestInventory;
 use sled_agent_types::inventory::ManifestNonBootInventory;
@@ -949,6 +951,62 @@ pub struct InvSledAgent {
 
     #[diesel(embed)]
     pub file_source_resolver: InvOmicronFileSourceResolver,
+
+    instance_manager_update_disposition: Option<DbInvSledUpdateDisposition>,
+    instance_manager_num_registered_vmms: i64,
+}
+
+/// Helper for breaking an [`InstanceManagerStatus`] up into its DB columns.
+#[derive(Debug, Clone, Copy)]
+pub struct InvInstanceManagerStatusCols {
+    pub update_disposition: Option<DbInvSledUpdateDisposition>,
+    pub num_registered_vmms: i64,
+}
+
+impl From<InstanceManagerStatus> for InvInstanceManagerStatusCols {
+    fn from(status: InstanceManagerStatus) -> Self {
+        let InstanceManagerStatus { update_disposition, num_registered_vmms } =
+            status;
+
+        // "no config" becomes NULL; `Known(_)` becomes non-NULL.
+        let update_disposition = match update_disposition {
+            CurrentUpdateDisposition::ConfigNotAvailable => None,
+            CurrentUpdateDisposition::Known(disposition) => {
+                Some(disposition.into())
+            }
+        };
+
+        // Converting this usize via `as i64` is gross, but cockroach doesn't
+        // have an unsigned 64-bit type, so this allows us to store the real
+        // value losslessly. Having more than u32::MAX VMMs registered on a sled
+        // seems.... very unlikely... but it's easy to faithfully convert the
+        // integer in both directions here instead of having to potentially
+        // return an error.
+        let num_registered_vmms = num_registered_vmms as i64;
+
+        Self { update_disposition, num_registered_vmms }
+    }
+}
+
+impl From<InvInstanceManagerStatusCols> for InstanceManagerStatus {
+    fn from(cols: InvInstanceManagerStatusCols) -> Self {
+        let InvInstanceManagerStatusCols {
+            update_disposition,
+            num_registered_vmms,
+        } = cols;
+
+        // See the comments in the `From<InstanceManagerStatus>` impl; we do the
+        // reverse here.
+        let update_disposition = match update_disposition {
+            None => CurrentUpdateDisposition::ConfigNotAvailable,
+            Some(disposition) => {
+                CurrentUpdateDisposition::Known(disposition.into())
+            }
+        };
+        let num_registered_vmms = num_registered_vmms as usize;
+
+        InstanceManagerStatus { update_disposition, num_registered_vmms }
+    }
 }
 
 /// See [`sled_agent_types::inventory::ConfigReconcilerInventoryStatus`].
@@ -1338,6 +1396,11 @@ impl InvSledAgent {
                 non-null baseboard id"
             ))
         } else {
+            let InvInstanceManagerStatusCols {
+                update_disposition: instance_manager_update_disposition,
+                num_registered_vmms: instance_manager_num_registered_vmms,
+            } = sled_agent.instance_manager_status.into();
+
             Ok(InvSledAgent {
                 inv_collection_id: collection_id.into(),
                 time_collected: sled_agent.time_collected,
@@ -1360,8 +1423,20 @@ impl InvSledAgent {
                 ledgered_sled_config: ledgered_sled_config.map(From::from),
                 reconciler_status,
                 file_source_resolver,
+                instance_manager_update_disposition,
+                instance_manager_num_registered_vmms,
             })
         }
+    }
+
+    /// Reassemble the internal DB columns that comprise an
+    /// [`InstanceManagerStatus`].
+    pub fn instance_manager_status(&self) -> InstanceManagerStatus {
+        InvInstanceManagerStatusCols {
+            update_disposition: self.instance_manager_update_disposition,
+            num_registered_vmms: self.instance_manager_num_registered_vmms,
+        }
+        .into()
     }
 }
 
