@@ -4,26 +4,10 @@
 
 //! Types for network setup required to bring up the control plane.
 
-use oxnet::{IpNet, Ipv4Net};
+use oxnet::IpNet;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::{IpAddr, Ipv4Addr};
-
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
-pub struct BgpConfig {
-    /// The autonomous system number for the BGP configuration.
-    pub asn: u32,
-    /// The set of prefixes for the BGP router to originate.
-    pub originate: Vec<Ipv4Net>,
-
-    /// Shaper to apply to outgoing messages.
-    #[serde(default)]
-    pub shaper: Option<String>,
-
-    /// Checker to apply to incoming messages.
-    #[serde(default)]
-    pub checker: Option<String>,
-}
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 pub struct BgpPeerConfig {
@@ -188,31 +172,6 @@ pub struct TxEqConfig {
     pub post2: Option<i32>,
     /// Post-cursor tap1
     pub post1: Option<i32>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
-pub struct PortConfig {
-    /// The set of routes associated with this port.
-    pub routes: Vec<RouteConfig>,
-    /// This port's addresses and optional vlan IDs
-    pub addresses: Vec<UplinkAddressConfig>,
-    /// Switch the port belongs to.
-    pub switch: SwitchSlot,
-    /// Nmae of the port this config applies to.
-    pub port: String,
-    /// Port speed.
-    pub uplink_port_speed: LinkSpeed,
-    /// Port forward error correction type.
-    pub uplink_port_fec: Option<LinkFec>,
-    /// BGP peers on this port
-    pub bgp_peers: Vec<BgpPeerConfig>,
-    /// Whether or not to set autonegotiation
-    #[serde(default)]
-    pub autoneg: bool,
-    /// LLDP configuration for this port
-    pub lldp: Option<LldpPortConfig>,
-    /// TX-EQ configuration for this port
-    pub tx_eq: Option<TxEqConfig>,
 }
 
 /// Identifies switch physical location
