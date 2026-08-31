@@ -5202,7 +5202,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config_zone (
     -- worthwhile.
 
     -- Some zones have a second service.  Like the primary one, the meaning of
-    -- this is zone-type-dependent.
+    -- this is zone-type-dependent.  This should be used for additional underlay
+    -- IPs, _not_ external IP addresses.  Those are stored in the child table
+    -- `inv_omicron_sled_config_zone_external_ip` with a reference to this row.
     second_service_ip INET,
     second_service_port INT4
         CHECK (second_service_port IS NULL
@@ -5231,13 +5233,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config_zone (
     -- Properties specific to Nexus zones
     nexus_external_tls BOOLEAN,
     nexus_external_dns_servers INET ARRAY,
-
-    -- Source NAT configuration (currently used for boundary NTP only)
-    snat_ip INET,
-    snat_first_port INT4
-        CHECK (snat_first_port IS NULL OR snat_first_port BETWEEN 0 AND 65535),
-    snat_last_port INT4
-        CHECK (snat_last_port IS NULL OR snat_last_port BETWEEN 0 AND 65535),
 
     -- TODO: This is nullable for backwards compatibility.
     -- Eventually, that nullability should be removed.
@@ -5272,8 +5267,7 @@ CREATE INDEX IF NOT EXISTS inv_omicron_sled_config_zone_nic_id
     ON omicron.public.inv_omicron_sled_config_zone (nic_id)
     STORING (
         primary_service_ip,
-        second_service_ip,
-        snat_ip
+        second_service_ip
     );
 
 CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config_zone_nic (
@@ -5307,6 +5301,54 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config_zone_nic (
         (ip IS NULL) = (subnet IS NULL) AND
         (ipv6 IS NULL) = (ipv6_subnet IS NULL)
     )
+);
+
+-- The external IP addresses of a zone in an `inv_omicron_sled_config_zone`.
+--
+-- Zones with external networking (Nexus, external DNS, boundary NTP) have one
+-- or more external IPs.  There is one row here per external IP.  The kind of
+-- external IP is inferred from the owning zone's `zone_type` together with
+-- which ports are set:
+--
+--   - Nexus:        a floating IP (`ip` only).
+--   - External DNS: a floating IP with a port (`ip` + `port`). Note that the
+--     port here isn't really part of the external IP definition, but it's used
+--     to tell the DNS server which port to listen on.
+--   - Boundary NTP: an SNAT IP (`ip` + `snat_first_port` + `snat_last_port`).
+CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config_zone_external_ip (
+    -- where this observation came from
+    inv_collection_id UUID NOT NULL,
+
+    -- foreign key into the `inv_omicron_sled_config` table
+    sled_config_id UUID NOT NULL,
+
+    -- foreign key into the `inv_omicron_sled_config_zone` table
+    zone_id UUID NOT NULL,
+
+    -- the external IP address itself
+    ip INET NOT NULL,
+
+    -- the port for a floating IP with an address (external DNS); NULL otherwise
+    port INT4
+        CHECK (port IS NULL OR port BETWEEN 0 AND 65535),
+
+    -- the SNAT port range (boundary NTP); NULL otherwise
+    snat_first_port INT4
+        CHECK (snat_first_port IS NULL OR snat_first_port BETWEEN 0 AND 65535),
+    snat_last_port INT4
+        CHECK (snat_last_port IS NULL OR snat_last_port BETWEEN 0 AND 65535),
+
+    -- must provide both SNAT ports
+    CONSTRAINT both_snat_ports CHECK (
+        (snat_first_port IS NULL) = (snat_last_port IS NULL)
+    ),
+
+    -- may not provide _both_ `port` and any SNAT port
+    CONSTRAINT only_port_or_snat_ports CHECK (
+        NOT ((port IS NOT NULL) AND (snat_first_port IS NOT NULL))
+    ),
+
+    PRIMARY KEY (inv_collection_id, sled_config_id, zone_id, ip)
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config_dataset (
@@ -9422,7 +9464,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '296.0.0', NULL)
+    (TRUE, NOW(), NOW(), '297.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

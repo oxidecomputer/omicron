@@ -34,6 +34,7 @@ mod ereport_trim_serial_trailing_nulls;
 mod ereporter_restart_latest_ereport;
 mod ereporter_restart_order_v2;
 mod ereporter_restart_rack_id;
+mod inventory_zone_multiple_external_ips;
 mod normalize_service_external_ips;
 mod prune_service_nat_entries;
 mod rename_default_igw_ip_pool;
@@ -78,6 +79,7 @@ pub(crate) fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     register!(add_sled_update_disposition);
     register!(normalize_service_external_ips);
     register!(add_rendezvous_sled_bp_availability);
+    register!(inventory_zone_multiple_external_ips);
 
     map
 }
