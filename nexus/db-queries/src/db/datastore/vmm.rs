@@ -876,26 +876,57 @@ mod tests {
                     .expect("VMM should be inserted successfully");
                 vmms.push(vmm);
             }
+
+            // A stoppable VMM that has been deleted. In practice, a VMM that is
+            // deleted, wouldn't be in a `running` state. But we're forcing that
+            // state here to ensure that even if it were `running`, it wouldn't
+            // be marked by this method because `time_deleted` is not null.
+            let deleted = datastore
+                .vmm_insert(
+                    &opctx,
+                    Vmm {
+                        id: Uuid::new_v4(),
+                        time_created: Utc::now(),
+                        time_deleted: Some(Utc::now()),
+                        instance_id: Uuid::new_v4(),
+                        sled_id: sled_id.into(),
+                        propolis_ip: "10.1.9.32".parse().unwrap(),
+                        propolis_port: 420.into(),
+                        cpu_platform: VmmCpuPlatform::SledDefault,
+                        time_state_updated: Utc::now(),
+                        generation: Generation::new(),
+                        state: DbVmmState::Running,
+                        failure_reason: None,
+                        stop_for_update_disposition_generation: None,
+                    },
+                )
+                .await
+                .expect("deleted VMM should be inserted successfully");
+            vmms.push(deleted);
         }
-        let stoppable_per_sled =
-            vmms.iter().filter(|v| is_stoppable(v.state)).count() / 3;
+        let stoppable_per_sled = vmms
+            .iter()
+            .filter(|v| v.time_deleted.is_none() && is_stoppable(v.state))
+            .count()
+            / 3;
         assert_eq!(stoppable_per_sled, 4);
 
-        // Fetches every VMM's current row, keyed by VMM ID.
-        async fn fetch_all(
-            datastore: &DataStore,
-            opctx: &OpContext,
-            vmms: &[Vmm],
-        ) -> HashMap<Uuid, Vmm> {
-            let mut actual = HashMap::new();
-            for vmm in vmms {
-                let fetched = datastore
-                    .vmm_fetch(opctx, &PropolisUuid::from_untyped_uuid(vmm.id))
-                    .await
-                    .expect("VMM should be fetched successfully");
-                actual.insert(vmm.id, fetched);
-            }
-            actual
+        // Fetches every VMM row, including deleted VMMs (unlike `vmm_fetch`,
+        // which skips them).
+        async fn fetch_all(datastore: &DataStore) -> HashMap<Uuid, Vmm> {
+            dsl::vmm
+                // A filter is required to avoid the full-table-scan guard
+                // enabled in tests.
+                .filter(dsl::id.ne(Uuid::nil()))
+                .select(Vmm::as_select())
+                .load_async(
+                    &*datastore.pool_connection_for_tests().await.unwrap(),
+                )
+                .await
+                .expect("VMMs should be listed")
+                .into_iter()
+                .map(|vmm| (vmm.id, vmm))
+                .collect()
         }
 
         // Asserts that every fetched VMM row matches the expected row.
@@ -924,7 +955,7 @@ mod tests {
         let mut expected: HashMap<Uuid, Vmm> =
             vmms.iter().map(|vmm| (vmm.id, vmm.clone())).collect();
 
-        let actual = fetch_all(datastore, opctx, &vmms).await;
+        let actual = fetch_all(datastore).await;
         assert_rows(&actual, &expected);
 
         datastore
@@ -977,24 +1008,30 @@ mod tests {
             "the 4 stoppable VMMs on each of sleds A and B should be marked"
         );
         for vmm in expected.values_mut() {
-            if vmm.sled_id() == sled_a && is_stoppable(vmm.state) {
+            if vmm.time_deleted.is_none()
+                && vmm.sled_id() == sled_a
+                && is_stoppable(vmm.state)
+            {
                 vmm.stop_for_update_disposition_generation = Some(gen1.into());
             }
-            if vmm.sled_id() == sled_b && is_stoppable(vmm.state) {
+            if vmm.time_deleted.is_none()
+                && vmm.sled_id() == sled_b
+                && is_stoppable(vmm.state)
+            {
                 vmm.stop_for_update_disposition_generation = Some(gen2.into());
             }
         }
 
-        // There should be 22 unmarked rows (6 unstoppable on each of sleds A
-        // and B, plus all 10 on sled C).
-        let actual = fetch_all(datastore, opctx, &vmms).await;
+        // There should be 25 unmarked rows. 6 unstoppable VMMs on each of
+        // sleds A and B, all 10 on sled C, plus the 3 deleted VMMs.
+        let actual = fetch_all(datastore).await;
         assert_rows(&actual, &expected);
         assert_eq!(
             actual
                 .values()
                 .filter(|v| v.stop_for_update_disposition_generation.is_none())
                 .count(),
-            22,
+            25,
             "all rows other than sleds A and B's stoppable VMMs remain unmarked"
         );
 
@@ -1004,14 +1041,14 @@ mod tests {
             .await
             .expect("re-running the bulk mark should succeed");
         assert_eq!(marked_again, 0);
-        let actual = fetch_all(datastore, opctx, &vmms).await;
+        let actual = fetch_all(datastore).await;
         assert_rows(&actual, &expected);
         assert_eq!(
             actual
                 .values()
                 .filter(|v| v.stop_for_update_disposition_generation.is_none())
                 .count(),
-            22
+            25
         );
 
         // Now sled C evacuates too, moving from generation 1 to generation 2.
@@ -1038,12 +1075,15 @@ mod tests {
             "only the 4 stoppable VMMs on sled C should be marked"
         );
         for vmm in expected.values_mut() {
-            if vmm.sled_id() == sled_c && is_stoppable(vmm.state) {
+            if vmm.time_deleted.is_none()
+                && vmm.sled_id() == sled_c
+                && is_stoppable(vmm.state)
+            {
                 vmm.stop_for_update_disposition_generation = Some(gen2.into());
             }
         }
 
-        let actual = fetch_all(datastore, opctx, &vmms).await;
+        let actual = fetch_all(datastore).await;
         assert_rows(&actual, &expected);
         let gen1_count = actual
             .values()
@@ -1066,7 +1106,10 @@ mod tests {
             gen2_count, 8,
             "sled B's marked VMMs are unchanged and sled C's are newly marked"
         );
-        assert_eq!(null_count, 18, "the unstoppable VMMs remain unmarked");
+        assert_eq!(
+            null_count, 21,
+            "the unstoppable and deleted VMMs remain unmarked"
+        );
 
         // Clean up.
         db.terminate().await;
