@@ -22,7 +22,7 @@ use crate::v14::inventory::OmicronFileSourceResolverInventory;
 use crate::v14::inventory::OmicronSledConfig;
 use crate::v16::inventory::ConfigReconcilerInventory;
 use crate::v16::inventory::SingleMeasurementInventory;
-use crate::v50::inventory::SledRole;
+use crate::v51::inventory::SledRole;
 
 /// Identity and basic status information about this sled agent
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]

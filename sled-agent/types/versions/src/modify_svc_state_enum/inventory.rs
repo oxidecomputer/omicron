@@ -29,7 +29,7 @@ use crate::v34::inventory::SvcsError;
 use crate::v37;
 use crate::v40::inventory::{FmdInventory, FmdInventoryError};
 use crate::v43;
-use crate::v50::inventory::SledRole;
+use crate::v51::inventory::SledRole;
 
 /// Each service instance is always in a well-defined state based on its
 /// dependencies, the results of the execution of its methods, and its potential

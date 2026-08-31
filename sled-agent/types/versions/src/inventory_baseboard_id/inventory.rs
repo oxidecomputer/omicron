@@ -24,7 +24,7 @@ use crate::v24::inventory::InventoryZpool;
 use crate::v37::inventory::SvcsEnabledNotOnlineResult;
 use crate::v40;
 use crate::v40::inventory::{FmdInventory, FmdInventoryError};
-use crate::v50::inventory::SledRole;
+use crate::v51::inventory::SledRole;
 
 /// Identity and basic status information about this sled agent
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]

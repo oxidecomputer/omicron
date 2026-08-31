@@ -24,7 +24,7 @@ use crate::v14::inventory::OmicronSledConfig;
 use crate::v16::inventory::ConfigReconcilerInventory;
 use crate::v16::inventory::SingleMeasurementInventory;
 use crate::v22;
-use crate::v50::inventory::SledRole;
+use crate::v51::inventory::SledRole;
 
 #[derive(
     Clone,

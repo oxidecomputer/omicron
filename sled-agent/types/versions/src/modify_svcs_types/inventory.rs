@@ -23,7 +23,7 @@ use crate::v16::inventory::ConfigReconcilerInventory;
 use crate::v16::inventory::SingleMeasurementInventory;
 use crate::v24::inventory::InventoryZpool;
 use crate::v28;
-use crate::v50::inventory::SledRole;
+use crate::v51::inventory::SledRole;
 
 #[derive(
     Debug,

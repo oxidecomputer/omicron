@@ -30,7 +30,7 @@ use crate::v24::inventory::InventoryZpool;
 use crate::v40::inventory::FmdInventory;
 use crate::v40::inventory::FmdInventoryError;
 use crate::v46::inventory::SvcsEnabledNotOnlineResult;
-use crate::v50::inventory::SledRole;
+use crate::v51::inventory::SledRole;
 use chrono::DateTime;
 use chrono::Utc;
 use iddqd::IdOrdMap;
