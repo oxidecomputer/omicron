@@ -22,9 +22,8 @@ use crate::v1;
 use crate::v1::disk::DatasetConfig;
 use crate::v1::disk::OmicronPhysicalDiskConfig;
 use crate::v1::inventory::{
-    HostPhase2DesiredSlots,
-    NetworkInterface, OmicronZoneDataset, OmicronZoneImageSource,
-    SourceNatConfig,
+    HostPhase2DesiredSlots, NetworkInterface, OmicronZoneDataset,
+    OmicronZoneImageSource, SourceNatConfig,
 };
 
 /// Describes the set of Reconfigurator-managed configuration elements of a sled
