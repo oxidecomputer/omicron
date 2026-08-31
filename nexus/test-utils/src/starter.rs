@@ -69,7 +69,6 @@ use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
 use omicron_common::address::NEXUS_OPTE_IPV6_SUBNET;
 use omicron_common::address::NTP_OPTE_IPV4_SUBNET;
 use omicron_common::address::NTP_PORT;
-use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::UserId;
@@ -80,8 +79,13 @@ use omicron_common::api::internal::nexus::ProducerKind;
 use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_common::zpool_name::ZpoolName;
+use omicron_debug_dropbox::DebugDropbox;
+use omicron_generation_kinds::{
+    Generation, NexusGeneration, SledConfigGeneration, TargetReleaseGeneration,
+};
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev;
+use omicron_test_utils::dev::TestTempDir;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ExternalIpUuid;
@@ -109,13 +113,15 @@ use sled_agent_types::inventory::SledCpuFamily;
 use sled_agent_types::inventory::SourceNatConfigGeneric;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use sled_agent_types::system_networking::WriteNetworkConfigRequest;
-use slog::{Logger, debug, error, o};
+use slog::{Logger, debug, error, info, o};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::iter::{once, repeat, zip};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
+use std::sync::atomic::AtomicU16;
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use transient_dns_server::TransientDnsServer;
@@ -149,6 +155,7 @@ pub struct ControlPlaneStarter<'a, N: NexusServer> {
     pub database_admin: Option<omicron_cockroach_admin::Server>,
     pub clickhouse: Option<dev::clickhouse::ClickHouseDeployment>,
     pub sled_agents: Vec<ControlPlaneTestContextSledAgent>,
+    sled_index_allocator: SledIndexAllocator,
     pub oximeter: Option<Oximeter>,
     pub producer: Option<ProducerServer>,
     pub gateway: BTreeMap<SwitchSlot, GatewayTestContext>,
@@ -177,6 +184,8 @@ pub struct ControlPlaneStarter<'a, N: NexusServer> {
     pub password: Option<String>,
 
     pub simulated_upstairs: Arc<sim::SimulatedUpstairs>,
+
+    debug_dropbox_dir: TestTempDir,
 }
 
 type StepInitFn<'a, N> = Box<
@@ -191,6 +200,8 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         let simulated_upstairs_log = logctx.log.new(o!(
             "component" => "omicron_sled_agent::sim::SimulatedUpstairs",
         ));
+
+        let debug_dropbox_dir = TestTempDir::new(&logctx.log);
 
         Self {
             config,
@@ -207,6 +218,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             database_admin: None,
             clickhouse: None,
             sled_agents: vec![],
+            sled_index_allocator: SledIndexAllocator::new(),
             oximeter: None,
             producer: None,
             gateway: BTreeMap::new(),
@@ -228,6 +240,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             simulated_upstairs: Arc::new(sim::SimulatedUpstairs::new(
                 simulated_upstairs_log,
             )),
+            debug_dropbox_dir,
         }
     }
 
@@ -596,7 +609,12 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                 .clone(),
         };
 
-        let nexus_internal = N::start_internal(&self.config, &log).await?;
+        let debug_dropbox =
+            DebugDropbox::for_tests(log, &self.debug_dropbox_dir.path())
+                .await
+                .expect("creating debug dropbox directory");
+        let nexus_internal =
+            N::start_internal(&self.config, &log, debug_dropbox).await?;
         let nexus_internal_addr =
             nexus_internal.get_http_server_internal_address();
         let internal_address = match nexus_internal_addr {
@@ -750,7 +768,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                     slot: 0,
                     vni: Vni::SERVICES_VNI,
                 },
-                nexus_generation: Generation::new(),
+                nexus_generation: NexusGeneration::new(),
             }),
             image_source: BlueprintZoneImageSource::InstallDataset,
         });
@@ -778,7 +796,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             .clone()
             .build_full_config_for_initial_generation();
 
-        slog::info!(log, "DNS population: {:#?}", dns_config);
+        info!(log, "DNS population: {:#?}", dns_config);
         dns_config_client.dns_config_put(&dns_config).await.expect(
             "Failed to send initial DNS records to internal DNS server",
         );
@@ -823,8 +841,8 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             parent_blueprint_id: None,
             internal_dns_version: dns_config.generation,
             external_dns_version: Generation::new(),
-            target_release_minimum_generation: Generation::new(),
-            nexus_generation: Generation::new(),
+            target_release_minimum_generation: TargetReleaseGeneration::new(),
+            nexus_generation: NexusGeneration::new(),
             external_networking_generation: Generation::new(),
             cockroachdb_fingerprint: String::new(),
             cockroachdb_setting_preserve_downgrade:
@@ -921,7 +939,6 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
     pub async fn start_sled(
         &mut self,
         sled_id: SledUuid,
-        sled_index: u16,
         sim_mode: sim::SimMode,
     ) {
         let nexus_address =
@@ -934,8 +951,9 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             )),
             nexus_address,
             sled_id,
-            sled_index,
+            self.sled_index_allocator.next(),
             sim_mode,
+            SledCpuFamily::AmdMilan,
             &self.simulated_upstairs,
         )
         .await
@@ -1003,7 +1021,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         // Send the sled-agents their new configurations.
         // This generation number should match the one in
         // `make_sled_configs`.
-        let generation = Generation::from_u32(2);
+        let generation = SledConfigGeneration::from_u32(2);
 
         for (sled_agent, sled_zones) in zip(self.sled_agents.iter(), zones) {
             let sled_id = sled_agent.sled_agent_id();
@@ -1043,7 +1061,6 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
     pub async fn extra_sled_agent(
         &mut self,
         sled_id: SledUuid,
-        sled_index: u16,
         sim_mode: sim::SimMode,
     ) {
         let nexus_address =
@@ -1056,8 +1073,9 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             )),
             nexus_address,
             sled_id,
-            sled_index,
+            self.sled_index_allocator.next(),
             sim_mode,
+            SledCpuFamily::AmdMilan,
             &self.simulated_upstairs,
         )
         .await
@@ -1293,6 +1311,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             database_admin: self.database_admin.unwrap(),
             clickhouse: self.clickhouse.unwrap(),
             sled_agents: self.sled_agents,
+            sled_index_allocator: self.sled_index_allocator,
             oximeter: self.oximeter.unwrap(),
             producer: self.producer.unwrap(),
             logctx: self.logctx,
@@ -1307,6 +1326,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             silo_name: self.silo_name.unwrap(),
             user_name: self.user_name.unwrap(),
             password: self.password.unwrap(),
+            debug_dropbox_dir: self.debug_dropbox_dir,
         }
     }
 
@@ -1344,6 +1364,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         for (_, mut ddm) in self.ddm {
             ddm.cleanup().await.unwrap();
         }
+        self.debug_dropbox_dir.cleanup_successful();
         self.logctx.cleanup_successful();
     }
 
@@ -1363,7 +1384,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         // The generation number that the sled-agents' configuration
         // will have when this blueprint is executed. Should match
         // the one in `configure_sled_agents`.
-        let sled_agent_generation = Generation::from_u32(2);
+        let sled_agent_generation = SledConfigGeneration::from_u32(2);
 
         for (sled_agent, maybe_zones) in
             zip(self.sled_agents.iter(), maybe_zones)
@@ -1767,11 +1788,7 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
                 "start_sled1",
                 Box::new(move |builder| {
                     builder
-                        .start_sled(
-                            SLED_AGENT_UUID.parse().unwrap(),
-                            0,
-                            sim_mode,
-                        )
+                        .start_sled(SLED_AGENT_UUID.parse().unwrap(), sim_mode)
                         .boxed()
                 }),
             )],
@@ -1788,7 +1805,6 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
                         builder
                             .start_sled(
                                 SLED_AGENT2_UUID.parse().unwrap(),
-                                1,
                                 sim_mode,
                             )
                             .boxed()
@@ -1799,18 +1815,14 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
             .await;
     }
 
-    for index in 1..extra_sled_agents {
+    for _ in 1..extra_sled_agents {
         starter
             .init_with_steps(
                 vec![(
                     "add_extra_sled_agent",
                     Box::new(move |builder| {
                         builder
-                            .extra_sled_agent(
-                                SledUuid::new_v4(),
-                                index.checked_add(1).unwrap(),
-                                sim_mode,
-                            )
+                            .extra_sled_agent(SledUuid::new_v4(), sim_mode)
                             .boxed()
                     }),
                 )],
@@ -1891,16 +1903,39 @@ pub(crate) enum PopulateCrdb {
     Empty,
 }
 
+/// Allocator for sled indexes within a test.
+///
+/// Sled indexes must be unique for a simulated control plane universe, since
+/// they're fed into (among other things) Crucible port offsets and SimGimletNN
+/// baseboard serials. This allocator ensures that different sleds each get
+/// their own indexes.
+#[derive(Debug)]
+pub(crate) struct SledIndexAllocator {
+    next: AtomicU16,
+}
+
+impl SledIndexAllocator {
+    pub(crate) fn new() -> Self {
+        Self { next: AtomicU16::new(0) }
+    }
+
+    pub(crate) fn next(&self) -> u16 {
+        self.next.fetch_add(1, Ordering::Relaxed)
+    }
+}
+
 /// Starts a simulated sled agent
 ///
 /// Note: you should probably use the `extra_sled_agents` macro parameter on
-/// `nexus_test` instead!
-pub async fn start_sled_agent(
+/// `nexus_test` instead! To start a sled agent partway through a test, use
+/// [`ControlPlaneTestContext::add_sled`].
+pub(crate) async fn start_sled_agent(
     log: Logger,
     nexus_address: SocketAddr,
     id: SledUuid,
     sled_index: u16,
     sim_mode: sim::SimMode,
+    cpu_family: SledCpuFamily,
     simulated_upstairs: &Arc<sim::SimulatedUpstairs>,
 ) -> Result<sim::Server, String> {
     // Generate a baseboard serial number that matches the SP configuration
@@ -1913,23 +1948,28 @@ pub async fn start_sled_agent(
         sim_mode,
         Some(nexus_address),
         sim::ZpoolConfig::None,
-        SledCpuFamily::AmdMilan,
+        cpu_family,
         Some(baseboard_serial),
     );
     start_sled_agent_with_config(log, &config, sled_index, simulated_upstairs)
         .await
 }
 
-pub async fn start_sled_agent_with_config(
+async fn start_sled_agent_with_config(
     log: Logger,
     config: &sim::Config,
     sled_index: u16,
     simulated_upstairs: &Arc<sim::SimulatedUpstairs>,
 ) -> Result<sim::Server, String> {
-    let server =
-        sim::Server::start(&config, &log, true, simulated_upstairs, sled_index)
-            .await
-            .map_err(|e| e.to_string())?;
+    let server = sim::Server::start(
+        &config,
+        &log,
+        sim::NexusRegistration::WaitForCompletion,
+        simulated_upstairs,
+        sled_index,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
     Ok(server)
 }
 

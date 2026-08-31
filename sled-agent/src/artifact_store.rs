@@ -34,7 +34,7 @@ use dropshot::{
 };
 use futures::{Stream, TryStreamExt};
 use omicron_common::address::REPO_DEPOT_PORT;
-use omicron_common::api::external::Generation;
+use omicron_generation_kinds::Generation;
 use omicron_ledger::Ledger;
 use repo_depot_api::*;
 use sha2::{Digest, Sha256};
@@ -926,7 +926,7 @@ mod test {
     use camino_tempfile::Utf8TempDir;
     use futures::stream::{self, StreamExt};
     use hex_literal::hex;
-    use omicron_common::api::external::Generation;
+    use omicron_generation_kinds::Generation;
     use omicron_test_utils::dev::test_setup_log;
     use sled_agent_types::artifact::ArtifactConfig;
     use tokio::io::AsyncReadExt;

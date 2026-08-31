@@ -87,7 +87,8 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
-    (2026_08_20_00, MULTICAST_SSM_EXAMPLE_DOCS),
+    (2026_08_31_00, MULTICAST_SSM_EXAMPLE_DOCS),
+    (2026_08_28_00, SILO_USER_DOCS),
     (2026_08_19_01, BGP_PEER_SRC_ADDR),
     (2026_08_17_00, SUPPORT_BUNDLES_STABLE),
     (2026_08_14_00, ALERT_LIST),
@@ -740,7 +741,7 @@ pub trait NexusExternalApi {
 
     // Silo-specific user endpoints
 
-    /// List built-in (system) users in silo
+    /// List users in silo
     #[endpoint {
         method = GET,
         path = "/v1/system/users",
@@ -752,7 +753,7 @@ pub trait NexusExternalApi {
         query_params: Query<PaginatedById<latest::silo::SiloSelector>>,
     ) -> Result<HttpResponseOk<ResultsPage<latest::user::User>>, HttpError>;
 
-    /// List built-in (system) users in silo
+    /// List users in silo
     #[endpoint {
         operation_id = "silo_user_list",
         method = GET,
@@ -777,7 +778,7 @@ pub trait NexusExternalApi {
         )
     }
 
-    /// Fetch built-in (system) user
+    /// Fetch user in silo
     #[endpoint {
         method = GET,
         path = "/v1/system/users/{user_id}",
@@ -790,7 +791,7 @@ pub trait NexusExternalApi {
         query_params: Query<latest::silo::SiloSelector>,
     ) -> Result<HttpResponseOk<latest::user::User>, HttpError>;
 
-    /// Fetch built-in (system) user
+    /// Fetch user in silo
     #[endpoint {
         operation_id = "silo_user_view",
         method = GET,
@@ -8986,10 +8987,10 @@ pub trait NexusExternalApi {
     ///
     /// Audit log entries are designed to be immutable: once you see an entry,
     /// fetching it again will never get you a different result. The list is
-    /// ordered by `time_completed`, not `time_started`. If you fetch the audit
-    /// log for a time range that is fully in the past, the resulting list is
-    /// guaranteed to be complete, i.e., fetching the same timespan again later
-    /// will always produce the same set of entries.
+    /// ordered and filtered by `time_completed`, not `time_started`. If
+    /// you fetch the audit log for a time range that is fully in the past,
+    /// the resulting list is guaranteed to be complete, i.e., fetching the
+    /// same timespan again later will always produce the same set of entries.
     #[endpoint {
         method = GET,
         path = "/v1/system/audit-log",

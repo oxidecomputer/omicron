@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use chrono::{DateTime, Utc};
-use omicron_common::api::external::Generation;
+use omicron_generation_kinds::Generation;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::instance as sled_agent;
 use std::fmt;

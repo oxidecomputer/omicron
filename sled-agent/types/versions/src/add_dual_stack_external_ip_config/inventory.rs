@@ -12,9 +12,10 @@ use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use omicron_common::{
     address::{Ip, NUM_SOURCE_NAT_PORTS},
-    api::external::{ByteCount, Generation},
+    api::external::ByteCount,
     zpool_name::ZpoolName,
 };
+use omicron_generation_kinds::Generation;
 use omicron_ledger::Ledgerable;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::{DatasetUuid, OmicronZoneUuid};

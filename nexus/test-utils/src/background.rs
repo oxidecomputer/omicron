@@ -11,6 +11,7 @@ use nexus_lockstep_client::types::CurrentStatus;
 use nexus_lockstep_client::types::LastResult;
 use nexus_types::internal_api::background::*;
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
+use omicron_uuid_kinds::CollectionUuid;
 use slog::info;
 use std::time::Duration;
 
@@ -507,6 +508,82 @@ pub async fn run_tuf_artifact_replication_step(
     .unwrap();
     assert_eq!(status.last_run_counters.err(), 0);
     status
+}
+
+/// Run the inventory_collection background task and return the new collection's
+/// ID.
+///
+/// Panics on encountering an error, or if no collection ID was returned from
+/// the task.
+pub async fn run_inventory_collection(
+    lockstep_client: &ClientTestContext,
+) -> CollectionUuid {
+    // Use a longer 60s timeout here.
+    //
+    // The wait covers an in-flight iteration too, and a single iteration can
+    // hit the collector's 15s cockroach-admin and the 60s Sled Agent client
+    // timeouts. In general we expect Sled Agent to be present, but
+    // cockroach-admin to not currently be present in tests (see
+    // https://github.com/oxidecomputer/omicron/issues/8496 -- we use an
+    // ephemeral port in tests but Nexus attempts to reach a hardcoded port). We
+    // may need to bump this timeout further if we continue to see flakes.
+    let last_background_task = activate_background_task_with_timeout(
+        &lockstep_client,
+        "inventory_collection",
+        Duration::from_secs(60),
+    )
+    .await;
+
+    let LastResult::Completed(last_result_completed) =
+        last_background_task.last
+    else {
+        panic!(
+            "unexpected {:?} returned from inventory_collection task",
+            last_background_task.last,
+        );
+    };
+
+    let details = last_result_completed.details;
+    if let Some(error) = details.get("error") {
+        panic!("inventory_collection task failed: {error}");
+    }
+    let Some(collection_id) =
+        details.get("collection_id").and_then(serde_json::Value::as_str)
+    else {
+        panic!("inventory_collection details have no collection_id: {details}");
+    };
+    collection_id.parse().expect("parsed collection_id as a CollectionUuid")
+}
+
+/// Run the inventory_loader background task and return the ID of the collection
+/// it has loaded.
+///
+/// Panics on encountering an error, or if there are no collections.
+pub async fn run_inventory_loader(
+    lockstep_client: &ClientTestContext,
+) -> CollectionUuid {
+    let last_background_task =
+        activate_background_task(&lockstep_client, "inventory_loader").await;
+
+    let LastResult::Completed(last_result_completed) =
+        last_background_task.last
+    else {
+        panic!(
+            "unexpected {:?} returned from inventory_loader task",
+            last_background_task.last,
+        );
+    };
+
+    let status = serde_json::from_value::<InventoryLoadStatus>(
+        last_result_completed.details,
+    )
+    .expect("parsed inventory_loader details as InventoryLoadStatus");
+    match status {
+        InventoryLoadStatus::Loaded { collection_id, .. } => collection_id,
+        InventoryLoadStatus::Error(_) | InventoryLoadStatus::NoCollections => {
+            panic!("inventory_loader did not load a collection: {status:?}")
+        }
+    }
 }
 
 /// Run the blueprint_loader background task
