@@ -4,28 +4,10 @@
 
 //! Types for network setup required to bring up the control plane.
 
-use oxnet::{IpNet, Ipv4Net, Ipv6Net};
+use oxnet::{IpNet, Ipv4Net};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::{IpAddr, Ipv4Addr};
-
-/// Initial network configuration
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
-pub struct RackNetworkConfig {
-    pub rack_subnet: Ipv6Net,
-    // TODO: #3591 Consider making infra-ip ranges implicit for uplinks
-    /// First ip address to be used for configuring network infrastructure
-    pub infra_ip_first: Ipv4Addr,
-    /// Last ip address to be used for configuring network infrastructure
-    pub infra_ip_last: Ipv4Addr,
-    /// Uplinks for connecting the rack to external networks
-    pub ports: Vec<PortConfig>,
-    /// BGP configurations for connecting the rack to external networks
-    pub bgp: Vec<BgpConfig>,
-    /// BFD configuration for connecting the rack to external networks
-    #[serde(default)]
-    pub bfd: Vec<BfdPeerConfig>,
-}
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 pub struct BgpConfig {

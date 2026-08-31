@@ -2,7 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::time::Duration;
 
@@ -14,8 +13,8 @@ use omicron_common::address::NEXUS_LOCKSTEP_PORT;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_generation_kinds::Generation;
 use omicron_ledger::Ledgerable;
-use omicron_uuid_kinds::{DatasetUuid, MupdateOverrideUuid, OmicronZoneUuid};
-use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::MupdateOverrideUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -23,10 +22,9 @@ use crate::v1;
 use crate::v1::disk::DatasetConfig;
 use crate::v1::disk::OmicronPhysicalDiskConfig;
 use crate::v1::inventory::{
-    BootPartitionContents, ConfigReconcilerInventoryResult,
     HostPhase2DesiredSlots,
     NetworkInterface, OmicronZoneDataset, OmicronZoneImageSource,
-    OrphanedDataset, RemoveMupdateOverrideInventory, SourceNatConfig,
+    SourceNatConfig,
 };
 
 /// Describes the set of Reconfigurator-managed configuration elements of a sled
@@ -200,24 +198,6 @@ pub enum OmicronZoneType {
 
 fn default_nexus_lockstep_port() -> u16 {
     omicron_common::address::NEXUS_LOCKSTEP_PORT
-}
-
-/// Describes the last attempt made by the sled-agent-config-reconciler to
-/// reconcile the current sled config against the actual state of the sled.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub struct ConfigReconcilerInventory {
-    pub last_reconciled_config: OmicronSledConfig,
-    pub external_disks:
-        BTreeMap<PhysicalDiskUuid, ConfigReconcilerInventoryResult>,
-    pub datasets: BTreeMap<DatasetUuid, ConfigReconcilerInventoryResult>,
-    pub orphaned_datasets: IdOrdMap<OrphanedDataset>,
-    pub zones: BTreeMap<OmicronZoneUuid, ConfigReconcilerInventoryResult>,
-    pub boot_partitions: BootPartitionContents,
-    /// The result of removing the mupdate override file on disk.
-    ///
-    /// `None` if `remove_mupdate_override` was not provided in the sled config.
-    pub remove_mupdate_override: Option<RemoveMupdateOverrideInventory>,
 }
 
 /// Status of the sled-agent-config-reconciler task.
