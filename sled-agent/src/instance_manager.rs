@@ -18,7 +18,7 @@ use illumos_utils::opte::PortManager;
 use illumos_utils::running_zone::ZoneBuilderFactory;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::internal::shared::SledIdentifiers;
-use omicron_uuid_kinds::{InstanceUuid, PropolisUuid};
+use omicron_uuid_kinds::PropolisUuid;
 use oxnet::IpNet;
 use sled_agent_config_reconciler::AvailableDatasetsReceiver;
 use sled_agent_config_reconciler::CurrentlyManagedZpoolsReceiver;
@@ -86,9 +86,6 @@ pub enum Error {
 
     #[error("VMM with ID {0} not found")]
     NoSuchVmm(PropolisUuid),
-
-    #[error("No active VMM for instance {0}")]
-    NoActiveVmmForInstance(InstanceUuid),
 
     #[error("OPTE port management error")]
     Opte(#[from] illumos_utils::opte::Error),
