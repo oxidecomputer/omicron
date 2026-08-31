@@ -827,7 +827,7 @@ impl DataStore {
                 | BundleData::SpDumps => {
                     // Handled by flags row above.
                 }
-                BundleData::HostInfo(sleds) => {
+                BundleData::HostInfo { sleds, zones: _ } => {
                     diesel::insert_into(
                         host_info_dsl::support_bundle_data_selection_host_info,
                     )

@@ -15,7 +15,9 @@ use nexus_db_schema::schema::{
 };
 use nexus_types::fm;
 use nexus_types::fm::ereport::EreportFilters;
-use nexus_types::support_bundle::{BundleData, BundleTimeRange, SledSelection};
+use nexus_types::support_bundle::{
+    BundleData, BundleTimeRange, SledSelection, ZoneSelection,
+};
 use omicron_uuid_kinds::{
     CaseKind, GenericUuid, SitrepKind, SledUuid, SupportBundleKind,
 };
@@ -121,14 +123,14 @@ impl HostInfo {
 impl From<HostInfo> for BundleData {
     fn from(row: HostInfo) -> Self {
         let HostInfo { sitrep_id: _, request_id: _, all_sleds, sled_ids } = row;
-        let selection = if all_sleds {
+        let sleds = if all_sleds {
             SledSelection::All
         } else {
             SledSelection::Specific(
                 sled_ids.into_iter().map(SledUuid::from_untyped_uuid).collect(),
             )
         };
-        BundleData::HostInfo(selection)
+        BundleData::HostInfo { sleds, zones: ZoneSelection::All }
     }
 }
 

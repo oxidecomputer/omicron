@@ -1123,7 +1123,7 @@ impl DataStore {
                     BundleData::Reconfigurator
                     | BundleData::SledCubbyInfo
                     | BundleData::SpDumps => {}
-                    BundleData::HostInfo(sleds) => {
+                    BundleData::HostInfo { sleds, zones: _ } => {
                         host_info_rows.push(HostInfo::from_sitrep(
                             sitrep_id, req_id, sleds,
                         ));

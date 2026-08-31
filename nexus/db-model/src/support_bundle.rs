@@ -19,6 +19,7 @@ use nexus_types::internal_api::views as internal_views;
 use nexus_types::support_bundle::BundleData;
 use nexus_types::support_bundle::BundleTimeRange;
 use nexus_types::support_bundle::SledSelection;
+use nexus_types::support_bundle::ZoneSelection;
 use omicron_uuid_kinds::CaseKind;
 use omicron_uuid_kinds::CaseUuid;
 use omicron_uuid_kinds::DatasetKind;
@@ -203,14 +204,14 @@ impl HostInfo {
 impl From<HostInfo> for BundleData {
     fn from(row: HostInfo) -> Self {
         let HostInfo { bundle_id: _, all_sleds, sled_ids } = row;
-        let selection = if all_sleds {
+        let sleds = if all_sleds {
             SledSelection::All
         } else {
             SledSelection::Specific(
                 sled_ids.into_iter().map(SledUuid::from_untyped_uuid).collect(),
             )
         };
-        BundleData::HostInfo(selection)
+        BundleData::HostInfo { sleds, zones: ZoneSelection::All }
     }
 }
 
