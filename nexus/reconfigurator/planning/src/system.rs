@@ -62,7 +62,9 @@ use sled_agent_types::disk::DiskVariant;
 use sled_agent_types::disk::M2Slot;
 use sled_agent_types::inventory::ConfigReconcilerInventory;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+use sled_agent_types::inventory::CurrentUpdateDisposition;
 use sled_agent_types::inventory::FmdInventory;
+use sled_agent_types::inventory::InstanceManagerStatus;
 use sled_agent_types::inventory::Inventory;
 use sled_agent_types::inventory::InventoryDataset;
 use sled_agent_types::inventory::InventoryDisk;
@@ -71,6 +73,7 @@ use sled_agent_types::inventory::ManifestBootInventory;
 use sled_agent_types::inventory::MupdateOverrideBootInventory;
 use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
 use sled_agent_types::inventory::OmicronSledConfig;
+use sled_agent_types::inventory::OmicronSledUpdateDisposition;
 use sled_agent_types::inventory::SledCpuFamily;
 use sled_agent_types::inventory::SledRole;
 use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
@@ -1518,6 +1521,12 @@ impl Sled {
                         sled_config,
                     ),
                 ),
+                instance_manager_status: InstanceManagerStatus {
+                    update_disposition: CurrentUpdateDisposition::Known(
+                        OmicronSledUpdateDisposition::Available,
+                    ),
+                    num_registered_vmms: 0,
+                },
                 // XXX: return something more reasonable here?
                 file_source_resolver:
                     OmicronFileSourceResolverInventory::new_fake(),
@@ -1704,6 +1713,12 @@ impl Sled {
             ledgered_sled_config: inv_sled_agent.ledgered_sled_config.clone(),
             reconciler_status: inv_sled_agent.reconciler_status.clone(),
             last_reconciliation: inv_sled_agent.last_reconciliation.clone(),
+            instance_manager_status: InstanceManagerStatus {
+                update_disposition: CurrentUpdateDisposition::Known(
+                    OmicronSledUpdateDisposition::Available,
+                ),
+                num_registered_vmms: 0,
+            },
             file_source_resolver: inv_sled_agent.file_source_resolver.clone(),
             smf_services_enabled_not_online: inv_sled_agent
                 .smf_services_enabled_not_online

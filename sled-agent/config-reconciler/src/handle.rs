@@ -9,11 +9,11 @@ use omicron_common::disk::DatasetName;
 use sled_agent_types::artifact::ArtifactConfig;
 use sled_agent_types::inventory::ConfigReconcilerInventory;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+use sled_agent_types::inventory::CurrentUpdateDisposition;
 use sled_agent_types::inventory::InventoryDataset;
 use sled_agent_types::inventory::InventoryDisk;
 use sled_agent_types::inventory::InventoryZpool;
 use sled_agent_types::inventory::OmicronSledConfig;
-use sled_agent_types::inventory::OmicronSledUpdateDisposition;
 use sled_storage::config::MountConfig;
 use sled_storage::disk::Disk;
 use sled_storage::nested_dataset::NestedDatasetConfig;
@@ -116,13 +116,6 @@ impl ConfigReconcilerSpawnToken {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
-pub enum CurrentUpdateDisposition {
-    ConfigNotAvailable,
-    Known(OmicronSledUpdateDisposition),
-}
-
 #[derive(Debug, Clone)]
 pub struct UpdateDispositionReceiver {
     // We act as a forwarding watch receiver for the ledger channel that reports
@@ -175,7 +168,7 @@ impl UpdateDispositionReceiver {
     /// never change.
     #[cfg(any(test, feature = "testing"))]
     pub fn fake_static(
-        update_disposition: OmicronSledUpdateDisposition,
+        update_disposition: sled_agent_types::inventory::OmicronSledUpdateDisposition,
     ) -> Self {
         let (receiver, sender) = Self::fake_dynamic(
             CurrentUpdateDisposition::Known(update_disposition),

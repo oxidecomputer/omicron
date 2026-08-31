@@ -2761,9 +2761,7 @@ impl InstanceRunner {
 mod tests {
     use super::*;
     use crate::fakes::nexus::{FakeNexusServer, ServerContext};
-    use crate::instance_manager::{
-        InstanceManagerJobsStatus, VmmRegistrationDisallowedReason,
-    };
+    use crate::instance_manager::VmmRegistrationDisallowedReason;
     use crate::metrics;
     use crate::nexus::make_nexus_client_with_port;
     use crate::vmm_reservoir::VmmReservoirManagerHandle;
@@ -2784,13 +2782,15 @@ mod tests {
     };
     use sled_agent_config_reconciler::UpdateDispositionReceiver;
     use sled_agent_config_reconciler::{
-        CurrentUpdateDisposition, CurrentlyManagedZpoolsReceiver,
-        InternalDiskDetails, InternalDisksReceiver,
+        CurrentlyManagedZpoolsReceiver, InternalDiskDetails,
+        InternalDisksReceiver,
     };
     use sled_agent_types::disk::DiskIdentity;
     use sled_agent_types::instance::ExternalIpv4Config;
     use sled_agent_types::instance::ExternalIpv6Config;
     use sled_agent_types::instance::InstanceEnsureBody;
+    use sled_agent_types::inventory::CurrentUpdateDisposition;
+    use sled_agent_types::inventory::InstanceManagerStatus;
     use sled_agent_types::inventory::OmicronSledUpdateDisposition;
     use sled_agent_types::inventory::SourceNatConfigV6;
     use sled_agent_types::zone_bundle::CleanupContext;
@@ -3591,15 +3591,15 @@ mod tests {
             .await
     }
 
-    /// Wait (with a timeout) until the `InstanceManager`'s jobs status
-    /// satisfies `pred`.
-    async fn wait_for_jobs_status(
+    /// Wait (with a timeout) until the `InstanceManager`'s status satisfies
+    /// `pred`.
+    async fn wait_for_status(
         instance_manager: &crate::instance_manager::InstanceManager,
-        pred: fn(&InstanceManagerJobsStatus) -> bool,
+        pred: fn(&InstanceManagerStatus) -> bool,
     ) {
         wait_for_condition(
             || async {
-                let status = instance_manager.jobs_status();
+                let status = instance_manager.status();
                 if pred(&status) {
                     Ok(())
                 } else {
@@ -3646,7 +3646,7 @@ mod tests {
             )
         );
 
-        let status = test_objects.instance_manager.jobs_status();
+        let status = test_objects.instance_manager.status();
         assert_eq!(status.num_registered_vmms, 0);
         assert_eq!(
             status.update_disposition,
@@ -3695,7 +3695,7 @@ mod tests {
         disposition_tx.set(CurrentUpdateDisposition::Known(
             OmicronSledUpdateDisposition::Available,
         ));
-        wait_for_jobs_status(&test_objects.instance_manager, |status| {
+        wait_for_status(&test_objects.instance_manager, |status| {
             status.update_disposition
                 == CurrentUpdateDisposition::Known(
                     OmicronSledUpdateDisposition::Available,
@@ -3706,7 +3706,7 @@ mod tests {
         try_ensure_registered(&test_objects, propolis_id, instance_id)
             .await
             .expect("registration should succeed once the sled is available");
-        wait_for_jobs_status(&test_objects.instance_manager, |status| {
+        wait_for_status(&test_objects.instance_manager, |status| {
             status.num_registered_vmms == 1
         })
         .await;
@@ -3736,7 +3736,7 @@ mod tests {
         try_ensure_registered(&test_objects, propolis_id_a, instance_id_a)
             .await
             .expect("registration should succeed while available");
-        wait_for_jobs_status(&test_objects.instance_manager, |status| {
+        wait_for_status(&test_objects.instance_manager, |status| {
             status.num_registered_vmms == 1
         })
         .await;
@@ -3744,7 +3744,7 @@ mod tests {
         disposition_tx.set(CurrentUpdateDisposition::Known(
             OmicronSledUpdateDisposition::Evacuating,
         ));
-        wait_for_jobs_status(&test_objects.instance_manager, |status| {
+        wait_for_status(&test_objects.instance_manager, |status| {
             status.update_disposition
                 == CurrentUpdateDisposition::Known(
                     OmicronSledUpdateDisposition::Evacuating,
@@ -3758,7 +3758,7 @@ mod tests {
             .await
             .expect("re-registration should succeed while evacuating");
         assert_eq!(
-            test_objects.instance_manager.jobs_status().num_registered_vmms,
+            test_objects.instance_manager.status().num_registered_vmms,
             1
         );
 
@@ -3778,7 +3778,7 @@ mod tests {
             )
         );
         assert_eq!(
-            test_objects.instance_manager.jobs_status().num_registered_vmms,
+            test_objects.instance_manager.status().num_registered_vmms,
             1
         );
 
@@ -3786,7 +3786,7 @@ mod tests {
         disposition_tx.set(CurrentUpdateDisposition::Known(
             OmicronSledUpdateDisposition::Available,
         ));
-        wait_for_jobs_status(&test_objects.instance_manager, |status| {
+        wait_for_status(&test_objects.instance_manager, |status| {
             status.update_disposition
                 == CurrentUpdateDisposition::Known(
                     OmicronSledUpdateDisposition::Available,
@@ -3796,7 +3796,7 @@ mod tests {
         try_ensure_registered(&test_objects, propolis_id_b, instance_id_b)
             .await
             .expect("registration should succeed once available again");
-        wait_for_jobs_status(&test_objects.instance_manager, |status| {
+        wait_for_status(&test_objects.instance_manager, |status| {
             status.num_registered_vmms == 2
         })
         .await;
@@ -3818,7 +3818,7 @@ mod tests {
         try_ensure_registered(&test_objects, propolis_id_a, instance_id_a)
             .await
             .expect("registration A should succeed");
-        wait_for_jobs_status(&test_objects.instance_manager, |status| {
+        wait_for_status(&test_objects.instance_manager, |status| {
             status.num_registered_vmms == 1
         })
         .await;
@@ -3831,7 +3831,7 @@ mod tests {
         )
         .await
         .expect("registration B should succeed");
-        wait_for_jobs_status(&test_objects.instance_manager, |status| {
+        wait_for_status(&test_objects.instance_manager, |status| {
             status.num_registered_vmms == 2
         })
         .await;
@@ -3841,7 +3841,7 @@ mod tests {
             .await
             .expect("re-registration A should succeed");
         assert_eq!(
-            test_objects.instance_manager.jobs_status().num_registered_vmms,
+            test_objects.instance_manager.status().num_registered_vmms,
             2
         );
 
@@ -3850,7 +3850,7 @@ mod tests {
             .ensure_unregistered(propolis_id_a)
             .await
             .expect("unregistration A should succeed");
-        wait_for_jobs_status(&test_objects.instance_manager, |status| {
+        wait_for_status(&test_objects.instance_manager, |status| {
             status.num_registered_vmms == 1
         })
         .await;
@@ -3860,7 +3860,7 @@ mod tests {
             .ensure_unregistered(propolis_id_b)
             .await
             .expect("unregistration B should succeed");
-        wait_for_jobs_status(&test_objects.instance_manager, |status| {
+        wait_for_status(&test_objects.instance_manager, |status| {
             status.num_registered_vmms == 0
         })
         .await;

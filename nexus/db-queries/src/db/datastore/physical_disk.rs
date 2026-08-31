@@ -774,9 +774,10 @@ mod test {
     use sled_agent_types::disk::DiskIdentity;
     use sled_agent_types::disk::DiskVariant;
     use sled_agent_types::inventory::{
-        ConfigReconcilerInventoryStatus, FmdInventory, Inventory,
-        InventoryDisk, OmicronFileSourceResolverInventory, SledCpuFamily,
-        SledRole, SvcsEnabledNotOnlineResult,
+        ConfigReconcilerInventoryStatus, CurrentUpdateDisposition,
+        FmdInventory, InstanceManagerStatus, Inventory, InventoryDisk,
+        OmicronFileSourceResolverInventory, OmicronSledUpdateDisposition,
+        SledCpuFamily, SledRole, SvcsEnabledNotOnlineResult,
     };
     use sled_hardware_types::BaseboardId;
     use std::num::NonZeroU32;
@@ -1133,6 +1134,12 @@ mod test {
                     reconciler_status:
                         ConfigReconcilerInventoryStatus::NotYetRun,
                     last_reconciliation: None,
+                    instance_manager_status: InstanceManagerStatus {
+                        update_disposition: CurrentUpdateDisposition::Known(
+                            OmicronSledUpdateDisposition::Available,
+                        ),
+                        num_registered_vmms: 0,
+                    },
                     file_source_resolver:
                         OmicronFileSourceResolverInventory::new_fake(),
                     smf_services_enabled_not_online:

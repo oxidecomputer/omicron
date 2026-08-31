@@ -52,8 +52,10 @@ use sled_agent_types::inventory::BootPartitionDetails;
 use sled_agent_types::inventory::ConfigReconcilerInventory;
 use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+use sled_agent_types::inventory::CurrentUpdateDisposition;
 use sled_agent_types::inventory::FmdInventory;
 use sled_agent_types::inventory::HostPhase2DesiredSlots;
+use sled_agent_types::inventory::InstanceManagerStatus;
 use sled_agent_types::inventory::Inventory;
 use sled_agent_types::inventory::InventoryDataset;
 use sled_agent_types::inventory::InventoryDisk;
@@ -1131,6 +1133,13 @@ pub fn sled_agent(
     });
     let fmd = Ok(FmdInventory { cases: fmd_cases, resources: fmd_resources });
 
+    let instance_manager_status = InstanceManagerStatus {
+        update_disposition: CurrentUpdateDisposition::Known(
+            OmicronSledUpdateDisposition::Available,
+        ),
+        num_registered_vmms: 3,
+    };
+
     Inventory {
         baseboard_id,
         reservoir_size: ByteCount::from(1024),
@@ -1146,6 +1155,7 @@ pub fn sled_agent(
         ledgered_sled_config,
         reconciler_status,
         last_reconciliation,
+        instance_manager_status,
         file_source_resolver,
         smf_services_enabled_not_online,
         reference_measurements,

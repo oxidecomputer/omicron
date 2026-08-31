@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "51.0.0"
+    "version": "52.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -4857,6 +4857,42 @@
         ],
         "additionalProperties": false
       },
+      "CurrentUpdateDisposition": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "disposition": {
+                "type": "string",
+                "enum": [
+                  "config_not_available"
+                ]
+              }
+            },
+            "required": [
+              "disposition"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "disposition": {
+                "type": "string",
+                "enum": [
+                  "known"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/OmicronSledUpdateDisposition"
+              }
+            },
+            "required": [
+              "disposition",
+              "value"
+            ]
+          }
+        ]
+      },
       "DatasetConfig": {
         "description": "Configuration information necessary to request a single dataset.\n\nThese datasets are tracked directly by Nexus.",
         "type": "object",
@@ -5907,6 +5943,23 @@
           }
         ]
       },
+      "InstanceManagerStatus": {
+        "type": "object",
+        "properties": {
+          "num_registered_vmms": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "update_disposition": {
+            "$ref": "#/components/schemas/CurrentUpdateDisposition"
+          }
+        },
+        "required": [
+          "num_registered_vmms",
+          "update_disposition"
+        ]
+      },
       "InstanceMetadata": {
         "description": "Metadata used to track statistics about an instance.",
         "type": "object",
@@ -6205,6 +6258,9 @@
               }
             ]
           },
+          "instance_manager_status": {
+            "$ref": "#/components/schemas/InstanceManagerStatus"
+          },
           "last_reconciliation": {
             "nullable": true,
             "allOf": [
@@ -6279,6 +6335,7 @@
           "disks",
           "file_source_resolver",
           "fmd",
+          "instance_manager_status",
           "reconciler_status",
           "reference_measurements",
           "reservoir_size",

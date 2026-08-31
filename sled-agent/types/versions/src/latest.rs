@@ -203,13 +203,16 @@ pub mod inventory {
     pub use crate::v51::inventory::ConfigReconcilerInventory;
     pub use crate::v51::inventory::ConfigReconcilerInventoryStatus;
     pub use crate::v51::inventory::ExternalDnsAddrs;
-    pub use crate::v51::inventory::Inventory;
     pub use crate::v51::inventory::NexusExternalIps;
     pub use crate::v51::inventory::OmicronSledConfig;
     pub use crate::v51::inventory::OmicronZoneConfig;
     pub use crate::v51::inventory::OmicronZoneType;
     pub use crate::v51::inventory::OmicronZonesConfig;
     pub use crate::v51::inventory::ZoneSnatConfig;
+
+    pub use crate::v52::inventory::CurrentUpdateDisposition;
+    pub use crate::v52::inventory::InstanceManagerStatus;
+    pub use crate::v52::inventory::Inventory;
 
     pub use crate::impls::inventory::FmdHostCaseDisplay;
     pub use crate::impls::inventory::FmdInventoryDisplay;
