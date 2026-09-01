@@ -217,7 +217,7 @@ pub enum ConfigReconcilerInventoryStatus {
     ///
     /// This variant does not include the `OmicronSledConfig` used in the last
     /// attempt, because that's always available via
-    /// [`ConfigReconcilerInventory::last_reconciled_config`].
+    /// `ConfigReconcilerInventory::last_reconciled_config`.
     Idle { completed_at: DateTime<Utc>, ran_for: Duration },
 }
 
