@@ -55,7 +55,7 @@ use crate::v50;
 // requests. It also should be enforced by the database or Neuxs, when we allow
 // operators control over which IPs DNS listens on, or which IP Pools Nexus
 // draws from. That's part of #10574.
-pub const MAX_ZONE_EXTERNAL_IPS: usize = 16;
+const MAX_ZONE_EXTERNAL_IPS: usize = 16;
 
 // Helper to check the length of an array of IPs / socket addrs.
 fn check_length(count: usize) -> Result<(), ZoneExternalAddrsError> {
@@ -72,43 +72,29 @@ fn check_length(count: usize) -> Result<(), ZoneExternalAddrsError> {
 #[derive(
     Clone, Debug, Deserialize, Eq, Hash, JsonSchema, PartialEq, Serialize,
 )]
-#[serde(try_from = "Vec<IpAddr>", into = "Vec<IpAddr>")]
+#[serde(try_from = "BTreeSet<IpAddr>", into = "BTreeSet<IpAddr>")]
 pub struct NexusExternalIps(
-    #[schemars(length(min = 1, max = "MAX_ZONE_EXTERNAL_IPS"))] Vec<IpAddr>,
+    #[schemars(length(min = 1, max = "MAX_ZONE_EXTERNAL_IPS"))]
+    pub(crate)  BTreeSet<IpAddr>,
 );
 
 impl NexusExternalIps {
     /// Construct from a list of IPs.
-    pub fn new(ips: Vec<IpAddr>) -> Result<Self, ZoneExternalAddrsError> {
+    pub fn new(ips: BTreeSet<IpAddr>) -> Result<Self, ZoneExternalAddrsError> {
         check_length(ips.len())?;
         Ok(Self(ips))
     }
-
-    /// Construct from a single IP address.
-    pub fn from_single(ip: IpAddr) -> Self {
-        Self(vec![ip])
-    }
-
-    /// If this consists of a single element, return it, or None.
-    pub fn into_single(self) -> Option<IpAddr> {
-        if self.0.len() == 1 { self.0.into_iter().next() } else { None }
-    }
-
-    /// Iterate over the external IPs.
-    pub fn iter(&self) -> impl Iterator<Item = &IpAddr> {
-        self.0.iter()
-    }
 }
 
-impl TryFrom<Vec<IpAddr>> for NexusExternalIps {
+impl TryFrom<BTreeSet<IpAddr>> for NexusExternalIps {
     type Error = ZoneExternalAddrsError;
 
-    fn try_from(value: Vec<IpAddr>) -> Result<Self, Self::Error> {
+    fn try_from(value: BTreeSet<IpAddr>) -> Result<Self, Self::Error> {
         Self::new(value)
     }
 }
 
-impl From<NexusExternalIps> for Vec<IpAddr> {
+impl From<NexusExternalIps> for BTreeSet<IpAddr> {
     fn from(ips: NexusExternalIps) -> Self {
         ips.0
     }
@@ -120,29 +106,21 @@ impl From<NexusExternalIps> for Vec<IpAddr> {
 )]
 #[serde(try_from = "Vec<SocketAddr>", into = "Vec<SocketAddr>")]
 pub struct ExternalDnsAddrs(
-    #[schemars(length(min = 1, max = "MAX_ZONE_EXTERNAL_IPS"))] Vec<SocketAddr>,
+    #[schemars(length(min = 1, max = "MAX_ZONE_EXTERNAL_IPS"))]
+    pub(crate)  Vec<SocketAddr>,
 );
 
 impl ExternalDnsAddrs {
     /// Construct from a list of addresses.
     pub fn new(addrs: Vec<SocketAddr>) -> Result<Self, ZoneExternalAddrsError> {
         check_length(addrs.len())?;
+        let mut unique_ips = BTreeSet::new();
+        for ip in addrs.iter().map(|addr| addr.ip()) {
+            if !unique_ips.insert(ip) {
+                return Err(ZoneExternalAddrsError::DuplicateIp { ip });
+            }
+        }
         Ok(Self(addrs))
-    }
-
-    /// Construct from a single socket address.
-    pub fn from_single(addr: SocketAddr) -> Self {
-        Self(vec![addr])
-    }
-
-    /// If this consists of a single element, return it, or None.
-    pub fn into_single(self) -> Option<SocketAddr> {
-        if self.0.len() == 1 { self.0.into_iter().next() } else { None }
-    }
-
-    /// Iterate over the external addresses.
-    pub fn iter(&self) -> impl Iterator<Item = &SocketAddr> {
-        self.0.iter()
     }
 }
 
@@ -169,6 +147,8 @@ pub enum ZoneExternalAddrsError {
         "too many external addresses: {count} (maximum is {MAX_ZONE_EXTERNAL_IPS})"
     )]
     TooMany { count: usize },
+    #[error("external IP addresses must all be unique, but {ip} is duplicated")]
+    DuplicateIp { ip: IpAddr },
 }
 
 /// Source NAT configuration for a boundary NTP zone.
@@ -600,15 +580,8 @@ impl From<v11::inventory::OmicronZonesConfig> for OmicronZonesConfig {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 pub struct OmicronSledConfig {
     pub generation: SledConfigGeneration,
-    // Serialize and deserialize disks, datasets, and zones as maps for
-    // backwards compatibility. Newer IdOrdMaps should not use IdOrdMapAsMap.
-    #[serde(
-        with = "iddqd::id_ord_map::IdOrdMapAsMap::<OmicronPhysicalDiskConfig>"
-    )]
     pub disks: IdOrdMap<OmicronPhysicalDiskConfig>,
-    #[serde(with = "iddqd::id_ord_map::IdOrdMapAsMap::<DatasetConfig>")]
     pub datasets: IdOrdMap<DatasetConfig>,
-    #[serde(with = "iddqd::id_ord_map::IdOrdMapAsMap::<OmicronZoneConfig>")]
     pub zones: IdOrdMap<OmicronZoneConfig>,
     pub remove_mupdate_override: Option<MupdateOverrideUuid>,
     #[serde(default = "HostPhase2DesiredSlots::current_contents")]

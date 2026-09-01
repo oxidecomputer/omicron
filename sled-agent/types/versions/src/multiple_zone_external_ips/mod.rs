@@ -5,8 +5,7 @@
 //! Version `MULTIPLE_ZONE_EXTERNAL_IPS` of the Sled Agent API.
 //!
 //! This version lets a service zone carry more than one external IP: Nexus and
-//! external DNS zones now hold a set of external IPs (`ZoneExternalIps`), and
-//! boundary NTP holds a single- or dual-stack SNAT configuration
-//! (`ZoneSnatConfig`).
+//! external DNS zones now hold a set of external IPs, and boundary NTP holds a
+//! single- or dual-stack SNAT configuration.
 
 pub mod inventory;

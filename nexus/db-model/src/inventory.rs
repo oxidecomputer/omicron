@@ -3453,7 +3453,7 @@ impl InvOmicronSledConfigZone {
                 let ips = external_ip_rows
                     .into_iter()
                     .map(|row| row.ip.ip())
-                    .collect::<Vec<_>>();
+                    .collect::<BTreeSet<_>>();
                 let external_ips = NexusExternalIps::new(ips)
                     .context("invalid Nexus external IPs")?;
                 OmicronZoneType::Nexus {

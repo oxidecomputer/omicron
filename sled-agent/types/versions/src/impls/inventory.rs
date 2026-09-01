@@ -4,7 +4,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Write};
-use std::net::{IpAddr, Ipv6Addr};
+use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::str::FromStr;
 
 use camino::Utf8PathBuf;
@@ -22,12 +22,13 @@ use tufaceous_artifact::ArtifactHash;
 use crate::latest::disk::M2Slot;
 use crate::latest::inventory::{
     BootImageHeader, BootPartitionContents, BootPartitionDetails,
-    ConfigReconcilerInventory, ConfigReconcilerInventoryResult, FmdHostCase,
-    FmdInventory, FmdInventoryError, FmdResource, HostPhase2DesiredContents,
-    HostPhase2DesiredSlots, ManifestBootInventory, ManifestInventory,
-    ManifestNonBootInventory, MupdateOverrideBootInventory,
-    MupdateOverrideInventory, MupdateOverrideNonBootInventory,
-    NetworkInterface, OmicronFileSourceResolverInventory, OmicronSledConfig,
+    ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
+    ExternalDnsAddrs, FmdHostCase, FmdInventory, FmdInventoryError,
+    FmdResource, HostPhase2DesiredContents, HostPhase2DesiredSlots,
+    ManifestBootInventory, ManifestInventory, ManifestNonBootInventory,
+    MupdateOverrideBootInventory, MupdateOverrideInventory,
+    MupdateOverrideNonBootInventory, NetworkInterface, NexusExternalIps,
+    OmicronFileSourceResolverInventory, OmicronSledConfig,
     OmicronSledUpdateDisposition, OmicronZoneConfig, OmicronZoneImageSource,
     OmicronZoneType, OmicronZonesConfig,
     RemoveMupdateOverrideBootSuccessInventory, RemoveMupdateOverrideInventory,
@@ -1185,6 +1186,134 @@ impl ZoneSnatConfig {
             | ZoneSnatConfig::DualStack { ipv6, .. } => Some(ipv6),
             ZoneSnatConfig::Ipv4Only(_) => None,
         }
+    }
+}
+
+impl NexusExternalIps {
+    /// Construct from a single IP address.
+    pub fn from_single(ip: IpAddr) -> Self {
+        Self::new(BTreeSet::from_iter(std::iter::once(ip)))
+            .expect("one IP is always valid")
+    }
+
+    /// If this consists of a single element, return it, or None.
+    ///
+    /// NOTE: This is a temporary method used while inventory supports multiple
+    /// addresses, but `BlueprintZoneType` does not. It should be removed when
+    /// that's fixed.
+    pub fn into_single(self) -> Option<IpAddr> {
+        if self.0.len() == 1 { self.0.into_iter().next() } else { None }
+    }
+
+    /// Iterate over the external IPs.
+    pub fn iter(&self) -> impl Iterator<Item = &IpAddr> {
+        self.0.iter()
+    }
+
+    /// Return the "primary" address, either IPv4 or IPv6 in that order.
+    ///
+    /// NOTE: This is a temporary method used while we don't fully support
+    /// multiple IP addresses. It should be removed when that support is done.
+    pub fn temporary_primary_address(&self) -> IpAddr {
+        self.iter()
+            .find(|ip| ip.is_ipv4())
+            .or_else(|| self.iter().next())
+            .copied()
+            .expect("NexusExternalIps is non-empty by construction")
+    }
+}
+
+impl From<&NexusExternalIps> for crate::latest::instance::ExternalIpConfig {
+    fn from(ips: &NexusExternalIps) -> Self {
+        external_ip_config_from_ips(ips.iter().copied())
+    }
+}
+
+impl From<&ExternalDnsAddrs> for crate::latest::instance::ExternalIpConfig {
+    fn from(addrs: &ExternalDnsAddrs) -> Self {
+        external_ip_config_from_ips(addrs.iter().map(|addr| addr.ip()))
+    }
+}
+
+fn external_ip_config_from_ips(
+    ips: impl Iterator<Item = IpAddr>,
+) -> crate::latest::instance::ExternalIpConfig {
+    let mut v4 = BTreeSet::new();
+    let mut v6 = BTreeSet::new();
+    for ip in ips {
+        match ip {
+            IpAddr::V4(ip) => {
+                v4.insert(ip);
+            }
+            IpAddr::V6(ip) => {
+                v6.insert(ip);
+            }
+        }
+    }
+    crate::latest::instance::ExternalIpConfig {
+        v4: (!v4.is_empty()).then(|| crate::latest::instance::ExternalIps {
+            floating_ips: v4,
+            ..Default::default()
+        }),
+        v6: (!v6.is_empty()).then(|| crate::latest::instance::ExternalIps {
+            floating_ips: v6,
+            ..Default::default()
+        }),
+    }
+}
+
+impl From<&ZoneSnatConfig> for crate::latest::instance::ExternalIpConfig {
+    fn from(snat: &ZoneSnatConfig) -> Self {
+        let (v4, v6) = match snat {
+            ZoneSnatConfig::Ipv4Only(c) => (Some(*c), None),
+            ZoneSnatConfig::Ipv6Only(c) => (None, Some(*c)),
+            ZoneSnatConfig::DualStack { ipv4, ipv6 } => {
+                (Some(*ipv4), Some(*ipv6))
+            }
+        };
+        Self {
+            v4: v4.map(|snat| crate::latest::instance::ExternalIps {
+                source_nat: Some(snat),
+                ..Default::default()
+            }),
+            v6: v6.map(|snat| crate::latest::instance::ExternalIps {
+                source_nat: Some(snat),
+                ..Default::default()
+            }),
+        }
+    }
+}
+
+impl ExternalDnsAddrs {
+    /// Construct from a single socket address.
+    pub fn from_single(addr: SocketAddr) -> Self {
+        Self(vec![addr])
+    }
+
+    /// If this consists of a single element, return it, or None.
+    ///
+    /// NOTE: This is a temporary method used while inventory supports multiple
+    /// addresses, but `BlueprintZoneType` does not. It should be removed when
+    /// that's fixed.
+    pub fn into_single(self) -> Option<SocketAddr> {
+        if self.0.len() == 1 { self.0.into_iter().next() } else { None }
+    }
+
+    /// Iterate over the external addresses.
+    pub fn iter(&self) -> impl Iterator<Item = &SocketAddr> {
+        self.0.iter()
+    }
+
+    /// Return the "primary" address, either IPv4 or IPv6 in that order.
+    ///
+    /// NOTE: This is a temporary method used while we don't fully support
+    /// multiple IP addresses. It should be removed when that support is done.
+    pub fn temporary_primary_address(&self) -> SocketAddr {
+        self.iter()
+            .find(|addr| addr.is_ipv4())
+            .or_else(|| self.iter().next())
+            .copied()
+            .expect("ExternalDnsAddrs is non-empty by construction")
     }
 }
 

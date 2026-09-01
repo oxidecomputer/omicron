@@ -5544,6 +5544,7 @@ mod test {
         SingleMeasurementInventory,
     };
     use sled_hardware_types::BaseboardId;
+    use std::collections::BTreeSet;
     use std::net::{IpAddr, Ipv4Addr};
     use std::num::NonZeroU32;
     use std::time::Duration;
@@ -6253,9 +6254,9 @@ mod test {
                 if let OmicronZoneType::Nexus { external_ips, .. } =
                     &mut zone.zone_type
                 {
-                    let mut ips: Vec<_> =
+                    let mut ips: BTreeSet<_> =
                         external_ips.iter().copied().collect();
-                    ips.push(second_ip);
+                    ips.insert(second_ip);
                     *external_ips = NexusExternalIps::new(ips)
                         .expect("two external IPs is valid");
                     nexus_zone_id = Some(zone.id);
