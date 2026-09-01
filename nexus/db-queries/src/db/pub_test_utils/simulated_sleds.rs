@@ -79,7 +79,7 @@ pub fn sled_updates_from_system(
         .collect()
 }
 
-/// Registers every sled in the system, returning the sled rows in sled ID
+/// Register every sled in the system, returning the sled rows in sled ID
 /// order.
 pub async fn upsert_sleds_from_system(
     datastore: &DataStore,
