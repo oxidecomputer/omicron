@@ -4431,12 +4431,12 @@
       },
       "ExternalDnsAddrs": {
         "description": "A non-empty, bounded set of external socket addrs for an External DNS zone.",
-        "type": "array",
-        "items": {
-          "type": "string"
-        },
-        "minItems": 1,
-        "maxItems": 16
+        "type": "object",
+        "additionalProperties": {
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0
+        }
       },
       "ExternalIpUuid": {
         "x-rust-type": {
@@ -6533,7 +6533,8 @@
           "format": "ip"
         },
         "minItems": 1,
-        "maxItems": 16
+        "maxItems": 16,
+        "uniqueItems": true
       },
       "NexusGeneration": {
         "description": "Generation numbers stored in the database, used for optimistic concurrency control",

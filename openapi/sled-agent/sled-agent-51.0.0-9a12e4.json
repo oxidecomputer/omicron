@@ -5179,12 +5179,12 @@
       },
       "ExternalDnsAddrs": {
         "description": "A non-empty, bounded set of external socket addrs for an External DNS zone.",
-        "type": "array",
-        "items": {
-          "type": "string"
-        },
-        "minItems": 1,
-        "maxItems": 16
+        "type": "object",
+        "additionalProperties": {
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0
+        }
       },
       "ExternalIp": {
         "description": "An external IP address used by a probe.",
@@ -7311,7 +7311,8 @@
           "format": "ip"
         },
         "minItems": 1,
-        "maxItems": 16
+        "maxItems": 16,
+        "uniqueItems": true
       },
       "NodePersistentStateSummary": {
         "description": "A summary of a node's persistent state.",
@@ -7563,7 +7564,7 @@
         "type": "object",
         "properties": {
           "datasets": {
-            "title": "IdOrdMapAsMap",
+            "title": "IdOrdMap",
             "x-rust-type": {
               "crate": "iddqd",
               "parameters": [
@@ -7574,13 +7575,14 @@
               "path": "iddqd::IdOrdMap",
               "version": "*"
             },
-            "type": "object",
-            "additionalProperties": {
+            "type": "array",
+            "items": {
               "$ref": "#/components/schemas/DatasetConfig"
-            }
+            },
+            "uniqueItems": true
           },
           "disks": {
-            "title": "IdOrdMapAsMap",
+            "title": "IdOrdMap",
             "x-rust-type": {
               "crate": "iddqd",
               "parameters": [
@@ -7591,10 +7593,11 @@
               "path": "iddqd::IdOrdMap",
               "version": "*"
             },
-            "type": "object",
-            "additionalProperties": {
+            "type": "array",
+            "items": {
               "$ref": "#/components/schemas/OmicronPhysicalDiskConfig"
-            }
+            },
+            "uniqueItems": true
           },
           "generation": {
             "$ref": "#/components/schemas/SledConfigGeneration"
@@ -7633,7 +7636,7 @@
             "$ref": "#/components/schemas/OmicronSledUpdateDisposition"
           },
           "zones": {
-            "title": "IdOrdMapAsMap",
+            "title": "IdOrdMap",
             "x-rust-type": {
               "crate": "iddqd",
               "parameters": [
@@ -7644,10 +7647,11 @@
               "path": "iddqd::IdOrdMap",
               "version": "*"
             },
-            "type": "object",
-            "additionalProperties": {
+            "type": "array",
+            "items": {
               "$ref": "#/components/schemas/OmicronZoneConfig"
-            }
+            },
+            "uniqueItems": true
           }
         },
         "required": [

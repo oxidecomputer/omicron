@@ -1231,7 +1231,7 @@ impl From<&NexusExternalIps> for crate::latest::instance::ExternalIpConfig {
 
 impl From<&ExternalDnsAddrs> for crate::latest::instance::ExternalIpConfig {
     fn from(addrs: &ExternalDnsAddrs) -> Self {
-        external_ip_config_from_ips(addrs.iter().map(|addr| addr.ip()))
+        external_ip_config_from_ips(addrs.0.keys().copied())
     }
 }
 
@@ -1287,7 +1287,7 @@ impl From<&ZoneSnatConfig> for crate::latest::instance::ExternalIpConfig {
 impl ExternalDnsAddrs {
     /// Construct from a single socket address.
     pub fn from_single(addr: SocketAddr) -> Self {
-        Self(vec![addr])
+        Self(BTreeMap::from([(addr.ip(), addr.port())]))
     }
 
     /// If this consists of a single element, return it, or None.
@@ -1296,12 +1296,19 @@ impl ExternalDnsAddrs {
     /// addresses, but `BlueprintZoneType` does not. It should be removed when
     /// that's fixed.
     pub fn into_single(self) -> Option<SocketAddr> {
-        if self.0.len() == 1 { self.0.into_iter().next() } else { None }
+        if self.0.len() == 1 {
+            self.0
+                .into_iter()
+                .next()
+                .map(|(ip, port)| SocketAddr::new(ip, port))
+        } else {
+            None
+        }
     }
 
     /// Iterate over the external addresses.
-    pub fn iter(&self) -> impl Iterator<Item = &SocketAddr> {
-        self.0.iter()
+    pub fn iter(&self) -> impl Iterator<Item = SocketAddr> {
+        self.0.iter().map(|(ip, port)| SocketAddr::new(*ip, *port))
     }
 
     /// Return the "primary" address, either IPv4 or IPv6 in that order.
@@ -1309,10 +1316,21 @@ impl ExternalDnsAddrs {
     /// NOTE: This is a temporary method used while we don't fully support
     /// multiple IP addresses. It should be removed when that support is done.
     pub fn temporary_primary_address(&self) -> SocketAddr {
-        self.iter()
-            .find(|addr| addr.is_ipv4())
-            .or_else(|| self.iter().next())
-            .copied()
+        self.0
+            .iter()
+            .find_map(|(ip, port)| {
+                if ip.is_ipv4() {
+                    Some(SocketAddr::new(*ip, *port))
+                } else {
+                    None
+                }
+            })
+            .or_else(|| {
+                self.0
+                    .iter()
+                    .next()
+                    .map(|(ip, port)| SocketAddr::new(*ip, *port))
+            })
             .expect("ExternalDnsAddrs is non-empty by construction")
     }
 }

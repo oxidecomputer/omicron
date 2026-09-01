@@ -107,20 +107,20 @@ impl From<NexusExternalIps> for BTreeSet<IpAddr> {
 #[serde(try_from = "Vec<SocketAddr>", into = "Vec<SocketAddr>")]
 pub struct ExternalDnsAddrs(
     #[schemars(length(min = 1, max = "MAX_ZONE_EXTERNAL_IPS"))]
-    pub(crate)  Vec<SocketAddr>,
+    pub(crate)  BTreeMap<IpAddr, u16>,
 );
 
 impl ExternalDnsAddrs {
     /// Construct from a list of addresses.
     pub fn new(addrs: Vec<SocketAddr>) -> Result<Self, ZoneExternalAddrsError> {
         check_length(addrs.len())?;
-        let mut unique_ips = BTreeSet::new();
-        for ip in addrs.iter().map(|addr| addr.ip()) {
-            if !unique_ips.insert(ip) {
+        let mut inner = BTreeMap::new();
+        for (ip, port) in addrs.iter().map(|addr| (addr.ip(), addr.port())) {
+            if inner.insert(ip, port).is_some() {
                 return Err(ZoneExternalAddrsError::DuplicateIp { ip });
             }
         }
-        Ok(Self(addrs))
+        Ok(Self(inner))
     }
 }
 
@@ -134,7 +134,7 @@ impl TryFrom<Vec<SocketAddr>> for ExternalDnsAddrs {
 
 impl From<ExternalDnsAddrs> for Vec<SocketAddr> {
     fn from(addrs: ExternalDnsAddrs) -> Self {
-        addrs.0
+        addrs.iter().collect()
     }
 }
 
