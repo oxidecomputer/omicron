@@ -156,7 +156,7 @@ impl RunAllArgs {
         );
         println!(
             "omicron-dev: internal DNS:           {}",
-            cptestctx.internal_dns.dns_server.local_address()
+            cptestctx.internal_dns.dns_server.first_local_address()
         );
         println!(
             "omicron-dev: external DNS name:      {}",
@@ -168,12 +168,12 @@ impl RunAllArgs {
         );
         println!(
             "omicron-dev: external DNS:           {}",
-            cptestctx.external_dns.dns_server.local_address()
+            cptestctx.external_dns.dns_server.first_local_address()
         );
         println!(
             "omicron-dev:   e.g. `dig @{} -p {} {}.sys.{}`",
-            cptestctx.external_dns.dns_server.local_address().ip(),
-            cptestctx.external_dns.dns_server.local_address().port(),
+            cptestctx.external_dns.dns_server.first_local_address().ip(),
+            cptestctx.external_dns.dns_server.first_local_address().port(),
             cptestctx.silo_name,
             cptestctx.external_dns_zone_name,
         );

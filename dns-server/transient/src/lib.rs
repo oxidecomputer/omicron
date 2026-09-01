@@ -54,7 +54,10 @@ impl TransientDnsServer {
         let (dns_server, dropshot_server) = dns_server::start_servers(
             dns_log,
             store,
-            &dns_server::dns_server::Config { bind_address: dns_bind_address },
+            &dns_server::dns_server::Config {
+                bind_addresses: vec![dns_bind_address],
+                ..Default::default()
+            },
             &dropshot::ConfigDropshot {
                 bind_address: "[::1]:0".parse().unwrap(),
                 default_request_body_max_bytes: 4 * 1024 * 1024,
@@ -86,7 +89,7 @@ impl TransientDnsServer {
     pub async fn resolver(&self) -> Result<TokioResolver, anyhow::Error> {
         let mut resolver_config = ResolverConfig::new();
         resolver_config.add_name_server(NameServerConfig::new(
-            self.dns_server.local_address(),
+            self.dns_server.first_local_address(),
             hickory_proto::xfer::Protocol::Udp,
         ));
         let mut resolver_opts = ResolverOpts::default();

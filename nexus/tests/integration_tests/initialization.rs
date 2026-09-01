@@ -56,7 +56,7 @@ async fn test_nexus_boots_before_cockroach() {
             .as_ref()
             .expect("Must start Internal DNS before acquiring an address")
             .dns_server
-            .local_address(),
+            .first_local_address(),
     };
     let nexus_config = starter.config.clone();
     let nexus_log = log.clone();
@@ -139,7 +139,7 @@ async fn test_nexus_boots_before_dendrite() {
             .as_ref()
             .expect("Must start Internal DNS before acquiring an address")
             .dns_server
-            .local_address(),
+            .first_local_address(),
     };
     let nexus_config = starter.config.clone();
     let nexus_log = log.clone();

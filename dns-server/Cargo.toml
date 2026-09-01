@@ -14,6 +14,7 @@ chrono.workspace = true
 clap.workspace = true
 dns-server-api.workspace = true
 dropshot.workspace = true
+flume.workspace = true
 hickory-proto.workspace = true
 hickory-resolver.workspace = true
 hickory-server.workspace = true

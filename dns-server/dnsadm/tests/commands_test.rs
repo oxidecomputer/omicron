@@ -32,7 +32,8 @@ async fn test_dnsadm() {
         logctx.log.clone(),
         store,
         &dns_server::dns_server::Config {
-            bind_address: "[::1]:0".parse().unwrap(),
+            bind_addresses: vec!["[::1]:0".parse().unwrap()],
+            ..Default::default()
         },
         &dropshot::ConfigDropshot {
             bind_address: "[::1]:0".parse().unwrap(),

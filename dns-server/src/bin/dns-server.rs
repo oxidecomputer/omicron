@@ -14,16 +14,60 @@ use slog::o;
 use std::net::{SocketAddr, SocketAddrV6};
 use std::path::PathBuf;
 
+#[derive(Clone, Debug)]
+struct SocketAddrs(Vec<SocketAddr>);
+
+impl IntoIterator for SocketAddrs {
+    type Item = SocketAddr;
+
+    type IntoIter = <Vec<SocketAddr> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+impl SocketAddrs {
+    /// Construct self from a comma-delimited list.
+    fn from_delimited_list(input: &str) -> anyhow::Result<Self> {
+        let addrs = input
+            .split(',')
+            .map(|each| {
+                each.parse::<SocketAddr>().with_context(|| {
+                    format!("Parsing '{}' as socket addr", each)
+                })
+            })
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        anyhow::ensure!(
+            !addrs.is_empty(),
+            "Must provide at least one socket address"
+        );
+        Ok(Self(addrs))
+    }
+}
+
 #[derive(Parser, Debug)]
 struct Args {
     #[clap(long, action)]
     config_file: PathBuf,
 
+    /// Socket address for the Dropshot server used to program DNS records.
     #[clap(long, action)]
     http_address: SocketAddrV6,
 
-    #[clap(long, action)]
-    dns_address: SocketAddr,
+    /// One or more socket address on which to serve DNS records.
+    ///
+    /// Multiple addresses may be separated by a comma (,). The DNS server will
+    /// listen for requests on each address, using the same underlying storage.
+    #[clap(
+        long,
+        action,
+        value_parser = SocketAddrs::from_delimited_list,
+        // Preserve the pre-existing `--dns-address` flag, which is how SMF
+        // populates it.
+        visible_alias = "dns-address",
+    )]
+    dns_addresses: SocketAddrs,
 }
 
 #[derive(Deserialize, Debug)]
@@ -53,8 +97,10 @@ async fn main_impl() -> Result<(), anyhow::Error> {
         .to_logger("dns-server")
         .context("failed to create logger")?;
 
-    let dns_server_config =
-        dns_server::dns_server::Config { bind_address: args.dns_address };
+    let dns_server_config = dns_server::dns_server::Config {
+        bind_addresses: args.dns_addresses.0,
+        ..Default::default()
+    };
 
     info!(&log, "config";
         "config" => ?config,
@@ -78,4 +124,48 @@ async fn main_impl() -> Result<(), anyhow::Error> {
     dropshot_server
         .await
         .map_err(|error_message| anyhow!("server exiting: {}", error_message))
+}
+
+#[cfg(test)]
+mod test {
+    use super::SocketAddrs;
+    use std::net::SocketAddr;
+
+    #[test]
+    fn can_parse_single_socket_addr() {
+        let addr = "[fd00::1]:53".parse::<SocketAddr>().unwrap();
+        assert_eq!(
+            SocketAddrs::from_delimited_list(addr.to_string().as_str())
+                .unwrap()
+                .0,
+            vec![addr],
+        );
+    }
+
+    #[test]
+    fn can_parse_multiple_valid_socket_addrs() {
+        let addr1 = "[fd00::1]:53".parse::<SocketAddr>().unwrap();
+        let addr2 = "1.2.3.4:53".parse::<SocketAddr>().unwrap();
+        assert_eq!(
+            SocketAddrs::from_delimited_list(
+                format!("{},{}", addr1, addr2).as_str(),
+            )
+            .unwrap()
+            .0,
+            vec![addr1, addr2],
+        );
+    }
+
+    #[test]
+    fn fail_on_one_invalid_socket_addr() {
+        let addr1 = "[fd00::1]:53".parse::<SocketAddr>().unwrap();
+        let res =
+            SocketAddrs::from_delimited_list(format!("{},foo", addr1).as_str());
+        assert!(res.unwrap_err().to_string().contains("as socket addr"));
+    }
+
+    #[test]
+    fn fail_on_empty_input() {
+        assert!(SocketAddrs::from_delimited_list("").is_err());
+    }
 }

@@ -69,7 +69,7 @@ pub async fn a_crud() -> Result<(), anyhow::Error> {
     // is authoritative, so we'll have to query again with a lower level
     // interface to validate that.
     let raw_response = raw_dns_client_query(
-        test_ctx.dns_server.local_address(),
+        test_ctx.dns_server.first_local_address(),
         Name::from_ascii(&fqdn).expect("name is valid"),
         RecordType::A,
     )
@@ -114,7 +114,7 @@ pub async fn aaaa_crud() -> Result<(), anyhow::Error> {
     // is authoritative, so we'll have to query again with a lower level
     // interface to validate that.
     let raw_response = raw_dns_client_query(
-        test_ctx.dns_server.local_address(),
+        test_ctx.dns_server.first_local_address(),
         Name::from_ascii(&fqdn).expect("name is valid"),
         RecordType::AAAA,
     )
@@ -160,7 +160,7 @@ pub async fn answers_match_question() -> Result<(), anyhow::Error> {
     // `raw_dns_client_query` avoids using a hickory Resolver, so we can assert
     // on the exact answer from our server.
     let raw_response = raw_dns_client_query(
-        test_ctx.dns_server.local_address(),
+        test_ctx.dns_server.first_local_address(),
         name,
         RecordType::A,
     )
@@ -245,7 +245,7 @@ pub async fn srv_crud() -> Result<(), anyhow::Error> {
         .expect("can construct name for query");
 
     let response = raw_dns_client_query(
-        test_ctx.dns_server.local_address(),
+        test_ctx.dns_server.first_local_address(),
         name,
         RecordType::SRV,
     )
@@ -422,7 +422,7 @@ pub async fn name_contains_zone() -> Result<(), anyhow::Error> {
 
     // A lookup shouldn't work without the zone's name appended twice.
     lookup_ip_expect_error_code(
-        test_ctx.dns_server.local_address(),
+        test_ctx.dns_server.first_local_address(),
         resolver,
         "epsilon3.oxide.test",
         ResponseCode::NXDomain,
@@ -452,7 +452,7 @@ pub async fn empty_record() -> Result<(), anyhow::Error> {
 
     // resolve the name
     lookup_ip_expect_error_code(
-        test_ctx.dns_server.local_address(),
+        test_ctx.dns_server.first_local_address(),
         &resolver,
         &(name + "." + TEST_ZONE + "."),
         ResponseCode::NXDomain,
@@ -554,7 +554,7 @@ pub async fn soa() -> Result<(), anyhow::Error> {
 
     // As with other NXDomain answers, we should see the authoritative bit.
     let raw_response = raw_query_expect_err(
-        test_ctx.dns_server.local_address(),
+        test_ctx.dns_server.first_local_address(),
         &no_soa_name,
         RecordType::A,
     )
@@ -605,7 +605,7 @@ pub async fn nxdomain() -> Result<(), anyhow::Error> {
     // asking for a nonexistent record within the domain of the internal DNS
     // server should result in an NXDOMAIN
     lookup_ip_expect_error_code(
-        test_ctx.dns_server.local_address(),
+        test_ctx.dns_server.first_local_address(),
         &resolver,
         &format!("unicorn.{}.", TEST_ZONE),
         ResponseCode::NXDomain,
@@ -626,12 +626,83 @@ pub async fn servfail() -> Result<(), anyhow::Error> {
     // SERVFAIL.  Further, `lookup_ip_expect_error_code` will check that the
     // error is not authoritative.
     lookup_ip_expect_error_code(
-        test_ctx.dns_server.local_address(),
+        test_ctx.dns_server.first_local_address(),
         &resolver,
         "unicorn.oxide.internal",
         ResponseCode::ServFail,
     )
     .await;
+
+    test_ctx.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+pub async fn receives_on_multiple_sockets() -> Result<(), anyhow::Error> {
+    // Bind mix of IPv4 / IPv6 sockets.
+    let requested: Vec<std::net::SocketAddr> = vec![
+        "[::1]:0".parse().unwrap(),
+        "[::1]:0".parse().unwrap(),
+        "127.0.0.1:0".parse().unwrap(),
+    ];
+    let test_ctx = init_client_server_with_bind_addresses(
+        "receives_on_multiple_sockets",
+        requested.clone(),
+    )
+    .await?;
+    let client = &test_ctx.client;
+
+    // The server should have bound one socket per requested address.
+    let bound: Vec<std::net::SocketAddr> =
+        test_ctx.dns_server.local_addresses().collect();
+    assert_eq!(
+        bound.len(),
+        requested.len(),
+        "expected one bound socket per requested address"
+    );
+
+    // Add a single record, served from the store shared by all sockets.
+    let name = "devron".to_string();
+    let fqdn = name.clone() + "." + TEST_ZONE + ".";
+    let addr = Ipv4Addr::new(10, 1, 2, 3);
+    dns_records_create(
+        client,
+        TEST_ZONE,
+        HashMap::from([(name.clone(), vec![DnsRecord::A(addr)])]),
+    )
+    .await?;
+
+    // A query sent to each bound socket must be answered the same way.
+    let mut first_answers: Option<Vec<_>> = None;
+    for bind_addr in bound {
+        let response = raw_dns_client_query(
+            bind_addr,
+            Name::from_ascii(&fqdn).expect("name is valid"),
+            RecordType::A,
+        )
+        .await
+        .with_context(|| format!("querying bound socket {bind_addr}"))?;
+        assert!(
+            response.authoritative(),
+            "response from {bind_addr} was not authoritative"
+        );
+        assert_eq!(
+            response.answers().len(),
+            1,
+            "expected exactly one answer from {bind_addr}"
+        );
+        // Every socket is backed by the same store, so they must all return
+        // the same answer records. Records each have a unique ID, so only look
+        // at the answer section.
+        let answers = response.answers().to_vec();
+        match &first_answers {
+            None => first_answers = Some(answers),
+            Some(first) => assert_eq!(
+                &answers, first,
+                "socket {bind_addr} returned different answers"
+            ),
+        }
+    }
 
     test_ctx.cleanup().await;
     Ok(())
@@ -658,6 +729,17 @@ impl TestContext {
 async fn init_client_server(
     test_name: &str,
 ) -> Result<TestContext, anyhow::Error> {
+    init_client_server_with_bind_addresses(
+        test_name,
+        vec!["[::1]:0".parse().unwrap()],
+    )
+    .await
+}
+
+async fn init_client_server_with_bind_addresses(
+    test_name: &str,
+    bind_addresses: Vec<std::net::SocketAddr>,
+) -> Result<TestContext, anyhow::Error> {
     // initialize dns server config
     let (tmp, config_storage, config_dropshot, logctx) =
         test_config(test_name)?;
@@ -672,9 +754,8 @@ async fn init_client_server(
     assert!(store.is_new());
 
     // launch a dns server
-    let dns_server_config = dns_server::dns_server::Config {
-        bind_address: "[::1]:0".parse().unwrap(),
-    };
+    let dns_server_config =
+        dns_server::dns_server::Config { bind_addresses, ..Default::default() };
     let (dns_server, dropshot_server) = dns_server::start_servers(
         log.clone(),
         store,
@@ -685,7 +766,7 @@ async fn init_client_server(
 
     let mut resolver_config = ResolverConfig::new();
     resolver_config.add_name_server(NameServerConfig::new(
-        dns_server.local_address(),
+        dns_server.first_local_address(),
         Protocol::Udp,
     ));
     let mut resolver_opts = ResolverOpts::default();

@@ -528,7 +528,7 @@ mod test {
         // Spin up the inventory collector background task.
         let resolver = internal_dns_resolver::Resolver::new_from_addrs(
             log.clone(),
-            &[cptestctx.internal_dns.dns_server.local_address()],
+            &[cptestctx.internal_dns.dns_server.first_local_address()],
         )
         .expect("can't start resolver");
         let mut collector = InventoryCollector::new(
