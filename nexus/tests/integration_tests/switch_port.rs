@@ -21,7 +21,9 @@ use omicron_common::api::external::Name;
 use omicron_common::api::external::{
     IdentityMetadataCreateParams, IdentityMetadataUpdateParams, NameOrId,
 };
+use omicron_sled_agent::sim;
 use omicron_test_utils::dev::poll::CondCheckError;
+use omicron_test_utils::dev::poll::Error;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use oxnet::IpNet;
 use sled_agent_types::early_networking::ImportExportPolicy;
@@ -658,28 +660,12 @@ async fn test_port_settings_basic_v6_crud(ctx: &ControlPlaneTestContext) {
 
     let rack_id = racks[0].identity.id;
 
-    for (i, sled_agent) in ctx.sled_agents.iter().enumerate() {
-        let sled_agent = sled_agent.sled_agent().clone();
-        wait_for_condition(
-            || async {
-                let generation = sled_agent
-                    .bootstore_network_config
-                    .lock()
-                    .unwrap()
-                    .generation;
-                if generation == 3 {
-                    Ok(())
-                } else {
-                    Err(CondCheckError::<()>::NotYet { status: None })
-                }
-            },
-            &Duration::from_millis(50),
-            &Duration::from_secs(60),
-        )
-        .await
-        .unwrap_or_else(|_| {
-            panic!("sled-agent {i}'s bootstore should be 3 prior to update")
-        });
+    for (i, s) in ctx.sled_agents.iter().enumerate() {
+        wait_for_sled_agent_bootstore_gen(s.sled_agent(), 3)
+            .await
+            .unwrap_or_else(|_| {
+                panic!("sled-agent {i}'s bootstore should be 3 prior to update")
+            });
     }
 
     NexusRequest::new(
@@ -728,24 +714,8 @@ async fn test_port_settings_basic_v6_crud(ctx: &ControlPlaneTestContext) {
     // The task only writes to the sled-agent if it can build a valid config.
     // Check the sim sled-agents' in-memory bootstores were actually updated,
     // confirming both scrimlets were successfully contacted.
-    for (i, sled_agent) in ctx.sled_agents.iter().enumerate() {
-        let sled_agent = sled_agent.sled_agent().clone();
-        wait_for_condition(
-            || async {
-                let generation = sled_agent
-                    .bootstore_network_config
-                    .lock()
-                    .unwrap()
-                    .generation;
-                if generation == 4 {
-                    Ok(())
-                } else {
-                    Err(CondCheckError::<()>::NotYet { status: None })
-                }
-            },
-            &Duration::from_millis(50),
-            &Duration::from_secs(60),
-        )
+    for (i, s) in ctx.sled_agents.iter().enumerate() {
+        wait_for_sled_agent_bootstore_gen(&s.sled_agent(), 4)
         .await
         .unwrap_or_else(|_| {
             panic!(
@@ -755,6 +725,26 @@ async fn test_port_settings_basic_v6_crud(ctx: &ControlPlaneTestContext) {
             )
         });
     }
+}
+
+async fn wait_for_sled_agent_bootstore_gen(
+    sled_agent: &sim::SledAgent,
+    g: u64,
+) -> Result<(), Error<()>> {
+    wait_for_condition(
+        || async {
+            let generation =
+                sled_agent.bootstore_network_config.lock().unwrap().generation;
+            if generation == g {
+                Ok(())
+            } else {
+                Err(CondCheckError::<()>::NotYet { status: None })
+            }
+        },
+        &Duration::from_millis(50),
+        &Duration::from_secs(60),
+    )
+    .await
 }
 
 #[nexus_test]
