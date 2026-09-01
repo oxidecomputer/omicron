@@ -1203,7 +1203,7 @@ impl ExampleSystemBuilder {
 #[derive(Clone, Debug)]
 struct BuilderSledSettings {
     policy: SledPolicy,
-    // TODO-RAINCLAUDE: None means the builder-wide ExampleSystemBuilder::sled_resources
+    // None means the builder-wide ExampleSystemBuilder::sled_resources applies.
     resources: Option<SimulatedSledResources>,
 }
 
