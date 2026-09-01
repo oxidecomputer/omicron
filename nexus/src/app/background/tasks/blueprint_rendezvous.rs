@@ -61,29 +61,32 @@ impl BlueprintRendezvous {
 
         // Reconcile sled availability -- this can be done without an inventory
         // collection available.
-        match reconcile_sled_blueprint_availability(
-            opctx,
-            &self.datastore,
-            &blueprint,
-        )
-        .await
-        {
-            Ok(stats) => {
-                SledBlueprintAvailabilityRendezvousOutcome::Reconciled(stats)
-            }
-            Err(err) => {
-                error!(
-                    &opctx.log,
-                    "Blueprint rendezvous: sled availability reconciliation \
-                     failed";
-                    "blueprint_id" => %blueprint.id,
-                    "error" => format!("{err:#}"),
-                );
-                SledBlueprintAvailabilityRendezvousOutcome::Error(format!(
-                    "{err:#}"
-                ))
-            }
-        };
+        let sled_blueprint_availability =
+            match reconcile_sled_blueprint_availability(
+                opctx,
+                &self.datastore,
+                &blueprint,
+            )
+            .await
+            {
+                Ok(stats) => {
+                    SledBlueprintAvailabilityRendezvousOutcome::Reconciled(
+                        stats,
+                    )
+                }
+                Err(err) => {
+                    error!(
+                        &opctx.log,
+                        "Blueprint rendezvous: sled availability reconciliation \
+                         failed";
+                        "blueprint_id" => %blueprint.id,
+                        "error" => format!("{err:#}"),
+                    );
+                    SledBlueprintAvailabilityRendezvousOutcome::Error(format!(
+                        "{err:#}"
+                    ))
+                }
+            };
 
         // Get the inventory most recently seen by the inventory loader
         // background task. We clone the Arc to avoid keeping the channel locked
