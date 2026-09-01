@@ -7,8 +7,11 @@ use crate::typed_generation::DbTypedGeneration;
 use crate::typed_uuid::DbTypedUuid;
 use anyhow::{Context, bail};
 use chrono::{DateTime, Utc};
-use iddqd::{IdOrdItem, id_upcast};
+use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
 use nexus_db_schema::schema::rendezvous_sled_bp_availability;
+use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintSledConfig;
+use nexus_types::external_api::sled::SledState;
 use omicron_generation_kinds::{
     UpdateDispositionGeneration, UpdateDispositionGenerationKind,
 };
@@ -91,6 +94,74 @@ pub enum SledBpAvailabilityState {
     },
     /// The sled is decommissioned.
     Decommissioned,
+}
+
+impl SledBpAvailabilityState {
+    /// Create a `SledBpAvailabilityState` from a sled config.
+    pub fn from_blueprint_sled_config(config: &BlueprintSledConfig) -> Self {
+        match config.state {
+            SledState::Decommissioned => {
+                SledBpAvailabilityState::Decommissioned
+            }
+            SledState::Active => {
+                let disposition = config.update_disposition;
+                let availability =
+                    if disposition.kind.is_available_for_provisioning() {
+                        ActiveSledBpAvailability::Available
+                    } else {
+                        ActiveSledBpAvailability::Unavailable
+                    };
+                SledBpAvailabilityState::Active {
+                    availability,
+                    update_disposition_generation: disposition.generation,
+                }
+            }
+        }
+    }
+}
+
+/// Data prepared for a single sled to write to the `rendezvous_sled_bp_availability` table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SledBlueprintAvailabilityInput {
+    /// The sled ID.
+    pub sled_id: SledUuid,
+
+    /// The current availability state of the sled.
+    pub state: SledBpAvailabilityState,
+}
+
+impl IdOrdItem for SledBlueprintAvailabilityInput {
+    type Key<'a> = SledUuid;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.sled_id
+    }
+
+    id_upcast!();
+}
+
+impl SledBlueprintAvailabilityInput {
+    /// Derive a sled's reconciliation input from its blueprint config.
+    pub fn from_blueprint(
+        sled_id: SledUuid,
+        config: &BlueprintSledConfig,
+    ) -> Self {
+        Self {
+            sled_id,
+            state: SledBpAvailabilityState::from_blueprint_sled_config(config),
+        }
+    }
+
+    /// Generate a [`SledBlueprintAvailabilityInput`] for every sled in the
+    /// blueprint.
+    pub fn all_from_blueprint(blueprint: &Blueprint) -> IdOrdMap<Self> {
+        IdOrdMap::from_iter_unique(
+            blueprint.sleds.iter().map(|(&sled_id, config)| {
+                Self::from_blueprint(sled_id, config)
+            }),
+        )
+        .expect("blueprint.sleds is keyed by sled ID, so inputs are unique")
+    }
 }
 
 /// Database representation of a sled tracked by the `rendezvous_sled_bp_availability`

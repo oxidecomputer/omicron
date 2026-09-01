@@ -7,71 +7,20 @@
 //! See the table comment in `dbinit.sql`.
 
 use anyhow::Context;
-use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
-use iddqd::id_upcast;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use nexus_db_queries::db::datastore::SledBpAvailabilityDecommissionOutcome;
+use nexus_db_queries::db::datastore::SledBpAvailabilityUpsertOutcome;
+use nexus_db_queries::db::datastore::SledBpAvailabilityWriteOutcome;
 use nexus_db_queries::db::model::ActiveSledBpAvailability;
 use nexus_db_queries::db::model::DbSledBpAvailability;
-use nexus_db_queries::db::model::RendezvousSledBpAvailabilityDecommission;
-use nexus_db_queries::db::model::RendezvousSledBpAvailabilityUpdate;
+use nexus_db_queries::db::model::SledBlueprintAvailabilityInput;
 use nexus_db_queries::db::model::SledBpAvailabilityState;
-use nexus_types::deployment::BlueprintSledConfig;
-use nexus_types::external_api::sled::SledState;
 use nexus_types::internal_api::background::SledBlueprintAvailabilityRendezvousStats;
 use omicron_uuid_kinds::BlueprintUuid;
-use omicron_uuid_kinds::SledUuid;
 use slog::error;
 use slog::info;
-
-/// One blueprint sled's input to reconciliation.
-#[derive(Debug)]
-pub(crate) struct SledBlueprintAvailabilityInput {
-    /// The sled ID.
-    pub(crate) sled_id: SledUuid,
-
-    /// The current availability state of the sled.
-    pub(crate) state: SledBpAvailabilityState,
-}
-
-impl IdOrdItem for SledBlueprintAvailabilityInput {
-    type Key<'a> = SledUuid;
-
-    fn key(&self) -> Self::Key<'_> {
-        self.sled_id
-    }
-
-    id_upcast!();
-}
-
-impl SledBlueprintAvailabilityInput {
-    /// Derives a sled's reconciliation input from its blueprint config.
-    pub(crate) fn from_blueprint(
-        sled_id: SledUuid,
-        config: &BlueprintSledConfig,
-    ) -> Self {
-        let state = match config.state {
-            SledState::Decommissioned => {
-                SledBpAvailabilityState::Decommissioned
-            }
-            SledState::Active => {
-                let disposition = config.update_disposition;
-                let availability =
-                    if disposition.kind.is_available_for_provisioning() {
-                        ActiveSledBpAvailability::Available
-                    } else {
-                        ActiveSledBpAvailability::Unavailable
-                    };
-                SledBpAvailabilityState::Active {
-                    availability,
-                    update_disposition_generation: disposition.generation,
-                }
-            }
-        };
-        Self { sled_id, state }
-    }
-}
 
 /// Reconcile the `rendezvous_sled_bp_availability` table against the target
 /// blueprint.
@@ -96,6 +45,9 @@ pub(crate) async fn reconcile_sled_blueprint_availability(
 
     let mut stats = SledBlueprintAvailabilityRendezvousStats::default();
 
+    // Use the snapshot to decide which sleds need a write at all. (This will
+    // always identify a superset of writes that will be successful.)
+    let mut to_write = IdOrdMap::new();
     for input in blueprint_sleds {
         let SledBlueprintAvailabilityInput { sled_id, state } = input;
         // Account for this sled; rows left in `existing_db_sleds` after the loop
@@ -166,55 +118,6 @@ pub(crate) async fn reconcile_sled_blueprint_availability(
                     stats.num_unchanged += 1;
                     continue;
                 }
-
-                let wrote = datastore
-                    .rendezvous_sled_bp_availability_upsert(
-                        opctx,
-                        RendezvousSledBpAvailabilityUpdate::new(
-                            sled_id,
-                            availability,
-                            update_disposition_generation,
-                            blueprint_id,
-                        ),
-                    )
-                    .await
-                    .with_context(|| {
-                        format!(
-                            "failed to upsert availability for sled {sled_id}"
-                        )
-                    })?;
-
-                if wrote {
-                    match availability {
-                        ActiveSledBpAvailability::Available => {
-                            stats.num_marked_available += 1;
-                            info!(
-                                opctx.log,
-                                "marked sled available for provisioning";
-                                "sled_id" => %sled_id,
-                                "update_disposition_generation" =>
-                                    %update_disposition_generation,
-                            );
-                        }
-                        ActiveSledBpAvailability::Unavailable => {
-                            stats.num_marked_unavailable += 1;
-                            info!(
-                                opctx.log,
-                                "marked sled unavailable for provisioning";
-                                "sled_id" => %sled_id,
-                                "update_disposition_generation" =>
-                                    %update_disposition_generation,
-                            );
-                        }
-                    }
-                } else {
-                    // We decided to perform a write, but a duelling Nexus
-                    // recorded an equal-or-newer generation (or decommissioned
-                    // the sled) first, so the row already reflects
-                    // current-or-newer state. From our perspective, this is an
-                    // unchanged sled.
-                    stats.num_unchanged += 1;
-                }
             }
             SledBpAvailabilityState::Decommissioned => {
                 // This is monotonic, so unlike the available/unavailable flip
@@ -222,6 +125,7 @@ pub(crate) async fn reconcile_sled_blueprint_availability(
                 match existing_state {
                     Some(SledBpAvailabilityState::Decommissioned) => {
                         stats.num_already_decommissioned += 1;
+                        continue;
                     }
                     // The None case here means that:
                     //
@@ -238,42 +142,84 @@ pub(crate) async fn reconcile_sled_blueprint_availability(
                     //    the sled was still active, inserted a row after the
                     //    snapshot was taken.
                     //
-                    // So in the None case we still call
-                    // rendezvous_sled_bp_availability_decommission, which does
-                    // an upsert just like
-                    // rendezvous_sled_bp_availability_upsert.
+                    // So in the None case we still write the decommission,
+                    // which does an upsert just like the active-sled write.
                     //
                     // * With case 1 we'll insert a fresh row.
                     // * With case 2 we'll tombstone the racing row.
                     //
                     // Either way, the sled ends up with a durable
                     // decommissioned tombstone.
-                    None | Some(SledBpAvailabilityState::Active { .. }) => {
-                        let decommissioned = datastore
-                            .rendezvous_sled_bp_availability_decommission(
-                                opctx,
-                                RendezvousSledBpAvailabilityDecommission::new(
-                                    sled_id,
-                                    blueprint_id,
-                                ),
-                            )
-                            .await
-                            .with_context(|| {
-                                format!("failed to decommission sled {sled_id}")
-                            })?;
-                        if decommissioned {
-                            stats.num_decommissioned += 1;
-                            info!(
-                                opctx.log,
-                                "decommissioned sled in rendezvous table";
-                                "sled_id" => %sled_id,
-                            );
-                        } else {
-                            // Another Nexus decommissioned it first.
-                            stats.num_already_decommissioned += 1;
-                        }
-                    }
+                    None | Some(SledBpAvailabilityState::Active { .. }) => {}
                 }
+            }
+        }
+
+        to_write.insert_unique(input).expect(
+            "blueprint_sleds is keyed by sled ID, so each sled appears once",
+        );
+    }
+
+    let writes = datastore
+        .rendezvous_sled_bp_availability_write(opctx, blueprint_id, to_write)
+        .await
+        .context("failed to write sled availability")?;
+
+    for write in writes {
+        let sled_id = write.sled_id;
+        match write.outcome {
+            SledBpAvailabilityWriteOutcome::Active {
+                availability,
+                update_disposition_generation,
+                outcome: SledBpAvailabilityUpsertOutcome::Written,
+            } => match availability {
+                ActiveSledBpAvailability::Available => {
+                    stats.num_marked_available += 1;
+                    info!(
+                        opctx.log,
+                        "marked sled available for provisioning";
+                        "sled_id" => %sled_id,
+                        "update_disposition_generation" =>
+                            %update_disposition_generation,
+                    );
+                }
+                ActiveSledBpAvailability::Unavailable => {
+                    stats.num_marked_unavailable += 1;
+                    info!(
+                        opctx.log,
+                        "marked sled unavailable for provisioning";
+                        "sled_id" => %sled_id,
+                        "update_disposition_generation" =>
+                            %update_disposition_generation,
+                    );
+                }
+            },
+            SledBpAvailabilityWriteOutcome::Active {
+                outcome: SledBpAvailabilityUpsertOutcome::Rejected,
+                ..
+            } => {
+                // We decided to perform a write, but a duelling Nexus
+                // recorded an equal-or-newer generation (or decommissioned
+                // the sled) first, so the row already reflects
+                // current-or-newer state. From our perspective, this is an
+                // unchanged sled.
+                stats.num_unchanged += 1;
+            }
+            SledBpAvailabilityWriteOutcome::Decommission(
+                SledBpAvailabilityDecommissionOutcome::Decommissioned,
+            ) => {
+                stats.num_decommissioned += 1;
+                info!(
+                    opctx.log,
+                    "decommissioned sled in rendezvous table";
+                    "sled_id" => %sled_id,
+                );
+            }
+            SledBpAvailabilityWriteOutcome::Decommission(
+                SledBpAvailabilityDecommissionOutcome::AlreadyDecommissioned,
+            ) => {
+                // Another Nexus decommissioned it first.
+                stats.num_already_decommissioned += 1;
             }
         }
     }
@@ -317,10 +263,13 @@ mod tests {
     use crate::tests::usize_to_id;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use async_bb8_diesel::AsyncSimpleConnection;
+    use nexus_db_queries::db::model::RendezvousSledBpAvailabilityDecommission;
+    use nexus_db_queries::db::model::RendezvousSledBpAvailabilityUpdate;
     use nexus_db_queries::db::pub_test_utils::TestDatabase;
     use nexus_db_queries::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
     use omicron_generation_kinds::UpdateDispositionGeneration;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::SledUuid;
     use proptest::prelude::*;
     use proptest::proptest;
     use test_strategy::Arbitrary;
