@@ -2481,6 +2481,10 @@ impl DataStore {
 
     /// Delete `bp_target` rows not newer than the specified version
     ///
+    /// The caller should have already deleted the corresponding blueprints (or
+    /// they will likely be leaked, since there will be no other way to find
+    /// them and know that they're pruneable).
+    ///
     /// The caller must have previously used `bp_target_determine_pruneable()`
     /// to figure out what can be safely pruned and supply that here.
     pub async fn bp_target_delete_up_to(
@@ -2572,9 +2576,19 @@ pub struct BpTargetPruneable {
     /// how many distinct blueprint ids we found
     pub nfound: usize,
     /// which rows to keep
-    pub keep: KeepWhat,
+    keep: KeepWhat,
     /// id of the latest target blueprint
-    pub target_id: BlueprintUuid,
+    target_id: BlueprintUuid,
+}
+
+impl BpTargetPruneable {
+    pub fn keep(&self) -> &KeepWhat {
+        &self.keep
+    }
+
+    pub fn target_id(&self) -> TypedUuid<BlueprintKind> {
+        self.target_id
+    }
 }
 
 /// Describes which versions in `bp_target` to keep, based on how many were
