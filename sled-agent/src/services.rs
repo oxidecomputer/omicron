@@ -2270,6 +2270,9 @@ impl ServiceManager {
                             compression: dropshot::CompressionConfig::Gzip,
                         },
                     },
+                    // TODO(#9288): populate a second external address here once
+                    // sled-agent assigns dual-stack external IPs to Nexus.
+                    dropshot_external_second_address: None,
                     dropshot_internal: dropshot::ConfigDropshot {
                         bind_address: (*internal_address).into(),
                         default_request_body_max_bytes: 1048576,

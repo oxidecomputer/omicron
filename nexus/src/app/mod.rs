@@ -210,6 +210,11 @@ pub struct Nexus {
     /// External dropshot servers
     external_server: std::sync::Mutex<Option<DropshotServer>>,
 
+    /// Optional second external dropshot server, serving the external API on a
+    /// second address (e.g. a second address family for dual stack). Present
+    /// only when `dropshot_external_second_address` is configured.
+    second_external_server: std::sync::Mutex<Option<DropshotServer>>,
+
     /// External dropshot server that listens on the internal network to allow
     /// connections from the tech port; see RFD 431.
     techport_external_server: std::sync::Mutex<Option<DropshotServer>>,
@@ -561,6 +566,7 @@ impl Nexus {
             authz: Arc::clone(&authz),
             sagas,
             external_server: std::sync::Mutex::new(None),
+            second_external_server: std::sync::Mutex::new(None),
             techport_external_server: std::sync::Mutex::new(None),
             internal_server: std::sync::Mutex::new(None),
             lockstep_server: std::sync::Mutex::new(None),
@@ -814,6 +820,7 @@ impl Nexus {
     pub(crate) async fn set_servers(
         &self,
         external_server: DropshotServer,
+        second_external_server: Option<DropshotServer>,
         techport_external_server: DropshotServer,
         internal_server: DropshotServer,
         lockstep_server: DropshotServer,
@@ -824,6 +831,12 @@ impl Nexus {
 
         // Insert the new servers.
         self.external_server.lock().unwrap().replace(external_server);
+        if let Some(second_external_server) = second_external_server {
+            self.second_external_server
+                .lock()
+                .unwrap()
+                .replace(second_external_server);
+        }
         self.techport_external_server
             .lock()
             .unwrap()
@@ -865,6 +878,11 @@ impl Nexus {
             };
 
         if let Some(server) = external_server {
+            extend_err(&mut res, server.close().await);
+        }
+        let second_external_server =
+            self.second_external_server.lock().unwrap().take();
+        if let Some(server) = second_external_server {
             extend_err(&mut res, server.close().await);
         }
         let techport_external_server =
@@ -915,6 +933,16 @@ impl Nexus {
         &self,
     ) -> Option<std::net::SocketAddr> {
         self.external_server
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|server| server.local_addr())
+    }
+
+    pub(crate) fn get_second_external_server_address(
+        &self,
+    ) -> Option<std::net::SocketAddr> {
+        self.second_external_server
             .lock()
             .unwrap()
             .as_ref()

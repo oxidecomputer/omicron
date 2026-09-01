@@ -172,6 +172,15 @@ pub struct DeploymentConfig {
     /// Dropshot configuration for the external API server.
     #[schemars(skip)] // TODO we're protected against dropshot changes
     pub dropshot_external: ConfigDropshotWithTls,
+    /// Optional second address on which to serve the external API.
+    ///
+    /// When set, Nexus launches an additional external API server bound to
+    /// this address, reusing all other settings (TLS, request limits, etc.)
+    /// from `dropshot_external`. This is used to serve the external API on a
+    /// second address version (e.g. IPv6 alongside IPv4).
+    #[schemars(skip)]
+    #[serde(default)]
+    pub dropshot_external_second_address: Option<SocketAddr>,
     /// Dropshot configuration for internal API server.
     #[schemars(skip)] // TODO we're protected against dropshot changes
     pub dropshot_internal: ConfigDropshot,
@@ -1278,6 +1287,7 @@ mod test {
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
             external_dns_servers = [ "1.1.1.1", "9.9.9.9" ]
+            dropshot_external_second_address = "[::1]:4567"
             [deployment.external_http_clients]
             interface = "opte0"
             treat_loopback_as_external = "yes_for_test_purposes_only"
@@ -1404,6 +1414,9 @@ mod test {
                             ..Default::default()
                         }
                     },
+                    dropshot_external_second_address: Some(
+                        "[::1]:4567".parse::<SocketAddr>().unwrap(),
+                    ),
                     dropshot_internal: ConfigDropshot {
                         bind_address: "10.1.2.3:4568"
                             .parse::<SocketAddr>()
