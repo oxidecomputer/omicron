@@ -2576,9 +2576,19 @@ pub struct BpTargetPruneable {
     /// how many distinct blueprint ids we found
     pub nfound: usize,
     /// which rows to keep
-    pub keep: KeepWhat,
+    keep: KeepWhat,
     /// id of the latest target blueprint
-    pub target_id: BlueprintUuid,
+    target_id: BlueprintUuid,
+}
+
+impl BpTargetPruneable {
+    pub fn keep(&self) -> &KeepWhat {
+        &self.keep
+    }
+
+    pub fn target_id(&self) -> TypedUuid<BlueprintKind> {
+        self.target_id
+    }
 }
 
 /// Describes which versions in `bp_target` to keep, based on how many were
