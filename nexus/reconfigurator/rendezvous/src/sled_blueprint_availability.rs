@@ -27,7 +27,7 @@ use slog::info;
 ///
 /// `blueprint_sleds` should contain a [`SledBlueprintAvailabilityInput`] for
 /// every sled in the blueprint, including decommissioned sleds.
-pub(crate) async fn reconcile_sled_blueprint_availability(
+pub(crate) async fn reconcile(
     opctx: &OpContext,
     datastore: &DataStore,
     blueprint_id: BlueprintUuid,
@@ -552,7 +552,7 @@ mod tests {
                     &prep,
                 ).await;
 
-                let result_stats = reconcile_sled_blueprint_availability(
+                let result_stats = reconcile(
                     opctx,
                     datastore,
                     blueprint_id,
@@ -623,7 +623,7 @@ mod tests {
             .await
             .expect("seeded the stored row");
 
-        let stats = reconcile_sled_blueprint_availability(
+        let stats = reconcile(
             opctx,
             datastore,
             bp_reconciled,

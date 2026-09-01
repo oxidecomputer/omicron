@@ -58,8 +58,9 @@ use nexus_types::internal_api::background::AttachedSubnetManagerStatus;
 use nexus_types::internal_api::background::AuditLogCleanupStatus;
 use nexus_types::internal_api::background::AuditLogTimeoutIncompleteStatus;
 use nexus_types::internal_api::background::BlueprintPlannerStatus;
-use nexus_types::internal_api::background::BlueprintRendezvousStats;
 use nexus_types::internal_api::background::BlueprintRendezvousStatus;
+use nexus_types::internal_api::background::DatasetRendezvousOutcome;
+use nexus_types::internal_api::background::DatasetRendezvousStats;
 use nexus_types::internal_api::background::DatasetsRendezvousStats;
 use nexus_types::internal_api::background::EreporterStatus;
 use nexus_types::internal_api::background::FmAnalysisStatus;
@@ -83,6 +84,8 @@ use nexus_types::internal_api::background::ServiceFirewallRuleStatus;
 use nexus_types::internal_api::background::SessionCleanupStatus;
 use nexus_types::internal_api::background::SitrepGcStatus;
 use nexus_types::internal_api::background::SitrepLoadStatus;
+use nexus_types::internal_api::background::SledBlueprintAvailabilityRendezvousOutcome;
+use nexus_types::internal_api::background::SledBlueprintAvailabilityRendezvousStats;
 use nexus_types::internal_api::background::SupportBundleActivationReport;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionStepStatus;
@@ -1696,82 +1699,131 @@ fn print_task_blueprint_rendezvous(details: &serde_json::Value) {
             error, details
         ),
         Ok(status) => {
-            println!("    target blueprint:     {}", status.blueprint_id);
-            println!(
-                "    inventory collection: {}",
-                status.inventory_collection_id
-            );
-
-            let BlueprintRendezvousStats {
-                debug_dataset,
-                crucible_dataset,
-                local_storage_dataset,
-                local_storage_unencrypted_dataset,
+            let BlueprintRendezvousStatus {
+                blueprint_id,
                 sled_blueprint_availability,
-            } = status.stats;
+                datasets,
+            } = status;
+            println!("    target blueprint:     {blueprint_id}");
 
-            print_datasets_rendezvous_stats(&debug_dataset, "debug_dataset");
+            match datasets {
+                DatasetRendezvousOutcome::NoInventoryCollection => {
+                    println!(
+                        "    inventory collection: none loaded yet; dataset \
+                         reconciliation skipped"
+                    );
+                }
+                DatasetRendezvousOutcome::Error {
+                    inventory_collection_id,
+                    error,
+                } => {
+                    println!(
+                        "    inventory collection: {inventory_collection_id}"
+                    );
+                    println!("    dataset reconciliation failed: {error}");
+                }
+                DatasetRendezvousOutcome::Reconciled {
+                    inventory_collection_id,
+                    stats,
+                } => {
+                    println!(
+                        "    inventory collection: {inventory_collection_id}"
+                    );
+                    print_dataset_rendezvous_stats(&stats);
+                }
+            }
 
-            // crucible datasets have a different number of rendezvous stats
-            println!("    crucible_dataset rendezvous counts:");
-            println!(
-                "        num_inserted:         {}",
-                crucible_dataset.num_inserted
-            );
-            println!(
-                "        num_already_exist:    {}",
-                crucible_dataset.num_already_exist
-            );
-            println!(
-                "        num_not_in_inventory: {}",
-                crucible_dataset.num_not_in_inventory
-            );
-
-            print_datasets_rendezvous_stats(
-                &local_storage_dataset,
-                "local_storage_dataset",
-            );
-
-            print_datasets_rendezvous_stats(
-                &local_storage_unencrypted_dataset,
-                "local_storage_unencrypted_dataset",
-            );
-
-            println!("    sled_blueprint_availability rendezvous counts:");
-            println!(
-                "        num_marked_available:                {}",
-                sled_blueprint_availability.num_marked_available
-            );
-            println!(
-                "        num_marked_unavailable:              {}",
-                sled_blueprint_availability.num_marked_unavailable
-            );
-            println!(
-                "        num_unchanged:                       {}",
-                sled_blueprint_availability.num_unchanged
-            );
-            println!(
-                "        num_invariant_violations:            {}",
-                sled_blueprint_availability.num_invariant_violations
-            );
-            println!(
-                "        num_decommissioned:                  {}",
-                sled_blueprint_availability.num_decommissioned
-            );
-            println!(
-                "        num_already_decommissioned:          {}",
-                sled_blueprint_availability.num_already_decommissioned
-            );
-            println!(
-                "        num_not_in_blueprint:                {}",
-                sled_blueprint_availability.num_not_in_blueprint
-            );
-            println!(
-                "        num_decommissioned_not_in_blueprint: {}",
-                sled_blueprint_availability.num_decommissioned_not_in_blueprint
-            );
+            match sled_blueprint_availability {
+                SledBlueprintAvailabilityRendezvousOutcome::Error(error) => {
+                    println!(
+                        "    sled_blueprint_availability reconciliation \
+                         failed: {error}"
+                    );
+                }
+                SledBlueprintAvailabilityRendezvousOutcome::Reconciled(
+                    stats,
+                ) => {
+                    print_sled_blueprint_availability_rendezvous_stats(&stats);
+                }
+            }
         }
     }
+}
+
+fn print_dataset_rendezvous_stats(stats: &DatasetRendezvousStats) {
+    let DatasetRendezvousStats {
+        debug_dataset,
+        crucible_dataset,
+        local_storage_dataset,
+        local_storage_unencrypted_dataset,
+    } = stats;
+
+    print_datasets_rendezvous_stats(debug_dataset, "debug_dataset");
+
+    // crucible datasets have a different number of rendezvous stats
+    println!("    crucible_dataset rendezvous counts:");
+    println!("        num_inserted:         {}", crucible_dataset.num_inserted);
+    println!(
+        "        num_already_exist:    {}",
+        crucible_dataset.num_already_exist
+    );
+    println!(
+        "        num_not_in_inventory: {}",
+        crucible_dataset.num_not_in_inventory
+    );
+
+    print_datasets_rendezvous_stats(
+        local_storage_dataset,
+        "local_storage_dataset",
+    );
+
+    print_datasets_rendezvous_stats(
+        local_storage_unencrypted_dataset,
+        "local_storage_unencrypted_dataset",
+    );
+}
+
+fn print_sled_blueprint_availability_rendezvous_stats(
+    stats: &SledBlueprintAvailabilityRendezvousStats,
+) {
+    let SledBlueprintAvailabilityRendezvousStats {
+        num_marked_available,
+        num_marked_unavailable,
+        num_unchanged,
+        num_invariant_violations,
+        num_decommissioned,
+        num_already_decommissioned,
+        num_not_in_blueprint,
+        num_decommissioned_not_in_blueprint,
+    } = stats;
+
+    println!("    sled_blueprint_availability rendezvous counts:");
+    println!(
+        "        num_marked_available:                {num_marked_available}"
+    );
+    println!(
+        "        num_marked_unavailable:              \
+         {num_marked_unavailable}"
+    );
+    println!("        num_unchanged:                       {num_unchanged}");
+    println!(
+        "        num_invariant_violations:            \
+         {num_invariant_violations}"
+    );
+    println!(
+        "        num_decommissioned:                  {num_decommissioned}"
+    );
+    println!(
+        "        num_already_decommissioned:          \
+         {num_already_decommissioned}"
+    );
+    println!(
+        "        num_not_in_blueprint:                {num_not_in_blueprint}"
+    );
+    println!(
+        "        num_decommissioned_not_in_blueprint: \
+         {num_decommissioned_not_in_blueprint}"
+    );
 }
 
 fn print_task_dns_config(details: &serde_json::Value) {
