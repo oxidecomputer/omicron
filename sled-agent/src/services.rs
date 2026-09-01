@@ -1858,10 +1858,7 @@ impl ServiceManager {
                 // TODO(#11008): external DNS should listen on the private IP
                 // address for *all* of its external addresses. For now we bind
                 // a single address, preferring the IPv4 one (else IPv6) to
-                // match `opte_interface_set_up_install`. Supporting multiple
-                // addresses is also blocked on #9309, which puts the private
-                // side of each external address onto the zone's OPTE port in
-                // the first place.
+                // match `opte_interface_set_up_install`.
                 let dns_address = dns_addresses.temporary_primary_address();
                 let private_ip = Self::private_ip_for_external_address(
                     dns_address.ip(),
@@ -2224,10 +2221,7 @@ impl ServiceManager {
                 // TODO(#11006): Nexus should be reachable on the private IP
                 // address for *all* of its external IPs. For now we bind a
                 // single address, preferring the IPv4 one (else IPv6) to match
-                // match `opte_interface_set_up_install`. Supporting multiple
-                // addresses is also blocked on #9309, which puts the private
-                // side of each external address onto the zone's OPTE port in
-                // the first place.
+                // match `opte_interface_set_up_install`.
                 let external_ip = external_ips.temporary_primary_address();
                 let private_ip = Self::private_ip_for_external_address(
                     external_ip,
