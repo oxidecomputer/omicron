@@ -21,6 +21,7 @@ use std::net::SocketAddrV6;
 use std::time::Duration;
 
 use crate::v1::disk::{DatasetConfig, OmicronPhysicalDiskConfig};
+use crate::v1::inventory::SledRole;
 use crate::v1::inventory::{
     BootPartitionContents, ConfigReconcilerInventoryResult,
     HostPhase2DesiredSlots, InventoryDataset, InventoryDisk, OrphanedDataset,
@@ -36,7 +37,6 @@ use crate::v40::inventory::{FmdInventory, FmdInventoryError};
 use crate::v46::inventory::SvcsEnabledNotOnlineResult;
 use crate::v49;
 use crate::v49::inventory::OmicronSledUpdateDisposition;
-use crate::v51::inventory::SledRole;
 
 /// Describes the set of Reconfigurator-managed configuration elements of a sled
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]

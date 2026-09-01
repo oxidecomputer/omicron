@@ -35,7 +35,6 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
-    (51, RETIRE_UP_TO_VERSION_23),
     (50, TYPED_SLED_CONFIG_GENERATION),
     (49, ADD_UPDATE_DISPOSITION),
     (48, ALLOW_DDM_TRAFFIC),

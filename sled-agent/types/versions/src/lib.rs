@@ -67,6 +67,8 @@ pub mod v26;
 pub mod v28;
 #[path = "add_vsock_component/mod.rs"]
 pub mod v29;
+#[path = "add_switch_zone_operator_policy/mod.rs"]
+pub mod v3;
 #[path = "stronger_bgp_unnumbered_types/mod.rs"]
 pub mod v30;
 #[path = "add_icmpv6_firewall_support/mod.rs"]
@@ -103,8 +105,6 @@ pub mod v48;
 pub mod v49;
 #[path = "typed_sled_config_generation/mod.rs"]
 pub mod v50;
-#[path = "retire_up_to_version_23/mod.rs"]
-pub mod v51;
 #[path = "add_probe_put_endpoint/mod.rs"]
 pub mod v6;
 #[path = "multicast_support/mod.rs"]

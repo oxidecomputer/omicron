@@ -142,6 +142,22 @@ pub struct InventoryDataset {
     pub compression: String,
 }
 
+/// Describes the role of the sled within the rack.
+///
+/// Note that this may change if the sled is physically moved
+/// within the rack.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum SledRole {
+    /// The sled is a general compute sled.
+    Gimlet,
+    /// The sled is attached to the network switch, and has additional
+    /// responsibilities.
+    Scrimlet,
+}
+
 /// Describes the desired contents of a host phase 2 slot (i.e., the boot
 /// partition on one of the internal M.2 drives).
 #[derive(

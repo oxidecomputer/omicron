@@ -22,6 +22,12 @@ use uuid::Uuid;
 use super::inventory::NetworkInterface;
 use super::inventory::SourceNatConfig;
 
+/// Path parameters for VMM requests.
+#[derive(Deserialize, JsonSchema)]
+pub struct VmmPathParam {
+    pub propolis_id: PropolisUuid,
+}
+
 /// Path parameters for VMM disk snapshot requests.
 #[derive(Deserialize, JsonSchema)]
 pub struct VmmIssueDiskSnapshotRequestPathParam {
