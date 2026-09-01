@@ -11,18 +11,115 @@ use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use diesel::upsert::excluded;
+use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
+use iddqd::id_upcast;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
+use nexus_db_lookup::DbConnection;
+use nexus_db_model::ActiveSledBpAvailability;
 use nexus_db_model::DbSledBpAvailability;
 use nexus_db_model::RendezvousSledBpAvailability;
 use nexus_db_model::RendezvousSledBpAvailabilityDecommission;
 use nexus_db_model::RendezvousSledBpAvailabilityUpdate;
+use nexus_db_model::SledBlueprintAvailabilityInput;
+use nexus_db_model::SledBpAvailabilityState;
+use nexus_types::deployment::Blueprint;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
+use omicron_generation_kinds::UpdateDispositionGeneration;
+use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
+
+/// The result of a generation-guarded availability upsert.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SledBpAvailabilityUpsertOutcome {
+    /// The row was inserted or updated.
+    Written,
+    /// The guard rejected the write.
+    ///
+    /// This can happen because:
+    ///
+    /// - the stored row is at an equal or newer `update_disposition` generation;
+    /// - or, the sled is decommissioned.
+    Rejected,
+}
+
+/// The result of recording a sled as decommissioned.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SledBpAvailabilityDecommissionOutcome {
+    /// The sled transitioned to decommissioned (fresh tombstone or an active
+    /// row overwritten).
+    Decommissioned,
+    /// The sled was already decommissioned; the row was left alone.
+    AlreadyDecommissioned,
+}
+
+/// The result of writing one blueprint sled's availability to the
+/// `rendezvous_sled_bp_availability` table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SledBpAvailabilityWrite {
+    pub sled_id: SledUuid,
+    pub outcome: SledBpAvailabilityWriteOutcome,
+}
+
+impl IdOrdItem for SledBpAvailabilityWrite {
+    type Key<'a> = SledUuid;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.sled_id
+    }
+
+    id_upcast!();
+}
+
+/// The result of writing one blueprint sled's availability to the
+/// `rendezvous_sled_bp_availability` table.
+///
+/// Part of [`SledBpAvailabilityWrite`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SledBpAvailabilityWriteOutcome {
+    /// The sled is active in the blueprint.
+    Active {
+        /// The availability written to the database.
+        availability: ActiveSledBpAvailability,
+
+        /// The generation of the update disposition that was written.
+        update_disposition_generation: UpdateDispositionGeneration,
+
+        /// Whether the upsert operation was successful.
+        outcome: SledBpAvailabilityUpsertOutcome,
+    },
+
+    /// The sled is decommissioned in the blueprint.
+    Decommission(SledBpAvailabilityDecommissionOutcome),
+}
+
+impl SledBpAvailabilityWriteOutcome {
+    /// Return true if the write changed the database.
+    pub fn applied(&self) -> bool {
+        match self {
+            SledBpAvailabilityWriteOutcome::Active { outcome, .. } => {
+                match outcome {
+                    SledBpAvailabilityUpsertOutcome::Written => true,
+                    SledBpAvailabilityUpsertOutcome::Rejected => false,
+                }
+            }
+            SledBpAvailabilityWriteOutcome::Decommission(outcome) => {
+                match outcome {
+                    SledBpAvailabilityDecommissionOutcome::Decommissioned => {
+                        true
+                    }
+                    SledBpAvailabilityDecommissionOutcome::AlreadyDecommissioned => {
+                        false
+                    }
+                }
+            }
+        }
+    }
+}
 
 impl DataStore {
     /// List one page of sleds in the rendezvous table.
@@ -88,6 +185,115 @@ impl DataStore {
         Ok(all_sleds)
     }
 
+    /// Initialize the rendezvous_sled_bp_availability table from the
+    /// blueprint, assuming an empty table.
+    ///
+    /// Used during RSS and in tests.
+    pub(crate) async fn initialize_rendezvous_sled_bp_availability_on_connection(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        blueprint: &Blueprint,
+    ) -> Result<(), Error> {
+        let writes = Self::rendezvous_sled_bp_availability_write_on_connection(
+            conn,
+            blueprint.id,
+            SledBlueprintAvailabilityInput::all_from_blueprint(blueprint),
+        )
+        .await?;
+        let not_applied: Vec<_> =
+            writes.iter().filter(|write| !write.outcome.applied()).collect();
+        if !not_applied.is_empty() {
+            return Err(Error::internal_error(&format!(
+                "initializing rendezvous_sled_bp_availability from blueprint \
+                 {}: writes for sleds {not_applied:?} were not applied, but \
+                 no rows should exist before rack initialization",
+                blueprint.id
+            )));
+        }
+        Ok(())
+    }
+
+    /// Write the availability of each sled in `sleds` to the database.
+    pub async fn rendezvous_sled_bp_availability_write(
+        &self,
+        opctx: &OpContext,
+        blueprint_id: BlueprintUuid,
+        sleds: IdOrdMap<SledBlueprintAvailabilityInput>,
+    ) -> Result<IdOrdMap<SledBpAvailabilityWrite>, Error> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        Self::rendezvous_sled_bp_availability_write_on_connection(
+            &conn,
+            blueprint_id,
+            sleds,
+        )
+        .await
+    }
+
+    /// on_connection variant of `rendezvous_sled_bp_availability_write`.
+    ///
+    /// The caller is responsible for authorizing the operation.
+    pub(crate) async fn rendezvous_sled_bp_availability_write_on_connection(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        blueprint_id: BlueprintUuid,
+        sleds: IdOrdMap<SledBlueprintAvailabilityInput>,
+    ) -> Result<IdOrdMap<SledBpAvailabilityWrite>, Error> {
+        let mut writes = IdOrdMap::new();
+        for SledBlueprintAvailabilityInput { sled_id, state } in sleds {
+            let outcome = match state {
+                SledBpAvailabilityState::Active {
+                    availability,
+                    update_disposition_generation,
+                } => {
+                    let outcome =
+                        Self::rendezvous_sled_bp_availability_upsert_on_connection(
+                            conn,
+                            RendezvousSledBpAvailabilityUpdate::new(
+                                sled_id,
+                                availability,
+                                update_disposition_generation,
+                                blueprint_id,
+                            ),
+                        )
+                        .await
+                        .map_err(|e| {
+                            e.internal_context(format!(
+                                "failed to upsert availability for sled \
+                                 {sled_id}"
+                            ))
+                        })?;
+                    SledBpAvailabilityWriteOutcome::Active {
+                        availability,
+                        update_disposition_generation,
+                        outcome,
+                    }
+                }
+                SledBpAvailabilityState::Decommissioned => {
+                    let outcome =
+                        Self::rendezvous_sled_bp_availability_decommission_on_connection(
+                            conn,
+                            RendezvousSledBpAvailabilityDecommission::new(
+                                sled_id,
+                                blueprint_id,
+                            ),
+                        )
+                        .await
+                        .map_err(|e| {
+                            e.internal_context(format!(
+                                "failed to decommission sled {sled_id}"
+                            ))
+                        })?;
+                    SledBpAvailabilityWriteOutcome::Decommission(outcome)
+                }
+            };
+            writes
+                .insert_unique(SledBpAvailabilityWrite { sled_id, outcome })
+                .expect(
+                    "input map is keyed by sled ID, so each sled appears once",
+                );
+        }
+        Ok(writes)
+    }
+
     /// Record a sled's availability in the `rendezvous_sled_bp_availability`
     /// table, guarded by its `update_disposition` generation.
     ///
@@ -99,21 +305,31 @@ impl DataStore {
     ///
     /// Together, these prevent duelling Nexuses from trampling over each
     /// other's state.
-    ///
-    /// Returns `true` if a row was written, and `false` if the write was
-    /// rejected (stale generation, or the sled is already decommissioned).
     pub async fn rendezvous_sled_bp_availability_upsert(
         &self,
         opctx: &OpContext,
         update: RendezvousSledBpAvailabilityUpdate,
-    ) -> Result<bool, Error> {
+    ) -> Result<SledBpAvailabilityUpsertOutcome, Error> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        Self::rendezvous_sled_bp_availability_upsert_on_connection(
+            &conn, update,
+        )
+        .await
+    }
+
+    /// on_connection variant of `rendezvous_sled_bp_availability_upsert`.
+    ///
+    /// The caller is responsible for authorizing the operation.
+    pub(crate) async fn rendezvous_sled_bp_availability_upsert_on_connection(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        update: RendezvousSledBpAvailabilityUpdate,
+    ) -> Result<SledBpAvailabilityUpsertOutcome, Error> {
         // `FilterDsl` brings `.filter()` (the `WHERE` on the `ON CONFLICT DO
         // UPDATE` below) into scope; the prelude's `QueryDsl` only offers it for
         // table-like queries, not upsert statements.
         use diesel::query_dsl::methods::FilterDsl;
         use nexus_db_schema::schema::rendezvous_sled_bp_availability::dsl;
-
-        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
         // Compared against the stored generation by the staleness guard.
         let incoming_generation = nexus_db_model::to_db_typed_generation(
@@ -138,13 +354,13 @@ impl DataStore {
             )
             // Overwrite only if our generation is newer than what's stored.
             .filter(dsl::update_disposition_generation.lt(incoming_generation))
-            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .execute_async(conn)
             .await
             // The conflict target is the primary key, so at most one row is
             // inserted or updated.
             .map(|rows_modified| match rows_modified {
-                0 => false,
-                1 => true,
+                0 => SledBpAvailabilityUpsertOutcome::Rejected,
+                1 => SledBpAvailabilityUpsertOutcome::Written,
                 n => unreachable!(
                     "upsert by primary key sled_id modified {n} rows"
                 ),
@@ -156,21 +372,32 @@ impl DataStore {
     /// `rendezvous_sled_bp_availability` table.
     ///
     /// This is a terminal state.
-    ///
-    /// Returns `true` if the sled transitioned to decommissioned, and `false`
-    /// if it was already decommissioned.
     pub async fn rendezvous_sled_bp_availability_decommission(
         &self,
         opctx: &OpContext,
         decommission: RendezvousSledBpAvailabilityDecommission,
-    ) -> Result<bool, Error> {
+    ) -> Result<SledBpAvailabilityDecommissionOutcome, Error> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        Self::rendezvous_sled_bp_availability_decommission_on_connection(
+            &conn,
+            decommission,
+        )
+        .await
+    }
+
+    /// on_connection variant of `rendezvous_sled_bp_availability_decommission`.
+    ///
+    /// The caller is responsible for authorizing the operation.
+    pub(crate) async fn rendezvous_sled_bp_availability_decommission_on_connection(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        decommission: RendezvousSledBpAvailabilityDecommission,
+    ) -> Result<SledBpAvailabilityDecommissionOutcome, Error> {
         // `FilterDsl` brings `.filter()` (the `WHERE` on the `ON CONFLICT DO
         // UPDATE` below) into scope; the prelude's `QueryDsl` only offers it for
         // table-like queries, not upsert statements.
         use diesel::query_dsl::methods::FilterDsl;
         use nexus_db_schema::schema::rendezvous_sled_bp_availability::dsl;
-
-        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
         let tombstone = decommission.into_insertable();
 
@@ -194,13 +421,15 @@ impl DataStore {
             .filter(
                 dsl::bp_availability.ne(DbSledBpAvailability::Decommissioned),
             )
-            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .execute_async(conn)
             .await
             // The conflict target is the primary key, so at most one row is
             // inserted or updated.
             .map(|rows_modified| match rows_modified {
-                0 => false,
-                1 => true,
+                0 => {
+                    SledBpAvailabilityDecommissionOutcome::AlreadyDecommissioned
+                }
+                1 => SledBpAvailabilityDecommissionOutcome::Decommissioned,
                 n => unreachable!(
                     "upsert by primary key sled_id modified {n} rows"
                 ),
@@ -260,14 +489,18 @@ mod tests {
         let bp2 = BlueprintUuid::new_v4();
 
         // Initial insert at generation 1, available.
-        let wrote = datastore
+        let outcome = datastore
             .rendezvous_sled_bp_availability_upsert(
                 opctx,
                 row(sled_id, ActiveSledBpAvailability::Available, 1, bp1),
             )
             .await
             .expect("query succeeded");
-        assert!(wrote, "first insert should write");
+        assert_eq!(
+            outcome,
+            SledBpAvailabilityUpsertOutcome::Written,
+            "first insert should write"
+        );
         let got = get(opctx, datastore, sled_id).await.expect("row present");
         assert_eq!(
             got.state().expect("reassembled row state"),
@@ -279,14 +512,18 @@ mod tests {
         );
 
         // A newer generation (2) flipping the sled to unavailable should win.
-        let wrote = datastore
+        let outcome = datastore
             .rendezvous_sled_bp_availability_upsert(
                 opctx,
                 row(sled_id, ActiveSledBpAvailability::Unavailable, 2, bp2),
             )
             .await
             .expect("query succeeded");
-        assert!(wrote, "newer generation should write");
+        assert_eq!(
+            outcome,
+            SledBpAvailabilityUpsertOutcome::Written,
+            "newer generation should write"
+        );
         let got = get(opctx, datastore, sled_id).await.expect("row present");
         assert_eq!(
             got.state().expect("reassembled row state"),
@@ -300,14 +537,18 @@ mod tests {
 
         // A stale write at the same generation (2) trying to flip back to
         // available must be rejected.
-        let wrote = datastore
+        let outcome = datastore
             .rendezvous_sled_bp_availability_upsert(
                 opctx,
                 row(sled_id, ActiveSledBpAvailability::Available, 2, bp1),
             )
             .await
             .expect("query succeeded");
-        assert!(!wrote, "equal-generation write should be rejected as stale");
+        assert_eq!(
+            outcome,
+            SledBpAvailabilityUpsertOutcome::Rejected,
+            "equal-generation write should be rejected as stale"
+        );
         let got = get(opctx, datastore, sled_id).await.expect("row present");
         assert_eq!(
             got.state().expect("reassembled row state"),
@@ -320,14 +561,18 @@ mod tests {
         );
 
         // A stale write at an older generation (1) must also be rejected.
-        let wrote = datastore
+        let outcome = datastore
             .rendezvous_sled_bp_availability_upsert(
                 opctx,
                 row(sled_id, ActiveSledBpAvailability::Available, 1, bp1),
             )
             .await
             .expect("query succeeded");
-        assert!(!wrote, "older-generation write should be rejected as stale");
+        assert_eq!(
+            outcome,
+            SledBpAvailabilityUpsertOutcome::Rejected,
+            "older-generation write should be rejected as stale"
+        );
         let got = get(opctx, datastore, sled_id).await.expect("row present");
         assert_eq!(
             got.state().expect("reassembled row state"),
@@ -340,14 +585,18 @@ mod tests {
         );
 
         // A newer generation (3) flipping back to available wins.
-        let wrote = datastore
+        let outcome = datastore
             .rendezvous_sled_bp_availability_upsert(
                 opctx,
                 row(sled_id, ActiveSledBpAvailability::Available, 3, bp2),
             )
             .await
             .expect("query succeeded");
-        assert!(wrote, "newest generation should write");
+        assert_eq!(
+            outcome,
+            SledBpAvailabilityUpsertOutcome::Written,
+            "newest generation should write"
+        );
         let got = get(opctx, datastore, sled_id).await.expect("row present");
         assert_eq!(
             got.state().expect("reassembled row state"),
@@ -394,14 +643,17 @@ mod tests {
 
         // Decommissioning it should change the sled's state to
         // `decommissioned`.
-        let decommissioned = datastore
+        let outcome = datastore
             .rendezvous_sled_bp_availability_decommission(
                 opctx,
                 RendezvousSledBpAvailabilityDecommission::new(sled_id, bp),
             )
             .await
             .expect("query succeeded");
-        assert!(decommissioned);
+        assert_eq!(
+            outcome,
+            SledBpAvailabilityDecommissionOutcome::Decommissioned
+        );
         let got = get(opctx, datastore, sled_id).await.expect("row remains");
         assert_eq!(
             got.state().expect("reassembled row state"),
@@ -409,25 +661,32 @@ mod tests {
         );
 
         // A second decommission is a no-op.
-        let decommissioned = datastore
+        let outcome = datastore
             .rendezvous_sled_bp_availability_decommission(
                 opctx,
                 RendezvousSledBpAvailabilityDecommission::new(sled_id, bp),
             )
             .await
             .expect("query succeeded");
-        assert!(!decommissioned);
+        assert_eq!(
+            outcome,
+            SledBpAvailabilityDecommissionOutcome::AlreadyDecommissioned
+        );
 
         // A stale Nexus must not be able to resurrect a decommissioned sled,
         // even at a newer generation.
-        let wrote = datastore
+        let outcome = datastore
             .rendezvous_sled_bp_availability_upsert(
                 opctx,
                 row(sled_id, ActiveSledBpAvailability::Available, 5, bp),
             )
             .await
             .expect("query succeeded");
-        assert!(!wrote, "decommissioned sled must not be resurrected");
+        assert_eq!(
+            outcome,
+            SledBpAvailabilityUpsertOutcome::Rejected,
+            "decommissioned sled must not be resurrected"
+        );
         assert_eq!(
             get(opctx, datastore, sled_id)
                 .await
@@ -452,14 +711,18 @@ mod tests {
         let bp = BlueprintUuid::new_v4();
         let bp_stale = BlueprintUuid::new_v4();
 
-        let decommissioned = datastore
+        let outcome = datastore
             .rendezvous_sled_bp_availability_decommission(
                 opctx,
                 RendezvousSledBpAvailabilityDecommission::new(sled_id, bp),
             )
             .await
             .expect("query succeeded");
-        assert!(decommissioned, "fresh tombstone insert should report true");
+        assert_eq!(
+            outcome,
+            SledBpAvailabilityDecommissionOutcome::Decommissioned,
+            "fresh tombstone insert should report true"
+        );
         let got = get(opctx, datastore, sled_id).await.expect("row present");
         assert_eq!(
             got.state().expect("reassembled row state"),
@@ -467,14 +730,18 @@ mod tests {
         );
         assert_eq!(got.blueprint_id(), bp);
 
-        let wrote = datastore
+        let outcome = datastore
             .rendezvous_sled_bp_availability_upsert(
                 opctx,
                 row(sled_id, ActiveSledBpAvailability::Available, 5, bp_stale),
             )
             .await
             .expect("query succeeded");
-        assert!(!wrote, "decommissioned sled must not be resurrected");
+        assert_eq!(
+            outcome,
+            SledBpAvailabilityUpsertOutcome::Rejected,
+            "decommissioned sled must not be resurrected"
+        );
         assert_eq!(
             get(opctx, datastore, sled_id).await.unwrap().blueprint_id(),
             bp,
