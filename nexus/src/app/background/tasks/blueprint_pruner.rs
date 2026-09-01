@@ -244,7 +244,7 @@ async fn prune_blueprints(
     // Figure out the maximum version that we'd consider pruning.
     let pruneable =
         datastore.bp_target_determine_pruneable(opctx, nkeep).await?;
-    let keep_version = match &pruneable.keep {
+    let keep_version = match pruneable.keep() {
         KeepWhat::All => {
             info!(
                 log,
@@ -646,7 +646,7 @@ async fn prune_batch_blueprints_impl(
         // This condition should be impossible because of the way the table is
         // structured.  But if somehow we wound up with the target blueprint id,
         // bail out rather than light the system on fire.
-        if blueprint_id == pargs.pruneable.target_id {
+        if blueprint_id == pargs.pruneable.target_id() {
             return ControlFlow::Break(batch.record_error(anyhow!(
                 "unexpectedly tried to delete target blueprint {}",
                 blueprint_id,
