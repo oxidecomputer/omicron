@@ -277,20 +277,6 @@ impl DataStore {
     ///
     /// Together, these prevent duelling Nexuses from trampling over each
     /// other's state.
-    pub async fn rendezvous_sled_bp_availability_upsert(
-        &self,
-        opctx: &OpContext,
-        update: RendezvousSledBpAvailabilityUpdate,
-    ) -> Result<SledBpAvailabilityUpsertOutcome, Error> {
-        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
-        let conn = self.pool_connection_authorized(opctx).await?;
-        Self::rendezvous_sled_bp_availability_upsert_on_connection(
-            &conn, update,
-        )
-        .await
-    }
-
-    /// on_connection variant of `rendezvous_sled_bp_availability_upsert`.
     ///
     /// The caller is responsible for authorizing the operation.
     pub(crate) async fn rendezvous_sled_bp_availability_upsert_on_connection(
@@ -344,21 +330,6 @@ impl DataStore {
     /// `rendezvous_sled_bp_availability` table.
     ///
     /// This is a terminal state.
-    pub async fn rendezvous_sled_bp_availability_decommission(
-        &self,
-        opctx: &OpContext,
-        decommission: RendezvousSledBpAvailabilityDecommission,
-    ) -> Result<SledBpAvailabilityDecommissionOutcome, Error> {
-        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
-        let conn = self.pool_connection_authorized(opctx).await?;
-        Self::rendezvous_sled_bp_availability_decommission_on_connection(
-            &conn,
-            decommission,
-        )
-        .await
-    }
-
-    /// on_connection variant of `rendezvous_sled_bp_availability_decommission`.
     ///
     /// The caller is responsible for authorizing the operation.
     pub(crate) async fn rendezvous_sled_bp_availability_decommission_on_connection(
@@ -414,26 +385,81 @@ impl DataStore {
 mod tests {
     use super::*;
     use crate::db::pub_test_utils::TestDatabase;
+    use iddqd::id_ord_map;
     use nexus_db_model::ActiveSledBpAvailability;
     use nexus_db_model::SledBpAvailabilityState;
     use omicron_generation_kinds::UpdateDispositionGeneration;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::BlueprintUuid;
 
-    // Convenience for building an availability update at a given
-    // availability/generation.
-    fn row(
+    async fn upsert_one(
+        opctx: &OpContext,
+        datastore: &DataStore,
         sled_id: SledUuid,
         availability: ActiveSledBpAvailability,
         generation: u32,
         blueprint_id: BlueprintUuid,
-    ) -> RendezvousSledBpAvailabilityUpdate {
-        RendezvousSledBpAvailabilityUpdate::new(
-            sled_id,
-            availability,
-            UpdateDispositionGeneration::from(generation),
-            blueprint_id,
-        )
+    ) -> SledBpAvailabilityUpsertOutcome {
+        let update_disposition_generation =
+            UpdateDispositionGeneration::from(generation);
+        let writes = datastore
+            .rendezvous_sled_bp_availability_write(
+                opctx,
+                blueprint_id,
+                id_ord_map! {
+                    SledBlueprintAvailabilityInput {
+                        sled_id,
+                        state: SledBpAvailabilityState::Active {
+                            availability,
+                            update_disposition_generation,
+                        },
+                    },
+                },
+            )
+            .await
+            .expect("query succeeded");
+        match writes.get(&sled_id).expect("write for the input sled").outcome {
+            SledBpAvailabilityWriteOutcome::Active {
+                availability: written_availability,
+                update_disposition_generation: written_generation,
+                outcome,
+            } => {
+                assert_eq!(written_availability, availability);
+                assert_eq!(written_generation, update_disposition_generation);
+                outcome
+            }
+            SledBpAvailabilityWriteOutcome::Decommission(outcome) => panic!(
+                "an active input must report an active outcome, got \
+                 {outcome:?}"
+            ),
+        }
+    }
+
+    async fn decommission_one(
+        opctx: &OpContext,
+        datastore: &DataStore,
+        sled_id: SledUuid,
+        blueprint_id: BlueprintUuid,
+    ) -> SledBpAvailabilityDecommissionOutcome {
+        let writes = datastore
+            .rendezvous_sled_bp_availability_write(
+                opctx,
+                blueprint_id,
+                id_ord_map! {
+                    SledBlueprintAvailabilityInput {
+                        sled_id,
+                        state: SledBpAvailabilityState::Decommissioned,
+                    },
+                },
+            )
+            .await
+            .expect("query succeeded");
+        match writes.get(&sled_id).expect("write for the input sled").outcome {
+            SledBpAvailabilityWriteOutcome::Decommission(outcome) => outcome,
+            SledBpAvailabilityWriteOutcome::Active { .. } => panic!(
+                "a decommissioned input must report a decommission outcome"
+            ),
+        }
     }
 
     // Fetch the single row for a sled, if present.
@@ -461,13 +487,15 @@ mod tests {
         let bp2 = BlueprintUuid::new_v4();
 
         // Initial insert at generation 1, available.
-        let outcome = datastore
-            .rendezvous_sled_bp_availability_upsert(
-                opctx,
-                row(sled_id, ActiveSledBpAvailability::Available, 1, bp1),
-            )
-            .await
-            .expect("query succeeded");
+        let outcome = upsert_one(
+            opctx,
+            datastore,
+            sled_id,
+            ActiveSledBpAvailability::Available,
+            1,
+            bp1,
+        )
+        .await;
         assert_eq!(
             outcome,
             SledBpAvailabilityUpsertOutcome::Written,
@@ -484,13 +512,15 @@ mod tests {
         );
 
         // A newer generation (2) flipping the sled to unavailable should win.
-        let outcome = datastore
-            .rendezvous_sled_bp_availability_upsert(
-                opctx,
-                row(sled_id, ActiveSledBpAvailability::Unavailable, 2, bp2),
-            )
-            .await
-            .expect("query succeeded");
+        let outcome = upsert_one(
+            opctx,
+            datastore,
+            sled_id,
+            ActiveSledBpAvailability::Unavailable,
+            2,
+            bp2,
+        )
+        .await;
         assert_eq!(
             outcome,
             SledBpAvailabilityUpsertOutcome::Written,
@@ -509,13 +539,15 @@ mod tests {
 
         // A stale write at the same generation (2) trying to flip back to
         // available must be rejected.
-        let outcome = datastore
-            .rendezvous_sled_bp_availability_upsert(
-                opctx,
-                row(sled_id, ActiveSledBpAvailability::Available, 2, bp1),
-            )
-            .await
-            .expect("query succeeded");
+        let outcome = upsert_one(
+            opctx,
+            datastore,
+            sled_id,
+            ActiveSledBpAvailability::Available,
+            2,
+            bp1,
+        )
+        .await;
         assert_eq!(
             outcome,
             SledBpAvailabilityUpsertOutcome::Rejected,
@@ -533,13 +565,15 @@ mod tests {
         );
 
         // A stale write at an older generation (1) must also be rejected.
-        let outcome = datastore
-            .rendezvous_sled_bp_availability_upsert(
-                opctx,
-                row(sled_id, ActiveSledBpAvailability::Available, 1, bp1),
-            )
-            .await
-            .expect("query succeeded");
+        let outcome = upsert_one(
+            opctx,
+            datastore,
+            sled_id,
+            ActiveSledBpAvailability::Available,
+            1,
+            bp1,
+        )
+        .await;
         assert_eq!(
             outcome,
             SledBpAvailabilityUpsertOutcome::Rejected,
@@ -557,13 +591,15 @@ mod tests {
         );
 
         // A newer generation (3) flipping back to available wins.
-        let outcome = datastore
-            .rendezvous_sled_bp_availability_upsert(
-                opctx,
-                row(sled_id, ActiveSledBpAvailability::Available, 3, bp2),
-            )
-            .await
-            .expect("query succeeded");
+        let outcome = upsert_one(
+            opctx,
+            datastore,
+            sled_id,
+            ActiveSledBpAvailability::Available,
+            3,
+            bp2,
+        )
+        .await;
         assert_eq!(
             outcome,
             SledBpAvailabilityUpsertOutcome::Written,
@@ -593,13 +629,15 @@ mod tests {
         let bp = BlueprintUuid::new_v4();
 
         // Insert the sled (available, generation 1) and confirm we see it.
-        datastore
-            .rendezvous_sled_bp_availability_upsert(
-                opctx,
-                row(sled_id, ActiveSledBpAvailability::Available, 1, bp),
-            )
-            .await
-            .expect("query succeeded");
+        upsert_one(
+            opctx,
+            datastore,
+            sled_id,
+            ActiveSledBpAvailability::Available,
+            1,
+            bp,
+        )
+        .await;
         assert_eq!(
             get(opctx, datastore, sled_id)
                 .await
@@ -615,13 +653,7 @@ mod tests {
 
         // Decommissioning it should change the sled's state to
         // `decommissioned`.
-        let outcome = datastore
-            .rendezvous_sled_bp_availability_decommission(
-                opctx,
-                RendezvousSledBpAvailabilityDecommission::new(sled_id, bp),
-            )
-            .await
-            .expect("query succeeded");
+        let outcome = decommission_one(opctx, datastore, sled_id, bp).await;
         assert_eq!(
             outcome,
             SledBpAvailabilityDecommissionOutcome::Decommissioned
@@ -633,13 +665,7 @@ mod tests {
         );
 
         // A second decommission is a no-op.
-        let outcome = datastore
-            .rendezvous_sled_bp_availability_decommission(
-                opctx,
-                RendezvousSledBpAvailabilityDecommission::new(sled_id, bp),
-            )
-            .await
-            .expect("query succeeded");
+        let outcome = decommission_one(opctx, datastore, sled_id, bp).await;
         assert_eq!(
             outcome,
             SledBpAvailabilityDecommissionOutcome::AlreadyDecommissioned
@@ -647,13 +673,15 @@ mod tests {
 
         // A stale Nexus must not be able to resurrect a decommissioned sled,
         // even at a newer generation.
-        let outcome = datastore
-            .rendezvous_sled_bp_availability_upsert(
-                opctx,
-                row(sled_id, ActiveSledBpAvailability::Available, 5, bp),
-            )
-            .await
-            .expect("query succeeded");
+        let outcome = upsert_one(
+            opctx,
+            datastore,
+            sled_id,
+            ActiveSledBpAvailability::Available,
+            5,
+            bp,
+        )
+        .await;
         assert_eq!(
             outcome,
             SledBpAvailabilityUpsertOutcome::Rejected,
@@ -683,13 +711,7 @@ mod tests {
         let bp = BlueprintUuid::new_v4();
         let bp_stale = BlueprintUuid::new_v4();
 
-        let outcome = datastore
-            .rendezvous_sled_bp_availability_decommission(
-                opctx,
-                RendezvousSledBpAvailabilityDecommission::new(sled_id, bp),
-            )
-            .await
-            .expect("query succeeded");
+        let outcome = decommission_one(opctx, datastore, sled_id, bp).await;
         assert_eq!(
             outcome,
             SledBpAvailabilityDecommissionOutcome::Decommissioned,
@@ -702,13 +724,15 @@ mod tests {
         );
         assert_eq!(got.blueprint_id(), bp);
 
-        let outcome = datastore
-            .rendezvous_sled_bp_availability_upsert(
-                opctx,
-                row(sled_id, ActiveSledBpAvailability::Available, 5, bp_stale),
-            )
-            .await
-            .expect("query succeeded");
+        let outcome = upsert_one(
+            opctx,
+            datastore,
+            sled_id,
+            ActiveSledBpAvailability::Available,
+            5,
+            bp_stale,
+        )
+        .await;
         assert_eq!(
             outcome,
             SledBpAvailabilityUpsertOutcome::Rejected,

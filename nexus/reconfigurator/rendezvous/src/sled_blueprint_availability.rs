@@ -263,8 +263,7 @@ mod tests {
     use crate::tests::usize_to_id;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use async_bb8_diesel::AsyncSimpleConnection;
-    use nexus_db_queries::db::model::RendezvousSledBpAvailabilityDecommission;
-    use nexus_db_queries::db::model::RendezvousSledBpAvailabilityUpdate;
+    use iddqd::id_ord_map;
     use nexus_db_queries::db::pub_test_utils::TestDatabase;
     use nexus_db_queries::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
     use omicron_generation_kinds::UpdateDispositionGeneration;
@@ -305,6 +304,15 @@ mod tests {
     }
 
     impl DbPrep {
+        fn state(self) -> SledBpAvailabilityState {
+            match self {
+                DbPrep::Active(ps) => ps.state(),
+                DbPrep::Decommissioned => {
+                    SledBpAvailabilityState::Decommissioned
+                }
+            }
+        }
+
         async fn insert(
             self,
             opctx: &OpContext,
@@ -312,36 +320,19 @@ mod tests {
             sled_id: SledUuid,
             blueprint_id: BlueprintUuid,
         ) {
-            match self {
-                DbPrep::Active(ps) => {
-                    datastore
-                        .rendezvous_sled_bp_availability_upsert(
-                            opctx,
-                            RendezvousSledBpAvailabilityUpdate::new(
-                                sled_id,
-                                ps.availability,
-                                UpdateDispositionGeneration::from(
-                                    ps.generation,
-                                ),
-                                blueprint_id,
-                            ),
-                        )
-                        .await
-                        .expect("query succeeded");
-                }
-                DbPrep::Decommissioned => {
-                    datastore
-                        .rendezvous_sled_bp_availability_decommission(
-                            opctx,
-                            RendezvousSledBpAvailabilityDecommission::new(
-                                sled_id,
-                                blueprint_id,
-                            ),
-                        )
-                        .await
-                        .expect("query succeeded");
-                }
-            }
+            datastore
+                .rendezvous_sled_bp_availability_write(
+                    opctx,
+                    blueprint_id,
+                    id_ord_map! {
+                        SledBlueprintAvailabilityInput {
+                            sled_id,
+                            state: self.state(),
+                        },
+                    },
+                )
+                .await
+                .expect("query succeeded");
         }
     }
 
@@ -615,14 +606,19 @@ mod tests {
         let bp_reconciled = BlueprintUuid::new_v4();
 
         datastore
-            .rendezvous_sled_bp_availability_upsert(
+            .rendezvous_sled_bp_availability_write(
                 opctx,
-                RendezvousSledBpAvailabilityUpdate::new(
-                    sled_id,
-                    ActiveSledBpAvailability::Available,
-                    UpdateDispositionGeneration::from(2u32),
-                    bp_stored,
-                ),
+                bp_stored,
+                id_ord_map! {
+                    SledBlueprintAvailabilityInput {
+                        sled_id,
+                        state: SledBpAvailabilityState::Active {
+                            availability: ActiveSledBpAvailability::Available,
+                            update_disposition_generation:
+                                UpdateDispositionGeneration::from(2u32),
+                        },
+                    },
+                },
             )
             .await
             .expect("seeded the stored row");
@@ -631,15 +627,16 @@ mod tests {
             opctx,
             datastore,
             bp_reconciled,
-            IdOrdMap::from_iter_unique([SledBlueprintAvailabilityInput {
-                sled_id,
-                state: SledBpAvailabilityState::Active {
-                    availability: ActiveSledBpAvailability::Unavailable,
-                    update_disposition_generation:
-                        UpdateDispositionGeneration::from(2u32),
+            id_ord_map! {
+                SledBlueprintAvailabilityInput {
+                    sled_id,
+                    state: SledBpAvailabilityState::Active {
+                        availability: ActiveSledBpAvailability::Unavailable,
+                        update_disposition_generation:
+                            UpdateDispositionGeneration::from(2u32),
+                    },
                 },
-            }])
-            .expect("a single input is trivially unique"),
+            },
         )
         .await
         .expect("reconciled sled availability");
