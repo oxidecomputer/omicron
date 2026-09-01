@@ -17,6 +17,7 @@ use crate::blueprint_editor::ExternalNetworkingAllocator;
 use crate::planner::Planner;
 use crate::planner::rng::PlannerRng;
 use crate::system::RotStateOverrides;
+use crate::system::SimulatedSledResources;
 use crate::system::SledBuilder;
 use crate::system::SystemDescription;
 use anyhow::bail;
@@ -217,6 +218,8 @@ pub struct ExampleSystemBuilder {
     log: slog::Logger,
     rng: ExampleSystemRng,
     sled_settings: Vec<BuilderSledSettings>,
+    // Default resources for every sled without a per-sled override.
+    sled_resources: SimulatedSledResources,
     // TODO: Store a Policy struct instead of these fields:
     // https://github.com/oxidecomputer/omicron/issues/6803
     ndisks_per_sled: u8,
@@ -261,6 +264,7 @@ impl ExampleSystemBuilder {
                 BuilderSledSettings::default();
                 Self::DEFAULT_N_SLEDS
             ],
+            sled_resources: SimulatedSledResources::default(),
             ndisks_per_sled: SledBuilder::DEFAULT_NPOOLS,
             nexus_count: None,
             internal_dns_count: ZoneCount(INTERNAL_DNS_REDUNDANCY),
@@ -475,6 +479,34 @@ impl ExampleSystemBuilder {
         Ok(self)
     }
 
+    /// Set the default hardware resources for sleds in the example system.
+    ///
+    /// To override a particular sled's resources, use [`Self::with_sled_resources`].
+    pub fn sled_resources(mut self, resources: SimulatedSledResources) -> Self {
+        self.sled_resources = resources;
+        self
+    }
+
+    /// Override the hardware resources for a sled in the example system by
+    /// index.
+    ///
+    /// Returns an error if `index >= nsleds`.
+    pub fn with_sled_resources(
+        mut self,
+        index: usize,
+        resources: SimulatedSledResources,
+    ) -> anyhow::Result<Self> {
+        let Some(settings) = self.sled_settings.get_mut(index) else {
+            bail!(
+                "sled index {} out of range (0..{})",
+                index,
+                self.sled_settings.len(),
+            );
+        };
+        settings.resources = Some(resources);
+        Ok(self)
+    }
+
     /// Set the target release to an initial `0.0.1` version, and image sources to
     /// Artifact corresponding to the release.
     pub fn with_target_release_0_0_1(mut self) -> anyhow::Result<Self> {
@@ -596,7 +628,10 @@ impl ExampleSystemBuilder {
                         .id(*sled_id)
                         .sled_role(*role)
                         .npools(self.ndisks_per_sled)
-                        .policy(settings.policy),
+                        .policy(settings.policy)
+                        .resources(
+                            settings.resources.unwrap_or(self.sled_resources),
+                        ),
                 )
                 .unwrap();
         }
@@ -1168,11 +1203,13 @@ impl ExampleSystemBuilder {
 #[derive(Clone, Debug)]
 struct BuilderSledSettings {
     policy: SledPolicy,
+    // TODO-RAINCLAUDE: None means the builder-wide ExampleSystemBuilder::sled_resources
+    resources: Option<SimulatedSledResources>,
 }
 
 impl Default for BuilderSledSettings {
     fn default() -> Self {
-        Self { policy: SledPolicy::provisionable() }
+        Self { policy: SledPolicy::provisionable(), resources: None }
     }
 }
 
