@@ -23,9 +23,12 @@ const NTP_ZONE_ID: &str = "1af903af-131a-463c-b086-c7aded7fb2c1";
 const INTERNAL_DNS_ZONE_ID: &str = "675dc9cb-2d77-4d67-9ca2-cec939fa797c";
 const CRUCIBLE_ZONE_ID: &str = "8639e2e7-9499-46a7-9927-ea6e6a81b1d3";
 
-// The allocated external IP IDs for the three external-networking zones.
+// The allocated external IPs and IDs for the three external-networking zones.
+const NEXUS_EIP: &str = "192.0.2.1";
 const NEXUS_EIP_ID: &str = "3c2b1a09-8f7e-4d6c-5b4a-3928170615a4";
+const DNS_EIP: &str = "192.0.2.2";
 const DNS_EIP_ID: &str = "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d";
+const NTP_EIP: &str = "192.0.2.3";
 const NTP_EIP_ID: &str = "d4c3b2a1-f6e5-4b7a-9d8c-5d4c3b2a1f6e";
 
 // The internal DNS zone's underlay `dns_address`, which stays in
@@ -64,15 +67,15 @@ async fn before_impl(ctx: &MigrationContext<'_>) {
             image_source, nexus_generation, nexus_lockstep_port
         ) VALUES
         ('{BLUEPRINT_ID}', '{SLED_ID}', '{NEXUS_ZONE_ID}', 'nexus',
-         '::1', 12345, '192.0.2.1', NULL, NULL, NULL, NULL,
+         '::1', 12345, '{NEXUS_EIP}', NULL, NULL, NULL, NULL,
          '{NEXUS_EIP_ID}', '{FILESYSTEM_POOL}',
          'in_service', FALSE, 'install_dataset', 1, 12346),
         ('{BLUEPRINT_ID}', '{SLED_ID}', '{DNS_ZONE_ID}', 'external_dns',
-         '::1', 5353, '192.0.2.2', 53, NULL, NULL, NULL,
+         '::1', 5353, '{DNS_EIP}', 53, NULL, NULL, NULL,
          '{DNS_EIP_ID}', '{FILESYSTEM_POOL}',
          'in_service', FALSE, 'install_dataset', NULL, NULL),
         ('{BLUEPRINT_ID}', '{SLED_ID}', '{NTP_ZONE_ID}', 'boundary_ntp',
-         '::1', 123, NULL, NULL, '192.0.2.3', 0, 16383,
+         '::1', 123, NULL, NULL, '{NTP_EIP}', 0, 16383,
          '{NTP_EIP_ID}', '{FILESYSTEM_POOL}',
          'in_service', FALSE, 'install_dataset', NULL, NULL),
         ('{BLUEPRINT_ID}', '{SLED_ID}', '{INTERNAL_DNS_ZONE_ID}', \
@@ -147,7 +150,7 @@ async fn after_impl(ctx: &MigrationContext<'_>) {
         by_zone.get(&nexus),
         Some(&(
             NEXUS_EIP_ID.parse().unwrap(),
-            "192.0.2.1".to_string(),
+            NEXUS_EIP.to_string(),
             None,
             None,
             None,
@@ -160,7 +163,7 @@ async fn after_impl(ctx: &MigrationContext<'_>) {
         by_zone.get(&dns),
         Some(&(
             DNS_EIP_ID.parse().unwrap(),
-            "192.0.2.2".to_string(),
+            DNS_EIP.to_string(),
             Some(53),
             None,
             None,
@@ -173,7 +176,7 @@ async fn after_impl(ctx: &MigrationContext<'_>) {
         by_zone.get(&ntp),
         Some(&(
             NTP_EIP_ID.parse().unwrap(),
-            "192.0.2.3".to_string(),
+            NTP_EIP.to_string(),
             None,
             Some(0),
             Some(16383),
