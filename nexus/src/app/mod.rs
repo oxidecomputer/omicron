@@ -207,8 +207,14 @@ pub struct Nexus {
     /// saga execution coordinator (SEC)
     sagas: Arc<SagaExecutor>,
 
-    /// External dropshot servers
-    external_server: std::sync::Mutex<Option<DropshotServer>>,
+    /// External dropshot servers.
+    ///
+    /// The external API is always served on at least one external address, but
+    /// may be served on more to support IPv4 / IPv6 dual-stack deployments.
+    /// Servers are created, stored, and closed in the order they're defined in
+    /// the provided configuration, with the primary server first, then one
+    /// server for each additional address.
+    external_servers: std::sync::Mutex<Vec<DropshotServer>>,
 
     /// External dropshot server that listens on the internal network to allow
     /// connections from the tech port; see RFD 431.
@@ -560,7 +566,7 @@ impl Nexus {
             db_datastore: Arc::clone(&db_datastore),
             authz: Arc::clone(&authz),
             sagas,
-            external_server: std::sync::Mutex::new(None),
+            external_servers: std::sync::Mutex::new(vec![]),
             techport_external_server: std::sync::Mutex::new(None),
             internal_server: std::sync::Mutex::new(None),
             lockstep_server: std::sync::Mutex::new(None),
@@ -813,7 +819,7 @@ impl Nexus {
     // Called to hand off management of external servers to Nexus.
     pub(crate) async fn set_servers(
         &self,
-        external_server: DropshotServer,
+        external_servers: Vec<DropshotServer>,
         techport_external_server: DropshotServer,
         internal_server: DropshotServer,
         lockstep_server: DropshotServer,
@@ -823,7 +829,7 @@ impl Nexus {
         let _ = self.close_servers().await;
 
         // Insert the new servers.
-        self.external_server.lock().unwrap().replace(external_server);
+        *self.external_servers.lock().unwrap() = external_servers;
         self.techport_external_server
             .lock()
             .unwrap()
@@ -850,7 +856,8 @@ impl Nexus {
         // NOTE: All these take the lock and swap out of the option immediately,
         // because they are synchronous mutexes, which cannot be held across the
         // await point these `close()` methods expose.
-        let external_server = self.external_server.lock().unwrap().take();
+        let external_servers =
+            std::mem::take(&mut *self.external_servers.lock().unwrap());
         let mut res = Ok(());
 
         let extend_err =
@@ -864,7 +871,7 @@ impl Nexus {
                 }
             };
 
-        if let Some(server) = external_server {
+        for server in external_servers.into_iter() {
             extend_err(&mut res, server.close().await);
         }
         let techport_external_server =
@@ -911,14 +918,37 @@ impl Nexus {
         Ok(())
     }
 
-    pub(crate) fn get_external_server_address(
+    /// Returns the primary server's external address.
+    ///
+    /// There is always at least one address (once the API servers have been
+    /// started), and there may be additional addresses.
+    pub(crate) fn get_external_server_primary_address(
         &self,
     ) -> Option<std::net::SocketAddr> {
-        self.external_server
+        self.external_servers
             .lock()
             .unwrap()
-            .as_ref()
+            .first()
             .map(|server| server.local_addr())
+    }
+
+    /// This returns all addresses for the external API servers.
+    ///
+    /// If the servers have not been started yet, then `None` is returned. If
+    /// they have been started, then `Some(_)` is returned, where the contained
+    /// vector has at least one element. `Some(vec![])`, with a contained empty
+    /// vector, is never returned.
+    pub(crate) fn get_all_external_server_addresses(
+        &self,
+    ) -> Option<Vec<std::net::SocketAddr>> {
+        let addrs: Vec<_> = self
+            .external_servers
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|server| server.local_addr())
+            .collect();
+        if addrs.is_empty() { None } else { Some(addrs) }
     }
 
     pub(crate) fn get_techport_server_address(
