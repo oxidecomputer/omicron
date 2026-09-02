@@ -253,7 +253,8 @@ mod test {
     use omicron_common::api::external;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_generation_kinds::{
-        Generation, SledConfigGeneration, TargetReleaseGeneration,
+        Generation, NexusGeneration, SledConfigGeneration,
+        TargetReleaseGeneration,
     };
     use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
@@ -331,7 +332,7 @@ mod test {
             internal_dns_version: dns_version,
             external_dns_version: dns_version,
             target_release_minimum_generation: TargetReleaseGeneration::new(),
-            nexus_generation: Generation::new(),
+            nexus_generation: NexusGeneration::new(),
             external_networking_generation: Generation::new(),
             cockroachdb_fingerprint: String::new(),
             clickhouse_cluster_config: None,

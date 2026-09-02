@@ -66,7 +66,7 @@ use omicron_common::address::ReservedRackSubnet;
 use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::api::external::Vni;
 use omicron_generation_kinds::{
-    Generation, SledConfigGeneration, TargetReleaseGeneration,
+    Generation, NexusGeneration, SledConfigGeneration, TargetReleaseGeneration,
 };
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid;
@@ -363,8 +363,8 @@ pub(crate) enum Operation {
         num_zones_expunged: usize,
     },
     SetNexusGeneration {
-        current_generation: Generation,
-        new_generation: Generation,
+        current_generation: NexusGeneration,
+        new_generation: NexusGeneration,
     },
     SetTargetReleaseMinimumGeneration {
         current_generation: TargetReleaseGeneration,
@@ -549,7 +549,7 @@ pub struct BlueprintBuilder<'a> {
     cockroachdb_setting_preserve_downgrade: CockroachDbPreserveDowngrade,
     cockroachdb_fingerprint: String,
     target_release_minimum_generation: TargetReleaseGeneration,
-    nexus_generation: Generation,
+    nexus_generation: NexusGeneration,
     internal_dns_version: Generation,
     external_dns_version: Generation,
 
@@ -581,7 +581,7 @@ impl<'a> BlueprintBuilder<'a> {
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
             target_release_minimum_generation: TargetReleaseGeneration::new(),
-            nexus_generation: Generation::new(),
+            nexus_generation: NexusGeneration::new(),
             external_networking_generation: Generation::new(),
             cockroachdb_fingerprint: String::new(),
             cockroachdb_setting_preserve_downgrade:
@@ -1710,7 +1710,7 @@ impl<'a> BlueprintBuilder<'a> {
         sled_id: SledUuid,
         image_source: BlueprintZoneImageSource,
         external_ip: ExternalNetworkingChoice,
-        nexus_generation: Generation,
+        nexus_generation: NexusGeneration,
         config: &OperatorNexusConfig<'_>,
     ) -> Result<(), Error> {
         let nexus_id = self.rng.sled_rng(sled_id).next_zone();
@@ -2308,13 +2308,13 @@ impl<'a> BlueprintBuilder<'a> {
     }
 
     /// Get the value of `nexus_generation`.
-    pub fn nexus_generation(&self) -> Generation {
+    pub fn nexus_generation(&self) -> NexusGeneration {
         self.nexus_generation
     }
 
     /// Given the current value of `nexus_generation`, set the new value for
     /// this blueprint.
-    pub fn set_nexus_generation(&mut self, new_generation: Generation) {
+    pub fn set_nexus_generation(&mut self, new_generation: NexusGeneration) {
         let current_generation = self.nexus_generation;
         self.nexus_generation = new_generation;
         self.record_operation(Operation::SetNexusGeneration {

@@ -116,7 +116,7 @@ impl DataStore {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
         // Compared against the stored generation by the staleness guard.
-        let incoming_generation = nexus_db_model::Generation::from(
+        let incoming_generation = nexus_db_model::to_db_typed_generation(
             update.update_disposition_generation(),
         );
         let sled = update.into_insertable();
@@ -215,7 +215,7 @@ mod tests {
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_db_model::ActiveSledBpAvailability;
     use nexus_db_model::SledBpAvailabilityState;
-    use omicron_generation_kinds::Generation;
+    use omicron_generation_kinds::UpdateDispositionGeneration;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::BlueprintUuid;
 
@@ -230,7 +230,7 @@ mod tests {
         RendezvousSledBpAvailabilityUpdate::new(
             sled_id,
             availability,
-            Generation::from(generation),
+            UpdateDispositionGeneration::from(generation),
             blueprint_id,
         )
     }
@@ -273,7 +273,8 @@ mod tests {
             got.state().expect("reassembled row state"),
             SledBpAvailabilityState::Active {
                 availability: ActiveSledBpAvailability::Available,
-                update_disposition_generation: Generation::from(1),
+                update_disposition_generation:
+                    UpdateDispositionGeneration::from(1),
             }
         );
 
@@ -291,7 +292,8 @@ mod tests {
             got.state().expect("reassembled row state"),
             SledBpAvailabilityState::Active {
                 availability: ActiveSledBpAvailability::Unavailable,
-                update_disposition_generation: Generation::from(2),
+                update_disposition_generation:
+                    UpdateDispositionGeneration::from(2),
             }
         );
         assert_eq!(got.blueprint_id(), bp2);
@@ -311,7 +313,8 @@ mod tests {
             got.state().expect("reassembled row state"),
             SledBpAvailabilityState::Active {
                 availability: ActiveSledBpAvailability::Unavailable,
-                update_disposition_generation: Generation::from(2),
+                update_disposition_generation:
+                    UpdateDispositionGeneration::from(2),
             },
             "row must not have rolled back"
         );
@@ -330,7 +333,8 @@ mod tests {
             got.state().expect("reassembled row state"),
             SledBpAvailabilityState::Active {
                 availability: ActiveSledBpAvailability::Unavailable,
-                update_disposition_generation: Generation::from(2),
+                update_disposition_generation:
+                    UpdateDispositionGeneration::from(2),
             },
             "row must not have rolled back"
         );
@@ -349,7 +353,8 @@ mod tests {
             got.state().expect("reassembled row state"),
             SledBpAvailabilityState::Active {
                 availability: ActiveSledBpAvailability::Available,
-                update_disposition_generation: Generation::from(3),
+                update_disposition_generation:
+                    UpdateDispositionGeneration::from(3),
             }
         );
 
@@ -382,7 +387,8 @@ mod tests {
                 .expect("reassembled row state"),
             SledBpAvailabilityState::Active {
                 availability: ActiveSledBpAvailability::Available,
-                update_disposition_generation: Generation::from(1u32),
+                update_disposition_generation:
+                    UpdateDispositionGeneration::from(1u32),
             },
         );
 

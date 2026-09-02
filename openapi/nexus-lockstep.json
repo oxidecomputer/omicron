@@ -2102,7 +2102,7 @@
             "description": "The generation of the active group of Nexuses\n\nIf a Nexus instance notices it has a nexus_generation less than this value, it will start to quiesce in preparation for handing off control to the newer generation (see: RFD 588).",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Generation"
+                "$ref": "#/components/schemas/NexusGeneration"
               }
             ]
           },
@@ -2472,7 +2472,7 @@
             "description": "The Nexus generation number\n\nSee [`Blueprint::nexus_generation`].",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Generation"
+                "$ref": "#/components/schemas/NexusGeneration"
               }
             ]
           },
@@ -2748,7 +2748,7 @@
             "description": "A generation number bumped whenever `kind` changes.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Generation"
+                "$ref": "#/components/schemas/UpdateDispositionGeneration"
               }
             ]
           },
@@ -3431,7 +3431,7 @@
                 "description": "Generation number for this Nexus zone. This is used to coordinate handoff between old and new Nexus instances during updates. See RFD 588.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/Generation"
+                    "$ref": "#/components/schemas/NexusGeneration"
                   }
                 ]
               },
@@ -4428,6 +4428,15 @@
             ]
           }
         ]
+      },
+      "ExternalDnsAddrs": {
+        "description": "A non-empty, bounded set of external socket addrs for an External DNS zone.",
+        "type": "object",
+        "additionalProperties": {
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0
+        }
       },
       "ExternalIpUuid": {
         "x-rust-type": {
@@ -6516,6 +6525,28 @@
         "description": "Password hashes must be in PHC (Password Hashing Competition) string format.  Passwords must be hashed with Argon2id.  Password hashes may be rejected if the parameters appear not to be secure enough.",
         "type": "string"
       },
+      "NexusExternalIps": {
+        "description": "A non-empty, bounded set of external IPs for a Nexus zone.",
+        "type": "array",
+        "items": {
+          "type": "string",
+          "format": "ip"
+        },
+        "minItems": 1,
+        "maxItems": 16,
+        "uniqueItems": true
+      },
+      "NexusGeneration": {
+        "description": "Generation numbers stored in the database, used for optimistic concurrency control",
+        "x-rust-type": {
+          "crate": "omicron-generation-kinds",
+          "path": "omicron_generation_kinds::NexusGeneration",
+          "version": "*"
+        },
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0
+      },
       "NexusGenerationBumpWaitingOn": {
         "oneOf": [
           {
@@ -6679,11 +6710,11 @@
                   "type": "string"
                 }
               },
-              "snat_cfg": {
+              "snat": {
                 "description": "The SNAT configuration for outbound connections.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/SourceNatConfigGeneric"
+                    "$ref": "#/components/schemas/ZoneSnatConfig"
                   }
                 ]
               },
@@ -6699,7 +6730,7 @@
               "dns_servers",
               "nic",
               "ntp_servers",
-              "snat_cfg",
+              "snat",
               "type"
             ]
           },
@@ -6840,9 +6871,13 @@
               "dataset": {
                 "$ref": "#/components/schemas/OmicronZoneDataset"
               },
-              "dns_address": {
-                "description": "The address at which the external DNS server is reachable.",
-                "type": "string"
+              "dns_addresses": {
+                "description": "The addresses at which the external DNS server is reachable.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/ExternalDnsAddrs"
+                  }
+                ]
               },
               "http_address": {
                 "description": "The address at which the external DNS server API is reachable.",
@@ -6865,7 +6900,7 @@
             },
             "required": [
               "dataset",
-              "dns_address",
+              "dns_addresses",
               "http_address",
               "nic",
               "type"
@@ -6939,10 +6974,13 @@
                   "format": "ip"
                 }
               },
-              "external_ip": {
-                "description": "The address at which the external nexus server is reachable.",
-                "type": "string",
-                "format": "ip"
+              "external_ips": {
+                "description": "The addresses at which the external nexus server is reachable.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/NexusExternalIps"
+                  }
+                ]
               },
               "external_tls": {
                 "description": "Whether Nexus's external endpoint should use TLS",
@@ -6976,7 +7014,7 @@
             },
             "required": [
               "external_dns_servers",
-              "external_ip",
+              "external_ips",
               "external_tls",
               "internal_address",
               "nic",
@@ -7853,7 +7891,7 @@
                 ]
               },
               "value": {
-                "$ref": "#/components/schemas/Generation"
+                "$ref": "#/components/schemas/NexusGeneration"
               }
             },
             "required": [
@@ -9737,6 +9775,62 @@
           "last_port"
         ]
       },
+      "SourceNatConfigV4": {
+        "description": "An IP address and port range used for source NAT, i.e., making outbound network connections from guests or services.",
+        "type": "object",
+        "properties": {
+          "first_port": {
+            "description": "The first port used for source NAT, inclusive.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "ip": {
+            "description": "The external address provided to the instance or service.",
+            "type": "string",
+            "format": "ipv4"
+          },
+          "last_port": {
+            "description": "The last port used for source NAT, also inclusive.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "first_port",
+          "ip",
+          "last_port"
+        ]
+      },
+      "SourceNatConfigV6": {
+        "description": "An IP address and port range used for source NAT, i.e., making outbound network connections from guests or services.",
+        "type": "object",
+        "properties": {
+          "first_port": {
+            "description": "The first port used for source NAT, inclusive.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "ip": {
+            "description": "The external address provided to the instance or service.",
+            "type": "string",
+            "format": "ipv6"
+          },
+          "last_port": {
+            "description": "The last port used for source NAT, also inclusive.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "first_port",
+          "ip",
+          "last_port"
+        ]
+      },
       "SpStatus": {
         "type": "object",
         "properties": {
@@ -10234,6 +10328,17 @@
           "took_over_concurrent_update"
         ]
       },
+      "UpdateDispositionGeneration": {
+        "description": "Generation numbers stored in the database, used for optimistic concurrency control",
+        "x-rust-type": {
+          "crate": "omicron-generation-kinds",
+          "path": "omicron_generation_kinds::UpdateDispositionGeneration",
+          "version": "*"
+        },
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0
+      },
       "UpdateStatus": {
         "type": "object",
         "properties": {
@@ -10418,6 +10523,103 @@
           "internal_ntp",
           "nexus",
           "oximeter"
+        ]
+      },
+      "ZoneSnatConfig": {
+        "description": "Source NAT configuration for a boundary NTP zone.\n\nBoundary NTP reaches upstream servers via source NAT and needs a source address per IP version it wants to reach them on: at most one per family, and at least one overall.",
+        "oneOf": [
+          {
+            "description": "An IP address and port range used for source NAT, i.e., making outbound network connections from guests or services.",
+            "type": "object",
+            "properties": {
+              "first_port": {
+                "description": "The first port used for source NAT, inclusive.",
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0
+              },
+              "ip": {
+                "description": "The external address provided to the instance or service.",
+                "type": "string",
+                "format": "ipv4"
+              },
+              "last_port": {
+                "description": "The last port used for source NAT, also inclusive.",
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ipv4_only"
+                ]
+              }
+            },
+            "required": [
+              "first_port",
+              "ip",
+              "last_port",
+              "type"
+            ]
+          },
+          {
+            "description": "An IP address and port range used for source NAT, i.e., making outbound network connections from guests or services.",
+            "type": "object",
+            "properties": {
+              "first_port": {
+                "description": "The first port used for source NAT, inclusive.",
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0
+              },
+              "ip": {
+                "description": "The external address provided to the instance or service.",
+                "type": "string",
+                "format": "ipv6"
+              },
+              "last_port": {
+                "description": "The last port used for source NAT, also inclusive.",
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ipv6_only"
+                ]
+              }
+            },
+            "required": [
+              "first_port",
+              "ip",
+              "last_port",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "ipv4": {
+                "$ref": "#/components/schemas/SourceNatConfigV4"
+              },
+              "ipv6": {
+                "$ref": "#/components/schemas/SourceNatConfigV6"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "dual_stack"
+                ]
+              }
+            },
+            "required": [
+              "ipv4",
+              "ipv6",
+              "type"
+            ]
+          }
         ]
       },
       "ZoneStatus": {
@@ -10621,7 +10823,7 @@
                 ]
               },
               "zone_generation": {
-                "$ref": "#/components/schemas/Generation"
+                "$ref": "#/components/schemas/NexusGeneration"
               }
             },
             "required": [

@@ -232,7 +232,8 @@ mod test {
     use omicron_common::api::internal::shared::PrivateIpConfig;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_generation_kinds::{
-        Generation, SledConfigGeneration, TargetReleaseGeneration,
+        Generation, NexusGeneration, SledConfigGeneration,
+        TargetReleaseGeneration,
     };
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::BlueprintUuid;
@@ -251,11 +252,11 @@ mod test {
     // Nexus generation, and Nexus zones, each with the specified disposition
     // and generation.
     fn create_test_blueprint_with_custom_nexus(
-        nexus_generation: Generation,
+        nexus_generation: NexusGeneration,
         nexus_zones: Vec<(
             OmicronZoneUuid,
             BlueprintZoneDisposition,
-            Generation,
+            NexusGeneration,
         )>,
     ) -> Blueprint {
         let blueprint_id = BlueprintUuid::new_v4();
@@ -380,7 +381,7 @@ mod test {
         // generation 1.
         let (example, blueprint1) =
             ExampleSystemBuilder::new(log, TEST_NAME).nexus_count(4).build();
-        let g1 = Generation::new();
+        let g1 = NexusGeneration::new();
         let g1_nexus_ids: Vec<_> = blueprint1
             .in_service_nexus_zones()
             .map(|(sled_id, zone_config, nexus_config)| {
@@ -566,7 +567,7 @@ mod test {
         let logctx = test_setup_log(TEST_NAME);
 
         // g1 is older than the current generation g2.
-        let g1 = Generation::new();
+        let g1 = NexusGeneration::new();
         let g2 = g1.next();
         let sled_g1 = SledConfigGeneration::new();
         let sled_g2 = sled_g1.next();
@@ -706,7 +707,7 @@ mod test {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Generations: g1 is older than the live generation g2.
-        let g1 = Generation::new();
+        let g1 = NexusGeneration::new();
         let g2 = g1.next();
         let sled_g1 = SledConfigGeneration::new();
         let sled_g2 = sled_g1.next();
