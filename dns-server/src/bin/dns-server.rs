@@ -8,6 +8,7 @@
 use anyhow::Context;
 use anyhow::anyhow;
 use clap::Parser;
+use dns_server::dns_server::ExitDetails;
 use serde::Deserialize;
 use slog::info;
 use slog::o;
@@ -101,7 +102,7 @@ async fn main_impl() -> Result<(), anyhow::Error> {
     )
     .context("initializing persistent storage")?;
 
-    let (_dns_server, dropshot_server) = dns_server::start_servers(
+    let (mut dns_server, dropshot_server) = dns_server::start_servers(
         log,
         store,
         &dns_server_config,
@@ -109,9 +110,30 @@ async fn main_impl() -> Result<(), anyhow::Error> {
     )
     .await?;
 
-    dropshot_server
-        .await
-        .map_err(|error_message| anyhow!("server exiting: {}", error_message))
+    // Wait for either the Dropshot server or any of the tasks in the DNS
+    // server to exit.
+    tokio::select! {
+        dropshot_result = dropshot_server => {
+            dropshot_result
+                .map_err(|e| anyhow!("server exiting: {}", e))
+        }
+        dns_result = dns_server.wait_for_exit() => {
+            match dns_result {
+                Some(Ok(ExitDetails::DnsWorker { index } )) => {
+                    anyhow::bail!("DNS worker task {index} exited unexpectedly");
+                }
+                Some(Ok(ExitDetails::UdpReader { index, result } )) => {
+                    result.with_context(|| {
+                        format!("UDP reader task {index} exited")
+                    })
+                }
+                Some(Err(je)) => anyhow::bail!(
+                    "Error joining DNS server task: '{je}'"
+                ),
+                None => unreachable!("Should always spawn >= 1 task"),
+            }
+        }
+    }
 }
 
 #[cfg(test)]

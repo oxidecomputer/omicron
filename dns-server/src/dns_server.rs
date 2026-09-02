@@ -38,6 +38,8 @@ use std::str::FromStr;
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::net::UdpSocket;
+use tokio::task::JoinError;
+use tokio::task::JoinSet;
 use uuid::Uuid;
 
 /// Configuration related to the DNS server
@@ -92,25 +94,21 @@ impl ConfigBuilder {
     }
 }
 
+/// The exit details of one of the DNS server's internal tasks.
+pub enum ExitDetails {
+    /// One of the DNS worker tasks exited.
+    DnsWorker { index: usize },
+    /// One of the UDP packet reader tasks exited.
+    UdpReader { index: usize, result: anyhow::Result<()> },
+}
+
 /// Handle to the DNS server
 ///
 /// Dropping this handle shuts down the DNS server. All of its receiver and
 /// worker tasks are aborted.
 pub struct ServerHandle {
     local_addresses: Vec<SocketAddr>,
-    receiver_tasks: Vec<tokio::task::JoinHandle<anyhow::Result<()>>>,
-    worker_tasks: Vec<tokio::task::JoinHandle<()>>,
-}
-
-impl Drop for ServerHandle {
-    fn drop(&mut self) {
-        for task in &self.receiver_tasks {
-            task.abort();
-        }
-        for task in &self.worker_tasks {
-            task.abort();
-        }
-    }
+    tasks: JoinSet<ExitDetails>,
 }
 
 impl ServerHandle {
@@ -125,6 +123,13 @@ impl ServerHandle {
     /// The addresses the server is bound to.
     pub fn local_addresses(&self) -> impl Iterator<Item = SocketAddr> + '_ {
         self.local_addresses.iter().copied()
+    }
+
+    /// Wait for any of the internal tasks to exit.
+    pub async fn wait_for_exit(
+        &mut self,
+    ) -> Option<Result<ExitDetails, JoinError>> {
+        self.tasks.join_next().await
     }
 }
 
@@ -155,27 +160,21 @@ impl Server {
 
         // Worker pool, which handle UDP packets from the store and serve
         // answers.
-        let worker_tasks = (0..config.n_workers.get())
-            .map(|i| {
-                let log = log.new(o!("worker" => i));
-                let store = store.clone();
-                let rx = rx.clone();
-                tokio::task::spawn(respond_to_dns_packets(log, store, rx))
-            })
-            .collect();
-
-        // Build the server handle now, so that failures to bind to any of the
-        // UDP sockets ensures we run our drop impl and reap any tasks we've
-        // spawned.
-        let n_addresses = config.bind_addresses.len();
-        let mut handle = ServerHandle {
-            local_addresses: Vec::with_capacity(n_addresses),
-            receiver_tasks: Vec::with_capacity(n_addresses),
-            worker_tasks,
-        };
+        let mut tasks = JoinSet::new();
+        for index in 0..config.n_workers.get() {
+            let log = log.new(o!("dns_worker" => index));
+            let store = store.clone();
+            let rx = rx.clone();
+            tasks.spawn(async move {
+                respond_to_dns_packets(log, store, rx).await;
+                ExitDetails::DnsWorker { index }
+            });
+        }
 
         // Bind each address and spawn a receiver task for it.
-        for bind_address in &config.bind_addresses {
+        let mut local_addresses =
+            Vec::with_capacity(config.bind_addresses.len());
+        for (index, bind_address) in config.bind_addresses.iter().enumerate() {
             let socket = Arc::new(
                 UdpSocket::bind(bind_address).await.with_context(|| {
                     format!("DNS server start: UDP bind to {:?}", bind_address)
@@ -187,17 +186,20 @@ impl Server {
             info!(&log, "DNS server bound to address";
                 "local_address" => ?local_address
             );
-            handle.local_addresses.push(local_address);
+            local_addresses.push(local_address);
 
-            let log = log.new(o!("bind_address" => local_address.to_string()));
-            handle.receiver_tasks.push(tokio::task::spawn(read_udp_packets(
-                log,
-                socket,
-                tx.clone(),
-            )));
+            let log = log.new(o!(
+                "udp_reader" => index,
+                "bind_address" => local_address.to_string()
+            ));
+            let tx_ = tx.clone();
+            tasks.spawn(async move {
+                let result = read_udp_packets(log, socket, tx_).await;
+                ExitDetails::UdpReader { index, result }
+            });
         }
 
-        Ok(handle)
+        Ok(ServerHandle { local_addresses, tasks })
     }
 }
 
@@ -213,6 +215,8 @@ struct Incoming {
 
 /// Receive packets on a single bound socket and forward them to the worker
 /// pool.
+//
+// NOTE: In practice this never returns Ok(_), only an error.
 async fn read_udp_packets(
     log: Logger,
     socket: Arc<UdpSocket>,
@@ -245,7 +249,7 @@ async fn read_udp_packets(
             }
             Err(flume::TrySendError::Disconnected(_)) => {
                 warn!(&log, "All DNS worker tasks disconnected, exiting");
-                return Ok(());
+                anyhow::bail!("All DNS worker tasks disconnected");
             }
         }
     }
