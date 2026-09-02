@@ -37,12 +37,12 @@ rack_id = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc"
 # These are the DNS servers it should use.
 external_dns_servers = ["1.1.1.1", "9.9.9.9"]
 
-# Optional second address on which to serve the external API, in addition to
+# Additional addresses on which to serve the external API, in addition to
 # `dropshot_external.bind_address` below. All other settings (TLS, request
 # limits, etc.) are shared with `dropshot_external`. This is used to serve the
 # external API on a second address family (e.g. IPv6 alongside IPv4). If
 # omitted, only `dropshot_external.bind_address` is served.
-# dropshot_external_second_address = "[::1]:12220"
+# dropshot_external_additional_addresses = "[::1]:12220"
 
 # Simulated/development deployments run "external" servers (e.g. webhook
 # receivers) on localhost, so external HTTP clients must be permitted to

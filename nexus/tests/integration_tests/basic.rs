@@ -566,8 +566,8 @@ async fn test_ping_on_second_external_address() {
     let cptestctx =
         ControlPlaneBuilder::new("test_ping_on_second_external_address")
             .customize_nexus_config(&|config| {
-                config.deployment.dropshot_external_second_address =
-                    Some("[::1]:0".parse().unwrap());
+                config.deployment.dropshot_external_additional_addresses =
+                    vec!["[::1]:0".parse().unwrap()];
             })
             .start::<omicron_nexus::Server>()
             .await;
