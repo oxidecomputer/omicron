@@ -626,11 +626,7 @@ impl nexus_test_interface::NexusServer for Server {
     ///
     /// This is always non-empty.
     fn get_all_http_server_external_addresses(&self) -> Vec<SocketAddr> {
-        self.apictx
-            .context
-            .nexus
-            .get_all_external_server_addresses()
-            .unwrap()
+        self.apictx.context.nexus.get_all_external_server_addresses().unwrap()
     }
 
     fn get_http_server_techport_address(&self) -> SocketAddr {
