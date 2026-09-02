@@ -719,7 +719,6 @@ impl BackgroundTasksInitializer {
             period: config.switch_port_settings_manager.period_secs,
             task_impl: Box::new(SwitchPortSettingsManager::new(
                 datastore.clone(),
-                resolver.clone(),
                 rx_blueprint.clone(),
             )),
             opctx: opctx.child(BTreeMap::new()),

@@ -56,6 +56,7 @@ use nexus_db_model::InvOmicronSledConfig;
 use nexus_db_model::InvOmicronSledConfigDataset;
 use nexus_db_model::InvOmicronSledConfigDisk;
 use nexus_db_model::InvOmicronSledConfigZone;
+use nexus_db_model::InvOmicronSledConfigZoneExternalIp;
 use nexus_db_model::InvOmicronSledConfigZoneNic;
 use nexus_db_model::InvPhysicalDisk;
 use nexus_db_model::InvRootOfTrust;
@@ -526,6 +527,7 @@ impl DataStore {
             datasets: omicron_sled_config_datasets,
             zones: omicron_sled_config_zones,
             zone_nics: omicron_sled_config_zone_nics,
+            zone_external_ips: omicron_sled_config_zone_external_ips,
             disk_results: reconciler_disk_results,
             dataset_results: reconciler_dataset_results,
             orphaned_datasets: reconciler_orphaned_datasets,
@@ -1453,6 +1455,30 @@ impl DataStore {
                 }
             }
 
+            // Insert rows for all the sled configs' zones' external IPs we found.
+            {
+                use nexus_db_schema::schema::inv_omicron_sled_config_zone_external_ip::dsl;
+
+                let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
+                let mut zone_external_ips =
+                    omicron_sled_config_zone_external_ips.into_iter();
+                loop {
+                    let some_zone_external_ips = zone_external_ips
+                        .by_ref()
+                        .take(batch_size)
+                        .collect::<Vec<_>>();
+                    if some_zone_external_ips.is_empty() {
+                        break;
+                    }
+                    let _ = diesel::insert_into(
+                        dsl::inv_omicron_sled_config_zone_external_ip,
+                    )
+                    .values(some_zone_external_ips)
+                    .execute_async(&conn)
+                    .await?;
+                }
+            }
+
             // Insert rows for all the sled config reference measurements
             {
                 use nexus_db_schema::schema::inv_single_measurements::dsl;
@@ -2279,6 +2305,7 @@ impl DataStore {
             nomicron_sled_config_datasets: usize,
             nomicron_sled_config_zones: usize,
             nomicron_sled_config_zone_nics: usize,
+            nomicron_sled_config_zone_external_ips: usize,
             nzpools: usize,
             nerrors: usize,
             nclickhouse_keeper_membership: usize,
@@ -2322,6 +2349,7 @@ impl DataStore {
             nomicron_sled_config_datasets,
             nomicron_sled_config_zones,
             nomicron_sled_config_zone_nics,
+            nomicron_sled_config_zone_external_ips,
             nzpools,
             nerrors,
             nclickhouse_keeper_membership,
@@ -2641,6 +2669,14 @@ impl DataStore {
                         .execute_async(&conn)
                         .await?
                     };
+                    let nomicron_sled_config_zone_external_ips = {
+                        use nexus_db_schema::schema::inv_omicron_sled_config_zone_external_ip::dsl;
+                        diesel::delete(dsl::inv_omicron_sled_config_zone_external_ip.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
 
                     let nzpools = {
                         use nexus_db_schema::schema::inv_zpool::dsl;
@@ -2742,6 +2778,7 @@ impl DataStore {
                         nomicron_sled_config_datasets,
                         nomicron_sled_config_zones,
                         nomicron_sled_config_zone_nics,
+                        nomicron_sled_config_zone_external_ips,
                         nzpools,
                         nerrors,
                         nclickhouse_keeper_membership,
@@ -2796,6 +2833,8 @@ impl DataStore {
             "nomicron_sled_config_datasets" => nomicron_sled_config_datasets,
             "nomicron_sled_config_zones" => nomicron_sled_config_zones,
             "nomicron_sled_config_zone_nics" => nomicron_sled_config_zone_nics,
+            "nomicron_sled_config_zone_external_ips" =>
+                nomicron_sled_config_zone_external_ips,
             "nzpools" => nzpools,
             "nerrors" => nerrors,
             "nclickhouse_keeper_membership" => nclickhouse_keeper_membership,
@@ -3793,6 +3832,44 @@ impl DataStore {
             nics
         };
 
+        // Assemble a mutable map of all the external IPs found, grouped by the
+        // (sled config, zone) they belong to.  As we match these up with the
+        // corresponding zone below, we'll remove items from this map.  That way
+        // we can tell if any external IPs were left unmatched.
+        let mut omicron_zone_external_ips = {
+            use nexus_db_schema::schema::inv_omicron_sled_config_zone_external_ip::dsl;
+
+            let mut external_ips: BTreeMap<_, Vec<_>> = BTreeMap::new();
+
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
+            while let Some(p) = paginator.next() {
+                let batch = paginated_multicolumn(
+                    dsl::inv_omicron_sled_config_zone_external_ip,
+                    (dsl::zone_id, dsl::ip),
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvOmicronSledConfigZoneExternalIp::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator = p.found_batch(&batch, &|row| (row.zone_id, row.ip));
+                for row in batch {
+                    external_ips
+                        .entry((row.sled_config_id, row.zone_id))
+                        .or_default()
+                        .push(row);
+                }
+            }
+
+            external_ips
+        };
+
         // Now load the actual list of zones from all configs.
         let omicron_zones_list = {
             use nexus_db_schema::schema::inv_omicron_sled_config_zone::dsl;
@@ -3853,16 +3930,23 @@ impl DataStore {
                     ))
                 })?;
             let zone_id = z.id;
+            let external_ip_rows = omicron_zone_external_ips
+                .remove(&(z.sled_config_id, z.id))
+                .unwrap_or_default();
             let zone = z
-                .into_omicron_zone_config(nic_row)
+                .into_omicron_zone_config(nic_row, external_ip_rows)
                 .with_context(|| {
                     format!("zone {:?}: parse from database", zone_id)
                 })
-                .map_err(|e| {
-                    Error::internal_error(&format!("{:#}", e.to_string()))
-                })?;
+                .map_err(|e| Error::internal_error(&format!("{e:#}")))?;
             config_with_id.config.zones.insert_overwrite(zone);
         }
+
+        bail_unless!(
+            omicron_zone_external_ips.is_empty(),
+            "found extra Omicron zone external IPs: {:?}",
+            omicron_zone_external_ips.keys()
+        );
 
         bail_unless!(
             omicron_zone_nics.is_empty(),
@@ -5084,6 +5168,7 @@ struct ConfigReconcilerRows {
     datasets: Vec<InvOmicronSledConfigDataset>,
     zones: Vec<InvOmicronSledConfigZone>,
     zone_nics: Vec<InvOmicronSledConfigZoneNic>,
+    zone_external_ips: Vec<InvOmicronSledConfigZoneExternalIp>,
     disk_results: Vec<InvLastReconciliationDiskResult>,
     dataset_results: Vec<InvLastReconciliationDatasetResult>,
     orphaned_datasets: Vec<InvLastReconciliationOrphanedDataset>,
@@ -5341,6 +5426,13 @@ impl ConfigReconcilerRows {
             )? {
                 self.zone_nics.push(nic);
             }
+            self.zone_external_ips.extend(
+                InvOmicronSledConfigZoneExternalIp::for_zone(
+                    collection_id,
+                    sled_config_id,
+                    zone,
+                ),
+            );
         }
 
         Ok(sled_config_id)
@@ -5415,6 +5507,7 @@ mod test {
     use nexus_types::inventory::CabooseWhich;
     use nexus_types::inventory::RotPageWhich;
     use nexus_types::inventory::SpType;
+    use omicron_common::address::NUM_SOURCE_NAT_PORTS;
     use omicron_common::api::external::Error;
     use omicron_common::api::external::Vni;
     use omicron_common::api::internal::shared::PrivateIpConfig;
@@ -5432,23 +5525,27 @@ mod test {
     };
     use pretty_assertions::assert_eq;
     use sled_agent_types::disk::M2Slot;
-    use sled_agent_types::inventory::BootPartitionContents;
     use sled_agent_types::inventory::BootPartitionDetails;
     use sled_agent_types::inventory::NetworkInterface;
     use sled_agent_types::inventory::NetworkInterfaceKind;
+    use sled_agent_types::inventory::NexusExternalIps;
     use sled_agent_types::inventory::OmicronZoneConfig;
     use sled_agent_types::inventory::OmicronZoneType;
     use sled_agent_types::inventory::OrphanedDataset;
+    use sled_agent_types::inventory::SourceNatConfigGeneric;
     use sled_agent_types::inventory::{
         BootImageHeader, RemoveMupdateOverrideBootSuccessInventory,
         RemoveMupdateOverrideInventory,
     };
+    use sled_agent_types::inventory::{BootPartitionContents, ZoneSnatConfig};
     use sled_agent_types::inventory::{
         ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
         ConfigReconcilerInventoryStatus, OmicronZoneImageSource,
         SingleMeasurementInventory,
     };
     use sled_hardware_types::BaseboardId;
+    use std::collections::BTreeSet;
+    use std::net::{IpAddr, Ipv4Addr};
     use std::num::NonZeroU32;
     use std::time::Duration;
     use tufaceous_artifact::ArtifactHash;
@@ -5498,7 +5595,9 @@ mod test {
 
     #[tokio::test]
     async fn test_find_hw_baseboard_id_missing_returns_not_found() {
-        let logctx = dev::test_setup_log("inventory_insert");
+        let logctx = dev::test_setup_log(
+            "find_hw_baseboard_id_missing_returns_not_found",
+        );
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let baseboard_id = BaseboardId {
@@ -6030,6 +6129,12 @@ mod test {
                 .await
                 .unwrap();
             assert_eq!(0, count);
+            let count = schema::inv_omicron_sled_config_zone_external_ip::dsl::inv_omicron_sled_config_zone_external_ip
+                .select(diesel::dsl::count_star())
+                .first_async::<i64>(&conn)
+                .await
+                .unwrap();
+            assert_eq!(0, count);
 
             Ok::<(), anyhow::Error>(())
         })
@@ -6122,6 +6227,161 @@ mod test {
         Ok(())
     }
 
+    // A zone with more than one external IP round-trips through the inventory
+    // tables in the database. The blueprint system only generates zones with a
+    // single external IP today, so we construct the multi-IP zone by hand.
+    #[tokio::test]
+    async fn test_zone_with_multiple_external_ips_round_trips_through_database()
+    {
+        let logctx = dev::test_setup_log(
+            "zone_with_multiple_external_ips_round_trips_through_database",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Start with a representative collection and give one Nexus zone a
+        // second external IP.
+        let Representative { builder, .. } = representative();
+        let mut collection = builder.build();
+        let second_ip = "10.255.255.255".parse::<std::net::IpAddr>().unwrap();
+
+        let mut nexus_zone_id = None;
+        'outer: for mut sa in collection.sled_agents.iter_mut() {
+            let Some(config) = sa.ledgered_sled_config.as_mut() else {
+                continue;
+            };
+            for mut zone in config.zones.iter_mut() {
+                if let OmicronZoneType::Nexus { external_ips, .. } =
+                    &mut zone.zone_type
+                {
+                    let mut ips: BTreeSet<_> =
+                        external_ips.iter().copied().collect();
+                    ips.insert(second_ip);
+                    *external_ips = NexusExternalIps::new(ips)
+                        .expect("two external IPs is valid");
+                    nexus_zone_id = Some(zone.id);
+                    break 'outer;
+                }
+            }
+        }
+        let nexus_zone_id =
+            nexus_zone_id.expect("collection has a ledgered Nexus zone");
+
+        // Write it and read it back.
+        datastore
+            .inventory_insert_collection(&opctx, &collection)
+            .await
+            .expect("failed to insert collection");
+        let read = datastore
+            .inventory_collection_read(&opctx, collection.id)
+            .await
+            .expect("collection with multiple external IPs reads back");
+
+        // The Nexus zone comes back with both external IPs.
+        let zone = read
+            .all_ledgered_omicron_zones()
+            .find(|z| z.id == nexus_zone_id)
+            .expect("the modified Nexus zone");
+        let OmicronZoneType::Nexus { external_ips, .. } = &zone.zone_type
+        else {
+            panic!("expected a Nexus zone");
+        };
+        let ips: Vec<_> = external_ips.iter().copied().collect();
+        assert!(
+            ips.contains(&second_ip),
+            "second external IP survived the round trip: {ips:?}",
+        );
+        assert_eq!(ips.len(), 2, "expected two external IPs, got {ips:?}");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Sanity check that we correctly receive, write, and then read an inventory
+    // collection with multiple zones sharing an SNAT IP address.
+    //
+    // Boundary NTP uses SNAT addresses, which split the port range into chunks
+    // and share an IP address. This check is pretty paranoid, but we're
+    // asserting that we don't somehow misread or incorrectly store an inventory
+    // collection in this case. This would fail if our logic for splitting out
+    // the EIP rows from the zones was incorrect, or somehow the DB constraints
+    // like the PK or the zone EIP table prevented such rows.
+    #[tokio::test]
+    async fn test_zone_external_ip_shared_across_zones() {
+        let logctx =
+            dev::test_setup_log("zone_external_ip_shared_across_zones");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // The representative collection has two boundary NTP zones (on
+        // different sleds). Give both the same SNAT IP with different,
+        // non-overlapping port ranges.
+        let Representative { builder, .. } = representative();
+        let mut collection = builder.build();
+
+        let shared_ipv4: Ipv4Addr = "192.0.2.10".parse().unwrap();
+        let shared_ip = IpAddr::V4(shared_ipv4);
+        let ranges = [
+            (0, NUM_SOURCE_NAT_PORTS - 1),
+            (NUM_SOURCE_NAT_PORTS, 2 * NUM_SOURCE_NAT_PORTS - 1),
+        ];
+        let mut expected = Vec::new();
+        'outer: for mut sa in collection.sled_agents.iter_mut() {
+            let Some(config) = sa.ledgered_sled_config.as_mut() else {
+                continue;
+            };
+            for mut zone in config.zones.iter_mut() {
+                if let OmicronZoneType::BoundaryNtp { snat, .. } =
+                    &mut zone.zone_type
+                {
+                    let (first, last) = ranges[expected.len()];
+                    *snat = ZoneSnatConfig::from(
+                        SourceNatConfigGeneric::new(shared_ip, first, last)
+                            .expect("aligned SNAT port range"),
+                    );
+                    expected.push((zone.id, first, last));
+                    if expected.len() == ranges.len() {
+                        break 'outer;
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            expected.len(),
+            2,
+            "representative collection should have two boundary NTP zones",
+        );
+
+        // Write and read back; the shared IP must round-trip.
+        datastore
+            .inventory_insert_collection(&opctx, &collection)
+            .await
+            .expect("collection with a shared SNAT IP inserts");
+        let collection_read = datastore
+            .inventory_collection_read(&opctx, collection.id)
+            .await
+            .expect("collection with a shared SNAT IP reads back");
+        assert_eq!(collection, collection_read);
+
+        // Each zone kept its own port range on the shared address.
+        for (zone_id, first, last) in expected {
+            let zone = collection_read
+                .all_ledgered_omicron_zones()
+                .find(|z| z.id == zone_id)
+                .expect("boundary NTP zone");
+            let OmicronZoneType::BoundaryNtp { snat, .. } = &zone.zone_type
+            else {
+                panic!("expected a boundary NTP zone");
+            };
+            let snat_v4 = snat.as_ipv4().unwrap();
+            assert_eq!(snat_v4.ip, shared_ipv4);
+            assert_eq!(snat_v4.port_range_raw(), (first, last));
+        }
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
     /// Creates a representative collection, deletes it, and walks through
     /// tables to ensure that the subcomponents of the inventory have been
     /// deleted.
@@ -6177,7 +6437,8 @@ mod test {
     #[tokio::test]
     async fn test_representative_collection_populates_database() {
         // Setup
-        let logctx = dev::test_setup_log("inventory_deletion");
+        let logctx =
+            dev::test_setup_log("representative_collection_populates_database");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
@@ -6640,7 +6901,9 @@ mod test {
             zone_type: OmicronZoneType::Nexus {
                 internal_address: "[::1]:12345".parse().unwrap(),
                 lockstep_port: 12346,
-                external_ip: "192.0.2.1".parse().unwrap(),
+                external_ips: NexusExternalIps::from_single(
+                    "192.0.2.1".parse().unwrap(),
+                ),
                 nic: nic.clone(),
                 external_tls: false,
                 external_dns_servers: vec![],

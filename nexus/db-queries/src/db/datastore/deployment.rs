@@ -50,6 +50,7 @@ use nexus_db_model::BpClickhouseServerZoneIdToNodeId;
 use nexus_db_model::BpOmicronDataset;
 use nexus_db_model::BpOmicronPhysicalDisk;
 use nexus_db_model::BpOmicronZone;
+use nexus_db_model::BpOmicronZoneExternalIp;
 use nexus_db_model::BpOmicronZoneNic;
 use nexus_db_model::BpOximeterReadPolicy;
 use nexus_db_model::BpPendingMgsUpdateComponent;
@@ -348,6 +349,15 @@ impl DataStore {
                 })
             })
             .collect::<Result<Vec<BpOmicronZoneNic>, _>>()?;
+        let omicron_zone_external_ips = blueprint
+            .sleds
+            .values()
+            .flat_map(|sled| {
+                sled.zones.iter().flat_map(|zone| {
+                    BpOmicronZoneExternalIp::for_zone(blueprint_id, zone)
+                })
+            })
+            .collect::<Vec<BpOmicronZoneExternalIp>>();
 
         let clickhouse_tables: Option<(_, _, _)> = if let Some(config) =
             &blueprint.clickhouse_cluster_config
@@ -499,6 +509,20 @@ impl DataStore {
                         omicron_zone_nic::bp_omicron_zone_nic,
                     )
                     .values(omicron_zone_nics)
+                    .execute_async(&conn)
+                    .await?;
+                }
+
+                {
+                    // Skip formatting this line to prevent rustfmt bailing out.
+                    #[rustfmt::skip]
+                    use nexus_db_schema::schema::
+                        bp_omicron_zone_external_ip::dsl
+                        as omicron_zone_external_ip;
+                    let _ = diesel::insert_into(
+                        omicron_zone_external_ip::bp_omicron_zone_external_ip,
+                    )
+                    .values(omicron_zone_external_ips)
                     .execute_async(&conn)
                     .await?;
                 }
@@ -790,6 +814,35 @@ impl DataStore {
                 })?;
 
                 paginator = p.found_batch(&batch, &|n| n.id);
+                rows.extend(batch);
+            }
+            rows
+        };
+
+        // Load zone external IP rows
+        let raw_zone_external_ips: Vec<BpOmicronZoneExternalIp> = {
+            use nexus_db_schema::schema::bp_omicron_zone_external_ip::dsl;
+
+            let mut rows = Vec::new();
+            let mut paginator = Paginator::new(
+                SQL_BATCH_SIZE,
+                dropshot::PaginationOrder::Ascending,
+            );
+            while let Some(p) = paginator.next() {
+                let batch = paginated(
+                    dsl::bp_omicron_zone_external_ip,
+                    dsl::external_ip_id,
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
+                .select(BpOmicronZoneExternalIp::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+                paginator = p.found_batch(&batch, &|r| r.external_ip_id);
                 rows.extend(batch);
             }
             rows
@@ -1342,6 +1395,16 @@ impl DataStore {
             );
         }
 
+        // Assemble a mutable map of all the external IPs found, grouped by zone
+        // id.  A zone may have more than one, so we collect them into a `Vec`.
+        // As we match these up with each zone below, we remove entries, so we
+        // can tell if any external IP references a zone that doesn't exist.
+        let mut omicron_zone_external_ips: BTreeMap<_, Vec<_>> =
+            BTreeMap::new();
+        for ip in raw_zone_external_ips {
+            omicron_zone_external_ips.entry(ip.zone_id).or_default().push(ip);
+        }
+
         // Process zones: match NICs, validate sled references, parse
         for (z, artifact) in raw_zones {
             let nic_row = z
@@ -1364,6 +1427,8 @@ impl DataStore {
                 .transpose()?;
             let sled_id = SledUuid::from(z.sled_id);
             let zone_id = z.id;
+            let external_ip_rows =
+                omicron_zone_external_ips.remove(&zone_id).unwrap_or_default();
             let sled_config =
                 sled_configs.get_mut(&sled_id).ok_or_else(|| {
                     // This error means that we found a row in
@@ -1376,11 +1441,9 @@ impl DataStore {
                     ))
                 })?;
             let zone = z
-                .into_blueprint_zone_config(nic_row, artifact)
+                .into_blueprint_zone_config(nic_row, artifact, external_ip_rows)
                 .with_context(|| format!("zone {zone_id}: parse from database"))
-                .map_err(|e| {
-                    Error::internal_error(&format!("{:#}", e.to_string()))
-                })?;
+                .map_err(|e| Error::internal_error(&format!("{e:#}")))?;
             sled_config.zones.insert_unique(zone).map_err(|e| {
                 Error::internal_error(&format!(
                     "duplicate zone ID found, but \
@@ -1395,6 +1458,13 @@ impl DataStore {
             omicron_zone_nics.is_empty(),
             "found extra Omicron zone NICs: {:?}",
             omicron_zone_nics.keys()
+        );
+
+        // Validate no external IPs remain
+        bail_unless!(
+            omicron_zone_external_ips.is_empty(),
+            "found external IPs for unknown Omicron zones: {:?}",
+            omicron_zone_external_ips.keys()
         );
 
         // Process disks: validate sled references, parse
@@ -1587,7 +1657,7 @@ impl DataStore {
         let external_dns_version = *blueprint_row.external_dns_version;
         let target_release_minimum_generation =
             blueprint_row.target_release_minimum_generation.into();
-        let nexus_generation = *blueprint_row.nexus_generation;
+        let nexus_generation = blueprint_row.nexus_generation.into();
         let external_networking_generation =
             *blueprint_row.external_networking_generation;
         let cockroachdb_fingerprint = blueprint_row.cockroachdb_fingerprint;
@@ -1656,6 +1726,7 @@ impl DataStore {
             ndatasets: usize,
             nzones: usize,
             nnics: usize,
+            nexternal_ips: usize,
             nclickhouse_cluster_configs: usize,
             nclickhouse_keepers: usize,
             nclickhouse_servers: usize,
@@ -1674,6 +1745,7 @@ impl DataStore {
             ndatasets,
             nzones,
             nnics,
+            nexternal_ips,
             nclickhouse_cluster_configs,
             nclickhouse_keepers,
             nclickhouse_servers,
@@ -1795,6 +1867,21 @@ impl DataStore {
                             bp_omicron_zone_nic::dsl;
                         diesel::delete(
                             dsl::bp_omicron_zone_nic.filter(
+                                dsl::blueprint_id
+                                    .eq(to_db_typed_uuid(blueprint_id)),
+                            ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
+
+                    let nexternal_ips = {
+                        // Skip rustfmt because it bails out on this long line.
+                        #[rustfmt::skip]
+                        use nexus_db_schema::schema::
+                            bp_omicron_zone_external_ip::dsl;
+                        diesel::delete(
+                            dsl::bp_omicron_zone_external_ip.filter(
                                 dsl::blueprint_id
                                     .eq(to_db_typed_uuid(blueprint_id)),
                             ),
@@ -1947,6 +2034,7 @@ impl DataStore {
                         ndatasets,
                         nzones,
                         nnics,
+                        nexternal_ips,
                         nclickhouse_cluster_configs,
                         nclickhouse_keepers,
                         nclickhouse_servers,
@@ -1973,6 +2061,7 @@ impl DataStore {
             "ndatasets" => ndatasets,
             "nzones" => nzones,
             "nnics" => nnics,
+            "nexternal_ips" => nexternal_ips,
             "nclickhouse_cluster_configs" => nclickhouse_cluster_configs,
             "nclickhouse_keepers" => nclickhouse_keepers,
             "nclickhouse_servers" => nclickhouse_servers,
@@ -3402,6 +3491,7 @@ fn insert_target_query(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use omicron_generation_kinds::NexusGeneration;
 
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::pub_test_utils::helpers::create_service_ip_pool;
@@ -3626,6 +3716,77 @@ mod tests {
         // on other tests to check blueprint deletion.
 
         // Clean up.
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // A zone with more than one external IP is not yet representable in the
+    // in-memory `BlueprintZoneType` (#9288). But the tables for its EIPs can
+    // store multiple rows per zone, so we have to check that we fail when
+    // reading a blueprint with more than one row. We'll adjust this to ensure
+    // we _can_ read such a blueprint when the zone-type enum is expanded.
+    #[tokio::test]
+    async fn test_blueprint_zone_requires_exactly_one_external_ip() {
+        let logctx = dev::test_setup_log(
+            "test_blueprint_zone_requires_exactly_one_external_ip",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let (_collection, _planning_input, blueprint) = representative(
+            &logctx.log,
+            "test_blueprint_zone_requires_exactly_one_external_ip",
+        );
+        let authz_blueprint = authz_blueprint_from_id(blueprint.id);
+
+        // Find a Nexus zone, and ensure we can write / read it with one IP.
+        let nexus_zone_id = blueprint
+            .sleds
+            .values()
+            .flat_map(|sled| sled.zones.iter())
+            .find(|zone| zone.zone_type.is_nexus())
+            .expect("representative blueprint has a Nexus zone")
+            .id;
+
+        datastore
+            .blueprint_insert(&opctx, &blueprint)
+            .await
+            .expect("failed to insert blueprint");
+
+        // With exactly one external IP per zone, the blueprint round-trips.
+        let blueprint_read = datastore
+            .blueprint_read(&opctx, &authz_blueprint)
+            .await
+            .expect("failed to read blueprint back");
+        assert_eq!(blueprint, blueprint_read);
+
+        // Inject a second external IP row for the Nexus zone. We should fail
+        // when reading this, because we can't represent it in the zone-type
+        // enum.
+        const SECOND_EXTERNAL_IP_ID: &str =
+            "b3f7d6c2-9a1e-4c8b-8d2f-0a1b2c3d4e5f";
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        let sql = format!(
+            "INSERT INTO omicron.public.bp_omicron_zone_external_ip \
+             (blueprint_id, zone_id, external_ip_id, ip, port, \
+              snat_first_port, snat_last_port) \
+             VALUES ('{}', '{}', '{SECOND_EXTERNAL_IP_ID}', \
+              '192.0.2.222', NULL, NULL, NULL)",
+            blueprint.id, nexus_zone_id,
+        );
+        conn.batch_execute_async(&sql)
+            .await
+            .expect("injected a second external IP row");
+        let err = datastore
+            .blueprint_read(&opctx, &authz_blueprint)
+            .await
+            .expect_err("a zone with two external IPs must fail to read back");
+        let msg = InlineErrorChain::new(&err).to_string();
+        assert!(
+            msg.contains("external IPs"),
+            "expected an exactly-one-external-IP error, got: {msg}",
+        );
+
         db.terminate().await;
         logctx.cleanup_successful();
     }
@@ -5660,6 +5821,7 @@ mod tests {
                 query_count!(bp_omicron_physical_disk, blueprint_id),
                 query_count!(bp_omicron_zone, blueprint_id),
                 query_count!(bp_omicron_zone_nic, blueprint_id),
+                query_count!(bp_omicron_zone_external_ip, blueprint_id),
                 query_count!(bp_clickhouse_cluster_config, blueprint_id),
                 query_count!(
                     bp_clickhouse_keeper_zone_id_to_node_id,
@@ -6086,7 +6248,7 @@ mod tests {
                 nic: nic.clone(),
                 external_tls: false,
                 external_dns_servers: Vec::new(),
-                nexus_generation: Generation::new(),
+                nexus_generation: NexusGeneration::new(),
             }),
             image_source: BlueprintZoneImageSource::InstallDataset,
         };

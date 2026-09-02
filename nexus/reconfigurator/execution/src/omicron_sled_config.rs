@@ -104,7 +104,9 @@ mod tests {
     use omicron_common::address::REPO_DEPOT_PORT;
     use omicron_common::api::internal::shared::DatasetKind;
     use omicron_common::zpool_name::ZpoolName;
-    use omicron_generation_kinds::{Generation, SledConfigGeneration};
+    use omicron_generation_kinds::{
+        SledConfigGeneration, UpdateDispositionGeneration,
+    };
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -265,7 +267,7 @@ mod tests {
         let sled_config = BlueprintSledConfig {
             state: SledState::Active,
             update_disposition: BlueprintSledUpdateDisposition {
-                generation: Generation::new().next(),
+                generation: UpdateDispositionGeneration::new().next(),
                 kind: BlueprintSledUpdateDispositionKind::Evacuating {
                     policy: ReconfiguratorDisruptionPolicy::Terminate,
                 },

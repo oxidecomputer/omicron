@@ -86,6 +86,7 @@ use sled_agent_types::resolvable_files::ResolverStatus;
 use sled_agent_types::resolvable_files::ZoneManifestStatus;
 use sled_agent_types_versions::v4::inventory::OmicronZonesConfig as OmicronZonesConfigV4;
 use sled_agent_types_versions::v10::inventory::OmicronZonesConfig as OmicronZonesConfigV10;
+use sled_agent_types_versions::v11::inventory::OmicronZonesConfig as OmicronZonesConfigV11;
 use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -399,7 +400,8 @@ pub fn representative() -> Representative {
     let extract_current_omicron_zones_config = |data: &str| {
         let as_v4: OmicronZonesConfigV4 = serde_json::from_str(data).unwrap();
         OmicronZonesConfigV10::try_from(as_v4)
-            .and_then(OmicronZonesConfig::try_from)
+            .and_then(OmicronZonesConfigV11::try_from)
+            .map(OmicronZonesConfig::from)
     };
     let sled14 = extract_current_omicron_zones_config(sled14_data).unwrap();
     let sled16 = extract_current_omicron_zones_config(sled16_data).unwrap();

@@ -2159,15 +2159,24 @@ table! {
         ntp_domain -> Nullable<Text>,
         nexus_external_tls -> Nullable<Bool>,
         nexus_external_dns_servers -> Nullable<Array<Inet>>,
-        snat_ip -> Nullable<Inet>,
-        snat_first_port -> Nullable<Int4>,
-        snat_last_port -> Nullable<Int4>,
         filesystem_pool -> Nullable<Uuid>,
 
         image_source -> crate::enums::InvZoneImageSourceEnum,
         image_artifact_sha256 -> Nullable<Text>,
 
         nexus_lockstep_port -> Nullable<Int4>,
+    }
+}
+
+table! {
+    inv_omicron_sled_config_zone_external_ip (inv_collection_id, sled_config_id, zone_id, ip) {
+        inv_collection_id -> Uuid,
+        sled_config_id -> Uuid,
+        zone_id -> Uuid,
+        ip -> Inet,
+        port -> Nullable<Int4>,
+        snat_first_port -> Nullable<Int4>,
+        snat_last_port -> Nullable<Int4>,
     }
 }
 
@@ -2402,10 +2411,6 @@ table! {
         ntp_domain -> Nullable<Text>,
         nexus_external_tls -> Nullable<Bool>,
         nexus_external_dns_servers -> Nullable<Array<Inet>>,
-        snat_ip -> Nullable<Inet>,
-        snat_first_port -> Nullable<Int4>,
-        snat_last_port -> Nullable<Int4>,
-        external_ip_id -> Nullable<Uuid>,
         filesystem_pool -> Uuid,
         disposition -> crate::enums::BpZoneDispositionEnum,
         disposition_expunged_as_of_generation -> Nullable<Int8>,
@@ -2435,6 +2440,18 @@ table! {
         slot -> Int2,
         ipv6 -> Nullable<Inet>,
         ipv6_subnet -> Nullable<Inet>,
+    }
+}
+
+table! {
+    bp_omicron_zone_external_ip (blueprint_id, zone_id, external_ip_id) {
+        blueprint_id -> Uuid,
+        zone_id -> Uuid,
+        external_ip_id -> Uuid,
+        ip -> Inet,
+        port -> Nullable<Int4>,
+        snat_first_port -> Nullable<Int4>,
+        snat_last_port -> Nullable<Int4>,
     }
 }
 

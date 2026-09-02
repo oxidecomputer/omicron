@@ -155,6 +155,9 @@ use omicron_common::api::external;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::MacAddr;
 use omicron_generation_kinds::Generation;
+use omicron_generation_kinds::InstanceStateGeneration;
+use omicron_generation_kinds::InstanceUpdaterGeneration;
+use omicron_generation_kinds::UpdateDispositionGeneration;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::DownstairsRegionUuid;
@@ -5061,7 +5064,7 @@ async fn cmd_db_instance_info(
     println!("    {INTENDED_STATE:>WIDTH$}: {}", instance.intended_state);
     println!(
         "    {LAST_UPDATED:>WIDTH$}: {time_updated:?} (generation {})",
-        generation.0
+        InstanceStateGeneration::from(generation)
     );
 
     // Reincarnation status
@@ -5117,7 +5120,10 @@ async fn cmd_db_instance_info(
     } else {
         print!("    {UPDATER_LOCK:>WIDTH$}: UNLOCKED");
     }
-    println!(" at generation: {}", instance.updater_gen.0);
+    println!(
+        " at generation: {}",
+        InstanceUpdaterGeneration::from(instance.updater_gen)
+    );
 
     fn print_vmm(kind: &str, id: Uuid, vmm: Option<&Vmm>) {
         match vmm {
@@ -8191,7 +8197,7 @@ fn prettyprint_vmm(
         );
     }
     if let Some(ud_generation) = stop_for_update_disposition_generation {
-        let u_g = u64::from(ud_generation.0);
+        let u_g = UpdateDispositionGeneration::from(*ud_generation);
         println!(
             "{indent}{STOP_FOR_UPDATE:>width$}: update disposition generation {u_g}"
         );

@@ -1209,9 +1209,9 @@ async fn test_debug_files(cptestctx: &ControlPlaneTestContext) {
 
     // We need to wait until there's a new target blueprint.  As usual, we wait
     // for the thing we care about rather than waiting precisely for one more
-    // activation of the background task.  That's because there's other
-    // asynchrony involved here (e.g., the updated reconfigurator config needs
-    // to be loaded, too).
+    // activation of the background task.  Expunging the sled activates the
+    // planner, but there's also other asynchrony involved here (e.g., the
+    // updated reconfigurator config needs to be loaded, too).
     let bp4_id = wait_for_condition(
         || async {
             let target = datastore

@@ -9,13 +9,13 @@ use crate::app::BlueprintDebugAction;
 use crate::app::background::BackgroundTask;
 use crate::app::background::tasks::blueprint_load::LoadedTargetBlueprint;
 use crate::app::deployment::SetTargetDebugWriter;
-use chrono::Utc;
 use futures::future::BoxFuture;
 use iddqd::IdOrdMap;
 use nexus_auth::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
+use nexus_inventory::now_db_precision;
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::planner::PlannerRng;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
@@ -321,7 +321,7 @@ impl BlueprintPlanner {
         let target = BlueprintTarget {
             target_id: blueprint_id,
             enabled: target.enabled, // copy previous `enabled` flag
-            time_made_target: Utc::now(),
+            time_made_target: now_db_precision(),
         };
         match self.datastore.blueprint_target_set_current(opctx, target).await {
             Ok(()) => (),
@@ -627,7 +627,7 @@ mod test {
                 report: _,
                 blueprint_count: _,
                 limit: _,
-            } if parent_blueprint_id == parent_blueprint_id
+            } if parent_blueprint_id == blueprint_id
         );
 
         // Enable execution.

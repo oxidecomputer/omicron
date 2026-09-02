@@ -68,7 +68,7 @@ use omicron_deployment_graph::DagEdge;
 use omicron_deployment_graph::DagEdgesFile;
 use omicron_deployment_graph::DeploymentUnitName;
 use omicron_deployment_graph::OMICRON_LS_APIS_PATH;
-use omicron_generation_kinds::{Generation, SledConfigGeneration};
+use omicron_generation_kinds::{NexusGeneration, SledConfigGeneration};
 use omicron_test_utils::dev::test_setup_log;
 use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -139,7 +139,7 @@ fn clickhouse_policy(mode: ClickhouseMode) -> ClickhousePolicy {
 
 fn get_nexus_ids_at_generation(
     blueprint: &Blueprint,
-    generation: Generation,
+    generation: NexusGeneration,
 ) -> BTreeSet<OmicronZoneUuid> {
     blueprint
         .in_service_zones()
@@ -3628,7 +3628,10 @@ fn test_update_crucible_pantry_before_nexus() {
             let BlueprintZoneType::Nexus(nexus_zone) = &added.zone_type else {
                 panic!("Unexpected zone type: {:?}", added.zone_type);
             };
-            assert_eq!(nexus_zone.nexus_generation, Generation::new().next());
+            assert_eq!(
+                nexus_zone.nexus_generation,
+                NexusGeneration::new().next()
+            );
             assert_eq!(&added.image_source, &image_source);
             modified_sleds += 1;
         }
@@ -3645,9 +3648,9 @@ fn test_update_crucible_pantry_before_nexus() {
     //
     // First, we'll expect the nexus generation to get bumped.
     let active_nexus_zones =
-        get_nexus_ids_at_generation(&blueprint, Generation::new());
+        get_nexus_ids_at_generation(&blueprint, NexusGeneration::new());
     let not_yet_nexus_zones =
-        get_nexus_ids_at_generation(&blueprint, Generation::new().next());
+        get_nexus_ids_at_generation(&blueprint, NexusGeneration::new().next());
 
     assert_eq!(active_nexus_zones.len(), NEXUS_REDUNDANCY);
     assert_eq!(not_yet_nexus_zones.len(), NEXUS_REDUNDANCY);
