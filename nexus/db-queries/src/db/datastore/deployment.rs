@@ -2515,53 +2515,45 @@ impl DataStore {
             }
         }
 
-        #[derive(Debug, Error)]
-        enum TargetDeleteError {
-            #[error("database error")]
-            Diesel(#[from] DieselError),
-
-            #[error("cannot delete latest bp_target row")]
-            LastRow,
-        }
-
         // Although the Rust interface makes it hard to invoke this in a way
         // that would prune the last rows in the table, since the consequences
         // would be so dire, we use a transaction to ensure that we're not
         // doing that.
         let conn = self.pool_connection_authorized(&opctx).await?;
+        let err = OptionalError::new();
         let ndeleted = self
-            .transaction_non_retry_wrapper("bp_target_delete")
-            .transaction(&conn, |conn| async move {
-                use nexus_db_schema::schema::bp_target::dsl;
-                let latest_version: SqlU32 = dsl::bp_target
-                    .select(dsl::version)
-                    .order_by(dsl::version.desc())
-                    .limit(1)
-                    .first_async(&conn)
+            .transaction_retry_wrapper("bp_target_delete")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                async move {
+                    use nexus_db_schema::schema::bp_target::dsl;
+                    let latest_version: SqlU32 = dsl::bp_target
+                        .select(dsl::version)
+                        .order_by(dsl::version.desc())
+                        .limit(1)
+                        .first_async(&conn)
+                        .await?;
+
+                    let err = err.clone();
+                    if version >= *latest_version {
+                        return Err(err.bail(Error::internal_error(
+                            "cannot delete latest bp_target row",
+                        )));
+                    }
+
+                    let ndeleted = diesel::delete(
+                        dsl::bp_target.filter(dsl::version.le(SqlU32(version))),
+                    )
+                    .execute_async(&conn)
                     .await?;
 
-                if version >= *latest_version {
-                    return Err(TargetDeleteError::LastRow);
+                    Ok(ndeleted)
                 }
-
-                let ndeleted = diesel::delete(
-                    dsl::bp_target.filter(dsl::version.le(SqlU32(version))),
-                )
-                .execute_async(&conn)
-                .await?;
-
-                Ok(ndeleted)
             })
             .await
-            .map_err(|e| match e {
-                TargetDeleteError::Diesel(e) => {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                }
-                e @ TargetDeleteError::LastRow => {
-                    // This variant is always an internal error and has no
-                    // causes so we don't need to use InlineErrorChain here.
-                    Error::internal_error(&e.to_string())
-                }
+            .map_err(|e| match err.take() {
+                Some(inside_error) => inside_error,
+                None => public_error_from_diesel(e, ErrorHandler::Server),
             })?;
 
         Ok(ndeleted)
