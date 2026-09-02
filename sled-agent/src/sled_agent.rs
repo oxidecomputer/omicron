@@ -41,7 +41,6 @@ use illumos_utils::zfs::SizeDetails;
 use illumos_utils::zfs::Zfs;
 use illumos_utils::zpool::PathInPool;
 use illumos_utils::zpool::ZpoolOrRamdisk;
-use internal_dns_resolver::Resolver;
 use itertools::Itertools as _;
 use omicron_common::address::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use omicron_common::address::{
@@ -323,8 +322,20 @@ impl From<Error> for dropshot::HttpError {
                 HttpError::for_not_found(
                     Some(NO_SUCH_INSTANCE.to_string()),
                     // NoSuchVmm has no source error, so it's currently not
-                    // necessary to use a chain-logging adapter here, but if that
-                    // changes in the future, the compiler won't complain.
+                    // necessary to use a chain-logging adapter here, but if
+                    // that changes in the future, the compiler won't complain.
+                    InlineErrorChain::new(&e).to_string(),
+                )
+            }
+            Error::Instance(
+                e @ InstanceManagerError::VmmRegistrationDisallowed(reason),
+            ) => {
+                HttpError::for_unavail(
+                    Some(reason.http_error_code().to_string()),
+                    // VmmRegistrationDisallowed has no source error, so it's
+                    // currently not necessary to use a chain-logging adapter
+                    // here, but if that changes in the future, the compiler
+                    // won't complain.
                     InlineErrorChain::new(&e).to_string(),
                 )
             }
@@ -700,6 +711,7 @@ impl SledAgent {
             long_running_task_handles.zone_bundler.clone(),
             vmm_reservoir_manager.clone(),
             metrics_manager.request_queue(),
+            config_reconciler_spawn_token.subscribe_update_disposition(),
         )?;
 
         let svc_config =
@@ -776,7 +788,7 @@ impl SledAgent {
         long_running_task_handles
             .scrimlet_reconcilers
             .set_sled_agent_networking_info_once(SledAgentNetworkingInfo {
-                system_networking_config_rx: network_config_rx.clone(),
+                system_networking_config_rx: network_config_rx,
                 mode: ScrimletReconcilersMode::SwitchZone(
                     this_sled_switch_zone_ip,
                 ),
@@ -800,14 +812,9 @@ impl SledAgent {
             .sled_agent_started(SledAgentInfo {
                 config: svc_config,
                 port_manager: port_manager.clone(),
-                resolver: Resolver::new_from_ip(
-                    parent_log.new(o!("component" => "DnsResolver")),
-                    *sled_address.ip(),
-                )?,
                 underlay_address: *sled_address.ip(),
                 local_switch_zone_ip: this_sled_switch_zone_ip,
                 rack_id: request.body.rack_id,
-                network_config_rx,
                 metrics_queue: metrics_manager.request_queue(),
             })
             .await?;

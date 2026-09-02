@@ -43,7 +43,9 @@ use nexus_types::external_api::sled::SledState;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::disk::DatasetKind;
-use omicron_generation_kinds::{Generation, SledConfigGeneration};
+use omicron_generation_kinds::{
+    SledConfigGeneration, UpdateDispositionGeneration,
+};
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -168,7 +170,7 @@ pub enum EnsureMupdateOverrideError {
 pub struct SledEditor {
     underlay_ip_allocator: SledUnderlayIpAllocator,
     incoming_sled_agent_generation: SledConfigGeneration,
-    incoming_update_disposition_generation: Generation,
+    incoming_update_disposition_generation: UpdateDispositionGeneration,
     update_disposition_kind: ScalarEditor<BlueprintSledUpdateDispositionKind>,
     zones: ZonesEditor,
     disks: DisksEditor,
@@ -242,7 +244,8 @@ impl SledEditor {
                 LastAllocatedSubnetIpOffset::initial(),
             ),
             incoming_sled_agent_generation: SledConfigGeneration::new(),
-            incoming_update_disposition_generation: Generation::new(),
+            incoming_update_disposition_generation:
+                UpdateDispositionGeneration::new(),
             update_disposition_kind: ScalarEditor::new(
                 BlueprintSledUpdateDispositionKind::Available,
             ),
@@ -1076,7 +1079,7 @@ mod tests {
         assert_eq!(edited.config.update_disposition.kind, EVACUATING);
         assert_eq!(
             edited.config.update_disposition.generation,
-            Generation::new().next(),
+            UpdateDispositionGeneration::new().next(),
             "generation bumped exactly once despite three `set` calls",
         );
         assert!(edited.scalar_edits.update_disposition);

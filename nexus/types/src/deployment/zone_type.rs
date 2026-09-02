@@ -15,7 +15,9 @@ use omicron_common::disk::DatasetName;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use sled_agent_types::inventory::ExternalDnsAddrs;
 use sled_agent_types::inventory::NetworkInterface;
+use sled_agent_types::inventory::NexusExternalIps;
 use sled_agent_types::inventory::OmicronZoneDataset;
 use sled_agent_types::inventory::OmicronZoneType;
 use sled_agent_types::inventory::ZoneKind;
@@ -264,7 +266,7 @@ impl From<BlueprintZoneType> for OmicronZoneType {
                 dns_servers: zone.dns_servers,
                 domain: zone.domain,
                 nic: zone.nic,
-                snat_cfg: zone.external_ip.snat_cfg,
+                snat: zone.external_ip.snat_cfg.into(),
             },
             BlueprintZoneType::Clickhouse(zone) => Self::Clickhouse {
                 address: zone.address,
@@ -295,7 +297,9 @@ impl From<BlueprintZoneType> for OmicronZoneType {
             BlueprintZoneType::ExternalDns(zone) => Self::ExternalDns {
                 dataset: zone.dataset,
                 http_address: zone.http_address,
-                dns_address: zone.dns_address.addr,
+                dns_addresses: ExternalDnsAddrs::from_single(
+                    zone.dns_address.addr,
+                ),
                 nic: zone.nic,
             },
             BlueprintZoneType::InternalDns(zone) => Self::InternalDns {
@@ -311,7 +315,9 @@ impl From<BlueprintZoneType> for OmicronZoneType {
             BlueprintZoneType::Nexus(zone) => Self::Nexus {
                 internal_address: zone.internal_address,
                 lockstep_port: zone.lockstep_port,
-                external_ip: zone.external_ip.ip,
+                external_ips: NexusExternalIps::from_single(
+                    zone.external_ip.ip,
+                ),
                 nic: zone.nic,
                 external_tls: zone.external_tls,
                 external_dns_servers: zone.external_dns_servers,
@@ -348,7 +354,7 @@ pub mod blueprint_zone_type {
     use crate::deployment::OmicronZoneExternalFloatingIp;
     use crate::deployment::OmicronZoneExternalSnatIp;
     use daft::Diffable;
-    use omicron_generation_kinds::Generation;
+    use omicron_generation_kinds::NexusGeneration;
     use schemars::JsonSchema;
     use serde::Deserialize;
     use serde::Serialize;
@@ -579,7 +585,7 @@ pub mod blueprint_zone_type {
         /// Generation number for this Nexus zone.
         /// This is used to coordinate handoff between old and new Nexus instances
         /// during updates. See RFD 588.
-        pub nexus_generation: Generation,
+        pub nexus_generation: NexusGeneration,
     }
 
     impl Nexus {

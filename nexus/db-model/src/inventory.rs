@@ -44,9 +44,10 @@ use nexus_db_schema::schema::{
     inv_mupdate_override_non_boot, inv_ntp_timesync, inv_nvme_disk_firmware,
     inv_omicron_sled_config, inv_omicron_sled_config_dataset,
     inv_omicron_sled_config_disk, inv_omicron_sled_config_zone,
-    inv_omicron_sled_config_zone_nic, inv_physical_disk, inv_root_of_trust,
-    inv_root_of_trust_page, inv_service_processor, inv_single_measurements,
-    inv_sled_agent, inv_sled_boot_partition, inv_sled_config_reconciler,
+    inv_omicron_sled_config_zone_external_ip, inv_omicron_sled_config_zone_nic,
+    inv_physical_disk, inv_root_of_trust, inv_root_of_trust_page,
+    inv_service_processor, inv_single_measurements, inv_sled_agent,
+    inv_sled_boot_partition, inv_sled_config_reconciler,
     inv_svc_enabled_not_online, inv_svc_enabled_not_online_parse_error,
     inv_svc_enabled_not_online_service, inv_zone_manifest_measurement,
     inv_zpool, sw_caboose, sw_root_of_trust_page,
@@ -92,6 +93,7 @@ use sled_agent_types::disk::SharedDatasetConfig;
 use sled_agent_types::inventory::BootImageHeader;
 use sled_agent_types::inventory::BootPartitionDetails;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+use sled_agent_types::inventory::ExternalDnsAddrs;
 use sled_agent_types::inventory::FmdHostCase;
 use sled_agent_types::inventory::FmdInventory;
 use sled_agent_types::inventory::FmdInventoryError;
@@ -105,6 +107,7 @@ use sled_agent_types::inventory::MupdateOverrideBootInventory;
 use sled_agent_types::inventory::MupdateOverrideInventory;
 use sled_agent_types::inventory::MupdateOverrideNonBootInventory;
 use sled_agent_types::inventory::NetworkInterface;
+use sled_agent_types::inventory::NexusExternalIps;
 use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
 use sled_agent_types::inventory::OmicronSingleMeasurement;
 use sled_agent_types::inventory::OmicronSledUpdateDisposition;
@@ -112,10 +115,11 @@ use sled_agent_types::inventory::OrphanedDataset;
 use sled_agent_types::inventory::RemoveMupdateOverrideBootSuccessInventory;
 use sled_agent_types::inventory::RemoveMupdateOverrideInventory;
 use sled_agent_types::inventory::SingleMeasurementInventory;
-use sled_agent_types::inventory::SourceNatConfigGeneric;
+use sled_agent_types::inventory::SourceNatConfig;
 use sled_agent_types::inventory::SvcEnabledNotOnline;
 use sled_agent_types::inventory::SvcEnabledNotOnlineState;
 use sled_agent_types::inventory::ZoneArtifactInventory;
+use sled_agent_types::inventory::ZoneSnatConfig;
 use sled_agent_types::inventory::ZpoolHealth;
 use sled_agent_types::inventory::{
     ConfigReconcilerInventoryResult, OmicronSledConfig, OmicronZoneConfig,
@@ -123,7 +127,7 @@ use sled_agent_types::inventory::{
 };
 use sled_hardware_types::BaseboardId;
 use std::collections::BTreeSet;
-use std::net::{IpAddr, SocketAddrV6};
+use std::net::{IpAddr, SocketAddr, SocketAddrV6};
 use std::time::Duration;
 use thiserror::Error;
 use tufaceous_artifact::ArtifactHash as ExternalArtifactHash;
@@ -3072,9 +3076,6 @@ pub struct InvOmicronSledConfigZone {
     pub ntp_domain: Option<String>,
     pub nexus_external_tls: Option<bool>,
     pub nexus_external_dns_servers: Option<Vec<IpNetwork>>,
-    pub snat_ip: Option<IpNetwork>,
-    pub snat_first_port: Option<SqlU16>,
-    pub snat_last_port: Option<SqlU16>,
     pub filesystem_pool: Option<DbTypedUuid<ZpoolKind>>,
     pub image_source: InvZoneImageSource,
     pub image_artifact_sha256: Option<ArtifactHash>,
@@ -3127,9 +3128,6 @@ impl InvOmicronSledConfigZone {
             ntp_domain: None,
             nexus_external_tls: None,
             nexus_external_dns_servers: None,
-            snat_ip: None,
-            snat_first_port: None,
-            snat_last_port: None,
             image_source,
             image_artifact_sha256,
             nexus_lockstep_port: None,
@@ -3142,13 +3140,14 @@ impl InvOmicronSledConfigZone {
                 dns_servers,
                 domain,
                 nic,
-                snat_cfg,
+                // Stored in the inv_omicron_sled_config_zone_external_ip child
+                // table, not here.
+                snat: _,
             } => {
                 // Set the common fields
                 inv_omicron_zone.set_primary_service_ip_and_port(address);
 
                 // Set the zone specific fields
-                let (first_port, last_port) = snat_cfg.port_range_raw();
                 inv_omicron_zone.ntp_ntp_servers = Some(ntp_servers.clone());
                 inv_omicron_zone.ntp_dns_servers = Some(
                     dns_servers
@@ -3158,10 +3157,6 @@ impl InvOmicronSledConfigZone {
                         .collect(),
                 );
                 inv_omicron_zone.ntp_domain.clone_from(domain);
-                inv_omicron_zone.snat_ip = Some(IpNetwork::from(snat_cfg.ip));
-                inv_omicron_zone.snat_first_port =
-                    Some(SqlU16::from(first_port));
-                inv_omicron_zone.snat_last_port = Some(SqlU16::from(last_port));
                 inv_omicron_zone.nic_id = Some(nic.id);
             }
             OmicronZoneType::Clickhouse { address, dataset } => {
@@ -3196,7 +3191,9 @@ impl InvOmicronSledConfigZone {
             OmicronZoneType::ExternalDns {
                 dataset,
                 http_address,
-                dns_address,
+                // Stored in the inv_omicron_sled_config_zone_external_ip child
+                // table, not here.
+                dns_addresses: _,
                 nic,
             } => {
                 // Set the common fields
@@ -3205,10 +3202,6 @@ impl InvOmicronSledConfigZone {
 
                 // Set the zone specific fields
                 inv_omicron_zone.nic_id = Some(nic.id);
-                inv_omicron_zone.second_service_ip =
-                    Some(IpNetwork::from(dns_address.ip()));
-                inv_omicron_zone.second_service_port =
-                    Some(SqlU16::from(dns_address.port()));
             }
             OmicronZoneType::InternalDns {
                 dataset,
@@ -3239,7 +3232,9 @@ impl InvOmicronSledConfigZone {
             OmicronZoneType::Nexus {
                 internal_address,
                 lockstep_port,
-                external_ip,
+                // Stored in the inv_omicron_sled_config_zone_external_ip child
+                // table, not here.
+                external_ips: _,
                 nic,
                 external_tls,
                 external_dns_servers,
@@ -3250,8 +3245,6 @@ impl InvOmicronSledConfigZone {
 
                 // Set the zone specific fields
                 inv_omicron_zone.nic_id = Some(nic.id);
-                inv_omicron_zone.second_service_ip =
-                    Some(IpNetwork::from(*external_ip));
                 inv_omicron_zone.nexus_external_tls = Some(*external_tls);
                 inv_omicron_zone.nexus_external_dns_servers = Some(
                     external_dns_servers
@@ -3286,6 +3279,7 @@ impl InvOmicronSledConfigZone {
     pub fn into_omicron_zone_config(
         self,
         nic_row: Option<InvOmicronSledConfigZoneNic>,
+        external_ip_rows: Vec<InvOmicronSledConfigZoneExternalIp>,
     ) -> Result<OmicronZoneConfig, anyhow::Error> {
         // Build up a set of common fields for our `OmicronZoneType`s
         //
@@ -3329,22 +3323,59 @@ impl InvOmicronSledConfigZone {
 
         let zone_type = match self.zone_type {
             ZoneType::BoundaryNtp => {
-                let snat_cfg = match (
-                    self.snat_ip,
-                    self.snat_first_port,
-                    self.snat_last_port,
-                ) {
-                    (Some(ip), Some(first_port), Some(last_port)) => {
-                        SourceNatConfigGeneric::new(
-                            ip.ip(),
-                            *first_port,
-                            *last_port,
-                        )
-                        .context("bad SNAT config for boundary NTP")?
+                // Boundary NTP has a source-NAT config per IP family, at most
+                // one each and at least one overall.
+                let mut ipv4 = None;
+                let mut ipv6 = None;
+                for row in external_ip_rows {
+                    let (Some(first_port), Some(last_port)) =
+                        (row.snat_first_port, row.snat_last_port)
+                    else {
+                        bail!(
+                            "expected non-NULL SNAT ports for boundary NTP \
+                             external IP {}",
+                            row.ip,
+                        );
+                    };
+                    match row.ip.ip() {
+                        IpAddr::V4(ip) => {
+                            let cfg = SourceNatConfig::new(
+                                ip,
+                                *first_port,
+                                *last_port,
+                            )
+                            .context("bad SNAT config for boundary NTP")?;
+                            if ipv4.replace(cfg).is_some() {
+                                bail!(
+                                    "multiple IPv4 SNAT configs for boundary \
+                                     NTP"
+                                );
+                            }
+                        }
+                        IpAddr::V6(ip) => {
+                            let cfg = SourceNatConfig::new(
+                                ip,
+                                *first_port,
+                                *last_port,
+                            )
+                            .context("bad SNAT config for boundary NTP")?;
+                            if ipv6.replace(cfg).is_some() {
+                                bail!(
+                                    "multiple IPv6 SNAT configs for boundary \
+                                     NTP"
+                                );
+                            }
+                        }
                     }
-                    _ => bail!(
-                        "expected non-NULL snat properties, \
-                         found at least one NULL"
+                }
+                let snat = match (ipv4, ipv6) {
+                    (Some(ipv4), Some(ipv6)) => {
+                        ZoneSnatConfig::DualStack { ipv4, ipv6 }
+                    }
+                    (Some(ipv4), None) => ZoneSnatConfig::Ipv4Only(ipv4),
+                    (None, Some(ipv6)) => ZoneSnatConfig::Ipv6Only(ipv6),
+                    (None, None) => bail!(
+                        "expected at least one SNAT config for boundary NTP"
                     ),
                 };
                 OmicronZoneType::BoundaryNtp {
@@ -3353,7 +3384,7 @@ impl InvOmicronSledConfigZone {
                     dns_servers: ntp_dns_servers?,
                     domain: self.ntp_domain,
                     nic: nic?,
-                    snat_cfg,
+                    snat,
                 }
             }
             ZoneType::Clickhouse => OmicronZoneType::Clickhouse {
@@ -3379,12 +3410,29 @@ impl InvOmicronSledConfigZone {
             ZoneType::CruciblePantry => {
                 OmicronZoneType::CruciblePantry { address: primary_address }
             }
-            ZoneType::ExternalDns => OmicronZoneType::ExternalDns {
-                dataset: dataset?,
-                http_address: primary_address,
-                dns_address: dns_address?,
-                nic: nic?,
-            },
+            ZoneType::ExternalDns => {
+                let addrs = external_ip_rows
+                    .into_iter()
+                    .map(|row| {
+                        let Some(port) = row.port else {
+                            bail!(
+                                "expected non-NULL port for external DNS \
+                                 external IP {}",
+                                row.ip,
+                            );
+                        };
+                        Ok(SocketAddr::new(row.ip.ip(), *port))
+                    })
+                    .collect::<Result<Vec<_>, anyhow::Error>>()?;
+                let dns_addresses = ExternalDnsAddrs::new(addrs)
+                    .context("invalid external DNS addresses")?;
+                OmicronZoneType::ExternalDns {
+                    dataset: dataset?,
+                    http_address: primary_address,
+                    dns_addresses,
+                    nic: nic?,
+                }
+            }
             ZoneType::InternalDns => OmicronZoneType::InternalDns {
                 dataset: dataset?,
                 http_address: primary_address,
@@ -3401,26 +3449,33 @@ impl InvOmicronSledConfigZone {
             ZoneType::InternalNtp => {
                 OmicronZoneType::InternalNtp { address: primary_address }
             }
-            ZoneType::Nexus => OmicronZoneType::Nexus {
-                internal_address: primary_address,
-                lockstep_port: *self
-                    .nexus_lockstep_port
-                    .ok_or_else(|| anyhow!("expected 'nexus_lockstep_port'"))?,
-                external_ip: self
-                    .second_service_ip
-                    .ok_or_else(|| anyhow!("expected second service IP"))?
-                    .ip(),
-                nic: nic?,
-                external_tls: self
-                    .nexus_external_tls
-                    .ok_or_else(|| anyhow!("expected 'external_tls'"))?,
-                external_dns_servers: self
-                    .nexus_external_dns_servers
-                    .ok_or_else(|| anyhow!("expected 'external_dns_servers'"))?
+            ZoneType::Nexus => {
+                let ips = external_ip_rows
                     .into_iter()
-                    .map(|i| i.ip())
-                    .collect(),
-            },
+                    .map(|row| row.ip.ip())
+                    .collect::<BTreeSet<_>>();
+                let external_ips = NexusExternalIps::new(ips)
+                    .context("invalid Nexus external IPs")?;
+                OmicronZoneType::Nexus {
+                    internal_address: primary_address,
+                    lockstep_port: *self.nexus_lockstep_port.ok_or_else(
+                        || anyhow!("expected 'nexus_lockstep_port'"),
+                    )?,
+                    external_ips,
+                    nic: nic?,
+                    external_tls: self
+                        .nexus_external_tls
+                        .ok_or_else(|| anyhow!("expected 'external_tls'"))?,
+                    external_dns_servers: self
+                        .nexus_external_dns_servers
+                        .ok_or_else(|| {
+                            anyhow!("expected 'external_dns_servers'")
+                        })?
+                        .into_iter()
+                        .map(|i| i.ip())
+                        .collect(),
+                }
+            }
             ZoneType::Oximeter => {
                 OmicronZoneType::Oximeter { address: primary_address }
             }
@@ -3452,6 +3507,84 @@ impl InvOmicronSledConfigZone {
             zone_type,
             image_source,
         })
+    }
+}
+
+/// The external IP addresses of a zone in an `inv_omicron_sled_config_zone`.
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_omicron_sled_config_zone_external_ip)]
+pub struct InvOmicronSledConfigZoneExternalIp {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub sled_config_id: DbTypedUuid<OmicronSledConfigKind>,
+    pub zone_id: DbTypedUuid<OmicronZoneKind>,
+    pub ip: IpNetwork,
+    pub port: Option<SqlU16>,
+    pub snat_first_port: Option<SqlU16>,
+    pub snat_last_port: Option<SqlU16>,
+}
+
+impl InvOmicronSledConfigZoneExternalIp {
+    /// Build the external IP rows for a zone.
+    ///
+    /// Zones without external networking return an empty array.
+    pub fn for_zone(
+        inv_collection_id: CollectionUuid,
+        sled_config_id: OmicronSledConfigUuid,
+        zone: &OmicronZoneConfig,
+    ) -> Vec<InvOmicronSledConfigZoneExternalIp> {
+        // Extract an SNAT config into the data for an external IP row.
+        let snat_row = |ip: IpAddr, ports: (u16, u16)| {
+            (
+                IpNetwork::from(ip),
+                None,
+                Some(SqlU16::from(ports.0)),
+                Some(SqlU16::from(ports.1)),
+            )
+        };
+        let entries = match &zone.zone_type {
+            OmicronZoneType::Nexus { external_ips, .. } => external_ips
+                .iter()
+                .map(|ip| (IpNetwork::from(*ip), None, None, None))
+                .collect(),
+            OmicronZoneType::ExternalDns { dns_addresses, .. } => dns_addresses
+                .iter()
+                .map(|addr| {
+                    (
+                        IpNetwork::from(addr.ip()),
+                        Some(SqlU16::from(addr.port())),
+                        None,
+                        None,
+                    )
+                })
+                .collect(),
+            OmicronZoneType::BoundaryNtp { snat, .. } => match snat {
+                ZoneSnatConfig::Ipv4Only(c) => {
+                    vec![snat_row(IpAddr::V4(c.ip), c.port_range_raw())]
+                }
+                ZoneSnatConfig::Ipv6Only(c) => {
+                    vec![snat_row(IpAddr::V6(c.ip), c.port_range_raw())]
+                }
+                ZoneSnatConfig::DualStack { ipv4, ipv6 } => vec![
+                    snat_row(IpAddr::V4(ipv4.ip), ipv4.port_range_raw()),
+                    snat_row(IpAddr::V6(ipv6.ip), ipv6.port_range_raw()),
+                ],
+            },
+            _ => return Vec::new(),
+        };
+        entries
+            .into_iter()
+            .map(|(ip, port, snat_first_port, snat_last_port)| {
+                InvOmicronSledConfigZoneExternalIp {
+                    inv_collection_id: inv_collection_id.into(),
+                    sled_config_id: sled_config_id.into(),
+                    zone_id: zone.id.into(),
+                    ip,
+                    port,
+                    snat_first_port,
+                    snat_last_port,
+                }
+            })
+            .collect()
     }
 }
 
@@ -3726,6 +3859,7 @@ mod test {
     use omicron_uuid_kinds::OmicronZoneUuid;
     use sled_agent_types::inventory::NetworkInterface;
     use sled_agent_types::inventory::NetworkInterfaceKind;
+    use sled_agent_types::inventory::NexusExternalIps;
     use sled_agent_types::inventory::OmicronZoneConfig;
     use sled_agent_types::inventory::OmicronZoneImageSource;
     use sled_agent_types::inventory::OmicronZoneType;
@@ -3973,7 +4107,9 @@ mod test {
             zone_type: OmicronZoneType::Nexus {
                 internal_address: "[::1]:12345".parse().unwrap(),
                 lockstep_port: 12346,
-                external_ip: "192.0.2.1".parse().unwrap(),
+                external_ips: NexusExternalIps::from_single(
+                    "192.0.2.1".parse().unwrap(),
+                ),
                 nic: nic.clone(),
                 external_tls: false,
                 external_dns_servers: vec![],

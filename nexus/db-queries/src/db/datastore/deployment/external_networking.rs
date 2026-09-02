@@ -682,7 +682,7 @@ mod tests {
     use omicron_common::api::internal::shared::PrivateIpv4Config;
     use omicron_common::api::internal::shared::PrivateIpv6Config;
     use omicron_common::zpool_name::ZpoolName;
-    use omicron_generation_kinds::Generation;
+    use omicron_generation_kinds::NexusGeneration;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::ExternalIpUuid;
     use omicron_uuid_kinds::ZpoolUuid;
@@ -895,7 +895,7 @@ mod tests {
                             nic: self.nexus_nic.clone(),
                             external_tls: false,
                             external_dns_servers: Vec::new(),
-                            nexus_generation: Generation::new(),
+                            nexus_generation: NexusGeneration::new(),
                         },
                     ),
                     image_source: BlueprintZoneImageSource::InstallDataset,
