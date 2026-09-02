@@ -2357,11 +2357,21 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    /// Fetch information about most recent target blueprints
+    /// Fetch information about most recent target blueprints to determine which
+    /// former target blueprints can be deleted while keeping `nkeep` distinct
+    /// blueprint ids in the database for debugging purposes
     ///
-    /// This looks at the most recent rows from the `bp_target` table and
-    /// determines which version(s) can be deleted, assuming we want to keep
-    /// `nkeep` distinct blueprints.
+    /// In practice, pruning what this function determines to be pruneable
+    /// should ensure that the database is left with the most recent `nkeep`
+    /// distinct blueprints as long as it had at least `nkeep` blueprints in it
+    /// to begin with.  This includes systems where the blueprint pruner has run
+    /// as well as those where `omdb reconfigurator archive` was run.  However,
+    /// if for some reason some of the `nkeep` blueprint ids correspond to
+    /// blueprints that are missing but earlier ones are not (because somebody
+    /// ran `omdb nexus blueprints delete` or something like that), then this
+    /// function would report that more blueprints were pruneable than is
+    /// accurate.  This has no impact on the system.  It just means we'd have
+    /// less debugging data than we'd want in that (very unusual) case.
     // This could arguably live in the pruner itself, which could build it atop
     // a public `bp_target_list_page`.  It lives here instead because it goes
     // with `bp_target_delete_up_to`, and that _can't_ be built atop a
