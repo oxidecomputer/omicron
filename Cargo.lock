@@ -4250,7 +4250,7 @@ dependencies = [
  "clap",
  "futures",
  "gateway-client",
- "gateway-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=01f06089a97bd084bec2595d4d62e0f91338cf57)",
+ "gateway-messages",
  "gateway-types",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -4277,7 +4277,7 @@ dependencies = [
  "chrono",
  "daft",
  "ereport-types",
- "gateway-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=01f06089a97bd084bec2595d4d62e0f91338cf57)",
+ "gateway-messages",
  "gateway-types",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -4304,39 +4304,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "gateway-ereport-messages"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=6c0aca2545a73fd75536e149d29faa7108be5862#6c0aca2545a73fd75536e149d29faa7108be5862"
-dependencies = [
- "serde",
- "zerocopy 0.8.55",
-]
-
-[[package]]
 name = "gateway-messages"
 version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=01f06089a97bd084bec2595d4d62e0f91338cf57#01f06089a97bd084bec2595d4d62e0f91338cf57"
 dependencies = [
  "bitflags 2.11.0",
- "gateway-ereport-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=01f06089a97bd084bec2595d4d62e0f91338cf57)",
- "hubpack",
- "serde",
- "serde-big-array",
- "serde_repr",
- "smoltcp 0.9.1",
- "static_assertions",
- "strum 0.27.2",
- "strum_macros 0.27.2",
- "uuid",
- "zerocopy 0.8.55",
-]
-
-[[package]]
-name = "gateway-messages"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=6c0aca2545a73fd75536e149d29faa7108be5862#6c0aca2545a73fd75536e149d29faa7108be5862"
-dependencies = [
- "bitflags 2.11.0",
+ "gateway-ereport-messages",
  "hubpack",
  "serde",
  "serde-big-array",
@@ -4359,8 +4332,8 @@ dependencies = [
  "base64 0.22.1",
  "futures",
  "fxhash",
- "gateway-ereport-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=01f06089a97bd084bec2595d4d62e0f91338cf57)",
- "gateway-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=01f06089a97bd084bec2595d4d62e0f91338cf57)",
+ "gateway-ereport-messages",
+ "gateway-messages",
  "hex",
  "hubpack",
  "hubtools 0.4.9",
@@ -4395,7 +4368,7 @@ dependencies = [
  "camino",
  "dropshot",
  "gateway-client",
- "gateway-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=01f06089a97bd084bec2595d4d62e0f91338cf57)",
+ "gateway-messages",
  "gateway-types",
  "omicron-gateway",
  "omicron-test-utils",
@@ -4422,7 +4395,7 @@ version = "0.1.0"
 dependencies = [
  "daft",
  "dropshot",
- "gateway-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=01f06089a97bd084bec2595d4d62e0f91338cf57)",
+ "gateway-messages",
  "hex",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -6997,7 +6970,7 @@ dependencies = [
  "clap",
  "futures",
  "gateway-client",
- "gateway-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=01f06089a97bd084bec2595d4d62e0f91338cf57)",
+ "gateway-messages",
  "gateway-test-utils",
  "libc",
  "omicron-gateway",
@@ -7707,7 +7680,7 @@ dependencies = [
  "fmd-adm-sys",
  "futures",
  "gateway-client",
- "gateway-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=01f06089a97bd084bec2595d4d62e0f91338cf57)",
+ "gateway-messages",
  "gateway-test-utils",
  "gateway-types",
  "httpmock",
@@ -7839,7 +7812,7 @@ dependencies = [
  "dropshot",
  "futures",
  "gateway-client",
- "gateway-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=01f06089a97bd084bec2595d4d62e0f91338cf57)",
+ "gateway-messages",
  "gateway-test-utils",
  "gateway-types",
  "http",
@@ -8256,7 +8229,7 @@ dependencies = [
  "dropshot",
  "fmd-adm-sys",
  "futures",
- "gateway-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=01f06089a97bd084bec2595d4d62e0f91338cf57)",
+ "gateway-messages",
  "gateway-test-utils",
  "headers",
  "hickory-resolver 0.25.2",
@@ -9113,7 +9086,7 @@ dependencies = [
  "futures",
  "gateway-api",
  "gateway-client",
- "gateway-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=01f06089a97bd084bec2595d4d62e0f91338cf57)",
+ "gateway-messages",
  "gateway-sp-comms",
  "gateway-test-utils",
  "gateway-types",
@@ -9289,7 +9262,7 @@ dependencies = [
  "fmd-adm-sys",
  "futures",
  "gateway-client",
- "gateway-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=01f06089a97bd084bec2595d4d62e0f91338cf57)",
+ "gateway-messages",
  "gateway-test-utils",
  "gateway-types",
  "headers",
@@ -9512,7 +9485,7 @@ dependencies = [
  "fmd-adm-sys",
  "futures",
  "gateway-client",
- "gateway-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=01f06089a97bd084bec2595d4d62e0f91338cf57)",
+ "gateway-messages",
  "gateway-test-utils",
  "gateway-types",
  "http",
@@ -10023,14 +9996,14 @@ dependencies = [
  "futures-sink",
  "futures-task",
  "futures-util",
- "gateway-ereport-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=6c0aca2545a73fd75536e149d29faa7108be5862)",
- "gateway-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=6c0aca2545a73fd75536e149d29faa7108be5862)",
+ "gateway-messages",
  "generic-array 0.14.7",
  "getrandom 0.2.17",
  "getrandom 0.4.3",
  "group 0.13.0",
  "hashbrown 0.15.5",
  "hashbrown 0.16.1",
+ "hashbrown 0.17.0",
  "heck 0.4.1",
  "hex",
  "hickory-proto 0.25.2",
@@ -10141,8 +10114,8 @@ dependencies = [
  "x509-cert",
  "zerocopy 0.8.55",
  "zeroize",
- "zip 0.6.6",
  "zip 4.6.1",
+ "zip 8.6.0",
 ]
 
 [[package]]
@@ -14574,7 +14547,7 @@ dependencies = [
  "either",
  "futures",
  "gateway-client",
- "gateway-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=01f06089a97bd084bec2595d4d62e0f91338cf57)",
+ "gateway-messages",
  "gateway-test-utils",
  "gateway-types",
  "http",
@@ -15064,8 +15037,8 @@ dependencies = [
  "clap",
  "dropshot",
  "futures",
- "gateway-ereport-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=01f06089a97bd084bec2595d4d62e0f91338cf57)",
- "gateway-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=01f06089a97bd084bec2595d4d62e0f91338cf57)",
+ "gateway-ereport-messages",
+ "gateway-messages",
  "gateway-types",
  "hex",
  "hubtools 0.4.9",
@@ -17888,7 +17861,7 @@ dependencies = [
  "fs-err 3.3.0",
  "futures",
  "gateway-client",
- "gateway-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=01f06089a97bd084bec2595d4d62e0f91338cf57)",
+ "gateway-messages",
  "gateway-test-utils",
  "gateway-types",
  "hex",
@@ -18883,7 +18856,6 @@ dependencies = [
  "bzip2 0.4.4",
  "crc32fast",
  "crossbeam-utils",
- "flate2",
 ]
 
 [[package]]
