@@ -213,7 +213,7 @@ pub struct Nexus {
     /// may be served on more to support IPv4 / IPv6 dual-stack deployments.
     /// Servers are created, stored, and closed in the order they're defined in
     /// the provided configuration, with the primary server first, then one
-    /// server for zero or more external addresses.
+    /// server for each additional address.
     external_servers: std::sync::Mutex<Vec<DropshotServer>>,
 
     /// External dropshot server that listens on the internal network to allow

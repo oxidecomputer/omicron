@@ -622,14 +622,15 @@ impl nexus_test_interface::NexusServer for Server {
         self.apictx.context.nexus.get_external_server_primary_address().unwrap()
     }
 
-    fn get_http_server_second_external_address(&self) -> Option<SocketAddr> {
+    /// Return all the external server addresses.
+    ///
+    /// This is always non-empty.
+    fn get_all_http_server_external_addresses(&self) -> Vec<SocketAddr> {
         self.apictx
             .context
             .nexus
             .get_all_external_server_addresses()
             .unwrap()
-            .get(1)
-            .copied()
     }
 
     fn get_http_server_techport_address(&self) -> SocketAddr {

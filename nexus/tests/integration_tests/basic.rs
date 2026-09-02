@@ -571,9 +571,10 @@ async fn test_ping_on_second_external_address() {
             })
             .start::<omicron_nexus::Server>()
             .await;
-    let second_address = cptestctx
+    let second_address = *cptestctx
         .server
-        .get_http_server_second_external_address()
+        .get_all_http_server_external_addresses()
+        .get(1)
         .expect("second external server should be running");
     let second_client =
         ClientTestContext::new(second_address, cptestctx.logctx.log.clone());
