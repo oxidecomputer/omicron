@@ -1177,3 +1177,17 @@ path = "workspace-hack"
 omicron-common = { path = "common" }
 omicron-generation-kinds = { path = "generation-kinds" }
 omicron-uuid-kinds = { path = "uuid-kinds" }
+
+# RFD 662 POC: build against the local maghemite checkout, which carries the
+# v13 multi-router admin API. Replace with a rev bump once that branch is
+# pushed.
+[patch."https://github.com/oxidecomputer/maghemite"]
+mg-admin-client = { path = "../maghemite/mg-admin-client" }
+mg-api-types = { path = "../maghemite/mg-api-types" }
+
+# RFD 662 POC: build against the local opte checkout (nsk/poc-662,
+# API_VERSION 42 router-scoped V2B + per-port router lists). Replace with a
+# rev bump once that branch is pushed.
+[patch."https://github.com/oxidecomputer/opte"]
+opte-ioctl = { path = "../opte/lib/opte-ioctl" }
+oxide-vpc = { path = "../opte/lib/oxide-vpc" }

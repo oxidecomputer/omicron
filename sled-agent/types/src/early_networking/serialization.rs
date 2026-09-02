@@ -51,7 +51,7 @@ use bootstore::schemes::v0 as bootstore;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use sled_agent_types_versions::{
-    latest, v20, v26, v30, v33, v39, v42, v47, v48,
+    latest, v20, v26, v30, v33, v39, v42, v47, v48, v53,
 };
 use slog_error_chain::SlogInlineError;
 
@@ -311,6 +311,7 @@ impl EarlyNetworkConfigEnvelope {
             v42::system_networking::SystemNetworkingConfig,
             v47::system_networking::SystemNetworkingConfig,
             v48::system_networking::SystemNetworkingConfig,
+            v53::system_networking::SystemNetworkingConfig,
         );
         f(self.schema_version, self.body.clone())
     }
@@ -363,3 +364,4 @@ from_body_for_envelope!(v39::system_networking::SystemNetworkingConfig);
 from_body_for_envelope!(v42::system_networking::SystemNetworkingConfig);
 from_body_for_envelope!(v47::system_networking::SystemNetworkingConfig);
 from_body_for_envelope!(v48::system_networking::SystemNetworkingConfig);
+from_body_for_envelope!(v53::system_networking::SystemNetworkingConfig);

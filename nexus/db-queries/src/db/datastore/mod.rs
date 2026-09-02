@@ -126,6 +126,7 @@ pub mod region_snapshot_replacement;
 mod rendezvous_debug_dataset;
 mod rendezvous_sled_bp_availability;
 mod role;
+mod router_configuration;
 mod saga;
 mod scim;
 mod scim_provider_store;

@@ -304,6 +304,24 @@ impl Populator for PopulateFleet {
     }
 }
 
+/// Populates the built-in per-switch router configurations
+#[derive(Debug)]
+struct PopulateBuiltinRouterConfiguration;
+impl Populator for PopulateBuiltinRouterConfiguration {
+    fn populate<'a, 'b>(
+        &self,
+        opctx: &'a OpContext,
+        datastore: &'a DataStore,
+        _args: &'a PopulateArgs,
+    ) -> BoxFuture<'b, Result<(), Error>>
+    where
+        'a: 'b,
+    {
+        async { datastore.load_builtin_router_configuration(opctx).await }
+            .boxed()
+    }
+}
+
 #[derive(Debug)]
 struct PopulateRack;
 impl Populator for PopulateRack {
@@ -321,7 +339,7 @@ impl Populator for PopulateRack {
     }
 }
 
-const ALL_POPULATORS: [&dyn Populator; 9] = [
+const ALL_POPULATORS: [&dyn Populator; 10] = [
     &PopulateBuiltinUsers {},
     &PopulateBuiltinRoleAssignments {},
     &PopulateBuiltinSilos {},
@@ -329,6 +347,7 @@ const ALL_POPULATORS: [&dyn Populator; 9] = [
     &PopulateBuiltinVpcs {},
     &PopulateSiloUsers {},
     &PopulateSiloUserRoleAssignments {},
+    &PopulateBuiltinRouterConfiguration {},
     &PopulateFleet {},
     &PopulateRack {},
 ];

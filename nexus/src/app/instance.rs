@@ -1689,6 +1689,23 @@ impl super::Nexus {
             None
         };
 
+        // The tunnel-router list the instance's OPTE ports are born with. A
+        // silo with no router-configuration assignment gets an empty list —
+        // no tunnel routers, no external egress. The router-lists background
+        // task corrects drift afterwards.
+        let router_list = crate::app::router_configuration::router_list_from_links(
+            self.db_datastore
+                .silo_router_configurations_list(opctx, authz_silo)
+                .await?
+                .into_iter()
+                .map(|link| {
+                    (
+                        *link.priority,
+                        link.router_configuration_id.into_untyped_uuid(),
+                    )
+                }),
+        );
+
         let local_config = sled_agent_client::types::InstanceSledLocalConfig {
             hostname,
             nics,
@@ -1704,6 +1721,7 @@ impl super::Nexus {
             delegated_zvols,
             attached_subnets,
             primary_nic_mtu,
+            router_list,
         };
 
         let instance_id = InstanceUuid::from_untyped_uuid(db_instance.id());

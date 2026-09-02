@@ -22,3 +22,11 @@
 #
 # To deactivate (once the new version is published): set OPTE_COMMIT to "".
 OPTE_COMMIT=""
+
+# RFD 662 POC: OPTE_P5P names a locally built p5p (relative to the omicron
+# root) used instead of OPTE_COMMIT's buildomat download — the nsk/poc-662
+# opte branch is unpushed, so no CI artifact exists. Built with
+# `cargo xtask build --profile all && cargo xtask package --skip-build
+# --profile all` in ../opte and staged into out/ so the voxel cargo-bay
+# carries it into the image build.
+OPTE_P5P="out/opte.p5p"

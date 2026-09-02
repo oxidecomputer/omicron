@@ -70,6 +70,12 @@ pub enum Error {
         "Tried to update attached subnets on non-existent port ({0}, {1:?})"
     )]
     AttachedSubnetUpdateMissingPort(uuid::Uuid, NetworkInterfaceKind),
+
+    #[error("Tried to set a router list on non-existent port for NIC {0}")]
+    RouterListMissingPort(uuid::Uuid),
+
+    #[error("Invalid router list: {0}")]
+    InvalidRouterList(String),
 }
 
 /// Delete all xde devices on the system.

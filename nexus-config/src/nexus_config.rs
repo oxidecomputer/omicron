@@ -416,6 +416,8 @@ pub struct BackgroundTaskConfig {
     pub blueprints: BlueprintTasksConfig,
     /// configuration for the switch port settings manager task
     pub switch_port_settings_manager: SwitchPortSettingsManagerConfig,
+    /// configuration for the per-port router list propagation task
+    pub router_list_propagation: RouterListPropagationConfig,
     /// configuration for region replacement starter task
     pub region_replacement: RegionReplacementConfig,
     /// configuration for region replacement driver task
@@ -764,6 +766,14 @@ pub struct InstanceReincarnationConfig {
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ServiceFirewallPropagationConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RouterListPropagationConfig {
     /// period (in seconds) for periodic activations of this background task
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
@@ -1330,6 +1340,7 @@ mod test {
             blueprints.period_secs_collect_crdb_node_ids = 180
             blueprints.period_secs_load_reconfigurator_config = 5
             switch_port_settings_manager.period_secs = 30
+            router_list_propagation.period_secs = 30
             region_replacement.period_secs = 30
             region_replacement_driver.period_secs = 30
             instance_watcher.period_secs = 30
@@ -1538,6 +1549,10 @@ mod test {
                             SwitchPortSettingsManagerConfig {
                                 period_secs: Duration::from_secs(30),
                             },
+                        router_list_propagation:
+                            RouterListPropagationConfig {
+                                period_secs: Duration::from_secs(30),
+                            },
                         region_replacement: RegionReplacementConfig {
                             period_secs: Duration::from_secs(30),
                         },
@@ -1730,6 +1745,7 @@ mod test {
             blueprints.period_secs_collect_crdb_node_ids = 180
             blueprints.period_secs_load_reconfigurator_config = 5
             switch_port_settings_manager.period_secs = 30
+            router_list_propagation.period_secs = 30
             region_replacement.period_secs = 30
             region_replacement_driver.period_secs = 30
             instance_watcher.period_secs = 30

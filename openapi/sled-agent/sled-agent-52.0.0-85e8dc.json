@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "51.0.0"
+    "version": "52.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -548,6 +548,59 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/router-lists": {
+      "get": {
+        "summary": "List the tunnel-router lists of all OPTE ports on the sled",
+        "operationId": "list_router_lists",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_PortRouterList",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PortRouterList"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "summary": "Set the prioritized tunnel-router list for one OPTE port",
+        "operationId": "set_router_list",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PortRouterList"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -8388,6 +8441,26 @@
           "uplink_port_speed"
         ]
       },
+      "PortRouterList": {
+        "description": "The prioritized tunnel-router list for one OPTE port, addressed by the guest NIC it hosts.",
+        "type": "object",
+        "properties": {
+          "nic_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "routers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouterListEntry"
+            }
+          }
+        },
+        "required": [
+          "nic_id",
+          "routers"
+        ]
+      },
       "PrepareAndCommitRequest": {
         "description": "Request to prepare and commit a trust quorum configuration.\n\nThis is the `Configuration` sent to a node that missed the `Prepare` phase.",
         "type": "object",
@@ -9124,6 +9197,27 @@
         "format": "uint16",
         "minimum": 0,
         "maximum": 9000
+      },
+      "RouterListEntry": {
+        "description": "One entry in a port's prioritized tunnel-router list.",
+        "type": "object",
+        "properties": {
+          "priority": {
+            "description": "Lower value wins length ties during boundary lookup.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "router_id": {
+            "nullable": true,
+            "description": "`None` selects the default router.",
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "priority"
+        ]
       },
       "RouterPeerType": {
         "oneOf": [

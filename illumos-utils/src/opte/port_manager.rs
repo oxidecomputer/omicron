@@ -21,6 +21,7 @@ use omicron_common::address::IPV6_MULTICAST_RANGE;
 use omicron_common::api::external;
 use omicron_common::api::internal::shared::ExternalIpGatewayMap;
 use omicron_common::api::internal::shared::InternetGatewayRouterTarget;
+use omicron_common::api::internal::shared::PortRouterList;
 use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_common::api::internal::shared::PrivateIpv4Config;
 use omicron_common::api::internal::shared::PrivateIpv6Config;
@@ -29,6 +30,7 @@ use omicron_common::api::internal::shared::ResolvedVpcRouteSet;
 use omicron_common::api::internal::shared::ResolvedVpcRouteState;
 use omicron_common::api::internal::shared::RouterId;
 use omicron_common::api::internal::shared::RouterKind;
+use omicron_common::api::internal::shared::RouterListEntry;
 use omicron_common::api::internal::shared::RouterTarget as ApiRouterTarget;
 use omicron_common::api::internal::shared::RouterVersion;
 use omicron_common::api::internal::shared::VirtualNetworkInterfaceHost;
@@ -149,6 +151,9 @@ pub struct PortCreateParams<'a> {
     /// MTU to set on the xde device, in bytes. If `None`, OPTE applies its
     /// default (1500). Used by jumbo-frame opt-in.
     pub mtu: Option<u32>,
+    /// The tunnel-router list the port is born with. Empty means no tunnel
+    /// routers (no external egress) until a list is set.
+    pub router_list: &'a [RouterListEntry],
 }
 
 impl<'a> TryFrom<&PortCreateParams<'a>> for IpCfg {
@@ -374,6 +379,7 @@ impl PortManager {
             dhcp_config,
             attached_subnets: _,
             mtu,
+            router_list,
         } = params;
         let is_service =
             matches!(nic.kind, NetworkInterfaceKind::Service { .. });
@@ -471,6 +477,26 @@ impl PortManager {
         hdl.set_firewall_rules(&oxide_vpc::api::SetFwRulesReq {
             port_name: port_name.clone(),
             rules,
+        })?;
+
+        // Install the port's tunnel-router list before it can pass traffic,
+        // whatever the xde default is: an empty list means no tunnel routers.
+        let tunnel_routers = oxide_vpc::api::RouterList::new(
+            router_list
+                .iter()
+                .map(|entry| (entry.priority, entry.router_id))
+                .collect(),
+        )
+        .map_err(Error::InvalidRouterList)?;
+        debug!(
+            self.inner.log,
+            "Setting port router list";
+            "port_name" => &port_name,
+            "list" => ?&tunnel_routers,
+        );
+        hdl.set_router_list(&oxide_vpc::api::SetRouterListReq {
+            port_name: port_name.clone(),
+            list: tunnel_routers,
         })?;
 
         // Create the default set of routes for a new port.
@@ -963,6 +989,63 @@ impl PortManager {
         Ok(())
     }
 
+    pub fn set_router_list(&self, list: &PortRouterList) -> Result<(), Error> {
+        info!(
+            self.inner.log,
+            "Setting port router list";
+            "list" => ?&list,
+        );
+        let port_name = {
+            let ports = self.inner.ports.lock().unwrap();
+            let Some(port) = ports
+                .iter()
+                .find(|((id, _), _)| *id == list.nic_id)
+                .map(|(_, port)| port)
+            else {
+                return Err(Error::RouterListMissingPort(list.nic_id));
+            };
+            port.name().to_string()
+        };
+        let opte_list = oxide_vpc::api::RouterList::new(
+            list.routers
+                .iter()
+                .map(|entry| (entry.priority, entry.router_id))
+                .collect(),
+        )
+        .map_err(Error::InvalidRouterList)?;
+        let hdl = Handle::new()?;
+        hdl.set_router_list(&oxide_vpc::api::SetRouterListReq {
+            port_name,
+            list: opte_list,
+        })?;
+        Ok(())
+    }
+
+    pub fn list_router_lists(&self) -> Result<Vec<PortRouterList>, Error> {
+        let hdl = Handle::new()?;
+        let ports = self.inner.ports.lock().unwrap();
+        let mut lists = Vec::with_capacity(ports.len());
+        for ((nic_id, _), port) in ports.iter() {
+            let resp =
+                hdl.dump_router_list(&oxide_vpc::api::DumpRouterListReq {
+                    port_name: port.name().to_string(),
+                })?;
+            lists.push(PortRouterList {
+                nic_id: *nic_id,
+                routers: resp
+                    .list
+                    .entries()
+                    .iter()
+                    .map(|(priority, router_id)| RouterListEntry {
+                        priority: *priority,
+                        router_id: *router_id,
+                    })
+                    .collect(),
+            });
+        }
+        Ok(lists)
+    }
+
     pub fn attached_subnets_ensure(
         &self,
         nic_id: Uuid,
@@ -1346,6 +1429,7 @@ mod tests {
                 },
                 attached_subnets: vec![],
                 mtu: None,
+                router_list: &[],
             })
             .unwrap();
 
@@ -1526,6 +1610,7 @@ mod tests {
                 },
                 attached_subnets: vec![],
                 mtu: None,
+                router_list: &[],
             })
             .unwrap();
 
@@ -1698,6 +1783,7 @@ mod tests {
             },
             attached_subnets: vec![],
             mtu: None,
+            router_list: &[],
         };
         let IpCfg::Ipv4(oxide_vpc::api::Ipv4Cfg {
             vpc_subnet,
@@ -1772,6 +1858,7 @@ mod tests {
             },
             attached_subnets: vec![],
             mtu: None,
+            router_list: &[],
         };
         let IpCfg::Ipv6(oxide_vpc::api::Ipv6Cfg {
             vpc_subnet,
@@ -1857,6 +1944,7 @@ mod tests {
             },
             attached_subnets: vec![],
             mtu: None,
+            router_list: &[],
         };
         let IpCfg::DualStack { ipv4, ipv6 } = IpCfg::try_from(&prs).unwrap()
         else {
@@ -1948,6 +2036,7 @@ mod tests {
             },
             attached_subnets: vec![],
             mtu: None,
+            router_list: &[],
         };
         let _ = IpCfg::try_from(&prs).expect_err(
             "Should fail to convert with public IPv6 and private IPv4",
@@ -1995,6 +2084,7 @@ mod tests {
             },
             attached_subnets: vec![],
             mtu: None,
+            router_list: &[],
         };
         let _ = IpCfg::try_from(&prs).expect_err(
             "Should fail to convert with public IPv4 and private IPv6",

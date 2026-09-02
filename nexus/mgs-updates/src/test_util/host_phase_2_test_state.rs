@@ -281,6 +281,7 @@ mod api_impl {
     use sled_agent_types_versions::v42;
     use sled_agent_types_versions::v47;
     use sled_agent_types_versions::v48;
+    use sled_agent_types_versions::v53;
     use sled_diagnostics::SledDiagnosticsQueryOutput;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
@@ -416,6 +417,26 @@ mod api_impl {
                     SvcsEnabledNotOnlineResult::DataUnavailable,
                 reference_measurements: IdOrdMap::new(),
             }))
+        }
+
+        async fn set_router_list(
+            _rqctx: RequestContext<Self::Context>,
+            _body: TypedBody<
+                omicron_common::api::internal::shared::PortRouterList,
+            >,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn list_router_lists(
+            _rqctx: RequestContext<Self::Context>,
+        ) -> Result<
+            HttpResponseOk<
+                Vec<omicron_common::api::internal::shared::PortRouterList>,
+            >,
+            HttpError,
+        > {
+            unimplemented!()
         }
 
         async fn zone_bundle_list_all(
@@ -773,6 +794,13 @@ mod api_impl {
             HttpResponseOk<v20::early_networking::EarlyNetworkConfig>,
             HttpError,
         > {
+            unimplemented!()
+        }
+
+        async fn write_network_bootstore_config_v53(
+            _rqctx: RequestContext<Self::Context>,
+            _body: TypedBody<v53::system_networking::WriteNetworkConfigRequest>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }
 

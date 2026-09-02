@@ -348,6 +348,90 @@ table! {
 }
 
 table! {
+    router_configuration (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        switch -> crate::enums::SwitchSlotEnum,
+        bgp_asn -> Nullable<Int8>,
+        bgp_max_paths -> Nullable<Int2>,
+        bgp_announce_set_id -> Nullable<Uuid>,
+    }
+}
+
+table! {
+    router_configuration_bgp_peer (router_configuration_id, name) {
+        router_configuration_id -> Uuid,
+        name -> Text,
+        addr -> Nullable<Inet>,
+        port_name -> Nullable<Text>,
+        remote_asn -> Nullable<Int8>,
+        allowed_import -> Nullable<Array<Inet>>,
+        allowed_export -> Nullable<Array<Inet>>,
+        hold_time -> Int8,
+        keepalive -> Int8,
+        connect_retry -> Int8,
+        delay_open -> Int8,
+        idle_hold_time -> Int8,
+        local_pref -> Nullable<Int8>,
+        communities -> Array<Int8>,
+        multi_exit_discriminator -> Nullable<Int8>,
+        enforce_first_as -> Bool,
+        md5_auth_key -> Nullable<Text>,
+        min_ttl -> Nullable<Int2>,
+        vlan_id -> Nullable<Int4>,
+        router_lifetime -> Nullable<Int4>,
+    }
+}
+
+table! {
+    router_configuration_static_route (router_configuration_id, name) {
+        router_configuration_id -> Uuid,
+        name -> Text,
+        dst -> Inet,
+        gw -> Inet,
+        rib_priority -> Nullable<Int2>,
+        vlan_id -> Nullable<Int4>,
+    }
+}
+
+table! {
+    router_configuration_bfd_peer (router_configuration_id, name) {
+        router_configuration_id -> Uuid,
+        name -> Text,
+        remote -> Inet,
+        local -> Nullable<Inet>,
+        mode -> crate::enums::BfdModeEnum,
+        detection_threshold -> Int2,
+        required_rx -> Int8,
+    }
+}
+
+table! {
+    silo_router_configuration (silo_id, priority) {
+        silo_id -> Uuid,
+        router_configuration_id -> Uuid,
+        priority -> Int4,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(
+    silo_router_configuration,
+    router_configuration
+);
+joinable!(silo_router_configuration -> router_configuration (router_configuration_id));
+
+table! {
+    control_plane_router_configuration (priority) {
+        priority -> Int4,
+        router_configuration_id -> Nullable<Uuid>,
+    }
+}
+
+table! {
     switch_port_settings_address_config (port_settings_id, address, interface_name) {
         port_settings_id -> Uuid,
         address_lot_block_id -> Uuid,

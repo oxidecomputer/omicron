@@ -20,10 +20,16 @@ use nexus_types::identity::Asset;
 use nexus_types::internal_api::background::IncompleteBootstoreConfigReport;
 use nexus_types::internal_api::background::SwitchPortSettingsManagerStatus;
 use omicron_common::api::external::DataPageParams;
+use omicron_uuid_kinds::GenericUuid;
 use serde_json::json;
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::system_networking::BlueprintExternalNetworkingConfig;
+use sled_agent_types::router_config::{
+    RouterConfigListEntry, SwitchRouterConfigs, default_router_list,
+};
+
+use super::router_config_render;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use sled_agent_types::system_networking::WriteNetworkConfigRequest;
 use slog_error_chain::InlineErrorChain;
@@ -188,42 +194,20 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     }
                 };
 
-                // The construction here is slightly weird - we start with
-                // `blueprint_external_networking_config: None` and then
-                // immediately fill it in. This gives us a non-optional
-                // reference to the config we supplied, which we need below to
-                // call `does_bootstore_need_update()`.
-                let mut desired_config = SystemNetworkingConfig {
-                    rack_network_config,
-                    blueprint_external_networking_config: None,
-                };
-                let desired_blueprint_networking_config = &*desired_config
-                    .blueprint_external_networking_config
-                    .insert(
-                        BlueprintExternalNetworkingConfig {
-                            blueprint_external_networking_generation,
-                            service_zone_nat_entries,
-                        },
-                    );
-
-                // bootstore_needs_update is a boolean value that determines
-                // whether or not we need to increment the bootstore version and
-                // push a new config to the sled agents.
+                // Load the most-recently-written bootstore contents from the
+                // db cache. They are needed twice below: to carry the current
+                // router-config specs forward if rendering fails, and to
+                // decide whether the bootstore needs an update at all.
                 //
-                // * If the config we've built from the switchport configuration
-                //   information is different from the last config we've cached
-                //   in the db, we update the config, cache it in the db, and
-                //   apply it.
-                // * If the last cached config cannot be succesfully
-                //   deserialized into our current bootstore format, we assume
-                //   that it is an older format and update the config,
-                //   cache it in the db, and apply it.
-                // * If there is no last cached config, we assume that this is
-                //   the first time this rpw has run for the given rack, so we
-                //   update the config, cache it in the db, and apply it.
-                // * If we cannot fetch the latest version due to a db error,
-                //   something is broken so we don't do anything.
-                let bootstore_needs_update = match self
+                // * If the cached config cannot be deserialized into our
+                //   current bootstore format, we assume that it is an older
+                //   format; we treat it like a missing config (update
+                //   unconditionally).
+                // * If there is no cached config, this is the first time this
+                //   rpw has run for the given rack; update unconditionally.
+                // * If we cannot fetch it due to a db error, something is
+                //   broken so we don't do anything.
+                let current_contents: Option<SystemNetworkingConfig> = match self
                     .datastore
                     .get_latest_bootstore_config(opctx, NETWORK_KEY.into())
                     .await
@@ -232,14 +216,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         match EarlyNetworkConfigEnvelope::deserialize_from_value(data.clone())
                             .and_then(|envelope| envelope.deserialize_body())
                         {
-                            Ok(config) => {
-                                does_bootstore_need_update(
-                                    &config,
-                                    &desired_config.rack_network_config,
-                                    desired_blueprint_networking_config,
-                                    &log,
-                                )
-                            },
+                            Ok(config) => Some(config),
                             Err(e) => {
                                 error!(
                                     log,
@@ -249,7 +226,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                     "value" => %data,
                                     "error" => %e,
                                 );
-                                true
+                                None
                             },
                         }
                     },
@@ -259,7 +236,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             "no bootstore config found in db";
                             "key" => %NETWORK_KEY,
                         );
-                        true
+                        None
                     },
                     Err(e) => {
                         error!(
@@ -270,6 +247,110 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         );
                         continue;
                     },
+                };
+
+                // Render the router configurations into bootstore specs. If
+                // the render fails, keep the specs already in the bootstore:
+                // the downstream mgd apply is total, so writing a partial
+                // render would tear down routers that merely failed to load.
+                let switch_router_configs =
+                    match router_config_render::render_switch_router_configs(
+                        &self.datastore,
+                        opctx,
+                        &mut status.router_config_render_errors,
+                    )
+                    .await
+                    {
+                        Ok(rendered) => rendered,
+                        Err(e) => {
+                            error!(
+                                log,
+                                "failed to render router configurations; \
+                                 keeping the current bootstore specs";
+                                "error" => %e,
+                            );
+                            status.router_config_render_errors.push(e);
+                            current_contents
+                                .as_ref()
+                                .map(|c| c.switch_router_configs.clone())
+                                .unwrap_or_default()
+                        }
+                    };
+
+                // The control-plane (service port) router list rides the
+                // bootstore so sled-agents can create service ports before
+                // nexus is reachable (boundary NTP). Never configured → the
+                // default list; the NULL-id marker row → explicitly empty.
+                let control_plane_router_list = match self
+                    .datastore
+                    .control_plane_router_configurations_list(opctx)
+                    .await
+                {
+                    Ok(entries) if entries.is_empty() => default_router_list(),
+                    Ok(entries) => {
+                        crate::app::router_configuration::router_list_from_links(
+                            entries.into_iter().filter_map(|e| {
+                                e.router_configuration_id.map(|id| {
+                                    (*e.priority, id.into_untyped_uuid())
+                                })
+                            }),
+                        )
+                        .into_iter()
+                        .map(|e| RouterConfigListEntry {
+                            priority: e.priority,
+                            router_id: e.router_id,
+                        })
+                        .collect()
+                    }
+                    Err(e) => {
+                        error!(
+                            log,
+                            "failed to list control-plane router \
+                             configurations; keeping the current bootstore \
+                             list";
+                            "error" => %DisplayErrorChain::new(&e),
+                        );
+                        current_contents
+                            .as_ref()
+                            .map(|c| c.control_plane_router_list.clone())
+                            .unwrap_or_else(default_router_list)
+                    }
+                };
+
+                // The construction here is slightly weird - we start with
+                // `blueprint_external_networking_config: None` and then
+                // immediately fill it in. This gives us a non-optional
+                // reference to the config we supplied, which we need below to
+                // call `does_bootstore_need_update()`.
+                let mut desired_config = SystemNetworkingConfig {
+                    rack_network_config,
+                    blueprint_external_networking_config: None,
+                    switch_router_configs,
+                    control_plane_router_list,
+                };
+                let desired_blueprint_networking_config = &*desired_config
+                    .blueprint_external_networking_config
+                    .insert(
+                        BlueprintExternalNetworkingConfig {
+                            blueprint_external_networking_generation,
+                            service_zone_nat_entries,
+                        },
+                    );
+
+                // Decide whether we need to increment the bootstore version
+                // and push a new config to the sled agents: only if the config
+                // we've built differs from the last config we've cached in the
+                // db (or there is no usable cached config at all).
+                let bootstore_needs_update = match &current_contents {
+                    Some(config) => does_bootstore_need_update(
+                        config,
+                        &desired_config.rack_network_config,
+                        desired_blueprint_networking_config,
+                        &desired_config.switch_router_configs,
+                        &desired_config.control_plane_router_list,
+                        &log,
+                    ),
+                    None => true,
                 };
 
                 // The following code is designed to give us the following
@@ -439,6 +520,8 @@ fn does_bootstore_need_update(
     current_contents: &SystemNetworkingConfig,
     desired_rack_network_config: &RackNetworkConfig,
     desired_blueprint_networking_config: &BlueprintExternalNetworkingConfig,
+    desired_switch_router_configs: &SwitchRouterConfigs,
+    desired_control_plane_router_list: &[RouterConfigListEntry],
     log: &slog::Logger,
 ) -> bool {
     // We should make our decision based on four boolean values: "is the config
@@ -547,17 +630,32 @@ fn does_bootstore_need_update(
         if rnc_differs { ConfigChanged::Yes } else { ConfigChanged::No }
     };
 
+    // Compute "are there changes" for the router-config specs and the
+    // control-plane router list. Like the rack network config, these carry no
+    // generation number, so we have no way of computing staleness and must
+    // assume they are not out of date.
+    let is_router_config_different = if current_contents.switch_router_configs
+        != *desired_switch_router_configs
+        || current_contents.control_plane_router_list
+            != *desired_control_plane_router_list
+    {
+        ConfigChanged::Yes
+    } else {
+        ConfigChanged::No
+    };
+
     match (
         is_blueprint_out_of_date,
         is_network_config_out_of_date,
         is_blueprint_different,
         is_network_config_different,
+        is_router_config_different,
     ) {
         // If either config is out of date, we must not make changes to avoid
         // overwriting newer data. A future task activation will load a
         // different (and newer) set of desired config.
-        (DesiredConfigOutOfDate::Yes, _, _, _)
-        | (_, DesiredConfigOutOfDate::Yes, _, _) => {
+        (DesiredConfigOutOfDate::Yes, _, _, _, _)
+        | (_, DesiredConfigOutOfDate::Yes, _, _, _) => {
             warn!(
                 log, "skipping bootstore update due to stale data";
                 "is_blueprint_out_of_date" =>
@@ -568,21 +666,32 @@ fn does_bootstore_need_update(
                     is_network_config_out_of_date.as_bool(),
                 "is_network_config_different" =>
                     is_network_config_different.as_bool(),
+                "is_router_config_different" =>
+                    is_router_config_different.as_bool(),
             );
             false
         }
 
-        // If neither config is out of date, has either changed? If so, we do
+        // If neither config is out of date, has any changed? If so, we do
         // need to write new bootstore contents.
         (
             DesiredConfigOutOfDate::No,
             DesiredConfigOutOfDate::No,
             ConfigChanged::Yes,
             _,
+            _,
         )
         | (
             DesiredConfigOutOfDate::No,
             DesiredConfigOutOfDate::No,
+            _,
+            ConfigChanged::Yes,
+            _,
+        )
+        | (
+            DesiredConfigOutOfDate::No,
+            DesiredConfigOutOfDate::No,
+            _,
             _,
             ConfigChanged::Yes,
         ) => {
@@ -592,6 +701,8 @@ fn does_bootstore_need_update(
                     is_network_config_out_of_date.as_bool(),
                 "is_network_config_different" =>
                     is_network_config_different.as_bool(),
+                "is_router_config_different" =>
+                    is_router_config_different.as_bool(),
             );
             true
         }
@@ -602,6 +713,7 @@ fn does_bootstore_need_update(
         (
             DesiredConfigOutOfDate::No,
             DesiredConfigOutOfDate::No,
+            ConfigChanged::No,
             ConfigChanged::No,
             ConfigChanged::No,
         ) => {
@@ -619,6 +731,7 @@ mod tests {
     use omicron_generation_kinds::Generation;
     use omicron_test_utils::dev::test_setup_log;
     use sled_agent_types::early_networking::PortConfig;
+    use sled_agent_types::early_networking::SwitchSlot;
     use sled_agent_types::early_networking::UplinkPorts;
     use sled_agent_types::inventory::SourceNatConfigGeneric;
     use sled_agent_types::system_networking::ServiceZoneNatEntries;
@@ -705,6 +818,8 @@ mod tests {
         SystemNetworkingConfig {
             rack_network_config: rnc,
             blueprint_external_networking_config: blueprint,
+            switch_router_configs: SwitchRouterConfigs::new(),
+            control_plane_router_list: default_router_list(),
         }
     }
 
@@ -723,6 +838,8 @@ mod tests {
             &current,
             &rnc,
             &desired_blueprint,
+            &current.switch_router_configs,
+            &current.control_plane_router_list,
             &logctx.log,
         ));
 
@@ -751,6 +868,8 @@ mod tests {
             &current,
             &rnc,
             &desired_blueprint,
+            &current.switch_router_configs,
+            &current.control_plane_router_list,
             &logctx.log,
         ));
 
@@ -775,6 +894,8 @@ mod tests {
             &current,
             &rnc,
             &desired_blueprint,
+            &current.switch_router_configs,
+            &current.control_plane_router_list,
             &logctx.log,
         ));
 
@@ -809,6 +930,8 @@ mod tests {
             &current,
             &rnc,
             &desired_blueprint,
+            &current.switch_router_configs,
+            &current.control_plane_router_list,
             &logctx.log,
         ));
 
@@ -834,6 +957,8 @@ mod tests {
             &current,
             &desired_rnc,
             &desired_blueprint,
+            &current.switch_router_configs,
+            &current.control_plane_router_list,
             &logctx.log,
         ));
 
@@ -858,6 +983,74 @@ mod tests {
             &current,
             &rnc,
             &desired_blueprint,
+            &current.switch_router_configs,
+            &current.control_plane_router_list,
+            &logctx.log,
+        ));
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn bootstore_update_when_router_configs_differ() {
+        let logctx =
+            test_setup_log("bootstore_update_when_router_configs_differ");
+
+        let rnc = make_rack_network_config("fd00:1122:3344:100::/56");
+        let desired_blueprint =
+            make_blueprint_config(3, make_nat_entries("172.20.26.3"));
+        let current = make_system_networking_config(
+            rnc.clone(),
+            Some(desired_blueprint.clone()),
+        );
+
+        let mut desired_router_configs = SwitchRouterConfigs::new();
+        desired_router_configs.insert(SwitchSlot::Switch0, Vec::new());
+        assert_ne!(current.switch_router_configs, desired_router_configs);
+
+        assert!(does_bootstore_need_update(
+            &current,
+            &rnc,
+            &desired_blueprint,
+            &desired_router_configs,
+            &current.control_plane_router_list,
+            &logctx.log,
+        ));
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn bootstore_update_when_control_plane_router_list_differs() {
+        let logctx = test_setup_log(
+            "bootstore_update_when_control_plane_router_list_differs",
+        );
+
+        let rnc = make_rack_network_config("fd00:1122:3344:100::/56");
+        let desired_blueprint =
+            make_blueprint_config(3, make_nat_entries("172.20.26.3"));
+        let current = make_system_networking_config(
+            rnc.clone(),
+            Some(desired_blueprint.clone()),
+        );
+
+        let desired_list = vec![
+            RouterConfigListEntry {
+                priority: 500,
+                router_id: Some(
+                    "4f9c2ea1-53a3-4b76-9cf8-7f2be4e3e6c1".parse().unwrap(),
+                ),
+            },
+            RouterConfigListEntry { priority: 1000, router_id: None },
+        ];
+        assert_ne!(current.control_plane_router_list, desired_list);
+
+        assert!(does_bootstore_need_update(
+            &current,
+            &rnc,
+            &desired_blueprint,
+            &current.switch_router_configs,
+            &desired_list,
             &logctx.log,
         ));
 

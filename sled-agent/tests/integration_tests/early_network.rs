@@ -10,13 +10,19 @@ use omicron_common::api::external::Vni;
 use omicron_generation_kinds::Generation;
 use omicron_test_utils::dev::test_setup_log;
 use sled_agent_types::early_networking::{
-    BgpConfig, BgpPeerConfig, EarlyNetworkConfigEnvelope, ImportExportPolicy,
-    LinkFec, LinkSpeed, LldpAdminStatus, LldpPortConfig, MaxPathConfig,
-    NumberedRouter, PortConfig, RackNetworkConfig, RouterLifetimeConfig,
-    SwitchSlot, UnnumberedRouter, UplinkAddress, UplinkAddressConfig,
-    UplinkPorts,
+    BfdMode, BgpConfig, BgpPeerConfig, EarlyNetworkConfigEnvelope,
+    ImportExportPolicy, LinkFec, LinkSpeed, LldpAdminStatus, LldpPortConfig,
+    MaxPathConfig, NumberedRouter, PortConfig, RackNetworkConfig,
+    RouterLifetimeConfig, SwitchSlot, UnnumberedRouter, UplinkAddress,
+    UplinkAddressConfig, UplinkPorts,
 };
 use sled_agent_types::inventory::SourceNatConfigGeneric;
+use sled_agent_types::router_config::{
+    RouterConfigBfdPeer, RouterConfigBgpPeer, RouterConfigBgpPeerParameters,
+    RouterConfigBgpSpec, RouterConfigListEntry, RouterConfigSpec,
+    RouterConfigStaticRoute4, RouterConfigStaticRoute6,
+    RouterConfigUnnumberedBgpPeer,
+};
 use sled_agent_types::system_networking::{
     BlueprintExternalNetworkingConfig, ServiceZoneNatEntries,
     ServiceZoneNatEntry, ServiceZoneNatKind, SystemNetworkingConfig,
@@ -135,7 +141,7 @@ fn early_network_blobs_deserialize() {
 /// future, older blobs can still be deserialized correctly.
 fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
     // NOTE: the description must not contain commas or newlines.
-    let description = "2026-08-20 v48";
+    let description = "2026-09-02 router configs in bootstore";
     let config = EarlyNetworkConfigEnvelope::from(&SystemNetworkingConfig {
         rack_network_config: RackNetworkConfig {
             rack_subnet: "fd00:1122:3344:100::/56".parse().unwrap(),
@@ -424,6 +430,97 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                 .expect("valid service zone NAT entries"),
             },
         ),
+        switch_router_configs: [(
+            SwitchSlot::Switch0,
+            vec![RouterConfigSpec {
+                name: "transit".to_owned(),
+                id: "4f9c2ea1-53a3-4b76-9cf8-7f2be4e3e6c1".parse().unwrap(),
+                bgp: Some(RouterConfigBgpSpec {
+                    asn: 65010,
+                    originate: vec!["172.20.60.0/24".parse().unwrap()],
+                    max_paths: std::num::NonZeroU8::new(2),
+                    checker: Some("fn open(msg) { \"accept\" }".to_owned()),
+                    shaper: None,
+                    peers: vec![RouterConfigBgpPeer {
+                        name: "upstream0".to_owned(),
+                        addr: "172.20.15.51".parse().unwrap(),
+                        parameters: RouterConfigBgpPeerParameters {
+                            hold_time: 6,
+                            idle_hold_time: 3,
+                            delay_open: 3,
+                            connect_retry: 3,
+                            keepalive: 2,
+                            remote_asn: Some(65011),
+                            min_ttl: None,
+                            md5_auth_key: None,
+                            multi_exit_discriminator: None,
+                            communities: vec![100, 200],
+                            local_pref: Some(100),
+                            enforce_first_as: false,
+                            vlan_id: None,
+                            allowed_import: Some(vec![
+                                "172.20.0.0/16".parse().unwrap(),
+                            ]),
+                            allowed_export: None,
+                        },
+                    }],
+                    unnumbered_peers: vec![RouterConfigUnnumberedBgpPeer {
+                        name: "upstream1".to_owned(),
+                        port: "qsfp1".to_owned(),
+                        router_lifetime: 9000,
+                        parameters: RouterConfigBgpPeerParameters {
+                            hold_time: 6,
+                            idle_hold_time: 3,
+                            delay_open: 3,
+                            connect_retry: 3,
+                            keepalive: 2,
+                            remote_asn: None,
+                            min_ttl: Some(255),
+                            md5_auth_key: None,
+                            multi_exit_discriminator: None,
+                            communities: Vec::new(),
+                            local_pref: None,
+                            enforce_first_as: false,
+                            vlan_id: None,
+                            allowed_import: None,
+                            allowed_export: Some(vec![
+                                "172.20.60.0/24".parse().unwrap(),
+                            ]),
+                        },
+                    }],
+                }),
+                static4: vec![RouterConfigStaticRoute4 {
+                    prefix: "172.20.70.0/24".parse().unwrap(),
+                    nexthop: "172.20.15.49".parse().unwrap(),
+                    vlan_id: None,
+                    rib_priority: 1,
+                }],
+                static6: vec![RouterConfigStaticRoute6 {
+                    prefix: "fd00:99::/64".parse().unwrap(),
+                    nexthop: "fe80::1".parse().unwrap(),
+                    vlan_id: Some(2),
+                    rib_priority: 1,
+                }],
+                bfd_peers: vec![RouterConfigBfdPeer {
+                    peer: "172.20.15.51".parse().unwrap(),
+                    listen: "0.0.0.0".parse().unwrap(),
+                    required_rx: 100_000,
+                    detection_threshold: std::num::NonZeroU8::new(3).unwrap(),
+                    mode: BfdMode::SingleHop,
+                }],
+            }],
+        )]
+        .into_iter()
+        .collect(),
+        control_plane_router_list: vec![
+            RouterConfigListEntry {
+                priority: 500,
+                router_id: Some(
+                    "4f9c2ea1-53a3-4b76-9cf8-7f2be4e3e6c1".parse().unwrap(),
+                ),
+            },
+            RouterConfigListEntry { priority: 1000, router_id: None },
+        ],
     });
 
     (description, config)

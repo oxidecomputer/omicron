@@ -1458,6 +1458,10 @@ pub struct SwitchPortSettingsManagerStatus {
     /// Racks skipped because a complete bootstore network config could not be
     /// built from their switch port settings.
     pub incomplete_bootstore_configs: Vec<IncompleteBootstoreConfigReport>,
+    /// Problems encountered while rendering router configurations into
+    /// bootstore specs. A fatal problem keeps the previously-written specs.
+    #[serde(default)]
+    pub router_config_render_errors: Vec<String>,
 }
 
 /// A rack that `sync_switch_configuration` skipped because its bootstore network

@@ -81,7 +81,23 @@ if PKG_FROZEN=$(pkg freeze | grep driver/network/opte); then
     pfexec pkg unfreeze driver/network/opte
 fi
 
-if [[ "x$OPTE_COMMIT" != "x" ]]; then
+if [[ "x${OPTE_P5P:-}" != "x" && -f "$OMICRON_TOP/$OPTE_P5P" ]]; then
+    # RFD 662 POC: install from a locally built p5p staged in the repo
+    # (see tools/opte_version_override). Pin to the exact version in the p5p;
+    # otherwise, if its deps are unsatisfiable, the solver silently falls back
+    # to whatever the network repo publishes.
+    P5P_VERSION="$(pkgrepo list -s "$OMICRON_TOP/$OPTE_P5P" -H driver/network/opte | awk '{ print $NF }')"
+    RC=0
+    pfexec pkg install -g "$OMICRON_TOP/$OPTE_P5P" pkg://helios/driver/network/opte@"$P5P_VERSION" || RC=$?
+    if [[ "$RC" -eq 0 ]]; then
+        echo "xde driver installed from local p5p $OPTE_P5P"
+    elif [[ "$RC" -eq 4 ]]; then
+        echo "Correct xde driver already installed"
+    else
+        echo "Installing xde driver from local p5p failed"
+        exit "$RC"
+    fi
+elif [[ "x$OPTE_COMMIT" != "x" ]]; then
     # Install from the override p5p archive built by OPTE CI. The p5p
     # contains exactly one version (built from $OPTE_COMMIT), which
     # generally won't match the canonical $OPTE_VERSION, so we let pkg

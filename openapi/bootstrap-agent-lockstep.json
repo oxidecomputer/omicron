@@ -1485,133 +1485,11 @@
         "minimum": 1,
         "maximum": 32
       },
-      "MgdBfdOperationFailure": {
-        "description": "Description of a failure to perform some mgd operation on a BFD peer.",
-        "type": "object",
-        "properties": {
-          "error": {
-            "type": "string"
-          },
-          "peer": {
-            "type": "string",
-            "format": "ip"
-          }
-        },
-        "required": [
-          "error",
-          "peer"
-        ]
-      },
-      "MgdBfdReconcilerStatus": {
-        "description": "Status of reconciling BFD settings with `mgd`.",
+      "MgdReconcilerStatus": {
+        "description": "Status of the `mgd` scrimlet reconciler.\n\nmgd is configured declaratively: each reconciliation sends one `multi_router_apply` request carrying the complete desired router list for this switch, so the status reflects that single request.",
         "oneOf": [
           {
-            "description": "Reconciliation failed because we couldn't fetch the current set of BFD peers from mgd.",
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
-                  "failed_reading_bfd_peers"
-                ]
-              },
-              "value": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "status",
-              "value"
-            ]
-          },
-          {
-            "description": "Reconciliation completed.",
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
-                  "complete"
-                ]
-              },
-              "value": {
-                "type": "object",
-                "properties": {
-                  "add_failure": {
-                    "type": "array",
-                    "items": {
-                      "$ref": "#/components/schemas/MgdBfdOperationFailure"
-                    }
-                  },
-                  "add_success": {
-                    "type": "array",
-                    "items": {
-                      "type": "string",
-                      "format": "ip"
-                    }
-                  },
-                  "remove_failure": {
-                    "type": "array",
-                    "items": {
-                      "$ref": "#/components/schemas/MgdBfdOperationFailure"
-                    }
-                  },
-                  "remove_success": {
-                    "type": "array",
-                    "items": {
-                      "type": "string",
-                      "format": "ip"
-                    }
-                  },
-                  "unchanged": {
-                    "type": "array",
-                    "items": {
-                      "type": "string",
-                      "format": "ip"
-                    },
-                    "uniqueItems": true
-                  }
-                },
-                "required": [
-                  "add_failure",
-                  "add_success",
-                  "remove_failure",
-                  "remove_success",
-                  "unchanged"
-                ]
-              }
-            },
-            "required": [
-              "status",
-              "value"
-            ]
-          }
-        ]
-      },
-      "MgdBgpReconcilerStatus": {
-        "description": "Status of reconciling BGP settings with `mgd`.",
-        "oneOf": [
-          {
-            "description": "Reconciliation failed because we couldn't fetch the current BGP configuration from MGD.",
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
-                  "failed_reading_bgp_config"
-                ]
-              },
-              "value": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "status",
-              "value"
-            ]
-          },
-          {
-            "description": "Reconciliation failed because we couldn't generate a desired config from the bootstore.\n\nThis should never happen - it indicates there's faulty data in the persisted config.",
+            "description": "Reconciliation was skipped because we couldn't render a desired router set from the bootstore contents.\n\nThis should never happen - it indicates there's faulty data in the persisted config.",
             "type": "object",
             "properties": {
               "status": {
@@ -1630,437 +1508,59 @@
             ]
           },
           {
-            "description": "Reconciliation completed.\n\nmgd operations are performed in bulk, so `counts` contains the number of items involved.",
+            "description": "The apply request to mgd failed.",
             "type": "object",
             "properties": {
               "status": {
                 "type": "string",
                 "enum": [
-                  "complete"
+                  "failed_applying"
                 ]
               },
               "value": {
                 "type": "object",
                 "properties": {
-                  "counts": {
-                    "$ref": "#/components/schemas/MgdBgpReconcilerStatusOpCount"
+                  "error": {
+                    "type": "string"
                   },
-                  "did_change_max_paths": {
-                    "type": "boolean"
-                  },
-                  "errors": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  }
-                },
-                "required": [
-                  "counts",
-                  "did_change_max_paths",
-                  "errors"
-                ]
-              }
-            },
-            "required": [
-              "status",
-              "value"
-            ]
-          }
-        ]
-      },
-      "MgdBgpReconcilerStatusOpCount": {
-        "description": "Count of operations performed while reconciling BGP settings with mgd.",
-        "type": "object",
-        "properties": {
-          "checkers_created": {
-            "type": "integer",
-            "format": "uint",
-            "minimum": 0
-          },
-          "checkers_deleted": {
-            "type": "integer",
-            "format": "uint",
-            "minimum": 0
-          },
-          "checkers_updated": {
-            "type": "integer",
-            "format": "uint",
-            "minimum": 0
-          },
-          "numbered_peers_created": {
-            "type": "integer",
-            "format": "uint",
-            "minimum": 0
-          },
-          "numbered_peers_deleted": {
-            "type": "integer",
-            "format": "uint",
-            "minimum": 0
-          },
-          "numbered_peers_updated": {
-            "type": "integer",
-            "format": "uint",
-            "minimum": 0
-          },
-          "origin4_created": {
-            "type": "integer",
-            "format": "uint",
-            "minimum": 0
-          },
-          "origin4_deleted": {
-            "type": "integer",
-            "format": "uint",
-            "minimum": 0
-          },
-          "origin4_updated": {
-            "type": "integer",
-            "format": "uint",
-            "minimum": 0
-          },
-          "origin6_created": {
-            "type": "integer",
-            "format": "uint",
-            "minimum": 0
-          },
-          "origin6_deleted": {
-            "type": "integer",
-            "format": "uint",
-            "minimum": 0
-          },
-          "origin6_updated": {
-            "type": "integer",
-            "format": "uint",
-            "minimum": 0
-          },
-          "routers_created": {
-            "type": "integer",
-            "format": "uint",
-            "minimum": 0
-          },
-          "routers_deleted": {
-            "type": "integer",
-            "format": "uint",
-            "minimum": 0
-          },
-          "routers_updated": {
-            "type": "integer",
-            "format": "uint",
-            "minimum": 0
-          },
-          "shapers_created": {
-            "type": "integer",
-            "format": "uint",
-            "minimum": 0
-          },
-          "shapers_deleted": {
-            "type": "integer",
-            "format": "uint",
-            "minimum": 0
-          },
-          "shapers_updated": {
-            "type": "integer",
-            "format": "uint",
-            "minimum": 0
-          },
-          "unnumbered_peers_created": {
-            "type": "integer",
-            "format": "uint",
-            "minimum": 0
-          },
-          "unnumbered_peers_deleted": {
-            "type": "integer",
-            "format": "uint",
-            "minimum": 0
-          },
-          "unnumbered_peers_updated": {
-            "type": "integer",
-            "format": "uint",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "checkers_created",
-          "checkers_deleted",
-          "checkers_updated",
-          "numbered_peers_created",
-          "numbered_peers_deleted",
-          "numbered_peers_updated",
-          "origin4_created",
-          "origin4_deleted",
-          "origin4_updated",
-          "origin6_created",
-          "origin6_deleted",
-          "origin6_updated",
-          "routers_created",
-          "routers_deleted",
-          "routers_updated",
-          "shapers_created",
-          "shapers_deleted",
-          "shapers_updated",
-          "unnumbered_peers_created",
-          "unnumbered_peers_deleted",
-          "unnumbered_peers_updated"
-        ]
-      },
-      "MgdReconcilerStatus": {
-        "description": "Status of the `mgd` scrimlet reconciler.",
-        "type": "object",
-        "properties": {
-          "bfd_status": {
-            "$ref": "#/components/schemas/MgdBfdReconcilerStatus"
-          },
-          "bgp_status": {
-            "$ref": "#/components/schemas/MgdBgpReconcilerStatus"
-          },
-          "static_routes_status": {
-            "$ref": "#/components/schemas/MgdStaticRouteReconcilerStatus"
-          }
-        },
-        "required": [
-          "bfd_status",
-          "bgp_status",
-          "static_routes_status"
-        ]
-      },
-      "MgdStaticRouteReconcilerStatus": {
-        "description": "Status of reconciling static routes with `mgd`.",
-        "oneOf": [
-          {
-            "description": "Reconciliation failed because we couldn't fetch the current set of static routes from MGD.",
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
-                  "failed_reading_static_routes"
-                ]
-              },
-              "value": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "status",
-              "value"
-            ]
-          },
-          {
-            "description": "Reconciliation failed because we couldn't determine a plan for changes to make.\n\nThis should never happen - it indicates there's some faulty data somewhere (either coming from mgd or in the rack network config).",
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
-                  "failed_generating_plan"
-                ]
-              },
-              "value": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "status",
-              "value"
-            ]
-          },
-          {
-            "description": "Reconciliation completed.\n\nmgd operations are performed in bulk, so each item here contains the count of items involved (on success) or the error associated with the bulk operation (on failure).",
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
-                  "complete"
-                ]
-              },
-              "value": {
-                "type": "object",
-                "properties": {
-                  "add_v4_result": {
-                    "x-rust-type": {
-                      "crate": "std",
-                      "parameters": [
-                        {
-                          "format": "uint",
-                          "minimum": 0.0,
-                          "type": "integer"
-                        },
-                        {
-                          "type": "string"
-                        }
-                      ],
-                      "path": "::std::result::Result",
-                      "version": "*"
-                    },
-                    "oneOf": [
-                      {
-                        "type": "object",
-                        "properties": {
-                          "ok": {
-                            "type": "integer",
-                            "format": "uint",
-                            "minimum": 0
-                          }
-                        },
-                        "required": [
-                          "ok"
-                        ]
-                      },
-                      {
-                        "type": "object",
-                        "properties": {
-                          "err": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "err"
-                        ]
-                      }
-                    ]
-                  },
-                  "add_v6_result": {
-                    "x-rust-type": {
-                      "crate": "std",
-                      "parameters": [
-                        {
-                          "format": "uint",
-                          "minimum": 0.0,
-                          "type": "integer"
-                        },
-                        {
-                          "type": "string"
-                        }
-                      ],
-                      "path": "::std::result::Result",
-                      "version": "*"
-                    },
-                    "oneOf": [
-                      {
-                        "type": "object",
-                        "properties": {
-                          "ok": {
-                            "type": "integer",
-                            "format": "uint",
-                            "minimum": 0
-                          }
-                        },
-                        "required": [
-                          "ok"
-                        ]
-                      },
-                      {
-                        "type": "object",
-                        "properties": {
-                          "err": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "err"
-                        ]
-                      }
-                    ]
-                  },
-                  "delete_v4_result": {
-                    "x-rust-type": {
-                      "crate": "std",
-                      "parameters": [
-                        {
-                          "format": "uint",
-                          "minimum": 0.0,
-                          "type": "integer"
-                        },
-                        {
-                          "type": "string"
-                        }
-                      ],
-                      "path": "::std::result::Result",
-                      "version": "*"
-                    },
-                    "oneOf": [
-                      {
-                        "type": "object",
-                        "properties": {
-                          "ok": {
-                            "type": "integer",
-                            "format": "uint",
-                            "minimum": 0
-                          }
-                        },
-                        "required": [
-                          "ok"
-                        ]
-                      },
-                      {
-                        "type": "object",
-                        "properties": {
-                          "err": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "err"
-                        ]
-                      }
-                    ]
-                  },
-                  "delete_v6_result": {
-                    "x-rust-type": {
-                      "crate": "std",
-                      "parameters": [
-                        {
-                          "format": "uint",
-                          "minimum": 0.0,
-                          "type": "integer"
-                        },
-                        {
-                          "type": "string"
-                        }
-                      ],
-                      "path": "::std::result::Result",
-                      "version": "*"
-                    },
-                    "oneOf": [
-                      {
-                        "type": "object",
-                        "properties": {
-                          "ok": {
-                            "type": "integer",
-                            "format": "uint",
-                            "minimum": 0
-                          }
-                        },
-                        "required": [
-                          "ok"
-                        ]
-                      },
-                      {
-                        "type": "object",
-                        "properties": {
-                          "err": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "err"
-                        ]
-                      }
-                    ]
-                  },
-                  "unchanged": {
+                  "routers": {
                     "type": "integer",
                     "format": "uint",
                     "minimum": 0
                   }
                 },
                 "required": [
-                  "add_v4_result",
-                  "add_v6_result",
-                  "delete_v4_result",
-                  "delete_v6_result",
-                  "unchanged"
+                  "error",
+                  "routers"
+                ]
+              }
+            },
+            "required": [
+              "status",
+              "value"
+            ]
+          },
+          {
+            "description": "The complete desired router list was applied.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "success"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "routers": {
+                    "type": "integer",
+                    "format": "uint",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "routers"
                 ]
               }
             },
