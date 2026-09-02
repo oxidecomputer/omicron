@@ -2357,11 +2357,21 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    /// Fetch information about most recent target blueprints
+    /// Fetch information about most recent target blueprints to determine which
+    /// former target blueprints can be deleted while keeping `nkeep` distinct
+    /// blueprint ids in the database for debugging purposes
     ///
-    /// This looks at the most recent rows from the `bp_target` table and
-    /// determines which version(s) can be deleted, assuming we want to keep
-    /// `nkeep` distinct blueprints.
+    /// In practice, pruning what this function determines to be pruneable
+    /// should ensure that the database is left with the most recent `nkeep`
+    /// distinct blueprints as long as it had at least `nkeep` blueprints in it
+    /// to begin with.  This includes systems where the blueprint pruner has run
+    /// as well as those where `omdb reconfigurator archive` was run.  However,
+    /// if for some reason some of the `nkeep` blueprint ids correspond to
+    /// blueprints that are missing but earlier ones are not (because somebody
+    /// ran `omdb nexus blueprints delete` or something like that), then this
+    /// function would report that more blueprints were pruneable than is
+    /// accurate.  This has no impact on the system.  It just means we'd have
+    /// less debugging data than we'd want in that (very unusual) case.
     // This could arguably live in the pruner itself, which could build it atop
     // a public `bp_target_list_page`.  It lives here instead because it goes
     // with `bp_target_delete_up_to`, and that _can't_ be built atop a
@@ -2515,53 +2525,45 @@ impl DataStore {
             }
         }
 
-        #[derive(Debug, Error)]
-        enum TargetDeleteError {
-            #[error("database error")]
-            Diesel(#[from] DieselError),
-
-            #[error("cannot delete latest bp_target row")]
-            LastRow,
-        }
-
         // Although the Rust interface makes it hard to invoke this in a way
         // that would prune the last rows in the table, since the consequences
         // would be so dire, we use a transaction to ensure that we're not
         // doing that.
         let conn = self.pool_connection_authorized(&opctx).await?;
+        let err = OptionalError::new();
         let ndeleted = self
-            .transaction_non_retry_wrapper("bp_target_delete")
-            .transaction(&conn, |conn| async move {
-                use nexus_db_schema::schema::bp_target::dsl;
-                let latest_version: SqlU32 = dsl::bp_target
-                    .select(dsl::version)
-                    .order_by(dsl::version.desc())
-                    .limit(1)
-                    .first_async(&conn)
+            .transaction_retry_wrapper("bp_target_delete")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                async move {
+                    use nexus_db_schema::schema::bp_target::dsl;
+                    let latest_version: SqlU32 = dsl::bp_target
+                        .select(dsl::version)
+                        .order_by(dsl::version.desc())
+                        .limit(1)
+                        .first_async(&conn)
+                        .await?;
+
+                    let err = err.clone();
+                    if version >= *latest_version {
+                        return Err(err.bail(Error::internal_error(
+                            "cannot delete latest bp_target row",
+                        )));
+                    }
+
+                    let ndeleted = diesel::delete(
+                        dsl::bp_target.filter(dsl::version.le(SqlU32(version))),
+                    )
+                    .execute_async(&conn)
                     .await?;
 
-                if version >= *latest_version {
-                    return Err(TargetDeleteError::LastRow);
+                    Ok(ndeleted)
                 }
-
-                let ndeleted = diesel::delete(
-                    dsl::bp_target.filter(dsl::version.le(SqlU32(version))),
-                )
-                .execute_async(&conn)
-                .await?;
-
-                Ok(ndeleted)
             })
             .await
-            .map_err(|e| match e {
-                TargetDeleteError::Diesel(e) => {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                }
-                e @ TargetDeleteError::LastRow => {
-                    // This variant is always an internal error and has no
-                    // causes so we don't need to use InlineErrorChain here.
-                    Error::internal_error(&e.to_string())
-                }
+            .map_err(|e| match err.take() {
+                Some(inside_error) => inside_error,
+                None => public_error_from_diesel(e, ErrorHandler::Server),
             })?;
 
         Ok(ndeleted)
@@ -4959,9 +4961,8 @@ mod tests {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        // With no rows at all, we report an internal error.  This should be
-        // impossible on a real system, where RSS always sets an initial target
-        // blueprint before any of this code can run.
+        // With no rows at all, we report an internal error.  On a real system,
+        // this should only be possible before RSS has completed.
         let error = datastore
             .bp_target_determine_pruneable(opctx, nonzero(3))
             .await

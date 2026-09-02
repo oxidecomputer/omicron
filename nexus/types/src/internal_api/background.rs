@@ -931,8 +931,11 @@ pub struct BlueprintPrunerDetails {
     pub ntargets_removable: usize,
     /// count of `bp_target` rows deleted
     pub ntargets_deleted: usize,
-    /// warnings encountered while pruning
-    pub warnings: Vec<String>,
+    /// errors encountered while pruning
+    ///
+    /// Note that errors may have been encountered while some blueprints and
+    /// `bp_target` rows were also deleted.
+    pub errors: Vec<String>,
 }
 
 impl std::fmt::Display for BlueprintPrunerDetails {
@@ -953,8 +956,8 @@ impl std::fmt::Display for BlueprintPrunerDetails {
                 humantime::format_rfc3339_millis(b.time_made_target.into())
             )?;
         }
-        writeln!(f, "    warnings: {}", self.warnings.len())?;
-        for w in &self.warnings {
+        writeln!(f, "    errors: {}", self.errors.len())?;
+        for w in &self.errors {
             writeln!(f, "        {}", w)?;
         }
         Ok(())
@@ -972,7 +975,7 @@ impl slog::KV for BlueprintPrunerDetails {
             deleted,
             ntargets_removable,
             ntargets_deleted,
-            warnings,
+            errors,
         } = self;
 
         serializer
@@ -984,7 +987,7 @@ impl slog::KV for BlueprintPrunerDetails {
         // slog does not support nested values out-of-the-box so we settle for
         // just the counts for now.
         serializer.emit_usize(Key::from("ndeleted"), deleted.len())?;
-        serializer.emit_usize(Key::from("nwarnings"), warnings.len())?;
+        serializer.emit_usize(Key::from("nerrors"), errors.len())?;
         Ok(())
     }
 }
@@ -1683,7 +1686,7 @@ mod test {
             ntargets_deleted: 17,
             ntargets_removable: 18,
             nkept_by_policy: 12,
-            warnings: vec![String::from("fake-oh problem-oh")],
+            errors: vec![String::from("fake-oh problem-oh")],
         };
         let status = BlueprintPrunerStatus::Enabled(details);
 

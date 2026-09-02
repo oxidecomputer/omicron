@@ -36,7 +36,7 @@
 //!
 //! - Old blueprints that were never made the target.
 //!
-//!   - One way this can happen is if the autoplanner (the `blueprint_plan`
+//!   - One way this can happen is if the autoplanner (the `blueprint_planner`
 //!     task) creates a blueprint, tries to make it the target, but that
 //!     fails (usually because another Nexus's autoplanner beat it to the
 //!     punch).  In this case, though, the autoplanner usually deletes the
@@ -257,16 +257,16 @@ async fn prune_blueprints(
                 deleted: vec![],
                 ntargets_deleted: 0,
                 ntargets_removable: 0,
-                warnings: vec![],
+                errors: vec![],
             });
         }
         KeepWhat::StartingFromVersion(version) => {
             info!(
                 log,
-                "will prune blueprints up through version";
+                "identified blueprints to avoid pruning";
                 "nfound" => pruneable.nfound,
                 "nscanned" => pruneable.nscanned,
-                "version" => version,
+                "keep_starting_at_version" => version,
             );
 
             *version
@@ -359,7 +359,7 @@ impl PruneTracker {
             deleted: self.deleted,
             ntargets_removable: self.ntargets_removable,
             ntargets_deleted: self.ntargets_deleted,
-            warnings: self
+            errors: self
                 .errors
                 .into_iter()
                 .map(|e| InlineErrorChain::new(&*e).to_string())
@@ -557,7 +557,7 @@ impl BatchTracker {
 
     /// Record an error.  The error winds up in the top-level `PruneTracker`.
     ///
-    /// This finishes processing of the batch, returning a `BatchPruneResult`
+    /// This finishes processing of the batch, returning a `BatchResult`
     /// summarizing the work done.
     pub fn record_error(mut self, error: anyhow::Error) -> BatchResult {
         self.pop = self.pop.record_error(error);
@@ -1111,7 +1111,7 @@ mod test {
         .expect("successful prune");
         println!("{details:?}");
         // Verify no problems encountered.
-        assert!(details.warnings.is_empty());
+        assert!(details.errors.is_empty());
         // Verify that whatever blueprints we deleted were the oldest ones.
         let deleted = if !details.deleted.is_empty() {
             let oldest = blueprints.drop_oldest(details.deleted.len());
@@ -1230,7 +1230,7 @@ mod test {
             }
         };
         println!("{details:?}");
-        assert!(details.warnings.is_empty());
+        assert!(details.errors.is_empty());
         assert_eq!(details.nkept_by_policy, nkeep);
         assert_eq!(details.deleted.len(), nblueprints - nkeep);
 
@@ -1422,7 +1422,7 @@ mod test {
         .await
         .expect("successful prune");
         println!("{details:?}");
-        assert!(details.warnings.is_empty());
+        assert!(details.errors.is_empty());
 
         // This is the crux of the test: we should have marked more bp_target
         // rows as removable than blueprints deleted.  And we should have
@@ -1481,7 +1481,7 @@ mod test {
         .await
         .expect("successful prune");
         println!("{details:?}");
-        assert!(details.warnings.is_empty());
+        assert!(details.errors.is_empty());
 
         // This is the crux of the test: the database state should still contain
         // the blueprint id.
@@ -1509,7 +1509,7 @@ mod test {
         .await
         .expect("successful prune");
         println!("{details:?}");
-        assert!(details.warnings.is_empty());
+        assert!(details.errors.is_empty());
         assert_eq!(details.deleted.len(), target_blueprints_before.len() + 1);
 
         // Reload the database state.
@@ -1532,7 +1532,7 @@ mod test {
         )
         .await
         .expect("successful prune");
-        assert!(details.warnings.is_empty());
+        assert!(details.errors.is_empty());
         assert_eq!(details.deleted.len(), 0);
         assert_eq!(details.ntargets_removable, 0);
 
@@ -1584,7 +1584,7 @@ mod test {
         .expect("successful prune");
         println!("{details:?}");
         // Verify no problems encountered.
-        assert!(details.warnings.is_empty());
+        assert!(details.errors.is_empty());
         // Verify that we deleted the oldest blueprints.
         assert_eq!(ndelete, details.deleted.len());
         let oldest = blueprints.drop_oldest(ndelete);
@@ -1642,7 +1642,7 @@ mod test {
         .expect("successful prune");
         println!("{details:?}");
         // Verify no problems encountered.
-        assert!(details.warnings.is_empty());
+        assert!(details.errors.is_empty());
 
         // This is a little tricky:
         //
@@ -1729,7 +1729,7 @@ mod test {
             .await
             .expect("successful prune");
             println!("{details:?}");
-            assert!(details.warnings.is_empty());
+            assert!(details.errors.is_empty());
             assert_eq!(details.nkept_by_policy, nkeep);
             assert_eq!(details.ntargets_removable, 1);
             assert_eq!(details.ntargets_deleted, 1);
@@ -1765,7 +1765,7 @@ mod test {
         .await
         .expect("successful prune");
         println!("{details:?}");
-        assert!(details.warnings.is_empty());
+        assert!(details.errors.is_empty());
         assert!(details.deleted.is_empty());
         assert_eq!(details.ntargets_removable, 0);
         assert_eq!(details.ntargets_deleted, 0);
@@ -1796,12 +1796,17 @@ mod test {
         }
         blueprints.verify_database_matches(opctx, datastore).await;
 
-        // Now, do something terrible: write a new `bp_target` row reflecting
-        // that the an earlier blueprint is now again the target.  The system
-        // should never do this.  However, if we're not careful, this kind of
-        // corruption could cause the pruner to delete the system's current
-        // target blueprint, which would be so bad that we go out of our way to
-        // make sure we never do that.
+        // Under normal conditions, the pruner should never even attempt to
+        // delete the current target blueprint because it always keeps the last
+        // `N` for some non-zero `N`.  Besides that, there are emergency checks
+        // to ensure that even if somehow we got this logic wrong, and the
+        // pruner erroneously determines that we can delete the target
+        // blueprint, then it'd still avoid deleting it.  We want to exercise
+        // those checks here.  We do that by writing a new `bp_target` row
+        // reflecting that the an earlier blueprint is now again the target.
+        // This is invalid, and the system should never do it.  We're doing it
+        // to trick the pruner into finding this blueprint as prunable and
+        // trying to delete it so that we can verify that it cathes itself.
         let first_blueprint_id = blueprints.target_rows[0].id;
         let second_blueprint_id = blueprints.target_rows[1].id;
         let latest_version =
@@ -1840,7 +1845,7 @@ mod test {
         .expect("successful prune");
         println!("{details:?}");
         // Verify that we reported an error.
-        assert!(!details.warnings.is_empty());
+        assert!(!details.errors.is_empty());
         // We ought to have deleted the first blueprint, before we ran into the
         // error.
         assert_eq!(details.deleted.len(), 1);
