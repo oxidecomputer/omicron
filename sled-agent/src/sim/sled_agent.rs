@@ -118,6 +118,20 @@ pub struct SledAgent {
     pub repo_depot: dropshot::HttpServer<ArtifactStore<SimArtifactStorage>>,
     pub log: Logger,
     health_monitor: HealthMonitorHandle,
+    /// Watch channel that sends the deserialized [`SystemNetworkingConfig`]
+    /// whenever Nexus writes a new bootstore config. Only populated for
+    /// scrimlet sleds; used to drive the scrimlet reconcilers.
+    #[cfg(feature = "testing")]
+    network_config_tx: Option<
+        tokio::sync::watch::Sender<
+            sled_agent_types::system_networking::SystemNetworkingConfig,
+        >,
+    >,
+    /// Keeps the scrimlet reconcilers alive once started.
+    #[cfg(feature = "testing")]
+    scrimlet_reconcilers: std::sync::OnceLock<
+        std::sync::Arc<sled_agent_scrimlet_reconcilers::ScrimletReconcilers>,
+    >,
 }
 
 impl SledAgent {
@@ -178,6 +192,28 @@ impl SledAgent {
 
         let health_monitor = HealthMonitorHandle::stub();
 
+        #[cfg(feature = "testing")]
+        let network_config_tx = if config.is_scrimlet {
+            let (tx, _) = tokio::sync::watch::channel(SystemNetworkingConfig {
+                rack_network_config: RackNetworkConfig {
+                    rack_subnet: Ipv6Net::new(Ipv6Addr::UNSPECIFIED, 56)
+                        .unwrap(),
+                    infra_ip_first: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                    infra_ip_last: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                    ports: UplinkPorts::new(vec![PortConfig::empty_for_tests(
+                        "qsfp0",
+                    )])
+                    .expect("placeholder port list is non-empty"),
+                    bgp: Vec::new(),
+                    bfd: Vec::new(),
+                },
+                blueprint_external_networking_config: None,
+            });
+            Some(tx)
+        } else {
+            None
+        };
+
         Arc::new(SledAgent {
             id,
             ip: config.dropshot.bind_address.ip(),
@@ -202,7 +238,91 @@ impl SledAgent {
             log,
             bootstore_network_config,
             health_monitor,
+            #[cfg(feature = "testing")]
+            network_config_tx,
+            #[cfg(feature = "testing")]
+            scrimlet_reconcilers: std::sync::OnceLock::new(),
         })
+    }
+
+    /// Called after every `write_network_bootstore_config_vXX` handler updates
+    /// [`Self::bootstore_network_config`]. No-op when the `testing` feature is
+    /// not enabled or this sled is not a scrimlet.
+    pub(crate) fn notify_network_config_changed(&self) {
+        #[cfg(feature = "testing")]
+        {
+            let Some(tx) = &self.network_config_tx else { return };
+            let config = self.bootstore_network_config.lock().unwrap().clone();
+            match sled_agent_types::early_networking::EarlyNetworkConfigEnvelope::deserialize_from_bootstore(&config)
+                .and_then(|e| e.deserialize_body())
+            {
+                Ok(system_config) => {
+                    tx.send_modify(|c| *c = system_config);
+                }
+                Err(e) => {
+                    slog::warn!(
+                        self.log,
+                        "failed to deserialize bootstore config for \
+                         scrimlet reconcilers (reconcilers may lag)";
+                        "error" => %e,
+                    );
+                }
+            }
+        }
+    }
+
+    /// Start the scrimlet reconcilers pointing at the given switch zone service
+    /// addresses. Must only be called once and only on scrimlet sleds.
+    ///
+    /// Only available under `cfg(feature = "testing")` because it uses
+    /// [`sled_agent_scrimlet_reconcilers::ScrimletReconcilersMode::Test`].
+    #[cfg(feature = "testing")]
+    pub fn start_scrimlet_reconcilers(
+        &self,
+        mgs_addr: std::net::SocketAddr,
+        dpd_addr: std::net::SocketAddr,
+        mgd_addr: std::net::SocketAddr,
+        bgp_dispatcher_addr: std::net::SocketAddr,
+    ) {
+        use sled_agent_scrimlet_reconcilers::{
+            ScrimletReconcilers, ScrimletReconcilersMode, ScrimletStatus,
+            SledAgentNetworkingInfo,
+        };
+
+        let tx = self
+            .network_config_tx
+            .as_ref()
+            .expect("network_config_tx must be Some for scrimlet sleds");
+
+        let reconcilers = ScrimletReconcilers::new(&self.log);
+        reconcilers.set_sled_agent_networking_info_once(
+            SledAgentNetworkingInfo {
+                system_networking_config_rx: tx.subscribe(),
+                mode: ScrimletReconcilersMode::Test {
+                    mgs_addr,
+                    dpd_addr,
+                    mgd_addr,
+                    bgp_dispatcher_addr,
+                },
+            },
+        );
+        reconcilers.set_scrimlet_status(ScrimletStatus::Scrimlet);
+
+        // Store to keep the reconcilers alive. Ignore the error: if called
+        // twice it is a programmer error and we just silently drop the second
+        // set (the first set is already running).
+        let _ = self.scrimlet_reconcilers.set(std::sync::Arc::new(reconcilers));
+    }
+
+    /// Returns the current status of the scrimlet reconcilers, or `None` if
+    /// `start_scrimlet_reconcilers()` has not yet been called.
+    #[cfg(feature = "testing")]
+    pub fn scrimlet_reconcilers_status(
+        &self,
+    ) -> Option<
+        bootstrap_agent_lockstep_types::scrimlet_reconcilers::ScrimletReconcilersStatus,
+    >{
+        self.scrimlet_reconcilers.get().map(|r| r.status())
     }
 
     pub async fn instance_register(
@@ -927,7 +1047,11 @@ impl SledAgent {
         Ok(Inventory {
             sled_id: self.id,
             sled_agent_address,
-            sled_role: SledRole::Scrimlet,
+            sled_role: if self.config.is_scrimlet {
+                SledRole::Scrimlet
+            } else {
+                SledRole::Gimlet
+            },
             baseboard_id: self.config.hardware.baseboard.clone().into(),
             usable_hardware_threads: self.config.hardware.hardware_threads,
             usable_physical_ram: ByteCount::try_from(

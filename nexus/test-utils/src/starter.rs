@@ -162,6 +162,10 @@ pub struct ControlPlaneStarter<'a, N: NexusServer> {
     pub dendrite: RwLock<HashMap<SwitchSlot, dev::dendrite::DendriteInstance>>,
     pub mgd: HashMap<SwitchSlot, dev::maghemite::MgdInstance>,
     pub ddm: HashMap<SwitchSlot, dev::maghemite::DdmInstance>,
+    /// Maps scrimlet sled IDs to their switch slot. Populated by
+    /// `record_switch_dns()` and used by `start_sled()` to configure
+    /// the sled-agent with `is_scrimlet = true` and start reconcilers.
+    scrimlets: BTreeMap<SledUuid, SwitchSlot>,
 
     // NOTE: Only exists after starting Nexus, until external Nexus is
     // initialized.
@@ -225,6 +229,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             dendrite: RwLock::new(HashMap::new()),
             mgd: HashMap::new(),
             ddm: HashMap::new(),
+            scrimlets: BTreeMap::new(),
             nexus_internal: None,
             nexus_internal_addr: None,
             external_dns_zone_name: None,
@@ -508,6 +513,10 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             "sled_id" => %sled_id,
             "switch_slot" => ?switch_slot,
         );
+
+        // Record that this sled is a scrimlet so that `start_sled()` can
+        // configure it with `is_scrimlet = true` and start reconcilers.
+        self.scrimlets.insert(sled_id, switch_slot);
 
         self.rack_init_builder
             .internal_dns_config
@@ -944,6 +953,9 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         let nexus_address =
             self.nexus_internal_addr.expect("Must launch Nexus first");
 
+        let switch_slot = self.scrimlets.get(&sled_id).copied();
+        let is_scrimlet = switch_slot.is_some();
+
         let sled_agent = start_sled_agent(
             self.logctx.log.new(o!(
                 "component" => "omicron_sled_agent::sim::Server",
@@ -954,10 +966,38 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             self.sled_index_allocator.next(),
             sim_mode,
             SledCpuFamily::AmdMilan,
+            is_scrimlet,
             &self.simulated_upstairs,
         )
         .await
         .expect("Failed to start sled agent");
+
+        // If this is a scrimlet, start the scrimlet reconcilers so they can
+        // react to bootstore network config updates.
+        if let Some(slot) = switch_slot {
+            let mgs_addr: SocketAddr =
+                self.gateway.get(&slot).unwrap().address().into();
+            let dpd_addr: SocketAddr = self
+                .dendrite
+                .read()
+                .unwrap()
+                .get(&slot)
+                .unwrap()
+                .address()
+                .into();
+            let mgd_addr: SocketAddr =
+                self.mgd.get(&slot).unwrap().address().into();
+            // Our test mgd uses --no-bgp-dispatcher, so pass the mgd admin
+            // address as a dummy bgp_dispatcher_addr. As long as tests don't
+            // configure BGP, the reconciler won't use this address.
+            let bgp_dispatcher_addr = mgd_addr;
+            sled_agent.sled_agent.start_scrimlet_reconcilers(
+                mgs_addr,
+                dpd_addr,
+                mgd_addr,
+                bgp_dispatcher_addr,
+            );
+        }
 
         // Add a DNS entry for the TUF Repo Depot on this simulated sled agent.
         let SocketAddr::V6(server_addr_v6) = sled_agent.repo_depot_address
@@ -1076,6 +1116,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             self.sled_index_allocator.next(),
             sim_mode,
             SledCpuFamily::AmdMilan,
+            false,
             &self.simulated_upstairs,
         )
         .await
@@ -1929,6 +1970,7 @@ impl SledIndexAllocator {
 /// Note: you should probably use the `extra_sled_agents` macro parameter on
 /// `nexus_test` instead! To start a sled agent partway through a test, use
 /// [`ControlPlaneTestContext::add_sled`].
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn start_sled_agent(
     log: Logger,
     nexus_address: SocketAddr,
@@ -1936,6 +1978,7 @@ pub(crate) async fn start_sled_agent(
     sled_index: u16,
     sim_mode: sim::SimMode,
     cpu_family: SledCpuFamily,
+    is_scrimlet: bool,
     simulated_upstairs: &Arc<sim::SimulatedUpstairs>,
 ) -> Result<sim::Server, String> {
     // Generate a baseboard serial number that matches the SP configuration
@@ -1950,6 +1993,7 @@ pub(crate) async fn start_sled_agent(
         sim::ZpoolConfig::None,
         cpu_family,
         Some(baseboard_serial),
+        is_scrimlet,
     );
     start_sled_agent_with_config(log, &config, sled_index, simulated_upstairs)
         .await
