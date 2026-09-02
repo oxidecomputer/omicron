@@ -2410,6 +2410,9 @@ pub(in crate::db::datastore) mod test {
     use crate::db::pub_test_utils::simulated_sleds::test_sled_resources;
     use crate::db::pub_test_utils::simulated_sleds::upsert_sleds_from_system;
     use crate::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
+    use crate::db::queries::sled_reservation::BANNED_SLEDS_SENTINEL;
+    use crate::db::queries::sled_reservation::REQUIRED_SLEDS_SENTINEL;
+    use crate::db::queries::sled_reservation::SLED_HAS_SPACE_SENTINEL;
     use anyhow::{Context, Result};
     use async_bb8_diesel::AsyncConnection;
     use async_bb8_diesel::AsyncSimpleConnection;
@@ -2859,6 +2862,22 @@ pub(in crate::db::datastore) mod test {
         anti_affinity_policy: Option<AffinityPolicy>,
     }
 
+    /// The result of [`Instance::insert_resource`].
+    #[derive(Debug, PartialEq, Eq)]
+    enum InsertResourceOutcome {
+        /// The resource was successfully inserted.
+        Inserted,
+
+        /// The insert query was rejected.
+        Rejected {
+            /// The sentinel value raised by the database.
+            ///
+            /// Compare against the sentinels defined in
+            /// [`crate::db::queries::sled_reservation`].
+            sentinel: &'static str,
+        },
+    }
+
     impl Instance {
         fn new() -> Self {
             Self::new_with_id(InstanceUuid::new_v4())
@@ -2928,15 +2947,13 @@ pub(in crate::db::datastore) mod test {
 
         // This is the second half of creating a sled reservation.
         // It can be called during tests trying to invoke contention manually.
-        //
-        // Returns "true" if the INSERT succeeded
         async fn insert_resource(
             &self,
             datastore: &DataStore,
             propolis_id: PropolisUuid,
             sled_id: SledUuid,
             reservation_reason: SledReservationReason,
-        ) -> bool {
+        ) -> InsertResourceOutcome {
             assert!(self.force_onto_sled.is_none());
 
             let resource = SledResourceVmm::new(
@@ -2956,15 +2973,18 @@ pub(in crate::db::datastore) mod test {
             .execute_async(&*conn)
             .await
             {
-                Ok(rows_inserted) => rows_inserted > 0,
-
+                // Without local storage allocations, we should never get Ok(0)
+                // back.
+                Ok(0) => panic!(
+                    "insert query inserted no rows without raising a sentinel"
+                ),
+                Ok(_) => InsertResourceOutcome::Inserted,
                 Err(e) => {
-                    if matches_sentinel(&e, &SLED_INSERT_QUERY_SENTINELS)
-                        .is_some()
-                    {
-                        false
-                    } else {
-                        panic!("{e}")
+                    match matches_sentinel(&e, &SLED_INSERT_QUERY_SENTINELS) {
+                        Some(sentinel) => {
+                            InsertResourceOutcome::Rejected { sentinel }
+                        }
+                        None => panic!("{e}"),
                     }
                 }
             }
@@ -3861,8 +3881,8 @@ pub(in crate::db::datastore) mod test {
         // Inserting onto sleds[1..3] should fail -- the affinity requirement
         // should bind us to sleds[0].
         for i in 1..=3 {
-            assert!(
-                !test_instance
+            assert_eq!(
+                test_instance
                     .insert_resource(
                         &datastore,
                         PropolisUuid::new_v4(),
@@ -3870,12 +3890,15 @@ pub(in crate::db::datastore) mod test {
                         SledReservationReason::Start,
                     )
                     .await,
+                InsertResourceOutcome::Rejected {
+                    sentinel: REQUIRED_SLEDS_SENTINEL
+                },
                 "Shouldn't have been able to insert into sled {i}"
             )
         }
 
         // Inserting into sleds[0] should succeed
-        assert!(
+        assert_eq!(
             test_instance
                 .insert_resource(
                     &datastore,
@@ -3883,7 +3906,8 @@ pub(in crate::db::datastore) mod test {
                     sleds[0].id(),
                     SledReservationReason::Start,
                 )
-                .await
+                .await,
+            InsertResourceOutcome::Inserted,
         );
 
         db.terminate().await;
@@ -3963,8 +3987,8 @@ pub(in crate::db::datastore) mod test {
 
         // Inserting onto sleds[0] should fail -- the anti-affinity requirement
         // should prevent us from inserting there.
-        assert!(
-            !test_instance
+        assert_eq!(
+            test_instance
                 .insert_resource(
                     &datastore,
                     PropolisUuid::new_v4(),
@@ -3972,11 +3996,12 @@ pub(in crate::db::datastore) mod test {
                     SledReservationReason::Start,
                 )
                 .await,
+            InsertResourceOutcome::Rejected { sentinel: BANNED_SLEDS_SENTINEL },
             "Shouldn't have been able to insert into sleds[0]"
         );
 
         // Inserting into sleds[1] should succeed
-        assert!(
+        assert_eq!(
             test_instance
                 .insert_resource(
                     &datastore,
@@ -3984,7 +4009,8 @@ pub(in crate::db::datastore) mod test {
                     sleds[1].id(),
                     SledReservationReason::Start,
                 )
-                .await
+                .await,
+            InsertResourceOutcome::Inserted,
         );
 
         db.terminate().await;
@@ -4049,8 +4075,8 @@ pub(in crate::db::datastore) mod test {
         // Inserting onto sleds[0, 2, 3] should fail - there shouldn't
         // be enough space on these sleds.
         for i in [0, 2, 3] {
-            assert!(
-                !test_instance
+            assert_eq!(
+                test_instance
                     .insert_resource(
                         &datastore,
                         PropolisUuid::new_v4(),
@@ -4058,12 +4084,15 @@ pub(in crate::db::datastore) mod test {
                         SledReservationReason::Start,
                     )
                     .await,
-                "Shouldn't have been able to insert into sleds[i]"
+                InsertResourceOutcome::Rejected {
+                    sentinel: SLED_HAS_SPACE_SENTINEL
+                },
+                "Shouldn't have been able to insert into sleds[{i}]"
             );
         }
 
         // Inserting into sleds[1] should succeed
-        assert!(
+        assert_eq!(
             test_instance
                 .insert_resource(
                     &datastore,
@@ -4071,7 +4100,8 @@ pub(in crate::db::datastore) mod test {
                     sleds[1].id(),
                     SledReservationReason::Start,
                 )
-                .await
+                .await,
+            InsertResourceOutcome::Inserted,
         );
 
         db.terminate().await;
