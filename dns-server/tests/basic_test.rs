@@ -755,7 +755,9 @@ async fn init_client_server_with_bind_addresses(
 
     // launch a dns server
     let dns_server_config =
-        dns_server::dns_server::Config { bind_addresses, ..Default::default() };
+        dns_server::dns_server::ConfigBuilder::new(bind_addresses)
+            .build()
+            .context("building DNS configuration")?;
     let (dns_server, dropshot_server) = dns_server::start_servers(
         log.clone(),
         store,

@@ -17,19 +17,11 @@ use std::path::PathBuf;
 #[derive(Clone, Debug)]
 struct SocketAddrs(Vec<SocketAddr>);
 
-impl IntoIterator for SocketAddrs {
-    type Item = SocketAddr;
-
-    type IntoIter = <Vec<SocketAddr> as IntoIterator>::IntoIter;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.0.into_iter()
-    }
-}
-
 impl SocketAddrs {
     /// Construct self from a comma-delimited list.
     fn from_delimited_list(input: &str) -> anyhow::Result<Self> {
+        // NOTE: This is either non-empty or we fail, because split() always
+        // returns _something_ and so we always have something to parse.
         let addrs = input
             .split(',')
             .map(|each| {
@@ -38,10 +30,6 @@ impl SocketAddrs {
                 })
             })
             .collect::<anyhow::Result<Vec<_>>>()?;
-        anyhow::ensure!(
-            !addrs.is_empty(),
-            "Must provide at least one socket address"
-        );
         Ok(Self(addrs))
     }
 }
@@ -97,10 +85,10 @@ async fn main_impl() -> Result<(), anyhow::Error> {
         .to_logger("dns-server")
         .context("failed to create logger")?;
 
-    let dns_server_config = dns_server::dns_server::Config {
-        bind_addresses: args.dns_addresses.0,
-        ..Default::default()
-    };
+    let dns_server_config =
+        dns_server::dns_server::ConfigBuilder::new(args.dns_addresses.0)
+            .build()
+            .context("building DNS configuration")?;
 
     info!(&log, "config";
         "config" => ?config,

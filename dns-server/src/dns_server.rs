@@ -44,22 +44,51 @@ use uuid::Uuid;
 #[derive(Debug, Clone)]
 pub struct Config {
     /// The addresses to listen for DNS requests on.
-    pub bind_addresses: Vec<SocketAddr>,
+    bind_addresses: Vec<SocketAddr>,
 
     /// The number of received requests to buffer before dropping them.
-    pub request_queue_size: NonZeroUsize,
+    request_queue_size: NonZeroUsize,
 
     /// The number of worker tasks that generate DNS answers.
-    pub n_workers: NonZeroUsize,
+    n_workers: NonZeroUsize,
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            bind_addresses: Vec::new(),
-            request_queue_size: NonZeroUsize::new(128).unwrap(),
-            n_workers: NonZeroUsize::new(16).unwrap(),
-        }
+pub struct ConfigBuilder {
+    bind_addresses: Vec<SocketAddr>,
+    request_queue_size: Option<NonZeroUsize>,
+    n_workers: Option<NonZeroUsize>,
+}
+
+impl ConfigBuilder {
+    pub fn new(bind_addresses: Vec<SocketAddr>) -> Self {
+        Self { bind_addresses, request_queue_size: None, n_workers: None }
+    }
+
+    pub fn request_queue_size(
+        &mut self,
+        request_queue_size: NonZeroUsize,
+    ) -> &mut Self {
+        self.request_queue_size = Some(request_queue_size);
+        self
+    }
+
+    pub fn n_workers(&mut self, n_workers: NonZeroUsize) -> &mut Self {
+        self.n_workers = Some(n_workers);
+        self
+    }
+
+    pub fn build(self) -> anyhow::Result<Config> {
+        anyhow::ensure!(
+            !self.bind_addresses.is_empty(),
+            "Must provide at least one bind address",
+        );
+        Ok(Config {
+            bind_addresses: self.bind_addresses,
+            request_queue_size: self
+                .request_queue_size
+                .unwrap_or(NonZeroUsize::new(128).unwrap()),
+            n_workers: self.n_workers.unwrap_or(NonZeroUsize::new(16).unwrap()),
+        })
     }
 }
 
@@ -135,11 +164,17 @@ impl Server {
             })
             .collect();
 
+        // Build the server handle now, so that failures to bind to any of the
+        // UDP sockets ensures we run our drop impl and reap any tasks we've
+        // spawned.
+        let n_addresses = config.bind_addresses.len();
+        let mut handle = ServerHandle {
+            local_addresses: Vec::with_capacity(n_addresses),
+            receiver_tasks: Vec::with_capacity(n_addresses),
+            worker_tasks,
+        };
+
         // Bind each address and spawn a receiver task for it.
-        let mut local_addresses =
-            Vec::with_capacity(config.bind_addresses.len());
-        let mut receiver_tasks =
-            Vec::with_capacity(config.bind_addresses.len());
         for bind_address in &config.bind_addresses {
             let socket = Arc::new(
                 UdpSocket::bind(bind_address).await.with_context(|| {
@@ -152,17 +187,17 @@ impl Server {
             info!(&log, "DNS server bound to address";
                 "local_address" => ?local_address
             );
-            local_addresses.push(local_address);
+            handle.local_addresses.push(local_address);
 
             let log = log.new(o!("bind_address" => local_address.to_string()));
-            receiver_tasks.push(tokio::task::spawn(read_udp_packets(
+            handle.receiver_tasks.push(tokio::task::spawn(read_udp_packets(
                 log,
                 socket,
                 tx.clone(),
             )));
         }
 
-        Ok(ServerHandle { local_addresses, receiver_tasks, worker_tasks })
+        Ok(handle)
     }
 }
 
@@ -205,7 +240,7 @@ async fn read_udp_packets(
                 debug!(
                     &log,
                     "dropping DNS request: worker queue full";
-                    "peer_addr" => client_addr.to_string(),
+                    "client_addr" => %client_addr,
                 );
             }
             Err(flume::TrySendError::Disconnected(_)) => {

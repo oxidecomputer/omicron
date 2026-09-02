@@ -54,10 +54,9 @@ impl TransientDnsServer {
         let (dns_server, dropshot_server) = dns_server::start_servers(
             dns_log,
             store,
-            &dns_server::dns_server::Config {
-                bind_addresses: vec![dns_bind_address],
-                ..Default::default()
-            },
+            &dns_server::dns_server::ConfigBuilder::new(vec![dns_bind_address])
+                .build()
+                .context("building DNS configuration")?,
             &dropshot::ConfigDropshot {
                 bind_address: "[::1]:0".parse().unwrap(),
                 default_request_body_max_bytes: 4 * 1024 * 1024,
