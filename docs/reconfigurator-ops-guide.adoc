@@ -631,6 +631,9 @@ Other Reconfigurator-related tasks include:
 |tuf_repo_pruner
 |Marks TUF repositories for automatic removal once they're no longer needed.  Check here if the system is out of space for new TUF repositories or if some repository's artifacts are unexpectedly missing.
 
+|blueprint_pruner
+|Removes old blueprints from the database
+
 |===
 
 Here's an example from the `tuf_repo_pruner` explaining the choices it's made about which repos to keep:
