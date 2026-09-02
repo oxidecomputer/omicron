@@ -566,12 +566,15 @@ impl<'a> BlueprintBuilder<'a> {
     /// Directly construct an empty blueprint: no sleds; default values for all
     /// other fields.
     pub fn build_empty(creator: &str) -> Blueprint {
-        Self::build_empty_seeded(creator, PlannerRng::from_entropy())
+        Self::build_empty_seeded(creator, &mut PlannerRng::from_entropy())
     }
 
     /// A version of [`Self::build_empty`] that allows the
     /// blueprint ID to be generated from a deterministic RNG.
-    pub fn build_empty_seeded(creator: &str, mut rng: PlannerRng) -> Blueprint {
+    pub fn build_empty_seeded(
+        creator: &str,
+        rng: &mut PlannerRng,
+    ) -> Blueprint {
         let id = rng.next_blueprint();
         Blueprint {
             id,
@@ -944,6 +947,16 @@ impl<'a> BlueprintBuilder<'a> {
 
     /// Assemble a final [`Blueprint`] based on the contents of the builder
     pub fn build(self, source: BlueprintSource) -> Blueprint {
+        self.build_returning_rng(source).0
+    }
+
+    /// Like [`build()`], but also returns the `PlannerRng` so that the same one
+    /// can be used for building more blueprints.  This version is only intended
+    /// for tests.
+    pub fn build_returning_rng(
+        self,
+        source: BlueprintSource,
+    ) -> (Blueprint, PlannerRng) {
         let blueprint_id = self.new_blueprint_id();
 
         // Collect the Omicron zones config for all sleds, including any
@@ -1045,7 +1058,7 @@ impl<'a> BlueprintBuilder<'a> {
                 blueprint.external_networking_generation.next();
         }
 
-        blueprint
+        (blueprint, self.rng)
     }
 
     pub fn current_sled_state(
