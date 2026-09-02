@@ -105,6 +105,7 @@ enum RackInitError {
     AddingNic(Error),
     BlueprintInsert(Error),
     BlueprintTargetSet(Error),
+    SledBpAvailabilitySeed(Error),
     NexusDatabaseAccessRecordsInsert(Error),
     DatasetInsert { err: AsyncInsertError, zpool_id: ZpoolUuid },
     PhysicalDiskInsert(Error),
@@ -152,6 +153,9 @@ impl From<RackInitError> for Error {
             RackInitError::BlueprintTargetSet(err) => {
                 err.internal_context("failed to set target Blueprint")
             }
+            RackInitError::SledBpAvailabilitySeed(err) => err.internal_context(
+                "failed to seed rendezvous_sled_bp_availability from Blueprint",
+            ),
             RackInitError::NexusDatabaseAccessRecordsInsert(err) => err
                 .internal_context(
                     "failed to insert nexus database access records",
@@ -862,6 +866,22 @@ impl DataStore {
                         DieselError::RollbackTransaction
                     })?;
 
+                    // Set up sled provisioning availability from the blueprint.
+                    Self::initialize_rendezvous_sled_bp_availability_on_connection(
+                        &conn, &blueprint,
+                    )
+                    .await
+                    .map_err(|e| {
+                        error!(
+                            log,
+                            "Initializing Rack: Failed to seed sled \
+                             blueprint availability";
+                            &e,
+                        );
+                        err.set(RackInitError::SledBpAvailabilitySeed(e)).unwrap();
+                        DieselError::RollbackTransaction
+                    })?;
+
                     // Insert Nexus database access records
                     self.initialize_nexus_access_from_blueprint_on_connection(
                         &conn,
@@ -1069,6 +1089,7 @@ mod test {
     use async_bb8_diesel::AsyncSimpleConnection;
     use internal_dns_types::names::DNS_ZONE;
     use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
+    use nexus_db_model::SledBpAvailabilityState;
     use nexus_db_model::{DnsGroup, Generation, InitialDnsGroup, IpVersion};
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingAllocator;
@@ -1257,6 +1278,16 @@ mod test {
         assert_eq!(rack.id(), nexus_test_utils::RACK_UUID);
         assert!(rack.initialized);
 
+        // The empty blueprint doesn't have any sleds, so the
+        // rendezvous_sled_bp_availability table doesn't need to be populated
+        // for this assertion to pass.
+        assert_sled_bp_availability_matches_blueprint(
+            &opctx,
+            &datastore,
+            &rack_init.blueprint,
+        )
+        .await;
+
         // Verify the DNS configuration.
         let dns_internal = datastore
             .dns_config_read(&opctx, DnsGroup::Internal)
@@ -1377,6 +1408,35 @@ mod test {
             ranges,
         )
         .expect("valid service IP pool config")
+    }
+
+    /// Assert that the current state of the rendezvous_sled_bp_availability
+    /// table corresponds to the blueprint.
+    async fn assert_sled_bp_availability_matches_blueprint(
+        opctx: &OpContext,
+        datastore: &DataStore,
+        blueprint: &Blueprint,
+    ) {
+        let rows = datastore
+            .rendezvous_sled_bp_availability_list_all_batched(opctx)
+            .await
+            .expect("listed rendezvous_sled_bp_availability");
+        assert_eq!(
+            rows.len(),
+            blueprint.sleds.len(),
+            "one rendezvous_sled_bp_availability row per blueprint sled"
+        );
+        for (sled_id, config) in &blueprint.sleds {
+            let row = rows
+                .get(sled_id)
+                .unwrap_or_else(|| panic!("row seeded for sled {sled_id}"));
+            assert_eq!(row.blueprint_id(), blueprint.id);
+            assert_eq!(
+                row.state().expect("seeded row is well-formed"),
+                SledBpAvailabilityState::from_blueprint_sled_config(config),
+                "seeded state for sled {sled_id} matches the blueprint"
+            );
+        }
     }
 
     // Hacky macro helper to:
@@ -1607,6 +1667,13 @@ mod test {
             .expect("failed to read blueprint");
         assert_eq!(observed_blueprint, blueprint);
 
+        // The rendezvous_sled_bp_availability table should have been populated
+        // from the blueprint.
+        assert_sled_bp_availability_matches_blueprint(
+            &opctx, &datastore, &blueprint,
+        )
+        .await;
+
         // We should also see the single external IP allocated for each service
         // save for the non-boundary NTP service.
         let observed_external_ips = get_all_external_ips(&datastore).await;
@@ -1806,6 +1873,13 @@ mod test {
             .await
             .expect("failed to read blueprint");
         assert_eq!(observed_blueprint, blueprint);
+
+        // The rendezvous_sled_bp_availability table should have been populated
+        // from the blueprint.
+        assert_sled_bp_availability_matches_blueprint(
+            &opctx, &datastore, &blueprint,
+        )
+        .await;
 
         // We should see both of the Nexus services we provisioned.
         let mut observed_zones: Vec<_> =
@@ -2134,6 +2208,13 @@ mod test {
             .await
             .expect("failed to read blueprint");
         assert_eq!(observed_blueprint, blueprint);
+
+        // The rendezvous_sled_bp_availability table should have been populated
+        // from the blueprint.
+        assert_sled_bp_availability_matches_blueprint(
+            &opctx, &datastore, &blueprint,
+        )
+        .await;
 
         // We should see the Nexus service we provisioned.
         let mut observed_zones: Vec<_> =

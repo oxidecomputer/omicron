@@ -613,24 +613,51 @@ impl IdOrdItem for TufRepoInfo {
     id_upcast!();
 }
 
-/// The status of an `blueprint_rendezvous` background task activation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// The status of a `blueprint_rendezvous` background task activation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BlueprintRendezvousStatus {
     /// ID of the target blueprint during this activation.
     pub blueprint_id: BlueprintUuid,
-    /// ID of the inventory collection used by this activation.
-    pub inventory_collection_id: CollectionUuid,
-    /// Counts of operations performed.
-    pub stats: BlueprintRendezvousStats,
+    /// Outcome of reconciling sled availability from the blueprint.
+    pub sled_blueprint_availability: SledBlueprintAvailabilityRendezvousOutcome,
+    /// Outcome of reconciling the dataset rendezvous tables from the blueprint
+    /// and inventory.
+    pub datasets: DatasetRendezvousOutcome,
+}
+
+/// Outcome of reconciling `rendezvous_bp_sled_availability`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SledBlueprintAvailabilityRendezvousOutcome {
+    /// Reconciliation ran to completion.
+    Reconciled(SledBlueprintAvailabilityRendezvousStats),
+    /// Reconciliation failed partway through; rows written before the
+    /// failure stay written.
+    Error(String),
+}
+
+/// Outcome of reconciling the rendezvous dataset tables.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DatasetRendezvousOutcome {
+    /// No inventory collection has been loaded yet, so dataset reconciliation
+    /// was skipped. (It needs inventory to confirm a dataset exists before
+    /// making it available to other subsystems.)
+    NoInventoryCollection,
+    /// Reconciliation ran to completion against `inventory_collection_id`.
+    Reconciled {
+        inventory_collection_id: CollectionUuid,
+        stats: DatasetRendezvousStats,
+    },
+    /// Reconciliation against `inventory_collection_id` failed partway through.
+    /// The rows written before the failure stay written.
+    Error { inventory_collection_id: CollectionUuid, error: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BlueprintRendezvousStats {
+pub struct DatasetRendezvousStats {
     pub debug_dataset: DatasetsRendezvousStats,
     pub crucible_dataset: CrucibleDatasetsRendezvousStats,
     pub local_storage_dataset: DatasetsRendezvousStats,
     pub local_storage_unencrypted_dataset: DatasetsRendezvousStats,
-    pub sled_blueprint_availability: SledBlueprintAvailabilityRendezvousStats,
 }
 
 /// Stats for a sled availability rendezvous run.
