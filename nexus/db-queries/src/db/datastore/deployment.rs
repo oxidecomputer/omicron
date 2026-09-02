@@ -4961,9 +4961,8 @@ mod tests {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        // With no rows at all, we report an internal error.  This should be
-        // impossible on a real system, where RSS always sets an initial target
-        // blueprint before any of this code can run.
+        // With no rows at all, we report an internal error.  On a real system,
+        // this should only be possible before RSS has completed.
         let error = datastore
             .bp_target_determine_pruneable(opctx, nonzero(3))
             .await
