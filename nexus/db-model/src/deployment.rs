@@ -1162,7 +1162,7 @@ impl BpOmicronZone {
 
 /// A single external IP address of a blueprint zone.
 ///
-/// Each zone with external networking has one or row in the
+/// Each zone with external networking has one or more rows in the
 /// `bp_omicron_zone_external_ip` table. Each EIP here is an _allocated_
 /// external IP, so it carries the `external_ip_id` as an FK into the
 /// `external_ip` table. The kind is inferred from the owning zone and which of

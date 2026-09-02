@@ -15,5 +15,5 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone_external_ip (
     CONSTRAINT only_port_or_snat_ports CHECK (
         NOT ((port IS NOT NULL) AND (snat_first_port IS NOT NULL))
     ),
-    PRIMARY KEY (blueprint_id, zone_id, external_ip_id)
+    PRIMARY KEY (blueprint_id, external_ip_id)
 );

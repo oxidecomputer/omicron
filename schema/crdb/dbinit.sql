@@ -6042,7 +6042,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone_external_ip (
         NOT ((port IS NOT NULL) AND (snat_first_port IS NOT NULL))
     ),
 
-    PRIMARY KEY (blueprint_id, zone_id, external_ip_id)
+    PRIMARY KEY (blueprint_id, external_ip_id)
 );
 
 -- Blueprint information related to clickhouse cluster management
