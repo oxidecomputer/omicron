@@ -43,7 +43,7 @@ struct Args {
     #[clap(long, action)]
     http_address: SocketAddrV6,
 
-    /// One or more socket address on which to serve DNS records.
+    /// One or more socket addresses on which to serve DNS records.
     ///
     /// Multiple addresses may be separated by a comma (,). The DNS server will
     /// listen for requests on each address, using the same underlying storage.
