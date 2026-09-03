@@ -770,7 +770,6 @@ async fn init_client_server_with_bind_addresses(
     resolver_config.add_name_server(NameServerConfig::new(
         dns_server
             .local_addresses()
-            .into_iter()
             .next()
             .context("fetching local DNS addresses")?,
         Protocol::Udp,
