@@ -2457,8 +2457,8 @@ impl DataStore {
     /// been responsible for deleting the most recent round of blueprints and
     /// `bp_target` rows.  However, if for some reason some of the `nkeep`
     /// blueprint ids correspond to blueprints that are missing but earlier ones
-    /// are not, then this function would report that more blueprints were
-    /// pruneable than is accurate, resulting in pruning more than we wanted.
+    /// are not, then when the caller prunes the blueprints that this function
+    /// reports are pruneable, there will be fewer than `nkeep` blueprints left.
     /// This can happen if someone ran `omdb nexus blueprints delete` to delete
     /// individual blueprints that had previously been targets or if someone
     /// used `omdb reconfigurator archive` with a limit that didn't allow it to
