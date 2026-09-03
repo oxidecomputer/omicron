@@ -253,7 +253,15 @@ impl Pool {
     pub async fn claim(&self) -> Result<DataStoreConnection, Error> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let held_since = Utc::now();
-        let debug = Backtrace::force_capture().to_string();
+        // This is an escape hatch in case we ever encounter an unexpected pathological case where
+        // capturing backtraces is slow enough to be an issue:
+        let disable_backtrace_capture =
+            std::env::var_os("NEXUS_DISABLE_DB_CLAIM_BACKTRACES").is_some();
+        let debug = if disable_backtrace_capture {
+            "(backtraces disabled)".to_string()
+        } else {
+            Backtrace::force_capture().to_string()
+        };
         let allowed = self.quiesce.send_if_modified(|q| {
             if let ClaimsAllowed::Disallowed = q.new_claims_allowed {
                 false
