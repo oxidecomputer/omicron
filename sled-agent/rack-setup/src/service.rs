@@ -117,6 +117,9 @@ use sled_agent_types::inventory::{
     OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
 };
 use sled_agent_types::rack_init::rack_init_bootstore_generation;
+use sled_agent_types::router_config::{
+    SwitchRouterConfigs, default_router_list,
+};
 use sled_agent_types::sled::StartSledAgentRequest;
 use sled_agent_types::system_networking::BlueprintExternalNetworkingConfig;
 use sled_agent_types::system_networking::ServiceZoneNatEntriesError;
@@ -1106,6 +1109,10 @@ impl ServiceInner {
             // until after the service plan is created, once we've finished
             // moving all system networking into scrimlet reconcilers?
             blueprint_external_networking_config: None,
+            // No operator router configurations exist at rack setup; Nexus
+            // fills these in later.
+            switch_router_configs: SwitchRouterConfigs::new(),
+            control_plane_router_list: default_router_list(),
         };
         info!(self.log, "Writing initial network configuration to bootstore");
         rss_step.update(RssStep::InitialNetworkConfigUpdate);

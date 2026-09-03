@@ -32,6 +32,7 @@ slog.workspace = true
 slog-error-chain.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+uuid.workspace = true
 
 omicron-workspace-hack.workspace = true
 

@@ -111,6 +111,9 @@ use sled_agent_types::inventory::OmicronSledUpdateDisposition;
 use sled_agent_types::inventory::OmicronZoneDataset;
 use sled_agent_types::inventory::SledCpuFamily;
 use sled_agent_types::inventory::SourceNatConfigGeneric;
+use sled_agent_types::router_config::{
+    SwitchRouterConfigs, default_router_list,
+};
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use sled_agent_types::system_networking::WriteNetworkConfigRequest;
 use slog::{Logger, debug, error, info, o};
@@ -995,6 +998,8 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                 },
                 // TODO-correctness Can we fill this in for tests?
                 blueprint_external_networking_config: None,
+                switch_router_configs: SwitchRouterConfigs::new(),
+                control_plane_router_list: default_router_list(),
             },
             generation: 1,
         };

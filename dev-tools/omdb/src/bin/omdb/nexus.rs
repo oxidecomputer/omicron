@@ -4267,8 +4267,20 @@ fn print_task_switch_port_settings_manager(details: &serde_json::Value) {
         }
     };
 
-    let SwitchPortSettingsManagerStatus { incomplete_bootstore_configs } =
-        status;
+    let SwitchPortSettingsManagerStatus {
+        incomplete_bootstore_configs,
+        router_config_render_errors,
+    } = status;
+
+    if !router_config_render_errors.is_empty() {
+        println!(
+            "{ERRICON} {} problem(s) rendering router configurations:",
+            router_config_render_errors.len(),
+        );
+        for problem in router_config_render_errors {
+            println!("    {ERRICON} {problem}");
+        }
+    }
 
     if incomplete_bootstore_configs.is_empty() {
         println!(

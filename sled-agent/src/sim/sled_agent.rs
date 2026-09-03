@@ -66,6 +66,9 @@ use sled_agent_types::inventory::{
     OmicronSledConfig, OmicronSledUpdateDisposition,
     SingleMeasurementInventory, SledRole, ZpoolHealth,
 };
+use sled_agent_types::router_config::{
+    SwitchRouterConfigs, default_router_list,
+};
 use sled_agent_types::support_bundle::SupportBundleMetadata;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 
@@ -160,6 +163,8 @@ impl SledAgent {
                 // TODO-correctness Can we fill this in for the simulated
                 // sled-agent?
                 blueprint_external_networking_config: None,
+                switch_router_configs: SwitchRouterConfigs::new(),
+                control_plane_router_list: default_router_list(),
             })
             .serialize_to_bootstore_with_generation(0),
         );

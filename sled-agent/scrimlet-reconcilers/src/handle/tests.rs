@@ -18,6 +18,9 @@ use sled_agent_types::early_networking::PortConfig;
 use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::UplinkPorts;
+use sled_agent_types::router_config::{
+    SwitchRouterConfigs, default_router_list,
+};
 use std::time::Duration;
 
 // For "happy path" tests, we spin up a real MGS instances (pointed at a
@@ -87,6 +90,8 @@ impl<T: MgsFlavor> Harness<T> {
                     bfd: Vec::new(),
                 },
                 blueprint_external_networking_config: None,
+                switch_router_configs: SwitchRouterConfigs::new(),
+                control_plane_router_list: default_router_list(),
             });
 
         let handle = ScrimletReconcilers::new(&logctx.log);

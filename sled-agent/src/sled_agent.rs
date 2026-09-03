@@ -788,7 +788,7 @@ impl SledAgent {
         long_running_task_handles
             .scrimlet_reconcilers
             .set_sled_agent_networking_info_once(SledAgentNetworkingInfo {
-                system_networking_config_rx: network_config_rx,
+                system_networking_config_rx: network_config_rx.clone(),
                 mode: ScrimletReconcilersMode::SwitchZone(
                     this_sled_switch_zone_ip,
                 ),
@@ -815,6 +815,7 @@ impl SledAgent {
                 underlay_address: *sled_address.ip(),
                 local_switch_zone_ip: this_sled_switch_zone_ip,
                 rack_id: request.body.rack_id,
+                network_config_rx,
                 metrics_queue: metrics_manager.request_queue(),
             })
             .await?;
