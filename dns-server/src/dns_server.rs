@@ -118,7 +118,7 @@ impl ServerHandle {
     /// # Panics
     ///
     /// This panics if there is not exactly one address. If you want to handle
-    /// any number of addresses, call [`local_addresses`] instead.
+    /// any number of addresses, call [`ServerHandle::local_addresses`] instead.
     pub fn sole_local_address(&self) -> SocketAddr {
         assert_eq!(
             self.local_addresses.len(),
