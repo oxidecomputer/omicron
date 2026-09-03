@@ -104,7 +104,31 @@ fn create_resolver(log: &slog::Logger) -> Result<Resolver, anyhow::Error> {
     // deployments today.  That's because while the base subnet is in principle
     // configurable in config-rss.toml, it's very uncommon to change it from the
     // default value used here.
-    let subnet = Ipv6Subnet::new("fd00:1122:3344:0100::".parse().unwrap());
+    //
+    // For deployments that _do_ use a non-default base subnet (e.g. racks whose
+    // ULA prefix was randomized at RSS time), the subnet can be overridden by
+    // setting LIVE_TESTS_RACK_SUBNET to any IPv6 address within the AZ subnet
+    // (for example, an internal DNS server address).
+    const RACK_SUBNET_ENV: &str = "LIVE_TESTS_RACK_SUBNET";
+    let subnet = match std::env::var(RACK_SUBNET_ENV) {
+        Ok(value) => {
+            let addr = value.parse::<std::net::Ipv6Addr>().with_context(|| {
+                format!(
+                    "parsing {} value {:?} as an IPv6 address",
+                    RACK_SUBNET_ENV, value
+                )
+            })?;
+            Ipv6Subnet::new(addr)
+        }
+        Err(std::env::VarError::NotPresent) => {
+            Ipv6Subnet::new("fd00:1122:3344:0100::".parse().unwrap())
+        }
+        Err(e) => {
+            return Err(e).with_context(|| {
+                format!("reading environment variable {}", RACK_SUBNET_ENV)
+            });
+        }
+    };
     eprintln!("note: using DNS server for subnet {}", subnet.net());
     internal_dns_resolver::Resolver::new_from_subnet(log.clone(), subnet)
         .with_context(|| {
@@ -222,11 +246,11 @@ async fn check_hardware_environment(
         "BRM42220004",
         // test rig: "london"
         "BRM42220036",
-        "BRM42220062",
+        "2CN2M459",
         "BRM42220030",
-        "BRM44220007",
+        "2RGCFG10",
         // test rig: "dublin"
-        "BRM42220026",
+        "2F8JEXDK",
         "BRM27230037",
         "BRM23230018",
         "BRM23230010",
@@ -234,7 +258,7 @@ async fn check_hardware_environment(
         "BRM42220011",
         "BRM44220007",
         "BRM42220082",
-        "BRM06240029",
+        "271FVPY0",
     ];
 
     // Refuse to operate in an environment that might contain real Oxide
