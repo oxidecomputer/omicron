@@ -15,6 +15,8 @@ use super::pumpkind;
 use super::server::StartError;
 use crate::config::Config;
 use crate::config::SidecarRevision;
+use crate::config::SledMode as SledModeConfig;
+use crate::config::SwitchBackend;
 use crate::ddm_reconciler::DdmReconciler;
 use crate::long_running_tasks::{
     LongRunningTaskHandles, LongRunningTaskResult, spawn_all_longrunning_tasks,
@@ -292,25 +294,49 @@ async fn ensure_zfs_ramdisk_dataset() -> Result<(), StartError> {
 }
 
 // Combine the `sled_mode` and `switch_backend` config with detected switch
-// hardware to determine the actual sled mode.
-//
-// Detected hardware wins in the priority order of `SwitchHardware`. With none
-// detected, `auto` leaves Tofino detection to the hardware monitor and
-// `scrimlet` assumes a Tofino ASIC when a physical sidecar is configured.
+// hardware to determine the actual sled mode. Hardware is only probed when
+// the config leaves the backend to detection.
 async fn sled_mode_from_config(
     config: &Config,
     log: &Logger,
 ) -> Result<SledMode, StartError> {
-    use crate::config::SledMode as SledModeConfig;
-    use crate::config::SwitchBackend;
+    let detected = if matches!(config.sled_mode, SledModeConfig::Sled)
+        || config.switch_backend != SwitchBackend::Detect
+    {
+        None
+    } else {
+        let probe_log = log.clone();
+        tokio::task::spawn_blocking(move || {
+            sled_hardware::detect_switch_hardware(&probe_log)
+        })
+        .await
+        .expect("switch hardware detection panicked")
+        .map_err(StartError::DetectSwitch)?
+    };
+    resolve_sled_mode(
+        &config.sled_mode,
+        &config.switch_backend,
+        &config.sidecar_revision,
+        detected,
+    )
+}
 
-    let forced_scrimlet = match config.sled_mode {
+// Detected hardware wins in the priority order of `SwitchHardware`. With none
+// detected, `auto` leaves Tofino detection to the hardware monitor and
+// `scrimlet` assumes a Tofino ASIC when a physical sidecar is configured.
+fn resolve_sled_mode(
+    sled_mode: &SledModeConfig,
+    switch_backend: &SwitchBackend,
+    sidecar_revision: &SidecarRevision,
+    detected: Option<SwitchHardware>,
+) -> Result<SledMode, StartError> {
+    let forced_scrimlet = match sled_mode {
         SledModeConfig::Sled => return Ok(SledMode::Sled),
         SledModeConfig::Auto => false,
         SledModeConfig::Scrimlet => true,
     };
 
-    let asic = match config.switch_backend {
+    let asic = match switch_backend {
         SwitchBackend::TofinoStub | SwitchBackend::SoftNpuZone
             if !forced_scrimlet =>
         {
@@ -320,8 +346,7 @@ async fn sled_mode_from_config(
         }
         SwitchBackend::TofinoStub => DendriteAsic::TofinoStub,
         SwitchBackend::SoftNpuZone => {
-            if !matches!(config.sidecar_revision, SidecarRevision::SoftZone(_))
-            {
+            if !matches!(sidecar_revision, SidecarRevision::SoftZone(_)) {
                 return Err(StartError::SledModeConfig(
                     "switch_backend soft_npu_zone requires \
                      sidecar_revision.soft_zone",
@@ -329,43 +354,162 @@ async fn sled_mode_from_config(
             }
             DendriteAsic::SoftNpuZone
         }
-        SwitchBackend::Detect => {
-            let probe_log = log.clone();
-            let detected = tokio::task::spawn_blocking(move || {
-                sled_hardware::detect_switch_hardware(&probe_log)
-            })
-            .await
-            .expect("switch hardware detection panicked")
-            .map_err(StartError::DetectSwitch)?;
-
-            match detected {
-                Some(SwitchHardware::Tofino) => DendriteAsic::TofinoAsic,
-                Some(SwitchHardware::SoftNpuPropolis { .. }) => {
-                    if !matches!(
-                        config.sidecar_revision,
-                        SidecarRevision::SoftPropolis(_)
-                    ) {
-                        return Err(StartError::SledModeConfig(
-                            "SoftNPU device present but sidecar_revision is \
-                             not soft_propolis",
-                        ));
-                    }
-                    DendriteAsic::SoftNpuPropolisDevice
-                }
-                None if !forced_scrimlet => return Ok(SledMode::Auto),
-                None if config.sidecar_revision.is_physical() => {
-                    DendriteAsic::TofinoAsic
-                }
-                None => {
+        SwitchBackend::Detect => match detected {
+            Some(SwitchHardware::Tofino) => DendriteAsic::TofinoAsic,
+            Some(SwitchHardware::SoftNpuPropolis { .. }) => {
+                if !matches!(sidecar_revision, SidecarRevision::SoftPropolis(_))
+                {
                     return Err(StartError::SledModeConfig(
-                        "sled_mode is scrimlet but no switch hardware was \
-                         detected and sidecar_revision is not physical",
+                        "SoftNPU device present but sidecar_revision is \
+                         not soft_propolis",
                     ));
                 }
+                DendriteAsic::SoftNpuPropolisDevice
             }
-        }
+            None if !forced_scrimlet => return Ok(SledMode::Auto),
+            None if sidecar_revision.is_physical() => DendriteAsic::TofinoAsic,
+            None => {
+                return Err(StartError::SledModeConfig(
+                    "sled_mode is scrimlet but no switch hardware was \
+                     detected and sidecar_revision is not physical",
+                ));
+            }
+        },
     };
     Ok(SledMode::Scrimlet { asic })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::SoftPortConfig;
+
+    const AUTO: SledModeConfig = SledModeConfig::Auto;
+    const SLED: SledModeConfig = SledModeConfig::Sled;
+    const SCRIMLET: SledModeConfig = SledModeConfig::Scrimlet;
+    const DETECT: SwitchBackend = SwitchBackend::Detect;
+    const STUB: SwitchBackend = SwitchBackend::TofinoStub;
+    const ZONE: SwitchBackend = SwitchBackend::SoftNpuZone;
+
+    #[derive(Clone, Copy)]
+    enum Sidecar {
+        Physical,
+        SoftPropolis,
+        SoftZone,
+    }
+
+    impl From<Sidecar> for SidecarRevision {
+        fn from(sidecar: Sidecar) -> Self {
+            let ports =
+                SoftPortConfig { front_port_count: 2, rear_port_count: 4 };
+            match sidecar {
+                Sidecar::Physical => SidecarRevision::Physical("b".to_string()),
+                Sidecar::SoftPropolis => SidecarRevision::SoftPropolis(ports),
+                Sidecar::SoftZone => SidecarRevision::SoftZone(ports),
+            }
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    enum Found {
+        Nothing,
+        Tofino,
+        SoftNpu,
+    }
+
+    impl From<Found> for Option<SwitchHardware> {
+        fn from(found: Found) -> Self {
+            match found {
+                Found::Nothing => None,
+                Found::Tofino => Some(SwitchHardware::Tofino),
+                Found::SoftNpu => Some(SwitchHardware::SoftNpuPropolis {
+                    path: "/devices/pci@0,0/pci1af4,9@6:9p".to_string(),
+                }),
+            }
+        }
+    }
+
+    #[derive(Debug, PartialEq)]
+    enum Expect {
+        Mode(SledMode),
+        ConfigError,
+    }
+
+    use DendriteAsic::*;
+    use Expect::*;
+    use Found::*;
+    use Sidecar::*;
+
+    fn scrimlet(asic: DendriteAsic) -> Expect {
+        Mode(SledMode::Scrimlet { asic })
+    }
+
+    #[test]
+    fn resolve_sled_mode_table() {
+        let cases = [
+            // Production gimlet config: auto with a physical sidecar. Nothing
+            // detected leaves Tofino detection to the hardware monitor.
+            (AUTO, DETECT, Physical, Nothing, Mode(SledMode::Auto)),
+            (AUTO, DETECT, Physical, Tofino, scrimlet(TofinoAsic)),
+            // gimlet-standalone: forced scrimlet with a physical sidecar,
+            // including a Tofino whose driver has not attached yet.
+            (SCRIMLET, DETECT, Physical, Tofino, scrimlet(TofinoAsic)),
+            (SCRIMLET, DETECT, Physical, Nothing, scrimlet(TofinoAsic)),
+            // Tofino wins under any sidecar config.
+            (AUTO, DETECT, SoftPropolis, Tofino, scrimlet(TofinoAsic)),
+            (AUTO, DETECT, SoftZone, Tofino, scrimlet(TofinoAsic)),
+            // A forced sled ignores attached hardware.
+            (SLED, DETECT, Physical, Tofino, Mode(SledMode::Sled)),
+            (SLED, DETECT, SoftPropolis, SoftNpu, Mode(SledMode::Sled)),
+            (SLED, STUB, Physical, Nothing, Mode(SledMode::Sled)),
+            // Voxel: forced scrimlets carry a SoftNPU device; auto works the
+            // same way with the device deciding.
+            (
+                SCRIMLET,
+                DETECT,
+                SoftPropolis,
+                SoftNpu,
+                scrimlet(SoftNpuPropolisDevice),
+            ),
+            (
+                AUTO,
+                DETECT,
+                SoftPropolis,
+                SoftNpu,
+                scrimlet(SoftNpuPropolisDevice),
+            ),
+            (AUTO, DETECT, SoftPropolis, Nothing, Mode(SledMode::Auto)),
+            // Forced scrimlet with nothing detected needs a physical sidecar.
+            (SCRIMLET, DETECT, SoftPropolis, Nothing, ConfigError),
+            (SCRIMLET, DETECT, SoftZone, Nothing, ConfigError),
+            // SoftNPU needs a soft_propolis sidecar.
+            (SCRIMLET, DETECT, Physical, SoftNpu, ConfigError),
+            (AUTO, DETECT, SoftZone, SoftNpu, ConfigError),
+            // Overrides: dev SoftNPU zone and stub Dendrite, forced scrimlet
+            // only, and the zone needs a soft_zone sidecar.
+            (SCRIMLET, ZONE, SoftZone, Nothing, scrimlet(SoftNpuZone)),
+            (SCRIMLET, ZONE, SoftPropolis, Nothing, ConfigError),
+            (SCRIMLET, STUB, Physical, Nothing, scrimlet(TofinoStub)),
+            (AUTO, STUB, Physical, Nothing, ConfigError),
+            (AUTO, ZONE, SoftZone, Nothing, ConfigError),
+        ];
+
+        for (i, (mode, backend, sidecar, found, expected)) in
+            cases.into_iter().enumerate()
+        {
+            let actual = match resolve_sled_mode(
+                &mode,
+                &backend,
+                &sidecar.into(),
+                found.into(),
+            ) {
+                Ok(mode) => Mode(mode),
+                Err(StartError::SledModeConfig(_)) => ConfigError,
+                Err(e) => panic!("case {i}: unexpected error {e:?}"),
+            };
+            assert_eq!(actual, expected, "case {i}");
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

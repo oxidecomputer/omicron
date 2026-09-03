@@ -110,7 +110,7 @@ pub enum ExternalDisks {
 }
 
 /// Configuration for forcing a sled to run as a Scrimlet or compute Sled
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum SledMode {
     /// Run as a compute sled unless a Tofino ASIC is present, in which case
     /// run as a Scrimlet
