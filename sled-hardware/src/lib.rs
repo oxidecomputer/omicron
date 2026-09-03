@@ -23,6 +23,8 @@ cfg_if::cfg_if! {
 pub mod cleanup;
 pub mod disk;
 pub use disk::*;
+pub mod softnpu;
+pub use softnpu::SoftNpuDetectError;
 pub mod underlay;
 
 // The type of networking 'ASIC' the Dendrite service is expected to manage
@@ -83,7 +85,8 @@ pub enum ExternalDisks {
 /// Configuration for forcing a sled to run as a Scrimlet or compute Sled
 #[derive(Copy, Clone, Debug)]
 pub enum SledMode {
-    /// Automatically detect whether to run as a compute sled or Scrimlet (w/ real Tofino ASIC)
+    /// Run as a compute sled unless a Tofino ASIC is present, in which case
+    /// run as a Scrimlet
     Auto,
     /// Force sled to run as a Gimlet
     Sled,

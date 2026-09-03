@@ -86,3 +86,10 @@ pub async fn ensure_partition_layout(
 pub fn is_oxide_sled() -> anyhow::Result<bool> {
     Ok(false)
 }
+
+/// Return the devfs path of the SoftNPU 9p device, if one is attached.
+pub fn find_softnpu_device(
+    _log: &Logger,
+) -> Result<Option<String>, crate::softnpu::SoftNpuDetectError> {
+    Ok(None)
+}

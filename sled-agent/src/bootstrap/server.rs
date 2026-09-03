@@ -131,8 +131,11 @@ pub enum StartError {
     #[error("Failed to enable ipv6-forwarding")]
     EnableIpv6Forwarding(#[from] illumos_utils::ExecutionError),
 
-    #[error("Incorrect binary packaging: {0}")]
-    IncorrectBuildPackaging(&'static str),
+    #[error("Invalid sled mode configuration: {0}")]
+    SledModeConfig(&'static str),
+
+    #[error("Failed to detect switch hardware")]
+    DetectSwitch(#[source] sled_hardware::SoftNpuDetectError),
 
     #[error("Failed to start HardwareManager: {0}")]
     StartHardwareManager(String),

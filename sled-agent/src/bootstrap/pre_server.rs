@@ -116,7 +116,7 @@ impl BootstrapAgentStartup {
         BootstrapNetworking::enable_ipv6_forwarding().await?;
 
         // Are we a gimlet or scrimlet?
-        let sled_mode = sled_mode_from_config(&config)?;
+        let sled_mode = sled_mode_from_config(&config, &log).await?;
 
         // Spawn all important long running tasks that live for the lifetime of
         // the process and are used by both the bootstrap agent and sled agent
@@ -290,45 +290,77 @@ async fn ensure_zfs_ramdisk_dataset() -> Result<(), StartError> {
     .map_err(StartError::EnsureZfsRamdiskDataset)
 }
 
-// Combine the `sled_mode` config with the build-time switch type to determine
-// the actual sled mode.
-fn sled_mode_from_config(config: &Config) -> Result<SledMode, StartError> {
+// Combine the `sled_mode` and `switch_backend` config with detected switch
+// hardware to determine the actual sled mode.
+//
+// A SoftNPU 9p device selects the propolis SoftNPU backend. Without one,
+// `auto` keeps the hardware monitor's Tofino detection and `scrimlet` assumes
+// a Tofino ASIC only when a physical sidecar revision is configured.
+async fn sled_mode_from_config(
+    config: &Config,
+    log: &Logger,
+) -> Result<SledMode, StartError> {
     use crate::config::SledMode as SledModeConfig;
-    let sled_mode = match config.sled_mode {
-        SledModeConfig::Auto => {
-            if !cfg!(feature = "switch-asic") {
-                return Err(StartError::IncorrectBuildPackaging(
-                    "sled-agent was not packaged with `switch-asic`",
+    use crate::config::SwitchBackend;
+
+    let sled_mode = match (&config.sled_mode, &config.switch_backend) {
+        (SledModeConfig::Sled, _) => SledMode::Sled,
+        (SledModeConfig::Scrimlet, SwitchBackend::TofinoStub) => {
+            SledMode::Scrimlet { asic: DendriteAsic::TofinoStub }
+        }
+        (SledModeConfig::Scrimlet, SwitchBackend::SoftNpuZone) => {
+            if !matches!(config.sidecar_revision, SidecarRevision::SoftZone(_))
+            {
+                return Err(StartError::SledModeConfig(
+                    "switch_backend soft_npu_zone requires \
+                     sidecar_revision.soft_zone",
                 ));
             }
-            SledMode::Auto
+            SledMode::Scrimlet { asic: DendriteAsic::SoftNpuZone }
         }
-        SledModeConfig::Sled => SledMode::Sled,
-        SledModeConfig::Scrimlet => {
-            let asic = if cfg!(feature = "switch-asic") {
-                DendriteAsic::TofinoAsic
-            } else if cfg!(feature = "switch-stub") {
-                DendriteAsic::TofinoStub
-            } else if cfg!(feature = "switch-softnpu") {
-                match config.sidecar_revision {
-                    SidecarRevision::SoftZone(_) => DendriteAsic::SoftNpuZone,
-                    SidecarRevision::SoftPropolis(_) => {
-                        DendriteAsic::SoftNpuPropolisDevice
-                    }
-                    _ => {
-                        return Err(StartError::IncorrectBuildPackaging(
-                            "sled-agent configured to run on softnpu zone but dosen't \
-                         have a softnpu sidecar revision",
+        (SledModeConfig::Auto, SwitchBackend::TofinoStub)
+        | (SledModeConfig::Auto, SwitchBackend::SoftNpuZone) => {
+            return Err(StartError::SledModeConfig(
+                "switch_backend override requires sled_mode = \"scrimlet\"",
+            ));
+        }
+        (mode, SwitchBackend::Detect) => {
+            let probe_log = log.clone();
+            let softnpu = tokio::task::spawn_blocking(move || {
+                sled_hardware::find_softnpu_device(&probe_log)
+            })
+            .await
+            .expect("SoftNPU probe panicked")
+            .map_err(StartError::DetectSwitch)?;
+
+            match (mode, softnpu) {
+                (_, Some(path)) => {
+                    if !matches!(
+                        config.sidecar_revision,
+                        SidecarRevision::SoftPropolis(_)
+                    ) {
+                        return Err(StartError::SledModeConfig(
+                            "SoftNPU device present but sidecar_revision is \
+                             not soft_propolis",
                         ));
                     }
+                    info!(log, "SoftNPU device detected"; "path" => path);
+                    SledMode::Scrimlet {
+                        asic: DendriteAsic::SoftNpuPropolisDevice,
+                    }
                 }
-            } else {
-                return Err(StartError::IncorrectBuildPackaging(
-                    "sled-agent configured to run on scrimlet but wasn't \
-                        packaged with switch zone",
-                ));
-            };
-            SledMode::Scrimlet { asic }
+                (SledModeConfig::Auto, None) => SledMode::Auto,
+                (SledModeConfig::Scrimlet, None) => {
+                    if !config.sidecar_revision.is_physical() {
+                        return Err(StartError::SledModeConfig(
+                            "sled_mode is scrimlet but no SoftNPU device is \
+                             present and sidecar_revision is not physical",
+                        ));
+                    }
+                    SledMode::Scrimlet { asic: DendriteAsic::TofinoAsic }
+                }
+                (SledModeConfig::Sled, None) => SledMode::Sled,
+            }
         }
     };
     Ok(sled_mode)
