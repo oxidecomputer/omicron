@@ -768,7 +768,11 @@ async fn init_client_server_with_bind_addresses(
 
     let mut resolver_config = ResolverConfig::new();
     resolver_config.add_name_server(NameServerConfig::new(
-        dns_server.sole_local_address(),
+        dns_server
+            .local_addresses()
+            .into_iter()
+            .next()
+            .context("fetching local DNS addresses")?,
         Protocol::Udp,
     ));
     let mut resolver_opts = ResolverOpts::default();
