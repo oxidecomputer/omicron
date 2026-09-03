@@ -2862,14 +2862,14 @@ mod tests {
                 Box::new(NexusServer { observed_runtime_state: state_tx }),
             );
 
-            let dns_server =
+            let _dns_server =
                 crate::fakes::nexus::start_dns_server(&log, &_nexus_server)
                     .await;
 
             let resolver = Arc::new(
                 Resolver::new_from_addrs(
                     log.clone(),
-                    &[dns_server.dns_server.sole_local_address()],
+                    &[_dns_server.dns_server.sole_local_address()],
                 )
                 .unwrap(),
             );
@@ -2880,7 +2880,7 @@ mod tests {
                 _nexus_server.local_addr().port(),
             );
 
-            Self { nexus_client, _nexus_server, state_rx, dns_server }
+            Self { nexus_client, _nexus_server, state_rx, _dns_server }
         }
     }
 
