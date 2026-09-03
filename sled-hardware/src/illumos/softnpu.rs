@@ -4,9 +4,8 @@
 
 //! Detection of the propolis SoftNPU 9p device.
 
-use crate::softnpu::{
-    SOFTNPU_9P_VERSION, SoftNpuDetectError, decode_rversion, encode_tversion,
-};
+use crate::SwitchDetectError;
+use crate::softnpu::{SOFTNPU_9P_VERSION, decode_rversion, encode_tversion};
 use illumos_devinfo::{DevInfo, Node};
 use slog::{Logger, debug, info, warn};
 use std::fs::{File, OpenOptions};
@@ -20,6 +19,12 @@ const VIRTIO_9P_DEVICE_IDS: [i32; 2] = [0x1009, 0x1049];
 const NINEP_MINOR: &str = "9p";
 const OPEN_ATTEMPTS: usize = 3;
 const OPEN_RETRY_DELAY: Duration = Duration::from_millis(500);
+const REPLY_BUF_LEN: usize = 65536;
+
+enum Probe {
+    Version(String),
+    Busy,
+}
 
 /// Returns the devfs path of the SoftNPU 9p device when one is attached.
 ///
@@ -27,14 +32,13 @@ const OPEN_RETRY_DELAY: Duration = Duration::from_millis(500);
 /// asked for its 9P version. Only the propolis SoftNPU handler answers with
 /// `9P2000.P4`. A device that stays busy across retries, such as a mounted
 /// 9p filesystem, is logged and skipped.
-pub fn find_softnpu_device(
+pub(super) fn find_softnpu_device(
     log: &Logger,
-) -> Result<Option<String>, SoftNpuDetectError> {
-    let mut devinfo =
-        DevInfo::new_force_load().map_err(SoftNpuDetectError::DevInfo)?;
+    devinfo: &mut DevInfo,
+) -> Result<Option<String>, SwitchDetectError> {
     let mut walker = devinfo.walk_node();
     while let Some(node) =
-        walker.next().transpose().map_err(SoftNpuDetectError::DevInfo)?
+        walker.next().transpose().map_err(SwitchDetectError::DevInfo)?
     {
         if !is_virtio_9p(&node)? {
             continue;
@@ -47,33 +51,32 @@ pub fn find_softnpu_device(
             );
             continue;
         };
-        match probe_version(&path) {
-            Ok(version) if version == SOFTNPU_9P_VERSION => {
+        match probe_version(&path)? {
+            Probe::Version(version) if version == SOFTNPU_9P_VERSION => {
                 info!(log, "found SoftNPU 9p device"; "path" => &path);
                 return Ok(Some(path));
             }
-            Ok(version) => {
+            Probe::Version(version) => {
                 debug!(
                     log,
                     "virtio 9p device is not SoftNPU";
-                    "path" => &path,
+                    "path" => path,
                     "version" => version,
                 );
             }
-            Err(SoftNpuDetectError::Busy { path }) => {
+            Probe::Busy => {
                 warn!(log, "virtio 9p device busy; skipping"; "path" => path);
             }
-            Err(e) => return Err(e),
         }
     }
     Ok(None)
 }
 
-fn is_virtio_9p(node: &Node<'_>) -> Result<bool, SoftNpuDetectError> {
+fn is_virtio_9p(node: &Node<'_>) -> Result<bool, SwitchDetectError> {
     let mut vendor = None;
     let mut device = None;
     for prop in node.props() {
-        let prop = prop.map_err(SoftNpuDetectError::DevInfo)?;
+        let prop = prop.map_err(SwitchDetectError::DevInfo)?;
         match prop.name().as_str() {
             "vendor-id" => vendor = prop.as_i32(),
             "device-id" => device = prop.as_i32(),
@@ -86,12 +89,12 @@ fn is_virtio_9p(node: &Node<'_>) -> Result<bool, SoftNpuDetectError> {
 
 fn ninep_minor_path(
     node: &Node<'_>,
-) -> Result<Option<String>, SoftNpuDetectError> {
+) -> Result<Option<String>, SwitchDetectError> {
     for minor in node.minors() {
-        let minor = minor.map_err(SoftNpuDetectError::DevInfo)?;
+        let minor = minor.map_err(SwitchDetectError::DevInfo)?;
         if minor.name() == NINEP_MINOR {
             let path =
-                minor.devfs_path().map_err(SoftNpuDetectError::DevInfo)?;
+                minor.devfs_path().map_err(SwitchDetectError::DevInfo)?;
             return Ok(Some(format!("/devices{path}")));
         }
     }
@@ -102,7 +105,7 @@ fn ninep_minor_path(
 ///
 /// The driver permits a single exclusive open, so EBUSY means another
 /// consumer such as scadm or a 9p mount currently holds the device.
-fn probe_version(path: &str) -> Result<String, SoftNpuDetectError> {
+fn probe_version(path: &str) -> Result<Probe, SwitchDetectError> {
     for attempt in 1..=OPEN_ATTEMPTS {
         match OpenOptions::new()
             .read(true)
@@ -110,32 +113,34 @@ fn probe_version(path: &str) -> Result<String, SoftNpuDetectError> {
             .custom_flags(libc::O_EXCL)
             .open(path)
         {
-            Ok(file) => return exchange_version(path, file),
+            Ok(file) => {
+                return exchange_version(path, file).map(Probe::Version);
+            }
             Err(e) if e.raw_os_error() == Some(libc::EBUSY) => {
                 if attempt < OPEN_ATTEMPTS {
                     std::thread::sleep(OPEN_RETRY_DELAY);
                 }
             }
             Err(err) => {
-                return Err(SoftNpuDetectError::Io {
+                return Err(SwitchDetectError::Io {
                     path: path.to_string(),
                     err,
                 });
             }
         }
     }
-    Err(SoftNpuDetectError::Busy { path: path.to_string() })
+    Ok(Probe::Busy)
 }
 
 fn exchange_version(
     path: &str,
     mut file: File,
-) -> Result<String, SoftNpuDetectError> {
-    let io = |err| SoftNpuDetectError::Io { path: path.to_string(), err };
+) -> Result<String, SwitchDetectError> {
+    let io = |err| SwitchDetectError::Io { path: path.to_string(), err };
     file.write_all(&encode_tversion(SOFTNPU_9P_VERSION)).map_err(io)?;
-    let mut buf = vec![0u8; 65536];
+    let mut buf = vec![0u8; REPLY_BUF_LEN];
     let n = file.read(&mut buf).map_err(io)?;
-    decode_rversion(&buf[..n]).map_err(|reason| SoftNpuDetectError::Protocol {
+    decode_rversion(&buf[..n]).map_err(|reason| SwitchDetectError::Protocol {
         path: path.to_string(),
         reason,
     })

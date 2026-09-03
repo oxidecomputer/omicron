@@ -7,7 +7,9 @@ use crate::ExternalDisks;
 use crate::HardwareView;
 use crate::TofinoSnapshot;
 use crate::TofinoView;
-use crate::{DendriteAsic, SledMode, UnparsedDisk};
+use crate::{
+    DendriteAsic, SledMode, SwitchDetectError, SwitchHardware, UnparsedDisk,
+};
 use camino::Utf8PathBuf;
 use gethostname::gethostname;
 use illumos_devinfo::{DevInfo, DevLinkType, DevLinks, Node, Property};
@@ -31,9 +33,26 @@ mod softnpu;
 mod sysconf;
 
 pub use partitions::{NvmeFormattingError, ensure_partition_layout};
-pub use softnpu::find_softnpu_device;
 
 const TOFINO_MONITOR: &'static str = "/opt/oxide/sled-agent/tofino-monitor";
+
+/// Detect attached switch hardware, checking each backend in the priority
+/// order of [`SwitchHardware`]. A Tofino node counts whether or not its
+/// driver is attached; availability is tracked by the hardware monitor.
+pub fn detect_switch_hardware(
+    log: &Logger,
+) -> Result<Option<SwitchHardware>, SwitchDetectError> {
+    let mut devinfo =
+        DevInfo::new_force_load().map_err(SwitchDetectError::DevInfo)?;
+    if let Some(node) = tofino::get_tofino_from_devinfo(&mut devinfo)
+        .map_err(SwitchDetectError::Tofino)?
+    {
+        info!(log, "found tofino node"; "path" => node.devfs_path);
+        return Ok(Some(SwitchHardware::Tofino));
+    }
+    Ok(softnpu::find_softnpu_device(log, &mut devinfo)?
+        .map(|path| SwitchHardware::SoftNpuPropolis { path }))
+}
 
 #[derive(thiserror::Error, Debug)]
 enum Error {

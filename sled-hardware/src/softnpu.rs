@@ -11,38 +11,18 @@
 /// Version string served by the propolis SoftNPU 9p handler.
 pub const SOFTNPU_9P_VERSION: &str = "9P2000.P4";
 
-/// Maximum message size offered in Tversion.
-pub const MSIZE: u32 = 8192;
-
+const MSIZE: u32 = 8192;
 const TVERSION: u8 = 100;
 const RVERSION: u8 = 101;
 const NOTAG: u16 = 0xffff;
-
-#[derive(Debug, thiserror::Error)]
-pub enum SoftNpuDetectError {
-    #[error("failed to walk device tree: {0}")]
-    DevInfo(anyhow::Error),
-
-    #[error("{path}: device busy")]
-    Busy { path: String },
-
-    #[error("{path}: {err}")]
-    Io {
-        path: String,
-        #[source]
-        err: std::io::Error,
-    },
-
-    #[error("{path}: malformed Rversion: {reason}")]
-    Protocol { path: String, reason: String },
-}
+const HEADER_LEN: usize = 4 + 1 + 2 + 4 + 2;
 
 /// Encode a Tversion message.
 ///
-/// Layout: size[4] type[1] tag[2] msize[4] version[s], little endian.
+/// Layout: `size[4] type[1] tag[2] msize[4] version[s]`, little endian.
 pub fn encode_tversion(version: &str) -> Vec<u8> {
     let version = version.as_bytes();
-    let size = (4 + 1 + 2 + 4 + 2 + version.len()) as u32;
+    let size = (HEADER_LEN + version.len()) as u32;
     let mut msg = Vec::with_capacity(size as usize);
     msg.extend_from_slice(&size.to_le_bytes());
     msg.push(TVERSION);
@@ -55,9 +35,8 @@ pub fn encode_tversion(version: &str) -> Vec<u8> {
 
 /// Decode the version string from an Rversion message.
 ///
-/// Layout: size[4] type[1] tag[2] msize[4] version[s], little endian.
+/// Layout: `size[4] type[1] tag[2] msize[4] version[s]`, little endian.
 pub fn decode_rversion(msg: &[u8]) -> Result<String, String> {
-    const HEADER_LEN: usize = 4 + 1 + 2 + 4 + 2;
     if msg.len() < HEADER_LEN {
         return Err(format!("short reply ({} bytes)", msg.len()));
     }
@@ -76,13 +55,13 @@ mod tests {
     use super::*;
 
     fn rversion(version: &[u8]) -> Vec<u8> {
-        let size = (4 + 1 + 2 + 4 + 2 + version.len()) as u32;
-        let mut msg = Vec::new();
-        msg.extend_from_slice(&size.to_le_bytes());
-        msg.push(RVERSION);
-        msg.extend_from_slice(&NOTAG.to_le_bytes());
-        msg.extend_from_slice(&MSIZE.to_le_bytes());
-        msg.extend_from_slice(&(version.len() as u16).to_le_bytes());
+        let mut msg = encode_tversion("");
+        msg.truncate(HEADER_LEN);
+        msg[0..4].copy_from_slice(
+            &((HEADER_LEN + version.len()) as u32).to_le_bytes(),
+        );
+        msg[4] = RVERSION;
+        msg[11..13].copy_from_slice(&(version.len() as u16).to_le_bytes());
         msg.extend_from_slice(version);
         msg
     }
@@ -90,10 +69,13 @@ mod tests {
     #[test]
     fn tversion_layout() {
         let msg = encode_tversion(SOFTNPU_9P_VERSION);
-        assert_eq!(msg.len(), 13 + SOFTNPU_9P_VERSION.len());
-        assert_eq!(u32::from_le_bytes(msg[0..4].try_into().unwrap()), 22);
+        assert_eq!(msg.len(), HEADER_LEN + SOFTNPU_9P_VERSION.len());
+        assert_eq!(
+            u32::from_le_bytes(msg[0..4].try_into().unwrap()),
+            msg.len() as u32
+        );
         assert_eq!(msg[4], TVERSION);
-        assert_eq!(&msg[13..], SOFTNPU_9P_VERSION.as_bytes());
+        assert_eq!(&msg[HEADER_LEN..], SOFTNPU_9P_VERSION.as_bytes());
     }
 
     #[test]
@@ -107,7 +89,7 @@ mod tests {
     #[test]
     fn rversion_malformed() {
         assert!(decode_rversion(&[]).is_err());
-        assert!(decode_rversion(&[0; 12]).is_err());
+        assert!(decode_rversion(&[0; HEADER_LEN - 1]).is_err());
 
         let mut msg = rversion(SOFTNPU_9P_VERSION.as_bytes());
         msg[4] = TVERSION;
