@@ -897,7 +897,11 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         )
         .await;
 
-        let external_server_addr = server.get_http_server_external_address();
+        let external_server_addr = server
+            .get_all_http_server_external_addresses()
+            .into_iter()
+            .next()
+            .expect("At least 1 external API address");
         let techport_external_server_addr =
             server.get_http_server_techport_address();
         let internal_server_addr = server.get_http_server_internal_address();
