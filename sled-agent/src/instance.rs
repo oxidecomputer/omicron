@@ -27,7 +27,9 @@ use illumos_utils::opte::{
 use illumos_utils::running_zone::{RunningZone, ZoneBuilderFactory};
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use illumos_utils::zpool::ZpoolOrRamdisk;
-use omicron_common::api::internal::shared::{DelegatedZvol, SledIdentifiers};
+use omicron_common::api::internal::shared::{
+    DelegatedZvol, RouterListEntry, SledIdentifiers,
+};
 use omicron_common::backoff;
 use omicron_common::backoff::BackoffError;
 use omicron_common::zpool_name::ZpoolName;
@@ -572,6 +574,10 @@ struct InstanceRunner {
     // default (1500). Populated by Nexus based on jumbo-frame opt-in (fleet
     // flag AND instance bit).
     primary_nic_mtu: Option<u32>,
+
+    // The tunnel-router list the instance's OPTE ports are created with.
+    // Empty means no tunnel routers (no external egress).
+    router_list: Vec<RouterListEntry>,
 
     // Internal State management
     state: InstanceStates,
@@ -1931,6 +1937,7 @@ impl Instance {
             firewall_rules: local_config.firewall_rules,
             dhcp_config,
             primary_nic_mtu: local_config.primary_nic_mtu,
+            router_list: local_config.router_list,
             state: InstanceStates::new(vmm_runtime, migration_id),
             running_state: None,
             nexus_client,
@@ -2344,6 +2351,7 @@ impl InstanceRunner {
                     .map(Into::into)
                     .collect(),
                 mtu: if nic.primary { self.primary_nic_mtu } else { None },
+                router_list: &self.router_list,
             })?;
             opte_port_names.push(port.0.name().to_string());
             opte_ports.push(port);
@@ -3020,6 +3028,7 @@ mod tests {
             delegated_zvols: vec![],
             attached_subnets: vec![],
             primary_nic_mtu: None,
+            router_list: vec![],
         };
 
         InstanceInitialState {
@@ -3944,6 +3953,7 @@ mod tests {
                 firewall_rules: local_config.firewall_rules,
                 dhcp_config,
                 primary_nic_mtu: local_config.primary_nic_mtu,
+                router_list: local_config.router_list,
                 state: InstanceStates::new(vmm_runtime, migration_id),
                 running_state: None,
                 nexus_client,

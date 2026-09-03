@@ -140,6 +140,27 @@ pub struct VirtualNetworkInterfaceHost {
     pub vni: external::Vni,
 }
 
+/// One entry in a port's prioritized tunnel-router list.
+#[derive(
+    Clone, Copy, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Hash,
+)]
+pub struct RouterListEntry {
+    /// Lower value wins length ties during boundary lookup.
+    pub priority: u16,
+    /// `None` selects the default router.
+    pub router_id: Option<Uuid>,
+}
+
+/// The prioritized tunnel-router list for one OPTE port, addressed by the
+/// guest NIC it hosts.
+#[derive(
+    Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Hash,
+)]
+pub struct PortRouterList {
+    pub nic_id: Uuid,
+    pub routers: Vec<RouterListEntry>,
+}
+
 /// DHCP configuration for a port
 ///
 /// Not present here: Hostname (DHCPv4 option 12; used in DHCPv6 option 39); we

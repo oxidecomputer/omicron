@@ -19,8 +19,8 @@ use dropshot::{
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::shared::{
-    ExternalIpGatewayMap, ResolvedVpcRouteSet, ResolvedVpcRouteState,
-    SledIdentifiers, VirtualNetworkInterfaceHost,
+    ExternalIpGatewayMap, PortRouterList, ResolvedVpcRouteSet,
+    ResolvedVpcRouteState, SledIdentifiers, VirtualNetworkInterfaceHost,
 };
 use range_requests::PotentialRange;
 use sled_agent_api::*;
@@ -929,6 +929,35 @@ impl SledAgentApi for SledAgentImpl {
                 let vnics =
                     sa.list_virtual_nics().await.map_err(Error::from)?;
                 Ok(HttpResponseOk(vnics))
+            })
+            .await
+    }
+
+    async fn set_router_list(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<PortRouterList>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        let body_args = body.into_inner();
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                sa.set_port_router_list(&body_args)
+                    .await
+                    .map_err(Error::from)?;
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
+    }
+
+    async fn list_router_lists(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<PortRouterList>>, HttpError> {
+        let sa = rqctx.context();
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                let lists =
+                    sa.list_port_router_lists().await.map_err(Error::from)?;
+                Ok(HttpResponseOk(lists))
             })
             .await
     }

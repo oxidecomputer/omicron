@@ -15,14 +15,14 @@ use dropshot_api_manager_types::api_versions;
 use omicron_common::api::internal::{
     nexus::DiskRuntimeState,
     shared::{
-        ExternalIpGatewayMap, ResolvedVpcRouteSet, ResolvedVpcRouteState,
-        SledIdentifiers, VirtualNetworkInterfaceHost,
+        ExternalIpGatewayMap, PortRouterList, ResolvedVpcRouteSet,
+        ResolvedVpcRouteState, SledIdentifiers, VirtualNetworkInterfaceHost,
     },
 };
 use sled_agent_types_versions::{
     latest, v1, v4, v6, v7, v9, v10, v11, v12, v14, v16, v17, v18, v20, v22,
     v24, v25, v26, v28, v29, v30, v31, v32, v33, v34, v37, v39, v40, v41, v42,
-    v43, v46, v47, v48, v49, v50,
+    v43, v44, v46, v47, v48, v49, v50,
 };
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 use slog_error_chain::InlineErrorChain;
@@ -39,6 +39,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (52, ADD_ROUTER_LISTS),
     (51, MULTIPLE_ZONE_EXTERNAL_IPS),
     (50, TYPED_SLED_CONFIG_GENERATION),
     (49, ADD_UPDATE_DISPOSITION),
@@ -493,13 +494,27 @@ pub trait SledAgentApi {
         operation_id = "vmm_register",
         method = PUT,
         path = "/vmms/{propolis_id}",
-        versions = VERSION_PROPOLIS_NVME_VWC..
+        versions = VERSION_ADD_ROUTER_LISTS..
     }]
     async fn vmm_register(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::instance::VmmPathParam>,
         body: TypedBody<latest::instance::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError>;
+
+    #[endpoint {
+        operation_id = "vmm_register",
+        method = PUT,
+        path = "/vmms/{propolis_id}",
+        versions = VERSION_PROPOLIS_NVME_VWC..VERSION_ADD_ROUTER_LISTS
+    }]
+    async fn vmm_register_v44(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::instance::VmmPathParam>,
+        body: TypedBody<v44::instance::InstanceEnsureBody>,
+    ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError> {
+        Self::vmm_register(rqctx, path_params, body.map(Into::into)).await
+    }
 
     #[endpoint {
         operation_id = "vmm_register",
@@ -512,7 +527,7 @@ pub trait SledAgentApi {
         path_params: Path<latest::instance::VmmPathParam>,
         body: TypedBody<v41::instance::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError> {
-        Self::vmm_register(rqctx, path_params, body.map(Into::into)).await
+        Self::vmm_register_v44(rqctx, path_params, body.map(Into::into)).await
     }
 
     #[endpoint {
@@ -889,6 +904,30 @@ pub trait SledAgentApi {
     async fn list_v2p(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<VirtualNetworkInterfaceHost>>, HttpError>;
+
+    /// Set the prioritized tunnel-router list for one OPTE port
+    // Used by nexus background task; setting `[default@1000]` restores the
+    // port's initial state, so there is no DELETE.
+    #[endpoint {
+        method = PUT,
+        path = "/router-lists",
+        versions = VERSION_ADD_ROUTER_LISTS..,
+    }]
+    async fn set_router_list(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<PortRouterList>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// List the tunnel-router lists of all OPTE ports on the sled
+    // Used by nexus background task
+    #[endpoint {
+        method = GET,
+        path = "/router-lists",
+        versions = VERSION_ADD_ROUTER_LISTS..,
+    }]
+    async fn list_router_lists(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<PortRouterList>>, HttpError>;
 
     #[endpoint {
         method = POST,
@@ -1683,12 +1722,31 @@ pub trait SledAgentApi {
     #[endpoint {
         method = PUT,
         path = "/probes",
-        versions = VERSION_ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES..,
+        versions = VERSION_ADD_ROUTER_LISTS..,
     }]
     async fn probes_put(
         request_context: RequestContext<Self::Context>,
         body: TypedBody<latest::probes::ProbeSet>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Update the entire set of probe zones on this sled.
+    ///
+    /// Probe zones are used to debug networking configuration. They look
+    /// similar to instances, in that they have an OPTE port on a VPC subnet and
+    /// external addresses, but no actual VM.
+    #[endpoint {
+        operation_id = "probes_put",
+        method = PUT,
+        path = "/probes",
+        versions =
+            VERSION_ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES..VERSION_ADD_ROUTER_LISTS,
+    }]
+    async fn probes_put_v10(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<v10::probes::ProbeSet>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::probes_put(request_context, body.map(Into::into)).await
+    }
 
     /// Update the entire set of probe zones on this sled.
     ///
@@ -1706,8 +1764,8 @@ pub trait SledAgentApi {
         request_context: RequestContext<Self::Context>,
         body: TypedBody<v6::probes::ProbeSet>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let body = body.try_map(latest::probes::ProbeSet::try_from)?;
-        Self::probes_put(request_context, body).await
+        let body = body.try_map(v10::probes::ProbeSet::try_from)?;
+        Self::probes_put_v10(request_context, body).await
     }
 
     /// Create a local storage dataset

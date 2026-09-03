@@ -47,6 +47,7 @@ pub mod region_snapshot_replacement_finish;
 pub mod region_snapshot_replacement_garbage_collect;
 pub mod region_snapshot_replacement_start;
 pub mod region_snapshot_replacement_step;
+pub mod router_lists;
 pub mod saga_recovery;
 pub mod service_firewall_rules;
 pub mod session_cleanup;

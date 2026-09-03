@@ -133,6 +133,7 @@ use super::tasks::region_snapshot_replacement_finish::*;
 use super::tasks::region_snapshot_replacement_garbage_collect::*;
 use super::tasks::region_snapshot_replacement_start::*;
 use super::tasks::region_snapshot_replacement_step::*;
+use super::tasks::router_lists;
 use super::tasks::saga_recovery;
 use super::tasks::service_firewall_rules;
 use super::tasks::session_cleanup;
@@ -243,6 +244,7 @@ impl BackgroundTasksInitializer {
             task_blueprint_rendezvous: Activator::new(),
             task_crdb_node_id_collector: Activator::new(),
             task_switch_port_settings_manager: Activator::new(),
+            task_router_list_manager: Activator::new(),
             task_v2p_manager: Activator::new(),
             task_region_replacement: Activator::new(),
             task_region_replacement_driver: Activator::new(),
@@ -340,6 +342,7 @@ impl BackgroundTasksInitializer {
             task_blueprint_rendezvous,
             task_crdb_node_id_collector,
             task_switch_port_settings_manager,
+            task_router_list_manager,
             task_v2p_manager,
             task_region_replacement,
             task_region_replacement_driver,
@@ -708,6 +711,19 @@ impl BackgroundTasksInitializer {
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
             activator: task_switch_port_settings_manager,
+        });
+
+        driver.register(TaskDefinition {
+            name: "router_list_manager",
+            description:
+                "propagates per-port tunnel-router lists to sled-agents",
+            period: config.router_list_propagation.period_secs,
+            task_impl: Box::new(router_lists::RouterListManager::new(
+                datastore.clone(),
+            )),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_router_list_manager,
         });
 
         driver.register(TaskDefinition {

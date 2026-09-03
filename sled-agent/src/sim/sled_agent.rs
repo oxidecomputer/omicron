@@ -28,8 +28,9 @@ use iddqd::IdOrdMap;
 use omicron_common::api::external::{ByteCount, Error, ResourceType};
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::shared::{
-    ResolvedVpcRoute, ResolvedVpcRouteSet, ResolvedVpcRouteState, RouterId,
-    RouterKind, RouterVersion, VirtualNetworkInterfaceHost,
+    PortRouterList, ResolvedVpcRoute, ResolvedVpcRouteSet,
+    ResolvedVpcRouteState, RouterId, RouterKind, RouterVersion,
+    VirtualNetworkInterfaceHost,
 };
 use omicron_generation_kinds::Generation;
 use omicron_uuid_kinds::{
@@ -95,6 +96,7 @@ pub struct SledAgent {
     pub nexus_client: Arc<NexusClient>,
     pub simulated_upstairs: Arc<SimulatedUpstairs>,
     pub v2p_mappings: Mutex<HashSet<VirtualNetworkInterfaceHost>>,
+    pub router_lists: Mutex<HashMap<Uuid, PortRouterList>>,
     mock_propolis: futures::lock::Mutex<
         Option<(propolis_mock_server::Server, PropolisClient)>,
     >,
@@ -190,6 +192,7 @@ impl SledAgent {
             nexus_client,
             simulated_upstairs,
             v2p_mappings: Mutex::new(HashSet::new()),
+            router_lists: Mutex::new(HashMap::new()),
             external_ips: Mutex::new(HashMap::new()),
             attached_subnets: Mutex::new(HashMap::new()),
             multicast_groups: Mutex::new(HashMap::new()),
@@ -694,6 +697,20 @@ impl SledAgent {
     ) -> Result<Vec<VirtualNetworkInterfaceHost>, Error> {
         let v2p_mappings = self.v2p_mappings.lock().unwrap();
         Ok(Vec::from_iter(v2p_mappings.clone()))
+    }
+
+    pub fn set_port_router_list(
+        &self,
+        list: &PortRouterList,
+    ) -> Result<(), Error> {
+        let mut router_lists = self.router_lists.lock().unwrap();
+        router_lists.insert(list.nic_id, list.clone());
+        Ok(())
+    }
+
+    pub fn list_port_router_lists(&self) -> Result<Vec<PortRouterList>, Error> {
+        let router_lists = self.router_lists.lock().unwrap();
+        Ok(router_lists.values().cloned().collect())
     }
 
     pub async fn instance_put_external_ip(

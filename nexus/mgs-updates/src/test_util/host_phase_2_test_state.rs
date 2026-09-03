@@ -418,6 +418,26 @@ mod api_impl {
             }))
         }
 
+        async fn set_router_list(
+            _rqctx: RequestContext<Self::Context>,
+            _body: TypedBody<
+                omicron_common::api::internal::shared::PortRouterList,
+            >,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn list_router_lists(
+            _rqctx: RequestContext<Self::Context>,
+        ) -> Result<
+            HttpResponseOk<
+                Vec<omicron_common::api::internal::shared::PortRouterList>,
+            >,
+            HttpError,
+        > {
+            unimplemented!()
+        }
+
         async fn zone_bundle_list_all(
             _rqctx: RequestContext<Self::Context>,
             _query: Query<ZoneBundleFilter>,

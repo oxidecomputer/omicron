@@ -130,10 +130,10 @@ pub mod instance {
     pub use crate::v32::instance::ExternalIps;
     pub use crate::v32::instance::ExternalIpv4Config;
     pub use crate::v32::instance::ExternalIpv6Config;
-    pub use crate::v41::instance::InstanceSledLocalConfig;
-
-    pub use crate::v44::instance::InstanceEnsureBody;
     pub use crate::v44::instance::VmmSpec;
+
+    pub use crate::v52::instance::InstanceEnsureBody;
+    pub use crate::v52::instance::InstanceSledLocalConfig;
 }
 
 pub mod inventory {
@@ -230,8 +230,9 @@ pub mod inventory {
 pub mod probes {
     pub use crate::v10::probes::ExternalIp;
     pub use crate::v10::probes::IpKind;
-    pub use crate::v10::probes::ProbeCreate;
-    pub use crate::v10::probes::ProbeSet;
+
+    pub use crate::v52::probes::ProbeCreate;
+    pub use crate::v52::probes::ProbeSet;
 }
 
 pub mod rot {

@@ -50,8 +50,8 @@ use omicron_common::api::external::{ByteCount, ByteCountRangeError, Vni};
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::shared::DelegatedZvol;
 use omicron_common::api::internal::shared::{
-    ExternalIpGatewayMap, ResolvedVpcRouteSet, ResolvedVpcRouteState,
-    SledIdentifiers, VirtualNetworkInterfaceHost,
+    ExternalIpGatewayMap, PortRouterList, ResolvedVpcRouteSet,
+    ResolvedVpcRouteState, SledIdentifiers, VirtualNetworkInterfaceHost,
 };
 use omicron_common::zpool_name::ZpoolName;
 use omicron_ddm_admin_client::Client as DdmAdminClient;
@@ -1236,6 +1236,19 @@ impl SledAgent {
             .port_manager
             .unset_virtual_nic_host(mapping)
             .map_err(Error::from)
+    }
+
+    pub async fn set_port_router_list(
+        &self,
+        list: &PortRouterList,
+    ) -> Result<(), Error> {
+        self.inner.port_manager.set_router_list(list).map_err(Error::from)
+    }
+
+    pub async fn list_port_router_lists(
+        &self,
+    ) -> Result<Vec<PortRouterList>, Error> {
+        self.inner.port_manager.list_router_lists().map_err(Error::from)
     }
 
     /// Validate if the given [`SocketAddr`] represents a peer on the same

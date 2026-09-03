@@ -20,6 +20,7 @@ use omicron_common::api::external::{
     NameOrId, UpdateResult,
 };
 use omicron_uuid_kinds::{GenericUuid, RouterConfigurationUuid};
+use sled_agent_client::types::RouterListEntry;
 use std::collections::{BTreeSet, HashMap};
 
 /// Maximum number of router configurations that may be assigned to a silo.
@@ -789,6 +790,9 @@ impl super::Nexus {
             .silo_router_configurations_replace(opctx, &authz_silo, links)
             .await?;
 
+        self.background_tasks
+            .activate(&self.background_tasks.task_router_list_manager);
+
         configurations.sort_by_key(|c| c.priority);
         Ok(networking::SiloRouterConfigurations { configurations })
     }
@@ -881,6 +885,9 @@ impl super::Nexus {
         self.db_datastore
             .control_plane_router_configurations_replace(opctx, links)
             .await?;
+
+        self.background_tasks
+            .activate(&self.background_tasks.task_router_list_manager);
         // The control-plane list also rides the bootstore, for service ports
         // created before nexus is reachable.
         self.activate_router_configuration_propagation();
@@ -890,5 +897,96 @@ impl super::Nexus {
             configured: true,
             configurations,
         })
+    }
+}
+
+/// Priority of the sole entry in the never-configured control-plane list.
+pub(crate) const DEFAULT_ROUTER_LIST_PRIORITY: u16 = 1000;
+
+/// The router list used for service ports when the control plane list was
+/// never configured: the daemon-owned default router at priority 1000.
+pub(crate) fn default_router_list() -> Vec<RouterListEntry> {
+    vec![RouterListEntry {
+        priority: DEFAULT_ROUTER_LIST_PRIORITY,
+        router_id: None,
+    }]
+}
+
+/// Keep only the highest-priority entry per resolved router.
+///
+/// The two built-in per-switch configurations are aliases (both resolve to
+/// the default `None` router), so a list referencing both would otherwise
+/// yield duplicate entries.
+pub(crate) fn dedup_by_router(
+    mut entries: Vec<RouterListEntry>,
+) -> Vec<RouterListEntry> {
+    entries.sort_by_key(|e| e.priority);
+    let mut seen = std::collections::HashSet::new();
+    entries.retain(|e| seen.insert(e.router_id));
+    entries
+}
+
+/// Resolve (priority, router-configuration id) links into the router list
+/// pushed to OPTE ports: the built-in per-switch configurations stand in
+/// for the daemon-owned default router (`None` in OPTE), and the list keeps
+/// only the highest-priority entry per resolved router.
+pub(crate) fn router_list_from_links(
+    links: impl IntoIterator<Item = (u16, Uuid)>,
+) -> Vec<RouterListEntry> {
+    dedup_by_router(
+        links
+            .into_iter()
+            .map(|(priority, rc_id)| RouterListEntry {
+                priority,
+                router_id: if is_builtin_router_configuration_id(&rc_id) {
+                    None
+                } else {
+                    Some(rc_id)
+                },
+            })
+            .collect(),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nexus_types::router_configuration::{
+        DEFAULT_SWITCH0_ROUTER_CONFIGURATION_ID,
+        DEFAULT_SWITCH1_ROUTER_CONFIGURATION_ID,
+    };
+
+    #[test]
+    fn builtin_links_alias_to_the_default_router_and_dedup() {
+        let named = Uuid::new_v4();
+        let list = router_list_from_links(vec![
+            (200, DEFAULT_SWITCH1_ROUTER_CONFIGURATION_ID),
+            (100, DEFAULT_SWITCH0_ROUTER_CONFIGURATION_ID),
+            (50, named),
+        ]);
+        // Both built-ins resolve to `None`; only the highest-priority
+        // (lowest value) entry survives.
+        assert_eq!(
+            list,
+            vec![
+                RouterListEntry { priority: 50, router_id: Some(named) },
+                RouterListEntry { priority: 100, router_id: None },
+            ]
+        );
+    }
+
+    #[test]
+    fn duplicate_named_links_keep_the_highest_priority_entry() {
+        let named = Uuid::new_v4();
+        let list = router_list_from_links(vec![(300, named), (100, named)]);
+        assert_eq!(
+            list,
+            vec![RouterListEntry { priority: 100, router_id: Some(named) }]
+        );
+    }
+
+    #[test]
+    fn no_links_means_an_empty_list() {
+        assert_eq!(router_list_from_links(vec![]), Vec::new());
     }
 }
