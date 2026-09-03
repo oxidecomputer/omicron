@@ -950,7 +950,7 @@ impl<'a> BlueprintBuilder<'a> {
         self.build_returning_rng(source).0
     }
 
-    /// Like [`build()`], but also returns the `PlannerRng` so that the same one
+    /// Like `build()`, but also returns the `PlannerRng` so that the same one
     /// can be used for building more blueprints.  This version is only intended
     /// for tests.
     pub fn build_returning_rng(
