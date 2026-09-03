@@ -898,7 +898,8 @@ mod test {
             &'a mut self,
             opctx: &'b OpContext,
             datastore: &'b DataStore,
-        ) -> (BlueprintUuid, &'a TargetRow) {
+            planner_rng: PlannerRng,
+        ) -> (BlueprintUuid, &'a TargetRow, PlannerRng) {
             // Find the highest-versioned target blueprint that we loaded and
             // read the whole blueprint.
             let parent_blueprint_target = self
@@ -920,25 +921,18 @@ mod test {
                 &opctx.log,
                 &parent_blueprint,
                 "test-suite",
-                // It would be nice to use a seeded RNG for the tests, but the
-                // builder takes ownership of the RNG (and for good reason --
-                // its state changes as it's used).  It's technically cloneable,
-                // but that doesn't have the semantics we want (we don't want
-                // clones to generate the same random sequences).  Really what
-                // we need is an interface through which the builder has a
-                // mutable borrow of the RNG or else returns it back to us when
-                // it's done.
-                PlannerRng::from_entropy(),
+                planner_rng,
             )
             .expect("creating BlueprintBuilder");
 
-            let new_blueprint = builder.build(BlueprintSource::Test);
+            let (new_blueprint, rng) =
+                builder.build_returning_rng(BlueprintSource::Test);
             datastore
                 .blueprint_insert(opctx, &new_blueprint)
                 .await
                 .expect("inserting new blueprint");
             self.all_blueprint_ids.insert(new_blueprint.id);
-            (new_blueprint.id, parent_blueprint_target)
+            (new_blueprint.id, parent_blueprint_target, rng)
         }
 
         /// Creates a new entry in `bp_target` that toggles the `enabled` bit
@@ -982,9 +976,10 @@ mod test {
             &mut self,
             opctx: &OpContext,
             datastore: &DataStore,
-        ) {
-            let (new_blueprint_id, old_target) =
-                self.add_non_target_blueprint(opctx, datastore).await;
+            rng: PlannerRng,
+        ) -> PlannerRng {
+            let (new_blueprint_id, old_target, rng) =
+                self.add_non_target_blueprint(opctx, datastore, rng).await;
 
             datastore
                 .blueprint_target_set_current(
@@ -1005,6 +1000,7 @@ mod test {
             };
 
             self.target_rows.push_back(target_row);
+            rng
         }
 
         /// Adds target blueprints, toggling the `enabled` bit `ntoggles` times
@@ -1017,17 +1013,21 @@ mod test {
             &mut self,
             opctx: &OpContext,
             datastore: &DataStore,
+            mut rng: PlannerRng,
             nblueprints: usize,
             ntoggles: usize,
-        ) {
+        ) -> PlannerRng {
             for i in 0..nblueprints {
                 if i > 0 {
-                    self.add_target_blueprint(opctx, datastore).await;
+                    rng =
+                        self.add_target_blueprint(opctx, datastore, rng).await;
                 }
                 for _ in 0..ntoggles {
                     self.toggle_target_blueprint(opctx, datastore).await;
                 }
             }
+
+            rng
         }
 
         /// Removes the oldest N target rows and their associated blueprints
@@ -1050,17 +1050,18 @@ mod test {
     }
 
     /// Inserts an initial blueprint into the database
-    async fn add_initial_blueprint(opctx: &OpContext, datastore: &DataStore) {
+    async fn add_initial_blueprint(
+        opctx: &OpContext,
+        datastore: &DataStore,
+        rng: &mut PlannerRng,
+    ) {
         // Verify the initial state set up by the test suite.
         let blueprints = BlueprintDatabaseState::load(opctx, datastore).await;
         assert!(blueprints.all_blueprint_ids.is_empty());
         assert!(blueprints.target_rows.is_empty());
 
         // Insert an initial blueprint.
-        let blueprint = BlueprintBuilder::build_empty_seeded(
-            "test-suite",
-            PlannerRng::from_entropy(),
-        );
+        let blueprint = BlueprintBuilder::build_empty_seeded("test-suite", rng);
         datastore
             .blueprint_insert(opctx, &blueprint)
             .await
@@ -1138,18 +1139,20 @@ mod test {
     /// that it's enabled, and that it uses the configured `nkeep`
     #[tokio::test]
     async fn test_config() {
-        let logctx = dev::test_setup_log("blueprint_pruner_config");
+        const TEST_NAME: &str = "blueprint_pruner_config";
+        let logctx = dev::test_setup_log(TEST_NAME);
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Load the initial state and add enough blueprints that there would be
         // something to prune if the pruner were enabled.
-        add_initial_blueprint(opctx, datastore).await;
+        let mut rng = PlannerRng::from_seed(TEST_NAME);
+        add_initial_blueprint(opctx, datastore, &mut rng).await;
         let nblueprints = 10usize;
         let mut blueprints =
             BlueprintDatabaseState::load(opctx, datastore).await;
         for _ in 0..(nblueprints - 1) {
-            blueprints.add_target_blueprint(opctx, datastore).await;
+            rng = blueprints.add_target_blueprint(opctx, datastore, rng).await;
         }
         blueprints.verify_database_matches(opctx, datastore).await;
 
@@ -1250,12 +1253,14 @@ mod test {
     /// - does nothing when there's nothing to prune
     #[tokio::test]
     async fn test_basic() {
-        let logctx = dev::test_setup_log("blueprint_pruner_basic");
+        const TEST_NAME: &str = "blueprint_pruner_basic";
+        let logctx = dev::test_setup_log(TEST_NAME);
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Load the initial state.
-        add_initial_blueprint(opctx, datastore).await;
+        let mut rng = PlannerRng::from_seed(TEST_NAME);
+        add_initial_blueprint(opctx, datastore, &mut rng).await;
 
         // Verify that newly loaded state reflects one blueprint.
         let mut blueprints =
@@ -1276,7 +1281,7 @@ mod test {
         // Add several more blueprints and make sure our representation of the
         // database state matches up with the real thing.
         for _ in 0..22 {
-            blueprints.add_target_blueprint(opctx, datastore).await;
+            rng = blueprints.add_target_blueprint(opctx, datastore, rng).await;
         }
         blueprints.verify_blueprints_referenced_by_targets();
         blueprints.verify_targets_referenced_by_blueprints();
@@ -1332,7 +1337,7 @@ mod test {
 
         // Now exercise a typical steady-state: if we create another blueprint,
         // then prune, then we'll wind up pruning the oldest one.
-        blueprints.add_target_blueprint(opctx, datastore).await;
+        rng = blueprints.add_target_blueprint(opctx, datastore, rng).await;
         let details =
             verify_prune(opctx, datastore, &mut blueprints, 3, 4).await;
         assert_eq!(details.nkept_by_policy, 3);
@@ -1347,8 +1352,8 @@ mod test {
 
         // Other times, the planner may get ahead and we'll have multiple to
         // prune.
-        blueprints.add_target_blueprint(opctx, datastore).await;
-        blueprints.add_target_blueprint(opctx, datastore).await;
+        rng = blueprints.add_target_blueprint(opctx, datastore, rng).await;
+        let _rng = blueprints.add_target_blueprint(opctx, datastore, rng).await;
         let details =
             verify_prune(opctx, datastore, &mut blueprints, 3, 4).await;
         assert_eq!(details.nkept_by_policy, 3);
@@ -1366,19 +1371,21 @@ mod test {
     /// archive`.
     #[tokio::test]
     async fn test_prune_missing_blueprint() {
-        let logctx = dev::test_setup_log("blueprint_pruner_missing_blueprint");
+        const TEST_NAME: &str = "blueprint_pruner_missing_blueprint";
+        let logctx = dev::test_setup_log(TEST_NAME);
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Load the initial state.
-        add_initial_blueprint(opctx, datastore).await;
+        let mut rng = PlannerRng::from_seed(TEST_NAME);
+        add_initial_blueprint(opctx, datastore, &mut rng).await;
 
         // Add several more blueprints and make sure our representation of the
         // database state matches up with the real thing.
         let mut blueprints =
             BlueprintDatabaseState::load(opctx, datastore).await;
         for _ in 0..20 {
-            blueprints.add_target_blueprint(opctx, datastore).await;
+            rng = blueprints.add_target_blueprint(opctx, datastore, rng).await;
         }
         blueprints.verify_blueprints_referenced_by_targets();
         blueprints.verify_targets_referenced_by_blueprints();
@@ -1446,25 +1453,26 @@ mod test {
     /// Tests that pruning does not remove blueprints that were never the target
     #[tokio::test]
     async fn test_no_prune_non_target_blueprint() {
-        let logctx =
-            dev::test_setup_log("blueprint_pruner_non_target_blueprint");
+        const TEST_NAME: &str = "blueprint_pruner_non_target_blueprint";
+        let logctx = dev::test_setup_log(TEST_NAME);
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Load the initial state.
-        add_initial_blueprint(opctx, datastore).await;
+        let mut rng = PlannerRng::from_seed(TEST_NAME);
+        add_initial_blueprint(opctx, datastore, &mut rng).await;
 
         // Add a non-target blueprint.
         let mut blueprints =
             BlueprintDatabaseState::load(opctx, datastore).await;
-        let (blueprint_id, _) =
-            blueprints.add_non_target_blueprint(opctx, datastore).await;
+        let (blueprint_id, _, mut rng) =
+            blueprints.add_non_target_blueprint(opctx, datastore, rng).await;
         blueprints.verify_database_matches(opctx, datastore).await;
 
         // Add several more target blueprints and make sure our representation
         // of the database state matches up with the real thing.
         for _ in 0..10 {
-            blueprints.add_target_blueprint(opctx, datastore).await;
+            rng = blueprints.add_target_blueprint(opctx, datastore, rng).await;
         }
         blueprints.verify_database_matches(opctx, datastore).await;
         let nblueprints = blueprints.all_blueprint_ids.len();
@@ -1496,7 +1504,7 @@ mod test {
             blueprints.target_rows.iter().map(|r| r.id).collect();
         let nblueprints = target_blueprints_before.len() + 1;
         for _ in 0..nblueprints {
-            blueprints.add_target_blueprint(opctx, datastore).await;
+            rng = blueprints.add_target_blueprint(opctx, datastore, rng).await;
         }
         let details = prune_blueprints(
             opctx,
@@ -1547,19 +1555,21 @@ mod test {
     /// so this happens whenever more than `batch_size` rows can be pruned.
     #[tokio::test]
     async fn test_blueprint_pruner_multiple_batches() {
-        let logctx = dev::test_setup_log("blueprint_pruner_multiple_batches");
+        const TEST_NAME: &str = "blueprint_pruner_multiple_batches";
+        let logctx = dev::test_setup_log(TEST_NAME);
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Load the initial state.
-        add_initial_blueprint(opctx, datastore).await;
+        let mut rng = PlannerRng::from_seed(TEST_NAME);
+        add_initial_blueprint(opctx, datastore, &mut rng).await;
 
         // Add several more target blueprints and make sure our representation
         // of the database state matches up with the real thing.
         let mut blueprints =
             BlueprintDatabaseState::load(opctx, datastore).await;
         for _ in 0..18 {
-            blueprints.add_target_blueprint(opctx, datastore).await;
+            rng = blueprints.add_target_blueprint(opctx, datastore, rng).await;
         }
         blueprints.verify_database_matches(opctx, datastore).await;
         let nblueprints = blueprints.all_blueprint_ids.len();
@@ -1605,22 +1615,25 @@ mod test {
     /// make that all the rows in `bp_target` point to unique blueprints.
     #[tokio::test]
     async fn test_blueprint_pruner_dups() {
-        let logctx = dev::test_setup_log("blueprint_pruner_dups");
+        const TEST_NAME: &str = "blueprint_pruner_dups";
+        let logctx = dev::test_setup_log(TEST_NAME);
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Load the initial state.
-        add_initial_blueprint(opctx, datastore).await;
+        let mut rng = PlannerRng::from_seed(TEST_NAME);
+        add_initial_blueprint(opctx, datastore, &mut rng).await;
 
         // Add several more target blueprints.  For each one, toggle
         // enable/disable a few times.
         let mut blueprints =
             BlueprintDatabaseState::load(opctx, datastore).await;
         let nblueprints = 15usize;
-        blueprints
+        let _rng = blueprints
             .add_target_blueprints_with_toggles(
                 opctx,
                 datastore,
+                rng,
                 nblueprints,
                 3,
             )
@@ -1686,13 +1699,14 @@ mod test {
     /// activation would reach.
     #[tokio::test]
     async fn test_blueprint_pruner_delete_cap_mid_blueprint() {
-        let logctx =
-            dev::test_setup_log("blueprint_pruner_delete_cap_mid_blueprint");
+        const TEST_NAME: &str = "blueprint_pruner_delete_cap_mid_blueprint";
+        let logctx = dev::test_setup_log(TEST_NAME);
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Load the initial state.
-        add_initial_blueprint(opctx, datastore).await;
+        let mut rng = PlannerRng::from_seed(TEST_NAME);
+        add_initial_blueprint(opctx, datastore, &mut rng).await;
 
         // Add several more target blueprints, toggling enable/disable three
         // times after each one.  That leaves four `bp_target` rows per
@@ -1701,10 +1715,11 @@ mod test {
             BlueprintDatabaseState::load(opctx, datastore).await;
         let nblueprints = 6usize;
         let nrows_per_blueprint = 4usize;
-        blueprints
+        let _rng = blueprints
             .add_target_blueprints_with_toggles(
                 opctx,
                 datastore,
+                rng,
                 nblueprints,
                 nrows_per_blueprint - 1,
             )
@@ -1779,20 +1794,21 @@ mod test {
     /// remove the system's current target blueprint.
     #[tokio::test]
     async fn test_blueprint_pruner_never_deletes_target() {
-        let logctx =
-            dev::test_setup_log("blueprint_pruner_never_deletes_target");
+        const TEST_NAME: &str = "blueprint_pruner_never_deletes_target";
+        let logctx = dev::test_setup_log(TEST_NAME);
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Load the initial state.
-        add_initial_blueprint(opctx, datastore).await;
+        let mut rng = PlannerRng::from_seed(TEST_NAME);
+        add_initial_blueprint(opctx, datastore, &mut rng).await;
 
         // Add several more target blueprints.
         let mut blueprints =
             BlueprintDatabaseState::load(opctx, datastore).await;
         let nblueprints = 10usize;
         for _ in 0..(nblueprints - 1) {
-            blueprints.add_target_blueprint(opctx, datastore).await;
+            rng = blueprints.add_target_blueprint(opctx, datastore, rng).await;
         }
         blueprints.verify_database_matches(opctx, datastore).await;
 
@@ -1892,8 +1908,9 @@ mod test {
         let mut blueprints =
             BlueprintDatabaseState::load(&opctx, datastore).await;
         assert!(blueprints.target_rows.len() < nblueprints);
+        let mut rng = PlannerRng::from_seed("test_blueprint_pruner_task");
         while blueprints.target_rows.len() < nblueprints {
-            blueprints.add_target_blueprint(&opctx, datastore).await;
+            rng = blueprints.add_target_blueprint(&opctx, datastore, rng).await;
         }
 
         // Figure out which blueprints the pruner ought to remove and which ones

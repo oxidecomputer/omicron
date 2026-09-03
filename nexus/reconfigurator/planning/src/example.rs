@@ -633,7 +633,7 @@ impl ExampleSystemBuilder {
                 // Start with an empty blueprint.
                 BlueprintBuilder::build_empty_seeded(
                     "test suite",
-                    rng.blueprint1_rng,
+                    &mut rng.blueprint1_rng,
                 ),
             ))
             .expect("failed to make planning input builder");
