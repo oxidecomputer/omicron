@@ -112,11 +112,19 @@ pub struct ServerHandle {
 }
 
 impl ServerHandle {
-    /// The first address the server is bound to.
+    /// Return the address the server is bound it, if there is exactly one. This
+    /// is intended for test contexts.
     ///
-    /// The server always binds at least one address, so this is always
-    /// available.
-    pub fn first_local_address(&self) -> SocketAddr {
+    /// # Panics
+    ///
+    /// This panics if there is not exactly one address. If you want to handle
+    /// any number of addresses, call [`local_addresses`] instead.
+    pub fn sole_local_address(&self) -> SocketAddr {
+        assert_eq!(
+            self.local_addresses.len(),
+            1,
+            "DNS server does not have exactly one bound address"
+        );
         self.local_addresses[0]
     }
 

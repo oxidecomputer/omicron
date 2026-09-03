@@ -585,7 +585,7 @@ async fn test_omdb_success_cases() {
     let mut bundle_output = String::new();
     let p = postgres_url.clone();
     let dns =
-        cptestctx.internal_dns.dns_server.first_local_address().to_string();
+        cptestctx.internal_dns.dns_server.sole_local_address().to_string();
     do_run_no_redactions(
         &mut bundle_output,
         move |exec| exec.env("OMDB_DB_URL", &p).env("OMDB_DNS_SERVER", &dns),
@@ -627,7 +627,7 @@ async fn test_omdb_success_cases() {
     let cmd_path_owned = cmd_path.to_path_buf();
     let p = postgres_url.clone();
     let dns =
-        cptestctx.internal_dns.dns_server.first_local_address().to_string();
+        cptestctx.internal_dns.dns_server.sole_local_address().to_string();
     let stream_tempdir = tmpdir.path().to_owned();
     let exit_status = tokio::task::spawn_blocking(move || {
         Exec::cmd(&cmd_path_owned)
@@ -715,7 +715,7 @@ async fn test_omdb_env_settings(cptestctx: &ControlPlaneTestContext) {
     let ox_url = format!("http://{}/", cptestctx.oximeter.server_address());
     let ox_test_producer = cptestctx.producer.address().ip();
     let ch_url = format!("http://{}/", cptestctx.clickhouse.http_address());
-    let dns_sockaddr = cptestctx.internal_dns.dns_server.first_local_address();
+    let dns_sockaddr = cptestctx.internal_dns.dns_server.sole_local_address();
     let mut output = String::new();
 
     // The blueprint_rendezvous task needs an inventory collection to run.

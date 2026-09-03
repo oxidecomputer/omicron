@@ -1417,7 +1417,7 @@ mod test {
         .expect("DNS server must accept its config");
 
         let resolver = Arc::new(external_dns::Resolver::new_from_addr(
-            dns.dns_server.first_local_address(),
+            dns.dns_server.sole_local_address(),
             test_policy(TreatLoopbackAsExternal::YesForTestPurposesOnly),
         ));
         let client = client_with_resolver(builder, resolver);

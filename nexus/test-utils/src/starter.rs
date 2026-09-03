@@ -598,7 +598,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                 .as_ref()
                 .expect("Must initialize internal DNS server first")
                 .dns_server
-                .first_local_address(),
+                .sole_local_address(),
         };
         self.config.deployment.database = Database::FromUrl {
             url: self
@@ -1179,7 +1179,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
 
         let dns = TransientDnsServer::new(&log).await.unwrap();
 
-        let SocketAddr::V6(dns_address) = dns.dns_server.first_local_address()
+        let SocketAddr::V6(dns_address) = dns.dns_server.sole_local_address()
         else {
             panic!("Unsupported IPv4 DNS address");
         };
@@ -1206,7 +1206,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             .parse()
             .unwrap();
 
-        let ip_config = if dns.dns_server.first_local_address().is_ipv4() {
+        let ip_config = if dns.dns_server.sole_local_address().is_ipv4() {
             PrivateIpConfig::new_ipv4(
                 DNS_OPTE_IPV4_SUBNET
                     .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
@@ -1262,7 +1262,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         let log = self.logctx.log.new(o!("component" => "internal_dns_server"));
         let dns = TransientDnsServer::new(&log).await.unwrap();
 
-        let SocketAddr::V6(dns_address) = dns.dns_server.first_local_address()
+        let SocketAddr::V6(dns_address) = dns.dns_server.sole_local_address()
         else {
             panic!("Unsupported IPv4 DNS address");
         };
