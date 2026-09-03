@@ -30,6 +30,24 @@
 //! This enables cross-project and cross-silo multicast while maintaining
 //! security through API authorization and underlay membership control.
 //!
+//! External senders reach the rack through ordinary multicast routing on the
+//! upstream network (PIM, IGMP snooping, or static routes toward the rack
+//! uplinks). Ingress is generally active-active: every switch carries every
+//! group's NAT ingress entry, and whichever switch receives a packet rewrites
+//! and replicates it accordingly. The rack does not delegate an ingress switch.
+//! Uplinks carrying a group is up to the customer network. Delivering toward
+//! one uplink gives each subscriber a single copy. Delivering toward both gives
+//! it one copy per switch, since nothing downstream carries packet identity to
+//! deduplicate on. Neither is wrong. A customer with two uplinks may
+//! configure both, why not.
+//!
+//! TODO: advertise membership upstream (RFD 488 "External Multicast",
+//! eventually mcastd) so a dynamic upstream builds its tree without
+//! manual steering. Reports from both uplinks can signal the stream through
+//! to both switches (one copy per switch). For single-copy delivery, we need mcastd
+//! to pick a reporting uplink per group, which involves a switch selection in the
+//! signaling plane rather than in NAT programming.
+//!
 //! ## Source Filtering (IGMPv3/MLDv2)
 //!
 //! Source IPs are stored **per-member** in the control plane, allowing each
@@ -50,7 +68,7 @@ use std::time::Duration;
 
 use futures::future::try_join_all;
 use oxnet::MulticastMac;
-use slog::{Logger, debug, error, info};
+use slog::{Logger, debug, error, info, warn};
 
 use dpd_client::Error as DpdError;
 use dpd_client::types::{
@@ -69,7 +87,7 @@ use omicron_common::address::is_ssm_address;
 use omicron_common::api::external::Error;
 use sled_agent_types::early_networking::SwitchSlot;
 
-use crate::app::dpd_clients;
+use crate::app::dpd_switches;
 
 /// Trait for extracting external responses from mixed DPD response types.
 trait IntoExternalResponse {
@@ -106,13 +124,13 @@ impl IntoExternalResponse for MulticastGroupResponse {
     }
 }
 
-/// Convert an [`IpAddr`] into a DPD [`UnderlayMulticastIpv6`],
+/// Convert an `IpAddr` into a DPD `UnderlayMulticastIpv6`,
 /// rejecting IPv4.
 ///
 /// Note: named without the `Ipv6` suffix because the input type is the general
 /// `IpAddr`.
 trait IntoUnderlayMulticast {
-    /// Convert to [`UnderlayMulticastIpv6`], rejecting IPv4 addresses.
+    /// Convert to `UnderlayMulticastIpv6`, rejecting IPv4 addresses.
     fn into_underlay_multicast(self) -> Result<UnderlayMulticastIpv6, Error>;
 }
 
@@ -143,6 +161,11 @@ pub(crate) type MulticastDataplaneResult<T> = Result<T, Error>;
 /// front-port uplink members with [`dpd_client::types::Direction::External`].
 pub(crate) struct MulticastDataplaneClient {
     dpd_clients: HashMap<SwitchSlot, dpd_client::Client>,
+    /// Whether every Dendrite instance advertised in DNS produced a client.
+    ///
+    /// Non-destructive operations tolerate a partial map, but tag-based
+    /// deletion refuses to run over one (see [`Self::remove_groups`]).
+    discovery_complete: bool,
     log: Logger,
 }
 
@@ -151,14 +174,19 @@ pub(crate) struct MulticastDataplaneClient {
 pub(crate) struct GroupUpdateParams<'a> {
     pub external_group: &'a ExternalMulticastGroup,
     pub underlay_group: &'a UnderlayMulticastGroup,
-    pub new_name: &'a str,
     pub source_filter: &'a SourceFilterState,
 }
 
-/// Bound DPD client construction. On timeout (or DNS failure) we yield
-/// an empty client map rather than failing the pass: group operations
-/// skip with no switches, but DB-only member-state transitions
-/// ("Joining" → "Left" when the instance is stopped) still proceed.
+/// What [`MulticastDataplaneClient::fetch_external_group_for_drift_check`]
+/// observed across the switches.
+pub(crate) struct ExternalDriftCheck {
+    /// One switch's config when the entry is present and consistent on
+    /// every switch, `None` when the reconciler must re-issue an update.
+    pub external_config: Option<MulticastGroupExternalResponse>,
+}
+
+/// Bound-by-timeout DPD client construction. On timeout or DNS failure we yield
+/// an empty client map rather than failing the pass.
 const DPD_CLIENT_BUILD_TIMEOUT: Duration =
     // Caps the internal-DNS retry budget for `_dendrite._tcp` so a DPD
     // outage doesn't starve the bg task's idle window.
@@ -167,17 +195,33 @@ const DPD_CLIENT_BUILD_TIMEOUT: Duration =
 impl MulticastDataplaneClient {
     /// Create a new client - builds fresh DPD clients for current switch
     /// topology.
+    ///
+    /// The client map holds every switch whose Dendrite zone is advertised
+    /// in internal DNS and whose DPD reports a slot. A missing switch (DNS
+    /// gap or unreachable management plane) is tolerated rather than
+    /// crashing out.
+    ///
+    /// Destructive tag-based cleanup is the exception and requires complete
+    /// discovery (see [`Self::remove_groups`]). See
+    /// [`DPD_CLIENT_BUILD_TIMEOUT`].
     pub(crate) async fn new(
         resolver: Resolver,
         log: Logger,
     ) -> MulticastDataplaneResult<Self> {
-        let dpd_clients = match tokio::time::timeout(
+        let (dpd_clients, discovery_complete) = match tokio::time::timeout(
             DPD_CLIENT_BUILD_TIMEOUT,
-            dpd_clients(&resolver, &log),
+            dpd_switches(&resolver, &log),
         )
         .await
         {
-            Ok(Ok(clients)) => clients,
+            Ok(Ok((switches, advertised))) => {
+                let complete = switches.len() == advertised;
+                let clients = switches
+                    .into_iter()
+                    .map(|(slot, (_addr, client))| (slot, client))
+                    .collect();
+                (clients, complete)
+            }
             Ok(Err(e)) => {
                 warn!(
                     log,
@@ -185,7 +229,7 @@ impl MulticastDataplaneClient {
                      client map";
                     "error" => %e,
                 );
-                HashMap::new()
+                (HashMap::new(), false)
             }
             Err(_) => {
                 warn!(
@@ -194,10 +238,10 @@ impl MulticastDataplaneClient {
                      client map";
                     "timeout" => ?DPD_CLIENT_BUILD_TIMEOUT,
                 );
-                HashMap::new()
+                (HashMap::new(), false)
             }
         };
-        Ok(Self { dpd_clients, log })
+        Ok(Self { dpd_clients, discovery_complete, log })
     }
 
     /// Compute DPD source filter from aggregated member source state.
@@ -414,10 +458,7 @@ impl MulticastDataplaneClient {
         external_group: &ExternalMulticastGroup,
         underlay_group: &UnderlayMulticastGroup,
         source_filter: &SourceFilterState,
-    ) -> MulticastDataplaneResult<(
-        MulticastGroupUnderlayResponse,
-        MulticastGroupExternalResponse,
-    )> {
+    ) -> MulticastDataplaneResult<()> {
         debug!(
             self.log,
             "DPD multicast group creation initiated across rack switches";
@@ -459,6 +500,9 @@ impl MulticastDataplaneClient {
         let sources_dpd =
             Self::compute_sources_for_dpd(external_group_ip, source_filter);
 
+        // Every switch carries the external entry. The underlay group is
+        // created on every switch too, keeping each a warm failover
+        // candidate whose member ports mg-lower populates.
         let create_operations =
             dpd_clients.into_iter().map(|(switch_slot, client)| {
                 let tag = tag.clone();
@@ -476,10 +520,10 @@ impl MulticastDataplaneClient {
                         )
                         .await?;
 
-                    // TODO: `vlan_id` is `None` because egress VLAN tagging is not
-                    // yet supported. See RFD 488 (§sect-external-mcast) for
-                    // the egress design. When egress support lands, this
-                    // should be populated from group configuration.
+                    // TODO: `vlan_id` is `None` because egress VLAN tagging is
+                    // not yet supported. See RFD 488 (§sect-external-mcast) for
+                    // the egress design. Once egress is supported, populate
+                    // this from group configuration.
                     let external_entry = MulticastGroupCreateExternalEntry {
                         group_ip: external_group_ip,
                         external_forwarding: ExternalForwarding {
@@ -525,7 +569,6 @@ impl MulticastDataplaneClient {
             e
         })?;
 
-        // Collect results
         let programmed_switches: Vec<SwitchSlot> =
             results.iter().map(|(loc, _, _)| **loc).collect();
         let (_, underlay_last, external_last) =
@@ -535,7 +578,7 @@ impl MulticastDataplaneClient {
 
         debug!(
             self.log,
-            "DPD multicast forwarding configuration completed - all switches configured";
+            "DPD multicast forwarding configuration completed";
             "external_group_id" => %external_group.id(),
             "external_multicast_ip" => %external_group.multicast_ip,
             "underlay_group_id" => %underlay_group.id,
@@ -546,20 +589,18 @@ impl MulticastDataplaneClient {
             "dpd_operation" => "create_groups"
         );
 
-        Ok((underlay_last, external_last))
+        Ok(())
     }
 
-    /// Update a multicast group's tag (name) and/or sources in the dataplane.
+    /// Update a multicast group's sources and forwarding in the dataplane.
+    /// The DPD tag is immutable, so a rename never reaches the switches.
     ///
     /// Membership is left untouched here: underlay members are owned by
     /// mg-lower/DDM and are not rewritten by this client.
     pub(crate) async fn update_groups(
         &self,
         params: GroupUpdateParams<'_>,
-    ) -> MulticastDataplaneResult<(
-        MulticastGroupUnderlayResponse,
-        MulticastGroupExternalResponse,
-    )> {
+    ) -> MulticastDataplaneResult<()> {
         debug!(
             self.log,
             "updating multicast groups in dataplane";
@@ -591,16 +632,26 @@ impl MulticastDataplaneClient {
             inner_mac: MacAddr { a: underlay_ipv6.derive_multicast_mac() },
             vni: Vni::from(u32::from(params.external_group.vni.0)),
         };
-        let new_name_str = params.new_name.to_string();
+        // The DB tag (`{uuid}:{multicast_ip}`) is immutable for the group's
+        // lifetime and shared by the external and underlay entries. Drift
+        // repair below recreates a missing external entry with this tag,
+        // matching `create_groups`. The user-facing name must not be used,
+        // since DPD tags never change after creation.
+        let db_tag = params.external_group.tag.clone().ok_or_else(|| {
+            Error::internal_error("multicast group missing tag")
+        })?;
         let external_group_ip = params.external_group.multicast_ip.ip();
         let sources_dpd = Self::compute_sources_for_dpd(
             external_group_ip,
             params.source_filter,
         );
 
+        // Update the external entry on every switch, matching
+        // `create_groups`. The underlay group stays updated on every switch
+        // as before.
         let update_operations =
             dpd_clients.into_iter().map(|(switch_slot, client)| {
-                let new_name = new_name_str.clone();
+                let db_tag = db_tag.clone();
                 let nat_target = nat_target.clone();
                 let sources = sources_dpd.clone();
                 let underlay_ip_admin = underlay_ip_admin.clone();
@@ -662,12 +713,12 @@ impl MulticastDataplaneClient {
                             ))
                         })?;
 
-                    // Prepare external update/create entries with pre-computed data.
+                    // Prepare external entries with pre-computed data.
                     //
-                    // TODO: `vlan_id` is `None` because egress VLAN tagging is not
-                    // yet supported. See RFD 488 (§sect-external-mcast) for
-                    // the egress design. When egress support lands, this
-                    // should be populated from group configuration.
+                    // TODO: `vlan_id` is `None` because egress VLAN tagging is
+                    // not yet supported. See RFD 488 (§sect-external-mcast) for
+                    // the egress design. Once egress is supported, populate
+                    // this from group configuration.
                     let external_forwarding =
                         ExternalForwarding { vlan_id: None };
                     let internal_forwarding =
@@ -682,7 +733,7 @@ impl MulticastDataplaneClient {
                         group_ip: external_group_ip,
                         external_forwarding,
                         internal_forwarding,
-                        tag: Some(new_name.clone()),
+                        tag: Some(db_tag),
                         sources,
                     };
 
@@ -716,103 +767,66 @@ impl MulticastDataplaneClient {
             e
         })?;
 
-        // Get the last response (all switches should return equivalent responses)
+        // Every switch received the same update, but watch for the failure of
+        // an empty switch set.
         let results_len = results.len();
-        let (_, underlay_last, external_last) = results
-            .into_iter()
-            .last()
-            .ok_or_else(|| Error::internal_error("no switches were updated"))?;
+        if results.is_empty() {
+            return Err(Error::internal_error("no switches were updated"));
+        }
 
         debug!(
             self.log,
-            "successfully updated multicast groups on all switches";
+            "successfully updated multicast groups";
             "external_group_id" => %params.external_group.id(),
             "switches_updated" => results_len,
-            "new_name" => params.new_name,
             "dpd_operation" => "update_groups"
         );
 
-        Ok((underlay_last, external_last))
-    }
-
-    /// Detect and log cross-switch drift for multicast groups.
-    ///
-    /// Detection-only. Logs errors when:
-    /// - Group is present on some switches but missing on others (presence drift)
-    /// - Group has different configurations across switches (config drift)
-    ///
-    /// Drift correction is handled separately by the active-group reconciler
-    /// (`groups.rs::reconcile_active_groups`), which re-pushes the
-    /// authoritative DB state to all switches on the next pass.
-    fn log_drift_issues<'a>(
-        &self,
-        group_ip: IpAddr,
-        first_location: &SwitchSlot,
-        first_config: &MulticastGroupResponse,
-        found_results: &[&'a (
-            &'a SwitchSlot,
-            Option<MulticastGroupResponse>,
-        )],
-        not_found_count: usize,
-    ) {
-        let total_switches = found_results.len() + not_found_count;
-
-        // Check for cross-switch presence drift (group missing on some switches)
-        if not_found_count > 0 {
-            error!(
-                self.log,
-                "cross-switch drift detected: group missing on some switches";
-                "group_ip" => %group_ip,
-                "switches_with_group" => found_results.len(),
-                "switches_without_group" => not_found_count,
-                "total_switches" => total_switches,
-                "dpd_operation" => "fetch_external_group_for_drift_check"
-            );
-        }
-
-        // Check for config mismatches between switches (functional style)
-        found_results
-            .iter()
-            .filter_map(|(loc, resp)| resp.as_ref().map(|r| (loc, r)))
-            .filter(|(_, cfg)| !external_configs_equivalent(cfg, first_config))
-            .for_each(|(switch_slot, _)| {
-                error!(
-                    self.log,
-                    "cross-switch drift detected: different configs on switches";
-                    "group_ip" => %group_ip,
-                    "first_switch" => ?first_location,
-                    "mismatched_switch" => ?switch_slot,
-                    "dpd_operation" => "fetch_external_group_for_drift_check"
-                );
-            });
+        Ok(())
     }
 
     /// Fetch external multicast group DPD state for RPW drift detection.
     ///
-    /// Queries every switch and returns a configuration only when all of them
-    /// agree on it. `None` covers both the group being absent everywhere and
-    /// the switches disagreeing, since the caller compares a returned
-    /// configuration against the database and would otherwise accept one
-    /// switch's view as the state of the whole rack.
+    /// This expects the entry on every switch. It queries all switches
+    /// and classifies the result as
+    ///
+    /// - present everywhere: returns one switch's config so that the
+    ///   reconciler can compare tag and sources against the DB.
+    /// - absent anywhere (external or underlay): returns `None` so
+    ///   the reconciler can re-issue [`update_groups`], which recreates it
+    ///   everywhere.
+    ///
+    /// The paired underlay replication entry at `underlay_ip` is checked on
+    /// every switch alongside the external entry, with the same expecation.
+    ///
+    /// Drift repair follows the RPW convergence model rather than an atomic
+    /// cross-switch saga.
+    ///
+    /// [`update_groups`]: Self::update_groups
     pub(crate) async fn fetch_external_group_for_drift_check(
         &self,
         group_ip: IpAddr,
-    ) -> MulticastDataplaneResult<Option<MulticastGroupExternalResponse>> {
+        underlay_ip: IpAddr,
+    ) -> MulticastDataplaneResult<ExternalDriftCheck> {
         debug!(
             self.log,
             "fetching external group state from all switches for drift detection";
             "group_ip" => %group_ip,
+            "underlay_ip" => %underlay_ip,
             "switch_count" => self.switch_count(),
             "dpd_operation" => "fetch_external_group_for_drift_check"
         );
 
+        let underlay_ip_admin = underlay_ip.into_underlay_multicast()?;
+
         let fetch_ops = self.dpd_clients.iter().map(|(switch_slot, client)| {
             let log = self.log.clone();
+            let underlay_ip_admin = underlay_ip_admin.clone();
+
             async move {
-                match client.multicast_group_get(&group_ip).await {
-                    Ok(response) => {
-                        Ok((switch_slot, Some(response.into_inner())))
-                    }
+                let external = match client.multicast_group_get(&group_ip).await
+                {
+                    Ok(response) => Some(response.into_inner()),
                     Err(DpdError::ErrorResponse(resp))
                         if resp.status() == reqwest::StatusCode::NOT_FOUND =>
                     {
@@ -823,7 +837,7 @@ impl MulticastDataplaneClient {
                             "switch" => ?switch_slot,
                             "dpd_operation" => "fetch_external_group_for_drift_check"
                         );
-                        Ok((switch_slot, None))
+                        None
                     }
                     Err(e) => {
                         error!(
@@ -834,75 +848,117 @@ impl MulticastDataplaneClient {
                             "error" => %e,
                             "dpd_operation" => "fetch_external_group_for_drift_check"
                         );
-                        Err(Error::internal_error(&format!(
+                        return Err(Error::internal_error(&format!(
                             "failed to fetch external group from DPD: {e}"
-                        )))
+                        )));
                     }
-                }
+                };
+
+                let underlay_present = match client
+                    .multicast_group_get_underlay(&underlay_ip_admin)
+                    .await
+                {
+                    Ok(_) => true,
+                    Err(DpdError::ErrorResponse(resp))
+                        if resp.status() == reqwest::StatusCode::NOT_FOUND =>
+                    {
+                        debug!(
+                            log,
+                            "underlay group not found on switch";
+                            "underlay_ip" => %underlay_ip_admin,
+                            "switch" => ?switch_slot,
+                            "dpd_operation" => "fetch_external_group_for_drift_check"
+                        );
+                        false
+                    }
+                    Err(e) => {
+                        error!(
+                            log,
+                            "underlay group fetch failed";
+                            "underlay_ip" => %underlay_ip_admin,
+                            "switch" => ?switch_slot,
+                            "error" => %e,
+                            "dpd_operation" => "fetch_external_group_for_drift_check"
+                        );
+                        return Err(Error::internal_error(&format!(
+                            "failed to fetch underlay group from DPD: {e}"
+                        )));
+                    }
+                };
+
+                Ok((switch_slot, external, underlay_present))
             }
         });
 
         let results = try_join_all(fetch_ops).await?;
 
-        // Partition results into found/not-found for drift analysis
-        let (found, not_found): (Vec<_>, Vec<_>) =
-            results.iter().partition(|(_, resp)| resp.is_some());
+        // Discovery can yield an empty client map (see
+        // [`DPD_CLIENT_BUILD_TIMEOUT`]), so warn and error out.
+        if results.is_empty() {
+            warn!(
+                self.log,
+                "no switches to query for drift detection";
+                "group_ip" => %group_ip,
+                "dpd_operation" => "fetch_external_group_for_drift_check"
+            );
+            return Err(Error::internal_error("no switches were configured"));
+        }
 
-        if found.is_empty() {
-            // Group doesn't exist on any switch
+        // The underlay replication entry must exist on every switch. A switch
+        // missing it cannot replicate the group's traffic: re-issue the
+        // update, which recreates the entry there.
+        let underlay_missing: Vec<SwitchSlot> = results
+            .iter()
+            .filter(|(_, _, present)| !present)
+            .map(|(slot, _, _)| **slot)
+            .collect();
+        if !underlay_missing.is_empty() {
+            error!(
+                self.log,
+                "underlay multicast entry missing on switch(es)";
+                "group_ip" => %group_ip,
+                "underlay_ip" => %underlay_ip,
+                "missing_switches" => ?underlay_missing,
+                "dpd_operation" => "fetch_external_group_for_drift_check"
+            );
+            return Ok(ExternalDriftCheck { external_config: None });
+        }
+
+        // Missing anywhere forces the update.
+        let missing: Vec<SwitchSlot> = results
+            .iter()
+            .filter(|(_, resp, _)| resp.is_none())
+            .map(|(slot, _, _)| **slot)
+            .collect();
+        if !missing.is_empty() {
             debug!(
                 self.log,
-                "external group not found on any switch (expected for new groups)";
+                "external group absent on switch(es), reconciler will create";
                 "group_ip" => %group_ip,
+                "missing_switches" => ?missing,
                 "switches_queried" => results.len(),
                 "dpd_operation" => "fetch_external_group_for_drift_check"
             );
-            return Ok(None);
+            return Ok(ExternalDriftCheck { external_config: None });
         }
 
-        // The first found config is the comparison baseline for the agreement
-        // check below and, when every switch matches it, the returned
-        // configuration.
-        let (first_location, first_config) = found
-            .first()
-            .and_then(|(loc, resp)| resp.as_ref().map(|r| (*loc, r)))
-            .expect(
-                "found_results non-empty check guarantees at least one element",
-            );
-
-        // Detect and log any cross-switch drift
-        self.log_drift_issues(
-            group_ip,
-            first_location,
-            first_config,
-            &found,
-            not_found.len(),
-        );
+        // Present everywhere. Any copy will do for the tag and source
+        // comparisons.
+        let config = results
+            .into_iter()
+            .find_map(|(_, resp, _)| resp)
+            .expect("missing is empty, so every result has a response");
 
         debug!(
             self.log,
-            "external group state fetched from all switches";
+            "external group present on every switch";
             "group_ip" => %group_ip,
-            "switches_queried" => results.len(),
-            "switches_with_group" => found.len(),
             "dpd_operation" => "fetch_external_group_for_drift_check"
         );
 
-        let configs_diverge = found
-            .iter()
-            .filter_map(|(_, resp)| resp.as_ref())
-            .any(|config| !external_configs_equivalent(config, first_config));
-
-        // A switch that is missing the group while others have it, or that
-        // holds a different configuration, cannot be repaired by reporting one
-        // switch's view to the caller. Withholding the configuration drives the
-        // caller into the update path, which rewrites the group on every switch
-        // and creates it where DPD returns 'not found'.
-        if !not_found.is_empty() || configs_diverge {
-            return Ok(None);
-        }
-
-        Ok(Some(first_config.clone().into_external_response()?))
+        Ok(ExternalDriftCheck {
+            external_config: Some(config.into_external_response()?),
+        })
     }
 
     pub(crate) async fn remove_groups(
@@ -916,6 +972,21 @@ impl MulticastDataplaneClient {
         );
 
         let dpd_clients = &self.dpd_clients;
+        if dpd_clients.is_empty() {
+            // An empty client map means switch state could not be reached
+            // (see [`DPD_CLIENT_BUILD_TIMEOUT`]).
+            return Err(Error::internal_error(
+                "no switches were available for multicast group cleanup",
+            ));
+        }
+
+        if !self.discovery_complete {
+            return Err(Error::internal_error(
+                "multicast group cleanup requires every switch advertised \
+                 in DNS, but Dendrite discovery was partial",
+            ));
+        }
+
         let dpd_tag: MulticastTag = tag
             .parse()
             .map_err(|_| Error::internal_error("invalid multicast tag"))?;
@@ -973,168 +1044,5 @@ impl MulticastDataplaneClient {
             "tag" => tag
         );
         Ok(())
-    }
-}
-
-/// Compare two DPD responses for the same external group across switches.
-///
-/// `external_group_id` is a switch-local allocation, so two switches that
-/// agree on the group's configuration still report different IDs. Comparing
-/// it would flag permanent drift and drive the reconciler into rewriting the
-/// group on every pass. Sources are compared as sets because DPD does not
-/// guarantee a stable ordering.
-fn external_configs_equivalent(
-    a: &MulticastGroupResponse,
-    b: &MulticastGroupResponse,
-) -> bool {
-    match (a, b) {
-        (
-            MulticastGroupResponse::External {
-                group_ip: a_group_ip,
-                external_group_id: _,
-                tag: a_tag,
-                internal_forwarding: a_internal,
-                external_forwarding: a_external,
-                sources: a_sources,
-            },
-            MulticastGroupResponse::External {
-                group_ip: b_group_ip,
-                external_group_id: _,
-                tag: b_tag,
-                internal_forwarding: b_internal,
-                external_forwarding: b_external,
-                sources: b_sources,
-            },
-        ) => {
-            a_group_ip == b_group_ip
-                && a_tag == b_tag
-                && a_internal == b_internal
-                && a_external == b_external
-                && sources_equivalent(
-                    a_sources.as_deref(),
-                    b_sources.as_deref(),
-                )
-        }
-        // An underlay response for an external group IP cannot be repaired by
-        // the update path either, but it is still drift, as is a mixed pair.
-        _ => false,
-    }
-}
-
-/// Compare two optional source lists as sets.
-///
-/// `None` (any-source) and `Some([])` are distinct filter states in DPD, so
-/// they do not compare equal.
-fn sources_equivalent(a: Option<&[IpSrc]>, b: Option<&[IpSrc]>) -> bool {
-    match (a, b) {
-        (None, None) => true,
-        (Some(a), Some(b)) => {
-            a.iter().all(|src| b.contains(src))
-                && b.iter().all(|src| a.contains(src))
-        }
-        _ => false,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn external_response(
-        external_group_id: u16,
-        tag: &str,
-        sources: Option<Vec<IpSrc>>,
-    ) -> MulticastGroupResponse {
-        MulticastGroupResponse::External {
-            group_ip: "232.1.1.1".parse().unwrap(),
-            external_group_id,
-            tag: tag.to_string(),
-            internal_forwarding: InternalForwarding { nat_target: None },
-            external_forwarding: ExternalForwarding { vlan_id: None },
-            sources,
-        }
-    }
-
-    #[test]
-    fn test_external_configs_equivalent_ignores_group_id() {
-        let sources = Some(vec![
-            IpSrc::Exact("10.0.0.1".parse().unwrap()),
-            IpSrc::Exact("10.0.0.2".parse().unwrap()),
-        ]);
-        let a = external_response(1, "tag", sources.clone());
-        let b = external_response(2, "tag", sources);
-        assert!(
-            external_configs_equivalent(&a, &b),
-            "switch-local external_group_id must not register as drift"
-        );
-    }
-
-    #[test]
-    fn test_external_configs_equivalent_ignores_source_order() {
-        let a = external_response(
-            1,
-            "tag",
-            Some(vec![
-                IpSrc::Exact("10.0.0.1".parse().unwrap()),
-                IpSrc::Exact("10.0.0.2".parse().unwrap()),
-            ]),
-        );
-        let b = external_response(
-            1,
-            "tag",
-            Some(vec![
-                IpSrc::Exact("10.0.0.2".parse().unwrap()),
-                IpSrc::Exact("10.0.0.1".parse().unwrap()),
-            ]),
-        );
-        assert!(
-            external_configs_equivalent(&a, &b),
-            "source ordering must not register as drift"
-        );
-    }
-
-    #[test]
-    fn test_external_configs_equivalent_detects_drift() {
-        let sources = Some(vec![IpSrc::Exact("10.0.0.1".parse().unwrap())]);
-
-        let a = external_response(1, "tag", sources.clone());
-        let tag_differs = external_response(1, "other-tag", sources.clone());
-        assert!(!external_configs_equivalent(&a, &tag_differs));
-
-        let any_source = external_response(1, "tag", None);
-        let empty_sources = external_response(1, "tag", Some(Vec::new()));
-        assert!(
-            !external_configs_equivalent(&any_source, &empty_sources),
-            "any-source and empty filter are distinct DPD states"
-        );
-
-        let sources_differ = external_response(
-            1,
-            "tag",
-            Some(vec![IpSrc::Exact("10.0.0.9".parse().unwrap())]),
-        );
-        assert!(!external_configs_equivalent(&a, &sources_differ));
-
-        let duplicate_sources = external_response(
-            1,
-            "tag",
-            Some(vec![IpSrc::Exact("10.0.0.1".parse().unwrap()); 2]),
-        );
-        assert!(
-            external_configs_equivalent(&a, &duplicate_sources),
-            "source lists are compared as sets"
-        );
-
-        let underlay = MulticastGroupResponse::Underlay {
-            group_ip: UnderlayMulticastIpv6("ff04::1".parse().unwrap()),
-            external_group_id: 1,
-            underlay_group_id: 2,
-            tag: "tag".to_string(),
-            members: Vec::new(),
-        };
-        assert!(
-            !external_configs_equivalent(&a, &underlay),
-            "an external/underlay variant mismatch is drift"
-        );
     }
 }

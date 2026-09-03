@@ -116,9 +116,8 @@ const ZLOGIN: &'static str = "/usr/sbin/zlogin";
 const ZPOOL: &'static str = "/usr/sbin/zpool";
 const ZONEADM: &'static str = "/usr/sbin/zoneadm";
 
-const SIDECAR_LITE_COMMIT: &'static str =
-    "461cbe1926b93b20c2f43ad5cd9007b193db61a6";
-const SOFTNPU_COMMIT: &'static str = "284c6830722548714128e63ea04bcca78ee27154";
+const SIDECAR_LITE_BRANCH: &'static str = "zl/multicast";
+const SOFTNPU_BRANCH: &'static str = "zl/multicast";
 const PXA_MAC_DEFAULT: &'static str = "a8:e1:de:01:70:1d";
 
 const PXA_WARNING: &'static str = r#"  You have not set up the proxy-ARP environment variables
@@ -340,6 +339,31 @@ fn ensure_simulated_links(
     Ok(())
 }
 
+/// Resolve the head commit of a branch in an oxidecomputer repo.
+///
+/// This allows an image to follow a build (on buildomat) branch rather
+/// than a pinned commit.
+///
+/// TODO: remove in split PR-series
+fn branch_head(repo: &str, branch: &str) -> Result<String> {
+    let output = Command::new("git")
+        .args([
+            "ls-remote",
+            &format!("https://github.com/oxidecomputer/{repo}"),
+            &format!("refs/heads/{branch}"),
+        ])
+        .output()
+        .with_context(|| format!("running git ls-remote for {repo}"))?;
+    if !output.status.success() {
+        bail!("git ls-remote failed for {repo} branch {branch}");
+    }
+    String::from_utf8(output.stdout)?
+        .split_whitespace()
+        .next()
+        .map(str::to_string)
+        .ok_or_else(|| anyhow!("{repo} branch {branch} not found"))
+}
+
 fn ensure_softnpu_zone(npu_zone: &Utf8Path) -> Result<()> {
     let zones = zoneadm_list()?;
     if !zones.iter().any(|z| z == "sidecar_softnpu") {
@@ -349,6 +373,9 @@ fn ensure_softnpu_zone(npu_zone: &Utf8Path) -> Result<()> {
             );
         }
 
+        let softnpu_commit = branch_head("softnpu", SOFTNPU_BRANCH)?;
+        let sidecar_lite_commit =
+            branch_head("sidecar-lite", SIDECAR_LITE_BRANCH)?;
         let mut cmd = Command::new(PFEXEC);
         cmd.arg(npu_zone);
         cmd.args([
@@ -360,9 +387,9 @@ fn ensure_softnpu_zone(npu_zone: &Utf8Path) -> Result<()> {
             "--ports",
             "sc0_1,tfportqsfp0_0",
             "--sidecar-lite-commit",
-            SIDECAR_LITE_COMMIT,
+            sidecar_lite_commit.as_str(),
             "--softnpu-commit",
-            SOFTNPU_COMMIT,
+            softnpu_commit.as_str(),
         ]);
         execute(cmd)?;
     }

@@ -449,7 +449,7 @@ async fn test_instance_multicast_endpoints(
     )
     .await;
 
-    // Verify instance now belongs to both groups (comprehensive list test)
+    // Verify instance now belongs to both groups
     let instance_memberships: ResultsPage<MulticastGroupMember> =
         object_get(client, &instance_groups_url).await;
     assert_eq!(
