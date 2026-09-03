@@ -618,10 +618,6 @@ impl nexus_test_interface::NexusServer for Server {
         self.apictx.context.nexus.inventory_load_rx()
     }
 
-    fn get_http_server_external_address(&self) -> SocketAddr {
-        self.apictx.context.nexus.get_external_server_primary_address().unwrap()
-    }
-
     /// Return all the external server addresses.
     ///
     /// This is always non-empty.
