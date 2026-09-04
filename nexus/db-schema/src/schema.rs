@@ -3426,8 +3426,8 @@ table! {
         comment -> Text,
         silo_id -> Uuid,
         kind -> crate::enums::FmFactCertificateKindEnum,
-        certificate_id -> Nullable<Uuid>,
-        not_after -> Nullable<Timestamptz>,
+        certificate_id -> Uuid,
+        not_after -> Timestamptz,
     }
 }
 

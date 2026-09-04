@@ -21,30 +21,15 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_fact_certificate (
     -- looked up from the silo and certificate tables when a case is acted on.
     silo_id UUID NOT NULL,
 
-    -- Which certificate fact this row represents. The columns below are
-    -- populated according to this discriminant (see the CHECK constraints).
+    -- Which certificate fact this row represents.
     kind omicron.public.fm_fact_certificate_kind NOT NULL,
 
-    -- Columns shared by the 'best_certificate_expiring' and
-    -- 'best_certificate_expired' kinds: the silo's best certificate (latest
-    -- leaf `not_after`) when the fact was recorded, and that `not_after`.
-    certificate_id UUID,
-    not_after TIMESTAMPTZ,
+    -- Both kinds carry the same payload: the silo's best certificate (latest
+    -- leaf `not_after`) when the fact was recorded, and that `not_after`. A
+    -- kind with a different payload would add nullable columns here with a
+    -- CHECK constraint keyed on `kind`, as `fm_fact_saga` does.
+    certificate_id UUID NOT NULL,
+    not_after TIMESTAMPTZ NOT NULL,
 
-    PRIMARY KEY (sitrep_id, id),
-
-    -- Each kind's constraint checks only that its own columns are present,
-    -- not that others are NULL, so future kinds may share columns.
-    CONSTRAINT best_certificate_expiring_columns_present CHECK (
-        kind != 'best_certificate_expiring' OR (
-            certificate_id IS NOT NULL
-            AND not_after IS NOT NULL
-        )
-    ),
-    CONSTRAINT best_certificate_expired_columns_present CHECK (
-        kind != 'best_certificate_expired' OR (
-            certificate_id IS NOT NULL
-            AND not_after IS NOT NULL
-        )
-    )
+    PRIMARY KEY (sitrep_id, id)
 );

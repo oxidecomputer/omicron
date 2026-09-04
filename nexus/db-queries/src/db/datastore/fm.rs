@@ -663,11 +663,7 @@ impl DataStore {
             paginator = p.found_batch(&batch, &|f| f.id);
             for row in batch {
                 let case_id: CaseUuid = row.case_id.into();
-                let fact_id = row.id;
-                let fact = row.into_fact().with_internal_context(|| {
-                    format!("failed to read fact {fact_id} on case {case_id}")
-                })?;
-                insert_fact_for_case(&mut by_case, case_id, fact)?;
+                insert_fact_for_case(&mut by_case, case_id, row.into_fact())?;
             }
         }
 

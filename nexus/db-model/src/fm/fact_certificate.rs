@@ -5,9 +5,8 @@
 //! Database representation of the certificate diagnosis engine's facts.
 //!
 //! Each certificate fact is stored as typed columns in the
-//! `fm_fact_certificate` table. The `kind` discriminant selects which payload
-//! columns are populated; per-kind CHECK constraints enforce that the right
-//! columns are non-NULL for each kind. See
+//! `fm_fact_certificate` table. Every kind of certificate fact carries the
+//! same payload, so the `kind` discriminant alone distinguishes them. See
 //! [`nexus_types::fm::CertificateFact`] for semantics.
 
 use crate::DbTypedUuid;
@@ -19,7 +18,6 @@ use nexus_types::fm::case::FactMetadata;
 use nexus_types::fm::{
     CertificateExpiryFactPayload, CertificateFact, FactPayload,
 };
-use omicron_common::api::external::Error;
 use omicron_uuid_kinds::{CaseKind, FactKind, SitrepKind};
 use uuid::Uuid;
 
@@ -34,9 +32,6 @@ impl_enum_type!(
 );
 
 /// Diesel row for the `fm_fact_certificate` table.
-///
-/// The payload columns are populated according to `kind`: a column is `Some`
-/// if it belongs to that `kind`'s payload, and `None` otherwise.
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
 #[diesel(table_name = fm_fact_certificate)]
 pub struct FmFactCertificate {
@@ -57,9 +52,8 @@ pub struct FmFactCertificate {
     pub silo_id: Uuid,
     pub kind: FmFactCertificateKind,
 
-    // Columns shared by both kinds.
-    pub certificate_id: Option<Uuid>,
-    pub not_after: Option<DateTime<Utc>>,
+    pub certificate_id: Uuid,
+    pub not_after: DateTime<Utc>,
 }
 
 impl FmFactCertificate {
@@ -89,24 +83,19 @@ impl FmFactCertificate {
             comment: comment.clone(),
             silo_id: payload.silo_id,
             kind,
-            certificate_id: Some(payload.certificate_id),
-            not_after: Some(payload.not_after),
+            certificate_id: payload.certificate_id,
+            not_after: payload.not_after,
         }
     }
 
     /// Reconstruct an in-memory fact from a row.
-    pub fn into_fact(self) -> Result<fm::case::Fact, Error> {
-        let kind = self.kind;
+    pub fn into_fact(self) -> fm::case::Fact {
         let payload = CertificateExpiryFactPayload {
             silo_id: self.silo_id,
-            certificate_id: self
-                .certificate_id
-                .ok_or_else(|| missing_column(kind, "certificate_id"))?,
-            not_after: self
-                .not_after
-                .ok_or_else(|| missing_column(kind, "not_after"))?,
+            certificate_id: self.certificate_id,
+            not_after: self.not_after,
         };
-        let payload = match kind {
+        let payload = match self.kind {
             FmFactCertificateKind::BestCertificateExpiring => {
                 FactPayload::Certificate(
                     CertificateFact::BestCertificateExpiring(payload),
@@ -118,23 +107,13 @@ impl FmFactCertificate {
                 )
             }
         };
-        Ok(fm::case::Fact {
+        fm::case::Fact {
             metadata: fm::case::FactMetadata {
                 id: self.id.into(),
                 created_sitrep_id: self.created_sitrep_id.into(),
                 comment: self.comment,
             },
             payload,
-        })
-    }
-}
-
-fn missing_column(kind: FmFactCertificateKind, column: &str) -> Error {
-    Error::InternalError {
-        internal_message: format!(
-            "fm_fact_certificate row of kind {kind:?} has a NULL {column}, \
-             violating the CHECK constraint requiring it to be non-NULL for \
-             this kind"
-        ),
+        }
     }
 }
