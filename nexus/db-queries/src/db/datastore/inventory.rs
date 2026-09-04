@@ -571,6 +571,27 @@ impl DataStore {
                 .map_err(|e| Error::internal_error(&e.to_string()))
             })
             .collect::<Result<Vec<_>, Error>>()?;
+        let sled_agents_baseboards = sled_agents_baseboards
+            .into_iter()
+            .map(|sled_agent| {
+                let config_reconciler_fields = config_reconciler_fields_by_sled
+                    .remove(&sled_agent.sled_id)
+                    .expect("all sled IDs should exist");
+                let instance_manager_status_cols = sled_agent
+                    .instance_manager_status
+                    .try_into()
+                    .map_err(|e: anyhow::Error| {
+                        Error::internal_error(
+                            &InlineErrorChain::new(&*e).to_string(),
+                        )
+                    })?;
+                Ok(InvSledAgentWithBaseboardFields {
+                    config_reconciler_fields,
+                    instance_manager_status_cols,
+                    sled_agent,
+                })
+            })
+            .collect::<Result<Vec<_>, Error>>()?;
 
         let mut inv_clickhouse_keeper_memberships = Vec::new();
         for membership in &collection.clickhouse_keeper_cluster_membership {
@@ -1802,20 +1823,23 @@ impl DataStore {
                 // For sleds with a real baseboard id, we have to use the
                 // `INSERT INTO ... SELECT` pattern that we used for other types
                 // of rows above to pull in the baseboard id's uuid.
-                for sled_agent in &sled_agents_baseboards {
+                for sled_agent in sled_agents_baseboards {
+                    let InvSledAgentWithBaseboardFields {
+                        config_reconciler_fields,
+                        instance_manager_status_cols,
+                        sled_agent,
+                    } = sled_agent;
                     let baseboard_id = sled_agent.baseboard_id.as_ref().expect(
                         "already selected only sled agents with baseboards",
                     );
                     let ConfigReconcilerFields {
                         ledgered_sled_config,
                         reconciler_status,
-                    } = config_reconciler_fields_by_sled
-                        .remove(&sled_agent.sled_id)
-                        .expect("all sled IDs should exist");
+                    } = config_reconciler_fields;
                     let InvInstanceManagerStatusCols {
                         update_disposition: instance_manager_update_disposition,
                         num_registered_vmms: instance_manager_num_registered_vmms,
-                    } = sled_agent.instance_manager_status.into();
+                    } = instance_manager_status_cols;
                     let file_source_resolver = InvOmicronFileSourceResolver::new(&sled_agent.file_source_resolver);
                     let selection = nexus_db_schema::schema::hw_baseboard_id::table
                         .select((
@@ -5153,6 +5177,16 @@ impl DataStore {
 
         Ok(collections)
     }
+}
+
+// Inserting an `inv_sled_agent` row with a baseboard requires listing all the
+// columns explicitly; this struct helps us gather up those columns ahead of
+// time (which requires some error handling).
+#[derive(Debug)]
+struct InvSledAgentWithBaseboardFields<'a> {
+    config_reconciler_fields: ConfigReconcilerFields,
+    instance_manager_status_cols: InvInstanceManagerStatusCols,
+    sled_agent: &'a SledAgent,
 }
 
 #[derive(Debug)]

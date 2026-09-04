@@ -4587,7 +4587,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     -- to `CurrentUpdateDisposition::Known(the_disposition)`.
     instance_manager_update_disposition omicron.public.inv_sled_update_disposition,
     -- Number of VMMs currently registered with the instance manager.
-    instance_manager_num_registered_vmms INT8 NOT NULL,
+    instance_manager_num_registered_vmms INT8 NOT NULL CHECK (instance_manager_num_registered_vmms >= 0),
 
     CONSTRAINT reconciler_status_sled_config_present_if_running CHECK (
         (reconciler_status_kind = 'running'

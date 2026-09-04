@@ -953,18 +953,20 @@ pub struct InvSledAgent {
     pub file_source_resolver: InvOmicronFileSourceResolver,
 
     instance_manager_update_disposition: Option<DbInvSledUpdateDisposition>,
-    instance_manager_num_registered_vmms: i64,
+    instance_manager_num_registered_vmms: SqlU32,
 }
 
 /// Helper for breaking an [`InstanceManagerStatus`] up into its DB columns.
 #[derive(Debug, Clone, Copy)]
 pub struct InvInstanceManagerStatusCols {
     pub update_disposition: Option<DbInvSledUpdateDisposition>,
-    pub num_registered_vmms: i64,
+    pub num_registered_vmms: SqlU32,
 }
 
-impl From<InstanceManagerStatus> for InvInstanceManagerStatusCols {
-    fn from(status: InstanceManagerStatus) -> Self {
+impl TryFrom<InstanceManagerStatus> for InvInstanceManagerStatusCols {
+    type Error = anyhow::Error;
+
+    fn try_from(status: InstanceManagerStatus) -> Result<Self, Self::Error> {
         let InstanceManagerStatus { update_disposition, num_registered_vmms } =
             status;
 
@@ -976,15 +978,17 @@ impl From<InstanceManagerStatus> for InvInstanceManagerStatusCols {
             }
         };
 
-        // Converting this usize via `as i64` is gross, but cockroach doesn't
-        // have an unsigned 64-bit type, so this allows us to store the real
-        // value losslessly. Having more than u32::MAX VMMs registered on a sled
-        // seems.... very unlikely... but it's easy to faithfully convert the
-        // integer in both directions here instead of having to potentially
-        // return an error.
-        let num_registered_vmms = num_registered_vmms as i64;
+        // We never expect this to fail; there are many practial limits to the
+        // number of VMMs registered on a sled far lower than `u32::MAX`.
+        let num_registered_vmms =
+            SqlU32::new(u32::try_from(num_registered_vmms).map_err(|_| {
+                anyhow!(
+                    "inventory claims there are {num_registered_vmms} \
+                     on a sled; this doesn't fit in a SqlU32"
+                )
+            })?);
 
-        Self { update_disposition, num_registered_vmms }
+        Ok(Self { update_disposition, num_registered_vmms })
     }
 }
 
@@ -1003,7 +1007,12 @@ impl From<InvInstanceManagerStatusCols> for InstanceManagerStatus {
                 CurrentUpdateDisposition::Known(disposition.into())
             }
         };
-        let num_registered_vmms = num_registered_vmms as usize;
+
+        // usize can always contain a u32; saturate instead of unwrapping to
+        // suppress the error branch.
+        let num_registered_vmms: u32 = *num_registered_vmms;
+        let num_registered_vmms =
+            usize::try_from(num_registered_vmms).unwrap_or(usize::MAX);
 
         InstanceManagerStatus { update_disposition, num_registered_vmms }
     }
@@ -1399,7 +1408,7 @@ impl InvSledAgent {
             let InvInstanceManagerStatusCols {
                 update_disposition: instance_manager_update_disposition,
                 num_registered_vmms: instance_manager_num_registered_vmms,
-            } = sled_agent.instance_manager_status.into();
+            } = sled_agent.instance_manager_status.try_into()?;
 
             Ok(InvSledAgent {
                 inv_collection_id: collection_id.into(),
