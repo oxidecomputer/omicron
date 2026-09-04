@@ -48,7 +48,6 @@ use omicron_uuid_kinds::SupportBundleUuid;
 use serde_json::json;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
-use std::num::NonZeroU32;
 use std::sync::Arc;
 use tokio::sync::watch;
 
@@ -453,37 +452,26 @@ impl FmAnalysis {
         opctx: &OpContext,
         warnings: &mut Vec<String>,
     ) -> anyhow::Result<IdOrdMap<ObservedSiloCertificates>> {
-        // The batch size is arbitrary; most systems have a handful of silos
-        // and certificates, and a few have a few hundred certificates.
-        let batch_size = NonZeroU32::new(200).unwrap();
-
         let mut silos = IdOrdMap::new();
-        let mut paginator =
-            Paginator::new(batch_size, dropshot::PaginationOrder::Ascending);
-        while let Some(p) = paginator.next() {
-            let batch = self
-                .datastore
-                .silos_list(
-                    opctx,
-                    &PaginatedBy::Id(p.current_pagparams()),
-                    Discoverability::All,
-                )
-                .await
-                .context("failed to list silos")?;
-            paginator = p.found_batch(&batch, &|s| s.id());
-            for silo in batch {
-                silos
-                    .insert_unique(ObservedSiloCertificates {
-                        silo_id: silo.id(),
-                        silo_name: silo.name().clone(),
-                        certificates: IdOrdMap::new(),
-                    })
-                    .expect("silo IDs are unique");
-            }
+        for silo in self
+            .datastore
+            .silo_list_all_batched(opctx, Discoverability::All)
+            .await
+            .context("failed to list silos")?
+        {
+            silos
+                .insert_unique(ObservedSiloCertificates {
+                    silo_id: silo.id(),
+                    silo_name: silo.name().clone(),
+                    certificates: IdOrdMap::new(),
+                })
+                .expect("silo IDs are unique");
         }
 
-        let mut paginator =
-            Paginator::new(batch_size, dropshot::PaginationOrder::Ascending);
+        let mut paginator = Paginator::new(
+            datastore::SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
         while let Some(p) = paginator.next() {
             let batch = self
                 .datastore
