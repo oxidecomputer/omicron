@@ -255,24 +255,17 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
             );
         }
 
+        // The comment is recorded once, when the fact is added, and carried
+        // forward unchanged, so it names only the absolute expiration time
+        // rather than a distance from a "now" that will go stale.
         let comment = match &desired {
             CertificateFact::BestCertificateExpiring(p) => format!(
-                "best certificate {} ({}) expires at {}, in {}",
-                best.name,
-                best.id,
-                p.not_after,
-                omicron_common::format_time_delta(
-                    p.not_after.signed_duration_since(reference_time)
-                ),
+                "best certificate {} ({}) expires at {}",
+                best.name, best.id, p.not_after,
             ),
             CertificateFact::BestCertificateExpired(p) => format!(
-                "best certificate {} ({}) expired at {}, {} ago",
-                best.name,
-                best.id,
-                p.not_after,
-                omicron_common::format_time_delta(
-                    reference_time.signed_duration_since(p.not_after)
-                ),
+                "best certificate {} ({}) expired at {}",
+                best.name, best.id, p.not_after,
             ),
         };
         case_mut.add_fact(desired.clone(), comment.clone());
