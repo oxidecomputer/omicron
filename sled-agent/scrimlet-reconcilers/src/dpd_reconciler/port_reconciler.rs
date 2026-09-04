@@ -530,6 +530,10 @@ impl From<&'_ DiffablePortSettings> for DpdPortSettings {
                     lane: Some(link_id),
                     speed,
                     tx_eq,
+                    // Only meaningful for multirack qsfp front ports, which
+                    // this reconciler does not configure; rear ports always
+                    // have DDM enabled in dpd.
+                    allow_ddm_traffic: false,
                 },
             },
         );

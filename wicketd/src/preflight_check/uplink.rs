@@ -865,6 +865,8 @@ fn build_port_settings(
                 speed,
                 lane: Some(LinkId(0)),
                 tx_eq: None,
+                // This link is an uplink, which the flag is defined to exclude.
+                allow_ddm_traffic: false,
             },
         },
     );
