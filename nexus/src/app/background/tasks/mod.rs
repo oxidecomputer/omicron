@@ -57,5 +57,6 @@ pub mod trust_quorum;
 pub mod tuf_artifact_replication;
 pub mod tuf_repo_pruner;
 pub mod v2p_mappings;
+pub mod vmm_mark_stop_for_update;
 pub mod vpc_routes;
 pub mod webhook_deliverator;
