@@ -318,7 +318,11 @@ impl ExternalEndpoint {
         // same rule, so that it alerts when the certificate we will actually
         // serve is expiring or expired. If the rule here changes, the engine
         // (and `ObservedSiloCertificates::best_certificate`, which it uses)
-        // must change with it.
+        // must change with it. When several certificates share the latest
+        // expiration, the engine breaks the tie toward the greatest
+        // certificate id; this loop may settle on a different one of them,
+        // but they expire at the same time, so the engine's prediction of
+        // when the served certificate expires holds either way.
 
         // This would be cleaner if Asn1Time impl'd Ord or even just a way to
         // convert it to a Unix timestamp or any other comparable timestamp.

@@ -944,6 +944,59 @@ mod tests {
         logctx.cleanup_successful();
     }
 
+    /// Two certificates with the same `not_after` (say, the same PEM uploaded
+    /// under two names) must not make the engine flip between them across
+    /// sitreps: the fact and its alert are carried unchanged.
+    #[test]
+    fn equal_expiry_certificates_carry_fact_unchanged() {
+        let (logctx, collection) =
+            setup("equal_expiry_certificates_carry_fact_unchanged");
+        let now = collection.time_done;
+        let not_after = now + TimeDelta::days(10);
+        let silos = silo_map([mk_silo(
+            SILO_A,
+            "fake-silo-a",
+            [
+                mk_cert(CERT_1, "fake-cert-1", not_after),
+                mk_cert(CERT_2, "fake-cert-2", not_after),
+            ],
+        )]);
+
+        let input1 = build_input(
+            collection.clone(),
+            None,
+            silos.clone(),
+            FmConfig::default(),
+        );
+        let sitrep1 = run_analyze(&logctx.log, &input1, "run-1");
+        let case1 = sole_open_case(&sitrep1).clone();
+        let (fact1_id, fact1) = sole_fact(&case1);
+        assert_eq!(
+            fact1,
+            CertificateFact::BestCertificateExpiring(
+                CertificateExpiryFactPayload {
+                    silo_id: SILO_A,
+                    certificate_id: CERT_2,
+                    not_after,
+                }
+            ),
+            "ties break toward the greatest certificate id"
+        );
+
+        let input2 =
+            build_input(collection, Some(sitrep1), silos, FmConfig::default());
+        let sitrep2 = run_analyze(&logctx.log, &input2, "run-2");
+
+        let case2 = sole_open_case(&sitrep2);
+        assert_eq!(case2.id, case1.id);
+        let (fact2_id, fact2) = sole_fact(case2);
+        assert_eq!(fact2_id, fact1_id, "the fact should be carried unchanged");
+        assert_eq!(fact2, fact1);
+        assert_alert_counts(case2, 1, 0);
+        assert_eq!(case2.alerts_requested, case1.alerts_requested);
+        logctx.cleanup_successful();
+    }
+
     #[test]
     fn window_override_changes_outcome() {
         let (logctx, collection) = setup("window_override_changes_outcome");

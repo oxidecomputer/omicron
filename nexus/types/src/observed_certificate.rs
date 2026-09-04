@@ -36,11 +36,18 @@ impl ObservedSiloCertificates {
     /// This must stay in lockstep with `ExternalEndpoint::best_certificate`
     /// in Nexus, which applies the same rule to choose the certificate
     /// actually presented to TLS clients. Like that function, this ignores
-    /// `not_before`. When several certificates share the latest `not_after`,
-    /// which one is returned is unspecified; callers only depend on the
-    /// `not_after` value itself.
+    /// `not_before`.
+    ///
+    /// When several certificates share the latest `not_after`, the one with
+    /// the greatest id is returned. The tiebreak matters because the
+    /// certificate diagnosis engine records the chosen certificate's id in
+    /// its facts and treats a change of id as a new condition worth a fresh
+    /// alert, so the choice must not vary between analyses of the same set of
+    /// certificates. Nexus may serve a different one of the tied certificates,
+    /// but it expires at the same time, so what the engine says about the
+    /// expiration of the served certificate holds either way.
     pub fn best_certificate(&self) -> Option<&ObservedCertificate> {
-        self.certificates.iter().max_by_key(|cert| cert.not_after)
+        self.certificates.iter().max_by_key(|cert| (cert.not_after, cert.id))
     }
 }
 
@@ -71,4 +78,47 @@ impl IdOrdItem for ObservedCertificate {
         self.id
     }
     id_upcast!();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cert(id: u128, not_after: DateTime<Utc>) -> ObservedCertificate {
+        ObservedCertificate {
+            id: Uuid::from_u128(id),
+            name: format!("fake-cert-{id}").parse().unwrap(),
+            not_before: not_after - chrono::TimeDelta::days(365),
+            not_after,
+        }
+    }
+
+    fn silo(
+        certs: impl IntoIterator<Item = ObservedCertificate>,
+    ) -> ObservedSiloCertificates {
+        ObservedSiloCertificates {
+            silo_id: Uuid::from_u128(0xA),
+            silo_name: "fake-silo".parse().unwrap(),
+            certificates: certs.into_iter().collect(),
+        }
+    }
+
+    #[test]
+    fn best_certificate_prefers_latest_not_after() {
+        let t = DateTime::from_timestamp(1_700_000_000, 0).unwrap();
+        // The later expiration wins even when it has the smaller id.
+        let s = silo([cert(2, t), cert(1, t + chrono::TimeDelta::days(1))]);
+        assert_eq!(s.best_certificate().unwrap().id, Uuid::from_u128(1));
+        assert!(silo([]).best_certificate().is_none());
+    }
+
+    #[test]
+    fn best_certificate_breaks_ties_toward_greatest_id() {
+        let t = DateTime::from_timestamp(1_700_000_000, 0).unwrap();
+        // Insertion order must not matter.
+        for certs in [[cert(1, t), cert(2, t)], [cert(2, t), cert(1, t)]] {
+            let s = silo(certs);
+            assert_eq!(s.best_certificate().unwrap().id, Uuid::from_u128(2));
+        }
+    }
 }
