@@ -43,11 +43,12 @@ use uuid::Uuid;
 
 /// A parent-forwarded Certificate case, parsed into the form this engine acts
 /// on. Every fact on a certificate case is about the same silo, and a case
-/// carries at most one fact.
+/// carries exactly one fact.
 struct ParsedCertificateCase {
+    /// The silo `fact` is about.
     silo_id: Uuid,
     /// The fact to consider when advancing the case.
-    fact: Option<(FactUuid, CertificateFact)>,
+    fact: (FactUuid, CertificateFact),
     /// Facts that should not exist: any beyond the first. They carry no
     /// information the kept fact doesn't.
     duplicate_facts: Vec<FactUuid>,
@@ -75,31 +76,33 @@ enum UninterpretableCase {
 fn parse_case(
     case: &fm::Case,
 ) -> Result<ParsedCertificateCase, UninterpretableCase> {
-    let mut silo_id: Option<Uuid> = None;
     let mut kept: Option<(FactUuid, CertificateFact)> = None;
     let mut duplicate_facts = Vec::new();
     // `case.facts` iterates in fact UUID order, so the kept fact is
     // deterministically the one with the lowest UUID.
     for fact in case.facts.iter() {
         let cert_fact = fact.as_certificate()?;
-        let this_silo = cert_fact.silo_id();
-        let expected = *silo_id.get_or_insert(this_silo);
-        if expected != this_silo {
-            return Err(UninterpretableCase::DisagreeingSilos {
-                expected,
-                found: this_silo,
-            });
-        }
-        if kept.is_none() {
-            kept = Some((fact.metadata.id, cert_fact.clone()));
-        } else {
-            duplicate_facts.push(fact.metadata.id);
+        match &kept {
+            None => kept = Some((fact.metadata.id, cert_fact.clone())),
+            Some((_, first)) => {
+                if first.silo_id() != cert_fact.silo_id() {
+                    return Err(UninterpretableCase::DisagreeingSilos {
+                        expected: first.silo_id(),
+                        found: cert_fact.silo_id(),
+                    });
+                }
+                duplicate_facts.push(fact.metadata.id);
+            }
         }
     }
-    let Some(silo_id) = silo_id else {
+    let Some(fact) = kept else {
         return Err(UninterpretableCase::NoFacts);
     };
-    Ok(ParsedCertificateCase { silo_id, fact: kept, duplicate_facts })
+    Ok(ParsedCertificateCase {
+        silo_id: fact.1.silo_id(),
+        fact,
+        duplicate_facts,
+    })
 }
 
 pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
@@ -244,11 +247,11 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
             }
         }
 
-        let carried = parent.and_then(|(_, p)| p.fact.as_ref());
-        if carried.map(|(_, fact)| fact) == Some(&desired) {
-            continue;
-        }
-        if let Some((fact_id, _)) = carried {
+        if let Some((_, parsed_case)) = parent {
+            let (fact_id, carried) = &parsed_case.fact;
+            if *carried == desired {
+                continue;
+            }
             case_mut.remove_fact(
                 *fact_id,
                 "fact no longer matches the silo's best certificate",
