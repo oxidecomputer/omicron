@@ -6,7 +6,10 @@
 //! queries on the sled table.
 
 use crate::db::DataStore;
+use crate::db::datastore::SledBpAvailabilityDecommissionOutcome;
+use crate::db::datastore::SledBpAvailabilityUpsertOutcome;
 use crate::db::datastore::SledBpAvailabilityWrite;
+use crate::db::datastore::SledBpAvailabilityWriteOutcome;
 use iddqd::IdOrdMap;
 use nexus_db_model::Generation;
 use nexus_db_model::Sled;
@@ -109,20 +112,33 @@ pub async fn initialize_sled_bp_availability(
     datastore: &DataStore,
     blueprint: &Blueprint,
 ) {
-    let conn = datastore
-        .pool_connection_for_tests()
-        .await
-        .expect("acquired database connection");
-    DataStore::initialize_rendezvous_sled_bp_availability_on_connection(
-        &conn, blueprint,
-    )
-    .await
-    .unwrap_or_else(|e| {
-        panic!(
-            "initialized rendezvous_sled_bp_availability from blueprint {}: {e}",
-            blueprint.id
-        )
-    });
+    for write in apply_sled_bp_availability(datastore, blueprint).await {
+        let applied = match write.outcome {
+            SledBpAvailabilityWriteOutcome::Active { outcome, .. } => {
+                match outcome {
+                    SledBpAvailabilityUpsertOutcome::Written => true,
+                    SledBpAvailabilityUpsertOutcome::Rejected => false,
+                }
+            }
+            SledBpAvailabilityWriteOutcome::Decommission(outcome) => {
+                match outcome {
+                    SledBpAvailabilityDecommissionOutcome::Decommissioned => {
+                        true
+                    }
+                    SledBpAvailabilityDecommissionOutcome::AlreadyDecommissioned => {
+                        false
+                    }
+                }
+            }
+        };
+        assert!(
+            applied,
+            "initializing rendezvous_sled_bp_availability from blueprint {}: \
+             write for sled {} was not applied ({:?}), but the table should \
+             have been empty",
+            blueprint.id, write.sled_id, write.outcome,
+        );
+    }
 }
 
 /// Apply a blueprint's sled availability to the `rendezvous_sled_bp_availability`

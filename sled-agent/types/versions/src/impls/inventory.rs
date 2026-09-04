@@ -4,7 +4,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Write};
-use std::net::{IpAddr, Ipv6Addr};
+use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::str::FromStr;
 
 use camino::Utf8PathBuf;
@@ -22,18 +22,20 @@ use tufaceous_artifact::ArtifactHash;
 use crate::latest::disk::M2Slot;
 use crate::latest::inventory::{
     BootImageHeader, BootPartitionContents, BootPartitionDetails,
-    ConfigReconcilerInventory, ConfigReconcilerInventoryResult, FmdHostCase,
-    FmdInventory, FmdInventoryError, FmdResource, HostPhase2DesiredContents,
-    HostPhase2DesiredSlots, ManifestBootInventory, ManifestInventory,
-    ManifestNonBootInventory, MupdateOverrideBootInventory,
-    MupdateOverrideInventory, MupdateOverrideNonBootInventory,
-    NetworkInterface, OmicronFileSourceResolverInventory, OmicronSledConfig,
+    ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
+    ExternalDnsAddrs, FmdHostCase, FmdInventory, FmdInventoryError,
+    FmdResource, HostPhase2DesiredContents, HostPhase2DesiredSlots,
+    ManifestBootInventory, ManifestInventory, ManifestNonBootInventory,
+    MupdateOverrideBootInventory, MupdateOverrideInventory,
+    MupdateOverrideNonBootInventory, NetworkInterface, NexusExternalIps,
+    OmicronFileSourceResolverInventory, OmicronSledConfig,
     OmicronSledUpdateDisposition, OmicronZoneConfig, OmicronZoneImageSource,
     OmicronZoneType, OmicronZonesConfig,
     RemoveMupdateOverrideBootSuccessInventory, RemoveMupdateOverrideInventory,
     SingleMeasurementInventory, SourceNatConfig, SourceNatConfigGeneric,
     SourceNatConfigV4, SourceNatConfigV6, SvcEnabledNotOnlineState, SvcState,
-    SvcsEnabledNotOnline, ZoneArtifactInventory, ZoneKind, ZpoolHealth,
+    SvcsEnabledNotOnline, ZoneArtifactInventory, ZoneKind, ZoneSnatConfig,
+    ZpoolHealth,
 };
 
 impl ZoneKind {
@@ -279,18 +281,6 @@ impl OmicronZoneType {
     /// Identifies whether this is a Crucible (not Crucible pantry) zone.
     pub fn is_crucible(&self) -> bool {
         matches!(self, OmicronZoneType::Crucible { .. })
-    }
-
-    /// This zone's external IP.
-    pub fn external_ip(&self) -> Option<IpAddr> {
-        match self {
-            OmicronZoneType::Nexus { external_ip, .. } => Some(*external_ip),
-            OmicronZoneType::ExternalDns { dns_address, .. } => {
-                Some(dns_address.ip())
-            }
-            OmicronZoneType::BoundaryNtp { snat_cfg, .. } => Some(snat_cfg.ip),
-            _ => None,
-        }
     }
 
     /// The service vNIC providing external connectivity to this zone.
@@ -1179,12 +1169,179 @@ pub enum SourceNatConfigError {
     UnalignedPortPair { first_port: u16, last_port: u16 },
 }
 
+impl ZoneSnatConfig {
+    /// Return the IPv4 SNAT config, if any.
+    pub fn as_ipv4(&self) -> Option<&SourceNatConfigV4> {
+        match self {
+            ZoneSnatConfig::Ipv4Only(ipv4)
+            | ZoneSnatConfig::DualStack { ipv4, .. } => Some(ipv4),
+            ZoneSnatConfig::Ipv6Only(_) => None,
+        }
+    }
+
+    /// Return the IPv6 SNAT config, if any.
+    pub fn as_ipv6(&self) -> Option<&SourceNatConfigV6> {
+        match self {
+            ZoneSnatConfig::Ipv6Only(ipv6)
+            | ZoneSnatConfig::DualStack { ipv6, .. } => Some(ipv6),
+            ZoneSnatConfig::Ipv4Only(_) => None,
+        }
+    }
+}
+
+impl NexusExternalIps {
+    /// Construct from a single IP address.
+    pub fn from_single(ip: IpAddr) -> Self {
+        Self::new(BTreeSet::from_iter(std::iter::once(ip)))
+            .expect("one IP is always valid")
+    }
+
+    /// If this consists of a single element, return it, or None.
+    ///
+    /// NOTE: This is a temporary method used while inventory supports multiple
+    /// addresses, but `BlueprintZoneType` does not. It should be removed when
+    /// that's fixed.
+    pub fn into_single(self) -> Option<IpAddr> {
+        if self.0.len() == 1 { self.0.into_iter().next() } else { None }
+    }
+
+    /// Iterate over the external IPs.
+    pub fn iter(&self) -> impl Iterator<Item = &IpAddr> {
+        self.0.iter()
+    }
+
+    /// Return the "primary" address, either IPv4 or IPv6 in that order.
+    ///
+    /// NOTE: This is a temporary method used while we don't fully support
+    /// multiple IP addresses. It should be removed when that support is done.
+    pub fn temporary_primary_address(&self) -> IpAddr {
+        self.iter()
+            .find(|ip| ip.is_ipv4())
+            .or_else(|| self.iter().next())
+            .copied()
+            .expect("NexusExternalIps is non-empty by construction")
+    }
+}
+
+impl From<&NexusExternalIps> for crate::latest::instance::ExternalIpConfig {
+    fn from(ips: &NexusExternalIps) -> Self {
+        external_ip_config_from_ips(ips.iter().copied())
+    }
+}
+
+impl From<&ExternalDnsAddrs> for crate::latest::instance::ExternalIpConfig {
+    fn from(addrs: &ExternalDnsAddrs) -> Self {
+        external_ip_config_from_ips(addrs.0.keys().copied())
+    }
+}
+
+fn external_ip_config_from_ips(
+    ips: impl Iterator<Item = IpAddr>,
+) -> crate::latest::instance::ExternalIpConfig {
+    let mut v4 = BTreeSet::new();
+    let mut v6 = BTreeSet::new();
+    for ip in ips {
+        match ip {
+            IpAddr::V4(ip) => {
+                v4.insert(ip);
+            }
+            IpAddr::V6(ip) => {
+                v6.insert(ip);
+            }
+        }
+    }
+    crate::latest::instance::ExternalIpConfig {
+        v4: (!v4.is_empty()).then(|| crate::latest::instance::ExternalIps {
+            floating_ips: v4,
+            ..Default::default()
+        }),
+        v6: (!v6.is_empty()).then(|| crate::latest::instance::ExternalIps {
+            floating_ips: v6,
+            ..Default::default()
+        }),
+    }
+}
+
+impl From<&ZoneSnatConfig> for crate::latest::instance::ExternalIpConfig {
+    fn from(snat: &ZoneSnatConfig) -> Self {
+        let (v4, v6) = match snat {
+            ZoneSnatConfig::Ipv4Only(c) => (Some(*c), None),
+            ZoneSnatConfig::Ipv6Only(c) => (None, Some(*c)),
+            ZoneSnatConfig::DualStack { ipv4, ipv6 } => {
+                (Some(*ipv4), Some(*ipv6))
+            }
+        };
+        Self {
+            v4: v4.map(|snat| crate::latest::instance::ExternalIps {
+                source_nat: Some(snat),
+                ..Default::default()
+            }),
+            v6: v6.map(|snat| crate::latest::instance::ExternalIps {
+                source_nat: Some(snat),
+                ..Default::default()
+            }),
+        }
+    }
+}
+
+impl ExternalDnsAddrs {
+    /// Construct from a single socket address.
+    pub fn from_single(addr: SocketAddr) -> Self {
+        Self(BTreeMap::from([(addr.ip(), addr.port())]))
+    }
+
+    /// If this consists of a single element, return it, or None.
+    ///
+    /// NOTE: This is a temporary method used while inventory supports multiple
+    /// addresses, but `BlueprintZoneType` does not. It should be removed when
+    /// that's fixed.
+    pub fn into_single(self) -> Option<SocketAddr> {
+        if self.0.len() == 1 {
+            self.0
+                .into_iter()
+                .next()
+                .map(|(ip, port)| SocketAddr::new(ip, port))
+        } else {
+            None
+        }
+    }
+
+    /// Iterate over the external addresses.
+    pub fn iter(&self) -> impl Iterator<Item = SocketAddr> {
+        self.0.iter().map(|(ip, port)| SocketAddr::new(*ip, *port))
+    }
+
+    /// Return the "primary" address, either IPv4 or IPv6 in that order.
+    ///
+    /// NOTE: This is a temporary method used while we don't fully support
+    /// multiple IP addresses. It should be removed when that support is done.
+    pub fn temporary_primary_address(&self) -> SocketAddr {
+        self.0
+            .iter()
+            .find_map(|(ip, port)| {
+                if ip.is_ipv4() {
+                    Some(SocketAddr::new(*ip, *port))
+                } else {
+                    None
+                }
+            })
+            .or_else(|| {
+                self.0
+                    .iter()
+                    .next()
+                    .map(|(ip, port)| SocketAddr::new(*ip, *port))
+            })
+            .expect("ExternalDnsAddrs is non-empty by construction")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::latest::inventory::{FmdInventoryError, FmdInventoryErrorKind};
     use iddqd::IdOrdMap;
     use omicron_uuid_kinds::{FmdHostCaseUuid, FmdResourceUuid, GenericUuid};
+    use std::net::Ipv4Addr;
     use uuid::Uuid;
 
     #[test]
@@ -1264,5 +1421,33 @@ mod tests {
             "tests/output/fmd_inventory_display.txt",
             &out,
         );
+    }
+
+    #[test]
+    fn test_zone_snat_config_as_ip_types() {
+        let ipv4 = SourceNatConfig::new(
+            "10.0.0.1".parse::<Ipv4Addr>().unwrap(),
+            0,
+            NUM_SOURCE_NAT_PORTS - 1,
+        )
+        .unwrap();
+        let ipv6 = SourceNatConfig::new(
+            "fd00::1".parse::<Ipv6Addr>().unwrap(),
+            0,
+            NUM_SOURCE_NAT_PORTS - 1,
+        )
+        .unwrap();
+        let ipv4_only = ZoneSnatConfig::Ipv4Only(ipv4);
+        let ipv6_only = ZoneSnatConfig::Ipv6Only(ipv6);
+        let dual_stack = ZoneSnatConfig::DualStack { ipv4, ipv6 };
+
+        assert_eq!(ipv4_only.as_ipv4().unwrap(), &ipv4);
+        assert!(ipv4_only.as_ipv6().is_none());
+
+        assert!(ipv6_only.as_ipv4().is_none());
+        assert_eq!(ipv6_only.as_ipv6().unwrap(), &ipv6);
+
+        assert_eq!(dual_stack.as_ipv4().unwrap(), &ipv4);
+        assert_eq!(dual_stack.as_ipv6().unwrap(), &ipv6);
     }
 }
