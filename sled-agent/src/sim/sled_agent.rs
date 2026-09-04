@@ -44,6 +44,10 @@ use propolis_client::{
 };
 use range_requests::PotentialRange;
 use sled_agent_health_monitor::HealthMonitorHandle;
+use sled_agent_scrimlet_reconcilers::{
+    ScrimletReconcilers, ScrimletReconcilersMode, ScrimletStatus,
+    SledAgentNetworkingInfo,
+};
 use sled_agent_types::attached_subnet::{AttachedSubnet, AttachedSubnets};
 use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
 use sled_agent_types::disk::DiskIdentity;
@@ -278,22 +282,7 @@ impl SledAgent {
 
     /// Start the scrimlet reconcilers pointing at the given switch zone service
     /// addresses. Must only be called once and only on scrimlet sleds.
-    ///
-    /// Only available under `cfg(feature = "testing")` because it uses
-    /// [`sled_agent_scrimlet_reconcilers::ScrimletReconcilersMode::Test`].
-    #[cfg(feature = "testing")]
-    pub fn start_scrimlet_reconcilers(
-        &self,
-        mgs_addr: std::net::SocketAddr,
-        dpd_addr: std::net::SocketAddr,
-        mgd_addr: std::net::SocketAddr,
-        bgp_dispatcher_addr: std::net::SocketAddr,
-    ) {
-        use sled_agent_scrimlet_reconcilers::{
-            ScrimletReconcilers, ScrimletReconcilersMode, ScrimletStatus,
-            SledAgentNetworkingInfo,
-        };
-
+    pub fn start_scrimlet_reconcilers(&self, mode: ScrimletReconcilersMode) {
         let tx = self
             .network_config_tx
             .as_ref()
@@ -303,12 +292,7 @@ impl SledAgent {
         reconcilers.set_sled_agent_networking_info_once(
             SledAgentNetworkingInfo {
                 system_networking_config_rx: tx.subscribe(),
-                mode: ScrimletReconcilersMode::Test {
-                    mgs_addr,
-                    dpd_addr,
-                    mgd_addr,
-                    bgp_dispatcher_addr,
-                },
+                mode,
             },
         );
         reconcilers.set_scrimlet_status(ScrimletStatus::Scrimlet);

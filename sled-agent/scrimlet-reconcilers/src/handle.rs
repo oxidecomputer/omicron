@@ -42,7 +42,6 @@ use tokio::sync::watch;
 #[derive(Debug, Clone, Copy)]
 pub enum ScrimletReconcilersMode {
     SwitchZone(ThisSledSwitchZoneUnderlayIpAddr),
-    #[cfg(any(test, feature = "testing"))]
     Test {
         mgs_addr: SocketAddr,
         dpd_addr: SocketAddr,

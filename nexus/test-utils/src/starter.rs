@@ -97,6 +97,7 @@ use omicron_uuid_kinds::ZpoolUuid;
 use oximeter_collector::Oximeter;
 use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
+use sled_agent_scrimlet_reconcilers::ScrimletReconcilersMode;
 use sled_agent_types::disk::CompressionAlgorithm;
 use sled_agent_types::disk::DiskIdentity;
 use sled_agent_types::early_networking::PortConfig;
@@ -996,12 +997,13 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             // address as a dummy bgp_dispatcher_addr. As long as tests don't
             // configure BGP, the reconciler won't use this address.
             let bgp_dispatcher_addr = mgd_addr;
-            sled_agent.sled_agent.start_scrimlet_reconcilers(
+            let mode = ScrimletReconcilersMode::Test {
                 mgs_addr,
                 dpd_addr,
                 mgd_addr,
                 bgp_dispatcher_addr,
-            );
+            };
+            sled_agent.sled_agent.start_scrimlet_reconcilers(mode);
         }
 
         // Add a DNS entry for the TUF Repo Depot on this simulated sled agent.
