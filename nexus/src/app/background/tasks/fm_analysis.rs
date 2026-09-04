@@ -502,8 +502,8 @@ impl FmAnalysis {
                 let silo_id = cert.silo_id;
                 let Some(mut silo) = silos.get_mut(&silo_id) else {
                     warnings.push(format!(
-                        "certificate {cert_id} belongs to silo {}, which                          was not found; ignoring it",
-                        cert.silo_id,
+                        "certificate {cert_id} belongs to silo {silo_id}, \
+                         which was not found; ignoring it",
                     ));
                     continue;
                 };
@@ -1570,22 +1570,23 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         const HOSTNAME: &str = "fake.test.oxide.computer";
-        let make_cert = |name: &str, cert: String, key: String| {
-            Certificate::new_unvalidated(
-                DEFAULT_SILO_ID,
-                Uuid::new_v4(),
-                ServiceKind::Nexus,
-                CertificateCreate {
-                    identity: IdentityMetadataCreateParams {
-                        name: name.parse().unwrap(),
-                        description: String::new(),
+        let make_cert =
+            |silo_id: Uuid, name: &str, cert: String, key: String| {
+                Certificate::new_unvalidated(
+                    silo_id,
+                    Uuid::new_v4(),
+                    ServiceKind::Nexus,
+                    CertificateCreate {
+                        identity: IdentityMetadataCreateParams {
+                            name: name.parse().unwrap(),
+                            description: String::new(),
+                        },
+                        cert,
+                        key,
+                        service: ServiceUsingCertificate::ExternalApi,
                     },
-                    cert,
-                    key,
-                    service: ServiceUsingCertificate::ExternalApi,
-                },
-            )
-        };
+                )
+            };
 
         // A certificate Nexus can serve, expiring soon.
         let mut params =
@@ -1595,6 +1596,7 @@ mod tests {
         .into();
         let chain = CertificateChain::with_params(params);
         let servable = make_cert(
+            DEFAULT_SILO_ID,
             "servable",
             chain.cert_chain_as_pem(),
             chain.end_cert_private_key_as_pem(),
@@ -1612,15 +1614,27 @@ mod tests {
         CertificateValidator::default()
             .validate(cert.as_bytes(), key.as_bytes(), &[HOSTNAME])
             .expect("upload validation accepts a 1024-bit RSA certificate");
-        let unservable = make_cert("unservable", cert, key);
+        let unservable = make_cert(DEFAULT_SILO_ID, "unservable", cert, key);
         let unservable_id = unservable.id();
         // ...but the external endpoint code refuses to serve it.
         TlsCertificate::try_from(unservable.clone())
             .err()
             .expect("external endpoints reject a 1024-bit RSA certificate");
 
+        // A servable certificate whose silo does not exist. The loader has
+        // no silo to attach it to, so it is skipped with a warning.
+        let orphan_silo_id = Uuid::new_v4();
+        let orphan_chain = CertificateChain::new(HOSTNAME);
+        let orphan = make_cert(
+            orphan_silo_id,
+            "orphan",
+            orphan_chain.cert_chain_as_pem(),
+            orphan_chain.end_cert_private_key_as_pem(),
+        );
+        let orphan_id = orphan.id();
+
         diesel::insert_into(dsl::certificate)
-            .values(vec![servable, unservable])
+            .values(vec![servable, unservable, orphan])
             .execute_async(
                 &*datastore.pool_connection_for_tests().await.unwrap(),
             )
@@ -1658,12 +1672,26 @@ mod tests {
         assert!(observed.not_after > Utc::now());
         assert!(observed.not_after < Utc::now() + chrono::Duration::days(6));
 
-        assert_eq!(warnings.len(), 1, "unexpected warnings: {warnings:?}");
+        // Both skipped certificates are reported, and the warnings are
+        // readable: no run of interior whitespace from a wrapped literal.
+        assert_eq!(warnings.len(), 2, "unexpected warnings: {warnings:?}");
+        for warning in &warnings {
+            assert!(!warning.contains("  "), "unexpected warning: {warning}");
+        }
         assert!(
-            warnings[0].contains(&unservable_id.to_string())
-                && warnings[0].contains("cannot be served"),
-            "unexpected warning: {}",
-            warnings[0]
+            warnings.iter().any(|w| {
+                w.contains(&unservable_id.to_string())
+                    && w.contains("cannot be served")
+            }),
+            "unexpected warnings: {warnings:?}"
+        );
+        assert!(
+            warnings.iter().any(|w| {
+                w.contains(&orphan_id.to_string())
+                    && w.contains(&orphan_silo_id.to_string())
+                    && w.contains("which was not found")
+            }),
+            "unexpected warnings: {warnings:?}"
         );
 
         db.terminate().await;
