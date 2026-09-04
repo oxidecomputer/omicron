@@ -38,51 +38,62 @@ pub(super) fn find_softnpu_device(
     log: &Logger,
     devinfo: &mut DevInfo,
 ) -> Result<Option<String>, SwitchDetectError> {
-    let mut walker = devinfo.walk_node();
-    while let Some(node) =
-        walker.next().transpose().map_err(SwitchDetectError::DevInfo)?
-    {
-        if !is_virtio_9p(&node)? {
-            continue;
-        }
-        let Some(path) = ninep_minor_path(&node)? else {
-            debug!(
-                log,
-                "virtio 9p node has no {NINEP_MINOR} minor";
-                "node" => node.node_name(),
-            );
-            continue;
-        };
-        match probe_version(&path) {
-            Ok(Probe::Version(version)) if version == SOFTNPU_9P_VERSION => {
-                info!(log, "found SoftNPU 9p device"; "path" => &path);
-                return Ok(Some(path));
-            }
-            Ok(Probe::Version(version)) => {
-                debug!(
-                    log,
-                    "virtio 9p device is not SoftNPU";
-                    "path" => path,
-                    "version" => version,
-                );
-            }
-            Ok(Probe::Busy) => {
-                warn!(log, "virtio 9p device busy; skipping"; "path" => path);
-            }
-            Err(
-                e @ (SwitchDetectError::Io { .. }
-                | SwitchDetectError::Protocol { .. }),
-            ) => {
-                warn!(
-                    log,
-                    "virtio 9p device probe failed; skipping";
-                    "error" => InlineErrorChain::new(&e),
-                );
-            }
-            Err(e) => return Err(e),
+    for node in devinfo.walk_node() {
+        let node = node.map_err(SwitchDetectError::DevInfo)?;
+        if let Some(path) = probe_node(log, &node)? {
+            return Ok(Some(path));
         }
     }
     Ok(None)
+}
+
+/// Returns the devfs path when `node` is the SoftNPU 9p device.
+fn probe_node(
+    log: &Logger,
+    node: &Node<'_>,
+) -> Result<Option<String>, SwitchDetectError> {
+    if !is_virtio_9p(node)? {
+        return Ok(None);
+    }
+    let Some(path) = ninep_minor_path(node)? else {
+        debug!(
+            log,
+            "virtio 9p node has no {NINEP_MINOR} minor";
+            "node" => node.node_name(),
+        );
+        return Ok(None);
+    };
+    match probe_version(&path) {
+        Ok(Probe::Version(version)) if version == SOFTNPU_9P_VERSION => {
+            info!(log, "found SoftNPU 9p device"; "path" => &path);
+            Ok(Some(path))
+        }
+        Ok(Probe::Version(version)) => {
+            debug!(
+                log,
+                "virtio 9p device is not SoftNPU";
+                "path" => path,
+                "version" => version,
+            );
+            Ok(None)
+        }
+        Ok(Probe::Busy) => {
+            warn!(log, "virtio 9p device busy; skipping"; "path" => path);
+            Ok(None)
+        }
+        Err(
+            e @ (SwitchDetectError::Io { .. }
+            | SwitchDetectError::Protocol { .. }),
+        ) => {
+            warn!(
+                log,
+                "virtio 9p device probe failed; skipping";
+                "error" => InlineErrorChain::new(&e),
+            );
+            Ok(None)
+        }
+        Err(e) => Err(e),
+    }
 }
 
 fn is_virtio_9p(node: &Node<'_>) -> Result<bool, SwitchDetectError> {
