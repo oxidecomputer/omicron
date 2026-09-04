@@ -458,7 +458,7 @@ pub async fn run_standalone_server(
                 blueprint_zone_type::InternalDns {
                     dataset: OmicronZoneDataset { pool_name },
                     http_address: http_bound,
-                    dns_address: match dns.dns_server.sole_local_address() {
+                    dns_address: match dns.dns_server.sole_local_address()? {
                         SocketAddr::V4(_) => {
                             panic!("did not expect v4 address")
                         }

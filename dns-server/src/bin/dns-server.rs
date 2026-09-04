@@ -15,6 +15,7 @@ use slog::o;
 use std::net::{SocketAddr, SocketAddrV6};
 use std::path::PathBuf;
 
+/// Helper type to parse one or more socket address from CLI arguments.
 #[derive(Clone, Debug)]
 struct SocketAddrs(Vec<SocketAddr>);
 
@@ -102,7 +103,7 @@ async fn main_impl() -> Result<(), anyhow::Error> {
     )
     .context("initializing persistent storage")?;
 
-    let (mut dns_server, dropshot_server) = dns_server::start_servers(
+    let (dns_server, dropshot_server) = dns_server::start_servers(
         log,
         store,
         &dns_server_config,

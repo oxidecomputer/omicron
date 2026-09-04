@@ -156,7 +156,11 @@ impl RunAllArgs {
         );
         println!(
             "omicron-dev: internal DNS:           {}",
-            cptestctx.internal_dns.dns_server.sole_local_address()
+            cptestctx
+                .internal_dns
+                .dns_server
+                .sole_local_address()
+                .context("Expected exactly 1 internal DNS address")?,
         );
         println!(
             "omicron-dev: external DNS name:      {}",

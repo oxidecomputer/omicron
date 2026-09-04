@@ -112,20 +112,16 @@ pub struct ServerHandle {
 }
 
 impl ServerHandle {
-    /// Return the address the server is bound it, if there is exactly one. This
-    /// is intended for test contexts.
-    ///
-    /// # Panics
-    ///
-    /// This panics if there is not exactly one address. If you want to handle
-    /// any number of addresses, call [`ServerHandle::local_addresses`] instead.
-    pub fn sole_local_address(&self) -> SocketAddr {
-        assert_eq!(
+    /// Return the address the server is bound it, if there is exactly one, or
+    /// an error otherwise. This is mostly intended for test contexts.
+    pub fn sole_local_address(&self) -> anyhow::Result<SocketAddr> {
+        anyhow::ensure!(
+            self.local_addresses.len() == 1,
+            "Expected the DNS server to have exactly 1 address, but \
+            it actually has {}",
             self.local_addresses.len(),
-            1,
-            "DNS server does not have exactly one bound address"
         );
-        self.local_addresses[0]
+        Ok(self.local_addresses[0])
     }
 
     /// The addresses the server is bound to.
@@ -135,7 +131,7 @@ impl ServerHandle {
 
     /// Wait for any of the internal tasks to exit.
     pub async fn wait_for_exit(
-        &mut self,
+        mut self,
     ) -> Option<Result<ExitDetails, JoinError>> {
         self.tasks.join_next().await
     }

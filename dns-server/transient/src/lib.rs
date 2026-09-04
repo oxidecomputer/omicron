@@ -88,7 +88,7 @@ impl TransientDnsServer {
     pub async fn resolver(&self) -> Result<TokioResolver, anyhow::Error> {
         let mut resolver_config = ResolverConfig::new();
         resolver_config.add_name_server(NameServerConfig::new(
-            self.dns_server.sole_local_address(),
+            self.dns_server.sole_local_address()?,
             hickory_proto::xfer::Protocol::Udp,
         ));
         let mut resolver_opts = ResolverOpts::default();

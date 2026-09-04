@@ -1587,7 +1587,7 @@ mod tests {
         {
             let resolver = Resolver::new_from_addrs(
                 logctx.log.clone(),
-                &[dns.dns_server.sole_local_address()],
+                &dns.dns_server.local_addresses().collect::<Vec<_>>(),
             )
             .expect("created DNS resolver");
 
@@ -1693,7 +1693,7 @@ mod tests {
         // Query with the qorb DNS resolver.
         {
             let resolver =
-                QorbResolver::new(vec![dns.dns_server.sole_local_address()]);
+                QorbResolver::new(dns.dns_server.local_addresses().collect());
 
             // Ensure that service names can be looked up via the qorb resolver.
             let mut services_with_errors = BTreeMap::new();
