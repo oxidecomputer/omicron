@@ -51,6 +51,7 @@ pub struct Pool {
     log: Logger,
     terminated: std::sync::atomic::AtomicBool,
     quiesce: watch::Sender<Quiesce>,
+    record_db_claim_backtraces: bool,
 }
 
 // Provides an alternative to the DNS resolver for cases where we want to
@@ -246,6 +247,7 @@ impl Pool {
             log,
             terminated: std::sync::atomic::AtomicBool::new(false),
             quiesce,
+            record_db_claim_backtraces: true,
         }
     }
 
@@ -255,12 +257,10 @@ impl Pool {
         let held_since = Utc::now();
         // This is an escape hatch in case we ever encounter an unexpected pathological case where
         // capturing backtraces is slow enough to be an issue:
-        let disable_backtrace_capture =
-            std::env::var_os("NEXUS_DISABLE_DB_CLAIM_BACKTRACES").is_some();
-        let debug = if disable_backtrace_capture {
-            "(backtraces disabled)".to_string()
-        } else {
+        let debug = if self.record_db_claim_backtraces {
             Backtrace::force_capture().to_string()
+        } else {
+            "(backtraces disabled)".to_string()
         };
         let allowed = self.quiesce.send_if_modified(|q| {
             if let ClaimsAllowed::Disallowed = q.new_claims_allowed {
