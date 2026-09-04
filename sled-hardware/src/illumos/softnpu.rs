@@ -8,6 +8,7 @@ use crate::SwitchDetectError;
 use crate::softnpu::{SOFTNPU_9P_VERSION, decode_rversion, encode_tversion};
 use illumos_devinfo::{DevInfo, Node};
 use slog::{Logger, debug, info, warn};
+use slog_error_chain::InlineErrorChain;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::os::unix::fs::OpenOptionsExt;
@@ -30,8 +31,9 @@ enum Probe {
 ///
 /// Every virtio 9p node with an attached driver is opened exclusively and
 /// asked for its 9P version. Only the propolis SoftNPU handler answers with
-/// `9P2000.P4`. A device that stays busy across retries, such as a mounted
-/// 9p filesystem, is logged and skipped.
+/// `9P2000.P4`. A device that stays busy across retries, fails to open, or
+/// answers with anything other than an Rversion is logged and skipped. Only
+/// device tree failures are fatal.
 pub(super) fn find_softnpu_device(
     log: &Logger,
     devinfo: &mut DevInfo,
@@ -51,12 +53,12 @@ pub(super) fn find_softnpu_device(
             );
             continue;
         };
-        match probe_version(&path)? {
-            Probe::Version(version) if version == SOFTNPU_9P_VERSION => {
+        match probe_version(&path) {
+            Ok(Probe::Version(version)) if version == SOFTNPU_9P_VERSION => {
                 info!(log, "found SoftNPU 9p device"; "path" => &path);
                 return Ok(Some(path));
             }
-            Probe::Version(version) => {
+            Ok(Probe::Version(version)) => {
                 debug!(
                     log,
                     "virtio 9p device is not SoftNPU";
@@ -64,9 +66,20 @@ pub(super) fn find_softnpu_device(
                     "version" => version,
                 );
             }
-            Probe::Busy => {
+            Ok(Probe::Busy) => {
                 warn!(log, "virtio 9p device busy; skipping"; "path" => path);
             }
+            Err(
+                e @ (SwitchDetectError::Io { .. }
+                | SwitchDetectError::Protocol { .. }),
+            ) => {
+                warn!(
+                    log,
+                    "virtio 9p device probe failed; skipping";
+                    "error" => InlineErrorChain::new(&e),
+                );
+            }
+            Err(e) => return Err(e),
         }
     }
     Ok(None)
