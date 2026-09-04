@@ -5,6 +5,7 @@
 use crate::app::background::Activator;
 use crate::app::background::BackgroundTask;
 use crate::app::background::tasks::fm_sitrep_load::CurrentSitrep;
+use crate::app::external_endpoints::TlsCertificate;
 use anyhow::Context;
 use chrono::Utc;
 use fm::analysis_input::Input;
@@ -439,10 +440,14 @@ impl FmAnalysis {
     /// leaf validity window of each of its external TLS certificates.
     ///
     /// This reads the same rows the `external_endpoints` background task uses
-    /// to decide which certificate to serve, so the engine reasons about the
-    /// certificates Nexus actually presents. Certificates that cannot be
-    /// parsed, or that belong to a silo that no longer exists, are skipped
-    /// with a warning, mirroring how `external_endpoints` skips them.
+    /// to decide which certificate to serve, and applies the same acceptance
+    /// check (`TlsCertificate::try_from`), so the engine reasons about exactly
+    /// the certificates Nexus can present. A certificate that fails that check
+    /// is never served, however far off its expiration is, so it must not be
+    /// allowed to mask an expiring certificate that is served. Certificates
+    /// that fail the check, or that belong to a silo that no longer exists,
+    /// are skipped with a warning, mirroring how `external_endpoints` skips
+    /// them.
     async fn load_silo_certificates(
         &self,
         opctx: &OpContext,
@@ -493,22 +498,21 @@ impl FmAnalysis {
             paginator = p.found_batch(&batch, &|c| c.id());
             for cert in batch {
                 let cert_id = cert.id();
-                let Some(mut silo) = silos.get_mut(&cert.silo_id) else {
+                let cert_name = cert.name().clone();
+                let silo_id = cert.silo_id;
+                let Some(mut silo) = silos.get_mut(&silo_id) else {
                     warnings.push(format!(
                         "certificate {cert_id} belongs to silo {}, which                          was not found; ignoring it",
                         cert.silo_id,
                     ));
                     continue;
                 };
-                let validity = match omicron_certificates::leaf_validity(
-                    &cert.cert,
-                ) {
-                    Ok(validity) => validity,
+                let validity = match TlsCertificate::try_from(cert) {
+                    Ok(tls_cert) => tls_cert.validity(),
                     Err(e) => {
                         warnings.push(format!(
-                            "certificate {cert_id} for silo {} could not be                              parsed; ignoring it: {}",
-                            cert.silo_id,
-                            InlineErrorChain::new(&e),
+                            "certificate {cert_id} for silo {silo_id} cannot \
+                             be served; ignoring it: {e:#}",
                         ));
                         continue;
                     }
@@ -516,7 +520,7 @@ impl FmAnalysis {
                 silo.certificates
                     .insert_unique(ObservedCertificate {
                         id: cert_id,
-                        name: cert.name().clone(),
+                        name: cert_name,
                         not_before: validity.not_before,
                         not_after: validity.not_after,
                     })
@@ -1490,6 +1494,177 @@ mod tests {
         );
         assert!(carried.unmarked_ereports.is_empty());
         assert_eq!(report.closed_cases_copied_forward.len(), 1);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Builds a self-signed certificate whose key is 1024-bit RSA, returning
+    /// the certificate and key as PEM.
+    ///
+    /// Upload validation (`CertificateValidator`) accepts such a certificate:
+    /// openssl parses the key, and it matches the leaf's public key. But
+    /// rustls (via aws-lc-rs) refuses RSA keys shorter than 2048 bits, so
+    /// `TlsCertificate::try_from` rejects it and Nexus never serves it.
+    fn unservable_certificate(
+        hostname: &str,
+        not_after: chrono::DateTime<Utc>,
+    ) -> (String, String) {
+        use openssl::asn1::Asn1Time;
+        use openssl::hash::MessageDigest;
+        use openssl::nid::Nid;
+        use openssl::pkey::PKey;
+        use openssl::rsa::Rsa;
+        use openssl::x509::X509Builder;
+        use openssl::x509::X509NameBuilder;
+        use openssl::x509::extension::SubjectAlternativeName;
+
+        let key = PKey::from_rsa(Rsa::generate(1024).unwrap()).unwrap();
+        let mut name = X509NameBuilder::new().unwrap();
+        name.append_entry_by_nid(Nid::COMMONNAME, hostname).unwrap();
+        let name = name.build();
+
+        let mut builder = X509Builder::new().unwrap();
+        builder.set_version(2).unwrap();
+        builder.set_subject_name(&name).unwrap();
+        builder.set_issuer_name(&name).unwrap();
+        builder.set_pubkey(&key).unwrap();
+        builder.set_not_before(&Asn1Time::days_from_now(0).unwrap()).unwrap();
+        builder
+            .set_not_after(&Asn1Time::from_unix(not_after.timestamp()).unwrap())
+            .unwrap();
+        let san = SubjectAlternativeName::new()
+            .dns(hostname)
+            .build(&builder.x509v3_context(None, None))
+            .unwrap();
+        builder.append_extension(san).unwrap();
+        builder.sign(&key, MessageDigest::sha256()).unwrap();
+        let cert = builder.build();
+
+        let cert_pem = String::from_utf8(cert.to_pem().unwrap()).unwrap();
+        let key_pem =
+            String::from_utf8(key.private_key_to_pem_pkcs8().unwrap()).unwrap();
+        (cert_pem, key_pem)
+    }
+
+    /// The certificate loader must apply the same acceptance check as the
+    /// external endpoint code, so that a stored certificate Nexus cannot
+    /// serve does not mask the expiring certificate it does serve.
+    #[tokio::test]
+    async fn test_load_silo_certificates_skips_unservable_certificates() {
+        use async_bb8_diesel::AsyncRunQueryDsl;
+        use nexus_db_model::Certificate;
+        use nexus_db_schema::schema::certificate::dsl;
+        use nexus_types::external_api::certificate::CertificateCreate;
+        use nexus_types::external_api::certificate::ServiceUsingCertificate;
+        use nexus_types::silo::DEFAULT_SILO_ID;
+        use omicron_certificates::CertificateValidator;
+        use omicron_common::api::external::IdentityMetadataCreateParams;
+        use omicron_test_utils::certificates::CertificateChain;
+        use uuid::Uuid;
+
+        let logctx = dev::test_setup_log(
+            "test_load_silo_certificates_skips_unservable_certificates",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        const HOSTNAME: &str = "fake.test.oxide.computer";
+        let make_cert = |name: &str, cert: String, key: String| {
+            Certificate::new_unvalidated(
+                DEFAULT_SILO_ID,
+                Uuid::new_v4(),
+                ServiceKind::Nexus,
+                CertificateCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: name.parse().unwrap(),
+                        description: String::new(),
+                    },
+                    cert,
+                    key,
+                    service: ServiceUsingCertificate::ExternalApi,
+                },
+            )
+        };
+
+        // A certificate Nexus can serve, expiring soon.
+        let mut params =
+            rcgen::CertificateParams::new(vec![HOSTNAME.to_string()]);
+        params.not_after = (std::time::SystemTime::now()
+            + std::time::Duration::from_secs(5 * 24 * 60 * 60))
+        .into();
+        let chain = CertificateChain::with_params(params);
+        let servable = make_cert(
+            "servable",
+            chain.cert_chain_as_pem(),
+            chain.end_cert_private_key_as_pem(),
+        );
+        let servable_id = servable.id();
+
+        // A certificate Nexus cannot serve, expiring much later. If the
+        // loader admitted it, it would be the silo's "best" certificate and
+        // the expiring one above would go unreported.
+        let (cert, key) = unservable_certificate(
+            HOSTNAME,
+            Utc::now() + chrono::Duration::days(730),
+        );
+        // Confirm the premise: upload validation accepts this certificate...
+        CertificateValidator::default()
+            .validate(cert.as_bytes(), key.as_bytes(), &[HOSTNAME])
+            .expect("upload validation accepts a 1024-bit RSA certificate");
+        let unservable = make_cert("unservable", cert, key);
+        let unservable_id = unservable.id();
+        // ...but the external endpoint code refuses to serve it.
+        TlsCertificate::try_from(unservable.clone())
+            .err()
+            .expect("external endpoints reject a 1024-bit RSA certificate");
+
+        diesel::insert_into(dsl::certificate)
+            .values(vec![servable, unservable])
+            .execute_async(
+                &*datastore.pool_connection_for_tests().await.unwrap(),
+            )
+            .await
+            .expect("inserted certificates");
+
+        let (_sitrep_tx, sitrep_rx) = watch::channel(None);
+        let (_inv_tx, inv_rx) = watch::channel(None);
+        let task = FmAnalysis::new(
+            datastore.clone(),
+            sitrep_rx,
+            inv_rx,
+            config_rx(Default::default()),
+            activators(),
+            OmicronZoneUuid::new_v4(),
+        );
+
+        let mut warnings = Vec::new();
+        let silos = task
+            .load_silo_certificates(opctx, &mut warnings)
+            .await
+            .expect("loaded silo certificates");
+
+        let silo = silos.get(&DEFAULT_SILO_ID).expect("default silo observed");
+        let observed_ids: Vec<Uuid> =
+            silo.certificates.iter().map(|c| c.id).collect();
+        assert_eq!(observed_ids, vec![servable_id]);
+        assert_eq!(
+            silo.best_certificate().map(|c| c.id),
+            Some(servable_id),
+            "the expiring servable certificate must be the best one"
+        );
+        let observed = silo.certificates.get(&servable_id).unwrap();
+        assert!(observed.not_before <= Utc::now());
+        assert!(observed.not_after > Utc::now());
+        assert!(observed.not_after < Utc::now() + chrono::Duration::days(6));
+
+        assert_eq!(warnings.len(), 1, "unexpected warnings: {warnings:?}");
+        assert!(
+            warnings[0].contains(&unservable_id.to_string())
+                && warnings[0].contains("cannot be served"),
+            "unexpected warning: {}",
+            warnings[0]
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();

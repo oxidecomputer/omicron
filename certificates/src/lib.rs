@@ -12,6 +12,7 @@ use openssl::asn1::Asn1Time;
 use openssl::asn1::Asn1TimeRef;
 use openssl::pkey::PKey;
 use openssl::x509::X509;
+use openssl::x509::X509Ref;
 use std::borrow::Borrow;
 use std::ffi::CString;
 
@@ -93,21 +94,17 @@ pub struct CertificateValidity {
     pub not_after: DateTime<Utc>,
 }
 
-/// Returns the validity window of the leaf certificate in a PEM-encoded
-/// certificate chain.
+/// Returns the validity window of an X509 certificate.
 ///
-/// The leaf certificate is the first certificate in the chain. This is the
-/// same convention used when the chain is served to TLS clients, so the
-/// returned window is the one clients will check.
-pub fn leaf_validity(
-    certs_pem: &[u8],
+/// When called on the leaf certificate of a chain (the first certificate in
+/// the chain, which is the one presented to TLS clients), the returned window
+/// is the one clients will check.
+pub fn validity(
+    cert: &X509Ref,
 ) -> Result<CertificateValidity, CertificateError> {
-    let certs = X509::stack_from_pem(certs_pem)
-        .map_err(CertificateError::BadCertificate)?;
-    let leaf = certs.first().ok_or(CertificateError::CertificateEmpty)?;
     Ok(CertificateValidity {
-        not_before: asn1_time_to_chrono(leaf.not_before())?,
-        not_after: asn1_time_to_chrono(leaf.not_after())?,
+        not_before: asn1_time_to_chrono(cert.not_before())?,
+        not_after: asn1_time_to_chrono(cert.not_after())?,
     })
 }
 
@@ -498,11 +495,12 @@ mod tests {
     }
 
     #[test]
-    fn test_leaf_validity_reads_leaf_certificate() {
+    fn test_validity_converts_asn1_times() {
         // Pin the leaf's validity window to exact second offsets from the
         // Unix epoch. The root and intermediate certificates in the chain
         // keep rcgen's default (much wider) window, so a correct result
-        // proves we read the leaf and not some other link in the chain.
+        // proves we read the certificate we were given and not some other
+        // link in the chain.
         const NOT_BEFORE_SECS: u64 = 1_000_000_000;
         const NOT_AFTER_SECS: u64 = 2_000_000_000;
         let mut params = CertificateParams::new(vec![
@@ -515,11 +513,13 @@ mod tests {
             + std::time::Duration::from_secs(NOT_AFTER_SECS))
         .into();
         let chain = CertificateChain::with_params(params);
-
-        let validity = leaf_validity(chain.cert_chain_as_pem().as_bytes())
+        let certs = X509::stack_from_pem(chain.cert_chain_as_pem().as_bytes())
             .expect("chain should parse");
+
+        let leaf_validity =
+            validity(&certs[0]).expect("leaf validity should convert");
         assert_eq!(
-            validity,
+            leaf_validity,
             CertificateValidity {
                 not_before: DateTime::from_timestamp(NOT_BEFORE_SECS as i64, 0)
                     .unwrap(),
@@ -527,18 +527,10 @@ mod tests {
                     .unwrap(),
             }
         );
-    }
-
-    #[test]
-    fn test_leaf_validity_rejects_garbage_and_empty_input() {
-        assert!(matches!(
-            leaf_validity(b"not a certificate"),
-            Err(CertificateError::BadCertificate(_))
-                | Err(CertificateError::CertificateEmpty)
-        ));
-        assert!(matches!(
-            leaf_validity(b""),
-            Err(CertificateError::CertificateEmpty)
-        ));
+        // The intermediate certificate keeps rcgen's default window, which
+        // differs from the leaf's.
+        let intermediate_validity =
+            validity(&certs[1]).expect("intermediate validity should convert");
+        assert_ne!(leaf_validity, intermediate_validity);
     }
 }

@@ -43,6 +43,7 @@ use nexus_db_queries::db::pagination::Paginator;
 use nexus_types::identity::Resource;
 use nexus_types::silo::DEFAULT_SILO_ID;
 use nexus_types::silo::silo_dns_name;
+use omicron_certificates::CertificateValidity;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::bail_unless;
@@ -388,9 +389,15 @@ impl PartialEq for ExternalEndpointError {
 }
 
 /// A parsed, validated TLS certificate ready to use with an external TLS server
+///
+/// Constructing one of these (via `TryFrom<Certificate>`) is the acceptance
+/// check for whether Nexus can serve a stored certificate at all. Anything
+/// else that needs to reason about the certificates Nexus actually presents,
+/// like the fault management certificate diagnosis engine, must go through the
+/// same conversion so that it sees the same set of certificates.
 #[derive(Serialize)]
 #[serde(transparent)]
-struct TlsCertificate {
+pub(crate) struct TlsCertificate {
     /// This is what we need to provide to the TLS stack when we decide to use
     /// this certificate for an incoming TLS connection
     // NOTE: It's important that we do not serialize the private key!
@@ -403,6 +410,10 @@ struct TlsCertificate {
     // NOTE: It's important that we do not serialize the private key!
     #[serde(skip)]
     parsed: X509,
+
+    /// Validity window of the leaf certificate
+    #[serde(skip)]
+    validity: CertificateValidity,
 
     /// certificate digest (historically sometimes called a "fingerprint")
     // This is the only field that appears in the serialized output or debug
@@ -478,7 +489,17 @@ impl TryFrom<Certificate> for TlsCertificate {
             hex::encode(&digest_bytes)
         };
 
-        Ok(TlsCertificate { certified_key, digest, parsed: end_cert })
+        let validity = omicron_certificates::validity(&end_cert)
+            .context("reading leaf certificate validity")?;
+
+        Ok(TlsCertificate { certified_key, digest, parsed: end_cert, validity })
+    }
+}
+
+impl TlsCertificate {
+    /// Returns the validity window of the leaf certificate
+    pub(crate) fn validity(&self) -> CertificateValidity {
+        self.validity
     }
 }
 
