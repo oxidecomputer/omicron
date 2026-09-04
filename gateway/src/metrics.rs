@@ -636,7 +636,7 @@ impl SpPoller {
                             // These are supposed to always be strings. But, if we
                             // see one that's not a string, fall back to the hex
                             // representation rather than panicking.
-                            let hex = hex::encode(dev.component.id);
+                            let hex = hex::encode(dev.component.id());
                             slog::warn!(
                                 &self.log,
                                 "a SP component ID was not a string! this isn't \
@@ -1277,6 +1277,12 @@ fn comms_error_str(error: CommunicationError) -> &'static str {
         }
         CommunicationError::BadDecompressionSize { .. } => {
             "bad_decompression_size"
+        }
+        CommunicationError::HostPanicDataChanged { .. } => {
+            "host_panic_data_changed"
+        }
+        CommunicationError::HostBootfailDataChanged { .. } => {
+            "host_boot_fail_data_changed"
         }
     }
 }
