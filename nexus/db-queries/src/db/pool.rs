@@ -117,7 +117,11 @@ impl Pool {
     ///
     /// Creating this pool does not necessarily wait for connections to become
     /// available, as backends may shift over time.
-    pub fn new(log: &Logger, resolver: &QorbResolver) -> Self {
+    pub fn new(
+        log: &Logger,
+        resolver: &QorbResolver,
+        record_db_claim_backtraces: bool,
+    ) -> Self {
         let resolver = resolver.for_service(ServiceName::Cockroach);
         let connector = make_postgres_connector(log);
         let policy = Policy::default();
@@ -136,7 +140,7 @@ impl Pool {
                 err.into_inner()
             }
         };
-        Self::new_common(inner, log.clone())
+        Self::new_common(inner, log.clone(), record_db_claim_backtraces)
     }
 
     /// Creates a new qorb-backed connection pool to a single instance of the
@@ -146,7 +150,11 @@ impl Pool {
     /// on a single instance of the database.
     ///
     /// In production, [Self::new] should be preferred.
-    pub fn new_single_host(log: &Logger, db_config: &DbConfig) -> Self {
+    pub fn new_single_host(
+        log: &Logger,
+        db_config: &DbConfig,
+        record_db_claim_backtraces: bool,
+    ) -> Self {
         let resolver = make_single_host_resolver(db_config);
         let connector = make_postgres_connector(log);
         let policy = Policy::default();
@@ -165,7 +173,7 @@ impl Pool {
                 err.into_inner()
             }
         };
-        Self::new_common(inner, log.clone())
+        Self::new_common(inner, log.clone(), record_db_claim_backtraces)
     }
 
     /// Creates a new qorb-backed connection pool to a fixed set of database
@@ -195,7 +203,7 @@ impl Pool {
                 err.into_inner()
             }
         };
-        Self::new_common(inner, log.clone())
+        Self::new_common(inner, log.clone(), true)
     }
 
     /// Creates a new qorb-backed connection pool which returns an error
@@ -230,12 +238,13 @@ impl Pool {
                 err.into_inner()
             }
         };
-        Self::new_common(inner, log.clone())
+        Self::new_common(inner, log.clone(), true)
     }
 
     fn new_common(
         inner: qorb::pool::Pool<AsyncConnection>,
         log: Logger,
+        record_db_claim_backtraces: bool,
     ) -> Self {
         let (quiesce, _) = watch::channel(Quiesce {
             new_claims_allowed: ClaimsAllowed::Allowed,
@@ -247,7 +256,7 @@ impl Pool {
             log,
             terminated: std::sync::atomic::AtomicBool::new(false),
             quiesce,
-            record_db_claim_backtraces: true,
+            record_db_claim_backtraces,
         }
     }
 
@@ -438,7 +447,7 @@ mod test {
         let mut db = crdb::test_setup_database(log).await;
         let cfg = crate::db::Config { url: db.pg_config().clone() };
         {
-            let pool = Pool::new_single_host(&log, &cfg);
+            let pool = Pool::new_single_host(&log, &cfg, true);
             pool.terminate().await;
         }
         db.cleanup().await.unwrap();
@@ -455,7 +464,7 @@ mod test {
         let mut db = crdb::test_setup_database(log).await;
         let cfg = crate::db::Config { url: db.pg_config().clone() };
         {
-            let pool = Pool::new_single_host(&log, &cfg);
+            let pool = Pool::new_single_host(&log, &cfg, true);
             drop(pool);
         }
         db.cleanup().await.unwrap();
