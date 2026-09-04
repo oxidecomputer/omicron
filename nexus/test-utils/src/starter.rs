@@ -117,6 +117,7 @@ use slog::{Logger, debug, error, info, o};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
+use std::env;
 use std::fmt::Debug;
 use std::iter::{once, repeat, zip};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
@@ -202,6 +203,12 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         ));
 
         let debug_dropbox_dir = TestTempDir::new(&logctx.log);
+
+        // Note that the record_db_claim_backtraces flag defaults to true; we only disable the flag
+        // specifically when this env var is set to "0":
+        if env::var_os("NEXUS_ENABLE_DB_CLAIM_BACKTRACES") == Some("0".into()) {
+            config.deployment.record_db_claim_backtraces = false;
+        }
 
         Self {
             config,
