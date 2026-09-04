@@ -18,6 +18,7 @@ http.workspace = true
 lldp_protocol.workspace = true
 mg-admin-client.workspace = true
 mg-api-types.workspace = true
+nexus-defaults.workspace = true
 omicron-common.workspace = true
 omicron-passwords.workspace = true
 omicron-uuid-kinds.workspace = true
