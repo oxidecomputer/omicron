@@ -3140,7 +3140,6 @@ dependencies = [
  "dns-server-api",
  "dns-service-client",
  "dropshot",
- "flume",
  "git-stub-vcs",
  "hickory-client",
  "hickory-proto 0.25.2",

@@ -754,10 +754,8 @@ async fn init_client_server_with_bind_addresses(
     assert!(store.is_new());
 
     // launch a dns server
-    let dns_server_config =
-        dns_server::dns_server::ConfigBuilder::new(bind_addresses)
-            .build()
-            .context("building DNS configuration")?;
+    let dns_server_config = dns_server::dns_server::Config::new(bind_addresses)
+        .context("building DNS configuration")?;
     let (dns_server, dropshot_server) = dns_server::start_servers(
         log.clone(),
         store,
@@ -768,7 +766,7 @@ async fn init_client_server_with_bind_addresses(
 
     let mut resolver_config = ResolverConfig::new();
     resolver_config.add_name_server(NameServerConfig::new(
-        dns_server.sole_local_address().expect("exactly one address"),
+        dns_server.local_addresses().next().expect("at least one address"),
         Protocol::Udp,
     ));
     let mut resolver_opts = ResolverOpts::default();

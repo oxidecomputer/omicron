@@ -8,7 +8,6 @@
 use anyhow::Context;
 use anyhow::anyhow;
 use clap::Parser;
-use dns_server::dns_server::ExitDetails;
 use serde::Deserialize;
 use slog::info;
 use slog::o;
@@ -88,8 +87,7 @@ async fn main_impl() -> Result<(), anyhow::Error> {
         .context("failed to create logger")?;
 
     let dns_server_config =
-        dns_server::dns_server::ConfigBuilder::new(args.dns_addresses.0)
-            .build()
+        dns_server::dns_server::Config::new(args.dns_addresses.0)
             .context("building DNS configuration")?;
 
     info!(&log, "config";
@@ -120,18 +118,10 @@ async fn main_impl() -> Result<(), anyhow::Error> {
         }
         dns_result = dns_server.wait_for_exit() => {
             match dns_result {
-                Some(Ok(ExitDetails::DnsWorker { index } )) => {
-                    anyhow::bail!("DNS worker task {index} exited unexpectedly");
-                }
-                Some(Ok(ExitDetails::UdpReader { index, result } )) => {
-                    result.with_context(|| {
-                        format!("UDP reader task {index} exited")
-                    })
-                }
-                Some(Err(je)) => anyhow::bail!(
+                Ok(res) => anyhow::bail!("DNS server task exited unexpectedly: {res:?}"),
+                Err(je) => anyhow::bail!(
                     "Error joining DNS server task: '{je}'"
                 ),
-                None => unreachable!("Should always spawn >= 1 task"),
             }
         }
     }

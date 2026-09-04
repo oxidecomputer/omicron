@@ -29,11 +29,9 @@ use hickory_server::authority::MessageResponseBuilder;
 use internal_dns_types::config::DnsRecord;
 use internal_dns_types::config::Srv;
 use pretty_hex::*;
-use slog::warn;
 use slog::{Logger, debug, error, info, o, trace};
 use slog_error_chain::InlineErrorChain;
 use std::net::SocketAddr;
-use std::num::NonZeroUsize;
 use std::str::FromStr;
 use std::sync::Arc;
 use thiserror::Error;
@@ -47,68 +45,31 @@ use uuid::Uuid;
 pub struct Config {
     /// The addresses to listen for DNS requests on.
     bind_addresses: Vec<SocketAddr>,
-
-    /// The number of received requests to buffer before dropping them.
-    request_queue_size: NonZeroUsize,
-
-    /// The number of worker tasks that generate DNS answers.
-    n_workers: NonZeroUsize,
 }
 
-pub struct ConfigBuilder {
-    bind_addresses: Vec<SocketAddr>,
-    request_queue_size: Option<NonZeroUsize>,
-    n_workers: Option<NonZeroUsize>,
-}
-
-impl ConfigBuilder {
-    pub fn new(bind_addresses: Vec<SocketAddr>) -> Self {
-        Self { bind_addresses, request_queue_size: None, n_workers: None }
-    }
-
-    pub fn request_queue_size(
-        &mut self,
-        request_queue_size: NonZeroUsize,
-    ) -> &mut Self {
-        self.request_queue_size = Some(request_queue_size);
-        self
-    }
-
-    pub fn n_workers(&mut self, n_workers: NonZeroUsize) -> &mut Self {
-        self.n_workers = Some(n_workers);
-        self
-    }
-
-    pub fn build(self) -> anyhow::Result<Config> {
+impl Config {
+    /// Construct from a list of addresses. This fails if the list is empty.
+    pub fn new(bind_addresses: Vec<SocketAddr>) -> anyhow::Result<Self> {
         anyhow::ensure!(
-            !self.bind_addresses.is_empty(),
-            "Must provide at least one bind address",
+            !bind_addresses.is_empty(),
+            "Must provide at least one bind address"
         );
-        Ok(Config {
-            bind_addresses: self.bind_addresses,
-            request_queue_size: self
-                .request_queue_size
-                .unwrap_or(NonZeroUsize::new(128).unwrap()),
-            n_workers: self.n_workers.unwrap_or(NonZeroUsize::new(16).unwrap()),
-        })
+        Ok(Self { bind_addresses })
     }
 }
 
-/// The exit details of one of the DNS server's internal tasks.
-pub enum ExitDetails {
-    /// One of the DNS worker tasks exited.
-    DnsWorker { index: usize },
-    /// One of the UDP packet reader tasks exited.
-    UdpReader { index: usize, result: anyhow::Result<()> },
-}
-
-/// Handle to the DNS server
+/// Handle to the DNS servers.
 ///
-/// Dropping this handle shuts down the DNS server. All of its receiver and
-/// worker tasks are aborted.
+/// Dropping this handle shuts down the DNS servers.
 pub struct ServerHandle {
+    /// Local address each single server is bound to.
     local_addresses: Vec<SocketAddr>,
-    tasks: JoinSet<ExitDetails>,
+    /// Join set in which all spawned server tasks run.
+    ///
+    /// NOTE: This does _not_ include the tasks handling an individual DNS
+    /// request, i.e., `handle_dns_packet()`. Those are spawned outside the set
+    /// and continue to run even if this is dropped.
+    server_tasks: JoinSet<anyhow::Result<()>>,
 }
 
 impl ServerHandle {
@@ -129,11 +90,11 @@ impl ServerHandle {
         self.local_addresses.iter().copied()
     }
 
-    /// Wait for any of the internal tasks to exit.
+    /// Wait for any of the individual servers to exit.
     pub async fn wait_for_exit(
         mut self,
-    ) -> Option<Result<ExitDetails, JoinError>> {
-        self.tasks.join_next().await
+    ) -> Result<anyhow::Result<()>, JoinError> {
+        self.server_tasks.join_next().await.expect("Always at least one server")
     }
 }
 
@@ -144,152 +105,73 @@ impl ServerHandle {
 pub struct Server;
 
 impl Server {
-    /// Starts a DNS server whose DNS data comes from the given `store`.
-    ///
-    /// The server binds each address in `config.bind_addresses` and serves DNS
-    /// on all of them from the same `store`.
+    /// Starts a DNS server whose DNS data comes from the given `store`
     pub async fn start(
         log: Logger,
         store: storage::Store,
         config: &Config,
     ) -> anyhow::Result<ServerHandle> {
-        anyhow::ensure!(
-            !config.bind_addresses.is_empty(),
-            "DNS server requires at least one bind address"
-        );
-
-        // Queue from tasks receiving UDP packets to the workers servicing them.
-        let (tx, rx) =
-            flume::bounded::<Incoming>(config.request_queue_size.get());
-
-        // Worker pool, which handle UDP packets from the store and serve
-        // answers.
-        let mut tasks = JoinSet::new();
-        for index in 0..config.n_workers.get() {
-            let log = log.new(o!("dns_worker" => index));
-            let store = store.clone();
-            let rx = rx.clone();
-            tasks.spawn(async move {
-                respond_to_dns_packets(log, store, rx).await;
-                ExitDetails::DnsWorker { index }
-            });
-        }
-
-        // Bind each address and spawn a receiver task for it.
+        let mut server_tasks = JoinSet::new();
         let mut local_addresses =
             Vec::with_capacity(config.bind_addresses.len());
-        for (index, bind_address) in config.bind_addresses.iter().enumerate() {
-            let socket = Arc::new(
-                UdpSocket::bind(bind_address).await.with_context(|| {
-                    format!("DNS server start: UDP bind to {:?}", bind_address)
+        for bind_address in config.bind_addresses.iter() {
+            let server_socket = Arc::new(
+                UdpSocket::bind(*bind_address).await.with_context(|| {
+                    format!("DNS server start: UDP bind to {:?}", bind_address,)
                 })?,
             );
-            let local_address = socket.local_addr().context(
+            let local_address = server_socket.local_addr().context(
                 "DNS server start: failed to get local address of bound socket",
             )?;
-            info!(&log, "DNS server bound to address";
-                "local_address" => ?local_address
-            );
+            let log = log.new(o!("bind_address" => local_address.to_string()));
+            info!(&log, "DNS server bound to address");
             local_addresses.push(local_address);
-
-            let log = log.new(o!(
-                "udp_reader" => index,
-                "bind_address" => local_address.to_string()
-            ));
-            let tx_ = tx.clone();
-            tasks.spawn(async move {
-                let result = read_udp_packets(log, socket, tx_).await;
-                ExitDetails::UdpReader { index, result }
-            });
+            let single_server =
+                SingleServer { log, store: store.clone(), server_socket };
+            server_tasks.spawn(single_server.run());
         }
-
-        Ok(ServerHandle { local_addresses, tasks })
+        Ok(ServerHandle { local_addresses, server_tasks })
     }
 }
 
-/// A received DNS packet, waiting to be answered by a worker.
-struct Incoming {
-    /// The socket the packet arrived on, used to send the reply.
-    socket: Arc<UdpSocket>,
-    /// Address we received the packet from.
-    client_addr: SocketAddr,
-    /// Raw packet data.
-    packet: Vec<u8>,
-}
-
-/// Receive packets on a single bound socket and forward them to the worker
-/// pool.
-//
-// NOTE: In practice this never returns Ok(_), only an error.
-async fn read_udp_packets(
-    log: Logger,
-    socket: Arc<UdpSocket>,
-    tx: flume::Sender<Incoming>,
-) -> anyhow::Result<()> {
-    loop {
-        let mut buf = vec![0u8; 16384];
-        let (n, client_addr) = socket
-            .recv_from(&mut buf)
-            .await
-            .context("receiving packet from UDP listen socket")?;
-        buf.resize(n, 0);
-        let incoming =
-            Incoming { socket: socket.clone(), client_addr, packet: buf };
-        match tx.try_send(incoming) {
-            Ok(()) => {
-                trace!(
-                    &log,
-                    "sent UDP packet to worker queue";
-                    "client_addr" => %client_addr,
-                    "packet_size" => n,
-                );
-            }
-            Err(flume::TrySendError::Full(_)) => {
-                debug!(
-                    &log,
-                    "dropping DNS request: worker queue full";
-                    "client_addr" => %client_addr,
-                );
-            }
-            Err(flume::TrySendError::Disconnected(_)) => {
-                warn!(&log, "All DNS worker tasks disconnected, exiting");
-                anyhow::bail!("All DNS worker tasks disconnected");
-            }
-        }
-    }
-}
-
-/// Pull received UDP packets off the queue and answer them.
-async fn respond_to_dns_packets(
+/// A DNS server bound to a single UDP socket.
+struct SingleServer {
     log: Logger,
     store: storage::Store,
-    rx: flume::Receiver<Incoming>,
-) {
-    while let Ok(Incoming { socket, client_addr, packet }) =
-        rx.recv_async().await
-    {
-        trace!(
-            &log,
-            "DNS worker tasks received incoming UDP packet";
-            "client_addr" => %client_addr,
-            "packet_size" => &packet.len(),
-        );
-        let req_id = Uuid::new_v4();
-        let log = log.new(o!(
-            "req_id" => req_id.to_string(),
-            "peer_addr" => client_addr.to_string(),
-        ));
+    server_socket: Arc<UdpSocket>,
+}
 
-        let request = Request {
-            log,
-            store: store.clone(),
-            socket,
-            client_addr,
-            packet,
-            req_id,
-        };
+impl SingleServer {
+    async fn run(self) -> anyhow::Result<()> {
+        // The guts of the DNS server: read packets from the bound socket and
+        // handle them.
+        loop {
+            let mut buf = vec![0u8; 16384];
+            let (n, client_addr) = self
+                .server_socket
+                .recv_from(&mut buf)
+                .await
+                .context("receiving packet from UDP listen socket")?;
+            buf.resize(n, 0);
 
-        handle_dns_packet(request).await;
+            let req_id = Uuid::new_v4();
+            let log = self.log.new(o!(
+                "req_id" => req_id.to_string(),
+                "peer_addr" => client_addr.to_string(),
+            ));
+            let request = Request {
+                log,
+                store: self.store.clone(),
+                socket: self.server_socket.clone(),
+                client_addr,
+                packet: buf,
+                req_id,
+            };
+
+            // TODO-robustness We should cap the number of tokio tasks that
+            // we're willing to spawn if we receive a flood of requests.
+            tokio::spawn(handle_dns_packet(request));
+        }
     }
 }
 

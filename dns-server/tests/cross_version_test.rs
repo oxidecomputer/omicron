@@ -226,11 +226,9 @@ async fn init_client_server(
     assert!(store.is_new());
 
     // launch a dns server
-    let dns_server_config = dns_server::dns_server::ConfigBuilder::new(vec![
-        "[::1]:0".parse().unwrap(),
-    ])
-    .build()
-    .context("building DNS configuration")?;
+    let dns_server_config =
+        dns_server::dns_server::Config::new(vec!["[::1]:0".parse().unwrap()])
+            .context("building DNS configuration")?;
     let (dns_server, dropshot_server) = dns_server::start_servers(
         log.clone(),
         store,

@@ -54,8 +54,7 @@ impl TransientDnsServer {
         let (dns_server, dropshot_server) = dns_server::start_servers(
             dns_log,
             store,
-            &dns_server::dns_server::ConfigBuilder::new(vec![dns_bind_address])
-                .build()
+            &dns_server::dns_server::Config::new(vec![dns_bind_address])
                 .context("building DNS configuration")?,
             &dropshot::ConfigDropshot {
                 bind_address: "[::1]:0".parse().unwrap(),

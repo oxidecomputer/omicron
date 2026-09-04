@@ -1594,10 +1594,9 @@ pub mod test {
         let (_, new_dns_dropshot_server) = dns_server::start_servers(
             log.clone(),
             store,
-            &dns_server::dns_server::ConfigBuilder::new(vec![
+            &dns_server::dns_server::Config::new(vec![
                 "[::1]:0".parse().unwrap(),
             ])
-            .build()
             .expect("valid DNS configuration"),
             &dropshot::ConfigDropshot {
                 bind_address: "[::1]:0".parse().unwrap(),
