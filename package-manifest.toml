@@ -878,7 +878,6 @@ only_for_targets.switch = "stub"
 only_for_targets.image = "standard"
 source.type = "composite"
 source.packages = [
-  "omicron-faux-mgs.tar.gz",
   "omicron-gateway-stub.tar.gz",
   "dendrite-stub.tar.gz",
   "lldp.tar.gz",
