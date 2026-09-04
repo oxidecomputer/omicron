@@ -8032,6 +8032,7 @@ dependencies = [
  "serde",
  "sled-agent-types",
  "slog",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "test-strategy",
  "tokio",
  "uuid",
