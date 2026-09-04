@@ -632,7 +632,7 @@ ntp-admin-client = { path = "clients/ntp-admin-client" }
 ntp-admin-types = { path = "ntp-admin/types" }
 ntp-admin-types-versions = { path = "ntp-admin/types/versions" }
 mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "ce015cde17a1ebc839ae482026d522cf0e369a3b" }
-ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "ce015cde17a1ebc839ae482026d522cf0e369a3b" }
+ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "373e5275c7656734318c6b34215eee637b48b695" }
 multimap = "0.10.1"
 nexus-auth = { path = "nexus/auth" }
 nexus-background-task-interface = { path = "nexus/background-task-interface" }
