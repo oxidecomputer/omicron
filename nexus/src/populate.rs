@@ -367,7 +367,7 @@ mod test {
         let logctx = dev::test_setup_log("test_populator");
         let db = TestDatabase::new_populate_schema_only(&logctx.log).await;
         let cfg = db::Config { url: db.crdb().pg_config().clone() };
-        let pool = Arc::new(db::Pool::new_single_host(&logctx.log, &cfg));
+        let pool = Arc::new(db::Pool::new_single_host(&logctx.log, &cfg, true));
         let datastore = Arc::new(
             db::DataStore::new(
                 &logctx.log,

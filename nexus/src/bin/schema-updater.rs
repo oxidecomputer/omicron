@@ -80,7 +80,7 @@ async fn main_impl() -> anyhow::Result<()> {
     let all_versions = AllSchemaVersions::load(&schema_config.schema_dir)?;
 
     let crdb_cfg = db::Config { url: args.url };
-    let pool = Arc::new(db::Pool::new_single_host(&log, &crdb_cfg));
+    let pool = Arc::new(db::Pool::new_single_host(&log, &crdb_cfg, true));
 
     // We use the unchecked constructor of the datastore because we
     // don't want to block on someone else applying an upgrade.

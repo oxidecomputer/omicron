@@ -51,6 +51,7 @@ pub struct Pool {
     log: Logger,
     terminated: std::sync::atomic::AtomicBool,
     quiesce: watch::Sender<Quiesce>,
+    record_db_claim_backtraces: bool,
 }
 
 // Provides an alternative to the DNS resolver for cases where we want to
@@ -116,7 +117,11 @@ impl Pool {
     ///
     /// Creating this pool does not necessarily wait for connections to become
     /// available, as backends may shift over time.
-    pub fn new(log: &Logger, resolver: &QorbResolver) -> Self {
+    pub fn new(
+        log: &Logger,
+        resolver: &QorbResolver,
+        record_db_claim_backtraces: bool,
+    ) -> Self {
         let resolver = resolver.for_service(ServiceName::Cockroach);
         let connector = make_postgres_connector(log);
         let policy = Policy::default();
@@ -135,7 +140,7 @@ impl Pool {
                 err.into_inner()
             }
         };
-        Self::new_common(inner, log.clone())
+        Self::new_common(inner, log.clone(), record_db_claim_backtraces)
     }
 
     /// Creates a new qorb-backed connection pool to a single instance of the
@@ -145,7 +150,11 @@ impl Pool {
     /// on a single instance of the database.
     ///
     /// In production, [Self::new] should be preferred.
-    pub fn new_single_host(log: &Logger, db_config: &DbConfig) -> Self {
+    pub fn new_single_host(
+        log: &Logger,
+        db_config: &DbConfig,
+        record_db_claim_backtraces: bool,
+    ) -> Self {
         let resolver = make_single_host_resolver(db_config);
         let connector = make_postgres_connector(log);
         let policy = Policy::default();
@@ -164,7 +173,7 @@ impl Pool {
                 err.into_inner()
             }
         };
-        Self::new_common(inner, log.clone())
+        Self::new_common(inner, log.clone(), record_db_claim_backtraces)
     }
 
     /// Creates a new qorb-backed connection pool to a fixed set of database
@@ -194,7 +203,7 @@ impl Pool {
                 err.into_inner()
             }
         };
-        Self::new_common(inner, log.clone())
+        Self::new_common(inner, log.clone(), true)
     }
 
     /// Creates a new qorb-backed connection pool which returns an error
@@ -229,12 +238,13 @@ impl Pool {
                 err.into_inner()
             }
         };
-        Self::new_common(inner, log.clone())
+        Self::new_common(inner, log.clone(), true)
     }
 
     fn new_common(
         inner: qorb::pool::Pool<AsyncConnection>,
         log: Logger,
+        record_db_claim_backtraces: bool,
     ) -> Self {
         let (quiesce, _) = watch::channel(Quiesce {
             new_claims_allowed: ClaimsAllowed::Allowed,
@@ -246,6 +256,7 @@ impl Pool {
             log,
             terminated: std::sync::atomic::AtomicBool::new(false),
             quiesce,
+            record_db_claim_backtraces,
         }
     }
 
@@ -253,7 +264,13 @@ impl Pool {
     pub async fn claim(&self) -> Result<DataStoreConnection, Error> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let held_since = Utc::now();
-        let debug = Backtrace::force_capture().to_string();
+        // This is an escape hatch in case we ever encounter an unexpected pathological case where
+        // capturing backtraces is slow enough to be an issue:
+        let debug = if self.record_db_claim_backtraces {
+            Backtrace::force_capture().to_string()
+        } else {
+            "(backtraces disabled)".to_string()
+        };
         let allowed = self.quiesce.send_if_modified(|q| {
             if let ClaimsAllowed::Disallowed = q.new_claims_allowed {
                 false
@@ -430,7 +447,7 @@ mod test {
         let mut db = crdb::test_setup_database(log).await;
         let cfg = crate::db::Config { url: db.pg_config().clone() };
         {
-            let pool = Pool::new_single_host(&log, &cfg);
+            let pool = Pool::new_single_host(&log, &cfg, true);
             pool.terminate().await;
         }
         db.cleanup().await.unwrap();
@@ -447,7 +464,7 @@ mod test {
         let mut db = crdb::test_setup_database(log).await;
         let cfg = crate::db::Config { url: db.pg_config().clone() };
         {
-            let pool = Pool::new_single_host(&log, &cfg);
+            let pool = Pool::new_single_host(&log, &cfg, true);
             drop(pool);
         }
         db.cleanup().await.unwrap();
