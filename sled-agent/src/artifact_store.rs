@@ -34,13 +34,14 @@ use dropshot::{
 };
 use futures::{Stream, TryStreamExt};
 use omicron_common::address::REPO_DEPOT_PORT;
-use omicron_generation_kinds::Generation;
+use omicron_generation_kinds::ArtifactConfigGeneration;
 use omicron_ledger::Ledger;
 use repo_depot_api::*;
 use sha2::{Digest, Sha256};
 use sled_agent_config_reconciler::ConfigReconcilerHandle;
 use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_config_reconciler::SledAgentArtifactStore;
+use sled_agent_config_reconciler::read_ledgered_artifact_config;
 use sled_agent_types::artifact::ArtifactConfig;
 use sled_agent_types::artifact::{ArtifactListResponse, ArtifactPutResponse};
 use slog::{Logger, error, info};
@@ -135,9 +136,8 @@ impl<T: DatasetsManager> ArtifactStore<T> {
             }
         }
 
-        let config = Ledger::new(&log, ledger_paths.clone())
-            .await
-            .map(Ledger::into_inner);
+        let config =
+            read_ledgered_artifact_config(&log, ledger_paths.clone()).await;
         let (config_tx, config) = watch::channel(config);
         // Somewhat arbitrary bound size, large enough that we should never hit it.
         let (ledger_tx, ledger_rx) = mpsc::channel(256);
@@ -353,7 +353,7 @@ where
     async fn writer(
         &self,
         sha256: ArtifactHash,
-        attempted_generation: Generation,
+        attempted_generation: ArtifactConfigGeneration,
     ) -> Result<ArtifactWriter, Error> {
         if let Some(config) = self.config.borrow().as_ref() {
             if attempted_generation != config.generation {
@@ -398,7 +398,7 @@ where
     pub(crate) async fn put_body(
         &self,
         sha256: ArtifactHash,
-        generation: Generation,
+        generation: ArtifactConfigGeneration,
         body: StreamingBody,
     ) -> Result<ArtifactPutResponse, Error> {
         self.writer(sha256, generation)
@@ -411,7 +411,7 @@ where
     pub(crate) async fn copy_from_depot(
         &self,
         sha256: ArtifactHash,
-        generation: Generation,
+        generation: ArtifactConfigGeneration,
         depot_base_url: &str,
     ) -> Result<(), Error> {
         // Check that there's no conflict before we send the upstream request.
@@ -615,7 +615,7 @@ pub trait DatasetsManager: Clone + Send + Sync + 'static {
         Ok(None)
     }
 
-    fn signal_delete_done(&self, _generation: Generation) {}
+    fn signal_delete_done(&self, _generation: ArtifactConfigGeneration) {}
 }
 
 impl DatasetsManager for InternalDisksReceiver {
@@ -821,8 +821,8 @@ pub enum Error {
         while at {current_generation}"
     )]
     GenerationConfig {
-        attempted_generation: Generation,
-        current_generation: Generation,
+        attempted_generation: ArtifactConfigGeneration,
+        current_generation: ArtifactConfigGeneration,
     },
 
     #[error(
@@ -830,8 +830,8 @@ pub enum Error {
         while at {current_generation}"
     )]
     GenerationPut {
-        attempted_generation: Generation,
-        current_generation: Generation,
+        attempted_generation: ArtifactConfigGeneration,
+        current_generation: ArtifactConfigGeneration,
     },
 
     #[error("Digest mismatch: expected {expected}, actual {actual}")]
@@ -868,7 +868,7 @@ pub enum Error {
     #[error(
         "Attempt to put artifact {sha256} not in config generation {generation}"
     )]
-    NotInConfig { sha256: ArtifactHash, generation: Generation },
+    NotInConfig { sha256: ArtifactHash, generation: ArtifactConfigGeneration },
 }
 
 impl From<Infallible> for Error {
@@ -926,7 +926,7 @@ mod test {
     use camino_tempfile::Utf8TempDir;
     use futures::stream::{self, StreamExt};
     use hex_literal::hex;
-    use omicron_generation_kinds::Generation;
+    use omicron_generation_kinds::ArtifactConfigGeneration;
     use omicron_test_utils::dev::test_setup_log;
     use sled_agent_types::artifact::ArtifactConfig;
     use tokio::io::AsyncReadExt;
@@ -938,8 +938,8 @@ mod test {
 
     #[derive(Clone)]
     struct TestBackend {
-        delete_done_tx: watch::Sender<Generation>,
-        delete_done_rx: watch::Receiver<Generation>,
+        delete_done_tx: watch::Sender<ArtifactConfigGeneration>,
+        delete_done_rx: watch::Receiver<ArtifactConfigGeneration>,
         datasets: Vec<Utf8PathBuf>,
         _tempdir: Arc<Utf8TempDir>,
     }
@@ -975,7 +975,7 @@ mod test {
             self.datasets.iter().cloned()
         }
 
-        fn signal_delete_done(&self, generation: Generation) {
+        fn signal_delete_done(&self, generation: ArtifactConfigGeneration) {
             self.delete_done_tx.send_if_modified(|old| {
                 let modified = *old != generation;
                 *old = generation;

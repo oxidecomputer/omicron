@@ -77,6 +77,7 @@ pub use internal_disks::InternalDisksWithBootDisk;
 pub use ledger::LedgerArtifactConfigError;
 pub use ledger::LedgerNewConfigError;
 pub use ledger::LedgerTaskError;
+pub use ledger::ledgered_config_versioning::read_ledgered_artifact_config;
 pub use mupdate_override::ResolverStatusExt;
 pub use raw_disks::RawDisksSender;
 pub use reconciler_task::CurrentlyManagedZpools;

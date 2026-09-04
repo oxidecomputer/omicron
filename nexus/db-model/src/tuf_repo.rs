@@ -5,7 +5,8 @@
 use std::collections::BTreeMap;
 use std::str::FromStr;
 
-use crate::{ByteCount, Generation, SemverVersion, typed_uuid::DbTypedUuid};
+use crate::typed_generation::DbTypedGeneration;
+use crate::{ByteCount, SemverVersion, typed_uuid::DbTypedUuid};
 use chrono::{DateTime, Utc};
 use diesel::sql_types::{Jsonb, Text};
 use diesel::{deserialize::FromSql, serialize::ToSql};
@@ -16,6 +17,9 @@ use nexus_db_schema::schema::{
 };
 use nexus_types::external_api::update as update_types;
 use omicron_common::api::external;
+use omicron_generation_kinds::{
+    ArtifactConfigGeneration, ArtifactConfigGenerationKind,
+};
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::TufArtifactKind;
 use omicron_uuid_kinds::TufRepoKind;
@@ -48,7 +52,7 @@ impl TufRepoDescription {
     /// [`nexus_types::tuf_repo::TufRepoDescription`].
     pub fn new(
         description: nexus_types::tuf_repo::TufRepoDescription,
-        generation_added: omicron_generation_kinds::Generation,
+        generation_added: ArtifactConfigGeneration,
     ) -> Result<Self, external::ByteCountRangeError> {
         let id = TypedUuid::new_v4().into();
         Ok(Self {
@@ -117,7 +121,7 @@ impl TufArtifactDescription {
     /// [`tufaceous_artifact::Artifact`].
     pub fn new(
         artifact: tufaceous_artifact::Artifact,
-        generation_added: omicron_generation_kinds::Generation,
+        generation_added: ArtifactConfigGeneration,
     ) -> Result<Self, external::ByteCountRangeError> {
         let id = TypedUuid::new_v4().into();
         Ok(Self {
@@ -237,7 +241,7 @@ pub struct TufArtifact {
     pub id: DbTypedUuid<TufArtifactKind>,
     pub time_created: DateTime<Utc>,
     pub sha256: ArtifactHash,
-    pub generation_added: Generation,
+    pub generation_added: DbTypedGeneration<ArtifactConfigGenerationKind>,
 }
 
 impl TufArtifact {
