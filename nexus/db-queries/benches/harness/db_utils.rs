@@ -20,6 +20,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::sled::SledReservationReason;
 use nexus_db_queries::db::pub_test_utils::helpers::small_resource_request;
+use nexus_db_queries::db::pub_test_utils::simulated_sleds::initialize_sled_bp_availability;
 use nexus_db_queries::db::pub_test_utils::simulated_sleds::test_sled_resources;
 use nexus_db_queries::db::pub_test_utils::simulated_sleds::upsert_sleds_from_system;
 use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
@@ -35,13 +36,15 @@ pub(crate) async fn create_sleds(
     datastore: &DataStore,
     count: usize,
 ) -> Vec<Sled> {
-    let (example, _) = ExampleSystemBuilder::new(log, "sled_reservation_bench")
-        .nsleds(count)
-        .sled_resources(SimulatedSledResources {
-            usable_hardware_threads: USABLE_HARDWARE_THREADS,
-            ..test_sled_resources()
-        })
-        .build();
+    let (example, blueprint) =
+        ExampleSystemBuilder::new(log, "sled_reservation_bench")
+            .nsleds(count)
+            .sled_resources(SimulatedSledResources {
+                usable_hardware_threads: USABLE_HARDWARE_THREADS,
+                ..test_sled_resources()
+            })
+            .build();
+    initialize_sled_bp_availability(datastore, &blueprint).await;
     upsert_sleds_from_system(
         datastore,
         &example.system,
