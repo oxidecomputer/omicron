@@ -1174,9 +1174,12 @@ mod test {
         assert_eq!(sled1_bb.part_number, "model1");
         assert_eq!(sled1_bb.serial_number, "s1");
         assert_eq!(sled1_agent.disks.len(), 4);
-        assert_eq!(sled1_agent.disks[0].identity.vendor, "macrohard");
-        assert_eq!(sled1_agent.disks[0].identity.model, "box");
-        assert_eq!(sled1_agent.disks[0].identity.serial, "XXIV");
+        assert_eq!(
+            sled1_agent.disks.first().unwrap().identity.vendor,
+            "macrohard"
+        );
+        assert_eq!(sled1_agent.disks.first().unwrap().identity.model, "box");
+        assert_eq!(sled1_agent.disks.first().unwrap().identity.serial, "XXIV");
 
         let sled4_agent =
             collection.sled_agents.get(&sled_agent_id_extra).unwrap();

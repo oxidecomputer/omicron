@@ -710,7 +710,7 @@ pub struct SledAgent {
     pub usable_physical_ram: ByteCount,
     pub cpu_family: SledCpuFamily,
     pub reservoir_size: ByteCount,
-    pub disks: Vec<PhysicalDisk>,
+    pub disks: IdOrdMap<PhysicalDisk>,
     pub zpools: Vec<Zpool>,
     pub datasets: Vec<Dataset>,
     pub ledgered_sled_config: Option<OmicronSledConfig>,
@@ -720,6 +720,14 @@ pub struct SledAgent {
     pub smf_services_enabled_not_online: SvcsEnabledNotOnlineResult,
     pub reference_measurements: IdOrdMap<SingleMeasurementInventory>,
     pub fmd: Result<FmdInventory, FmdInventoryError>,
+}
+
+impl IdOrdItem for PhysicalDisk {
+    type Key<'a> = &'a DiskIdentity;
+    fn key(&self) -> Self::Key<'_> {
+        &self.identity
+    }
+    id_upcast!();
 }
 
 impl IdOrdItem for SledAgent {
