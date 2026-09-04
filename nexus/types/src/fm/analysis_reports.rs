@@ -19,6 +19,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
+use uuid::Uuid;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AnalysisReport {
@@ -524,6 +525,10 @@ pub struct InputReport {
     /// analysis pass.
     #[serde(default)]
     pub observed_sagas: BTreeMap<steno::SagaId, ObservedSagaReport>,
+    /// Every silo, with its installed external TLS certificates, visible to
+    /// the diagnosis engines for this analysis pass. Keyed by silo ID.
+    #[serde(default)]
+    pub observed_silo_certificates: BTreeMap<Uuid, SiloCertificatesReport>,
     // Reports are serialized to the database, so any new field here should
     // be `#[serde(default)]` (or `Option`al) to keep reports written before
     // the field existed parseable.
@@ -540,6 +545,22 @@ pub struct ObservedSagaReport {
     /// The classified state of the owning Nexus, or `None` if the saga has
     /// no current SEC.
     pub owner_state: Option<SagaOwnerState>,
+}
+
+/// Summary of one silo's external TLS certificates in an [`InputReport`].
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SiloCertificatesReport {
+    pub silo_name: String,
+    /// The silo's certificates, keyed by certificate ID.
+    pub certificates: BTreeMap<Uuid, ObservedCertificateReport>,
+}
+
+/// Summary of one external TLS certificate in an [`InputReport`].
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ObservedCertificateReport {
+    pub name: String,
+    pub not_before: DateTime<Utc>,
+    pub not_after: DateTime<Utc>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -590,6 +611,7 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
                     num_ereporter_restarts,
                     in_service_disks,
                     observed_sagas,
+                    observed_silo_certificates,
                 },
             indent,
             colored,
@@ -897,6 +919,43 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
             }
         }
 
+        if observed_silo_certificates.is_empty() {
+            writeln!(f, "\n{:indent$}no silos observed", "")?;
+        } else {
+            writeln!(
+                f,
+                "\n{:indent$}silo external TLS certificates observed ({} \
+                 silos):",
+                "",
+                observed_silo_certificates.len()
+            )?;
+            let indent = indent + 2;
+            for (silo_id, silo) in observed_silo_certificates {
+                let SiloCertificatesReport { silo_name, certificates } = silo;
+                writeln!(
+                    f,
+                    "{:indent$}* silo {silo_id} ({silo_name}): {} \
+                     certificate(s)",
+                    "",
+                    certificates.len()
+                )?;
+                let indent = indent + 2;
+                for (cert_id, cert) in certificates {
+                    let ObservedCertificateReport {
+                        name,
+                        not_before,
+                        not_after,
+                    } = cert;
+                    writeln!(
+                        f,
+                        "{:indent$}* certificate {cert_id} ({name}): valid \
+                         from {not_before} until {not_after}",
+                        ""
+                    )?;
+                }
+            }
+        }
+
         Ok(())
     }
 }
@@ -1019,6 +1078,7 @@ mod tests {
         );
 
         let observed_sagas = example_observed_sagas();
+        let observed_silo_certificates = example_observed_silo_certificates();
 
         InputReport {
             parent_sitrep_id: Some(parent_sitrep_id),
@@ -1030,7 +1090,30 @@ mod tests {
             closed_cases_copied_forward,
             in_service_disks,
             observed_sagas,
+            observed_silo_certificates,
         }
+    }
+
+    fn example_observed_silo_certificates()
+    -> BTreeMap<Uuid, SiloCertificatesReport> {
+        let mut certificates = BTreeMap::new();
+        certificates.insert(
+            Uuid::from_str("cccccccc-0000-0000-0000-000000000001").unwrap(),
+            ObservedCertificateReport {
+                name: "fake-cert-1".to_string(),
+                not_before: "2020-01-01T00:00:00Z".parse().unwrap(),
+                not_after: "2021-01-01T00:00:00Z".parse().unwrap(),
+            },
+        );
+        let mut silos = BTreeMap::new();
+        silos.insert(
+            Uuid::from_str("5110aaaa-0000-0000-0000-000000000001").unwrap(),
+            SiloCertificatesReport {
+                silo_name: "fake-silo".to_string(),
+                certificates,
+            },
+        );
+        silos
     }
 
     fn example_observed_sagas() -> BTreeMap<steno::SagaId, ObservedSagaReport> {
@@ -1081,6 +1164,7 @@ mod tests {
             closed_cases_copied_forward: BTreeMap::new(),
             in_service_disks: BTreeSet::new(),
             observed_sagas: BTreeMap::new(),
+            observed_silo_certificates: BTreeMap::new(),
         }
     }
 
@@ -1102,6 +1186,7 @@ mod tests {
             closed_cases_copied_forward: BTreeMap::new(),
             in_service_disks: BTreeSet::new(),
             observed_sagas: BTreeMap::new(),
+            observed_silo_certificates: BTreeMap::new(),
         }
     }
 

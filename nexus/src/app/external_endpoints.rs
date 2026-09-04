@@ -43,11 +43,11 @@ use nexus_db_queries::db::pagination::Paginator;
 use nexus_types::identity::Resource;
 use nexus_types::silo::DEFAULT_SILO_ID;
 use nexus_types::silo::silo_dns_name;
+use omicron_certificates::CertificateValidity;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::bail_unless;
 use openssl::pkey::PKey;
-use openssl::x509::X509;
 use rustls::sign::CertifiedKey;
 use serde::Serialize;
 use serde_with::SerializeDisplay;
@@ -311,32 +311,20 @@ impl ExternalEndpoint {
         // Anyway, we don't yet do anything of these things.  For now, pick the
         // certificate chain whose leaf certificate has the latest expiration
         // time.
-
-        // This would be cleaner if Asn1Time impl'd Ord or even just a way to
-        // convert it to a Unix timestamp or any other comparable timestamp.
-        let mut latest_expiration: Option<&TlsCertificate> = None;
-        for t in &self.tls_certs {
-            // We'll choose this certificate (so far) if we find that it's
-            // anything other than "earlier" than the best we've seen so far.
-            // That includes the case where we haven't seen any so far, where
-            // this one is greater than or equal to the best so far, as well as
-            // the case where they're incomparable for whatever reason.  (This
-            // ensures that we always pick at least one.)
-            if latest_expiration.is_none()
-                || !matches!(
-                    t.parsed.not_after().partial_cmp(
-                        latest_expiration.unwrap().parsed.not_after()
-                    ),
-                    Some(std::cmp::Ordering::Less)
-                )
-            {
-                latest_expiration = Some(t);
-            }
-        }
-
-        latest_expiration.ok_or_else(|| {
-            anyhow!("silo {} has no usable certificates", self.silo_id)
-        })
+        //
+        // The fault management certificate diagnosis engine
+        // (`nexus_fm::diagnosis::certificate`) predicts this choice with the
+        // same rule (`ObservedSiloCertificates::best_certificate`), so that it
+        // alerts when the certificate we will actually serve is expiring or
+        // expired. If the rule here changes, that one must change with it.
+        // When several certificates share the latest expiration, the engine
+        // breaks the tie toward the greatest certificate id; this may settle
+        // on a different one of them, but they expire at the same time, so
+        // the engine's prediction of when the served certificate expires
+        // holds either way.
+        self.tls_certs.iter().max_by_key(|t| t.validity().not_after).ok_or_else(
+            || anyhow!("silo {} has no usable certificates", self.silo_id),
+        )
     }
 }
 
@@ -381,21 +369,24 @@ impl PartialEq for ExternalEndpointError {
 }
 
 /// A parsed, validated TLS certificate ready to use with an external TLS server
+///
+/// Constructing one of these (via `TryFrom<Certificate>`) is the acceptance
+/// check for whether Nexus can serve a stored certificate at all. Anything
+/// else that needs to reason about the certificates Nexus actually presents,
+/// like the fault management certificate diagnosis engine, must go through the
+/// same conversion so that it sees the same set of certificates.
 #[derive(Serialize)]
 #[serde(transparent)]
-struct TlsCertificate {
+pub(crate) struct TlsCertificate {
     /// This is what we need to provide to the TLS stack when we decide to use
     /// this certificate for an incoming TLS connection
     // NOTE: It's important that we do not serialize the private key!
     #[serde(skip)]
     certified_key: Arc<CertifiedKey>,
 
-    /// Parsed representation of the whole certificate chain
-    ///
-    /// This is used to extract metadata like the expiration time.
-    // NOTE: It's important that we do not serialize the private key!
+    /// Validity window of the leaf certificate
     #[serde(skip)]
-    parsed: X509,
+    validity: CertificateValidity,
 
     /// certificate digest (historically sometimes called a "fingerprint")
     // This is the only field that appears in the serialized output or debug
@@ -471,7 +462,17 @@ impl TryFrom<Certificate> for TlsCertificate {
             hex::encode(&digest_bytes)
         };
 
-        Ok(TlsCertificate { certified_key, digest, parsed: end_cert })
+        let validity = omicron_certificates::validity(&end_cert)
+            .context("reading leaf certificate validity")?;
+
+        Ok(TlsCertificate { certified_key, digest, validity })
+    }
+}
+
+impl TlsCertificate {
+    /// Returns the validity window of the leaf certificate
+    pub(crate) fn validity(&self) -> CertificateValidity {
+        self.validity
     }
 }
 
@@ -879,7 +880,9 @@ mod test {
 
     fn cert_matches(tls_cert: &TlsCertificate, cert: &Certificate) -> bool {
         let parse_right = openssl::x509::X509::from_pem(&cert.cert).unwrap();
-        tls_cert.parsed == parse_right
+        let digest_right =
+            parse_right.digest(openssl::hash::MessageDigest::sha256()).unwrap();
+        tls_cert.digest == hex::encode(&digest_right)
     }
 
     #[test]

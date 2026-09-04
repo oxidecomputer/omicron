@@ -731,10 +731,11 @@ task: "fm_config_loader"
     config last loaded at:       <REDACTED_TIMESTAMP>
       loaded by this activation: false
     current config:
-      source:                    default
-      analysis enabled:          true (default)
-      sitrep limit:              2500 (default)
-      history pruning threshold: 2000 (default)
+      source:                          default
+      analysis enabled:                true (default)
+      sitrep limit:                    2500 (default)
+      history pruning threshold:       2000 (default)
+      certificate expiry warning days: 30 (default)
 
 task: "fm_rendezvous"
   configured period: every <REDACTED_DURATION>m
@@ -788,6 +789,8 @@ task: "fm_sitrep_gc"
       batches:                                                                   1
     orphaned fm_ereport_in_case rows deleted:                                    0
       batches:                                                                   1
+    orphaned fm_fact_certificate rows deleted:                                   0
+      batches:                                                                   1
     orphaned fm_fact_physical_disk rows deleted:                                 0
       batches:                                                                   1
     orphaned fm_fact_saga rows deleted:                                          0
@@ -808,9 +811,10 @@ task: "fm_sitrep_history_pruner"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     configuration:
-      analysis enabled:          true (default)
-      sitrep limit:              2500 (default)
-      history pruning threshold: 2000 (default)
+      analysis enabled:                true (default)
+      sitrep limit:                    2500 (default)
+      history pruning threshold:       2000 (default)
+      certificate expiry warning days: 30 (default)
     deletion batch size: 1000
     status: within limit (nothing was deleted)
       current count:        1
@@ -1459,10 +1463,11 @@ task: "fm_config_loader"
     config last loaded at:       <REDACTED_TIMESTAMP>
       loaded by this activation: false
     current config:
-      source:                    default
-      analysis enabled:          true (default)
-      sitrep limit:              2500 (default)
-      history pruning threshold: 2000 (default)
+      source:                          default
+      analysis enabled:                true (default)
+      sitrep limit:                    2500 (default)
+      history pruning threshold:       2000 (default)
+      certificate expiry warning days: 30 (default)
 
 task: "fm_rendezvous"
   configured period: every <REDACTED_DURATION>m
@@ -1516,6 +1521,8 @@ task: "fm_sitrep_gc"
       batches:                                                                   1
     orphaned fm_ereport_in_case rows deleted:                                    0
       batches:                                                                   1
+    orphaned fm_fact_certificate rows deleted:                                   0
+      batches:                                                                   1
     orphaned fm_fact_physical_disk rows deleted:                                 0
       batches:                                                                   1
     orphaned fm_fact_saga rows deleted:                                          0
@@ -1536,9 +1543,10 @@ task: "fm_sitrep_history_pruner"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     configuration:
-      analysis enabled:          true (default)
-      sitrep limit:              2500 (default)
-      history pruning threshold: 2000 (default)
+      analysis enabled:                true (default)
+      sitrep limit:                    2500 (default)
+      history pruning threshold:       2000 (default)
+      certificate expiry warning days: 30 (default)
     deletion batch size: 1000
     status: within limit (nothing was deleted)
       current count:        1
@@ -2425,10 +2433,11 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 current fault management configuration:
-  source:                    default
-  analysis enabled:          true (default)
-  sitrep limit:              2500 (default)
-  history pruning threshold: 2000 (default)
+  source:                          default
+  analysis enabled:                true (default)
+  sitrep limit:                    2500 (default)
+  history pruning threshold:       2000 (default)
+  certificate expiry warning days: 30 (default)
 
 ---------------------------------------------
 stderr:
@@ -2439,9 +2448,10 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 fault management config updated to version 1:
-  analysis enabled:          true (default)
-  sitrep limit:              3000 (overriden)
-  history pruning threshold: 2000 (default)
+  analysis enabled:                true (default)
+  sitrep limit:                    3000 (overriden)
+  history pruning threshold:       2000 (default)
+  certificate expiry warning days: 30 (default)
 
 ---------------------------------------------
 stderr:
@@ -2452,13 +2462,14 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 current fault management configuration:
-  source:                    version 1
-    modified at:             <REDACTED_TIMESTAMP>
-    comment:                
+  source:                          version 1
+    modified at:                   <REDACTED_TIMESTAMP>
+    comment:                      
       I am altering the config. Pray I do not alter it further.
-  analysis enabled:          true (default)
-  sitrep limit:              3000 (overriden)
-  history pruning threshold: 2000 (default)
+  analysis enabled:                true (default)
+  sitrep limit:                    3000 (overriden)
+  history pruning threshold:       2000 (default)
+  certificate expiry warning days: 30 (default)
 
 ---------------------------------------------
 stderr:
@@ -2469,9 +2480,10 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 fault management config updated to version 2:
-  analysis enabled:          false (overriden)
-  sitrep limit:              3000 (overriden)
-  history pruning threshold: 2000 (default)
+  analysis enabled:                false (overriden)
+  sitrep limit:                    3000 (overriden)
+  history pruning threshold:       2000 (default)
+  certificate expiry warning days: 30 (default)
 
 ---------------------------------------------
 stderr:
@@ -2482,13 +2494,14 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 current fault management configuration:
-  source:                    version 2
-    modified at:             <REDACTED_TIMESTAMP>
-    comment:                
+  source:                          version 2
+    modified at:                   <REDACTED_TIMESTAMP>
+    comment:                      
       oops i altered it further
-  analysis enabled:          false (overriden)
-  sitrep limit:              3000 (overriden)
-  history pruning threshold: 2000 (default)
+  analysis enabled:                false (overriden)
+  sitrep limit:                    3000 (overriden)
+  history pruning threshold:       2000 (default)
+  certificate expiry warning days: 30 (default)
 
 ---------------------------------------------
 stderr:
@@ -2499,13 +2512,14 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 fault management configuration v1:
-  source:                    version 1
-    modified at:             <REDACTED_TIMESTAMP>
-    comment:                
+  source:                          version 1
+    modified at:                   <REDACTED_TIMESTAMP>
+    comment:                      
       I am altering the config. Pray I do not alter it further.
-  analysis enabled:          true (default)
-  sitrep limit:              3000 (overriden)
-  history pruning threshold: 2000 (default)
+  analysis enabled:                true (default)
+  sitrep limit:                    3000 (overriden)
+  history pruning threshold:       2000 (default)
+  certificate expiry warning days: 30 (default)
 
 ---------------------------------------------
 stderr:

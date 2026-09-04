@@ -265,6 +265,7 @@ mod tests {
             analysis_enabled: Some(true),
             sitrep_limit: Some(SqlU32::new(2500)),
             history_pruning_threshold: Some(SqlU32::new(2000)),
+            certificate_expiry_warning_days: Some(SqlU32::new(30)),
             time_modified: chrono::DateTime::UNIX_EPOCH,
         }
     }
@@ -331,6 +332,7 @@ mod tests {
                 history_pruning_threshold: Setting::new(
                     NonZeroU32::new(4).unwrap(),
                 ),
+                certificate_expiry_warning_days: Setting::Default,
             },
         };
         assert!(
@@ -370,6 +372,10 @@ mod tests {
         assert_eq!(comment, "first override");
         assert_eq!(read.config.sitrep_limit.value().get(), 5);
         assert_eq!(read.config.history_pruning_threshold.value().get(), 4);
+        assert_eq!(
+            read.config.certificate_expiry_warning_days,
+            Setting::Default
+        );
 
         // An invalid config is rejected with an invalid value error.
         // (Validation is tested exhaustively in `nexus-types`; this just
@@ -416,6 +422,8 @@ mod tests {
         // Inserting version 2 with a valid config should work.
         config.comment = "second override".to_string();
         config.config.analysis_enabled = Setting::new(false);
+        config.config.certificate_expiry_warning_days =
+            Setting::new(NonZeroU32::new(60).unwrap());
         dbg!(
             datastore
                 .fm_config_insert_latest_version(opctx, dbg!(config))
@@ -437,6 +445,10 @@ mod tests {
         assert!(!read.config.analysis_enabled.value());
         assert_eq!(read.config.sitrep_limit.value().get(), 500);
         assert_eq!(read.config.history_pruning_threshold.value().get(), 400);
+        assert_eq!(
+            read.config.certificate_expiry_warning_days.value().get(),
+            60
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();

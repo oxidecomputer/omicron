@@ -59,6 +59,7 @@ define_enums! {
     EreporterTypeEnum => "ereporter_type",
     ExternalServiceKindEnum => "external_service_kind",
     FailureDomainEnum => "failure_domain",
+    FmFactCertificateKindEnum => "fm_fact_certificate_kind",
     FmFactPhysicalDiskKindEnum => "fm_fact_physical_disk_kind",
     FmFactSagaKindEnum => "fm_fact_saga_kind",
     FmFactSagaOrphanReasonEnum => "fm_fact_saga_orphan_reason",

@@ -8,9 +8,10 @@ use chrono::{DateTime, Utc};
 use iddqd::IdOrdMap;
 use nexus_db_model::EreporterRestart;
 use nexus_types::fm::analysis_reports::ClosedCaseReport;
-use nexus_types::fm::{self, Sitrep, SitrepVersion};
+use nexus_types::fm::{self, FmConfig, Sitrep, SitrepVersion};
 use nexus_types::in_service_disk::InServiceDisk;
 use nexus_types::inventory;
+use nexus_types::observed_certificate::ObservedSiloCertificates;
 use nexus_types::observed_saga::ObservedSaga;
 use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::CollectionUuid;
@@ -64,6 +65,10 @@ pub struct Input {
     /// All non-terminal (running, unwinding, or abandoned) sagas, annotated
     /// with their latest node-event time and owning-Nexus state.
     observed_sagas: Arc<IdOrdMap<ObservedSaga>>,
+    /// Every silo, with its installed external TLS certificates.
+    observed_silo_certificates: Arc<IdOrdMap<ObservedSiloCertificates>>,
+    /// The fault management configuration in effect for this analysis.
+    config: FmConfig,
 }
 
 impl Input {
@@ -125,12 +130,31 @@ impl Input {
         &self.observed_sagas
     }
 
+    /// Every silo observed in the database, with its installed external TLS
+    /// certificates, indexed by silo ID. See the certificate diagnosis engine
+    /// for how a silo's absence drives case closure.
+    pub fn observed_silo_certificates(
+        &self,
+    ) -> &IdOrdMap<ObservedSiloCertificates> {
+        &self.observed_silo_certificates
+    }
+
+    /// The fault management configuration in effect for this analysis.
+    ///
+    /// Diagnosis engines read their tunable thresholds from here rather than
+    /// from any global state, so a given input always produces the same
+    /// sitrep.
+    pub fn config(&self) -> &FmConfig {
+        &self.config
+    }
+
     /// Returns a [`Builder`] for constructing a new `Input` from the provided
     /// `parent_sitrep` and inventory collection.
     ///
-    /// The queried input collections (in-service disks, observed sagas) are
-    /// provided via the builder's setters; [`Builder::build`] fails if any
-    /// was never provided.
+    /// The queried input collections (in-service disks, observed sagas,
+    /// observed silo certificates) and the FM configuration are provided via
+    /// the builder's setters; [`Builder::build`] fails if any was never
+    /// provided.
     pub fn builder(
         parent_sitrep: Option<Arc<(SitrepVersion, Sitrep)>>,
         inv: Arc<inventory::Collection>,
@@ -160,6 +184,8 @@ impl Input {
             inv,
             in_service_disks: None,
             observed_sagas: None,
+            observed_silo_certificates: None,
+            config: None,
             new_ereports: IdOrdMap::default(),
             ereporter_restarts: IdOrdMap::default(),
             unmarked_seen_ereports: BTreeSet::default(),
@@ -194,6 +220,11 @@ pub struct Builder {
     // e.g. an empty `observed_sagas` reads as "every saga case may close").
     in_service_disks: Option<Arc<IdOrdMap<InServiceDisk>>>,
     observed_sagas: Option<Arc<IdOrdMap<ObservedSaga>>>,
+    observed_silo_certificates: Option<Arc<IdOrdMap<ObservedSiloCertificates>>>,
+    /// The FM configuration. Required for the same reason as the queried
+    /// collections: analysis must not silently run against defaults when an
+    /// operator has overridden them.
+    config: Option<FmConfig>,
     /// Ereports which are new and should be input to analysis in the next
     /// sitrep.
     new_ereports: IdOrdMap<Arc<fm::Ereport>>,
@@ -323,7 +354,25 @@ impl Builder {
         self
     }
 
-    /// Fills every required input not yet provided with an empty collection.
+    /// Provides the silos and their external TLS certificates queried from
+    /// the database. Required; [`Builder::build`] fails without it.
+    pub fn observed_silo_certificates(
+        mut self,
+        silos: Arc<IdOrdMap<ObservedSiloCertificates>>,
+    ) -> Self {
+        self.observed_silo_certificates = Some(silos);
+        self
+    }
+
+    /// Provides the fault management configuration in effect.
+    /// Required; [`Builder::build`] fails without it.
+    pub fn config(mut self, config: FmConfig) -> Self {
+        self.config = Some(config);
+        self
+    }
+
+    /// Fills every required input not yet provided with an empty collection
+    /// (or, for the configuration, the default configuration).
     ///
     /// Test-only: lets a test populate just the inputs it exercises while
     /// still declaring, explicitly, that the rest are empty. Production
@@ -332,6 +381,8 @@ impl Builder {
     pub fn with_empty_defaults(mut self) -> Self {
         self.in_service_disks.get_or_insert_with(Default::default);
         self.observed_sagas.get_or_insert_with(Default::default);
+        self.observed_silo_certificates.get_or_insert_with(Default::default);
+        self.config.get_or_insert_with(Default::default);
         self
     }
 
@@ -342,6 +393,14 @@ impl Builder {
         let observed_sagas = self
             .observed_sagas
             .ok_or(InvalidInputs::MissingInput { name: "observed_sagas" })?;
+        let observed_silo_certificates = self
+            .observed_silo_certificates
+            .ok_or(InvalidInputs::MissingInput {
+                name: "observed_silo_certificates",
+            })?;
+        let config = self
+            .config
+            .ok_or(InvalidInputs::MissingInput { name: "config" })?;
         let parent_sitrep = self.parent_sitrep.as_ref().map(|s| &s.1);
         let (parent_sitrep_id, parent_inv_id) = match parent_sitrep {
             Some(sitrep) => {
@@ -374,6 +433,31 @@ impl Builder {
                             saga_state: s.saga_state.clone(),
                             last_event_time: s.last_event_time,
                             owner_state: s.owner_state,
+                        },
+                    )
+                })
+                .collect(),
+            observed_silo_certificates: observed_silo_certificates
+                .iter()
+                .map(|silo| {
+                    (
+                        silo.silo_id,
+                        fm::analysis_reports::SiloCertificatesReport {
+                            silo_name: silo.silo_name.to_string(),
+                            certificates: silo
+                                .certificates
+                                .iter()
+                                .map(|cert| {
+                                    (
+                                        cert.id,
+                                        fm::analysis_reports::ObservedCertificateReport {
+                                            name: cert.name.to_string(),
+                                            not_before: cert.not_before,
+                                            not_after: cert.not_after,
+                                        },
+                                    )
+                                })
+                                .collect(),
                         },
                     )
                 })
@@ -476,6 +560,8 @@ impl Builder {
             support_bundles_changed,
             in_service_disks,
             observed_sagas,
+            observed_silo_certificates,
+            config,
         };
 
         Ok((input, report))

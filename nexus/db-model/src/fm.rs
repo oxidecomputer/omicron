@@ -32,6 +32,8 @@ mod config;
 pub use config::*;
 mod diagnosis_engine;
 pub use diagnosis_engine::*;
+mod fact_certificate;
+pub use fact_certificate::*;
 mod fact_physical_disk;
 pub use fact_physical_disk::*;
 mod fact_saga;
