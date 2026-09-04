@@ -18,7 +18,7 @@ use omicron_common::api::internal::shared::{
 };
 use sled_agent_types_versions::{
     latest, v1, v11, v14, v18, v20, v22, v24, v25, v26, v28, v29, v30, v31,
-    v32, v33, v34, v37, v39, v40, v41, v42, v43, v46, v47, v48, v49,
+    v32, v33, v34, v37, v39, v40, v41, v42, v43, v46, v47, v48, v49, v50,
 };
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 use slog_error_chain::InlineErrorChain;
@@ -35,6 +35,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (51, MULTIPLE_ZONE_EXTERNAL_IPS),
     (50, TYPED_SLED_CONFIG_GENERATION),
     (49, ADD_UPDATE_DISPOSITION),
     (48, ALLOW_DDM_TRAFFIC),
@@ -350,12 +351,24 @@ pub trait SledAgentApi {
     #[endpoint {
         method = PUT,
         path = "/omicron-config",
-        versions = VERSION_TYPED_SLED_CONFIG_GENERATION..,
+        versions = VERSION_MULTIPLE_ZONE_EXTERNAL_IPS..,
     }]
     async fn omicron_config_put(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<latest::inventory::OmicronSledConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        method = PUT,
+        path = "/omicron-config",
+        versions = VERSION_TYPED_SLED_CONFIG_GENERATION..VERSION_MULTIPLE_ZONE_EXTERNAL_IPS,
+    }]
+    async fn omicron_config_put_v50(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v50::inventory::OmicronSledConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::omicron_config_put(rqctx, body.map(Into::into)).await
+    }
 
     #[endpoint {
         operation_id = "omicron_config_put",
@@ -367,7 +380,7 @@ pub trait SledAgentApi {
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<v49::inventory::OmicronSledConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        Self::omicron_config_put(rqctx, body.map(Into::into)).await
+        Self::omicron_config_put_v50(rqctx, body.map(Into::into)).await
     }
 
     #[endpoint {
@@ -901,11 +914,26 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/inventory",
-        versions = VERSION_TYPED_SLED_CONFIG_GENERATION..,
+        versions = VERSION_MULTIPLE_ZONE_EXTERNAL_IPS..,
     }]
     async fn inventory(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<latest::inventory::Inventory>, HttpError>;
+
+    /// Fetch basic information about this sled
+    #[endpoint {
+        method = GET,
+        path = "/inventory",
+        versions = VERSION_TYPED_SLED_CONFIG_GENERATION..VERSION_MULTIPLE_ZONE_EXTERNAL_IPS,
+    }]
+    async fn inventory_v50(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v50::inventory::Inventory>, HttpError> {
+        let HttpResponseOk(inv) = Self::inventory(rqctx).await?;
+        v50::inventory::Inventory::try_from(inv)
+            .map(HttpResponseOk)
+            .map_err(HttpError::from)
+    }
 
     /// Fetch basic information about this sled
     #[endpoint {
@@ -917,7 +945,7 @@ pub trait SledAgentApi {
     async fn inventory_v49(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<v49::inventory::Inventory>, HttpError> {
-        Self::inventory(rqctx).await.map(|HttpResponseOk(inv)| {
+        Self::inventory_v50(rqctx).await.map(|HttpResponseOk(inv)| {
             HttpResponseOk(v49::inventory::Inventory::from(inv))
         })
     }
