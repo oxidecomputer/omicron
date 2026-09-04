@@ -1127,12 +1127,12 @@ opt-level = 3
 # [patch."https://github.com/oxidecomputer/diesel-dtrace"]
 # diesel-dtrace = { path = "../diesel-dtrace" }
 
-# [patch."https://github.com/oxidecomputer/propolis"]
-# bhyve_api = { path = "../propolis/crates/bhyve-api" }
-# propolis-api-types-versions = { path = "../propolis/crates/propolis-api-types-versions" }
-# propolis_api_types = { path = "../propolis/crates/propolis-api-types" }
-# propolis-client = { path = "../propolis/lib/propolis-client" }
-# propolis-mock-server = { path = "../propolis/bin/mock-server" }
+[patch."https://github.com/oxidecomputer/propolis"]
+bhyve_api = { path = "../propolis2/crates/bhyve-api" }
+propolis-api-types-versions = { path = "../propolis2/crates/propolis-api-types-versions" }
+propolis_api_types = { path = "../propolis2/crates/propolis-api-types" }
+propolis-client = { path = "../propolis2/lib/propolis-client" }
+propolis-mock-server = { path = "../propolis2/bin/mock-server" }
 
 # [patch."https://github.com/oxidecomputer/tufaceous"]
 # tufaceous = { path = "../tufaceous/bin" }

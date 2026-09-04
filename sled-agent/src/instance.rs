@@ -231,6 +231,7 @@ enum InstanceRequest {
     PutState {
         state: VmmStateRequested,
         tx: oneshot::Sender<Result<VmmPutStateResponse, ManagerError>>,
+        acpi_timeout_secs: Option<u64>,
     },
     IssueSnapshotRequest {
         disk_id: Uuid,
@@ -602,6 +603,9 @@ struct InstanceRunner {
 impl InstanceRunner {
     /// How long to wait for VMM shutdown to complete before forcefully
     /// terminating the zone.
+    // TODO(lif): need to ignore this for graceful stops, which can have
+    // much longer (3600 seconds max!) timeouts. the 600 second grace period
+    // here was written at a time when all stops/reboots were forceful
     const STOP_GRACE_PERIOD: Duration = Duration::from_secs(60 * 10);
 
     async fn run(
@@ -723,11 +727,11 @@ impl InstanceRunner {
                                 tx.send(Ok(self.current_state()))
                                     .map_err(|_| Error::FailedSendClientClosed)
                             },
-                            PutState { state, tx } => {
+                            PutState { state, acpi_timeout_secs, tx } => {
                                 // If we're going to stop the instance, start
                                 // the timeout after which we will forcefully
                                 // terminate the VMM.
-                                if let VmmStateRequested::Stopped = state {
+                                if let VmmStateRequested::Stopped = state && acpi_timeout_secs.is_none() {
                                     // Only start the stop timeout if there
                                     // isn't one already, so that additional
                                     // requests to stop coming in don't reset
@@ -739,7 +743,7 @@ impl InstanceRunner {
                                     }
                                 }
 
-                                tx.send(self.put_state(state).await
+                                tx.send(self.put_state(state, acpi_timeout_secs).await
                                     .map(|r| VmmPutStateResponse { updated_runtime: Some(r) })
                                     .map_err(|e| e.into()))
                                     .map_err(|_| Error::FailedSendClientClosed)
@@ -1113,7 +1117,7 @@ impl InstanceRunner {
     /// Sends an instance state PUT request to this instance's Propolis.
     async fn propolis_state_put(
         &self,
-        request: propolis_client::types::InstanceStateRequested,
+        request: propolis_client::types::InstanceStateChange,
     ) -> Result<(), PropolisClientError> {
         let res = self
             .running_state
@@ -1991,9 +1995,14 @@ impl Instance {
         &self,
         tx: oneshot::Sender<Result<VmmPutStateResponse, ManagerError>>,
         state: VmmStateRequested,
+        acpi_timeout_secs: Option<u64>,
     ) -> Result<(), Error> {
         self.tx
-            .try_send(InstanceRequest::PutState { state, tx })
+            .try_send(InstanceRequest::PutState {
+                state,
+                acpi_timeout_secs,
+                tx,
+            })
             .or_else(InstanceRequest::fail_try_send)
     }
 
@@ -2214,7 +2223,9 @@ impl InstanceRunner {
     async fn put_state(
         &mut self,
         state: VmmStateRequested,
+        acpi_timeout_secs: Option<u64>,
     ) -> Result<SledVmmState, Error> {
+        use propolis_client::types::InstanceStateChange as PropolisStateChange;
         use propolis_client::types::InstanceStateRequested as PropolisRequest;
         let (propolis_request, next_published) = match state {
             VmmStateRequested::MigrationTarget(migration_params) => {
@@ -2287,7 +2298,8 @@ impl InstanceRunner {
         // Since there's an active Propolis zone with an extant VM, it's
         // possible to ask Propolis to drive the VM state machine.
         if let Some(p) = propolis_request {
-            if let Err(e) = self.propolis_state_put(p).await {
+            let change = PropolisStateChange { state: p, acpi_timeout_secs };
+            if let Err(e) = self.propolis_state_put(change).await {
                 match propolis_error_code(&self.log, &e) {
                     Some(
                         code @ PropolisErrorCode::NoInstance

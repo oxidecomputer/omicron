@@ -438,7 +438,7 @@ impl SledAgent {
 
         let mock_lock = self.mock_propolis.lock().await;
         if let Some((_srv, client)) = mock_lock.as_ref() {
-            let body = match state {
+            let p_state = match state {
                 VmmStateRequested::MigrationTarget(_) => {
                     return Err(Error::internal_error(
                         "migration not implemented for mock Propolis",
@@ -477,6 +477,10 @@ impl SledAgent {
                 VmmStateRequested::Reboot => {
                     propolis_client::types::InstanceStateRequested::Reboot
                 }
+            };
+            let body = propolis_client::types::InstanceStateChange {
+                state: p_state,
+                acpi_timeout_secs: None, /* TODO(lif) */
             };
             client.instance_state_put().body(body).send().await.map_err(
                 |e| {

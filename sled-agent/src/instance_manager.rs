@@ -274,6 +274,7 @@ impl InstanceManager {
         &self,
         propolis_id: PropolisUuid,
         target: VmmStateRequested,
+        acpi_timeout_secs: Option<u64>,
     ) -> Result<VmmPutStateResponse, Error> {
         let (tx, rx) = oneshot::channel();
         self.inner
@@ -281,6 +282,7 @@ impl InstanceManager {
             .send(InstanceManagerRequest::EnsureState {
                 propolis_id,
                 target,
+                acpi_timeout_secs,
                 tx,
             })
             .await
@@ -528,6 +530,7 @@ enum InstanceManagerRequest {
     EnsureState {
         propolis_id: PropolisUuid,
         target: VmmStateRequested,
+        acpi_timeout_secs: Option<u64>,
         tx: oneshot::Sender<Result<VmmPutStateResponse, Error>>,
     },
 
@@ -709,8 +712,8 @@ impl InstanceManagerRunner {
                         Some(EnsureUnregistered { propolis_id, tx }) => {
                             self.ensure_unregistered(tx, propolis_id)
                         },
-                        Some(EnsureState { propolis_id, target, tx }) => {
-                            self.ensure_state(tx, propolis_id, target)
+                        Some(EnsureState { propolis_id, target, acpi_timeout_secs, tx }) => {
+                            self.ensure_state(tx, propolis_id, target, acpi_timeout_secs)
                         },
                         Some(IssueDiskSnapshot { propolis_id, disk_id, snapshot_id, tx }) => {
                             self.issue_disk_snapshot_request(tx, propolis_id, disk_id, snapshot_id)
@@ -939,13 +942,14 @@ impl InstanceManagerRunner {
         tx: oneshot::Sender<Result<VmmPutStateResponse, Error>>,
         propolis_id: PropolisUuid,
         target: VmmStateRequested,
+        acpi_timeout_secs: Option<u64>,
     ) -> Result<(), Error> {
         let Some(instance) = self.get_propolis(propolis_id) else {
             tx.send(Err(Error::NoSuchVmm(propolis_id)))
                 .map_err(|_| Error::FailedSendClientClosed)?;
             return Ok(());
         };
-        instance.put_state(tx, target)?;
+        instance.put_state(tx, target, acpi_timeout_secs)?;
         Ok(())
     }
 
