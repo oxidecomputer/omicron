@@ -16,6 +16,7 @@ use sled_agent_types_versions::v11;
 use sled_agent_types_versions::v14;
 use sled_agent_types_versions::v49;
 use sled_agent_types_versions::v50;
+use sled_agent_types_versions::v51;
 use slog::Logger;
 use slog::info;
 use slog::warn;
@@ -67,6 +68,7 @@ macro_rules! version_conversion_chain {
 // attempt to parse the ledgered config. Add new versions to the top of the
 // list.
 version_conversion_chain!(
+    v51::inventory::OmicronSledConfig,
     v50::inventory::OmicronSledConfig,
     v49::inventory::OmicronSledConfig,
     v14::inventory::OmicronSledConfig,
@@ -280,6 +282,8 @@ pub(super) mod tests {
         "expectorate/v49-sled-config.json";
     const EXPECTORATE_V50_CONFIG_PATH: &str =
         "expectorate/v50-sled-config.json";
+    const EXPECTORATE_V51_CONFIG_PATH: &str =
+        "expectorate/v51-sled-config.json";
 
     // This is solely an expectorate test to guarantee:
     //
@@ -310,6 +314,7 @@ pub(super) mod tests {
             .expect("converted from v11");
         let v49 = v49::inventory::OmicronSledConfig::from(v14.clone());
         let v50 = v50::inventory::OmicronSledConfig::from(v49.clone());
+        let v51 = v51::inventory::OmicronSledConfig::from(v50.clone());
 
         expectorate::assert_contents(
             EXPECTORATE_V10_CONFIG_PATH,
@@ -331,6 +336,10 @@ pub(super) mod tests {
             EXPECTORATE_V50_CONFIG_PATH,
             &serde_json::to_string_pretty(&v50).unwrap(),
         );
+        expectorate::assert_contents(
+            EXPECTORATE_V51_CONFIG_PATH,
+            &serde_json::to_string_pretty(&v51).unwrap(),
+        );
         logctx.cleanup_successful();
     }
 
@@ -345,8 +354,8 @@ pub(super) mod tests {
         // compilation error if the latest version changes. Bump the
         // version here and add the new version's path to the array of ledger
         // paths below.
-        type LatestConfig = v50::inventory::OmicronSledConfig;
-        let latest_version_path = EXPECTORATE_V50_CONFIG_PATH;
+        type LatestConfig = v51::inventory::OmicronSledConfig;
+        let latest_version_path = EXPECTORATE_V51_CONFIG_PATH;
         let expected_config =
             LatestConfig::read_from(log, latest_version_path.into())
                 .await
@@ -374,6 +383,7 @@ pub(super) mod tests {
             EXPECTORATE_V14_CONFIG_PATH,
             EXPECTORATE_V49_CONFIG_PATH,
             EXPECTORATE_V50_CONFIG_PATH,
+            EXPECTORATE_V51_CONFIG_PATH,
         ] {
             // Copy the ledger into `my-ledger.json`
             let dst_ledger_path = tempdir.child("my-ledger.json");

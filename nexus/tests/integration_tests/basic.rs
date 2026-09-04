@@ -8,6 +8,7 @@
 //! TODO-coverage add test for racks, sleds
 
 use dropshot::HttpErrorResponseBody;
+use dropshot::test_util::ClientTestContext;
 use http::StatusCode;
 use http::method::Method;
 use nexus_types::external_api::project;
@@ -19,6 +20,8 @@ use omicron_common::api::external::Name;
 use serde::Serialize;
 use uuid::Uuid;
 
+use nexus_test_interface::NexusServer;
+use nexus_test_utils::ControlPlaneBuilder;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
@@ -556,6 +559,31 @@ async fn test_ping(cptestctx: &ControlPlaneTestContext) {
         .execute_and_parse_unwrap::<system::Ping>()
         .await;
     assert_eq!(health.status, system::PingStatus::Ok);
+}
+
+#[tokio::test]
+async fn test_ping_on_second_external_address() {
+    let cptestctx =
+        ControlPlaneBuilder::new("test_ping_on_second_external_address")
+            .customize_nexus_config(&|config| {
+                config.deployment.dropshot_external_additional_addresses =
+                    vec!["[::1]:0".parse().unwrap()];
+            })
+            .start::<omicron_nexus::Server>()
+            .await;
+    let second_address = *cptestctx
+        .server
+        .get_all_http_server_external_addresses()
+        .get(1)
+        .expect("second external server should be running");
+    let second_client =
+        ClientTestContext::new(second_address, cptestctx.logctx.log.clone());
+    let health = NexusRequest::object_get(&second_client, "/v1/ping")
+        .execute_and_parse_unwrap::<system::Ping>()
+        .await;
+    assert_eq!(health.status, system::PingStatus::Ok);
+
+    cptestctx.teardown().await;
 }
 
 /// Test that the external API returns gzip-compressed responses when the

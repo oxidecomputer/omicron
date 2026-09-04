@@ -50,6 +50,7 @@ use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
+use nexus_types::deployment::DEFAULT_BLUEPRINT_PRUNER_NKEEP;
 use nexus_types::deployment::LastAllocatedSubnetIpOffset;
 use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
 use nexus_types::deployment::OmicronZoneExternalFloatingIp;
@@ -591,6 +592,8 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                 planner_config: PlannerConfig::default(),
                 tuf_repo_pruner_enabled: true,
                 disruption_policy: ReconfiguratorDisruptionPolicy::default(),
+                blueprint_pruner_enabled: true,
+                blueprint_pruner_nkeep: DEFAULT_BLUEPRINT_PRUNER_NKEEP,
             });
         self.config.deployment.internal_dns = InternalDns::FromAddress {
             address: self
@@ -894,7 +897,11 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         )
         .await;
 
-        let external_server_addr = server.get_http_server_external_address();
+        let external_server_addr = server
+            .get_all_http_server_external_addresses()
+            .into_iter()
+            .next()
+            .expect("At least 1 external API address");
         let techport_external_server_addr =
             server.get_http_server_techport_address();
         let internal_server_addr = server.get_http_server_internal_address();
