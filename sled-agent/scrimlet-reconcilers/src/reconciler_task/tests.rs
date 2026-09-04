@@ -143,6 +143,7 @@ impl Harness {
                     mgs_addr: dummy_addr,
                     dpd_addr: dummy_addr,
                     mgd_addr: dummy_addr,
+                    bgp_dispatcher_addr: dummy_addr,
                 },
                 ThisSledSwitchSlot::TEST_FAKE,
                 log,

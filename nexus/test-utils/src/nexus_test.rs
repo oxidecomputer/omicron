@@ -257,6 +257,7 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
             sled_index,
             sim_mode,
             cpu_family,
+            false,
             &self.first_sled_agent().simulated_upstairs,
         )
         .await

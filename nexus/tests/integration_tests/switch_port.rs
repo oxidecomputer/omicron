@@ -888,3 +888,277 @@ async fn test_bgp_config_update(ctx: &ControlPlaneTestContext) {
     assert_eq!(updated.asn, 47);
     assert_eq!(updated.max_paths, MaxPathConfig::new(3).unwrap());
 }
+
+/// Verifies that scrimlet reconcilers are triggered when Nexus's
+/// `sync_switch_configuration` background task updates the sled-agent
+/// bootstore.
+///
+/// Tests the full pipeline:
+///   Nexus (sync_switch_configuration)
+///     → sled-agent bootstore updated
+///     → `notify_network_config_changed()` called
+///     → reconcilers' watch channel updated
+///     → reconcilers run with `SystemNetworkingConfigChanged` reason
+#[nexus_test(extra_sled_agents = 1)]
+async fn test_scrimlet_reconcilers_update_on_bootstore_change(
+    ctx: &ControlPlaneTestContext,
+) {
+    use bootstrap_agent_lockstep_types::scrimlet_reconcilers::{
+        ReconcilerActivationReason, ScrimletReconcilersStatus,
+    };
+
+    let client = &ctx.external_client;
+
+    // Create an address lot.
+    let lot_name =
+        Name::from_str("subspace").expect("subspace should be a valid name");
+    let lot_params = AddressLotCreate {
+        identity: IdentityMetadataCreateParams {
+            name: lot_name.clone(),
+            description: "where the comms happen".into(),
+        },
+        kind: AddressLotKind::Infra,
+        blocks: vec![AddressLotBlockCreate {
+            first_address: "1701::a".parse().unwrap(),
+            last_address: "1701::e".parse().unwrap(),
+        }],
+    };
+    NexusRequest::objects_post(
+        client,
+        "/v1/system/networking/address-lot",
+        &lot_params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Create port settings.
+    let settings_name =
+        Name::from_str("nacelle2").expect("should be a valid name");
+    let mut settings =
+        SwitchPortSettingsCreate::new(IdentityMetadataCreateParams {
+            name: settings_name.clone(),
+            description: "just a port".into(),
+        });
+    let link_name =
+        Name::from_str("phy0").expect("phy0 should be a valid name");
+    settings.links.push(LinkConfigCreate {
+        link_name: link_name.clone(),
+        mtu: 1500,
+        lldp: LldpLinkConfigCreate {
+            enabled: false,
+            link_name: None,
+            link_description: None,
+            chassis_id: None,
+            system_name: None,
+            system_description: None,
+            management_ip: None,
+        },
+        fec: None,
+        speed: LinkSpeed::Speed100G,
+        autoneg: false,
+        tx_eq: None,
+    });
+    settings.interfaces.push(SwitchInterfaceConfigCreate {
+        link_name: link_name.clone(),
+        v6_enabled: true,
+        kind: SwitchInterfaceKind::Primary,
+    });
+    settings.addresses.push(AddressConfig {
+        link_name: link_name.clone(),
+        addresses: vec![Address {
+            address: "1701::d/64".parse().unwrap(),
+            vlan_id: None,
+            address_lot: NameOrId::Name(lot_name.clone()),
+        }],
+    });
+    settings.routes.push(RouteConfig {
+        link_name: link_name.clone(),
+        routes: vec![Route {
+            dst: "2000::/64".parse().unwrap(),
+            gw: "2000::1".parse().unwrap(),
+            vid: None,
+            rib_priority: None,
+        }],
+    });
+    NexusRequest::objects_post(
+        client,
+        "/v1/system/networking/switch-port-settings",
+        &settings,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Wait for the initial bootstore config (generation 3) to be written to
+    // all sled agents. This happens as part of test setup.
+    for (i, sled_agent) in ctx.sled_agents.iter().enumerate() {
+        let sled_agent = sled_agent.sled_agent().clone();
+        wait_for_condition(
+            || async {
+                let generation = sled_agent
+                    .bootstore_network_config
+                    .lock()
+                    .unwrap()
+                    .generation;
+                if generation == 3 {
+                    Ok(())
+                } else {
+                    Err(CondCheckError::<()>::NotYet { status: None })
+                }
+            },
+            &Duration::from_millis(50),
+            &Duration::from_secs(60),
+        )
+        .await
+        .unwrap_or_else(|_| {
+            panic!("sled-agent {i}'s bootstore should be 3 prior to update")
+        });
+    }
+
+    // Apply port settings to switch0.
+    let apply_settings = SwitchPortApplySettings {
+        port_settings: NameOrId::Name(settings_name.clone()),
+    };
+    let racks: Vec<Rack> = NexusRequest::iter_collection_authn(
+        client,
+        "/v1/system/hardware/racks",
+        "",
+        None,
+    )
+    .await
+    .expect("failed to list racks")
+    .all_items;
+    let rack_id = racks[0].identity.id;
+
+    NexusRequest::new(
+        RequestBuilder::new(
+            client,
+            Method::POST,
+            &format!(
+                "/v1/system/hardware/switch-port/qsfp0/settings?\
+                 rack_id={rack_id}&switch_slot=switch0"
+            ),
+        )
+        .body(Some(&apply_settings))
+        .expect_status(Some(StatusCode::NO_CONTENT)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Activate `sync_switch_configuration`, which writes the updated config
+    // to sled-agent bootstores.
+    let task = nexus_test_utils::background::activate_background_task(
+        &ctx.lockstep_client,
+        "switch_port_config_manager",
+    )
+    .await;
+    let nexus_lockstep_client::types::LastResult::Completed(result) = task.last
+    else {
+        panic!(
+            "switch_port_config_manager task did not complete: {:?}",
+            task.last
+        );
+    };
+    let status = serde_json::from_value::<
+        nexus_types::internal_api::background::SwitchPortSettingsManagerStatus,
+    >(result.details)
+    .expect(
+        "task details should deserialize as SwitchPortSettingsManagerStatus",
+    );
+    assert!(
+        status.incomplete_bootstore_configs.is_empty(),
+        "sync_switch_configuration should have successfully built a bootstore \
+         config for all racks: {status:?}",
+    );
+
+    // Verify the sled-agent bootstores were updated to generation 4.
+    for (i, sled_agent) in ctx.sled_agents.iter().enumerate() {
+        let sled_agent = sled_agent.sled_agent().clone();
+        wait_for_condition(
+            || async {
+                let generation = sled_agent
+                    .bootstore_network_config
+                    .lock()
+                    .unwrap()
+                    .generation;
+                if generation == 4 {
+                    Ok(())
+                } else {
+                    Err(CondCheckError::<()>::NotYet { status: None })
+                }
+            },
+            &Duration::from_millis(50),
+            &Duration::from_secs(60),
+        )
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "sync_switch_configuration should have written to sled-agent \
+                 {i}'s bootstore (generation was still 3, indicating it was \
+                 never contacted)",
+            )
+        });
+    }
+
+    // After the bootstore update, `notify_network_config_changed()` was called,
+    // which sends the new config to the scrimlet reconcilers via a watch
+    // channel. Verify that the reconcilers ran in response to this config
+    // change, confirming the full pipeline works end-to-end.
+    for (i, sled_agent) in ctx.sled_agents.iter().enumerate() {
+        let sled_agent = sled_agent.sled_agent().clone();
+        wait_for_condition(
+            || async {
+                let Some(status) = sled_agent.scrimlet_reconcilers_status()
+                else {
+                    // Reconcilers not yet started (start_scrimlet_reconcilers
+                    // hasn't been called yet).
+                    return Err(CondCheckError::<()>::NotYet { status: None });
+                };
+                match status {
+                    ScrimletReconcilersStatus::Running {
+                        mgd_reconciler, ..
+                    } => {
+                        let Some(last) =
+                            mgd_reconciler.last_completion.as_ref()
+                        else {
+                            // Reconciler hasn't completed a run yet.
+                            return Err(CondCheckError::<()>::NotYet {
+                                status: None,
+                            });
+                        };
+                        if matches!(
+                            last.activation_reason,
+                            ReconcilerActivationReason::SystemNetworkingConfigChanged
+                        ) {
+                            Ok(())
+                        } else {
+                            // Still showing startup activation; waiting for
+                            // the config-change-triggered run.
+                            Err(CondCheckError::<()>::NotYet { status: None })
+                        }
+                    }
+                    _ => {
+                        // Reconcilers still initializing (determining switch
+                        // slot or waiting for networking info).
+                        Err(CondCheckError::<()>::NotYet { status: None })
+                    }
+                }
+            },
+            &Duration::from_millis(50),
+            &Duration::from_secs(60),
+        )
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "sled-agent {i}'s scrimlet reconcilers should have run in \
+                 response to the bootstore update (last status: {:?})",
+                sled_agent.scrimlet_reconcilers_status(),
+            )
+        });
+    }
+}
