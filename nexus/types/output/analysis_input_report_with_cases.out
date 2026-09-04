@@ -46,3 +46,7 @@ non-terminal sagas observed (2 total):
     state: Abandoned at 1970-01-01 00:00:00 UTC (Unrecoverable: fake recovery error)
     last event: <none recorded>
     owner: <no current SEC>
+
+silo external TLS certificates observed (1 silos):
+  * silo 5110aaaa-0000-0000-0000-000000000001 (fake-silo): 1 certificate(s)
+    * certificate cccccccc-0000-0000-0000-000000000001 (fake-cert-1): valid from 2020-01-01 00:00:00 UTC until 2021-01-01 00:00:00 UTC

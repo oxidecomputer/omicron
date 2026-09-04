@@ -16,11 +16,14 @@ use nexus_db_model::DbMetadataNexusState;
 use nexus_db_model::PhysicalDiskPolicy;
 use nexus_db_model::SagaExecState;
 use nexus_db_model::SagaReasonAbandoned;
+use nexus_db_model::ServiceKind;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore;
+use nexus_db_queries::db::datastore::Discoverability;
 use nexus_db_queries::db::identity::Asset;
+use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_fm as fm;
 use nexus_types::fm::FmConfig;
@@ -30,16 +33,21 @@ use nexus_types::in_service_disk::InServiceDisk;
 use nexus_types::internal_api::background::FmAnalysisStatus;
 use nexus_types::internal_api::background::fm_analysis as status;
 use nexus_types::inventory;
+use nexus_types::observed_certificate::ObservedCertificate;
+use nexus_types::observed_certificate::ObservedSiloCertificates;
 use nexus_types::observed_saga::{
     ObservedSaga, ObservedSagaState, SagaAbandonInfo, SagaAbandonReason,
     SagaOwnerState,
 };
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use serde_json::json;
 use slog_error_chain::InlineErrorChain;
+use std::collections::BTreeMap;
+use std::num::NonZeroU32;
 use std::sync::Arc;
 use tokio::sync::watch;
 
@@ -227,7 +235,7 @@ impl FmAnalysis {
 
         // Prepare analysis inputs.
         let (inputs, prep_status, input_report) = match self
-            .prepare_inputs(&opctx, parent_sitrep, inv)
+            .prepare_inputs(&opctx, parent_sitrep, inv, &cfg)
             .await
         {
             Ok(inputs) => inputs,
@@ -321,6 +329,7 @@ impl FmAnalysis {
         opctx: &OpContext,
         parent_sitrep: Option<CurrentSitrep>,
         inv: Arc<inventory::Collection>,
+        cfg: &FmConfig,
     ) -> Result<(Input, status::PreparationStatus, InputReport), PreparationError>
     {
         let mut warnings = Vec::new();
@@ -331,10 +340,15 @@ impl FmAnalysis {
         let observed_sagas =
             Arc::new(self.prepare_observed_sagas(opctx).await?);
 
+        let observed_silo_certificates =
+            Arc::new(self.load_silo_certificates(opctx, &mut warnings).await?);
+
         let mut builder =
             fm::analysis_input::Input::builder(parent_sitrep.clone(), inv)?
                 .in_service_disks(in_service_disks)
-                .observed_sagas(observed_sagas);
+                .observed_sagas(observed_sagas)
+                .observed_silo_certificates(observed_silo_certificates)
+                .config(*cfg);
         self.load_ereporter_restarts(opctx, &mut builder)
             .await
             .context("failed to load ereporter restarts")?;
@@ -421,6 +435,98 @@ impl FmAnalysis {
         Ok(in_service_disks)
     }
 
+    /// Build the certificate diagnosis engine's input: every silo, with the
+    /// leaf validity window of each of its external TLS certificates.
+    ///
+    /// This reads the same rows the `external_endpoints` background task uses
+    /// to decide which certificate to serve, so the engine reasons about the
+    /// certificates Nexus actually presents. Certificates that cannot be
+    /// parsed, or that belong to a silo that no longer exists, are skipped
+    /// with a warning, mirroring how `external_endpoints` skips them.
+    async fn load_silo_certificates(
+        &self,
+        opctx: &OpContext,
+        warnings: &mut Vec<String>,
+    ) -> anyhow::Result<IdOrdMap<ObservedSiloCertificates>> {
+        // The batch size is arbitrary; most systems have a handful of silos
+        // and certificates, and a few have a few hundred certificates.
+        let batch_size = NonZeroU32::new(200).unwrap();
+
+        let mut silos = IdOrdMap::new();
+        let mut paginator =
+            Paginator::new(batch_size, dropshot::PaginationOrder::Ascending);
+        while let Some(p) = paginator.next() {
+            let batch = self
+                .datastore
+                .silos_list(
+                    opctx,
+                    &PaginatedBy::Id(p.current_pagparams()),
+                    Discoverability::All,
+                )
+                .await
+                .context("failed to list silos")?;
+            paginator = p.found_batch(&batch, &|s| s.id());
+            for silo in batch {
+                silos
+                    .insert_unique(ObservedSiloCertificates {
+                        silo_id: silo.id(),
+                        silo_name: silo.name().clone(),
+                        certificates: IdOrdMap::new(),
+                    })
+                    .expect("silo IDs are unique");
+            }
+        }
+
+        let mut paginator =
+            Paginator::new(batch_size, dropshot::PaginationOrder::Ascending);
+        while let Some(p) = paginator.next() {
+            let batch = self
+                .datastore
+                .certificate_list_for(
+                    opctx,
+                    Some(ServiceKind::Nexus),
+                    &PaginatedBy::Id(p.current_pagparams()),
+                    false,
+                )
+                .await
+                .context("failed to list certificates")?;
+            paginator = p.found_batch(&batch, &|c| c.id());
+            for cert in batch {
+                let cert_id = cert.id();
+                let Some(mut silo) = silos.get_mut(&cert.silo_id) else {
+                    warnings.push(format!(
+                        "certificate {cert_id} belongs to silo {}, which                          was not found; ignoring it",
+                        cert.silo_id,
+                    ));
+                    continue;
+                };
+                let validity = match omicron_certificates::leaf_validity(
+                    &cert.cert,
+                ) {
+                    Ok(validity) => validity,
+                    Err(e) => {
+                        warnings.push(format!(
+                            "certificate {cert_id} for silo {} could not be                              parsed; ignoring it: {}",
+                            cert.silo_id,
+                            InlineErrorChain::new(&e),
+                        ));
+                        continue;
+                    }
+                };
+                silo.certificates
+                    .insert_unique(ObservedCertificate {
+                        id: cert_id,
+                        name: cert.name().clone(),
+                        not_before: validity.not_before,
+                        not_after: validity.not_after,
+                    })
+                    .expect("certificate IDs are unique");
+            }
+        }
+
+        Ok(silos)
+    }
+
     /// Build the saga diagnosis engine's input: every non-terminal saga,
     /// annotated with the timestamp of its latest node event (the progress
     /// signal) and the state of its owning Nexus.
@@ -428,8 +534,6 @@ impl FmAnalysis {
         &self,
         opctx: &OpContext,
     ) -> anyhow::Result<IdOrdMap<ObservedSaga>> {
-        use std::collections::BTreeMap;
-
         // All unfinished (running, unwinding, or abandoned) sagas. Completed
         // sagas are excluded; a parent case whose saga is absent from this
         // set is closed by the engine.
@@ -967,6 +1071,7 @@ mod tests {
             analysis_enabled: Setting::new(true),
             sitrep_limit: Setting::new(sitrep_limit),
             history_pruning_threshold: Setting::new(history_pruning_threshold),
+            certificate_expiry_warning_days: Setting::Default,
         };
         FmConfigView { config, source: Default::default() }
     }
@@ -1347,7 +1452,7 @@ mod tests {
         );
 
         let (input, prep, report) = task
-            .prepare_inputs(opctx, Some(parent), inv)
+            .prepare_inputs(opctx, Some(parent), inv, &FmConfig::default())
             .await
             .expect("input preparation should succeed");
         assert!(

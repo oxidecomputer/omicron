@@ -352,6 +352,10 @@ Options:
             power shelf
           - hardware.power_shelf.psu.remove: A power supply unit (PSU) has been removed from a power
             shelf
+          - silo.certificate.expiring:       The TLS certificate that a silo's external API serves
+            is about to expire, and no later-expiring certificate is installed for that silo
+          - silo.certificate.expired:        The TLS certificate that a silo's external API serves
+            has expired, and no later-expiring certificate is installed for that silo
 
   -d, --dispatched <DISPATCHED>
           If `true`, include only alerts that have been fully dispatched. If `false`, include only
@@ -396,7 +400,7 @@ stdout:
 ---------------------------------------------
 stderr:
 error: invalid value 'test.foo.box' for '--classes <CLASSES>...'
-  [possible values: probe, test.foo, test.foo.bar, test.foo.baz, test.quux.bar, test.quux.bar.baz, hardware.power_shelf.psu.insert, hardware.power_shelf.psu.remove]
+  [possible values: probe, test.foo, test.foo.bar, test.foo.baz, test.quux.bar, test.quux.bar.baz, hardware.power_shelf.psu.insert, hardware.power_shelf.psu.remove, silo.certificate.expiring, silo.certificate.expired]
 
   tip: a similar value exists: 'test.foo.baz'
 
@@ -1950,7 +1954,7 @@ version.
 Use the `omdb nexus fm-config show-defaults` command to view the default values for all config
 options.
 
-Usage: omdb nexus fm-config set [OPTIONS] --comment <COMMENT> <--sitrep-limit <SITREP_LIMIT>|--history-pruning-threshold <HISTORY_PRUNING_THRESHOLD>|--analysis-enabled <ANALYSIS_ENABLED>>
+Usage: omdb nexus fm-config set [OPTIONS] --comment <COMMENT> <--sitrep-limit <SITREP_LIMIT>|--history-pruning-threshold <HISTORY_PRUNING_THRESHOLD>|--analysis-enabled <ANALYSIS_ENABLED>|--certificate-expiry-warning-days <CERTIFICATE_EXPIRY_WARNING_DAYS>>
 
 Options:
       --comment <COMMENT>
@@ -1998,6 +2002,17 @@ Config Options:
           This must be a boolean ('true' or 'false'), or 'default'. If it is set to 'default', any
           previous override will be removed, and the system will revert this setting to the default
           value.
+
+      --certificate-expiry-warning-days <CERTIFICATE_EXPIRY_WARNING_DAYS>
+          Sets how many days before a silo's external TLS certificate expires the certificate
+          diagnosis engine opens a case and requests an alert.
+          
+          The window applies to the certificate Nexus serves for the silo (the one with the latest
+          expiration time), so a case opens only when no later-expiring replacement is installed.
+          
+          This must be a non-zero integer no greater than 3650, or 'default'. If it is set to
+          'default', any previous override will be removed, and the system will revert this setting
+          to the default value.
 
 Connection Options:
       --nexus-internal-url <NEXUS_INTERNAL_URL>

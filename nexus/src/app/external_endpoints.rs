@@ -311,6 +311,13 @@ impl ExternalEndpoint {
         // Anyway, we don't yet do anything of these things.  For now, pick the
         // certificate chain whose leaf certificate has the latest expiration
         // time.
+        //
+        // The fault management certificate diagnosis engine
+        // (`nexus_fm::diagnosis::certificate`) predicts this choice from the
+        // same rule, so that it alerts when the certificate we will actually
+        // serve is expiring or expired. If the rule here changes, the engine
+        // (and `ObservedSiloCertificates::best_certificate`, which it uses)
+        // must change with it.
 
         // This would be cleaner if Asn1Time impl'd Ord or even just a way to
         // convert it to a Unix timestamp or any other comparable timestamp.

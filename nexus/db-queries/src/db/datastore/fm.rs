@@ -40,6 +40,7 @@ use nexus_db_schema::schema::ereport::dsl as ereport_dsl;
 use nexus_db_schema::schema::fm_alert_request::dsl as alert_req_dsl;
 use nexus_db_schema::schema::fm_case::dsl as case_dsl;
 use nexus_db_schema::schema::fm_ereport_in_case::dsl as case_ereport_dsl;
+use nexus_db_schema::schema::fm_fact_certificate::dsl as fact_cert_dsl;
 use nexus_db_schema::schema::fm_fact_physical_disk::dsl as fact_pd_dsl;
 use nexus_db_schema::schema::fm_fact_saga::dsl as fact_saga_dsl;
 use nexus_db_schema::schema::fm_sitrep::dsl as sitrep_dsl;
@@ -136,6 +137,7 @@ sitrep_child_tables! {
     Case => { table: "fm_case" },
     FmFactPhysicalDisk => { table: "fm_fact_physical_disk" },
     FmFactSaga => { table: "fm_fact_saga" },
+    FmFactCertificate => { table: "fm_fact_certificate" },
     AnalysisReport => { table: "fm_sitrep_analysis_report" },
 }
 
@@ -640,6 +642,35 @@ impl DataStore {
             }
         }
 
+        // --- certificate diagnosis engine facts ---
+        let mut paginator: Paginator<DbTypedUuid<FactKind>> =
+            Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
+        while let Some(p) = paginator.next() {
+            let batch = paginated(
+                fact_cert_dsl::fm_fact_certificate,
+                fact_cert_dsl::id,
+                &p.current_pagparams(),
+            )
+            .filter(fact_cert_dsl::sitrep_id.eq(id.into_untyped_uuid()))
+            .select(model::fm::FmFactCertificate::as_select())
+            .load_async(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context("failed to load certificate case facts")
+            })?;
+
+            paginator = p.found_batch(&batch, &|f| f.id);
+            for row in batch {
+                let case_id: CaseUuid = row.case_id.into();
+                let fact_id = row.id;
+                let fact = row.into_fact().with_internal_context(|| {
+                    format!("failed to read fact {fact_id} on case {case_id}")
+                })?;
+                insert_fact_for_case(&mut by_case, case_id, fact)?;
+            }
+        }
+
         Ok(by_case)
     }
 
@@ -894,6 +925,7 @@ impl DataStore {
         let mut case_ereports = Vec::new();
         let mut physical_disk_facts = Vec::new();
         let mut saga_facts = Vec::new();
+        let mut certificate_facts = Vec::new();
         for case in sitrep.cases {
             let case_id = case.id;
             cases.push(model::fm::CaseMetadata::from_sitrep(sitrep_id, &case));
@@ -937,6 +969,16 @@ impl DataStore {
                             &fact.metadata,
                             saga_fact,
                         ));
+                    }
+                    fm::FactPayload::Certificate(cert_fact) => {
+                        certificate_facts.push(
+                            model::fm::FmFactCertificate::from_sitrep(
+                                sitrep_id,
+                                case_id,
+                                &fact.metadata,
+                                cert_fact,
+                            ),
+                        );
                     }
                 }
             }
@@ -1019,6 +1061,19 @@ impl DataStore {
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
                         .internal_context("failed to insert saga case facts")
+                })?;
+        }
+
+        if !certificate_facts.is_empty() {
+            diesel::insert_into(fact_cert_dsl::fm_fact_certificate)
+                .values(certificate_facts)
+                .execute_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                        .internal_context(
+                            "failed to insert certificate case facts",
+                        )
                 })?;
         }
 
@@ -3004,11 +3059,60 @@ mod tests {
             }
         };
 
+        // Certificate cases, exercising the fm_fact_certificate
+        // read/write/GC paths: one per fact kind, since a certificate case
+        // carries exactly one fact at a time.
+        let certificate_case = |kind: fn(
+            fm::CertificateExpiryFactPayload,
+        ) -> fm::CertificateFact,
+                                comment: &str| {
+            let mut facts = iddqd::IdOrdMap::new();
+            facts
+                .insert_unique(fm::case::Fact {
+                    metadata: fm::case::FactMetadata {
+                        id: FactUuid::new_v4(),
+                        created_sitrep_id: sitrep_id,
+                        comment: format!("a representative {comment} fact"),
+                    },
+                    payload: fm::FactPayload::Certificate(kind(
+                        fm::CertificateExpiryFactPayload {
+                            silo_id: Uuid::new_v4(),
+                            certificate_id: Uuid::new_v4(),
+                            not_after: omicron_common::now_db_precision(),
+                        },
+                    )),
+                })
+                .unwrap();
+            fm::Case {
+                id: omicron_uuid_kinds::CaseUuid::new_v4(),
+                metadata: fm::case::Metadata {
+                    created_sitrep_id: sitrep_id,
+                    closed_sitrep_id: None,
+                    de: fm::DiagnosisEngineKind::Certificate,
+                    comment: format!("a silo whose {comment}"),
+                },
+                ereports: iddqd::IdOrdMap::new(),
+                alerts_requested: iddqd::IdOrdMap::new(),
+                support_bundles_requested: iddqd::IdOrdMap::new(),
+                facts,
+            }
+        };
+        let case5 = certificate_case(
+            fm::CertificateFact::BestCertificateExpiring,
+            "best certificate is expiring",
+        );
+        let case6 = certificate_case(
+            fm::CertificateFact::BestCertificateExpired,
+            "best certificate has expired",
+        );
+
         let mut cases = iddqd::IdOrdMap::new();
         cases.insert_unique(case1.clone()).expect("failed to insert case 1");
         cases.insert_unique(case2.clone()).expect("failed to insert case 2");
         cases.insert_unique(case3).expect("failed to insert case 3");
         cases.insert_unique(case4).expect("failed to insert case 4");
+        cases.insert_unique(case5).expect("failed to insert case 5");
+        cases.insert_unique(case6).expect("failed to insert case 6");
         let mut ereports_by_id = iddqd::IdOrdMap::new();
         for case in cases.iter() {
             ereports_by_id
@@ -3057,6 +3161,7 @@ mod tests {
             closed_cases_copied_forward: Default::default(),
             in_service_disks: Default::default(),
             observed_sagas: Default::default(),
+            observed_silo_certificates: Default::default(),
         };
         let analysis_report = AnalysisReport {
             log: Default::default(),
@@ -3300,7 +3405,7 @@ mod tests {
             .get_result_async::<i64>(&*conn)
             .await
             .expect("failed to count cases before deletion");
-        assert_eq!(cases_before, 4, "four cases should exist before deletion");
+        assert_eq!(cases_before, 6, "six cases should exist before deletion");
 
         let case_ereports_before: i64 = case_ereport_dsl::fm_ereport_in_case
             .filter(
@@ -3682,6 +3787,7 @@ mod tests {
                 num_ereporter_restarts: 0,
                 in_service_disks: Default::default(),
                 observed_sagas: Default::default(),
+                observed_silo_certificates: Default::default(),
             };
             let analysis_report = AnalysisReport {
                 log: Default::default(),

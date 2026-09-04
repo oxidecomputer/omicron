@@ -137,6 +137,20 @@ struct ConfigOpts {
     /// revert this setting to the default value.
     #[clap(long, action = ArgAction::Set)]
     analysis_enabled: Option<Setting<settings::AnalysisEnabled>>,
+
+    /// Sets how many days before a silo's external TLS certificate expires
+    /// the certificate diagnosis engine opens a case and requests an alert.
+    ///
+    /// The window applies to the certificate Nexus serves for the silo (the
+    /// one with the latest expiration time), so a case opens only when no
+    /// later-expiring replacement is installed.
+    ///
+    /// This must be a non-zero integer no greater than 3650, or 'default'. If
+    /// it is set to 'default', any previous override will be removed, and the
+    /// system will revert this setting to the default value.
+    #[clap(long, action = ArgAction::Set)]
+    certificate_expiry_warning_days:
+        Option<Setting<settings::CertificateExpiryWarningDays>>,
 }
 
 impl ConfigOpts {
@@ -151,6 +165,9 @@ impl ConfigOpts {
             analysis_enabled: self
                 .analysis_enabled
                 .unwrap_or(current.analysis_enabled),
+            certificate_expiry_warning_days: self
+                .certificate_expiry_warning_days
+                .unwrap_or(current.certificate_expiry_warning_days),
         }
     }
 

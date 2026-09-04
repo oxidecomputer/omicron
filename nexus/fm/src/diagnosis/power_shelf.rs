@@ -1032,6 +1032,8 @@ mod tests {
                 collection.into(),
                 Arc::new(IdOrdMap::new()),
                 Arc::new(IdOrdMap::new()),
+                Arc::new(IdOrdMap::new()),
+                Default::default(),
             )
             .expect("input builder should accept fresh inventory");
         builder.add_unmarked_ereports(new_ereports);
