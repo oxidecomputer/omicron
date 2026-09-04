@@ -18,6 +18,7 @@ use nexus_types::internal_api::background::SledBlueprintAvailabilityRendezvousSt
 use omicron_uuid_kinds::BlueprintUuid;
 use slog::error;
 use slog::info;
+use slog_error_chain::InlineErrorChain;
 
 /// Reconcile the `rendezvous_sled_bp_availability` table against the target
 /// blueprint.
@@ -157,38 +158,50 @@ pub(crate) async fn reconcile_sled_blueprint_availability(
         );
     }
 
+    let num_to_write = to_write.len();
     let writes = match datastore
         .rendezvous_sled_bp_availability_write(opctx, blueprint_id, to_write)
         .await
     {
         Ok(writes) => writes,
-        Err(SledBpAvailabilityWriteError::Failed {
-            completed,
-            failed_sled_id,
-            num_not_attempted,
-            error,
-        }) => {
-            for write in &completed {
-                write.log_to_and_count(&opctx.log, &mut stats);
+        Err(err) => {
+            match &err {
+                SledBpAvailabilityWriteError::Failed {
+                    completed,
+                    failed_sled_id,
+                    num_not_attempted,
+                    error,
+                } => {
+                    for write in completed {
+                        write.log_to_and_count(&opctx.log, &mut stats);
+                    }
+                    error!(
+                        opctx.log,
+                        "sled availability write failed partway; writes \
+                         completed before the failure are counted here";
+                        "blueprint_id" => %blueprint_id,
+                        "failed_sled_id" => %failed_sled_id,
+                        "num_not_attempted" => num_not_attempted,
+                        InlineErrorChain::new(error),
+                        &stats,
+                    );
+                }
+                SledBpAvailabilityWriteError::NotStarted(error) => {
+                    error!(
+                        opctx.log,
+                        "sled availability write did not start; no rows \
+                         were touched";
+                        "blueprint_id" => %blueprint_id,
+                        "num_to_write" => num_to_write,
+                        InlineErrorChain::new(error),
+                        &stats,
+                    );
+                }
             }
-            error!(
-                opctx.log,
-                "sled availability write failed partway; writes completed \
-                 before the failure are counted here";
-                "blueprint_id" => %blueprint_id,
-                "failed_sled_id" => %failed_sled_id,
-                "num_not_attempted" => num_not_attempted,
-                "error" => %error,
-                &stats,
-            );
-            return Err(anyhow::Error::from(error).context(format!(
-                "failed to write availability for sled {failed_sled_id} \
-                 ({num_not_attempted} sled(s) not attempted)",
-            )));
-        }
-        Err(err @ SledBpAvailabilityWriteError::NotStarted(_)) => {
-            return Err(anyhow::Error::from(err)
-                .context("failed to write sled availability"));
+            // Do not add `.context()` on this error, since
+            // SledBpAvailabilityWriteError's Display already produces a
+            // complete message.
+            return Err(anyhow::Error::from(err));
         }
     };
     for write in &writes {
@@ -612,18 +625,15 @@ mod tests {
         .await
         .expect_err("the injected constraint fails the pass");
         let message = format!("{err:#}");
-        for needle in [
-            format!(
-                "failed to write availability for sled {rejected} \
-                 (2 sled(s) not attempted)"
-            ),
-            format!("failed to upsert availability for sled {rejected}"),
-        ] {
-            assert!(
-                message.contains(&needle),
-                "error {message:?} must contain {needle:?}"
-            );
-        }
+        let expected_prefix = format!(
+            "failed to write availability for sled {rejected} after 2 \
+             write(s) completed (2 not attempted): Internal Error: failed to \
+             upsert availability: unexpected database error: "
+        );
+        assert!(
+            message.starts_with(&expected_prefix),
+            "error {message:?} must start with {expected_prefix:?}"
+        );
 
         let rows = datastore
             .rendezvous_sled_bp_availability_list_all_batched(opctx)

@@ -168,13 +168,14 @@ impl SledBpAvailabilityWrite {
 pub enum SledBpAvailabilityWriteOutcome {
     /// The sled is active in the blueprint.
     Active {
-        /// The availability written to the database.
+        /// The availability requested to be written to the database.
         availability: ActiveSledBpAvailability,
 
-        /// The generation of the update disposition that was written.
+        /// The generation of the update disposition that was requested to be
+        /// written.
         update_disposition_generation: UpdateDispositionGeneration,
 
-        /// Whether the upsert operation was successful.
+        /// Whether the write was successful.
         outcome: SledBpAvailabilityUpsertOutcome,
     },
 
@@ -338,9 +339,7 @@ impl DataStore {
                         outcome,
                     })
                     .map_err(|e| {
-                        e.internal_context(format!(
-                            "failed to upsert availability for sled {sled_id}"
-                        ))
+                        e.internal_context("failed to upsert availability")
                     })
                 }
                 SledBpAvailabilityState::Decommissioned => {
@@ -353,11 +352,7 @@ impl DataStore {
                     )
                     .await
                     .map(SledBpAvailabilityWriteOutcome::Decommission)
-                    .map_err(|e| {
-                        e.internal_context(format!(
-                            "failed to decommission sled {sled_id}"
-                        ))
-                    })
+                    .map_err(|e| e.internal_context("failed to decommission sled"))
                 }
             };
             let outcome = match result {
@@ -1066,7 +1061,7 @@ mod tests {
             expected_completed: IdOrdMap<SledBpAvailabilityWrite>,
             expected_failed_sled_id: SledUuid,
             expected_num_not_attempted: usize,
-            expected_context: String,
+            expected_context: &'static str,
             expected_absent: Vec<SledUuid>,
         }
 
@@ -1107,9 +1102,7 @@ mod tests {
                 },
                 expected_failed_sled_id: rejected_upsert,
                 expected_num_not_attempted: 2,
-                expected_context: format!(
-                    "failed to upsert availability for sled {rejected_upsert}"
-                ),
+                expected_context: "failed to upsert availability",
                 expected_absent: vec![rejected_upsert, sled(4), sled(5)],
             },
             Case {
@@ -1144,9 +1137,7 @@ mod tests {
                 },
                 expected_failed_sled_id: rejected_decommission,
                 expected_num_not_attempted: 1,
-                expected_context: format!(
-                    "failed to decommission sled {rejected_decommission}"
-                ),
+                expected_context: "failed to decommission sled",
                 expected_absent: vec![rejected_decommission, sled(14)],
             },
         ];
@@ -1175,12 +1166,14 @@ mod tests {
                     );
                     match error {
                         Error::InternalError { internal_message } => {
+                            let expected_prefix = format!(
+                                "{}: unexpected database error: ",
+                                case.expected_context
+                            );
                             assert!(
-                                internal_message
-                                    .contains(&case.expected_context),
+                                internal_message.starts_with(&expected_prefix),
                                 "{name}: internal message {internal_message:?} \
-                                 must contain {:?}",
-                                case.expected_context,
+                                 must start with {expected_prefix:?}",
                             );
                             assert!(
                                 internal_message.contains("CHECK constraint"),
