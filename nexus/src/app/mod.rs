@@ -329,6 +329,10 @@ pub struct Nexus {
     /// once the rack has been initialized (if RSS has not already finished when
     /// this Nexus process starts).
     underlay_subnets: Arc<OnceLock<UnderlaySubnets>>,
+
+    /// Currently only useful for debug and testing in corner case situations where the recording of
+    /// backtraces in the DB pool claim code may be unusually expensive.
+    record_db_claim_backtraces: bool,
 }
 
 impl Nexus {
@@ -618,6 +622,9 @@ impl Nexus {
             sitrep_load_rx,
             debug_dropbox_reconfigurator: debug_dropbox_reconfigurator.clone(),
             underlay_subnets,
+            record_db_claim_backtraces: config
+                .deployment
+                .record_db_claim_backtraces,
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong
