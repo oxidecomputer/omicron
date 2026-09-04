@@ -29,7 +29,6 @@ use hickory_server::authority::MessageResponseBuilder;
 use internal_dns_types::config::DnsRecord;
 use internal_dns_types::config::Srv;
 use pretty_hex::*;
-use serde::Deserialize;
 use slog::{Logger, debug, error, info, o, trace};
 use slog_error_chain::InlineErrorChain;
 use std::net::SocketAddr;
@@ -37,32 +36,65 @@ use std::str::FromStr;
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::net::UdpSocket;
+use tokio::task::JoinError;
+use tokio::task::JoinSet;
 use uuid::Uuid;
 
 /// Configuration related to the DNS server
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct Config {
-    /// The address to listen for DNS requests on
-    pub bind_address: SocketAddr,
+    /// The addresses to listen for DNS requests on.
+    bind_addresses: Vec<SocketAddr>,
 }
 
-/// Handle to the DNS server
-///
-/// Dropping this handle shuts down the DNS server.
-pub struct ServerHandle {
-    local_address: SocketAddr,
-    handle: tokio::task::JoinHandle<anyhow::Result<()>>,
-}
-
-impl Drop for ServerHandle {
-    fn drop(&mut self) {
-        self.handle.abort()
+impl Config {
+    /// Construct from a list of addresses. This fails if the list is empty.
+    pub fn new(bind_addresses: Vec<SocketAddr>) -> anyhow::Result<Self> {
+        anyhow::ensure!(
+            !bind_addresses.is_empty(),
+            "Must provide at least one bind address"
+        );
+        Ok(Self { bind_addresses })
     }
 }
 
+/// Handle to the DNS servers.
+///
+/// Dropping this handle shuts down the DNS servers.
+pub struct ServerHandle {
+    /// Local address each single server is bound to.
+    local_addresses: Vec<SocketAddr>,
+    /// Join set in which all spawned server tasks run.
+    ///
+    /// NOTE: This does _not_ include the tasks handling an individual DNS
+    /// request, i.e., `handle_dns_packet()`. Those are spawned outside the set
+    /// and continue to run even if this is dropped.
+    server_tasks: JoinSet<anyhow::Result<()>>,
+}
+
 impl ServerHandle {
-    pub fn local_address(&self) -> SocketAddr {
-        self.local_address
+    /// Return the address the server is bound it, if there is exactly one, or
+    /// an error otherwise. This is mostly intended for test contexts.
+    pub fn sole_local_address(&self) -> anyhow::Result<SocketAddr> {
+        anyhow::ensure!(
+            self.local_addresses.len() == 1,
+            "Expected the DNS server to have exactly 1 address, but \
+            it actually has {}",
+            self.local_addresses.len(),
+        );
+        Ok(self.local_addresses[0])
+    }
+
+    /// The addresses the server is bound to.
+    pub fn local_addresses(&self) -> impl Iterator<Item = SocketAddr> + '_ {
+        self.local_addresses.iter().copied()
+    }
+
+    /// Wait for any of the individual servers to exit.
+    pub async fn wait_for_exit(
+        mut self,
+    ) -> Result<anyhow::Result<()>, JoinError> {
+        self.server_tasks.join_next().await.expect("Always at least one server")
     }
 }
 
@@ -70,11 +102,7 @@ impl ServerHandle {
 ///
 /// You construct one of these with [`Server::start()`].  But what you get back
 /// is a [`ServerHandle`].  You don't deal with the Server directly.
-pub struct Server {
-    log: Logger,
-    store: storage::Store,
-    server_socket: Arc<UdpSocket>,
-}
+pub struct Server;
 
 impl Server {
     /// Starts a DNS server whose DNS data comes from the given `store`
@@ -83,28 +111,37 @@ impl Server {
         store: storage::Store,
         config: &Config,
     ) -> anyhow::Result<ServerHandle> {
-        let server_socket = Arc::new(
-            UdpSocket::bind(config.bind_address).await.with_context(|| {
-                format!(
-                    "DNS server start: UDP bind to {:?}",
-                    config.bind_address
-                )
-            })?,
-        );
-
-        let local_address = server_socket.local_addr().context(
-            "DNS server start: failed to get local address of bound socket",
-        )?;
-
-        info!(&log, "DNS server bound to address";
-            "local_address" => ?local_address
-        );
-
-        let server = Server { log, store, server_socket };
-        let handle = tokio::task::spawn(server.run());
-        Ok(ServerHandle { local_address, handle })
+        let mut server_tasks = JoinSet::new();
+        let mut local_addresses =
+            Vec::with_capacity(config.bind_addresses.len());
+        for bind_address in config.bind_addresses.iter() {
+            let server_socket = Arc::new(
+                UdpSocket::bind(*bind_address).await.with_context(|| {
+                    format!("DNS server start: UDP bind to {:?}", bind_address,)
+                })?,
+            );
+            let local_address = server_socket.local_addr().context(
+                "DNS server start: failed to get local address of bound socket",
+            )?;
+            let log = log.new(o!("bind_address" => local_address.to_string()));
+            info!(&log, "DNS server bound to address");
+            local_addresses.push(local_address);
+            let single_server =
+                SingleServer { log, store: store.clone(), server_socket };
+            server_tasks.spawn(single_server.run());
+        }
+        Ok(ServerHandle { local_addresses, server_tasks })
     }
+}
 
+/// A DNS server bound to a single UDP socket.
+struct SingleServer {
+    log: Logger,
+    store: storage::Store,
+    server_socket: Arc<UdpSocket>,
+}
+
+impl SingleServer {
     async fn run(self) -> anyhow::Result<()> {
         // The guts of the DNS server: read packets from the bound socket and
         // handle them.
@@ -122,7 +159,6 @@ impl Server {
                 "req_id" => req_id.to_string(),
                 "peer_addr" => client_addr.to_string(),
             ));
-
             let request = Request {
                 log,
                 store: self.store.clone(),
