@@ -87,6 +87,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_09_02_00, ADD_ROUTER_CONFIGURATIONS),
     (2026_08_28_00, SILO_USER_DOCS),
     (2026_08_19_01, BGP_PEER_SRC_ADDR),
     (2026_08_17_00, SUPPORT_BUNDLES_STABLE),
@@ -735,6 +736,44 @@ pub trait NexusExternalApi {
         new_policy: TypedBody<latest::policy::Policy<latest::policy::SiloRole>>,
     ) -> Result<
         HttpResponseOk<latest::policy::Policy<latest::policy::SiloRole>>,
+        HttpError,
+    >;
+
+    /// List router configurations used by silo
+    ///
+    /// Returns the router configurations assigned to the silo, in ascending
+    /// priority order.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/silos/{silo}/router-configurations",
+        tags = ["system/silos"],
+        versions = VERSION_ADD_ROUTER_CONFIGURATIONS..,
+    }]
+    async fn silo_router_configurations_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::SiloPath>,
+    ) -> Result<
+        HttpResponseOk<latest::networking::SiloRouterConfigurations>,
+        HttpError,
+    >;
+
+    /// Update router configurations used by silo
+    ///
+    /// Replaces the full set of router configurations assigned to the silo,
+    /// along with their priorities. Any currently assigned configuration not
+    /// present in the request is unassigned.
+    #[endpoint {
+        method = PUT,
+        path = "/v1/system/silos/{silo}/router-configurations",
+        tags = ["system/silos"],
+        versions = VERSION_ADD_ROUTER_CONFIGURATIONS..,
+    }]
+    async fn silo_router_configurations_update(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::SiloPath>,
+        update: TypedBody<latest::networking::SiloRouterConfigurationsUpdate>,
+    ) -> Result<
+        HttpResponseOk<latest::networking::SiloRouterConfigurations>,
         HttpError,
     >;
 
@@ -6110,6 +6149,380 @@ pub trait NexusExternalApi {
         path_params: Path<latest::networking::BgpAnnounceSetSelector>,
     ) -> Result<
         HttpResponseOk<Vec<latest::networking::BgpAnnouncement>>,
+        HttpError,
+    >;
+
+    /// List router configurations
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/router-configurations",
+        tags = ["system/networking"],
+        versions = VERSION_ADD_ROUTER_CONFIGURATIONS..,
+    }]
+    async fn networking_router_configuration_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::networking::RouterConfiguration>>,
+        HttpError,
+    >;
+
+    /// Create router configuration
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/networking/router-configurations",
+        tags = ["system/networking"],
+        versions = VERSION_ADD_ROUTER_CONFIGURATIONS..,
+    }]
+    async fn networking_router_configuration_create(
+        rqctx: RequestContext<Self::Context>,
+        config: TypedBody<latest::networking::RouterConfigurationCreate>,
+    ) -> Result<
+        HttpResponseCreated<latest::networking::RouterConfiguration>,
+        HttpError,
+    >;
+
+    /// Fetch router configuration
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/router-configurations/{configuration}",
+        tags = ["system/networking"],
+        versions = VERSION_ADD_ROUTER_CONFIGURATIONS..,
+    }]
+    async fn networking_router_configuration_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::networking::RouterConfigurationSelector>,
+    ) -> Result<
+        HttpResponseOk<latest::networking::RouterConfiguration>,
+        HttpError,
+    >;
+
+    /// Update router configuration
+    #[endpoint {
+        method = PUT,
+        path = "/v1/system/networking/router-configurations/{configuration}",
+        tags = ["system/networking"],
+        versions = VERSION_ADD_ROUTER_CONFIGURATIONS..,
+    }]
+    async fn networking_router_configuration_update(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::networking::RouterConfigurationSelector>,
+        update: TypedBody<latest::networking::RouterConfigurationUpdate>,
+    ) -> Result<
+        HttpResponseOk<latest::networking::RouterConfiguration>,
+        HttpError,
+    >;
+
+    /// Delete router configuration
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/system/networking/router-configurations/{configuration}",
+        tags = ["system/networking"],
+        versions = VERSION_ADD_ROUTER_CONFIGURATIONS..,
+    }]
+    async fn networking_router_configuration_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::networking::RouterConfigurationSelector>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Fetch BGP configuration for router configuration
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/router-configurations/{configuration}/bgp-config",
+        tags = ["system/networking"],
+        versions = VERSION_ADD_ROUTER_CONFIGURATIONS..,
+    }]
+    async fn networking_router_configuration_bgp_config_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::networking::RouterConfigurationSelector>,
+    ) -> Result<
+        HttpResponseOk<latest::networking::RouterConfigurationBgpConfig>,
+        HttpError,
+    >;
+
+    /// Create or update BGP configuration for router configuration
+    #[endpoint {
+        method = PUT,
+        path = "/v1/system/networking/router-configurations/{configuration}/bgp-config",
+        tags = ["system/networking"],
+        versions = VERSION_ADD_ROUTER_CONFIGURATIONS..,
+    }]
+    async fn networking_router_configuration_bgp_config_set(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::networking::RouterConfigurationSelector>,
+        config: TypedBody<latest::networking::RouterConfigurationBgpConfigSet>,
+    ) -> Result<
+        HttpResponseOk<latest::networking::RouterConfigurationBgpConfig>,
+        HttpError,
+    >;
+
+    /// Remove BGP configuration from router configuration
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/system/networking/router-configurations/{configuration}/bgp-config",
+        tags = ["system/networking"],
+        versions = VERSION_ADD_ROUTER_CONFIGURATIONS..,
+    }]
+    async fn networking_router_configuration_bgp_config_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::networking::RouterConfigurationSelector>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// List BGP peers in router configuration
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/router-configurations/{configuration}/bgp-peers",
+        tags = ["system/networking"],
+        versions = VERSION_ADD_ROUTER_CONFIGURATIONS..,
+    }]
+    async fn networking_router_configuration_bgp_peer_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::networking::RouterConfigurationSelector>,
+    ) -> Result<
+        HttpResponseOk<Vec<latest::networking::RouterConfigurationBgpPeer>>,
+        HttpError,
+    >;
+
+    /// Add BGP peer to router configuration
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/networking/router-configurations/{configuration}/bgp-peers",
+        tags = ["system/networking"],
+        versions = VERSION_ADD_ROUTER_CONFIGURATIONS..,
+    }]
+    async fn networking_router_configuration_bgp_peer_create(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::networking::RouterConfigurationSelector>,
+        peer: TypedBody<latest::networking::RouterConfigurationBgpPeer>,
+    ) -> Result<
+        HttpResponseCreated<latest::networking::RouterConfigurationBgpPeer>,
+        HttpError,
+    >;
+
+    /// Fetch BGP peer in router configuration
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/router-configurations/{configuration}/bgp-peers/{peer}",
+        tags = ["system/networking"],
+        versions = VERSION_ADD_ROUTER_CONFIGURATIONS..,
+    }]
+    async fn networking_router_configuration_bgp_peer_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<
+            latest::networking::RouterConfigurationBgpPeerSelector,
+        >,
+    ) -> Result<
+        HttpResponseOk<latest::networking::RouterConfigurationBgpPeer>,
+        HttpError,
+    >;
+
+    /// Update BGP peer in router configuration
+    #[endpoint {
+        method = PUT,
+        path = "/v1/system/networking/router-configurations/{configuration}/bgp-peers/{peer}",
+        tags = ["system/networking"],
+        versions = VERSION_ADD_ROUTER_CONFIGURATIONS..,
+    }]
+    async fn networking_router_configuration_bgp_peer_update(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<
+            latest::networking::RouterConfigurationBgpPeerSelector,
+        >,
+        peer: TypedBody<latest::networking::RouterConfigurationBgpPeer>,
+    ) -> Result<
+        HttpResponseOk<latest::networking::RouterConfigurationBgpPeer>,
+        HttpError,
+    >;
+
+    /// Remove BGP peer from router configuration
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/system/networking/router-configurations/{configuration}/bgp-peers/{peer}",
+        tags = ["system/networking"],
+        versions = VERSION_ADD_ROUTER_CONFIGURATIONS..,
+    }]
+    async fn networking_router_configuration_bgp_peer_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<
+            latest::networking::RouterConfigurationBgpPeerSelector,
+        >,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// List static routes in router configuration
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/router-configurations/{configuration}/routes",
+        tags = ["system/networking"],
+        versions = VERSION_ADD_ROUTER_CONFIGURATIONS..,
+    }]
+    async fn networking_router_configuration_static_route_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::networking::RouterConfigurationSelector>,
+    ) -> Result<HttpResponseOk<Vec<latest::networking::StaticRoute>>, HttpError>;
+
+    /// Add static route to router configuration
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/networking/router-configurations/{configuration}/routes",
+        tags = ["system/networking"],
+        versions = VERSION_ADD_ROUTER_CONFIGURATIONS..,
+    }]
+    async fn networking_router_configuration_static_route_create(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::networking::RouterConfigurationSelector>,
+        route: TypedBody<latest::networking::StaticRoute>,
+    ) -> Result<HttpResponseCreated<latest::networking::StaticRoute>, HttpError>;
+
+    /// Fetch static route in router configuration
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/router-configurations/{configuration}/routes/{route}",
+        tags = ["system/networking"],
+        versions = VERSION_ADD_ROUTER_CONFIGURATIONS..,
+    }]
+    async fn networking_router_configuration_static_route_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<
+            latest::networking::RouterConfigurationStaticRouteSelector,
+        >,
+    ) -> Result<HttpResponseOk<latest::networking::StaticRoute>, HttpError>;
+
+    /// Update static route in router configuration
+    #[endpoint {
+        method = PUT,
+        path = "/v1/system/networking/router-configurations/{configuration}/routes/{route}",
+        tags = ["system/networking"],
+        versions = VERSION_ADD_ROUTER_CONFIGURATIONS..,
+    }]
+    async fn networking_router_configuration_static_route_update(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<
+            latest::networking::RouterConfigurationStaticRouteSelector,
+        >,
+        route: TypedBody<latest::networking::StaticRoute>,
+    ) -> Result<HttpResponseOk<latest::networking::StaticRoute>, HttpError>;
+
+    /// Remove static route from router configuration
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/system/networking/router-configurations/{configuration}/routes/{route}",
+        tags = ["system/networking"],
+        versions = VERSION_ADD_ROUTER_CONFIGURATIONS..,
+    }]
+    async fn networking_router_configuration_static_route_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<
+            latest::networking::RouterConfigurationStaticRouteSelector,
+        >,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// List BFD peers in router configuration
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/router-configurations/{configuration}/bfd-peers",
+        tags = ["system/networking"],
+        versions = VERSION_ADD_ROUTER_CONFIGURATIONS..,
+    }]
+    async fn networking_router_configuration_bfd_peer_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::networking::RouterConfigurationSelector>,
+    ) -> Result<HttpResponseOk<Vec<latest::networking::BfdPeer>>, HttpError>;
+
+    /// Add BFD peer to router configuration
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/networking/router-configurations/{configuration}/bfd-peers",
+        tags = ["system/networking"],
+        versions = VERSION_ADD_ROUTER_CONFIGURATIONS..,
+    }]
+    async fn networking_router_configuration_bfd_peer_create(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::networking::RouterConfigurationSelector>,
+        peer: TypedBody<latest::networking::BfdPeer>,
+    ) -> Result<HttpResponseCreated<latest::networking::BfdPeer>, HttpError>;
+
+    /// Fetch BFD peer in router configuration
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/router-configurations/{configuration}/bfd-peers/{peer}",
+        tags = ["system/networking"],
+        versions = VERSION_ADD_ROUTER_CONFIGURATIONS..,
+    }]
+    async fn networking_router_configuration_bfd_peer_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<
+            latest::networking::RouterConfigurationBfdPeerSelector,
+        >,
+    ) -> Result<HttpResponseOk<latest::networking::BfdPeer>, HttpError>;
+
+    /// Update BFD peer in router configuration
+    #[endpoint {
+        method = PUT,
+        path = "/v1/system/networking/router-configurations/{configuration}/bfd-peers/{peer}",
+        tags = ["system/networking"],
+        versions = VERSION_ADD_ROUTER_CONFIGURATIONS..,
+    }]
+    async fn networking_router_configuration_bfd_peer_update(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<
+            latest::networking::RouterConfigurationBfdPeerSelector,
+        >,
+        peer: TypedBody<latest::networking::BfdPeer>,
+    ) -> Result<HttpResponseOk<latest::networking::BfdPeer>, HttpError>;
+
+    /// Remove BFD peer from router configuration
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/system/networking/router-configurations/{configuration}/bfd-peers/{peer}",
+        tags = ["system/networking"],
+        versions = VERSION_ADD_ROUTER_CONFIGURATIONS..,
+    }]
+    async fn networking_router_configuration_bfd_peer_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<
+            latest::networking::RouterConfigurationBfdPeerSelector,
+        >,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// List router configurations used by control-plane services
+    ///
+    /// Returns the router configurations assigned to control-plane
+    /// (service) ports, in ascending priority order. `configured: false`
+    /// means the list was never set and services use the built-in default
+    /// router.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/control-plane-router-configurations",
+        tags = ["system/networking"],
+        versions = VERSION_ADD_ROUTER_CONFIGURATIONS..,
+    }]
+    async fn networking_control_plane_router_configurations_view(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<latest::networking::ControlPlaneRouterConfigurations>,
+        HttpError,
+    >;
+
+    /// Update router configurations used by control-plane services
+    ///
+    /// Replaces the full set of router configurations assigned to
+    /// control-plane (service) ports. An empty set removes external egress
+    /// for services; assign a built-in per-switch configuration
+    /// ("default-switch0" or "default-switch1") to restore the default
+    /// router.
+    #[endpoint {
+        method = PUT,
+        path = "/v1/system/networking/control-plane-router-configurations",
+        tags = ["system/networking"],
+        versions = VERSION_ADD_ROUTER_CONFIGURATIONS..,
+    }]
+    async fn networking_control_plane_router_configurations_update(
+        rqctx: RequestContext<Self::Context>,
+        update: TypedBody<
+            latest::networking::ControlPlaneRouterConfigurationsUpdate,
+        >,
+    ) -> Result<
+        HttpResponseOk<latest::networking::ControlPlaneRouterConfigurations>,
         HttpError,
     >;
 

@@ -33,12 +33,14 @@
 //    001de000-all0   singleton ID for source IP allowlist ("all0" is like "allow")
 //    001de000-7768   singleton ID for webhook probe event ('wh' for 'webhook'
 //                    is ascii 0x77 0x68).
+//    001de000-defa   built-in per-switch router configurations
 
 use std::sync::LazyLock;
 
 pub mod allow_list;
 pub mod project;
 pub mod role_assignment;
+pub mod router_configuration;
 pub mod silo;
 pub mod silo_user;
 pub mod user_builtin;

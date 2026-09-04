@@ -339,6 +339,28 @@ pub mod networking {
     pub use crate::v2026_08_14_01::networking::SwitchPortSettingsCreate;
 
     pub use crate::v2026_06_10_00::networking::BgpConfigUpdate;
+
+    pub use crate::v2026_09_02_00::networking::BfdPeer;
+    pub use crate::v2026_09_02_00::networking::BgpPeerKind;
+    pub use crate::v2026_09_02_00::networking::ControlPlaneRouterConfiguration;
+    pub use crate::v2026_09_02_00::networking::ControlPlaneRouterConfigurationEntry;
+    pub use crate::v2026_09_02_00::networking::ControlPlaneRouterConfigurations;
+    pub use crate::v2026_09_02_00::networking::ControlPlaneRouterConfigurationsUpdate;
+    pub use crate::v2026_09_02_00::networking::RouterConfiguration;
+    pub use crate::v2026_09_02_00::networking::RouterConfigurationBfdPeerSelector;
+    pub use crate::v2026_09_02_00::networking::RouterConfigurationBgpConfig;
+    pub use crate::v2026_09_02_00::networking::RouterConfigurationBgpConfigSet;
+    pub use crate::v2026_09_02_00::networking::RouterConfigurationBgpPeer;
+    pub use crate::v2026_09_02_00::networking::RouterConfigurationBgpPeerSelector;
+    pub use crate::v2026_09_02_00::networking::RouterConfigurationCreate;
+    pub use crate::v2026_09_02_00::networking::RouterConfigurationSelector;
+    pub use crate::v2026_09_02_00::networking::RouterConfigurationStaticRouteSelector;
+    pub use crate::v2026_09_02_00::networking::RouterConfigurationUpdate;
+    pub use crate::v2026_09_02_00::networking::SiloRouterConfiguration;
+    pub use crate::v2026_09_02_00::networking::SiloRouterConfigurationEntry;
+    pub use crate::v2026_09_02_00::networking::SiloRouterConfigurations;
+    pub use crate::v2026_09_02_00::networking::SiloRouterConfigurationsUpdate;
+    pub use crate::v2026_09_02_00::networking::StaticRoute;
 }
 
 pub mod oxql {

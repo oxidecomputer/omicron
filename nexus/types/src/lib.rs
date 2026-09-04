@@ -42,6 +42,7 @@ pub mod inventory;
 pub mod multicast;
 pub mod observed_saga;
 pub mod quiesce;
+pub mod router_configuration;
 pub mod saga;
 pub mod silo;
 pub mod support_bundle;

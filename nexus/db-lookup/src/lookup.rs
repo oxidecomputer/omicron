@@ -354,6 +354,20 @@ impl<'a> LookupPath<'a> {
         BgpAnnounceSet::OwnedName(Root { lookup_root: self }, name)
     }
 
+    pub fn router_configuration_id(
+        self,
+        id: RouterConfigurationUuid,
+    ) -> RouterConfiguration<'a> {
+        RouterConfiguration::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
+    pub fn router_configuration_name_owned(
+        self,
+        name: Name,
+    ) -> RouterConfiguration<'a> {
+        RouterConfiguration::OwnedName(Root { lookup_root: self }, name)
+    }
+
     /// Select a resource of type MulticastGroup, identified by its name
     pub fn multicast_group_name<'b, 'c>(
         self,
@@ -897,6 +911,14 @@ lookup_resource! {
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", uuid_kind = BgpConfigKind} ]
+}
+
+lookup_resource! {
+    name = "RouterConfiguration",
+    ancestors = [],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", uuid_kind = RouterConfigurationKind} ]
 }
 
 lookup_resource! {

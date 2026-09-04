@@ -92,6 +92,7 @@ impl_typed_uuid_kinds! {
         ReconfiguratorSimOp = {},
         ReconfiguratorSimState = {},
         Region = {},
+        RouterConfiguration = {},
         SiloGroup = {},
         SiloUser = {},
         Sitrep = {},
