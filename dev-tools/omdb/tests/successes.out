@@ -294,6 +294,10 @@ task: "blueprint_planner"
     Updates the target blueprint
 
 
+task: "blueprint_pruner"
+    prunes old blueprints from the database
+
+
 task: "blueprint_rendezvous"
     reconciles blueprints and inventory collection, updating Reconfigurator-
     owned rendezvous tables that other subsystems consume
@@ -632,6 +636,12 @@ task: "blueprint_planner"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     blueprint planning explicitly disabled by config!
+
+task: "blueprint_pruner"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: Internal Error: no bp_target rows found
 
 task: "blueprint_rendezvous"
   configured period: every <REDACTED_DURATION>m
@@ -1354,6 +1364,12 @@ task: "blueprint_planner"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     blueprint planning explicitly disabled by config!
+
+task: "blueprint_pruner"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: Internal Error: no bp_target rows found
 
 task: "blueprint_rendezvous"
   configured period: every <REDACTED_DURATION>m
@@ -2231,6 +2247,8 @@ Reconfigurator config:
     tuf repo pruner enabled: true
     disruption policy: terminate
     planner enabled: false
+    blueprint pruner enabled: true
+    blueprint pruner nkeep: 1000
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
@@ -2308,9 +2326,11 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 reconfigurator config updated to version 2:
-    tuf repo pruner enabled:   true (unchanged)
-*   planner enabled:::::::::   false -> true
-    disruption policy:::::::   terminate (unchanged)
+    tuf repo pruner enabled::   true (unchanged)
+*   planner enabled::::::::::   false -> true
+    disruption policy::::::::   terminate (unchanged)
+    blueprint pruner enabled:   true (unchanged)
+    blueprint pruner nkeep:::   1000 (unchanged)
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
@@ -2320,9 +2340,11 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 reconfigurator config updated to version 3:
-    tuf repo pruner enabled:   true (unchanged)
-    planner enabled:::::::::   true (unchanged)
-*   disruption policy:::::::   terminate -> live-migrate or terminate
+    tuf repo pruner enabled::   true (unchanged)
+    planner enabled::::::::::   true (unchanged)
+*   disruption policy::::::::   terminate -> live-migrate or terminate
+    blueprint pruner enabled:   true (unchanged)
+    blueprint pruner nkeep:::   1000 (unchanged)
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
@@ -2337,6 +2359,8 @@ Reconfigurator config:
     tuf repo pruner enabled: true
     disruption policy: live-migrate or terminate
     planner enabled: true
+    blueprint pruner enabled: true
+    blueprint pruner nkeep: 1000
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/

@@ -140,8 +140,9 @@ pub(crate) async fn reconcile_sled_blueprint_availability(
                     //    the sled was still active, inserted a row after the
                     //    snapshot was taken.
                     //
-                    // So in the None case we still write the decommission,
-                    // which does an upsert just like the active-sled write.
+                    // So in the None case we still queue the decommission
+                    // write, which does an upsert just like the active-sled
+                    // write.
                     //
                     // * With case 1 we'll insert a fresh row.
                     // * With case 2 we'll tombstone the racing row.
@@ -155,6 +156,40 @@ pub(crate) async fn reconcile_sled_blueprint_availability(
 
         to_write.insert_unique(input).expect(
             "blueprint_sleds is keyed by sled ID, so each sled appears once",
+        );
+    }
+
+    // Rows still here are for sleds the blueprint doesn't mention. We leave
+    // them untouched either way, but account for them separately:
+    //
+    // * An active row can only be left over on a stale blueprint predating a
+    //   sled another Nexus already recorded, so it's worth calling out.
+    // * A decommissioned row is a terminal tombstone. The blueprint doesn't
+    //   prune decommissioned sleds today, but once it does this will be the
+    //   steady state for every pruned sled, so it isn't noteworthy.
+    //
+    // Do this before doing the writes below so that the step at the end can
+    // exit on error without us having to remember to log
+    // active_not_in_blueprint at the end.
+    let mut active_not_in_blueprint = Vec::new();
+    for row in &existing_db_sleds {
+        match row.state()? {
+            SledBpAvailabilityState::Active { .. } => {
+                active_not_in_blueprint.push(row.sled_id());
+            }
+            SledBpAvailabilityState::Decommissioned => {
+                stats.num_decommissioned_not_in_blueprint += 1;
+            }
+        }
+    }
+    stats.num_not_in_blueprint = active_not_in_blueprint.len();
+    if !active_not_in_blueprint.is_empty() {
+        info!(
+            opctx.log,
+            "left active rows for sleds absent from the target blueprint \
+             untouched; this Nexus may be acting on a stale blueprint";
+            "num_not_in_blueprint" => stats.num_not_in_blueprint,
+            "sled_ids" => ?active_not_in_blueprint,
         );
     }
 
@@ -198,7 +233,7 @@ pub(crate) async fn reconcile_sled_blueprint_availability(
                     );
                 }
             }
-            // Do not add `.context()` on this error, since
+            // Do not add `.context()` to this error, since
             // SledBpAvailabilityWriteError's Display already produces a
             // complete message.
             return Err(anyhow::Error::from(err));
@@ -206,36 +241,6 @@ pub(crate) async fn reconcile_sled_blueprint_availability(
     };
     for write in &writes {
         write.log_to_and_count(&opctx.log, &mut stats);
-    }
-
-    // Rows still here are for sleds the blueprint doesn't mention. We leave
-    // them untouched either way, but account for them separately:
-    //
-    // * An active row can only be left over on a stale blueprint predating a
-    //   sled another Nexus already recorded, so it's worth calling out.
-    // * A decommissioned row is a terminal tombstone. The blueprint doesn't
-    //   prune decommissioned sleds today, but once it does this will be the
-    //   steady state for every pruned sled, so it isn't noteworthy.
-    let mut active_not_in_blueprint = Vec::new();
-    for row in &existing_db_sleds {
-        match row.state()? {
-            SledBpAvailabilityState::Active { .. } => {
-                active_not_in_blueprint.push(row.sled_id());
-            }
-            SledBpAvailabilityState::Decommissioned => {
-                stats.num_decommissioned_not_in_blueprint += 1;
-            }
-        }
-    }
-    stats.num_not_in_blueprint = active_not_in_blueprint.len();
-    if !active_not_in_blueprint.is_empty() {
-        info!(
-            opctx.log,
-            "left active rows for sleds absent from the target blueprint \
-             untouched; this Nexus may be acting on a stale blueprint";
-            "num_not_in_blueprint" => stats.num_not_in_blueprint,
-            "sled_ids" => ?active_not_in_blueprint,
-        );
     }
 
     Ok(stats)

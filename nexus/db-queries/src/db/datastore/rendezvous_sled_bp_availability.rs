@@ -45,7 +45,7 @@ pub enum SledBpAvailabilityUpsertOutcome {
     /// This can happen because:
     ///
     /// - the stored row is at an equal or newer `update_disposition` generation;
-    /// - or, the sled is decommissioned.
+    /// - or, the stored row corresponding to the sled is decommissioned.
     Rejected,
 }
 
@@ -79,7 +79,7 @@ impl IdOrdItem for SledBpAvailabilityWrite {
 
 impl SledBpAvailabilityWrite {
     /// Log this write to the given logger, and increment the corresponding
-    /// scount in `stats`.
+    /// count in `stats`.
     pub fn log_to_and_count(
         &self,
         log: &slog::Logger,
@@ -278,6 +278,11 @@ impl DataStore {
     }
 
     /// Write the availability of each sled in `sleds` to the database.
+    ///
+    /// Writes are issued one sled at a time, and are stopped at the first
+    /// error. In case of a failure after a partial write, the returned
+    /// [`SledBpAvailabilityWriteError`] contains information about the sleds
+    /// that succeeded.
     pub async fn rendezvous_sled_bp_availability_write(
         &self,
         opctx: &OpContext,
@@ -302,11 +307,6 @@ impl DataStore {
     }
 
     /// on_connection variant of `rendezvous_sled_bp_availability_write`.
-    ///
-    /// Writes are issued one sled at a time, and are stopped at the first
-    /// error. In case of a failure after a partial write, the returned
-    /// [`SledBpAvailabilityWriteError`] contains information about the sleds
-    /// that succeeded.
     ///
     /// The caller is responsible for authorizing the operation.
     pub(crate) async fn rendezvous_sled_bp_availability_write_on_connection(

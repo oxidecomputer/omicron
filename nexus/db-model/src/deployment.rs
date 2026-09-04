@@ -198,7 +198,7 @@ impl From<DbBpSource> for BlueprintSource {
 }
 
 /// See [`nexus_types::deployment::BlueprintTarget`].
-#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[derive(Queryable, Clone, Debug, Eq, PartialEq, Selectable, Insertable)]
 #[diesel(table_name = bp_target)]
 pub struct BpTarget {
     pub version: SqlU32,

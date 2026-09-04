@@ -2246,6 +2246,8 @@ table! {
         time_modified -> Timestamptz,
         tuf_repo_pruner_enabled -> Bool,
         disruption_policy -> crate::enums::ReconfiguratorDisruptionPolicyEnum,
+        blueprint_pruner_enabled -> Bool,
+        blueprint_pruner_nkeep -> Int8,
     }
 }
 
