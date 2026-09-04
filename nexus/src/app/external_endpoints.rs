@@ -48,7 +48,6 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::bail_unless;
 use openssl::pkey::PKey;
-use openssl::x509::X509;
 use rustls::sign::CertifiedKey;
 use serde::Serialize;
 use serde_with::SerializeDisplay;
@@ -314,41 +313,18 @@ impl ExternalEndpoint {
         // time.
         //
         // The fault management certificate diagnosis engine
-        // (`nexus_fm::diagnosis::certificate`) predicts this choice from the
-        // same rule, so that it alerts when the certificate we will actually
-        // serve is expiring or expired. If the rule here changes, the engine
-        // (and `ObservedSiloCertificates::best_certificate`, which it uses)
-        // must change with it. When several certificates share the latest
-        // expiration, the engine breaks the tie toward the greatest
-        // certificate id; this loop may settle on a different one of them,
-        // but they expire at the same time, so the engine's prediction of
-        // when the served certificate expires holds either way.
-
-        // This would be cleaner if Asn1Time impl'd Ord or even just a way to
-        // convert it to a Unix timestamp or any other comparable timestamp.
-        let mut latest_expiration: Option<&TlsCertificate> = None;
-        for t in &self.tls_certs {
-            // We'll choose this certificate (so far) if we find that it's
-            // anything other than "earlier" than the best we've seen so far.
-            // That includes the case where we haven't seen any so far, where
-            // this one is greater than or equal to the best so far, as well as
-            // the case where they're incomparable for whatever reason.  (This
-            // ensures that we always pick at least one.)
-            if latest_expiration.is_none()
-                || !matches!(
-                    t.parsed.not_after().partial_cmp(
-                        latest_expiration.unwrap().parsed.not_after()
-                    ),
-                    Some(std::cmp::Ordering::Less)
-                )
-            {
-                latest_expiration = Some(t);
-            }
-        }
-
-        latest_expiration.ok_or_else(|| {
-            anyhow!("silo {} has no usable certificates", self.silo_id)
-        })
+        // (`nexus_fm::diagnosis::certificate`) predicts this choice with the
+        // same rule (`ObservedSiloCertificates::best_certificate`), so that it
+        // alerts when the certificate we will actually serve is expiring or
+        // expired. If the rule here changes, that one must change with it.
+        // When several certificates share the latest expiration, the engine
+        // breaks the tie toward the greatest certificate id; this may settle
+        // on a different one of them, but they expire at the same time, so
+        // the engine's prediction of when the served certificate expires
+        // holds either way.
+        self.tls_certs.iter().max_by_key(|t| t.validity().not_after).ok_or_else(
+            || anyhow!("silo {} has no usable certificates", self.silo_id),
+        )
     }
 }
 
@@ -407,13 +383,6 @@ pub(crate) struct TlsCertificate {
     // NOTE: It's important that we do not serialize the private key!
     #[serde(skip)]
     certified_key: Arc<CertifiedKey>,
-
-    /// Parsed representation of the whole certificate chain
-    ///
-    /// This is used to extract metadata like the expiration time.
-    // NOTE: It's important that we do not serialize the private key!
-    #[serde(skip)]
-    parsed: X509,
 
     /// Validity window of the leaf certificate
     #[serde(skip)]
@@ -496,7 +465,7 @@ impl TryFrom<Certificate> for TlsCertificate {
         let validity = omicron_certificates::validity(&end_cert)
             .context("reading leaf certificate validity")?;
 
-        Ok(TlsCertificate { certified_key, digest, parsed: end_cert, validity })
+        Ok(TlsCertificate { certified_key, digest, validity })
     }
 }
 
@@ -911,7 +880,9 @@ mod test {
 
     fn cert_matches(tls_cert: &TlsCertificate, cert: &Certificate) -> bool {
         let parse_right = openssl::x509::X509::from_pem(&cert.cert).unwrap();
-        tls_cert.parsed == parse_right
+        let digest_right =
+            parse_right.digest(openssl::hash::MessageDigest::sha256()).unwrap();
+        tls_cert.digest == hex::encode(&digest_right)
     }
 
     #[test]
