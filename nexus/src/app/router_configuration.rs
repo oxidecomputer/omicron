@@ -14,6 +14,7 @@ use nexus_db_model::{
 use nexus_db_queries::context::OpContext;
 use nexus_types::external_api::networking;
 use nexus_types::identity::Resource;
+use nexus_types::router_configuration::is_builtin_router_configuration_id;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
     CreateResult, DeleteResult, Error, ListResultVec, LookupResult, Name,
@@ -22,6 +23,7 @@ use omicron_common::api::external::{
 use omicron_uuid_kinds::{GenericUuid, RouterConfigurationUuid};
 use sled_agent_client::types::RouterListEntry;
 use std::collections::{BTreeSet, HashMap};
+use uuid::Uuid;
 
 /// Maximum number of router configurations that may be assigned to a silo.
 ///

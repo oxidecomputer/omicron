@@ -457,6 +457,10 @@ task: "region_snapshot_replacement_step"
     the step saga for them
 
 
+task: "router_list_manager"
+    propagates per-port tunnel-router lists to sled-agents
+
+
 task: "saga_recovery"
     recovers sagas assigned to this Nexus
 
@@ -973,6 +977,12 @@ task: "region_snapshot_replacement_step"
     total step saga invoked ok: 0
     total steps set to volume_deleted ok: 0
     errors: 0
+
+task: "router_list_manager"
+  configured period: every <REDACTED_DURATION>s
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+warning: unknown background task: "router_list_manager" (don't know how to interpret details: Object {"errors": Array [], "ports": Number(0), "pushed": Number(0), "sleds": Number(0)})
 
 task: "saga_recovery"
   configured period: every <REDACTED_DURATION>m
@@ -1695,6 +1705,12 @@ task: "region_snapshot_replacement_step"
     total step saga invoked ok: 0
     total steps set to volume_deleted ok: 0
     errors: 0
+
+task: "router_list_manager"
+  configured period: every <REDACTED_DURATION>s
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+warning: unknown background task: "router_list_manager" (don't know how to interpret details: Object {"errors": Array [], "ports": Number(0), "pushed": Number(0), "sleds": Number(0)})
 
 task: "saga_recovery"
   configured period: every <REDACTED_DURATION>m
