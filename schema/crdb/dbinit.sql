@@ -5881,7 +5881,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone (
     -- worthwhile.
 
     -- Some zones have a second service.  Like the primary one, the meaning of
-    -- this is zone-type-dependent.
+    -- this is zone-type-dependent.  This should be used for additional underlay
+    -- IPs, _not_ external IP addresses.  Those are stored in the child table
+    -- `bp_omicron_zone_external_ip` with a reference to this row.
     second_service_ip INET,
     second_service_port INT4
         CHECK (second_service_port IS NULL
@@ -5910,22 +5912,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone (
     -- Properties specific to Nexus zones
     nexus_external_tls BOOLEAN,
     nexus_external_dns_servers INET ARRAY,
-
-    -- Source NAT configuration (currently used for boundary NTP only)
-    snat_ip INET,
-    snat_first_port INT4
-        CHECK (snat_first_port IS NULL OR snat_first_port BETWEEN 0 AND 65535),
-    snat_last_port INT4
-        CHECK (snat_last_port IS NULL OR snat_last_port BETWEEN 0 AND 65535),
-
-    -- For some zones, either primary_service_ip or second_service_ip (but not
-    -- both!) is an external IP address. For such zones, this is the ID of that
-    -- external IP. In general this is a foreign key into
-    -- omicron.public.external_ip, though the row many not exist: if this
-    -- blueprint is old, it's possible the IP has been deleted, and if this
-    -- blueprint has not yet been realized, it's possible the IP hasn't been
-    -- created yet.
-    external_ip_id UUID,
 
     filesystem_pool UUID NOT NULL,
 
@@ -6007,6 +5993,56 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone_nic (
         (ip IS NULL) = (subnet IS NULL) AND
         (ipv6 IS NULL) = (ipv6_subnet IS NULL)
     )
+);
+
+-- The external IP addresses of a zone in a `bp_omicron_zone`.
+--
+-- Zones with external networking have one or more external IPs. There is one
+-- row here per external IP. Each blueprint external IP is an *allocated* IP, so it
+-- carries its `external_ip_id` (an FK into `omicron.public.external_ip`,
+-- though the row may not exist: if this blueprint is old, the IP may have been
+-- deleted, and if it has not yet been realized, the IP may not exist yet). The
+-- kind of external IP is inferred from the owning zone's `zone_type` together
+-- with which port columns are set:
+--
+--  - Nexus:        a floating IP (`ip` only).
+--  - External DNS: a floating IP with a port (`ip` + `port`).
+--  - Boundary NTP: a source-NAT IP (`ip` + `snat_first_port`/`snat_last_port`).
+CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone_external_ip (
+    -- foreign key into the `blueprint` table
+    blueprint_id UUID NOT NULL,
+
+    -- foreign key into the `bp_omicron_zone` table
+    zone_id UUID NOT NULL,
+
+    -- ID of the external IP allocation (foreign key into
+    -- `omicron.public.external_ip`)
+    external_ip_id UUID NOT NULL,
+
+    -- the external IP address itself
+    ip INET NOT NULL,
+
+    -- the port for a floating IP with an address (external DNS); NULL otherwise
+    port INT4
+        CHECK (port IS NULL OR port BETWEEN 0 AND 65535),
+
+    -- the source-NAT port range (boundary NTP); NULL otherwise
+    snat_first_port INT4
+        CHECK (snat_first_port IS NULL OR snat_first_port BETWEEN 0 AND 65535),
+    snat_last_port INT4
+        CHECK (snat_last_port IS NULL OR snat_last_port BETWEEN 0 AND 65535),
+
+    -- must provide both SNAT ports
+    CONSTRAINT both_snat_ports CHECK (
+        (snat_first_port IS NULL) = (snat_last_port IS NULL)
+    ),
+
+    -- may not provide _both_ `port` and any SNAT port
+    CONSTRAINT only_port_or_snat_ports CHECK (
+        NOT ((port IS NOT NULL) AND (snat_first_port IS NOT NULL))
+    ),
+
+    PRIMARY KEY (blueprint_id, external_ip_id)
 );
 
 -- Blueprint information related to clickhouse cluster management
@@ -9464,7 +9500,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '297.0.0', NULL)
+    (TRUE, NOW(), NOW(), '298.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

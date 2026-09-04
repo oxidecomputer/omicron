@@ -24,6 +24,7 @@ use nexus_db_model::RendezvousSledBpAvailabilityDecommission;
 use nexus_db_model::RendezvousSledBpAvailabilityUpdate;
 use nexus_db_model::SledBlueprintAvailabilityInput;
 use nexus_db_model::SledBpAvailabilityState;
+use nexus_types::internal_api::background::SledBlueprintAvailabilityRendezvousStats;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
@@ -31,6 +32,8 @@ use omicron_generation_kinds::UpdateDispositionGeneration;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
+use slog::debug;
+use slog::info;
 
 /// The result of a generation-guarded availability upsert.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -74,6 +77,89 @@ impl IdOrdItem for SledBpAvailabilityWrite {
     id_upcast!();
 }
 
+impl SledBpAvailabilityWrite {
+    /// Log this write to the given logger, and increment the corresponding
+    /// scount in `stats`.
+    pub fn log_to_and_count(
+        &self,
+        log: &slog::Logger,
+        stats: &mut SledBlueprintAvailabilityRendezvousStats,
+    ) {
+        let sled_id = self.sled_id;
+        match self.outcome {
+            SledBpAvailabilityWriteOutcome::Active {
+                availability,
+                update_disposition_generation,
+                outcome: SledBpAvailabilityUpsertOutcome::Written,
+            } => match availability {
+                ActiveSledBpAvailability::Available => {
+                    stats.num_marked_available += 1;
+                    info!(
+                        log,
+                        "marked sled available for provisioning";
+                        "sled_id" => %sled_id,
+                        "update_disposition_generation" =>
+                            %update_disposition_generation,
+                    );
+                }
+                ActiveSledBpAvailability::Unavailable => {
+                    stats.num_marked_unavailable += 1;
+                    info!(
+                        log,
+                        "marked sled unavailable for provisioning";
+                        "sled_id" => %sled_id,
+                        "update_disposition_generation" =>
+                            %update_disposition_generation,
+                    );
+                }
+            },
+            SledBpAvailabilityWriteOutcome::Active {
+                availability,
+                update_disposition_generation,
+                outcome: SledBpAvailabilityUpsertOutcome::Rejected,
+            } => {
+                // We decided to perform a write, but a duelling Nexus
+                // recorded an equal-or-newer generation (or decommissioned
+                // the sled) first, so the row already reflects
+                // current-or-newer state. From our perspective, this is an
+                // unchanged sled.
+                stats.num_unchanged += 1;
+                debug!(
+                    log,
+                    "left sled availability row as-is: stored row is at an \
+                     equal or newer generation, or the sled is decommissioned";
+                    "sled_id" => %sled_id,
+                    "availability" =>
+                        DbSledBpAvailability::from(availability).label(),
+                    "update_disposition_generation" =>
+                        %update_disposition_generation,
+                );
+            }
+            SledBpAvailabilityWriteOutcome::Decommission(
+                SledBpAvailabilityDecommissionOutcome::Decommissioned,
+            ) => {
+                stats.num_decommissioned += 1;
+                info!(
+                    log,
+                    "decommissioned sled in rendezvous table";
+                    "sled_id" => %sled_id,
+                );
+            }
+            SledBpAvailabilityWriteOutcome::Decommission(
+                SledBpAvailabilityDecommissionOutcome::AlreadyDecommissioned,
+            ) => {
+                // Another Nexus decommissioned it first.
+                stats.num_already_decommissioned += 1;
+                debug!(
+                    log,
+                    "left sled availability row as-is: already decommissioned";
+                    "sled_id" => %sled_id,
+                );
+            }
+        }
+    }
+}
+
 /// The result of writing one blueprint sled's availability to the
 /// `rendezvous_sled_bp_availability` table.
 ///
@@ -96,28 +182,34 @@ pub enum SledBpAvailabilityWriteOutcome {
     Decommission(SledBpAvailabilityDecommissionOutcome),
 }
 
-impl SledBpAvailabilityWriteOutcome {
-    /// Return true if the write changed the database.
-    pub fn applied(&self) -> bool {
-        match self {
-            SledBpAvailabilityWriteOutcome::Active { outcome, .. } => {
-                match outcome {
-                    SledBpAvailabilityUpsertOutcome::Written => true,
-                    SledBpAvailabilityUpsertOutcome::Rejected => false,
-                }
-            }
-            SledBpAvailabilityWriteOutcome::Decommission(outcome) => {
-                match outcome {
-                    SledBpAvailabilityDecommissionOutcome::Decommissioned => {
-                        true
-                    }
-                    SledBpAvailabilityDecommissionOutcome::AlreadyDecommissioned => {
-                        false
-                    }
-                }
-            }
-        }
-    }
+/// An error produced while writing a batch of sleds to
+/// `rendezvous_sled_bp_availability`.
+#[derive(Debug, thiserror::Error)]
+pub enum SledBpAvailabilityWriteError {
+    /// The write was not started due to an error (e.g. authz/connection
+    /// failed).
+    #[error("failed to start writing sled availability")]
+    NotStarted(#[source] Error),
+
+    /// The write failed in the middle of the operation.
+    #[error(
+        "failed to write availability for sled {failed_sled_id} after \
+         {} write(s) completed ({num_not_attempted} not attempted)",
+        completed.len()
+    )]
+    Failed {
+        /// Information about the sleds that were successfully written before
+        /// the failure.
+        completed: IdOrdMap<SledBpAvailabilityWrite>,
+        /// The UUID of the sled that failed to be written.
+        failed_sled_id: SledUuid,
+        /// The number of sleds for which writes were not attempted, not
+        /// including the failed sled.
+        num_not_attempted: usize,
+        /// The underlying error.
+        #[source]
+        error: Error,
+    },
 }
 
 impl DataStore {
@@ -190,9 +282,16 @@ impl DataStore {
         opctx: &OpContext,
         blueprint_id: BlueprintUuid,
         sleds: IdOrdMap<SledBlueprintAvailabilityInput>,
-    ) -> Result<IdOrdMap<SledBpAvailabilityWrite>, Error> {
-        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
-        let conn = self.pool_connection_authorized(opctx).await?;
+    ) -> Result<IdOrdMap<SledBpAvailabilityWrite>, SledBpAvailabilityWriteError>
+    {
+        opctx
+            .authorize(authz::Action::Modify, &authz::FLEET)
+            .await
+            .map_err(SledBpAvailabilityWriteError::NotStarted)?;
+        let conn = self
+            .pool_connection_authorized(opctx)
+            .await
+            .map_err(SledBpAvailabilityWriteError::NotStarted)?;
         Self::rendezvous_sled_bp_availability_write_on_connection(
             &conn,
             blueprint_id,
@@ -203,58 +302,74 @@ impl DataStore {
 
     /// on_connection variant of `rendezvous_sled_bp_availability_write`.
     ///
+    /// Writes are issued one sled at a time, and are stopped at the first
+    /// error. In case of a failure after a partial write, the returned
+    /// [`SledBpAvailabilityWriteError`] contains information about the sleds
+    /// that succeeded.
+    ///
     /// The caller is responsible for authorizing the operation.
     pub(crate) async fn rendezvous_sled_bp_availability_write_on_connection(
         conn: &async_bb8_diesel::Connection<DbConnection>,
         blueprint_id: BlueprintUuid,
         sleds: IdOrdMap<SledBlueprintAvailabilityInput>,
-    ) -> Result<IdOrdMap<SledBpAvailabilityWrite>, Error> {
+    ) -> Result<IdOrdMap<SledBpAvailabilityWrite>, SledBpAvailabilityWriteError>
+    {
+        let num_sleds = sleds.len();
         let mut writes = IdOrdMap::new();
         for SledBlueprintAvailabilityInput { sled_id, state } in sleds {
-            let outcome = match state {
+            let result = match state {
                 SledBpAvailabilityState::Active {
                     availability,
                     update_disposition_generation,
                 } => {
-                    let outcome =
-                        Self::rendezvous_sled_bp_availability_upsert_on_connection(
-                            conn,
-                            RendezvousSledBpAvailabilityUpdate::new(
-                                sled_id,
-                                availability,
-                                update_disposition_generation,
-                                blueprint_id,
-                            ),
-                        )
-                        .await
-                        .map_err(|e| {
-                            e.internal_context(format!(
-                                "failed to upsert availability for sled \
-                                 {sled_id}"
-                            ))
-                        })?;
-                    SledBpAvailabilityWriteOutcome::Active {
+                    Self::rendezvous_sled_bp_availability_upsert_on_connection(
+                        conn,
+                        RendezvousSledBpAvailabilityUpdate::new(
+                            sled_id,
+                            availability,
+                            update_disposition_generation,
+                            blueprint_id,
+                        ),
+                    )
+                    .await
+                    .map(|outcome| SledBpAvailabilityWriteOutcome::Active {
                         availability,
                         update_disposition_generation,
                         outcome,
-                    }
+                    })
+                    .map_err(|e| {
+                        e.internal_context(format!(
+                            "failed to upsert availability for sled {sled_id}"
+                        ))
+                    })
                 }
                 SledBpAvailabilityState::Decommissioned => {
-                    let outcome =
-                        Self::rendezvous_sled_bp_availability_decommission_on_connection(
-                            conn,
-                            RendezvousSledBpAvailabilityDecommission::new(
-                                sled_id,
-                                blueprint_id,
-                            ),
-                        )
-                        .await
-                        .map_err(|e| {
-                            e.internal_context(format!(
-                                "failed to decommission sled {sled_id}"
-                            ))
-                        })?;
-                    SledBpAvailabilityWriteOutcome::Decommission(outcome)
+                    Self::rendezvous_sled_bp_availability_decommission_on_connection(
+                        conn,
+                        RendezvousSledBpAvailabilityDecommission::new(
+                            sled_id,
+                            blueprint_id,
+                        ),
+                    )
+                    .await
+                    .map(SledBpAvailabilityWriteOutcome::Decommission)
+                    .map_err(|e| {
+                        e.internal_context(format!(
+                            "failed to decommission sled {sled_id}"
+                        ))
+                    })
+                }
+            };
+            let outcome = match result {
+                Ok(outcome) => outcome,
+                Err(error) => {
+                    let num_not_attempted = num_sleds - writes.len() - 1;
+                    return Err(SledBpAvailabilityWriteError::Failed {
+                        completed: writes,
+                        failed_sled_id: sled_id,
+                        num_not_attempted,
+                        error,
+                    });
                 }
             };
             writes
@@ -385,6 +500,7 @@ impl DataStore {
 mod tests {
     use super::*;
     use crate::db::pub_test_utils::TestDatabase;
+    use async_bb8_diesel::AsyncSimpleConnection;
     use iddqd::id_ord_map;
     use nexus_db_model::ActiveSledBpAvailability;
     use nexus_db_model::SledBpAvailabilityState;
@@ -796,6 +912,311 @@ mod tests {
                     "case {case:?}: expected a check-constraint violation, \
                      got {other:?}"
                 ),
+            }
+        }
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn bulk_write_reports_each_sled_outcome() {
+        let logctx =
+            dev::test_setup_log("bulk_write_reports_each_sled_outcome");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let bp1 = BlueprintUuid::new_v4();
+        let bp2 = BlueprintUuid::new_v4();
+
+        let fresh = SledUuid::new_v4();
+        let stale_gen = SledUuid::new_v4();
+        let tombstone = SledUuid::new_v4();
+
+        upsert_one(
+            opctx,
+            datastore,
+            stale_gen,
+            ActiveSledBpAvailability::Available,
+            2,
+            bp1,
+        )
+        .await;
+
+        let active =
+            |availability, generation: u32| SledBpAvailabilityState::Active {
+                availability,
+                update_disposition_generation:
+                    UpdateDispositionGeneration::from(generation),
+            };
+        let writes = datastore
+            .rendezvous_sled_bp_availability_write(
+                opctx,
+                bp2,
+                id_ord_map! {
+                    SledBlueprintAvailabilityInput {
+                        sled_id: fresh,
+                        state: active(ActiveSledBpAvailability::Available, 1),
+                    },
+                    SledBlueprintAvailabilityInput {
+                        sled_id: stale_gen,
+                        state: active(ActiveSledBpAvailability::Unavailable, 1),
+                    },
+                    SledBlueprintAvailabilityInput {
+                        sled_id: tombstone,
+                        state: SledBpAvailabilityState::Decommissioned,
+                    },
+                },
+            )
+            .await
+            .expect("bulk write succeeded");
+
+        let expected = id_ord_map! {
+            SledBpAvailabilityWrite {
+                sled_id: fresh,
+                outcome: SledBpAvailabilityWriteOutcome::Active {
+                    availability: ActiveSledBpAvailability::Available,
+                    update_disposition_generation:
+                        UpdateDispositionGeneration::from(1u32),
+                    outcome: SledBpAvailabilityUpsertOutcome::Written,
+                },
+            },
+            SledBpAvailabilityWrite {
+                sled_id: stale_gen,
+                outcome: SledBpAvailabilityWriteOutcome::Active {
+                    availability: ActiveSledBpAvailability::Unavailable,
+                    update_disposition_generation:
+                        UpdateDispositionGeneration::from(1u32),
+                    outcome: SledBpAvailabilityUpsertOutcome::Rejected,
+                },
+            },
+            SledBpAvailabilityWrite {
+                sled_id: tombstone,
+                outcome: SledBpAvailabilityWriteOutcome::Decommission(
+                    SledBpAvailabilityDecommissionOutcome::Decommissioned,
+                ),
+            },
+        };
+        assert_eq!(writes, expected);
+
+        let rows = datastore
+            .rendezvous_sled_bp_availability_list_all_batched(opctx)
+            .await
+            .expect("listed rows");
+        let blueprint_id_of = |sled_id: SledUuid| {
+            rows.get(&sled_id)
+                .unwrap_or_else(|| panic!("row for sled {sled_id}"))
+                .blueprint_id()
+        };
+        assert_eq!(blueprint_id_of(fresh), bp2);
+        assert_eq!(
+            blueprint_id_of(stale_gen),
+            bp1,
+            "rejected write must not touch the row"
+        );
+        assert_eq!(blueprint_id_of(tombstone), bp2);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn bulk_write_stops_at_first_error() {
+        let logctx = dev::test_setup_log("bulk_write_stops_at_first_error");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Use fixed sled IDs so we can cause a deterministic failure.
+        let sled = |n: u128| SledUuid::from_u128(n);
+        let rejected_upsert = sled(3);
+        let rejected_decommission = sled(13);
+
+        // Inject a deterministic failure via a test-only CHECK constraint.
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        conn.batch_execute_async(&format!(
+            "ALTER TABLE omicron.public.rendezvous_sled_bp_availability \
+             ADD CONSTRAINT test_reject_sleds \
+             CHECK (sled_id NOT IN ('{rejected_upsert}', \
+             '{rejected_decommission}'))"
+        ))
+        .await
+        .expect("added the test constraint");
+
+        let bp = BlueprintUuid::new_v4();
+        let available = SledBpAvailabilityState::Active {
+            availability: ActiveSledBpAvailability::Available,
+            update_disposition_generation: UpdateDispositionGeneration::from(
+                1u32,
+            ),
+        };
+        let available_written = SledBpAvailabilityWriteOutcome::Active {
+            availability: ActiveSledBpAvailability::Available,
+            update_disposition_generation: UpdateDispositionGeneration::from(
+                1u32,
+            ),
+            outcome: SledBpAvailabilityUpsertOutcome::Written,
+        };
+        let decommissioned = SledBpAvailabilityWriteOutcome::Decommission(
+            SledBpAvailabilityDecommissionOutcome::Decommissioned,
+        );
+
+        struct Case {
+            name: &'static str,
+            inputs: IdOrdMap<SledBlueprintAvailabilityInput>,
+            expected_completed: IdOrdMap<SledBpAvailabilityWrite>,
+            expected_failed_sled_id: SledUuid,
+            expected_num_not_attempted: usize,
+            expected_context: String,
+            expected_absent: Vec<SledUuid>,
+        }
+
+        let cases = [
+            Case {
+                name: "upsert fails on the third of five sleds",
+                inputs: id_ord_map! {
+                    SledBlueprintAvailabilityInput {
+                        sled_id: sled(1),
+                        state: available,
+                    },
+                    SledBlueprintAvailabilityInput {
+                        sled_id: sled(2),
+                        state: SledBpAvailabilityState::Decommissioned,
+                    },
+                    SledBlueprintAvailabilityInput {
+                        sled_id: rejected_upsert,
+                        state: available,
+                    },
+                    SledBlueprintAvailabilityInput {
+                        sled_id: sled(4),
+                        state: SledBpAvailabilityState::Decommissioned,
+                    },
+                    SledBlueprintAvailabilityInput {
+                        sled_id: sled(5),
+                        state: available,
+                    },
+                },
+                expected_completed: id_ord_map! {
+                    SledBpAvailabilityWrite {
+                        sled_id: sled(1),
+                        outcome: available_written,
+                    },
+                    SledBpAvailabilityWrite {
+                        sled_id: sled(2),
+                        outcome: decommissioned,
+                    },
+                },
+                expected_failed_sled_id: rejected_upsert,
+                expected_num_not_attempted: 2,
+                expected_context: format!(
+                    "failed to upsert availability for sled {rejected_upsert}"
+                ),
+                expected_absent: vec![rejected_upsert, sled(4), sled(5)],
+            },
+            Case {
+                name: "decommission fails on the third of four sleds",
+                inputs: id_ord_map! {
+                    SledBlueprintAvailabilityInput {
+                        sled_id: sled(11),
+                        state: available,
+                    },
+                    SledBlueprintAvailabilityInput {
+                        sled_id: sled(12),
+                        state: available,
+                    },
+                    SledBlueprintAvailabilityInput {
+                        sled_id: rejected_decommission,
+                        state: SledBpAvailabilityState::Decommissioned,
+                    },
+                    SledBlueprintAvailabilityInput {
+                        sled_id: sled(14),
+                        state: available,
+                    },
+                },
+                expected_completed: id_ord_map! {
+                    SledBpAvailabilityWrite {
+                        sled_id: sled(11),
+                        outcome: available_written,
+                    },
+                    SledBpAvailabilityWrite {
+                        sled_id: sled(12),
+                        outcome: available_written,
+                    },
+                },
+                expected_failed_sled_id: rejected_decommission,
+                expected_num_not_attempted: 1,
+                expected_context: format!(
+                    "failed to decommission sled {rejected_decommission}"
+                ),
+                expected_absent: vec![rejected_decommission, sled(14)],
+            },
+        ];
+
+        for case in cases {
+            let name = case.name;
+            let err = datastore
+                .rendezvous_sled_bp_availability_write(opctx, bp, case.inputs)
+                .await
+                .expect_err("the injected constraint fails the batch");
+            match err {
+                SledBpAvailabilityWriteError::Failed {
+                    completed,
+                    failed_sled_id,
+                    num_not_attempted,
+                    error,
+                } => {
+                    assert_eq!(completed, case.expected_completed, "{name}");
+                    assert_eq!(
+                        failed_sled_id, case.expected_failed_sled_id,
+                        "{name}"
+                    );
+                    assert_eq!(
+                        num_not_attempted, case.expected_num_not_attempted,
+                        "{name}"
+                    );
+                    match error {
+                        Error::InternalError { internal_message } => {
+                            assert!(
+                                internal_message
+                                    .contains(&case.expected_context),
+                                "{name}: internal message {internal_message:?} \
+                                 must contain {:?}",
+                                case.expected_context,
+                            );
+                            assert!(
+                                internal_message.contains("CHECK constraint"),
+                                "{name}: internal message {internal_message:?} \
+                                 must name the CHECK constraint violation",
+                            );
+                        }
+                        other => panic!(
+                            "{name}: expected an internal error, got {other:?}"
+                        ),
+                    }
+                }
+                SledBpAvailabilityWriteError::NotStarted(error) => {
+                    panic!("{name}: the write must have started, got {error:?}")
+                }
+            }
+
+            let rows = datastore
+                .rendezvous_sled_bp_availability_list_all_batched(opctx)
+                .await
+                .expect("listed rows");
+            for write in &case.expected_completed {
+                let row = rows.get(&write.sled_id).unwrap_or_else(|| {
+                    panic!(
+                        "{name}: completed write for sled {} is durable",
+                        write.sled_id
+                    )
+                });
+                assert_eq!(row.blueprint_id(), bp, "{name}");
+            }
+            for sled_id in case.expected_absent {
+                assert!(
+                    rows.get(&sled_id).is_none(),
+                    "{name}: no row must exist for sled {sled_id}, which \
+                     failed or was not attempted",
+                );
             }
         }
 

@@ -190,6 +190,7 @@ pub use region_snapshot_replacement::OldSnapshotVolumeId;
 pub use rendezvous_sled_bp_availability::SledBpAvailabilityDecommissionOutcome;
 pub use rendezvous_sled_bp_availability::SledBpAvailabilityUpsertOutcome;
 pub use rendezvous_sled_bp_availability::SledBpAvailabilityWrite;
+pub use rendezvous_sled_bp_availability::SledBpAvailabilityWriteError;
 pub use rendezvous_sled_bp_availability::SledBpAvailabilityWriteOutcome;
 pub use saga::NewSagaState;
 pub use saga::SagaStateDbFields;
