@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "50.0.0"
+    "version": "51.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -5177,6 +5177,15 @@
           "from"
         ]
       },
+      "ExternalDnsAddrs": {
+        "description": "A non-empty, bounded set of external socket addrs for an External DNS zone.",
+        "type": "object",
+        "additionalProperties": {
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0
+        }
+      },
       "ExternalIp": {
         "description": "An external IP address used by a probe.",
         "type": "object",
@@ -7294,6 +7303,17 @@
           }
         ]
       },
+      "NexusExternalIps": {
+        "description": "A non-empty, bounded set of external IPs for a Nexus zone.",
+        "type": "array",
+        "items": {
+          "type": "string",
+          "format": "ip"
+        },
+        "minItems": 1,
+        "maxItems": 16,
+        "uniqueItems": true
+      },
       "NodePersistentStateSummary": {
         "description": "A summary of a node's persistent state.",
         "type": "object",
@@ -7583,7 +7603,19 @@
             "$ref": "#/components/schemas/SledConfigGeneration"
           },
           "host_phase_2": {
-            "$ref": "#/components/schemas/HostPhase2DesiredSlots"
+            "default": {
+              "slot_a": {
+                "type": "current_contents"
+              },
+              "slot_b": {
+                "type": "current_contents"
+              }
+            },
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/HostPhase2DesiredSlots"
+              }
+            ]
           },
           "measurements": {
             "type": "array",
@@ -7626,7 +7658,6 @@
           "datasets",
           "disks",
           "generation",
-          "host_phase_2",
           "measurements",
           "update_disposition",
           "zones"
@@ -7761,11 +7792,11 @@
                   "type": "string"
                 }
               },
-              "snat_cfg": {
+              "snat": {
                 "description": "The SNAT configuration for outbound connections.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/SourceNatConfigGeneric"
+                    "$ref": "#/components/schemas/ZoneSnatConfig"
                   }
                 ]
               },
@@ -7781,7 +7812,7 @@
               "dns_servers",
               "nic",
               "ntp_servers",
-              "snat_cfg",
+              "snat",
               "type"
             ]
           },
@@ -7922,9 +7953,13 @@
               "dataset": {
                 "$ref": "#/components/schemas/OmicronZoneDataset"
               },
-              "dns_address": {
-                "description": "The address at which the external DNS server is reachable.",
-                "type": "string"
+              "dns_addresses": {
+                "description": "The addresses at which the external DNS server is reachable.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/ExternalDnsAddrs"
+                  }
+                ]
               },
               "http_address": {
                 "description": "The address at which the external DNS server API is reachable.",
@@ -7947,7 +7982,7 @@
             },
             "required": [
               "dataset",
-              "dns_address",
+              "dns_addresses",
               "http_address",
               "nic",
               "type"
@@ -8021,10 +8056,13 @@
                   "format": "ip"
                 }
               },
-              "external_ip": {
-                "description": "The address at which the external nexus server is reachable.",
-                "type": "string",
-                "format": "ip"
+              "external_ips": {
+                "description": "The addresses at which the external nexus server is reachable.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/NexusExternalIps"
+                  }
+                ]
               },
               "external_tls": {
                 "description": "Whether Nexus's external endpoint should use TLS",
@@ -8058,7 +8096,7 @@
             },
             "required": [
               "external_dns_servers",
-              "external_ip",
+              "external_ips",
               "external_tls",
               "internal_address",
               "nic",
@@ -10894,6 +10932,103 @@
           "id",
           "time_created",
           "version"
+        ]
+      },
+      "ZoneSnatConfig": {
+        "description": "Source NAT configuration for a boundary NTP zone.\n\nBoundary NTP reaches upstream servers via source NAT and needs a source address per IP version it wants to reach them on: at most one per family, and at least one overall.",
+        "oneOf": [
+          {
+            "description": "An IP address and port range used for source NAT, i.e., making outbound network connections from guests or services.",
+            "type": "object",
+            "properties": {
+              "first_port": {
+                "description": "The first port used for source NAT, inclusive.",
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0
+              },
+              "ip": {
+                "description": "The external address provided to the instance or service.",
+                "type": "string",
+                "format": "ipv4"
+              },
+              "last_port": {
+                "description": "The last port used for source NAT, also inclusive.",
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ipv4_only"
+                ]
+              }
+            },
+            "required": [
+              "first_port",
+              "ip",
+              "last_port",
+              "type"
+            ]
+          },
+          {
+            "description": "An IP address and port range used for source NAT, i.e., making outbound network connections from guests or services.",
+            "type": "object",
+            "properties": {
+              "first_port": {
+                "description": "The first port used for source NAT, inclusive.",
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0
+              },
+              "ip": {
+                "description": "The external address provided to the instance or service.",
+                "type": "string",
+                "format": "ipv6"
+              },
+              "last_port": {
+                "description": "The last port used for source NAT, also inclusive.",
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ipv6_only"
+                ]
+              }
+            },
+            "required": [
+              "first_port",
+              "ip",
+              "last_port",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "ipv4": {
+                "$ref": "#/components/schemas/SourceNatConfigV4"
+              },
+              "ipv6": {
+                "$ref": "#/components/schemas/SourceNatConfigV6"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "dual_stack"
+                ]
+              }
+            },
+            "required": [
+              "ipv4",
+              "ipv6",
+              "type"
+            ]
+          }
         ]
       },
       "ZpoolHealth": {

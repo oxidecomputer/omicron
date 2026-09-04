@@ -83,7 +83,6 @@ use omicron_uuid_kinds::RackUuid;
 use sled_agent_resolvable_files::{
     ZoneImageSourceResolver, ramdisk_file_source,
 };
-use sled_agent_types::instance::ExternalIpConfig;
 use sled_agent_types::inventory::{
     OmicronZoneConfig, OmicronZoneType, ZoneKind,
 };
@@ -955,49 +954,18 @@ impl ServiceManager {
 
         let (zone_kind, nic, external_ips) = match &zone_args.omicron_type() {
             Some(
-                zone_type @ OmicronZoneType::Nexus { external_ip, nic, .. },
-            ) => {
-                let eip = match external_ip {
-                    IpAddr::V4(ipv4) => {
-                        ExternalIpConfig::new_floating_ipv4(*ipv4)
-                    }
-                    IpAddr::V6(ipv6) => {
-                        ExternalIpConfig::new_floating_ipv6(*ipv6)
-                    }
-                };
-                (zone_type.kind(), nic, eip)
-            }
+                zone_type @ OmicronZoneType::Nexus { external_ips, nic, .. },
+            ) => (zone_type.kind(), nic, external_ips.into()),
             Some(
                 zone_type @ OmicronZoneType::ExternalDns {
-                    dns_address,
+                    dns_addresses,
                     nic,
                     ..
                 },
-            ) => {
-                let eip = match dns_address.ip() {
-                    IpAddr::V4(ipv4) => {
-                        ExternalIpConfig::new_floating_ipv4(ipv4)
-                    }
-                    IpAddr::V6(ipv6) => {
-                        ExternalIpConfig::new_floating_ipv6(ipv6)
-                    }
-                };
-                (zone_type.kind(), nic, eip)
-            }
+            ) => (zone_type.kind(), nic, dns_addresses.into()),
             Some(
-                zone_type @ OmicronZoneType::BoundaryNtp {
-                    nic, snat_cfg, ..
-                },
-            ) => {
-                let eip = if let Some(snat) = snat_cfg.try_as_ipv4() {
-                    ExternalIpConfig::new_ipv4_source_nat(snat)
-                } else if let Some(snat) = snat_cfg.try_as_ipv6() {
-                    ExternalIpConfig::new_ipv6_source_nat(snat)
-                } else {
-                    unreachable!("Generic SNAT IP must be IPv4 or IPv6");
-                };
-                (zone_type.kind(), nic, eip)
-            }
+                zone_type @ OmicronZoneType::BoundaryNtp { nic, snat, .. },
+            ) => (zone_type.kind(), nic, snat.into()),
             _ => unreachable!("unexpected zone type"),
         };
 
@@ -1162,16 +1130,68 @@ impl ServiceManager {
 
         let opte_interface = port.name();
 
-        // TODO-completeness: This needs to support dual-stack OPTE ports.
-        // See https://github.com/oxidecomputer/omicron/issues/9309.
-        let opte_gateway = port.gateway().ipv4_or_ipv6_addr().to_string();
-        let opte_ip = port.ipv4_or_ipv6_addr().to_string();
+        // Write out IPv4 and / or IPv6 details to the SMF service properties.
+        //
+        // IMPORTANT:
+        //
+        // This particular bit of code represents a "cross-consolidation
+        // interface". The sled-agent and the SMF service / zone-setup binary
+        // have to agree on an interface, but they're built in different
+        // software images. The sled-agent is part of the host OS image, and
+        // updated first during a live-update. The SMF properties are part of an
+        // Omicron service zone, and built / installed separately. So we have to
+        // be pretty careful about evolving these to avoid incompatibilities.
+        //
+        // Prior to this R23, there is no way to create any service zones with
+        // IPv6 addresses. Everything is IPv4 for services.
+        //
+        // (1) Old sled-agent, old `opte-interface-setup` SMF service
+        // (2) Old sled-agent, new service
+        // (3) New sled-agent, old service
+        // (4) New sled-agent, new service
+        //
+        // In case (1), things will work the same way as prior to this change.
+        // The sled-agent will fill out only the `config/gateway` and
+        // `config/ip` properties with either the IPv4 or IPv6 address.
+        //
+        // (2) is not possible. Updates always proceed with the host OS being
+        // updated first (reconfigurator-driven) or at the same time (mupdate).
+        //
+        // (3) In this case, the sled-agent will set the IPv4 properties as
+        // before, and could _also_ set the new SMF property
+        // `config/create_ipv6`. That property will be ignored by the old
+        // binary, which is fine because (1) that's how it works now, and (2)
+        // there _are_ no IPv6 control plane zones until we get all the way
+        // through the update and Nexus starts handing out IPv6 addresses
+        // anyway. Since all old zones also have an IPv4 address, we don't have
+        // to worry about this value being unset, and becoming the default
+        // "unknown", which the `zone-setup` binary will fail to parse as an
+        // IPv4 address.
+        //
+        // (4) Everything is fine here, the sled-agent and SMF service are on
+        // the same version. The sled-agent writes out the IPv4 / IPv6
+        // properties, and the SMF service knows how to interpret them. Note
+        // that this also works for deployment that is completely new on R23 and
+        // which _only_ uses IPv6 control plane zones. In that case, only the
+        // IPv6-related SMF properties are filled, which the binary knows how to
+        // interpret.
+        let mut config_builder = PropertyGroupBuilder::new("config")
+            .add_property("interface", "astring", opte_interface);
 
-        let mut config_builder = PropertyGroupBuilder::new("config");
-        config_builder = config_builder
-            .add_property("interface", "astring", opte_interface)
-            .add_property("gateway", "astring", &opte_gateway)
-            .add_property("ip", "astring", &opte_ip);
+        // If there is no IPv4 address, these properties will be left at their
+        // default values of "unknown", which the zone-setup binary understands
+        // means "don't set up IPv4 at all".
+        if let Some((gateway_ip, private_ip)) = port.gateway_and_private_ipv4()
+        {
+            config_builder = config_builder
+                .add_property("gateway", "astring", gateway_ip.to_string())
+                .add_property("ip", "astring", private_ip.to_string());
+        }
+
+        if port.ipv6_addr().is_some() {
+            config_builder =
+                config_builder.add_property("create_ipv6", "boolean", "true");
+        }
 
         Ok(ServiceBuilder::new("oxide/opte-interface-setup")
             .add_property_group(config_builder)
@@ -1806,7 +1826,7 @@ impl ServiceManager {
                 zone_type:
                     OmicronZoneType::ExternalDns {
                         http_address,
-                        dns_address,
+                        dns_addresses,
                         nic,
                         ..
                     },
@@ -1834,6 +1854,12 @@ impl ServiceManager {
                 //
                 // Make sure we take the VPC-private IP address with the same
                 // version as the external address.
+                //
+                // TODO(#11008): external DNS should listen on the private IP
+                // address for *all* of its external addresses. For now we bind
+                // a single address, preferring the IPv4 one (else IPv6) to
+                // match `opte_interface_set_up_install`.
+                let dns_address = dns_addresses.temporary_primary_address();
                 let private_ip = Self::private_ip_for_external_address(
                     dns_address.ip(),
                     &nic.ip_config,
@@ -2152,7 +2178,7 @@ impl ServiceManager {
                         lockstep_port,
                         external_tls,
                         external_dns_servers,
-                        external_ip,
+                        external_ips,
                         nic,
                         ..
                     },
@@ -2191,8 +2217,14 @@ impl ServiceManager {
 
                 // Fetch the private IP of the same IP version as the external
                 // IP address.
+                //
+                // TODO(#11006): Nexus should be reachable on the private IP
+                // address for *all* of its external IPs. For now we bind a
+                // single address, preferring the IPv4 one (else IPv6) to match
+                // match `opte_interface_set_up_install`.
+                let external_ip = external_ips.temporary_primary_address();
                 let private_ip = Self::private_ip_for_external_address(
-                    *external_ip,
+                    external_ip,
                     &nic.ip_config,
                     config.zone_type.kind(),
                 )?;
@@ -2218,6 +2250,9 @@ impl ServiceManager {
                             compression: dropshot::CompressionConfig::Gzip,
                         },
                     },
+                    // TODO(#9288): populate additional external addresses here
+                    // once sled-agent assigns dual-stack external IPs to Nexus.
+                    dropshot_external_additional_addresses: vec![],
                     dropshot_internal: dropshot::ConfigDropshot {
                         bind_address: (*internal_address).into(),
                         default_request_body_max_bytes: 1048576,
