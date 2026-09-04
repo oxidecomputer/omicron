@@ -27,14 +27,11 @@ pub mod bootstore {
 }
 
 pub mod dataset {
-    pub use crate::v9::dataset::LocalStoragePathParam;
     pub use crate::v17::dataset::LocalStorageDatasetDeleteRequest;
     pub use crate::v17::dataset::LocalStorageDatasetEnsureRequest;
 }
 
 pub mod debug {
-    pub use crate::v1::debug::ChickenSwitchDestroyOrphanedDatasets;
-
     pub use crate::v3::debug::OperatorSwitchZonePolicy;
 }
 
@@ -47,10 +44,7 @@ pub mod diagnostics {
 pub mod disk {
     pub use crate::v1::disk::CompressionAlgorithm;
     pub use crate::v1::disk::DatasetConfig;
-    pub use crate::v1::disk::DiskEnsureBody;
     pub use crate::v1::disk::DiskIdentity;
-    pub use crate::v1::disk::DiskPathParam;
-    pub use crate::v1::disk::DiskStateRequested;
     pub use crate::v1::disk::DiskVariant;
     pub use crate::v1::disk::GzipLevel;
     pub use crate::v1::disk::M2Slot;

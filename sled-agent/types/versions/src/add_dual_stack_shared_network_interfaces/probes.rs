@@ -96,15 +96,3 @@ impl From<v6::probes::IpKind> for IpKind {
         }
     }
 }
-
-impl TryFrom<v6::probes::ProbeSet> for ProbeSet {
-    type Error = ExternalError;
-
-    fn try_from(v6: v6::probes::ProbeSet) -> Result<Self, Self::Error> {
-        v6.probes
-            .into_iter()
-            .map(TryInto::try_into)
-            .collect::<Result<_, _>>()
-            .map(|probes| Self { probes })
-    }
-}
