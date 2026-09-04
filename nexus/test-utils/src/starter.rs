@@ -110,6 +110,7 @@ use sled_agent_types::inventory::OmicronSledConfig;
 use sled_agent_types::inventory::OmicronSledUpdateDisposition;
 use sled_agent_types::inventory::OmicronZoneDataset;
 use sled_agent_types::inventory::SledCpuFamily;
+use sled_agent_types::inventory::SledRole;
 use sled_agent_types::inventory::SourceNatConfigGeneric;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use sled_agent_types::system_networking::WriteNetworkConfigRequest;
@@ -954,7 +955,11 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             self.nexus_internal_addr.expect("Must launch Nexus first");
 
         let switch_slot = self.scrimlets.get(&sled_id).copied();
-        let is_scrimlet = switch_slot.is_some();
+        let sled_role = if switch_slot.is_some() {
+            SledRole::Scrimlet
+        } else {
+            SledRole::Gimlet
+        };
 
         let sled_agent = start_sled_agent(
             self.logctx.log.new(o!(
@@ -966,7 +971,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             self.sled_index_allocator.next(),
             sim_mode,
             SledCpuFamily::AmdMilan,
-            is_scrimlet,
+            sled_role,
             &self.simulated_upstairs,
         )
         .await
@@ -1116,7 +1121,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             self.sled_index_allocator.next(),
             sim_mode,
             SledCpuFamily::AmdMilan,
-            false,
+            SledRole::Gimlet,
             &self.simulated_upstairs,
         )
         .await
@@ -1978,7 +1983,7 @@ pub(crate) async fn start_sled_agent(
     sled_index: u16,
     sim_mode: sim::SimMode,
     cpu_family: SledCpuFamily,
-    is_scrimlet: bool,
+    sled_role: SledRole,
     simulated_upstairs: &Arc<sim::SimulatedUpstairs>,
 ) -> Result<sim::Server, String> {
     // Generate a baseboard serial number that matches the SP configuration
@@ -1993,7 +1998,7 @@ pub(crate) async fn start_sled_agent(
         sim::ZpoolConfig::None,
         cpu_family,
         Some(baseboard_serial),
-        is_scrimlet,
+        sled_role,
     );
     start_sled_agent_with_config(log, &config, sled_index, simulated_upstairs)
         .await

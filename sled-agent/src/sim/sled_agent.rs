@@ -193,25 +193,30 @@ impl SledAgent {
         let health_monitor = HealthMonitorHandle::stub();
 
         #[cfg(feature = "testing")]
-        let network_config_tx = if config.is_scrimlet {
-            let (tx, _) = tokio::sync::watch::channel(SystemNetworkingConfig {
-                rack_network_config: RackNetworkConfig {
-                    rack_subnet: Ipv6Net::new(Ipv6Addr::UNSPECIFIED, 56)
-                        .unwrap(),
-                    infra_ip_first: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-                    infra_ip_last: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-                    ports: UplinkPorts::new(vec![PortConfig::empty_for_tests(
-                        "qsfp0",
-                    )])
-                    .expect("placeholder port list is non-empty"),
-                    bgp: Vec::new(),
-                    bfd: Vec::new(),
-                },
-                blueprint_external_networking_config: None,
-            });
-            Some(tx)
-        } else {
-            None
+        let network_config_tx = match config.sled_role {
+            SledRole::Scrimlet => {
+                let (tx, _) =
+                    tokio::sync::watch::channel(SystemNetworkingConfig {
+                        rack_network_config: RackNetworkConfig {
+                            rack_subnet: Ipv6Net::new(
+                                Ipv6Addr::UNSPECIFIED,
+                                56,
+                            )
+                            .unwrap(),
+                            infra_ip_first: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                            infra_ip_last: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                            ports: UplinkPorts::new(vec![
+                                PortConfig::empty_for_tests("qsfp0"),
+                            ])
+                            .expect("placeholder port list is non-empty"),
+                            bgp: Vec::new(),
+                            bfd: Vec::new(),
+                        },
+                        blueprint_external_networking_config: None,
+                    });
+                Some(tx)
+            }
+            SledRole::Gimlet => None,
         };
 
         Arc::new(SledAgent {
@@ -1047,11 +1052,7 @@ impl SledAgent {
         Ok(Inventory {
             sled_id: self.id,
             sled_agent_address,
-            sled_role: if self.config.is_scrimlet {
-                SledRole::Scrimlet
-            } else {
-                SledRole::Gimlet
-            },
+            sled_role: self.config.sled_role,
             baseboard_id: self.config.hardware.baseboard.clone().into(),
             usable_hardware_threads: self.config.hardware.hardware_threads,
             usable_physical_ram: ByteCount::try_from(

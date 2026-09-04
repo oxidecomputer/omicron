@@ -8,6 +8,7 @@ use dropshot::ConfigDropshot;
 use omicron_uuid_kinds::SledUuid;
 use serde::Deserialize;
 use serde::Serialize;
+use sled_agent_types::inventory::SledRole;
 use sled_agent_types::inventory::ZpoolHealth;
 pub use sled_hardware_types::{Baseboard, SledCpuFamily};
 use sp_sim::FAKE_GIMLET_MODEL;
@@ -82,8 +83,8 @@ pub struct Config {
     pub storage: ConfigStorage,
     /// configuration to emulate the sled agent's hardware
     pub hardware: ConfigHardware,
-    /// whether this sled is a scrimlet (connected to a switch)
-    pub is_scrimlet: bool,
+    /// is this sled a normal gimlet, or a scrimlet?
+    pub sled_role: SledRole,
 }
 
 pub enum ZpoolConfig {
@@ -109,7 +110,7 @@ impl Config {
             zpool_config,
             cpu_family,
             None,
-            false,
+            SledRole::Gimlet,
         )
     }
 
@@ -120,7 +121,7 @@ impl Config {
         zpool_config: ZpoolConfig,
         cpu_family: SledCpuFamily,
         baseboard_serial: Option<String>,
-        is_scrimlet: bool,
+        sled_role: SledRole,
     ) -> Config {
         // This IP range is guaranteed by RFC 6666 to discard traffic.
         // For tests that don't use a Nexus, we use this address to simulate a
@@ -168,7 +169,7 @@ impl Config {
                     revision: 3,
                 },
             },
-            is_scrimlet,
+            sled_role,
         }
     }
 }
