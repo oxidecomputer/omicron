@@ -2,14 +2,16 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Module for converting older formats of the sled configuration files.
+//! Module for converting older formats of Sled Agent's ledgered config files.
 
 use camino::Utf8PathBuf;
 use omicron_ledger::Ledger;
 use omicron_ledger::Ledgerable;
 use serde::Deserialize;
 use serde::Serialize;
+use sled_agent_types::artifact::ArtifactConfig;
 use sled_agent_types::inventory::OmicronSledConfig;
+use sled_agent_types_versions::v1;
 use sled_agent_types_versions::v4;
 use sled_agent_types_versions::v10;
 use sled_agent_types_versions::v11;
@@ -23,12 +25,12 @@ use slog::warn;
 use slog_error_chain::InlineErrorChain;
 use std::error::Error as StdError;
 
-/// Trait describing an ordered sequence of `OmicronSledConfig` versions, each
+/// Trait describing an ordered sequence of versions of a ledgered config, each
 /// of which can be converted from its previous version.
 ///
-/// When adding a new [`OmicronSledConfig`] version, add your new version to the
-/// `version_conversion_chain!()` invocation below. Use the fully-versioned name
-/// (e.g., `vN::inventory::OmicronSledConfig`), not the [`OmicronSledConfig`]
+/// When adding a new version of a ledgered config, add your new version to the
+/// relevant `version_conversion_chain!()` invocation below. Use the
+/// fully-versioned name (e.g., `vN::inventory::OmicronSledConfig`), not the
 /// alias from `latest`.
 ///
 /// Also update the unit tests at the bottom of this file to cover your new
@@ -43,14 +45,14 @@ trait VersionConversionChain: Ledgerable {
     // recursing.
     const IS_TERMINAL: bool = false;
 
-    /// The previous [`OmicronSledConfig`] version, which must be convertible
-    /// into this version.
+    /// The previous version of this config, which must be convertible into
+    /// this version.
     type Previous: VersionConversionChain + TryInto<Self, Error: StdError>;
 }
 
 macro_rules! version_conversion_chain {
     // base case
-    ($current:path, $previous:path) => {
+    ($current:path, $previous:path $(,)?) => {
         impl VersionConversionChain for $current {
             const DESCRIPTION: &str = stringify!($current);
             type Previous = $previous;
@@ -64,9 +66,9 @@ macro_rules! version_conversion_chain {
     };
 }
 
-// This list is ordered from newest to oldest; this is the order in which we'll
-// attempt to parse the ledgered config. Add new versions to the top of the
-// list.
+// These lists are ordered from newest to oldest; this is the order in which
+// we'll attempt to parse the ledgered config. Add new versions to the top of
+// the relevant list.
 version_conversion_chain!(
     v51::inventory::OmicronSledConfig,
     v50::inventory::OmicronSledConfig,
@@ -75,6 +77,11 @@ version_conversion_chain!(
     v11::inventory::OmicronSledConfig,
     v10::inventory::OmicronSledConfig,
     v4::inventory::OmicronSledConfig,
+    VersionConversionChainTerminal,
+);
+
+version_conversion_chain!(
+    v1::artifact::ArtifactConfig,
     VersionConversionChainTerminal,
 );
 
@@ -97,25 +104,48 @@ pub(super) async fn read_ledgered_sled_config(
     log: &Logger,
     paths: Vec<Utf8PathBuf>,
 ) -> Option<OmicronSledConfig> {
+    read_ledgered_config(log, paths).await
+}
+
+/// Read the ledgered [`ArtifactConfig`], converting from older versions if
+/// needed.
+///
+/// # Panics
+///
+/// As with [`read_ledgered_sled_config`], this panics if we can read a config
+/// of some known older version but cannot convert it to the latest version.
+pub async fn read_ledgered_artifact_config(
+    log: &Logger,
+    paths: Vec<Utf8PathBuf>,
+) -> Option<ArtifactConfig> {
+    read_ledgered_config(log, paths).await
+}
+
+async fn read_ledgered_config<T>(
+    log: &Logger,
+    paths: Vec<Utf8PathBuf>,
+) -> Option<T>
+where
+    T: VersionConversionChain + Clone,
+{
     // Attempt to read the ledger as the current version; if this succeeds,
     // we're done.
-    if let Some(config) = Ledger::new(log, paths.clone()).await {
-        info!(log, "Ledger of sled config exists");
+    if let Some(config) = Ledger::<T>::new(log, paths.clone()).await {
+        info!(log, "Ledger of config exists"; "version" => T::DESCRIPTION);
         return Some(config.into_inner());
     }
 
     // Try to read the config as the previous version; if we have an older
     // version on disk, this will recurse until we get to it, but then convert
     // it up through our previous version before returning.
-    let prev_version = try_ledgered_config_versions_chain::<
-        <OmicronSledConfig as VersionConversionChain>::Previous,
-    >(log, paths.clone())
-    .await?;
+    let prev_version =
+        try_ledgered_config_versions_chain::<T::Previous>(log, paths.clone())
+            .await?;
 
     let current_version = prev_version.try_into().unwrap_or_else(|e| {
         panic!(
             "failed to convert {} to the current version: {}",
-            <OmicronSledConfig as VersionConversionChain>::DESCRIPTION,
+            T::DESCRIPTION,
             InlineErrorChain::new(&e)
         );
     });
@@ -199,12 +229,12 @@ where
     }
 }
 
-async fn write_converted_ledger(
+async fn write_converted_ledger<T: Ledgerable + Clone>(
     log: &Logger,
     paths: Vec<Utf8PathBuf>,
-    sled_config: OmicronSledConfig,
-) -> OmicronSledConfig {
-    let mut config_ledger = Ledger::new_with(log, paths.clone(), sled_config);
+    config: T,
+) -> T {
+    let mut config_ledger = Ledger::new_with(log, paths.clone(), config);
 
     match config_ledger.commit().await {
         Ok(()) => (),
@@ -215,7 +245,7 @@ async fn write_converted_ledger(
             // next time we run.
             warn!(
                 log,
-                "Failed to write new sled config converted from \
+                "Failed to write new config converted from \
                  from older version";
                 InlineErrorChain::new(&err),
             );
@@ -261,6 +291,16 @@ impl TryFrom<VersionConversionChainTerminal>
     }
 }
 
+impl TryFrom<VersionConversionChainTerminal> for v1::artifact::ArtifactConfig {
+    type Error = std::io::Error;
+
+    fn try_from(
+        _: VersionConversionChainTerminal,
+    ) -> Result<Self, Self::Error> {
+        unreachable!("terminal type is uninhabitable")
+    }
+}
+
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
@@ -269,21 +309,24 @@ pub(super) mod tests {
     use omicron_test_utils::dev;
 
     // v4 config collected from a test system.
-    const V4_CONFIG_PATH: &str = "test-data/v4-sled-config.json";
+    const V4_SLED_CONFIG_PATH: &str = "test-data/v4-sled-config.json";
 
     // paths for expectorate checks
-    const EXPECTORATE_V10_CONFIG_PATH: &str =
+    const EXPECTORATE_V10_SLED_CONFIG_PATH: &str =
         "expectorate/v10-sled-config.json";
-    const EXPECTORATE_V11_CONFIG_PATH: &str =
+    const EXPECTORATE_V11_SLED_CONFIG_PATH: &str =
         "expectorate/v11-sled-config.json";
-    const EXPECTORATE_V14_CONFIG_PATH: &str =
+    const EXPECTORATE_V14_SLED_CONFIG_PATH: &str =
         "expectorate/v14-sled-config.json";
-    const EXPECTORATE_V49_CONFIG_PATH: &str =
+    const EXPECTORATE_V49_SLED_CONFIG_PATH: &str =
         "expectorate/v49-sled-config.json";
-    const EXPECTORATE_V50_CONFIG_PATH: &str =
+    const EXPECTORATE_V50_SLED_CONFIG_PATH: &str =
         "expectorate/v50-sled-config.json";
-    const EXPECTORATE_V51_CONFIG_PATH: &str =
+    const EXPECTORATE_V51_SLED_CONFIG_PATH: &str =
         "expectorate/v51-sled-config.json";
+
+    // v1 artifact config collected from a test system.
+    const V1_ARTIFACT_CONFIG_PATH: &str = "test-data/v1-artifact-config.json";
 
     // This is solely an expectorate test to guarantee:
     //
@@ -297,7 +340,7 @@ pub(super) mod tests {
 
         let v4 = Ledger::<v4::inventory::OmicronSledConfig>::new(
             log,
-            vec![V4_CONFIG_PATH.into()],
+            vec![V4_SLED_CONFIG_PATH.into()],
         )
         .await
         .expect("read v4 from test-data")
@@ -317,27 +360,27 @@ pub(super) mod tests {
         let v51 = v51::inventory::OmicronSledConfig::from(v50.clone());
 
         expectorate::assert_contents(
-            EXPECTORATE_V10_CONFIG_PATH,
+            EXPECTORATE_V10_SLED_CONFIG_PATH,
             &serde_json::to_string_pretty(&v10).unwrap(),
         );
         expectorate::assert_contents(
-            EXPECTORATE_V11_CONFIG_PATH,
+            EXPECTORATE_V11_SLED_CONFIG_PATH,
             &serde_json::to_string_pretty(&v11).unwrap(),
         );
         expectorate::assert_contents(
-            EXPECTORATE_V14_CONFIG_PATH,
+            EXPECTORATE_V14_SLED_CONFIG_PATH,
             &serde_json::to_string_pretty(&v14).unwrap(),
         );
         expectorate::assert_contents(
-            EXPECTORATE_V49_CONFIG_PATH,
+            EXPECTORATE_V49_SLED_CONFIG_PATH,
             &serde_json::to_string_pretty(&v49).unwrap(),
         );
         expectorate::assert_contents(
-            EXPECTORATE_V50_CONFIG_PATH,
+            EXPECTORATE_V50_SLED_CONFIG_PATH,
             &serde_json::to_string_pretty(&v50).unwrap(),
         );
         expectorate::assert_contents(
-            EXPECTORATE_V51_CONFIG_PATH,
+            EXPECTORATE_V51_SLED_CONFIG_PATH,
             &serde_json::to_string_pretty(&v51).unwrap(),
         );
         logctx.cleanup_successful();
@@ -355,11 +398,112 @@ pub(super) mod tests {
         // version here and add the new version's path to the array of ledger
         // paths below.
         type LatestConfig = v51::inventory::OmicronSledConfig;
-        let latest_version_path = EXPECTORATE_V51_CONFIG_PATH;
-        let expected_config =
-            LatestConfig::read_from(log, latest_version_path.into())
-                .await
-                .expect("read expected config");
+
+        let counts = check_ledger_reads::<LatestConfig, _, _>(
+            log,
+            EXPECTORATE_V51_SLED_CONFIG_PATH,
+            Some(V4_SLED_CONFIG_PATH),
+            &[
+                V4_SLED_CONFIG_PATH,
+                EXPECTORATE_V10_SLED_CONFIG_PATH,
+                EXPECTORATE_V11_SLED_CONFIG_PATH,
+                EXPECTORATE_V14_SLED_CONFIG_PATH,
+                EXPECTORATE_V49_SLED_CONFIG_PATH,
+                EXPECTORATE_V50_SLED_CONFIG_PATH,
+                EXPECTORATE_V51_SLED_CONFIG_PATH,
+            ],
+            |paths| read_ledgered_sled_config(log, paths),
+        )
+        .await;
+
+        // Guard against every fixture silently taking one branch (e.g. after a
+        // wire-compatible bump or a forgotten array entry) by counting both
+        // branches and asserting that both of them were > 0.
+        assert!(
+            counts.converted > 0,
+            "no fixture required conversion; the conversion chain is untested"
+        );
+        assert!(
+            counts.unchanged > 0,
+            "no fixture parsed as the latest version; \
+             the no-conversion path is untested"
+        );
+
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn read_artifact_config_converts_from_older_versions() {
+        let logctx = dev::test_setup_log(
+            "read_artifact_config_converts_from_older_versions",
+        );
+        let log = &logctx.log;
+
+        // Use an explicit type so that adding a new artifact config version
+        // breaks compilation here. Bump the version and add the new version's
+        // path to the array of ledger paths below.
+        type LatestConfig = v1::artifact::ArtifactConfig;
+
+        let counts = check_ledger_reads::<LatestConfig, _, _>(
+            log,
+            V1_ARTIFACT_CONFIG_PATH,
+            None,
+            &[V1_ARTIFACT_CONFIG_PATH],
+            |paths| read_ledgered_artifact_config(log, paths),
+        )
+        .await;
+
+        // For now, the v1 wire format parses correctly as the latest config
+        // version. Once we make an incompatible change, switch this to
+        // `converted > 0`.
+        assert_eq!(
+            counts.converted, 0,
+            "all artifact config versions share a wire format, so nothing \
+             should have needed conversion"
+        );
+        assert!(
+            counts.unchanged > 0,
+            "no fixture parsed as the latest version; \
+             the no-conversion path is untested"
+        );
+
+        logctx.cleanup_successful();
+    }
+
+    /// How many fixtures took each branch of [`check_ledger_reads`].
+    struct LedgerReadCounts {
+        /// Fixtures that did not parse as the latest version, and so had to be
+        /// converted and rewritten.
+        converted: usize,
+        /// Fixtures that parsed as the latest version, and so were left alone.
+        unchanged: usize,
+    }
+
+    /// For each fixture in `fixture_paths`, verify the following properties:
+    ///
+    /// * Reading it by converting through the version chain produces the
+    ///   same config as `latest_version_path`.
+    /// * The file on disk is rewritten if and only if a conversion was
+    ///   needed.
+    ///
+    /// If provided, `must_convert_path` additionally asserts that that fixture
+    /// does *not* parse as the latest version. Pass in the oldest supported
+    /// version whose on-disk format is different from the latest.
+    async fn check_ledger_reads<T, F, Fut>(
+        log: &Logger,
+        latest_version_path: &str,
+        must_convert_path: Option<&str>,
+        fixture_paths: &[&str],
+        read: F,
+    ) -> LedgerReadCounts
+    where
+        T: Ledgerable + PartialEq + std::fmt::Debug,
+        F: Fn(Vec<Utf8PathBuf>) -> Fut,
+        Fut: std::future::Future<Output = Option<T>>,
+    {
+        let expected_config = T::read_from(log, latest_version_path.into())
+            .await
+            .expect("read expected config");
 
         // Reading old configs should rewrite the file to match the newest
         // version.
@@ -367,24 +511,11 @@ pub(super) mod tests {
             serde_json::to_string(&expected_config).expect("serialized config");
 
         let tempdir = Utf8TempDir::new().unwrap();
-
-        // Guard against every fixture silently taking one branch (e.g. after a
-        // wire-compatible bump or a forgotten array entry) by counting both
-        // branches and asserting that both of them were > 0.
-        let mut converted_count = 0usize;
-        let mut unchanged_count = 0usize;
+        let mut counts = LedgerReadCounts { converted: 0, unchanged: 0 };
 
         // For each older version, confirm we can read a ledger of that version
         // and that it's converted to the current version.
-        for src_ledger_path in [
-            V4_CONFIG_PATH,
-            EXPECTORATE_V10_CONFIG_PATH,
-            EXPECTORATE_V11_CONFIG_PATH,
-            EXPECTORATE_V14_CONFIG_PATH,
-            EXPECTORATE_V49_CONFIG_PATH,
-            EXPECTORATE_V50_CONFIG_PATH,
-            EXPECTORATE_V51_CONFIG_PATH,
-        ] {
+        for src_ledger_path in fixture_paths.iter().copied() {
             // Copy the ledger into `my-ledger.json`
             let dst_ledger_path = tempdir.child("my-ledger.json");
             dst_ledger_path.write_file(src_ledger_path.into()).unwrap();
@@ -402,16 +533,14 @@ pub(super) mod tests {
             // without being the latest expectorate file, e.g. when a version
             // bump introduces a transparent newtype.
             //
-            // Ledger::<LatestConfig>::new is (effectively) the first step of
-            // read_ledgered_sled_config, so the test matches the SUT if a
-            // version ever overrides Ledgerable::deserialize.
-            let parses_as_latest = Ledger::<LatestConfig>::new(
-                log,
-                vec![dst_ledger_path.to_path_buf()],
-            )
-            .await
-            .is_some();
-            if src_ledger_path == V4_CONFIG_PATH {
+            // Ledger::<T>::new is (effectively) the first step of the read
+            // function under test, so the test matches the SUT if a version
+            // ever overrides Ledgerable::deserialize.
+            let parses_as_latest =
+                Ledger::<T>::new(log, vec![dst_ledger_path.to_path_buf()])
+                    .await
+                    .is_some();
+            if Some(src_ledger_path) == must_convert_path {
                 assert!(
                     !parses_as_latest,
                     "{src_ledger_path} is the oldest supported version \
@@ -427,21 +556,18 @@ pub(super) mod tests {
             }
 
             // Attempt to read `my-ledger.json`; this should give us back a
-            // current-version `OmicronSledConfig` and, if a conversion was
-            // needed, also have rewritten the config.
-            let converted_config = read_ledgered_sled_config(
-                log,
-                vec![dst_ledger_path.to_path_buf()],
-            )
-            .await
-            .expect("read and converted ledger");
+            // current-version config and, if a conversion was needed, also
+            // have rewritten the config.
+            let converted_config = read(vec![dst_ledger_path.to_path_buf()])
+                .await
+                .expect("read and converted ledger");
             assert_eq!(expected_config, converted_config);
 
             let data = tokio::fs::read_to_string(&dst_ledger_path)
                 .await
                 .expect("read tempdir ledger");
             if parses_as_latest {
-                unchanged_count += 1;
+                counts.unchanged += 1;
                 // Ensure that the fixture contents are *not* byte-identical to
                 // the serialized JSON that a rewrite would produce (fixtures
                 // are pretty-printed while ledgered data is stored as compact
@@ -468,7 +594,7 @@ pub(super) mod tests {
                      and must not be rewritten"
                 );
             } else {
-                converted_count += 1;
+                counts.converted += 1;
                 // We couldn't parse as the latest version, so the file must
                 // have been rewritten in the latest format.
                 assert_eq!(
@@ -479,16 +605,6 @@ pub(super) mod tests {
             }
         }
 
-        assert!(
-            converted_count > 0,
-            "no fixture required conversion; the conversion chain is untested"
-        );
-        assert!(
-            unchanged_count > 0,
-            "no fixture parsed as the latest version; \
-             the no-conversion path is untested"
-        );
-
-        logctx.cleanup_successful();
+        counts
     }
 }
