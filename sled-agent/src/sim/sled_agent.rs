@@ -60,10 +60,11 @@ use sled_agent_types::instance::{
 };
 use sled_agent_types::inventory::{
     ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
-    ConfigReconcilerInventoryStatus, FmdInventory, Inventory, InventoryDataset,
-    InventoryDisk, InventoryZpool, OmicronFileSourceResolverInventory,
-    OmicronSledConfig, OmicronSledUpdateDisposition,
-    SingleMeasurementInventory, SledRole, ZpoolHealth,
+    ConfigReconcilerInventoryStatus, CurrentUpdateDisposition, FmdInventory,
+    InstanceManagerStatus, Inventory, InventoryDataset, InventoryDisk,
+    InventoryZpool, OmicronFileSourceResolverInventory, OmicronSledConfig,
+    OmicronSledUpdateDisposition, SingleMeasurementInventory, SledRole,
+    ZpoolHealth,
 };
 use sled_agent_types::support_bundle::SupportBundleMetadata;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
@@ -895,13 +896,24 @@ impl SledAgent {
         Ok(addr)
     }
 
-    pub fn inventory(&self, addr: SocketAddr) -> anyhow::Result<Inventory> {
+    pub async fn inventory(
+        &self,
+        addr: SocketAddr,
+    ) -> anyhow::Result<Inventory> {
         let sled_agent_address = match addr {
             SocketAddr::V4(_) => {
                 bail!("sled_agent_ip must be v6 for inventory")
             }
             SocketAddr::V6(v6) => v6,
         };
+
+        // TODO-correctness Unlike real sled-agent, the `InstanceManagerStatus`
+        // we report view is _not_ atomic - we acquire separate locks to fill
+        // the number of VMMs and the update disposition. If that becomes
+        // problematic in tests, we'll need to combine these (probably by moving
+        // the disposition into `self.vmms`, which is how sled-agent proper
+        // handles this).
+        let num_registered_vmms = self.vmms.size().await;
 
         let storage = self.storage.lock();
 
@@ -923,6 +935,19 @@ impl SledAgent {
         ]
         .into_iter()
         .collect();
+
+        let instance_manager_status = InstanceManagerStatus {
+            update_disposition: match maybe_sled_config
+                .as_ref()
+                .map(|c| c.update_disposition)
+            {
+                Some(disposition) => {
+                    CurrentUpdateDisposition::Known(disposition)
+                }
+                None => CurrentUpdateDisposition::ConfigNotAvailable,
+            },
+            num_registered_vmms,
+        };
 
         Ok(Inventory {
             sled_id: self.id,
@@ -994,6 +1019,7 @@ impl SledAgent {
             },
             last_reconciliation: maybe_sled_config
                 .map(ConfigReconcilerInventory::debug_assume_success),
+            instance_manager_status,
             // TODO: simulate the file source resolver with greater fidelity
             file_source_resolver: OmicronFileSourceResolverInventory::new_fake(
             ),

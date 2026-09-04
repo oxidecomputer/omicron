@@ -34,8 +34,10 @@ use sled_agent_types::inventory::BootPartitionContents;
 use sled_agent_types::inventory::BootPartitionDetails;
 use sled_agent_types::inventory::ConfigReconcilerInventory;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+use sled_agent_types::inventory::CurrentUpdateDisposition;
 use sled_agent_types::inventory::FmdInventory;
 use sled_agent_types::inventory::HostPhase2DesiredSlots;
+use sled_agent_types::inventory::InstanceManagerStatus;
 use sled_agent_types::inventory::Inventory;
 use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
 use sled_agent_types::inventory::OmicronSledConfig;
@@ -1321,6 +1323,13 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                             ledgered_sled_config: Some(fake_sled_config),
                             reconciler_status:
                                 ConfigReconcilerInventoryStatus::NotYetRun,
+                            instance_manager_status: InstanceManagerStatus {
+                                update_disposition:
+                                    CurrentUpdateDisposition::Known(
+                                        OmicronSledUpdateDisposition::Available,
+                                    ),
+                                num_registered_vmms: 0,
+                            },
                             file_source_resolver:
                                 OmicronFileSourceResolverInventory::new_fake(),
                             smf_services_enabled_not_online:

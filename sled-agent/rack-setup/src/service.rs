@@ -1644,6 +1644,8 @@ mod test {
     use oxnet::Ipv6Net;
     use sled_agent_types::disk::DiskIdentity;
     use sled_agent_types::disk::DiskVariant;
+    use sled_agent_types::inventory::CurrentUpdateDisposition;
+    use sled_agent_types::inventory::InstanceManagerStatus;
     use sled_agent_types::{
         early_networking::{PortConfig, RackNetworkConfig, UplinkPorts},
         inventory::{
@@ -1708,6 +1710,12 @@ mod test {
                 ledgered_sled_config: None,
                 reconciler_status: ConfigReconcilerInventoryStatus::NotYetRun,
                 last_reconciliation: None,
+                instance_manager_status: InstanceManagerStatus {
+                    update_disposition: CurrentUpdateDisposition::Known(
+                        OmicronSledUpdateDisposition::Available,
+                    ),
+                    num_registered_vmms: 0,
+                },
                 file_source_resolver:
                     OmicronFileSourceResolverInventory::new_fake(),
                 smf_services_enabled_not_online:
