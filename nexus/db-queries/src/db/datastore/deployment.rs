@@ -3523,6 +3523,7 @@ mod tests {
     use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::deployment::ExpectedActiveRotSlot;
     use nexus_types::deployment::OmicronZoneExternalFloatingIp;
+    use nexus_types::deployment::OmicronZoneExternalFloatingIps;
     use nexus_types::deployment::PendingMgsUpdate;
     use nexus_types::deployment::PlanningInput;
     use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
@@ -3725,72 +3726,68 @@ mod tests {
         logctx.cleanup_successful();
     }
 
-    // A zone with more than one external IP is not yet representable in the
-    // in-memory `BlueprintZoneType` (#9288). But the tables for its EIPs can
-    // store multiple rows per zone, so we have to check that we fail when
-    // reading a blueprint with more than one row. We'll adjust this to ensure
-    // we _can_ read such a blueprint when the zone-type enum is expanded.
     #[tokio::test]
-    async fn test_blueprint_zone_requires_exactly_one_external_ip() {
-        let logctx = dev::test_setup_log(
-            "test_blueprint_zone_requires_exactly_one_external_ip",
-        );
+    async fn test_blueprint_zone_multiple_external_ips_round_trip() {
+        const TEST_NAME: &str =
+            "test_blueprint_zone_multiple_external_ips_round_trip";
+        let logctx = dev::test_setup_log(TEST_NAME);
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let (_collection, _planning_input, blueprint) = representative(
-            &logctx.log,
-            "test_blueprint_zone_requires_exactly_one_external_ip",
-        );
+        let (_collection, _planning_input, mut blueprint) =
+            representative(&logctx.log, TEST_NAME);
         let authz_blueprint = authz_blueprint_from_id(blueprint.id);
 
-        // Find a Nexus zone, and ensure we can write / read it with one IP.
-        let nexus_zone_id = blueprint
-            .sleds
-            .values()
-            .flat_map(|sled| sled.zones.iter())
-            .find(|zone| zone.zone_type.is_nexus())
-            .expect("representative blueprint has a Nexus zone")
-            .id;
+        // Give a Nexus zone a second external IP by hand.
+        let second_ip = "192.0.2.222".parse::<std::net::IpAddr>().unwrap();
+        let second_id = ExternalIpUuid::new_v4();
+        let mut nexus_zone_id = None;
+        'outer: for sled in blueprint.sleds.values_mut() {
+            for mut zone in sled.zones.iter_mut() {
+                if let BlueprintZoneType::Nexus(nexus) = &mut zone.zone_type {
+                    let mut ips: Vec<_> =
+                        nexus.external_ips.iter().copied().collect();
+                    ips.push(OmicronZoneExternalFloatingIp {
+                        id: second_id,
+                        ip: second_ip,
+                    });
+                    nexus.external_ips =
+                        OmicronZoneExternalFloatingIps::new(ips)
+                            .expect("two external IPs is valid");
+                    nexus_zone_id = Some(zone.id);
+                    break 'outer;
+                }
+            }
+        }
+        let nexus_zone_id =
+            nexus_zone_id.expect("representative blueprint has a Nexus zone");
 
         datastore
             .blueprint_insert(&opctx, &blueprint)
             .await
             .expect("failed to insert blueprint");
-
-        // With exactly one external IP per zone, the blueprint round-trips.
         let blueprint_read = datastore
             .blueprint_read(&opctx, &authz_blueprint)
             .await
-            .expect("failed to read blueprint back");
+            .expect("blueprint with multiple external IPs reads back");
         assert_eq!(blueprint, blueprint_read);
 
-        // Inject a second external IP row for the Nexus zone. We should fail
-        // when reading this, because we can't represent it in the zone-type
-        // enum.
-        const SECOND_EXTERNAL_IP_ID: &str =
-            "b3f7d6c2-9a1e-4c8b-8d2f-0a1b2c3d4e5f";
-        let conn = datastore.pool_connection_for_tests().await.unwrap();
-        let sql = format!(
-            "INSERT INTO omicron.public.bp_omicron_zone_external_ip \
-             (blueprint_id, zone_id, external_ip_id, ip, port, \
-              snat_first_port, snat_last_port) \
-             VALUES ('{}', '{}', '{SECOND_EXTERNAL_IP_ID}', \
-              '192.0.2.222', NULL, NULL, NULL)",
-            blueprint.id, nexus_zone_id,
-        );
-        conn.batch_execute_async(&sql)
-            .await
-            .expect("injected a second external IP row");
-        let err = datastore
-            .blueprint_read(&opctx, &authz_blueprint)
-            .await
-            .expect_err("a zone with two external IPs must fail to read back");
-        let msg = InlineErrorChain::new(&err).to_string();
+        // Re-read the Nexus zone and check it still has both external IPs.
+        let zone = blueprint_read
+            .sleds
+            .values()
+            .flat_map(|sled| sled.zones.iter())
+            .find(|zone| zone.id == nexus_zone_id)
+            .expect("the modified Nexus zone");
+        let BlueprintZoneType::Nexus(nexus) = &zone.zone_type else {
+            panic!("expected a Nexus zone");
+        };
+        let ips: Vec<_> = nexus.external_ips.iter().map(|e| e.ip).collect();
         assert!(
-            msg.contains("external IPs"),
-            "expected an exactly-one-external-IP error, got: {msg}",
+            ips.contains(&second_ip),
+            "second external IP survived the round trip: {ips:?}",
         );
+        assert_eq!(ips.len(), 2, "expected two external IPs, got {ips:?}");
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -5556,10 +5553,9 @@ mod tests {
         let nexus_ip = blueprint1
             .in_service_zones()
             .find_map(|(_, zone_config)| {
-                zone_config
-                    .zone_type
-                    .external_networking()
-                    .map(|(ip, _nic)| ip.ip())
+                zone_config.zone_type.external_networking().and_then(
+                    |(ips, _nic)| ips.into_iter().next().map(|ip| ip.ip()),
+                )
             })
             .expect("found external IP");
         let service_pool = create_service_ip_pool(
@@ -6246,10 +6242,12 @@ mod tests {
             zone_type: BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                 internal_address: "[::1]:12345".parse().unwrap(),
                 lockstep_port: 12346,
-                external_ip: OmicronZoneExternalFloatingIp {
-                    id: ExternalIpUuid::new_v4(),
-                    ip: "192.0.2.1".parse().unwrap(),
-                },
+                external_ips: OmicronZoneExternalFloatingIps::from_single(
+                    OmicronZoneExternalFloatingIp {
+                        id: ExternalIpUuid::new_v4(),
+                        ip: "192.0.2.1".parse().unwrap(),
+                    },
+                ),
                 nic: nic.clone(),
                 external_tls: false,
                 external_dns_servers: Vec::new(),
