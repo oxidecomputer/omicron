@@ -13,9 +13,6 @@ use super::packets::client::OXIMETER_HELLO;
 use super::packets::client::Packet as ClientPacket;
 use super::packets::client::Query;
 use super::packets::client::QueryResult;
-use super::packets::client::VERSION_MAJOR;
-use super::packets::client::VERSION_MINOR;
-use super::packets::client::VERSION_PATCH;
 use super::packets::server::Hello as ServerHello;
 use super::packets::server::Packet as ServerPacket;
 use super::packets::server::Progress;
@@ -150,12 +147,7 @@ impl Connection {
             Some(Err(e)) => return Err(e),
             None => return Err(Error::Disconnected),
         };
-        if hello.name != "ClickHouse"
-            || hello.version_major != VERSION_MAJOR
-            || hello.version_minor != VERSION_MINOR
-            || hello.revision != REVISION
-            || hello.version_patch != VERSION_PATCH
-        {
+        if hello.name != "ClickHouse" || hello.revision < REVISION {
             return Err(Error::UnrecognizedClickHouseServer {
                 name: hello.name,
                 major_version: hello.version_major,

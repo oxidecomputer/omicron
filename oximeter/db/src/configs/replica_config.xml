@@ -127,7 +127,7 @@
          For value equals to -1 this parameter is initialized by number of logical cores multiplies by 3.
          Which is a good heuristic for CPU-bound tasks.
     -->
-    <concurrent_threads_soft_limit>0</concurrent_threads_soft_limit>
+    <concurrent_threads_soft_limit_num>0</concurrent_threads_soft_limit_num>
 
     <!-- Maximum number of concurrent queries. -->
     <max_concurrent_queries>100</max_concurrent_queries>

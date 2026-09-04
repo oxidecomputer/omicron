@@ -125,9 +125,22 @@ impl Lgif {
 
         let expected = Lgif::expected_keys();
 
-        // Verify the output contains the same amount of lines as the expected keys.
-        // This will ensure we catch any new key-value pairs appended to the lgif output.
-        let lines = s.trim().lines();
+        let lines = s
+            .trim()
+            .lines()
+            .map(|line| {
+                line.split_once('\t').map(|(key, _)| (key, line)).ok_or_else(
+                    || {
+                        anyhow::anyhow!(
+                            "Command output has a malformed line: {line:?}"
+                        )
+                    },
+                )
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let lines = lines
+            .into_iter()
+            .filter_map(|(key, line)| expected.contains(&key).then_some(line));
         if expected.len() != lines.count() {
             bail!(
                 "Output from the Keeper differs to the expected output keys \
@@ -137,7 +150,14 @@ impl Lgif {
         }
 
         let mut vals: Vec<u64> = Vec::new();
-        for (line, expected_key) in s.lines().zip(expected.clone()) {
+        for (line, expected_key) in s
+            .lines()
+            .filter(|line| {
+                line.split_once('\t')
+                    .is_some_and(|(key, _)| expected.contains(&key))
+            })
+            .zip(expected.clone())
+        {
             let mut split = line.split('\t');
             let Some(key) = split.next() else {
                 bail!("Returned None while attempting to retrieve key");
@@ -333,37 +353,41 @@ impl KeeperConf {
 
         let expected = KeeperConf::expected_keys();
 
-        // Verify the output contains the same amount of lines as the expected keys.
-        // This will ensure we catch any new key-value pairs appended to the lgif output.
-        let lines = s.trim().lines();
-        if expected.len() != lines.count() {
-            bail!(
-                "Output from the Keeper differs to the expected output keys \
-                Output: {s:?} \
-                Expected output keys: {expected:?}"
-            );
+        let lines = s
+            .trim()
+            .lines()
+            .map(|line| {
+                line.split_once('=').map(|(key, _)| (key, line)).ok_or_else(
+                    || {
+                        anyhow::anyhow!(
+                            "Command output has a malformed line: {line:?}"
+                        )
+                    },
+                )
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let mut values = std::collections::BTreeMap::new();
+        for (key, line) in lines {
+            if !expected.contains(&key) {
+                continue;
+            }
+            let (_, value) = line.split_once('=').unwrap();
+            if let Some(previous) = values.insert(key, value) {
+                if previous != value {
+                    bail!("Conflicting values returned for key {key:?}");
+                }
+            }
         }
 
-        let mut vals: Vec<&str> = Vec::new();
-        // The output from the `conf` command contains the `max_requests_batch_size` field
-        // twice. We make sure to only read it once.
-        for (line, expected_key) in s.lines().zip(expected.clone()).unique() {
-            let mut split = line.split('=');
-            let Some(key) = split.next() else {
-                bail!("Returned None while attempting to retrieve key");
-            };
-            if key != expected_key {
-                bail!(
-                    "Extracted key `{key:?}` from output differs from expected key `{expected_key}`"
-                );
-            }
-            let Some(val) = split.next() else {
-                bail!(
-                    "Command output has a line that does not contain a key-value pair: {key:?}"
-                );
-            };
-            vals.push(val);
-        }
+        let vals = expected
+            .iter()
+            .unique()
+            .map(|key| {
+                values.get(key).copied().ok_or_else(|| {
+                    anyhow::anyhow!("Required key {key:?} is missing")
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
 
         let mut iter = vals.into_iter();
         let server_id = match u64::from_str(iter.next().unwrap()) {
@@ -708,7 +732,7 @@ mod tests {
     fn test_full_lgif_parse_success() {
         let log = log();
         let data =
-            "first_log_idx\t1\nfirst_log_term\t1\nlast_log_idx\t4386\nlast_log_term\t1\nlast_committed_log_idx\t4386\nleader_committed_log_idx\t4386\ntarget_committed_log_idx\t4386\nlast_snapshot_idx\t0\n\n"
+            "first_log_idx\t1\nfirst_log_term\t1\nlast_log_idx\t4386\nlast_log_term\t1\nlast_committed_log_idx\t4386\nleader_committed_log_idx\t4386\ntarget_committed_log_idx\t4386\nlast_snapshot_idx\t0\nlatest_logs_cache_entries\t12\nlatest_logs_cache_size\t345\n\n"
             .as_bytes();
         let lgif = Lgif::parse(&log, data).unwrap();
 
@@ -752,7 +776,7 @@ mod tests {
 
         assert_eq!(
             format!("{}", root_cause),
-            "Command output has a line that does not contain a key-value pair: \"first_log_idx\""
+            "Command output has a malformed line: \"first_log_idx\""
         );
     }
 
@@ -782,9 +806,9 @@ mod tests {
         let error = result.unwrap_err();
         let root_cause = error.root_cause();
 
-        assert_eq!(
-            format!("{}", root_cause),
-            "Extracted key `\"first_log\"` from output differs from expected key `first_log_term`"
+        assert!(
+            format!("{}", root_cause)
+                .starts_with("Output from the Keeper differs")
         );
     }
 
@@ -1094,6 +1118,7 @@ log_storage_path=./deployment/keeper-1/coordination/log
 log_storage_disk=LocalLogDisk
 snapshot_storage_path=./deployment/keeper-1/coordination/snapshots
 snapshot_storage_disk=LocalSnapshotDisk
+unknown_setting=ignored
 \n"
             .as_bytes();
         let conf = KeeperConf::parse(&log, data).unwrap();
@@ -1254,7 +1279,7 @@ snapshot_storage_disk=LocalSnapshotDisk
 
         assert_eq!(
             format!("{}", root_cause),
-            "Command output has a line that does not contain a key-value pair: \"session_timeout_ms\""
+            "Command output has a malformed line: \"session_timeout_ms\""
         );
     }
 
@@ -1307,9 +1332,7 @@ snapshot_storage_disk=LocalSnapshotDisk
 
         assert_eq!(
             format!("{}", root_cause),
-            "Output from the Keeper differs to the expected output keys \
-            Output: \"server_id=1\\nenable_ipv6=true\\ntcp_port=20001\\nfour_letter_word_allow_list=conf,cons,crst,envi,ruok,srst,srvr,stat,wchs,dirs,mntr,isro,rcvr,apiv,csnp,lgif,rqld,rclc,clrs,ftfl\\nmax_requests_batch_size=100\\nmin_session_timeout_ms=10000\\noperation_timeout_ms=10000\\ndead_session_check_period_ms=500\\nheart_beat_interval_ms=500\\nelection_timeout_lower_bound_ms=1000\\nelection_timeout_upper_bound_ms=2000\\nreserved_log_items=100000\\nsnapshot_distance=100000\\nauto_forwarding=true\\nshutdown_timeout=5000\\nstartup_timeout=180000\\nraft_logs_level=trace\\nsnapshots_to_keep=3\\nrotate_log_storage_interval=100000\\nstale_log_gap=10000\\nfresh_log_gap=200\\nmax_requests_batch_size=100\\nmax_requests_batch_bytes_size=102400\\nmax_request_queue_size=100000\\nmax_requests_quick_batch_size=100\\nquorum_reads=false\\nforce_sync=true\\ncompress_logs=true\\ncompress_snapshots_with_zstd_format=true\\nconfiguration_change_tries_count=20\\nraft_limits_reconnect_limit=50\\nlog_storage_path=./deployment/keeper-1/coordination/log\\nlog_storage_disk=LocalLogDisk\\nsnapshot_storage_path=./deployment/keeper-1/coordination/snapshots\\nsnapshot_storage_disk=LocalSnapshotDisk\\n\\n\" \
-            Expected output keys: [\"server_id\", \"enable_ipv6\", \"tcp_port\", \"four_letter_word_allow_list\", \"max_requests_batch_size\", \"min_session_timeout_ms\", \"session_timeout_ms\", \"operation_timeout_ms\", \"dead_session_check_period_ms\", \"heart_beat_interval_ms\", \"election_timeout_lower_bound_ms\", \"election_timeout_upper_bound_ms\", \"reserved_log_items\", \"snapshot_distance\", \"auto_forwarding\", \"shutdown_timeout\", \"startup_timeout\", \"raft_logs_level\", \"snapshots_to_keep\", \"rotate_log_storage_interval\", \"stale_log_gap\", \"fresh_log_gap\", \"max_requests_batch_size\", \"max_requests_batch_bytes_size\", \"max_request_queue_size\", \"max_requests_quick_batch_size\", \"quorum_reads\", \"force_sync\", \"compress_logs\", \"compress_snapshots_with_zstd_format\", \"configuration_change_tries_count\", \"raft_limits_reconnect_limit\", \"log_storage_path\", \"log_storage_disk\", \"snapshot_storage_path\", \"snapshot_storage_disk\"]"
+            "Required key \"session_timeout_ms\" is missing"
         );
     }
 
@@ -1363,7 +1386,7 @@ snapshot_storage_disk=LocalSnapshotDisk
 
         assert_eq!(
             format!("{}", root_cause),
-            "Extracted key `\"session_timeout_fake\"` from output differs from expected key `session_timeout_ms`"
+            "Required key \"session_timeout_ms\" is missing"
         );
     }
 }

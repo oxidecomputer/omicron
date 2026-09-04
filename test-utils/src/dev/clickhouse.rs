@@ -557,12 +557,7 @@ impl ClickHouseProcess {
             );
         }
         let data_path = data_dir.root_path().to_path_buf();
-        wait_for_ready(
-            &data_dir.log_path(),
-            CLICKHOUSE_TIMEOUT,
-            CLICKHOUSE_READY,
-        )
-        .await?;
+        let log_path = data_dir.log_path();
         let process = ClickHouseProcess {
             data_dir: Some(data_dir),
             data_path,
@@ -570,6 +565,13 @@ impl ClickHouseProcess {
             child: Some(child),
             env,
         };
+        wait_for_ready(
+            &log_path,
+            CLICKHOUSE_TIMEOUT,
+            CLICKHOUSE_READY,
+        )
+        .await
+        .with_context(|| format!("ClickHouse log: {log_path}"))?;
         let http_address = ipv6_localhost_on(port);
         let native_address = ipv6_localhost_on(tcp_port);
         Ok(ClickHouseReplica { http_address, native_address, process })
@@ -648,12 +650,7 @@ impl ClickHouseProcess {
         }
         let data_path = data_dir.root_path().to_path_buf();
         let address = ipv6_localhost_on(port);
-        wait_for_ready(
-            &data_dir.keeper_log_path(),
-            CLICKHOUSE_KEEPER_TIMEOUT,
-            KEEPER_READY,
-        )
-        .await?;
+        let log_path = data_dir.keeper_log_path();
         let process = ClickHouseProcess {
             data_dir: Some(data_dir),
             data_path,
@@ -661,6 +658,13 @@ impl ClickHouseProcess {
             child: Some(child),
             env,
         };
+        wait_for_ready(
+            &log_path,
+            CLICKHOUSE_KEEPER_TIMEOUT,
+            KEEPER_READY,
+        )
+        .await
+        .with_context(|| format!("ClickHouse Keeper log: {log_path}"))?;
         Ok(ClickHouseKeeper { address, process })
     }
 
