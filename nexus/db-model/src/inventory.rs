@@ -93,6 +93,7 @@ use sled_agent_types::disk::SharedDatasetConfig;
 use sled_agent_types::inventory::BootImageHeader;
 use sled_agent_types::inventory::BootPartitionDetails;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+use sled_agent_types::inventory::CurrentUpdateDisposition;
 use sled_agent_types::inventory::ExternalDnsAddrs;
 use sled_agent_types::inventory::FmdHostCase;
 use sled_agent_types::inventory::FmdInventory;
@@ -100,6 +101,7 @@ use sled_agent_types::inventory::FmdInventoryError;
 use sled_agent_types::inventory::FmdResource;
 use sled_agent_types::inventory::HostPhase2DesiredContents;
 use sled_agent_types::inventory::HostPhase2DesiredSlots;
+use sled_agent_types::inventory::InstanceManagerStatus;
 use sled_agent_types::inventory::ManifestBootInventory;
 use sled_agent_types::inventory::ManifestInventory;
 use sled_agent_types::inventory::ManifestNonBootInventory;
@@ -949,6 +951,71 @@ pub struct InvSledAgent {
 
     #[diesel(embed)]
     pub file_source_resolver: InvOmicronFileSourceResolver,
+
+    instance_manager_update_disposition: Option<DbInvSledUpdateDisposition>,
+    instance_manager_num_registered_vmms: SqlU32,
+}
+
+/// Helper for breaking an [`InstanceManagerStatus`] up into its DB columns.
+#[derive(Debug, Clone, Copy)]
+pub struct InvInstanceManagerStatusCols {
+    pub update_disposition: Option<DbInvSledUpdateDisposition>,
+    pub num_registered_vmms: SqlU32,
+}
+
+impl TryFrom<InstanceManagerStatus> for InvInstanceManagerStatusCols {
+    type Error = anyhow::Error;
+
+    fn try_from(status: InstanceManagerStatus) -> Result<Self, Self::Error> {
+        let InstanceManagerStatus { update_disposition, num_registered_vmms } =
+            status;
+
+        // "no config" becomes NULL; `Known(_)` becomes non-NULL.
+        let update_disposition = match update_disposition {
+            CurrentUpdateDisposition::ConfigNotAvailable => None,
+            CurrentUpdateDisposition::Known(disposition) => {
+                Some(disposition.into())
+            }
+        };
+
+        // We never expect this to fail; there are many practial limits to the
+        // number of VMMs registered on a sled far lower than `u32::MAX`.
+        let num_registered_vmms =
+            SqlU32::new(u32::try_from(num_registered_vmms).map_err(|_| {
+                anyhow!(
+                    "inventory claims there are {num_registered_vmms} \
+                     on a sled; this doesn't fit in a SqlU32"
+                )
+            })?);
+
+        Ok(Self { update_disposition, num_registered_vmms })
+    }
+}
+
+impl From<InvInstanceManagerStatusCols> for InstanceManagerStatus {
+    fn from(cols: InvInstanceManagerStatusCols) -> Self {
+        let InvInstanceManagerStatusCols {
+            update_disposition,
+            num_registered_vmms,
+        } = cols;
+
+        // See the comments in the `From<InstanceManagerStatus>` impl; we do the
+        // reverse here.
+        let update_disposition = match update_disposition {
+            None => CurrentUpdateDisposition::ConfigNotAvailable,
+            Some(disposition) => {
+                CurrentUpdateDisposition::Known(disposition.into())
+            }
+        };
+
+        // usize can always contain a u32; saturate instead of unwrapping to
+        // suppress the error branch.
+        let num_registered_vmms: u32 = *num_registered_vmms;
+        let num_registered_vmms =
+            usize::try_from(num_registered_vmms).unwrap_or(usize::MAX);
+
+        InstanceManagerStatus { update_disposition, num_registered_vmms }
+    }
 }
 
 /// See [`sled_agent_types::inventory::ConfigReconcilerInventoryStatus`].
@@ -1338,6 +1405,11 @@ impl InvSledAgent {
                 non-null baseboard id"
             ))
         } else {
+            let InvInstanceManagerStatusCols {
+                update_disposition: instance_manager_update_disposition,
+                num_registered_vmms: instance_manager_num_registered_vmms,
+            } = sled_agent.instance_manager_status.try_into()?;
+
             Ok(InvSledAgent {
                 inv_collection_id: collection_id.into(),
                 time_collected: sled_agent.time_collected,
@@ -1360,8 +1432,20 @@ impl InvSledAgent {
                 ledgered_sled_config: ledgered_sled_config.map(From::from),
                 reconciler_status,
                 file_source_resolver,
+                instance_manager_update_disposition,
+                instance_manager_num_registered_vmms,
             })
         }
+    }
+
+    /// Reassemble the internal DB columns that comprise an
+    /// [`InstanceManagerStatus`].
+    pub fn instance_manager_status(&self) -> InstanceManagerStatus {
+        InvInstanceManagerStatusCols {
+            update_disposition: self.instance_manager_update_disposition,
+            num_registered_vmms: self.instance_manager_num_registered_vmms,
+        }
+        .into()
     }
 }
 
