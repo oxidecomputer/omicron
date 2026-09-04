@@ -149,6 +149,7 @@ async fn test_instance_placement_honors_blueprint_availability(
         Default::default(),
         None,
         Vec::new(),
+        Some(instance::InstanceShutdownPolicy::HardOff),
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
