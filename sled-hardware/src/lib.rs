@@ -40,9 +40,6 @@ pub enum SwitchDetectError {
     #[error("failed to walk device tree: {0}")]
     DevInfo(anyhow::Error),
 
-    #[error("failed to look up tofino node: {0}")]
-    Tofino(anyhow::Error),
-
     #[error("{path}: {err}")]
     Io {
         path: String,

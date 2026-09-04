@@ -37,17 +37,15 @@ pub use partitions::{NvmeFormattingError, ensure_partition_layout};
 const TOFINO_MONITOR: &'static str = "/opt/oxide/sled-agent/tofino-monitor";
 
 /// Detect attached switch hardware, checking each backend in the priority
-/// order of [`SwitchHardware`]. A Tofino node counts whether or not its
-/// driver is attached; availability is tracked by the hardware monitor.
+/// order of [`SwitchHardware`]. Tofino presence uses the same snapshot the
+/// hardware monitor polls, so startup detection and `is_scrimlet` agree.
 pub fn detect_switch_hardware(
     log: &Logger,
 ) -> Result<Option<SwitchHardware>, SwitchDetectError> {
     let mut devinfo =
         DevInfo::new_force_load().map_err(SwitchDetectError::DevInfo)?;
-    if let Some(node) = tofino::get_tofino_from_devinfo(&mut devinfo)
-        .map_err(SwitchDetectError::Tofino)?
-    {
-        info!(log, "found tofino node"; "path" => node.devfs_path);
+    if get_tofino_snapshot(log, &mut devinfo).exists {
+        info!(log, "found tofino asic");
         return Ok(Some(SwitchHardware::Tofino));
     }
     Ok(softnpu::find_softnpu_device(log, &mut devinfo)?
