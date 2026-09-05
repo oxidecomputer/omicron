@@ -38,7 +38,10 @@ use nexus_types_versions::v2026_02_13_01;
 use nexus_types_versions::v2026_04_16_00;
 use nexus_types_versions::v2026_05_07_00;
 use nexus_types_versions::v2026_06_05_00;
+use nexus_types_versions::v2026_06_08_00;
 use nexus_types_versions::v2026_08_14_00;
+use nexus_types_versions::v2026_08_14_01;
+
 use omicron_common::address::IpRange;
 use omicron_common::api::external::{
     http_pagination::{
@@ -88,6 +91,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_10_28_00, ACPI_SHUTDOWN),
     (2026_10_21_00, BYTE_WRAPPER_0_2_BUMP),
     (2026_10_15_00, SYSTEM_CERTIFICATES),
     (2026_10_13_00, ARTIFACT_HASH_SCHEMA),
@@ -4287,13 +4291,33 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/instances/{instance}/reboot",
         tags = ["instances"],
-        versions = VERSION_INSTANCE_CPU_TYPE_TURIN_V2..,
+        versions = VERSION_ACPI_SHUTDOWN..,
     }]
     async fn instance_reboot(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<latest::project::OptionalProjectSelector>,
         path_params: Path<latest::path_params::InstancePath>,
     ) -> Result<HttpResponseAccepted<latest::instance::Instance>, HttpError>;
+
+    #[endpoint {
+        operation_id = "instance_reboot",
+        method = POST,
+        path = "/v1/instances/{instance}/reboot",
+        tags = ["instances"],
+        versions = VERSION_INSTANCE_CPU_TYPE_TURIN_V2..VERSION_ACPI_SHUTDOWN,
+    }]
+    async fn instance_reboot_v2026_06_08_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        path_params: Path<latest::path_params::InstancePath>,
+    ) -> Result<
+        HttpResponseAccepted<v2026_06_08_00::instance::Instance>,
+        HttpError,
+    > {
+        let resp =
+            Self::instance_reboot(rqctx, query_params, path_params).await?;
+        Ok(HttpResponseAccepted(resp.0.try_into()?))
+    }
 
     #[endpoint {
         operation_id = "instance_reboot",
@@ -4310,8 +4334,12 @@ pub trait NexusExternalApi {
         HttpResponseAccepted<v2026_06_05_00::instance::Instance>,
         HttpError,
     > {
-        let resp =
-            Self::instance_reboot(rqctx, query_params, path_params).await?;
+        let resp = Self::instance_reboot_v2026_06_08_00(
+            rqctx,
+            query_params,
+            path_params,
+        )
+        .await?;
         Ok(HttpResponseAccepted(resp.0.try_into()?))
     }
 
@@ -4401,13 +4429,33 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/instances/{instance}/stop",
         tags = ["instances"],
-        versions = VERSION_INSTANCE_CPU_TYPE_TURIN_V2..,
+        versions = VERSION_ACPI_SHUTDOWN..,
     }]
     async fn instance_stop(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<latest::project::OptionalProjectSelector>,
         path_params: Path<latest::path_params::InstancePath>,
     ) -> Result<HttpResponseAccepted<latest::instance::Instance>, HttpError>;
+
+    #[endpoint {
+        operation_id = "instance_stop",
+        method = POST,
+        path = "/v1/instances/{instance}/stop",
+        tags = ["instances"],
+        versions = VERSION_INSTANCE_CPU_TYPE_TURIN_V2..VERSION_ACPI_SHUTDOWN,
+    }]
+    async fn instance_stop_v2026_06_08_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        path_params: Path<latest::path_params::InstancePath>,
+    ) -> Result<
+        HttpResponseAccepted<v2026_06_08_00::instance::Instance>,
+        HttpError,
+    > {
+        let resp =
+            Self::instance_stop(rqctx, query_params, path_params).await?;
+        Ok(HttpResponseAccepted(resp.0.try_into()?))
+    }
 
     #[endpoint {
         operation_id = "instance_stop",
@@ -4424,8 +4472,12 @@ pub trait NexusExternalApi {
         HttpResponseAccepted<v2026_06_05_00::instance::Instance>,
         HttpError,
     > {
-        let resp =
-            Self::instance_stop(rqctx, query_params, path_params).await?;
+        let resp = Self::instance_stop_v2026_06_08_00(
+            rqctx,
+            query_params,
+            path_params,
+        )
+        .await?;
         Ok(HttpResponseAccepted(resp.0.try_into()?))
     }
 
