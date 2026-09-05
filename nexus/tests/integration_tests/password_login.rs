@@ -7,7 +7,9 @@ use http::{StatusCode, header, method::Method};
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::grant_iam;
 use nexus_test_utils::resource_helpers::test_params;
-use nexus_test_utils::resource_helpers::{create_local_user, create_silo};
+use nexus_test_utils::resource_helpers::{
+    create_local_user, create_silo, delete_silo,
+};
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::policy::SiloRole;
 use nexus_types::external_api::silo;
@@ -19,9 +21,6 @@ use std::str::FromStr;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
-
-// TODO-coverage verify that deleting a Silo deletes all the users and their
-// password hashes
 
 // TODO-coverage A more rigorous test to verify there are no timing attack
 // vulnerabilities here might be to construct a few kinds of logins (attempt for
@@ -44,14 +43,7 @@ async fn test_local_users(cptestctx: &ControlPlaneTestContext) {
     .await;
     test_local_user_basic(client, &silo).await;
     test_local_user_with_no_initial_password(client, &silo).await;
-    NexusRequest::object_delete(
-        client,
-        &format!("/v1/system/silos/{}", silo_name),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap();
+    delete_silo(client, silo_name.as_str()).await;
 }
 
 async fn test_local_user_basic(client: &ClientTestContext, silo: &silo::Silo) {
