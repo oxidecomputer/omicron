@@ -38,6 +38,12 @@ enum Commands {
         #[clap(long, env, default_value = "zone")]
         softnpu_mode: String,
 
+        #[clap(long, env)]
+        softnpu_commit: Option<String>,
+
+        #[clap(long, env)]
+        sidecar_lite_commit: Option<String>,
+
         /// The MAC address of your gateway IP
         ///
         /// Will be inferred via `arp` if unsupplied.
@@ -116,9 +122,8 @@ const ZLOGIN: &'static str = "/usr/sbin/zlogin";
 const ZPOOL: &'static str = "/usr/sbin/zpool";
 const ZONEADM: &'static str = "/usr/sbin/zoneadm";
 
-const SIDECAR_LITE_COMMIT: &'static str =
-    "461cbe1926b93b20c2f43ad5cd9007b193db61a6";
-const SOFTNPU_COMMIT: &'static str = "284c6830722548714128e63ea04bcca78ee27154";
+const SIDECAR_LITE_BRANCH: &'static str = "zl/multicast";
+const SOFTNPU_BRANCH: &'static str = "zl/multicast";
 const PXA_MAC_DEFAULT: &'static str = "a8:e1:de:01:70:1d";
 
 const PXA_WARNING: &'static str = r#"  You have not set up the proxy-ARP environment variables
@@ -162,6 +167,8 @@ pub fn run_cmd(args: Args) -> Result<()> {
             physical_link,
             promiscuous_filter_off,
             softnpu_mode,
+            softnpu_commit,
+            sidecar_lite_commit,
             gateway_ip,
             gateway_mac,
             pxa,
@@ -182,7 +189,11 @@ pub fn run_cmd(args: Args) -> Result<()> {
                 && softnpu_mode == "zone"
             {
                 ensure_simulated_links(&physical_link, promiscuous_filter_off)?;
-                ensure_softnpu_zone(&npu_zone)?;
+                ensure_softnpu_zone(
+                    &npu_zone,
+                    softnpu_commit,
+                    sidecar_lite_commit,
+                )?;
                 initialize_softnpu_zone(gateway_ip, gateway_mac, pxa, pxa_mac)?;
             }
             println!("created virtual hardware");
@@ -340,7 +351,36 @@ fn ensure_simulated_links(
     Ok(())
 }
 
-fn ensure_softnpu_zone(npu_zone: &Utf8Path) -> Result<()> {
+/// Resolve the head commit of a branch in an oxidecomputer repo.
+///
+/// This allows an image to follow a build (on buildomat) branch rather
+/// than a pinned commit.
+///
+/// TODO: remove in split PR-series
+fn branch_head(repo: &str, branch: &str) -> Result<String> {
+    let output = Command::new("git")
+        .args([
+            "ls-remote",
+            &format!("https://github.com/oxidecomputer/{repo}"),
+            &format!("refs/heads/{branch}"),
+        ])
+        .output()
+        .with_context(|| format!("running git ls-remote for {repo}"))?;
+    if !output.status.success() {
+        bail!("git ls-remote failed for {repo} branch {branch}");
+    }
+    String::from_utf8(output.stdout)?
+        .split_whitespace()
+        .next()
+        .map(str::to_string)
+        .ok_or_else(|| anyhow!("{repo} branch {branch} not found"))
+}
+
+fn ensure_softnpu_zone(
+    npu_zone: &Utf8Path,
+    softnpu_commit: Option<String>,
+    sidecar_lite_commit: Option<String>,
+) -> Result<()> {
     let zones = zoneadm_list()?;
     if !zones.iter().any(|z| z == "sidecar_softnpu") {
         if !npu_zone.exists() {
@@ -349,6 +389,14 @@ fn ensure_softnpu_zone(npu_zone: &Utf8Path) -> Result<()> {
             );
         }
 
+        let softnpu_commit = match softnpu_commit {
+            Some(sha) => sha,
+            None => branch_head("softnpu", SOFTNPU_BRANCH)?,
+        };
+        let sidecar_lite_commit = match sidecar_lite_commit {
+            Some(sha) => sha,
+            None => branch_head("sidecar-lite", SIDECAR_LITE_BRANCH)?,
+        };
         let mut cmd = Command::new(PFEXEC);
         cmd.arg(npu_zone);
         cmd.args([
@@ -360,9 +408,9 @@ fn ensure_softnpu_zone(npu_zone: &Utf8Path) -> Result<()> {
             "--ports",
             "sc0_1,tfportqsfp0_0",
             "--sidecar-lite-commit",
-            SIDECAR_LITE_COMMIT,
+            sidecar_lite_commit.as_str(),
             "--softnpu-commit",
-            SOFTNPU_COMMIT,
+            softnpu_commit.as_str(),
         ]);
         execute(cmd)?;
     }

@@ -518,7 +518,7 @@ digest = "0.10.7"
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
-dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "3d49b1314dc111323052ffe4b5b7ec442d9d0f3d" }
+dpd-client = { git = "https://github.com/oxidecomputer/dendrite", branch = "multicast-e2e" }
 dropshot = { version = "0.17.1", features = [ "usdt-probes" ] }
 dropshot-api-manager = "0.8.0"
 dropshot-api-manager-types = "0.8.0"
@@ -631,9 +631,9 @@ ntp-admin-api = { path = "ntp-admin/api" }
 ntp-admin-client = { path = "clients/ntp-admin-client" }
 ntp-admin-types = { path = "ntp-admin/types" }
 ntp-admin-types-versions = { path = "ntp-admin/types/versions" }
-mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "96a2f153a08a8c55d75df6f92b084ed003e04400" }
-ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "96a2f153a08a8c55d75df6f92b084ed003e04400" }
-ddm-api-types-versions = { git = "https://github.com/oxidecomputer/maghemite", rev = "96a2f153a08a8c55d75df6f92b084ed003e04400" }
+mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", branch = "zl/ddm-mcast" }
+ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", branch = "zl/ddm-mcast" }
+ddm-api-types-versions = { git = "https://github.com/oxidecomputer/maghemite", branch = "zl/ddm-mcast" }
 multimap = "0.10.1"
 nexus-auth = { path = "nexus/auth" }
 nexus-background-task-interface = { path = "nexus/background-task-interface" }
@@ -756,11 +756,11 @@ progenitor-extras = "0.2.0"
 # NOTE: if you change the pinned revision of the `bhyve_api` and propolis
 # dependencies, you must also update the references in package-manifest.toml to
 # match the new revision.
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "3c07d60a77d528018fded2f0a434cafe724f3423" }
-propolis-api-types-versions = { git = "https://github.com/oxidecomputer/propolis", rev = "3c07d60a77d528018fded2f0a434cafe724f3423" }
-propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "3c07d60a77d528018fded2f0a434cafe724f3423" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "3c07d60a77d528018fded2f0a434cafe724f3423" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "3c07d60a77d528018fded2f0a434cafe724f3423" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", branch = "zl/multicast" }
+propolis-api-types-versions = { git = "https://github.com/oxidecomputer/propolis", branch = "zl/multicast" }
+propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", branch = "zl/multicast" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", branch = "zl/multicast" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", branch = "zl/multicast" }
 # NOTE: see above!
 proptest = "1.11.0"
 qorb = "0.4.1"
@@ -777,7 +777,7 @@ rats-corim = { git = "https://github.com/oxidecomputer/rats-corim.git", rev = "f
 raw-cpuid = { git = "https://github.com/oxidecomputer/rust-cpuid.git", rev = "a4cf01df76f35430ff5d39dc2fe470bcb953503b" }
 rayon = "1.10"
 rcgen = { version = "0.12.1", default-features = false, features = ["aws_lc_rs", "pem"] }
-mg-api-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "96a2f153a08a8c55d75df6f92b084ed003e04400" }
+mg-api-types = { git = "https://github.com/oxidecomputer/maghemite", branch = "zl/ddm-mcast" }
 reconfigurator-cli = { path = "dev-tools/reconfigurator-cli" }
 reedline = "0.40.0"
 ref-cast = "1.0"
