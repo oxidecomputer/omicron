@@ -5,21 +5,21 @@
 use crate::{State, keymap::Cmd, state::ComponentId};
 use camino::Utf8PathBuf;
 use humantime::format_rfc3339;
+use iddqd::IdOrdMap;
 use semver::Version;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::fs::File;
 use std::time::SystemTime;
 use wicket_common::artifact::ArtifactId;
 use wicket_common::inventory::RackV1Inventory;
-use wicket_common::update_events::EventReport;
+use wicket_common::update_events::SpEventReport;
 use wicketd_client::types::{
     CurrentRssUserConfig, IgnitionCommand, RackOperationStatus,
 };
 use wicketd_commission_types::inventory::LocationInfo;
 
 /// Event report type returned by the get_artifacts_and_event_reports API call.
-pub type EventReportMap = HashMap<String, HashMap<String, EventReport>>;
+pub type EventReportMap = IdOrdMap<SpEventReport>;
 
 /// An event that will update state
 ///

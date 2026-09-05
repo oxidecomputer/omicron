@@ -17833,6 +17833,7 @@ dependencies = [
  "bootstrap-agent-lockstep-types",
  "dropshot",
  "gateway-client",
+ "iddqd",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "schemars 0.8.22",
@@ -17850,6 +17851,7 @@ version = "0.1.0"
 dependencies = [
  "bootstrap-agent-lockstep-types",
  "chrono",
+ "iddqd",
  "installinator-common",
  "omicron-common",
  "omicron-uuid-kinds",

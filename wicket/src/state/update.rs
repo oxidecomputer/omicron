@@ -14,7 +14,7 @@ use wicket_common::update_events::{
 use crate::helpers::{get_update_simulated_result, get_update_test_error};
 use crate::{events::EventReportMap, ui::defaults::style};
 
-use super::{ALL_COMPONENT_IDS, ComponentId, ParsableComponentId};
+use super::{ALL_COMPONENT_IDS, ComponentId};
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use slog::Logger;
@@ -510,22 +510,18 @@ pub fn parse_event_report_map(
     reports: EventReportMap,
 ) -> BTreeMap<ComponentId, EventReport> {
     let mut component_id_map = BTreeMap::new();
-    for (sp_type, logs) in reports {
-        for (i, event_report) in logs {
-            let Ok(id) = ComponentId::try_from(ParsableComponentId {
-                sp_type: &sp_type,
-                i: &i,
-            }) else {
-                slog::warn!(
-                    log,
-                    "Invalid ComponentId in EventReportMap: {} {}",
-                    &sp_type,
-                    &i
-                );
-                continue;
-            };
-            component_id_map.insert(id, event_report);
-        }
+    for report in reports {
+        let Ok(id) =
+            ComponentId::from_sp_type_and_slot(report.sp.typ, report.sp.slot)
+        else {
+            slog::warn!(
+                log,
+                "Invalid ComponentId in EventReportMap: {:?}",
+                report.sp,
+            );
+            continue;
+        };
+        component_id_map.insert(id, report.event_report);
     }
 
     component_id_map
