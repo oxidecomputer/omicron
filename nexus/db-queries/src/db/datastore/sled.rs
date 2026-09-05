@@ -2405,17 +2405,23 @@ pub(in crate::db::datastore) mod test {
     use crate::db::pub_test_utils::helpers::create_anti_affinity_group;
     use crate::db::pub_test_utils::helpers::create_project;
     use crate::db::pub_test_utils::helpers::small_resource_request;
+    use crate::db::pub_test_utils::simulated_sleds::sled_updates_from_system;
+    use crate::db::pub_test_utils::simulated_sleds::test_sled_resources;
+    use crate::db::pub_test_utils::simulated_sleds::upsert_sleds_from_system;
     use crate::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
     use anyhow::{Context, Result};
     use async_bb8_diesel::AsyncConnection;
     use async_bb8_diesel::AsyncSimpleConnection;
     use itertools::Itertools;
     use nexus_db_lookup::LookupPath;
+    use nexus_db_model::Generation;
     use nexus_db_model::PhysicalDiskKind;
     use nexus_db_model::PhysicalDiskPolicy;
     use nexus_db_model::PhysicalDiskState;
-    use nexus_db_model::{Generation, SledCpuFamily};
     use nexus_db_model::{InstanceCpuPlatform, PhysicalDisk};
+    use nexus_reconfigurator_planning::example::ExampleSystem;
+    use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
+    use nexus_reconfigurator_planning::system::SimulatedSledResources;
     use nexus_types::external_api::{affinity, disk, instance};
     use nexus_types::identity::Asset;
     use nexus_types::identity::Resource;
@@ -2430,6 +2436,7 @@ pub(in crate::db::datastore) mod test {
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
     use predicates::{BoxPredicate, prelude::*};
+    use sled_agent_types::inventory::SledCpuFamily;
     use sled_agent_types::inventory::ZpoolHealth;
     use std::collections::BTreeMap;
     use std::collections::HashMap;
@@ -2583,15 +2590,29 @@ pub(in crate::db::datastore) mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
+        let example = example_system_with_resources(&opctx, 5);
+        let [
+            non_provisionable_update,
+            expunged_update,
+            decommissioned_update,
+            illegal_decommissioned_update,
+            provisionable_update,
+        ]: [SledUpdate; 5] = sled_updates_from_system(
+            &example.system,
+            nexus_test_utils::RACK_UUID,
+        )
+        .try_into()
+        .expect("simulated system has exactly five sleds");
+
         // Define some sleds that resources cannot be provisioned on.
         let (non_provisionable_sled, _) =
-            datastore.sled_upsert(test_new_sled_update()).await.unwrap();
+            datastore.sled_upsert(non_provisionable_update).await.unwrap();
         let (expunged_sled, _) =
-            datastore.sled_upsert(test_new_sled_update()).await.unwrap();
+            datastore.sled_upsert(expunged_update).await.unwrap();
         let (decommissioned_sled, _) =
-            datastore.sled_upsert(test_new_sled_update()).await.unwrap();
+            datastore.sled_upsert(decommissioned_update).await.unwrap();
         let (illegal_decommissioned_sled, _) =
-            datastore.sled_upsert(test_new_sled_update()).await.unwrap();
+            datastore.sled_upsert(illegal_decommissioned_update).await.unwrap();
 
         let ineligible_sleds = IneligibleSleds {
             non_provisionable: non_provisionable_sled.id(),
@@ -2623,9 +2644,8 @@ pub(in crate::db::datastore) mod test {
         assert!(matches!(error, external::Error::InsufficientCapacity { .. }));
 
         // Now add a provisionable sled and try again.
-        let sled_update = test_new_sled_update();
         let (provisionable_sled, _) =
-            datastore.sled_upsert(sled_update.clone()).await.unwrap();
+            datastore.sled_upsert(provisionable_update).await.unwrap();
 
         // Try a few times to ensure that resources never get allocated to the
         // non-provisionable sled.
@@ -2662,13 +2682,14 @@ pub(in crate::db::datastore) mod test {
 
     // Create a resource request that will entirely fill a sled.
     fn large_resource_request() -> db::model::Resources {
-        // NOTE: This is dependent on [`test_new_sled_update`] using the default
-        // configuration for [`SledSystemHardware`].
-        let sled_resources = SledUpdateBuilder::new().hardware().build();
-        let threads = sled_resources.usable_hardware_threads;
-        let rss_ram = sled_resources.usable_physical_ram;
-        let reservoir_ram = sled_resources.reservoir_size;
-        db::model::Resources::new(threads, rss_ram, reservoir_ram)
+        // example_system_with_resources also uses test_sled_resources, so this
+        // will entirely fill those simulated sleds.
+        let sled_resources = test_sled_resources();
+        db::model::Resources::new(
+            sled_resources.usable_hardware_threads,
+            sled_resources.usable_physical_ram.into(),
+            sled_resources.reservoir_size.into(),
+        )
     }
 
     // This short-circuits some of the logic and checks we normally have when
@@ -2716,14 +2737,30 @@ pub(in crate::db::datastore) mod test {
             .unwrap();
     }
 
-    async fn create_sleds(datastore: &DataStore, count: usize) -> Vec<Sled> {
-        let mut sleds = vec![];
-        for _ in 0..count {
-            let (sled, _) =
-                datastore.sled_upsert(test_new_sled_update()).await.unwrap();
-            sleds.push(sled);
-        }
-        sleds
+    fn example_system_with_resources(
+        opctx: &OpContext,
+        nsleds: usize,
+    ) -> ExampleSystem {
+        let (example, _) =
+            ExampleSystemBuilder::new(&opctx.log, "sled_reservation_tests")
+                .nsleds(nsleds)
+                .sled_resources(test_sled_resources())
+                .build();
+        example
+    }
+
+    async fn create_sleds(
+        opctx: &OpContext,
+        datastore: &DataStore,
+        count: usize,
+    ) -> Vec<Sled> {
+        let example = example_system_with_resources(opctx, count);
+        upsert_sleds_from_system(
+            datastore,
+            &example.system,
+            nexus_test_utils::RACK_UUID,
+        )
+        .await
     }
 
     type GroupName = &'static str;
@@ -3030,7 +3067,7 @@ pub(in crate::db::datastore) mod test {
             create_project(&opctx, &datastore, "project").await;
 
         const SLED_COUNT: usize = 2;
-        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+        let sleds = create_sleds(&opctx, &datastore, SLED_COUNT).await;
 
         let groups = [Group {
             affinity: Affinity::Negative,
@@ -3079,7 +3116,7 @@ pub(in crate::db::datastore) mod test {
             create_project(&opctx, &datastore, "project").await;
 
         const SLED_COUNT: usize = 3;
-        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+        let sleds = create_sleds(&opctx, &datastore, SLED_COUNT).await;
 
         let groups = [Group {
             affinity: Affinity::Negative,
@@ -3125,7 +3162,7 @@ pub(in crate::db::datastore) mod test {
             create_project(&opctx, &datastore, "project").await;
 
         const SLED_COUNT: usize = 2;
-        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+        let sleds = create_sleds(&opctx, &datastore, SLED_COUNT).await;
 
         let groups = [Group {
             affinity: Affinity::Negative,
@@ -3172,7 +3209,7 @@ pub(in crate::db::datastore) mod test {
             create_project(&opctx, &datastore, "project").await;
 
         const SLED_COUNT: usize = 2;
-        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+        let sleds = create_sleds(&opctx, &datastore, SLED_COUNT).await;
 
         let groups = [Group {
             affinity: Affinity::Positive,
@@ -3219,7 +3256,7 @@ pub(in crate::db::datastore) mod test {
             create_project(&opctx, &datastore, "project").await;
 
         const SLED_COUNT: usize = 3;
-        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+        let sleds = create_sleds(&opctx, &datastore, SLED_COUNT).await;
 
         let groups = [
             Group {
@@ -3282,7 +3319,7 @@ pub(in crate::db::datastore) mod test {
             create_project(&opctx, &datastore, "project").await;
 
         const SLED_COUNT: usize = 2;
-        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+        let sleds = create_sleds(&opctx, &datastore, SLED_COUNT).await;
 
         let groups = [Group {
             affinity: Affinity::Positive,
@@ -3335,7 +3372,7 @@ pub(in crate::db::datastore) mod test {
             create_project(&opctx, &datastore, "project").await;
 
         const SLED_COUNT: usize = 2;
-        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+        let sleds = create_sleds(&opctx, &datastore, SLED_COUNT).await;
 
         let groups = [Group {
             affinity: Affinity::Positive,
@@ -3383,7 +3420,7 @@ pub(in crate::db::datastore) mod test {
             create_project(&opctx, &datastore, "project").await;
 
         const SLED_COUNT: usize = 2;
-        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+        let sleds = create_sleds(&opctx, &datastore, SLED_COUNT).await;
 
         let groups = [
             Group {
@@ -3442,7 +3479,7 @@ pub(in crate::db::datastore) mod test {
             create_project(&opctx, &datastore, "project").await;
 
         const SLED_COUNT: usize = 2;
-        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+        let sleds = create_sleds(&opctx, &datastore, SLED_COUNT).await;
 
         let groups = [
             Group {
@@ -3500,7 +3537,7 @@ pub(in crate::db::datastore) mod test {
             create_project(&opctx, &datastore, "project").await;
 
         const SLED_COUNT: usize = 4;
-        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+        let sleds = create_sleds(&opctx, &datastore, SLED_COUNT).await;
 
         let groups = [
             Group {
@@ -3568,7 +3605,7 @@ pub(in crate::db::datastore) mod test {
             create_project(&opctx, &datastore, "project").await;
 
         const SLED_COUNT: usize = 4;
-        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+        let sleds = create_sleds(&opctx, &datastore, SLED_COUNT).await;
 
         let groups = [
             Group {
@@ -3636,7 +3673,7 @@ pub(in crate::db::datastore) mod test {
             create_project(&opctx, &datastore, "project").await;
 
         const SLED_COUNT: usize = 3;
-        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+        let sleds = create_sleds(&opctx, &datastore, SLED_COUNT).await;
 
         let groups = [
             Group {
@@ -3695,7 +3732,7 @@ pub(in crate::db::datastore) mod test {
             create_project(&opctx, &datastore, "project").await;
 
         const SLED_COUNT: usize = 3;
-        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+        let sleds = create_sleds(&opctx, &datastore, SLED_COUNT).await;
 
         let groups = [
             Group {
@@ -3754,7 +3791,7 @@ pub(in crate::db::datastore) mod test {
             create_project(&opctx, &datastore, "project").await;
 
         const SLED_COUNT: usize = 4;
-        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+        let sleds = create_sleds(&opctx, &datastore, SLED_COUNT).await;
 
         let test_instance = Instance::new().group("affinity");
 
@@ -3856,7 +3893,7 @@ pub(in crate::db::datastore) mod test {
             create_project(&opctx, &datastore, "project").await;
 
         const SLED_COUNT: usize = 4;
-        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+        let sleds = create_sleds(&opctx, &datastore, SLED_COUNT).await;
 
         let test_instance = Instance::new().group("anti-affinity");
 
@@ -3955,7 +3992,7 @@ pub(in crate::db::datastore) mod test {
             create_project(&opctx, &datastore, "project").await;
 
         const SLED_COUNT: usize = 4;
-        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+        let sleds = create_sleds(&opctx, &datastore, SLED_COUNT).await;
 
         let test_instance = Instance::new().use_many_resources();
 
@@ -4039,17 +4076,33 @@ pub(in crate::db::datastore) mod test {
         let (_authz_project, _project) =
             create_project(&opctx, &datastore, "project").await;
 
-        let mut sleds = vec![];
-        for family in [SledCpuFamily::AmdMilan, SledCpuFamily::AmdTurin] {
-            for _ in 0..2 {
-                let mut builder = SledUpdateBuilder::new();
-                builder.rack_id(nexus_test_utils::RACK_UUID);
-                builder.hardware().cpu_family(family);
-                let (sled, _) =
-                    datastore.sled_upsert(builder.build()).await.unwrap();
-                sleds.push(sled);
-            }
+        let families = [
+            SledCpuFamily::AmdMilan,
+            SledCpuFamily::AmdMilan,
+            SledCpuFamily::AmdTurin,
+            SledCpuFamily::AmdTurin,
+        ];
+        let mut builder =
+            ExampleSystemBuilder::new(&opctx.log, "sled_reservation_tests")
+                .nsleds(families.len());
+        for (index, family) in families.into_iter().enumerate() {
+            builder = builder
+                .with_sled_resources(
+                    index,
+                    SimulatedSledResources {
+                        cpu_family: family,
+                        ..test_sled_resources()
+                    },
+                )
+                .expect("sled index is in range");
         }
+        let (example, _) = builder.build();
+        upsert_sleds_from_system(
+            &datastore,
+            &example.system,
+            nexus_test_utils::RACK_UUID,
+        )
+        .await;
 
         let mut test_instance = Instance::new();
         for platform in [None, Some(InstanceCpuPlatform::AmdMilan)] {
@@ -4545,7 +4598,7 @@ pub(in crate::db::datastore) mod test {
                     usable_hardware_threads: 128,
                     usable_physical_ram: (64 << 30).try_into().unwrap(),
                     reservoir_size: (56 << 30).try_into().unwrap(),
-                    cpu_family: SledCpuFamily::AmdMilan,
+                    cpu_family: db::model::SledCpuFamily::AmdMilan,
                 },
                 RackUuid::new_v4(),
                 Generation::new(),

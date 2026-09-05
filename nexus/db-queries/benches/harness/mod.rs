@@ -104,7 +104,7 @@ impl TestHarness {
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _project) =
             create_project(&opctx, &datastore, "project").await;
-        create_sleds(&datastore, sled_count).await;
+        create_sleds(log, &datastore, sled_count).await;
 
         Self { db, authz_project }
     }
