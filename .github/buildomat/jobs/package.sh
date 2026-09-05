@@ -9,7 +9,19 @@
 #: rust_toolchain = true
 #: output_rules = [
 #:	"=/work/package.tar.gz",
+#:	"=/work/omicron-sled-agent.tar.gz",
+#:	"=/work/omicron-sled-agent.tar.gz.sha256.txt",
 #: ]
+#:
+#: [[publish]]
+#: series = "softnpu"
+#: name = "omicron-sled-agent.tar.gz"
+#: from_output = "/work/omicron-sled-agent.tar.gz"
+#:
+#: [[publish]]
+#: series = "softnpu"
+#: name = "omicron-sled-agent.tar.gz.sha256.txt"
+#: from_output = "/work/omicron-sled-agent.tar.gz.sha256.txt"
 #:
 
 set -o errexit
@@ -36,6 +48,14 @@ ptime -m cargo run --locked --release --bin omicron-package -- \
   -t test package
 mapfile -t packages \
   < <(cargo run --locked --release --bin omicron-package -- -t test list-outputs)
+
+# Publish the sled-agent package from this softnpu/non-gimlet build on its
+# own. Test environments driving softnpu scrimlets need exactly this package
+# from a stock commit, and package.tar.gz is far too large to fetch for one
+# file.
+ptime -m gzip -c out/omicron-sled-agent.tar > $WORK/omicron-sled-agent.tar.gz
+digest -a sha256 $WORK/omicron-sled-agent.tar.gz \
+  > $WORK/omicron-sled-agent.tar.gz.sha256.txt
 
 # Build the xtask binary used by the deploy job
 ptime -m cargo build --locked --release -p xtask
