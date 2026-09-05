@@ -13,6 +13,8 @@ use crate::kstat::n_processors;
 use kstat_rs::Data;
 use kstat_rs::Kstat;
 use kstat_rs::Named;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use oximeter::FieldType;
 use oximeter::FieldValue;
 use oximeter::Sample;
@@ -34,22 +36,37 @@ pub fn max_cardinality() -> usize {
     CPU_STATES.len() * n_processors().unwrap_or(1024)
 }
 
-/// Parsed zone metadata from a zone name formatted as "oxz_TYPE_UUID".
+/// Parsed zone metadata from a zone name.
 struct ZoneMetadata {
     zone_type: String,
-    zone_id: Uuid,
+    zone_id: OmicronZoneUuid,
 }
 
-/// Parse a zone name into its service type and UUID.
+/// Extract zone metadata from a zone by name. If formatted as oxz_TYPE_UUID,
+/// extract the type and UUID. For zones not formatted following this
+/// convention, such as "global" or "oxz_switch", strip the "oxz_" prefix, and
+/// treat the result as the zone type.
 ///
-/// Returns `None` if the zone name isn't formatted as
-/// "oxz_TYPE_UUID".
-///
-/// TODO: Consider passing typed zone metadata from sled-agent instead of
-/// parsing zone names. As of this writing, zone names are easy to parse,
-/// and we can avoid the complexity of per-zone tracking or maintaining a
-/// shared mapping of zone metadata.
-fn parse_zone_name(zone_name: &str) -> Option<ZoneMetadata> {
+/// Note: because oximeter fields aren't optional, we use a nil UUID
+/// rather than None when we don't have an Omicron zone UUID.
+fn parse_zone_name(zone_name: &str) -> ZoneMetadata {
+    if let Some(metadata) = parse_zone_name_prefix_uuid(zone_name) {
+        metadata
+    } else if let Some(rest) = zone_name.strip_prefix(ZONE_PREFIX) {
+        ZoneMetadata {
+            zone_type: rest.to_string(),
+            zone_id: OmicronZoneUuid::nil(),
+        }
+    } else {
+        ZoneMetadata {
+            zone_type: zone_name.into(),
+            zone_id: OmicronZoneUuid::nil(),
+        }
+    }
+}
+
+// Parse a zone name formatted as oxz_TYPE_UUID.
+fn parse_zone_name_prefix_uuid(zone_name: &str) -> Option<ZoneMetadata> {
     let rest = zone_name.strip_prefix(ZONE_PREFIX)?;
     let (zone_type, uuid_str) = rest.rsplit_once('_')?;
     let zone_id = uuid_str.parse().ok()?;
@@ -120,10 +137,7 @@ impl KstatTarget for Zone {
                 .ok_or(Error::NoSuchKstat)
                 .and_then(|n| n.value.as_str())?
                 .to_string();
-            let (zone_type, zone_id) = match parse_zone_name(&zone_name) {
-                Some(m) => (m.zone_type, m.zone_id),
-                None => (String::new(), Uuid::nil()),
-            };
+            let zone_metadata = parse_zone_name(&zone_name);
 
             for named_data in named.iter() {
                 let Named { name, value } = named_data;
@@ -138,8 +152,8 @@ impl KstatTarget for Zone {
                 let datum = value.as_u64()?;
                 let metric = zone::CpuNsec {
                     zone_name: zone_name.clone().into(),
-                    zone_type: zone_type.clone().into(),
-                    zone_id,
+                    zone_type: zone_metadata.zone_type.clone().into(),
+                    zone_id: zone_metadata.zone_id.into_untyped_uuid(),
                     state: state.to_string().into(),
                     datum: Cumulative::with_start_time(*creation_time, datum),
                 };
@@ -184,28 +198,35 @@ mod parse_tests {
     fn test_parse_zone_name_omicron_zone() {
         let metadata = parse_zone_name(
             "oxz_cockroachdb_2be512e2-e127-40f0-95a4-67763ac02185",
-        )
-        .unwrap();
+        );
         assert_eq!(metadata.zone_type, "cockroachdb");
         assert_eq!(
             metadata.zone_id,
-            "2be512e2-e127-40f0-95a4-67763ac02185".parse::<Uuid>().unwrap()
+            "2be512e2-e127-40f0-95a4-67763ac02185"
+                .parse::<OmicronZoneUuid>()
+                .unwrap()
         );
     }
 
     #[test]
     fn test_parse_zone_name_no_prefix() {
-        assert!(parse_zone_name("global").is_none());
+        let metadata = parse_zone_name("global");
+        assert_eq!(metadata.zone_type, "global");
+        assert_eq!(metadata.zone_id, OmicronZoneUuid::nil());
     }
 
     #[test]
     fn test_parse_zone_name_no_uuid() {
-        assert!(parse_zone_name("oxz_switch").is_none());
+        let metadata = parse_zone_name("oxz_switch");
+        assert_eq!(metadata.zone_type, "switch");
+        assert_eq!(metadata.zone_id, OmicronZoneUuid::nil());
     }
 
     #[test]
     fn test_parse_zone_name_invalid_uuid() {
-        assert!(parse_zone_name("oxz_foo_bar").is_none());
+        let metadata = parse_zone_name("oxz_foo_bar");
+        assert_eq!(metadata.zone_type, "foo_bar");
+        assert_eq!(metadata.zone_id, OmicronZoneUuid::nil());
     }
 }
 
