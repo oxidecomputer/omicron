@@ -30,25 +30,33 @@ pub struct ObservedSiloCertificates {
 }
 
 impl ObservedSiloCertificates {
-    /// The certificate Nexus will serve for this silo: the one whose leaf
-    /// `not_after` is latest, or `None` if the silo has no certificates.
-    ///
-    /// This must stay in lockstep with `ExternalEndpoint::best_certificate`
-    /// in Nexus, which applies the same rule to choose the certificate
-    /// actually presented to TLS clients. Like that function, this ignores
-    /// `not_before`.
-    ///
-    /// When several certificates share the latest `not_after`, the one with
-    /// the greatest id is returned. The tiebreak matters because the
-    /// certificate diagnosis engine records the chosen certificate's id in
-    /// its facts and treats a change of id as a new condition worth a fresh
-    /// alert, so the choice must not vary between analyses of the same set of
-    /// certificates. Nexus may serve a different one of the tied certificates,
-    /// but it expires at the same time, so what the engine says about the
-    /// expiration of the served certificate holds either way.
+    /// The certificate Nexus serves for this silo, chosen by
+    /// [`best_certificate`], or `None` if the silo has no certificates.
     pub fn best_certificate(&self) -> Option<&ObservedCertificate> {
-        self.certificates.iter().max_by_key(|cert| (cert.not_after, cert.id))
+        best_certificate(self.certificates.iter(), |cert| {
+            (cert.not_after, cert.id)
+        })
     }
+}
+
+/// Chooses which of a silo's certificates Nexus serves for its external API:
+/// the one whose leaf `not_after` is latest, breaking ties toward the
+/// greatest certificate id. `not_before` is not considered.
+///
+/// `key` returns a certificate's `(not_after, id)`. Nexus calls this when
+/// choosing the certificate to present to TLS clients, and the certificate
+/// diagnosis engine calls it when predicting which certificate is served, so
+/// the engine's facts name exactly the certificate clients receive.
+///
+/// The tie-break must be deterministic because the engine records the chosen
+/// certificate's id in its facts and treats a change of id as a new
+/// condition worth a fresh alert; the choice must not vary between analyses
+/// of the same set of certificates.
+pub fn best_certificate<T>(
+    certs: impl IntoIterator<Item = T>,
+    key: impl Fn(&T) -> (DateTime<Utc>, Uuid),
+) -> Option<T> {
+    certs.into_iter().max_by_key(|cert| key(cert))
 }
 
 impl IdOrdItem for ObservedSiloCertificates {

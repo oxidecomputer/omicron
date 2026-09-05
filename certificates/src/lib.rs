@@ -51,6 +51,9 @@ pub enum CertificateError {
     #[error("Unsupported certificate purpose (not usable for server auth)")]
     UnsupportedPurpose,
 
+    #[error("Certificate validity time could not be interpreted")]
+    BadValidityTime(#[source] openssl::error::ErrorStack),
+
     #[error("Certificate validity time is out of the representable range")]
     TimeOutOfRange,
 
@@ -70,6 +73,7 @@ impl From<CertificateError> for Error {
             | ErrorValidatingHostname(_)
             | NoDnsNameMatchingHostname { .. }
             | UnsupportedPurpose
+            | BadValidityTime(_)
             | TimeOutOfRange => Error::invalid_value(
                 "certificate",
                 DisplayErrorChain::new(&error).to_string(),
@@ -111,18 +115,25 @@ pub fn validity(
 /// Converts an ASN.1 time to a `chrono` timestamp by measuring its offset
 /// from the Unix epoch.
 ///
-/// `Asn1TimeRef` offers no direct conversion to a Unix timestamp, but
-/// `ASN1_TIME_diff` can compute the (days, seconds) difference between two
-/// ASN.1 times.
+/// `Asn1TimeRef` offers no direct conversion to a Unix timestamp. Instead we
+/// use `Asn1TimeRef::diff`, a binding to OpenSSL's `ASN1_TIME_diff`, which
+/// computes the difference between two ASN.1 times as whole days plus
+/// remaining seconds.
 fn asn1_time_to_chrono(
     time: &Asn1TimeRef,
 ) -> Result<DateTime<Utc>, CertificateError> {
     const SECS_PER_DAY: i64 = 24 * 60 * 60;
     let epoch = Asn1Time::from_unix(0).map_err(CertificateError::Unexpected)?;
-    // `diff` computes `time - epoch`, split into whole days and the
-    // remaining seconds.
-    let diff = epoch.diff(time).map_err(CertificateError::Unexpected)?;
-    let secs = i64::from(diff.days) * SECS_PER_DAY + i64::from(diff.secs);
+    // `epoch.diff(time)` computes `time - epoch`. OpenSSL fails this call if
+    // `time` is not a well-formed ASN.1 time, or if the difference cannot be
+    // represented (years far outside the range its calendar arithmetic
+    // supports). Either way the certificate carries a validity time we
+    // cannot interpret.
+    let diff = epoch.diff(time).map_err(CertificateError::BadValidityTime)?;
+    let secs = i64::from(diff.days)
+        .checked_mul(SECS_PER_DAY)
+        .and_then(|s| s.checked_add(i64::from(diff.secs)))
+        .ok_or(CertificateError::TimeOutOfRange)?;
     DateTime::from_timestamp(secs, 0).ok_or(CertificateError::TimeOutOfRange)
 }
 
@@ -496,11 +507,9 @@ mod tests {
 
     #[test]
     fn test_validity_converts_asn1_times() {
-        // Pin the leaf's validity window to exact second offsets from the
-        // Unix epoch. The root and intermediate certificates in the chain
-        // keep rcgen's default (much wider) window, so a correct result
-        // proves we read the certificate we were given and not some other
-        // link in the chain.
+        // Give the leaf a specific validity window. The other certificates
+        // in the chain use rcgen's defaults, so the assertions below also
+        // check that we read the certificate we were given.
         const NOT_BEFORE_SECS: u64 = 1_000_000_000;
         const NOT_AFTER_SECS: u64 = 2_000_000_000;
         let mut params = CertificateParams::new(vec![

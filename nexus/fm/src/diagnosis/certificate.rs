@@ -5,9 +5,10 @@
 //! Certificate diagnosis engine.
 //!
 //! Nexus serves each silo's external API with the silo's TLS certificate
-//! whose leaf `not_after` is latest (`ExternalEndpoint::best_certificate` in
-//! Nexus). This engine predicts that choice from the analysis input and opens
-//! a case (keyed by silo) when the certificate Nexus will serve:
+//! whose leaf `not_after` is latest. This engine makes the same choice from
+//! the analysis input, using the same function
+//! (`nexus_types::observed_certificate::best_certificate`), and opens a case
+//! (keyed by silo) when the certificate Nexus serves:
 //!  - expires within the configured warning window
 //!    (`FmConfig::certificate_expiry_warning_days`), or
 //!  - has already expired.
@@ -22,9 +23,7 @@
 //! certificate becoming the (still expiring or expired) best certificate
 //! requests a fresh alert for it. Unchanged input requests nothing.
 //!
-//! Like `best_certificate`, this engine ignores `not_before`. If that rule
-//! ever changes, it must change in both places together, or the engine will
-//! reason about a certificate Nexus does not actually serve.
+//! Certificate selection ignores `not_before`, so this engine does too.
 
 use crate::SitrepBuilder;
 use chrono::{DateTime, TimeDelta, Utc};
@@ -78,8 +77,10 @@ fn parse_case(
 ) -> Result<ParsedCertificateCase, UninterpretableCase> {
     let mut kept: Option<(FactUuid, CertificateFact)> = None;
     let mut duplicate_facts = Vec::new();
-    // `case.facts` iterates in fact UUID order, so the kept fact is
-    // deterministically the one with the lowest UUID.
+    // A well-formed case has exactly one fact. If a case somehow has more,
+    // we keep one and treat the rest as duplicates to be removed. Since
+    // `case.facts` iterates in fact UUID order, the one we keep is always
+    // the one with the lowest UUID.
     for fact in case.facts.iter() {
         let cert_fact = fact.as_certificate()?;
         match &kept {
@@ -95,9 +96,7 @@ fn parse_case(
             }
         }
     }
-    let Some(fact) = kept else {
-        return Err(UninterpretableCase::NoFacts);
-    };
+    let fact = kept.ok_or(UninterpretableCase::NoFacts)?;
     Ok(ParsedCertificateCase {
         silo_id: fact.1.silo_id(),
         fact,
@@ -114,12 +113,17 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
     let silos = input.observed_silo_certificates();
 
     // Parse the Certificate cases copied forward from the parent sitrep. Every
-    // case is about one silo, derived from its facts. Cases we cannot
-    // interpret are closed inline, so they don't ride along as
-    // open-but-unprocessable in every future sitrep. This is safe with
-    // respect to fault coverage: detection below is independent of case
-    // bookkeeping, so if a closed case concerned a silo that genuinely needs
-    // attention, a fresh, well-formed case is opened in this same pass.
+    // case is about one silo, derived from its facts.
+    //
+    // A case we cannot interpret is quarantined by closing it: it stops being
+    // carried forward, and its corrupt facts are no longer treated as part of
+    // this engine's view of the silo. Closing does not lose fault coverage,
+    // because detection below runs independently of the parent cases: if the
+    // silo the closed case was about still needs attention, a new case opens
+    // in this same pass. That new case does request a fresh alert, so a
+    // corrupt case costs one duplicate alert for its silo. Corrupt cases
+    // should only arise from a bug, so that is an acceptable price for not
+    // carrying an unreadable case forever.
     let mut parent_cases: BTreeMap<CaseUuid, ParsedCertificateCase> =
         BTreeMap::new();
     for case in input

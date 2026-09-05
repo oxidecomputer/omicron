@@ -312,19 +312,17 @@ impl ExternalEndpoint {
         // certificate chain whose leaf certificate has the latest expiration
         // time.
         //
-        // The fault management certificate diagnosis engine
-        // (`nexus_fm::diagnosis::certificate`) predicts this choice with the
-        // same rule (`ObservedSiloCertificates::best_certificate`), so that it
-        // alerts when the certificate we will actually serve is expiring or
-        // expired. If the rule here changes, that one must change with it.
-        // When several certificates share the latest expiration, the engine
-        // breaks the tie toward the greatest certificate id; this may settle
-        // on a different one of them, but they expire at the same time, so
-        // the engine's prediction of when the served certificate expires
-        // holds either way.
-        self.tls_certs.iter().max_by_key(|t| t.validity().not_after).ok_or_else(
-            || anyhow!("silo {} has no usable certificates", self.silo_id),
+        // The choice is made by `nexus_types::observed_certificate::
+        // best_certificate`, which the fault management certificate diagnosis
+        // engine also uses to predict which certificate we serve, so that its
+        // alerts name the certificate clients actually receive.
+        nexus_types::observed_certificate::best_certificate(
+            self.tls_certs.iter(),
+            |t| (t.validity().not_after, t.id),
         )
+        .ok_or_else(|| {
+            anyhow!("silo {} has no usable certificates", self.silo_id)
+        })
     }
 }
 
@@ -383,6 +381,10 @@ pub(crate) struct TlsCertificate {
     // NOTE: It's important that we do not serialize the private key!
     #[serde(skip)]
     certified_key: Arc<CertifiedKey>,
+
+    /// ID of the `certificate` row this was built from
+    #[serde(skip)]
+    id: Uuid,
 
     /// Validity window of the leaf certificate
     #[serde(skip)]
@@ -465,7 +467,7 @@ impl TryFrom<Certificate> for TlsCertificate {
         let validity = omicron_certificates::validity(&end_cert)
             .context("reading leaf certificate validity")?;
 
-        Ok(TlsCertificate { certified_key, digest, validity })
+        Ok(TlsCertificate { id: db_cert.id(), certified_key, digest, validity })
     }
 }
 
@@ -1075,6 +1077,46 @@ mod test {
             previously-found silo 6bcbd3bb-f93b-e8b3-d41c-dce6d98281d3 \
             (\"dummy\")"
         );
+    }
+
+    /// When two certificates share the latest expiration, the one with the
+    /// greatest id is served, regardless of the order they were loaded in.
+    /// This is the same tie-break the certificate diagnosis engine uses, so
+    /// the certificate it names in its facts is the one clients receive.
+    #[test]
+    fn test_best_certificate_breaks_ties_toward_greatest_id() {
+        let silo = create_silo(None, "silo1", false);
+        let dns_zone = create_dns_zone("oxide1");
+        // Two distinct certificates with rcgen's default (identical)
+        // expiration.
+        let low_id = Uuid::from_u128(1);
+        let high_id = Uuid::from_u128(2);
+        let low = Certificate::new_unvalidated(
+            silo.identity().id,
+            low_id,
+            ServiceKind::Nexus,
+            create_certificate("silo1.sys.oxide1.test", false),
+        );
+        let high = Certificate::new_unvalidated(
+            silo.identity().id,
+            high_id,
+            ServiceKind::Nexus,
+            create_certificate("silo1.sys.oxide1.test", false),
+        );
+
+        for certs in
+            [vec![low.clone(), high.clone()], vec![high.clone(), low.clone()]]
+        {
+            let ee = ExternalEndpoints::new(
+                vec![silo.clone()],
+                certs,
+                vec![dns_zone.clone()],
+            );
+            let endpoint = &ee.by_dns_name["silo1.sys.oxide1.test"];
+            let best = endpoint.best_certificate().unwrap();
+            assert_eq!(best.id, high_id);
+            assert!(cert_matches(best, &high));
+        }
     }
 
     #[test]

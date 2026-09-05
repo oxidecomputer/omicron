@@ -509,6 +509,11 @@ pub struct InputReport {
     pub parent_sitrep_id: Option<SitrepUuid>,
     pub parent_inv_id: Option<CollectionUuid>,
     pub inv_id: CollectionUuid,
+    /// The time diagnosis engines treated as "now" for this analysis: the
+    /// completion time of the inventory collection it ran against. `None`
+    /// only for reports written before this field existed.
+    #[serde(default)]
+    pub reference_time: Option<DateTime<Utc>>,
     pub new_ereport_ids: BTreeSet<EreportId>,
     /// Cases which were open in the parent sitrep.
     pub open_cases: BTreeMap<CaseUuid, case::Metadata>,
@@ -605,6 +610,7 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
                     parent_sitrep_id,
                     parent_inv_id,
                     inv_id,
+                    reference_time,
                     new_ereport_ids,
                     open_cases,
                     closed_cases_copied_forward,
@@ -661,6 +667,21 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
                      (collection {parent_inv_id})"
                 )),
             )?;
+        }
+
+        match reference_time {
+            Some(t) => writeln!(
+                f,
+                "{:indent$}{}: {t}",
+                "",
+                heading.style("reference time")
+            )?,
+            None => writeln!(
+                f,
+                "{:indent$}{}: <not recorded>",
+                "",
+                heading.style("reference time")
+            )?,
         }
 
         writeln!(
@@ -1084,6 +1105,7 @@ mod tests {
             parent_sitrep_id: Some(parent_sitrep_id),
             parent_inv_id: Some(parent_inv_id),
             inv_id,
+            reference_time: Some("2024-01-01T00:00:00Z".parse().unwrap()),
             num_ereporter_restarts: 420,
             new_ereport_ids,
             open_cases,
@@ -1158,6 +1180,7 @@ mod tests {
             parent_sitrep_id: None,
             parent_inv_id: None,
             inv_id,
+            reference_time: None,
             num_ereporter_restarts: 0,
             new_ereport_ids: BTreeSet::new(),
             open_cases: BTreeMap::new(),
@@ -1180,6 +1203,7 @@ mod tests {
             parent_sitrep_id: Some(parent_sitrep_id),
             parent_inv_id: Some(inv_id),
             inv_id,
+            reference_time: Some("2024-01-01T00:00:00Z".parse().unwrap()),
             num_ereporter_restarts: 420,
             new_ereport_ids: BTreeSet::new(),
             open_cases: BTreeMap::new(),

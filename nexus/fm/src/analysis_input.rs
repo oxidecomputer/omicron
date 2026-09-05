@@ -415,6 +415,7 @@ impl Builder {
             parent_sitrep_id,
             parent_inv_id,
             inv_id: self.inv.id,
+            reference_time: Some(self.inv.time_done),
             new_ereport_ids: self.new_ereports.iter().map(|e| e.id).collect(),
             num_ereporter_restarts: self.ereporter_restarts.len(),
             open_cases: BTreeMap::new(),

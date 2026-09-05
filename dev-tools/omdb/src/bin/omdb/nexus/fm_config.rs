@@ -138,8 +138,11 @@ struct ConfigOpts {
     #[clap(long, action = ArgAction::Set)]
     analysis_enabled: Option<Setting<settings::AnalysisEnabled>>,
 
-    /// Sets how many days before a silo's external TLS certificate expires
-    /// the certificate diagnosis engine opens a case and requests an alert.
+    /// Sets the certificate expiry warning window, in days.
+    ///
+    /// When a silo's external TLS certificate is within this many days of
+    /// expiring, the certificate diagnosis engine opens a case and requests an
+    /// alert.
     ///
     /// The window applies to the certificate Nexus serves for the silo (the
     /// one with the latest expiration time), so a case opens only when no
