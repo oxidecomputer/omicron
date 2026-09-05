@@ -86,3 +86,10 @@ pub async fn ensure_partition_layout(
 pub fn is_oxide_sled() -> anyhow::Result<bool> {
     Ok(false)
 }
+
+/// Detect attached switch hardware.
+pub fn detect_switch_hardware(
+    _log: &Logger,
+) -> Result<Option<crate::SwitchHardware>, crate::SwitchDetectError> {
+    Ok(None)
+}

@@ -14,6 +14,12 @@ sled_mode = "scrimlet"
 # this information.
 sidecar_revision.soft_zone = { front_port_count = 1, rear_port_count = 1 }
 
+# Selects the switch backend for a scrimlet. "detect" (the default) probes for
+# a SoftNPU 9p device and otherwise expects a Tofino ASIC. "soft_npu_zone" runs
+# Dendrite against a SoftNPU zone on this host and "tofino_stub" runs the stub
+# Dendrite. Both overrides require sled_mode = "scrimlet".
+switch_backend = "soft_npu_zone"
+
 # Setting this to true causes sled-agent to always report that its time is
 # in-sync, rather than querying its NTP zone.
 skip_timesync = false

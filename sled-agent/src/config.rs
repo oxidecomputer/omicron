@@ -26,6 +26,18 @@ pub enum SledMode {
     Scrimlet,
 }
 
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SwitchBackend {
+    /// Probe for switch hardware: a SoftNPU 9p device, else the Tofino ASIC
+    #[default]
+    Detect,
+    /// Run the stub Dendrite; no switch hardware
+    TofinoStub,
+    /// Run Dendrite against a SoftNPU zone on this host
+    SoftNpuZone,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SidecarRevision {
@@ -66,6 +78,11 @@ pub struct Config {
     pub sled_mode: SledMode,
     // TODO: Remove once this can be auto-detected.
     pub sidecar_revision: SidecarRevision,
+    /// Which switch backend to run when acting as a scrimlet. Defaults to
+    /// hardware detection; the stub and zone backends must be requested
+    /// explicitly and require `sled_mode = "scrimlet"`.
+    #[serde(default)]
+    pub switch_backend: SwitchBackend,
     /// Optional percentage of otherwise-unbudgeted DRAM to reserve for guest
     /// memory, after accounting for expected host OS memory consumption and, if
     /// set, `vmm_reservoir_size_mb`.
