@@ -310,7 +310,7 @@ impl DataStore {
     ///   associated delete saga run
     ///
     /// This function also marks user data export records as deleted if the
-    /// associated resource was itself delete.
+    /// associated resource was itself deleted.
     pub async fn compute_user_data_export_changeset(
         &self,
         opctx: &OpContext,
@@ -421,8 +421,12 @@ impl DataStore {
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
+        // Filter on state != Deleted to avoid returning a constantly
+        // accumulating list records to delete.
+
         let records: Vec<UserDataExportRecord> = dsl::user_data_export
             .filter(dsl::resource_deleted.eq(true))
+            .filter(dsl::state.ne(UserDataExportState::Deleted))
             .select(UserDataExportRecord::as_select())
             .load_async(&*conn)
             .await
@@ -468,6 +472,7 @@ impl DataStore {
             .filter(diesel::dsl::not(
                 dsl::pantry_ip.eq_any(in_service_pantries),
             ))
+            .filter(dsl::resource_deleted.eq(false))
             .set(dsl::resource_deleted.eq(true))
             .execute_async(&*conn)
             .await
@@ -1815,9 +1820,8 @@ mod tests {
             .await
             .unwrap();
 
-        // The changeset should now show that a record for this iamge needs to
-        // be created, along with the old record still needing the associated
-        // delete saga.
+        // The changeset should now show that a record for this image needs to
+        // be created.
 
         let changeset =
             datastore.compute_user_data_export_changeset(&opctx).await.unwrap();
@@ -1826,8 +1830,7 @@ mod tests {
             &[UserDataExportResource::Image { id: image.id() }],
         );
         assert!(changeset.create_required.is_empty());
-        assert_eq!(changeset.delete_required.len(), 1);
-        assert_eq!(changeset.delete_required[0].id(), record.id());
+        assert!(changeset.delete_required.is_empty());
 
         // Now it should work.
 
@@ -1902,6 +1905,110 @@ mod tests {
             )
             .await
             .unwrap();
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Assert that deleted records are not part of the changeset anymore.
+    #[tokio::test]
+    async fn test_deleted_not_part_of_changeset() {
+        let logctx = dev::test_setup_log("test_deleted_not_part_of_changeset");
+        let log = logctx.log.new(o!());
+        let db = TestDatabase::new_with_datastore(&log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let (authz_project, _) =
+            create_project(&opctx, &datastore, PROJECT_NAME).await;
+
+        let snapshot = create_project_snapshot(
+            &opctx,
+            &datastore,
+            &authz_project,
+            Uuid::new_v4(),
+            "snap",
+        )
+        .await;
+
+        // Create a regular record and move it to Live
+
+        let record = datastore
+            .user_data_export_create_for_snapshot(
+                &opctx,
+                UserDataExportUuid::new_v4(),
+                snapshot.id(),
+            )
+            .await
+            .unwrap();
+
+        let operating_saga_id = Uuid::new_v4();
+
+        datastore
+            .set_user_data_export_requested_to_assigning(
+                &opctx,
+                record.id(),
+                operating_saga_id,
+                1,
+            )
+            .await
+            .unwrap();
+
+        datastore
+            .set_user_data_export_assigning_to_live(
+                &opctx,
+                record.id(),
+                operating_saga_id,
+                1,
+                SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0),
+                VolumeUuid::new_v4(),
+            )
+            .await
+            .unwrap();
+
+        // The changeset should be empty now
+
+        let changeset =
+            datastore.compute_user_data_export_changeset(&opctx).await.unwrap();
+        assert!(changeset.request_required.is_empty());
+        assert!(changeset.create_required.is_empty());
+        assert!(changeset.delete_required.is_empty());
+
+        // Marking the record's resource as deleted means it will show up in the
+        // delete_required list.
+
+        datastore.user_data_export_mark_deleted(record.id()).await.unwrap();
+
+        let changeset =
+            datastore.compute_user_data_export_changeset(&opctx).await.unwrap();
+        assert!(!changeset.delete_required.is_empty());
+
+        // Move the record to deleting.
+
+        datastore
+            .set_user_data_export_live_to_deleting(
+                &opctx,
+                record.id(),
+                operating_saga_id,
+                2,
+            )
+            .await
+            .unwrap();
+
+        datastore
+            .set_user_data_export_deleting_to_deleted(
+                &opctx,
+                record.id(),
+                operating_saga_id,
+                2,
+            )
+            .await
+            .unwrap();
+
+        // The record should _not_ show up in the delete_required list anymore.
+
+        let changeset =
+            datastore.compute_user_data_export_changeset(&opctx).await.unwrap();
+        assert!(changeset.delete_required.is_empty());
 
         db.terminate().await;
         logctx.cleanup_successful();

@@ -59,6 +59,8 @@ pub mod snapshot_delete;
 pub mod subnet_attach;
 pub mod subnet_detach;
 pub mod test_saga;
+pub mod user_data_export_create;
+pub mod user_data_export_delete;
 pub mod volume_delete;
 pub mod volume_remove_rop;
 pub mod vpc_create;
@@ -170,8 +172,8 @@ fn make_action_registry() -> ActionRegistry {
         disk_create::SagaDiskCreate,
         disk_delete::SagaDiskDelete,
         finalize_disk::SagaFinalizeDisk,
-        image_delete::SagaImageDelete,
         image_create::SagaImageCreate,
+        image_delete::SagaImageDelete,
         instance_create::SagaInstanceCreate,
         instance_delete::SagaInstanceDelete,
         instance_ip_attach::SagaInstanceIpAttach,
@@ -181,18 +183,20 @@ fn make_action_registry() -> ActionRegistry {
         instance_update::SagaInstanceUpdate,
         multicast_group_dpd_ensure::SagaMulticastGroupDpdEnsure,
         project_create::SagaProjectCreate,
-        region_replacement_start::SagaRegionReplacementStart,
         region_replacement_drive::SagaRegionReplacementDrive,
         region_replacement_finish::SagaRegionReplacementFinish,
-        region_snapshot_replacement_start::SagaRegionSnapshotReplacementStart,
+        region_replacement_start::SagaRegionReplacementStart,
+        region_snapshot_replacement_finish::SagaRegionSnapshotReplacementFinish,
         region_snapshot_replacement_garbage_collect::SagaRegionSnapshotReplacementGarbageCollect,
+        region_snapshot_replacement_start::SagaRegionSnapshotReplacementStart,
         region_snapshot_replacement_step::SagaRegionSnapshotReplacementStep,
         region_snapshot_replacement_step_garbage_collect::SagaRegionSnapshotReplacementStepGarbageCollect,
-        region_snapshot_replacement_finish::SagaRegionSnapshotReplacementFinish,
         snapshot_create::SagaSnapshotCreate,
         snapshot_delete::SagaSnapshotDelete,
         subnet_attach::SagaSubnetAttach,
         subnet_detach::SagaSubnetDetach,
+        user_data_export_create::SagaUserDataExportCreate,
+        user_data_export_delete::SagaUserDataExportDelete,
         volume_delete::SagaVolumeDelete,
         volume_remove_rop::SagaVolumeRemoveROP,
         vpc_create::SagaVpcCreate,
