@@ -112,7 +112,7 @@ pub(super) async fn read_ledgered_sled_config(
 ///
 /// # Panics
 ///
-/// As with [`read_ledgered_sled_config`], this panics if we can read a config
+/// As with `read_ledgered_sled_config`, this panics if we can read a config
 /// of some known older version but cannot convert it to the latest version.
 pub async fn read_ledgered_artifact_config(
     log: &Logger,
