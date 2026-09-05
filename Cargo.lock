@@ -14191,6 +14191,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "byte-wrapper",
  "chrono",
  "omicron-common",
  "omicron-generation-kinds",
