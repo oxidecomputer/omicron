@@ -565,6 +565,11 @@ fn milan_ideal() -> CpuIdDump {
     dump
 }
 
+/// The Turin-like CPU platform is very much like Milan with AVX-512 features.
+/// It also omits cache size information; this was intentional, but was since
+/// found to be problematic with some older guest software. It has been
+/// supplanted by `turin_v2()` except for instances that specifically requested
+/// this older version.
 pub fn turin_v1() -> CpuIdDump {
     // For VMs, a Turin-like CPU is very much like Milan with AVX-512 features,
     // so start from Milan.
@@ -808,21 +813,25 @@ pub fn turin_v1() -> CpuIdDump {
     source
 }
 
+/// Turin V2 is a result of discovering that some guest software does depend on
+/// cache size information in AMD CPUID leaf 8000_0006h. See
+/// [Propolis#1152](https://github.com/oxidecomputer/propolis/issues/1152) for
+/// at least one known case.
+///
+/// Requires `vcpu_count` to be less than 4096, otherwise returns a
+/// `CpuPlatformError`.
 pub fn turin_v2(vcpu_count: u16) -> Result<CpuIdDump, CpuPlatformError> {
-    // Turin V2 is a result of discovering that some guest software does depend
-    // on cache size information in AMD CPUID leaf 8000_0006. See
-    // https://github.com/oxidecomputer/propolis/issues/1152 for at least one
-    // known case.
-    //
-    // We want to minimize the amount these reported values differ from the
-    // actual hardware a guest is placed on. We *must not* try to populate this
-    // based on an actual sled selection: this would either limit migration to
-    // same-or-better caches *or* make migration liable to having CPUID lie
-    // w.r.t actual hardware. Instead, we'll assume that future caches are at
-    // least "as good as" Turin - thankfully Turin and Turin Dense have the same
-    // L1/L2 shapes. Then we can just use Turin's L1 and L2 shapes here, accept
-    // that Turin VMs will be too pessimistic about caches on future hardware,
-    // and ... we only have the problem of describing L3 left.
+    let mut cpuid = CpuId::with_cpuid_reader(turin_v1());
+
+    // We want to minimize the amount our reported cache information differs
+    // from the actual hardware a guest is placed on. We *must not* try to
+    // populate this based on an actual sled selection: this would either limit
+    // migration to same-or-better caches *or* make migration liable to having
+    // CPUID lie w.r.t. actual hardware. Instead, we'll assume that future
+    // caches are at least "as good as" Turin - thankfully Turin and Turin Dense
+    // have the same L1/L2 shapes. Then we can just use Turin's L1 and L2 shapes
+    // here, accept that Turin VMs will be too pessimistic about caches on
+    // future hardware, and ... we only have the problem of describing L3 left.
     //
     // How do we describe L3? The amount of L3 "actually" available to a guest
     // is just the whole unified L3 of the physical processor. On actual Turin
@@ -836,7 +845,7 @@ pub fn turin_v2(vcpu_count: u16) -> Result<CpuIdDump, CpuPlatformError> {
     // that into guests by sizing the reported L3 as a function of the vCPU
     // count. A VM encompassing a whole 256-thread sled would be told it has the
     // whole L3 to work with, whereas a sled full of 2-vCPU VMs would "fail
-    // safe" in that if all VMs were in memcpy() they would decide the copy is
+    // safe" in that if all VMs were in memcpy(), they would decide the copy is
     // churning cache if each were churning their ~1/128th slice of the
     // universe.
     //
@@ -856,12 +865,11 @@ pub fn turin_v2(vcpu_count: u16) -> Result<CpuIdDump, CpuPlatformError> {
     //
     // The above hopefully informs you, dear reader, about why we'd really
     // rather not populate this leaf in the general case. glibc considered the
-    // misbehavior that has us here to be a bug, which was fixed in glibc 2.39
+    // misbehavior that led us here to be a bug, which was fixed in glibc 2.39
     // and backported to 2.38 as well as 2.37. This was *not* backported to
     // 2.35, which is in Ubuntu 22.04, which has LTS extending another year or
     // so. So while this is a (fixed!) guest software bug, we'll not try being
-    // clever about 8000_0006 for a while longer.
-    let mut cpuid = CpuId::with_cpuid_reader(turin_v1());
+    // clever about 8000_0006h for a while longer.
 
     // Set up L1 cache+TLB info (leaf 8000_0005h)
     let mut leaf = L1CacheTlbInfo::empty();
@@ -926,7 +934,7 @@ pub fn turin_v2(vcpu_count: u16) -> Result<CpuIdDump, CpuPlatformError> {
     // Set up leaf 8000_0006h EDX
     //
     // L3 size is the really tricky one. The big comment at the top of this
-    // function talks about why *this* math.
+    // function talks about why *this* math and *these* numbers.
     const L3_KB_PER_CCD: u32 = 32 * 1024;
     const VCPU_PER_CCD: u32 = 16;
     const L3_KB_PER_VCPU: u32 = L3_KB_PER_CCD / VCPU_PER_CCD;
@@ -942,7 +950,7 @@ pub fn turin_v2(vcpu_count: u16) -> Result<CpuIdDump, CpuPlatformError> {
     // effectively a limit of 4096 vCPUs.
     if leaf_edx_l3_size_scaled >= (1 << 14) {
         return Err(CpuPlatformError::OutOfRange {
-            leaf: 8000_0006,
+            leaf: 0x8000_0006,
             field: "L3 cache size",
             param: "ncpu",
         });
@@ -1360,8 +1368,8 @@ mod test {
     // (e.g. that the collection of builders behind `turin_v2` produce this
     // profile as used for testing and elsewhere).
     //
-    // This platform is Turin V1, but with the addition of leaves 8000_0005 and
-    // 8000_0006 for cache information it turns out some guest software needs
+    // This platform is Turin V1, but with the addition of leaves 8000_0005h and
+    // 8000_0006h for cache information it turns out some guest software needs
     // for now. `turin_v2()` discusses the difference in more depth.
     #[test]
     fn turin_v2_is_as_described() {
