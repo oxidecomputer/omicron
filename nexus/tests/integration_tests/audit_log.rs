@@ -515,6 +515,7 @@ async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
                 | AllowedMethod::GetUnimplemented
                 | AllowedMethod::GetVolatile
                 | AllowedMethod::GetWebsocket
+                | AllowedMethod::GetWebsocketUnavailable
                 | AllowedMethod::Head
                 | AllowedMethod::HeadNonexistent => false,
             };

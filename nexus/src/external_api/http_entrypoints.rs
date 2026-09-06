@@ -27,7 +27,10 @@ use dropshot::WhichPage;
 use dropshot::{ApiDescription, StreamingBody};
 use dropshot::{HttpResponseAccepted, HttpResponseFound, HttpResponseSeeOther};
 use dropshot::{HttpResponseCreated, HttpResponseHeaders};
-use dropshot::{WebsocketChannelResult, WebsocketConnection};
+use dropshot::{
+    WebsocketChannelResult, WebsocketConnection, WebsocketEndpointResult,
+    WebsocketUpgrade,
+};
 use dropshot::{http_response_found, http_response_see_other};
 use http::{Response, StatusCode, header};
 use ipnetwork::IpNetwork;
@@ -6660,6 +6663,24 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .context
             .external_latencies
             .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn rack_support_shell_tunnel(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<path_params::RackPath>,
+        upgrade: WebsocketUpgrade,
+    ) -> WebsocketEndpointResult {
+        let apictx = rqctx.context();
+        let nexus = &apictx.context.nexus;
+        let path = path_params.into_inner();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        nexus
+            .support_shell_tunnel(
+                &opctx,
+                RackUuid::from_untyped_uuid(path.rack_id),
+                upgrade,
+            )
             .await
     }
 
