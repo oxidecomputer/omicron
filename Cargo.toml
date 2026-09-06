@@ -846,8 +846,8 @@ slog-term = "2.9.1"
 smf = "0.2"
 socket2 = { version = "0.5", features = ["all"] }
 sp-sim = { path = "sp-sim" }
-sprockets-tls = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "a233079e04d9688454486c452b694587a28c5257" }
-sprockets-tls-test-utils = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "a233079e04d9688454486c452b694587a28c5257" }
+sprockets-tls = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "98615b86d51f74ce220198eb16c57932fd24e7cb", default-features = false }
+sprockets-tls-test-utils = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "98615b86d51f74ce220198eb16c57932fd24e7cb" }
 sqlformat = "0.3.5"
 sqlparser = { version = "0.61.0", features = [ "visitor" ] }
 static_assertions = "1.1.0"
@@ -861,6 +861,9 @@ subtle = "2.6.1"
 supports-color = "3.0.2"
 support-bundle-collection = { path = "support-bundle-collection" }
 support-bundle-viewer = "0.1.2"
+sush-api = { git = "https://github.com/oxidecomputer/sush", rev = "94762dc96e1ecad8a75f9280461adee701a066d6" }
+sush-common = { git = "https://github.com/oxidecomputer/sush", rev = "94762dc96e1ecad8a75f9280461adee701a066d6" }
+sush-server = { git = "https://github.com/oxidecomputer/sush", rev = "94762dc96e1ecad8a75f9280461adee701a066d6", features = ["embedded"] }
 swrite = "0.1.0"
 sync-ptr = "0.1.4"
 libsw = { version = "3.5.0", features = ["tokio"] }
@@ -1160,20 +1163,25 @@ branch = "oxide/omicron"
 [patch.crates-io.omicron-workspace-hack]
 path = "workspace-hack"
 
-# Several crates such as crucible and propolis have have a Git dependency on
+# Several crates such as crucible and propolis have a Git dependency on
 # this repo. Omicron itself depends on these crates, which can lead to two
-# copies of these crates in the dependency graph. (As a Git dependency, and as
-# a path dependency.) The goal of omicron-uuid-kinds and
+# copies of these crates in the dependency graph. (As a Git dependency,
+# and as a path dependency.) The goal of omicron-uuid-kinds and
 # omicron-generation-kinds is to provide unified registries of UUID and
 # generation kinds. Two copies of the same kinds floating around is unnecessary
 # and painful.
 #
-# These directives ensure that whenever we see omicron-uuid-kinds or
-# omicron-generation-kinds as a Git dependency, we'll use the path dependency
-# version of the crate instead.
+# Similarly, sush has a Git dependency on this repo's sled-hardware-types,
+# and the BaseboardId in its API must be the same type sled-agent derives
+# from HardwareManager::baseboard().
+#
+# These directives ensure that whenever we see omicron-uuid-kinds,
+# omicron-generation-kinds, or sled-hardware-types as a Git dependency,
+# we'll use the path dependency version of the crate instead.
 #
 # See also: uuid-kinds/README.adoc and generation-kinds/README.adoc.
 [patch."https://github.com/oxidecomputer/omicron"]
 omicron-common = { path = "common" }
 omicron-generation-kinds = { path = "generation-kinds" }
 omicron-uuid-kinds = { path = "uuid-kinds" }
+sled-hardware-types = { path = "sled-hardware/types" }
