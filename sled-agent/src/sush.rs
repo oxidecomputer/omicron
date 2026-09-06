@@ -42,7 +42,8 @@
 //! which sush uses to synchronize job and event sets.
 
 use crate::config::SushConfig;
-use camino::Utf8PathBuf;
+use anyhow::Context;
+use camino::{Utf8Path, Utf8PathBuf};
 use dropshot::{ConfigDropshot, HandlerTaskMode, HttpServer, ServerBuilder};
 use gateway_client::Client as MgsClient;
 use gateway_types::component::SpType;
@@ -50,22 +51,34 @@ use omicron_common::address::{
     MGS_PORT, SUSH_API_PORT, SUSH_GOSSIP_PORT, get_switch_zone_address,
 };
 use omicron_ddm_admin_client::Client as DdmClient;
+use sha3::{Digest as _, Sha3_256};
 use sled_agent_config_reconciler::AvailableDatasetsReceiver;
 use sled_agent_measurements::MeasurementsHandle;
 use sled_hardware_types::BaseboardId;
 use slog::{Logger, debug, error, info, o, warn};
 use slog_error_chain::InlineErrorChain;
+use sprockets_tls::ipcc::Ipcc;
 use sprockets_tls::keys::SprocketsConfig;
 use std::collections::BTreeSet;
+use std::io;
+use std::iter::once;
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::fs::create_dir_all;
+use tokio::fs::{OpenOptions, create_dir_all};
+use tokio::io::AsyncWriteExt as _;
 use tokio::spawn;
 use tokio::sync::watch;
+use tokio::task::spawn_blocking;
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
+use x509_cert::Certificate;
+use x509_cert::der::oid::db::rfc8410::ID_ED_25519;
+use x509_cert::der::{Decode as _, Reader as _, SliceReader};
+use x509_cert::spki::AlgorithmIdentifierOwned;
+use x509_cert::time::Validity;
 
+use sush_common::keys::{EphemeralKey, KeyType, pem_cert_chain};
 use sush_common::targets::{Cubbies, MAX_CUBBY};
 use sush_server::executor::PathIsolation;
 use sush_server::gossip::{GossipConfig, isolated, lonely, spawn_gossip};
@@ -77,6 +90,17 @@ use sush_server::{JobManager, seed_gossip};
 
 /// Subdirectory of an encrypted dataset that job output is recorded in.
 const SUSH_OUTPUT_SUBDIR: &str = "sush";
+
+/// Path inside the switch zone to the sush proxy's TLS private key.
+pub const SUSH_PROXY_KEY_PATH: &str = "/etc/sush-proxy/key.pem";
+
+/// Path inside the switch zone to the sush proxy's TLS certificate chain.
+pub const SUSH_PROXY_CERT_CHAIN_PATH: &str = "/etc/sush-proxy/chain.pem";
+
+/// How long a generated proxy identity claims to be valid. Nothing checks
+/// expiry today, and every zone startup generates a fresh identity.
+const SUSH_PROXY_CERT_VALIDITY: Duration =
+    Duration::from_secs(365 * 24 * 60 * 60);
 
 /// How often to refresh the cubby map from MGS.
 const MGS_POLL_INTERVAL: Duration = Duration::from_secs(30);
@@ -424,4 +448,84 @@ async fn poll_mgs_for_cubbies(log: Logger, cubbies: watch::Sender<Cubbies>) {
         }
         sleep(MGS_POLL_INTERVAL).await;
     }
+}
+
+/// Generate the switch zone proxy's TLS identity: an ephemeral key whose
+/// certificate the RoT signs once, in its signing convention (Ed25519
+/// over the SHA3-256 digest of the TBS certificate). The key and chain
+/// are written as PEM under `zone_root` for the proxy to serve with.
+pub async fn generate_proxy_identity(
+    log: &Logger,
+    zone_root: &Utf8Path,
+) -> anyhow::Result<()> {
+    // IPCC requests are ioctls, i.e., blocking I/O.
+    let (key_pem, chain_pem) = spawn_blocking(generate_proxy_pems).await??;
+    let key_path = format!("{zone_root}{SUSH_PROXY_KEY_PATH}");
+    let chain_path = format!("{zone_root}{SUSH_PROXY_CERT_CHAIN_PATH}");
+    let dir = Utf8Path::new(&key_path).parent().expect("key path has a parent");
+    create_dir_all(dir).await.with_context(|| format!("creating {dir}"))?;
+    write_private(&key_path, key_pem.as_bytes())
+        .await
+        .with_context(|| format!("writing {key_path}"))?;
+    tokio::fs::write(&chain_path, chain_pem.as_bytes())
+        .await
+        .with_context(|| format!("writing {chain_path}"))?;
+    info!(log, "generated sush proxy TLS identity"; "key" => key_path);
+    Ok(())
+}
+
+/// The proxy's private key and certificate chain, PEM-encoded.
+fn generate_proxy_pems() -> anyhow::Result<(String, String)> {
+    let ipcc = Ipcc::new().context("opening IPCC")?;
+    let chain_der =
+        ipcc.rot_get_tq_cert_chain().context("fetching the TQ cert chain")?;
+    // The RoT returns the chain leaf first, as sprockets assumes too.
+    let platform = der_cert_chain(&chain_der)?;
+    let issuer = platform
+        .first()
+        .context("the TQ cert chain is empty")?
+        .tbs_certificate
+        .subject
+        .clone();
+    let leaf = EphemeralKey::new_delegated(
+        KeyType::Ed25519,
+        "CN=sush-proxy".parse().context("parsing the subject")?,
+        issuer,
+        Validity::from_now(SUSH_PROXY_CERT_VALIDITY)
+            .context("computing validity")?,
+        AlgorithmIdentifierOwned { oid: ID_ED_25519, parameters: None },
+        |tbs| ipcc.rot_tq_sign(&Sha3_256::digest(tbs)),
+    )
+    .context("generating the proxy key")?;
+    let key_pem = leaf.private_key_pem().context("encoding the proxy key")?;
+    let chain = once(leaf.cert().clone()).chain(platform).collect::<Vec<_>>();
+    let chain_pem = pem_cert_chain(chain).context("encoding the chain")?;
+    Ok((key_pem, chain_pem))
+}
+
+/// Parse a concatenated series of DER certs, as the RoT returns.
+fn der_cert_chain(bytes: &[u8]) -> anyhow::Result<Vec<Certificate>> {
+    let mut chain = Vec::new();
+    let mut reader =
+        SliceReader::new(bytes).context("reading the TQ cert chain")?;
+    while !reader.is_finished() {
+        chain.push(
+            Certificate::decode(&mut reader)
+                .context("parsing the TQ cert chain")?,
+        );
+    }
+    Ok(chain)
+}
+
+/// Write a file readable only by the owner.
+async fn write_private(path: &str, contents: &[u8]) -> io::Result<()> {
+    let mut file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)
+        .await?;
+    file.write_all(contents).await?;
+    file.flush().await
 }

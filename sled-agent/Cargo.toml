@@ -129,7 +129,7 @@ tufaceous-brand-metadata.workspace = true
 usdt.workspace = true
 uuid.workspace = true
 walkdir.workspace = true
-x509-cert.workspace = true
+x509-cert = { workspace = true, features = ["std"] }
 zeroize.workspace = true
 zip.workspace = true
 zone.workspace = true

@@ -525,6 +525,16 @@ source.paths = [{ from = "smf/wicketd", to = "/var/svc/manifest/site/wicketd" }]
 output.type = "zone"
 output.intermediate_only = true
 
+[package.sush-proxy]
+service_name = "sush-proxy"
+only_for_targets.image = "standard"
+source.type = "local"
+source.rust.binary_names = ["sush-proxy"]
+source.rust.release = true
+source.paths = [{ from = "smf/sush-proxy", to = "/var/svc/manifest/site/sush-proxy" }]
+output.type = "zone"
+output.intermediate_only = true
+
 [package.wicket]
 service_name = "wicket"
 only_for_targets.image = "standard"
@@ -856,6 +866,7 @@ source.packages = [
   "pumpkind.tar.gz",
   "wicketd.tar.gz",
   "wicket.tar.gz",
+  "sush-proxy.tar.gz",
   "mg-ddm.tar.gz",
   "mgd.tar.gz",
   "switch_zone_setup.tar.gz",
@@ -883,6 +894,7 @@ source.packages = [
   "lldp.tar.gz",
   "wicketd.tar.gz",
   "wicket.tar.gz",
+  "sush-proxy.tar.gz",
   "mg-ddm.tar.gz",
   "mgd.tar.gz",
   "switch_zone_setup.tar.gz",
@@ -910,6 +922,7 @@ source.packages = [
   "lldp.tar.gz",
   "wicketd.tar.gz",
   "wicket.tar.gz",
+  "sush-proxy.tar.gz",
   "mg-ddm.tar.gz",
   "mgd.tar.gz",
   "switch_zone_setup.tar.gz",
