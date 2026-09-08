@@ -4138,8 +4138,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_router_configuration_by_name ON omicron
 
 /*
  * A BGP peer within a router configuration. Peers are identified by name
- * within their parent router configuration. A numbered peer has only `addr`
- * set; an unnumbered peer has only `port_name` and `router_lifetime`
+ * within their parent router configuration. A numbered peer has `addr` and
+ * an optional same-family `src_addr` set; an unnumbered peer has only `port_name` and `router_lifetime`
  * (0 = disabled) set. A null `allowed_import`/`allowed_export` means no
  * filtering.
  */
@@ -4166,6 +4166,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.router_configuration_bgp_peer (
     router_lifetime INT4 CHECK (
         router_lifetime >= 0 AND router_lifetime <= 9000
     ),
+
+    src_addr INET CHECK (host(src_addr) != '0.0.0.0' AND host(src_addr) != '::'),
+    CONSTRAINT src_addr_only_for_numbered_peers
+        CHECK (src_addr IS NULL OR addr IS NOT NULL),
+    CONSTRAINT src_addr_family_must_match_peer
+        CHECK (family(src_addr) = family(addr)),
 
     CONSTRAINT numbered_xor_unnumbered_peer CHECK (
         (
@@ -9680,7 +9686,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '299.0.0', NULL)
+    (TRUE, NOW(), NOW(), '300.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

@@ -81,6 +81,10 @@ pub struct RouterConfigBgpSpec {
 pub struct RouterConfigBgpPeer {
     pub name: String,
     pub addr: IpAddr,
+    /// Local connection address. Older bootstore specs omit this field
+    /// and retain system source-address selection.
+    #[serde(default)]
+    pub src_addr: Option<IpAddr>,
     #[serde(flatten)]
     pub parameters: RouterConfigBgpPeerParameters,
 }

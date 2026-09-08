@@ -502,7 +502,10 @@ async fn test_router_configuration_bgp_config(ctx: &ControlPlaneTestContext) {
 fn demo_bgp_peer() -> RouterConfigurationBgpPeer {
     RouterConfigurationBgpPeer {
         name: "spine1".parse().unwrap(),
-        peer: BgpPeerKind::Numbered { addr: "203.0.113.10".parse().unwrap() },
+        peer: BgpPeerKind::Numbered {
+            addr: "203.0.113.10".parse().unwrap(),
+            src_addr: None,
+        },
         remote_asn: Some(65001),
         allowed_import: ImportExportPolicy::NoFiltering,
         allowed_export: ImportExportPolicy::NoFiltering,
@@ -1169,4 +1172,117 @@ async fn test_router_configuration_bfd_peer_validation(
             .parsed_body()
             .unwrap();
     assert_eq!(result, updated);
+}
+
+#[nexus_test]
+async fn test_router_configuration_bgp_source_address(
+    ctx: &ControlPlaneTestContext,
+) {
+    create_configuration(ctx, "sourcecheck").await;
+    let peers_url = format!("{CONFIGURATIONS_URL}/sourcecheck/bgp-peers");
+    let mut body = serde_json::to_value(demo_bgp_peer()).unwrap();
+
+    // Neither a mixed family nor a source on an unnumbered peer may be
+    // silently stored/ignored. Test both POST and, below, PUT admission.
+    for kind in [
+        serde_json::json!({"type": "numbered", "addr": "10.99.0.3", "src_addr": "2001:db8::4"}),
+        serde_json::json!({"type": "numbered", "addr": "2001:db8::3", "src_addr": "10.99.0.4"}),
+        serde_json::json!({"type": "numbered", "addr": "10.99.0.3", "src_addr": "0.0.0.0"}),
+        serde_json::json!({"type": "unnumbered", "port": "qsfp0", "src_addr": "10.99.0.4"}),
+        serde_json::json!({"type": "unnumbered", "port": "qsfp0", "src_addr": null}),
+    ] {
+        body["peer"] = kind;
+        expect_bad_request(ctx, Method::POST, &peers_url, &body.to_string())
+            .await;
+    }
+    let peers: Vec<RouterConfigurationBgpPeer> =
+        get_json(ctx, &peers_url).await;
+    assert!(peers.is_empty(), "rejected peers were persisted: {peers:?}");
+
+    for (name, target, first, second) in [
+        ("v4", "10.99.0.3", "10.99.0.4", "10.99.0.2"),
+        ("v6", "2001:db8::3", "2001:db8::4", "2001:db8::2"),
+    ] {
+        body["name"] = name.into();
+        // Old clients omit the field entirely.
+        body["peer"] = serde_json::json!({"type": "numbered", "addr": target});
+        let created: RouterConfigurationBgpPeer =
+            NexusRequest::objects_post(&ctx.external_client, &peers_url, &body)
+                .authn_as(AuthnMode::PrivilegedUser)
+                .execute()
+                .await
+                .unwrap()
+                .parsed_body()
+                .unwrap();
+        assert!(matches!(
+            created.peer,
+            BgpPeerKind::Numbered { src_addr: None, .. }
+        ));
+        let peer_url = format!("{peers_url}/{name}");
+        // Explicit A, replacement B, explicit null, and omission all have
+        // replacement semantics. Clearing must not retain the old source.
+        for source in [Some(first), Some(second), None] {
+            body["peer"] = serde_json::json!({"type": "numbered", "addr": target, "src_addr": source});
+            let updated: RouterConfigurationBgpPeer = NexusRequest::object_put(
+                &ctx.external_client,
+                &peer_url,
+                Some(&body),
+            )
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body()
+            .unwrap();
+            let expected: RouterConfigurationBgpPeer =
+                serde_json::from_value(body.clone()).unwrap();
+            assert_eq!(updated, expected);
+            let fetched: RouterConfigurationBgpPeer =
+                get_json(ctx, &peer_url).await;
+            assert_eq!(fetched, expected);
+        }
+        body["peer"]["src_addr"] = first.into();
+        NexusRequest::object_put(&ctx.external_client, &peer_url, Some(&body))
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap();
+        body["peer"].as_object_mut().unwrap().remove("src_addr");
+        let cleared: RouterConfigurationBgpPeer = NexusRequest::object_put(
+            &ctx.external_client,
+            &peer_url,
+            Some(&body),
+        )
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap()
+        .parsed_body()
+        .unwrap();
+        assert!(matches!(
+            cleared.peer,
+            BgpPeerKind::Numbered { src_addr: None, .. }
+        ));
+
+        let before: RouterConfigurationBgpPeer = get_json(ctx, &peer_url).await;
+        body["peer"]["src_addr"] =
+            if name == "v4" { "2001:db8::4" } else { "10.99.0.4" }.into();
+        let msg =
+            expect_bad_request(ctx, Method::PUT, &peer_url, &body.to_string())
+                .await;
+        assert!(msg.contains("same address family"), "{msg}");
+        let after: RouterConfigurationBgpPeer = get_json(ctx, &peer_url).await;
+        assert_eq!(after, before, "rejected update changed the peer");
+    }
+    // The unnumbered form remains usable when no source field is supplied.
+    body["name"] = "unnumbered".into();
+    body["peer"] = serde_json::json!({"type": "unnumbered", "port": "qsfp0"});
+    NexusRequest::objects_post(&ctx.external_client, &peers_url, &body)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+    let peers: Vec<RouterConfigurationBgpPeer> =
+        get_json(ctx, &peers_url).await;
+    assert_eq!(peers.len(), 3);
 }

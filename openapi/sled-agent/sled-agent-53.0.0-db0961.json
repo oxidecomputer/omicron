@@ -9281,6 +9281,13 @@
             "format": "uint32",
             "minimum": 0
           },
+          "src_addr": {
+            "nullable": true,
+            "description": "Local connection address. Older bootstore specs omit this field and retain system source-address selection.",
+            "default": null,
+            "type": "string",
+            "format": "ip"
+          },
           "vlan_id": {
             "nullable": true,
             "type": "integer",

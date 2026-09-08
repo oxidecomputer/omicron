@@ -141,7 +141,7 @@ fn early_network_blobs_deserialize() {
 /// future, older blobs can still be deserialized correctly.
 fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
     // NOTE: the description must not contain commas or newlines.
-    let description = "2026-09-02 router configs in bootstore";
+    let description = "2026-09-08 numbered router source in bootstore";
     let config = EarlyNetworkConfigEnvelope::from(&SystemNetworkingConfig {
         rack_network_config: RackNetworkConfig {
             rack_subnet: "fd00:1122:3344:100::/56".parse().unwrap(),
@@ -444,6 +444,7 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                     peers: vec![RouterConfigBgpPeer {
                         name: "upstream0".to_owned(),
                         addr: "172.20.15.51".parse().unwrap(),
+                        src_addr: Some("172.20.15.21".parse().unwrap()),
                         parameters: RouterConfigBgpPeerParameters {
                             hold_time: 6,
                             idle_hold_time: 3,

@@ -400,7 +400,10 @@ impl super::Nexus {
             .db_datastore
             .router_configuration_bgp_peer_create(
                 opctx,
-                RouterConfigurationBgpPeer::new(authz_configuration.id(), peer),
+                RouterConfigurationBgpPeer::new(
+                    authz_configuration.id(),
+                    peer,
+                )?,
             )
             .await?;
         self.activate_router_configuration_propagation();
@@ -446,7 +449,10 @@ impl super::Nexus {
                 opctx,
                 &authz_configuration,
                 peer_name,
-                RouterConfigurationBgpPeer::new(authz_configuration.id(), peer),
+                RouterConfigurationBgpPeer::new(
+                    authz_configuration.id(),
+                    peer,
+                )?,
             )
             .await?;
         self.activate_router_configuration_propagation();

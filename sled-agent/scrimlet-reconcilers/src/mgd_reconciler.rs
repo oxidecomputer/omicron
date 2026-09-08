@@ -403,7 +403,10 @@ fn convert_operator_bgp(bgp: &RouterConfigBgpSpec) -> BgpSpec {
             MgdBgpPeerConfig {
                 host: SocketAddr::new(peer.addr, BGP_PORT).into(),
                 name: peer.name.clone(),
-                parameters: convert_operator_peer_parameters(&peer.parameters),
+                parameters: MgdBgpPeerParameters {
+                    src_addr: peer.src_addr,
+                    ..convert_operator_peer_parameters(&peer.parameters)
+                },
             },
         );
     }

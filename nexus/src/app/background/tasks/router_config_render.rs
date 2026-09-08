@@ -264,6 +264,7 @@ fn build_bgp_spec(
                 numbered.push(RouterConfigBgpPeer {
                     name: peer.name.to_string(),
                     addr: addr.ip(),
+                    src_addr: peer.src_addr.map(|addr| addr.ip()),
                     parameters,
                 });
             }
@@ -408,6 +409,34 @@ mod tests {
             bgp_announce_set_id: BgpAnnounceSetUuid::new_v4().into(),
         });
         config
+    }
+
+    #[test]
+    fn bgp_source_address_is_rendered() {
+        let config = config(1);
+        for (target, source) in [
+            ("10.99.0.3", Some("10.99.0.4")),
+            ("2001:db8::3", Some("2001:db8::4")),
+            ("10.99.0.3", None),
+        ] {
+            let api = serde_json::from_value(serde_json::json!({
+                "name": "source-test",
+                "peer": {"type": "numbered", "addr": target, "src_addr": source},
+                "hold_time": 6, "keepalive": 2, "connect_retry": 3,
+                "delay_open": 0, "idle_hold_time": 3, "enforce_first_as": false,
+            })).unwrap();
+            let peer =
+                RouterConfigurationBgpPeer::new(config.id(), api).unwrap();
+            let mut errors = Vec::new();
+            let spec =
+                build_bgp_spec(&config, &[&peer], Vec::new(), &mut errors)
+                    .unwrap();
+            assert!(errors.is_empty(), "{errors:?}");
+            assert_eq!(
+                spec.peers[0].src_addr,
+                source.map(|s| s.parse::<IpAddr>().unwrap())
+            );
+        }
     }
 
     /// A-14: the stored max-paths value reaches the rendered spec; the API

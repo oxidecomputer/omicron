@@ -384,6 +384,7 @@ table! {
         min_ttl -> Nullable<Int2>,
         vlan_id -> Nullable<Int4>,
         router_lifetime -> Nullable<Int4>,
+        src_addr -> Nullable<Inet>,
     }
 }
 

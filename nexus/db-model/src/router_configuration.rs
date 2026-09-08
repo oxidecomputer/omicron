@@ -25,6 +25,7 @@ use omicron_uuid_kinds::{
 use serde::{Deserialize, Serialize};
 use sled_agent_types::early_networking::ImportExportPolicy;
 use sled_agent_types::early_networking::MaxPathConfig;
+use sled_agent_types::early_networking::NumberedRouter;
 use sled_agent_types::early_networking::RouterLifetimeConfig;
 use sled_agent_types::early_networking::RouterPeerIpAddr;
 use slog_error_chain::InlineErrorChain;
@@ -180,8 +181,9 @@ fn import_export_policy_from_db(
 
 /// A BGP peer for a [`RouterConfiguration`].
 ///
-/// A numbered peer has only `addr` set, while an unnumbered peer has only
-/// `port_name` and `router_lifetime` set; a CHECK constraint enforces this,
+/// A numbered peer has `addr` and an optional same-family `src_addr`, while
+/// an unnumbered peer has only `port_name` and `router_lifetime` set. CHECK
+/// constraints enforce this,
 /// so [`RouterConfigurationBgpPeer::peer()`] can rebuild the peer as a
 /// [`networking::BgpPeerKind`].
 #[derive(
@@ -209,22 +211,34 @@ pub struct RouterConfigurationBgpPeer {
     pub min_ttl: Option<SqlU8>,
     pub vlan_id: Option<SqlU16>,
     pub router_lifetime: Option<SqlU16>,
+    pub src_addr: Option<IpNetwork>,
 }
 
 impl RouterConfigurationBgpPeer {
     pub fn new(
         router_configuration_id: RouterConfigurationUuid,
         peer: networking::RouterConfigurationBgpPeer,
-    ) -> Self {
-        let (addr, port_name, router_lifetime) = match peer.peer {
-            networking::BgpPeerKind::Numbered { addr } => {
-                (Some(IpAddr::from(addr).into()), None, None)
+    ) -> Result<Self, Error> {
+        let (addr, src_addr, port_name, router_lifetime) = match peer.peer {
+            networking::BgpPeerKind::Numbered { addr, src_addr } => {
+                NumberedRouter::new(addr, src_addr).map_err(|err| {
+                    Error::invalid_request(&format!(
+                        "BGP peer {}: {err}",
+                        peer.name,
+                    ))
+                })?;
+                (
+                    Some(IpAddr::from(addr).into()),
+                    src_addr.map(|addr| IpAddr::from(addr).into()),
+                    None,
+                    None,
+                )
             }
             networking::BgpPeerKind::Unnumbered { port, router_lifetime } => {
-                (None, Some(port), Some(router_lifetime.as_u16().into()))
+                (None, None, Some(port), Some(router_lifetime.as_u16().into()))
             }
         };
-        Self {
+        Ok(Self {
             router_configuration_id: router_configuration_id.into(),
             name: peer.name.into(),
             addr,
@@ -247,15 +261,17 @@ impl RouterConfigurationBgpPeer {
             min_ttl: peer.min_ttl.map(Into::into),
             vlan_id: peer.vlan_id.map(Into::into),
             router_lifetime,
-        }
+            src_addr,
+        })
     }
 
     /// Returns the peer (numbered or unnumbered) described by this row.
     ///
     /// Only fails if invalid data has been stored in the database.
     pub fn peer(&self) -> Result<networking::BgpPeerKind, Error> {
-        match (self.addr, &self.port_name, self.router_lifetime) {
-            (Some(addr), None, None) => {
+        match (self.addr, self.src_addr, &self.port_name, self.router_lifetime)
+        {
+            (Some(addr), src_addr, None, None) => {
                 let addr =
                     RouterPeerIpAddr::try_from(addr.ip()).map_err(|err| {
                         Error::internal_error(&format!(
@@ -264,9 +280,20 @@ impl RouterConfigurationBgpPeer {
                             InlineErrorChain::new(&err)
                         ))
                     })?;
-                Ok(networking::BgpPeerKind::Numbered { addr })
+                let src_addr = src_addr
+                    .map(|src| RouterPeerIpAddr::try_from(src.ip()))
+                    .transpose()
+                    .map_err(|err| Error::internal_error(&format!(
+                        "invalid database contents: BGP source address: {err}",
+                    )))?;
+                NumberedRouter::new(addr, src_addr).map_err(|err| {
+                    Error::internal_error(&format!(
+                        "invalid database contents: BGP source address: {err}",
+                    ))
+                })?;
+                Ok(networking::BgpPeerKind::Numbered { addr, src_addr })
             }
-            (None, Some(port), Some(lifetime)) => {
+            (None, None, Some(port), Some(lifetime)) => {
                 let router_lifetime = RouterLifetimeConfig::new(*lifetime)
                     .map_err(|err| {
                         Error::internal_error(&format!(
@@ -534,6 +561,50 @@ mod tests {
 
     fn is_invalid_request(e: &Error) -> bool {
         matches!(e, Error::InvalidRequest { .. })
+    }
+
+    #[test]
+    fn bgp_source_address_validates_and_round_trips() {
+        let id = RouterConfigurationUuid::new_v4();
+        for (target, source) in [
+            ("10.99.0.3", Some("10.99.0.4")),
+            ("2001:db8::3", Some("2001:db8::4")),
+            ("10.99.0.3", None),
+        ] {
+            let api: networking::RouterConfigurationBgpPeer =
+                serde_json::from_value(serde_json::json!({
+                    "name": "source-test",
+                    "peer": {"type": "numbered", "addr": target, "src_addr": source},
+                    "hold_time": 6, "keepalive": 2, "connect_retry": 3,
+                    "delay_open": 0, "idle_hold_time": 3, "enforce_first_as": false,
+                })).unwrap();
+            let mut db =
+                RouterConfigurationBgpPeer::new(id, api.clone()).unwrap();
+            let back =
+                networking::RouterConfigurationBgpPeer::try_from(db.clone())
+                    .unwrap();
+            assert_eq!(back, api);
+            // Defend reads even if stored data bypassed the constraints.
+            db.src_addr = Some(if target.contains(':') {
+                "10.99.0.4".parse::<IpAddr>().unwrap().into()
+            } else {
+                "2001:db8::4".parse::<IpAddr>().unwrap().into()
+            });
+            assert!(matches!(db.peer(), Err(Error::InternalError { .. })));
+            let mut invalid = api;
+            if let networking::BgpPeerKind::Numbered { src_addr, .. } =
+                &mut invalid.peer
+            {
+                *src_addr = Some(
+                    RouterPeerIpAddr::try_from(db.src_addr.unwrap().ip())
+                        .unwrap(),
+                );
+            }
+            assert!(matches!(
+                RouterConfigurationBgpPeer::new(id, invalid),
+                Err(Error::InvalidRequest { .. })
+            ));
+        }
     }
 
     #[test]

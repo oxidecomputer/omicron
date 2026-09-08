@@ -194,6 +194,54 @@ fn uplink_numbered_sources_reach_mgd_and_clear() {
 }
 
 #[test]
+fn operator_numbered_sources_survive_bootstore_and_reach_mgd() {
+    for (target, first, second) in [
+        ("10.99.0.3", "10.99.0.4", "10.99.0.2"),
+        ("2001:db8::3", "2001:db8::4", "2001:db8::2"),
+    ] {
+        let mut peer = RouterConfigBgpPeer {
+            name: "source-test".to_owned(),
+            addr: target.parse().unwrap(),
+            src_addr: None,
+            parameters: operator_peer_parameters(),
+        };
+        // A pre-change bootstore peer has no src_addr field.
+        let mut old = serde_json::to_value(&peer).unwrap();
+        old.as_object_mut().unwrap().remove("src_addr");
+        let old: RouterConfigBgpPeer = serde_json::from_value(old).unwrap();
+        assert_eq!(old.src_addr, None);
+        for source in [None, Some(first), Some(second), None] {
+            peer.src_addr = source.map(|s| s.parse().unwrap());
+            let restored: RouterConfigBgpPeer =
+                serde_json::from_slice(&serde_json::to_vec(&peer).unwrap())
+                    .unwrap();
+            let bgp = RouterConfigBgpSpec {
+                asn: 65000,
+                originate: Vec::new(),
+                checker: None,
+                shaper: None,
+                max_paths: None,
+                peers: vec![restored],
+                unnumbered_peers: vec![RouterConfigUnnumberedBgpPeer {
+                    name: "unnumbered".to_owned(),
+                    port: "qsfp1".to_owned(),
+                    router_lifetime: 0,
+                    parameters: operator_peer_parameters(),
+                }],
+            };
+            let rendered = convert_operator_bgp(&bgp);
+            let parameters = &rendered.peers[DEFAULT_ROUTER_NAME][0].parameters;
+            assert_eq!(parameters.src_addr, peer.src_addr);
+            assert_eq!(parameters.src_port, None);
+            assert_eq!(
+                rendered.unnumbered_peers["qsfp1"][0].parameters.src_addr,
+                None
+            );
+        }
+    }
+}
+
+#[test]
 fn uplink_render_full() {
     let mut peer_a = uplink_peer(65000, "qsfp0", numbered("192.0.2.1"));
     peer_a.allowed_import = ImportExportPolicy::Allow(vec![
@@ -563,6 +611,7 @@ fn operator_default_spec_replaces_uplink_render() {
         peers: vec![RouterConfigBgpPeer {
             name: "peer-a".to_string(),
             addr: "192.0.2.50".parse().unwrap(),
+            src_addr: None,
             parameters: operator_peer_parameters(),
         }],
         unnumbered_peers: Vec::new(),
@@ -621,6 +670,7 @@ fn operator_named_specs_are_appended_to_the_uplink_default() {
             peers: vec![RouterConfigBgpPeer {
                 name: "peer-a".to_string(),
                 addr: "192.0.2.50".parse().unwrap(),
+                src_addr: None,
                 parameters: RouterConfigBgpPeerParameters {
                     hold_time: 12,
                     allowed_export: Some(vec![

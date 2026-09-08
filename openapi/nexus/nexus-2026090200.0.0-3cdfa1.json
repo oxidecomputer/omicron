@@ -19187,6 +19187,13 @@
                 "type": "string",
                 "format": "ip"
               },
+              "src_addr": {
+                "nullable": true,
+                "description": "Local address to use for the BGP connection. Must have the same address family as the peer. If omitted, the system selects the source address.",
+                "default": null,
+                "type": "string",
+                "format": "ip"
+              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -19197,7 +19204,8 @@
             "required": [
               "addr",
               "type"
-            ]
+            ],
+            "additionalProperties": false
           },
           {
             "description": "An unnumbered session on a given port",
@@ -19230,7 +19238,8 @@
             "required": [
               "port",
               "type"
-            ]
+            ],
+            "additionalProperties": false
           }
         ]
       },

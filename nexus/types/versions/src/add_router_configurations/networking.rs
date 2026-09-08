@@ -125,12 +125,17 @@ pub struct RouterConfigurationBgpConfigSet {
 
 /// The peer to establish a BGP session with
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum BgpPeerKind {
     /// A session with a specific peer address
     Numbered {
         /// Address of the peer.
         addr: RouterPeerIpAddr,
+        /// Local address to use for the BGP connection. Must have the same
+        /// address family as the peer. If omitted, the system selects the
+        /// source address.
+        #[serde(default)]
+        src_addr: Option<RouterPeerIpAddr>,
     },
     /// An unnumbered session on a given port
     Unnumbered {
