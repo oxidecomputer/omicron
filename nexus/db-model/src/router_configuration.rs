@@ -337,18 +337,31 @@ pub struct RouterConfigurationStaticRoute {
 }
 
 impl RouterConfigurationStaticRoute {
+    /// Convert an API static route for storage. This is the single
+    /// admission point for create and update: the destination and gateway
+    /// must be of the same address family, otherwise the route could only
+    /// fail later, at render or apply time, after it had been persisted.
     pub fn new(
         router_configuration_id: RouterConfigurationUuid,
         route: networking::StaticRoute,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, Error> {
+        let dst_v4 = matches!(route.dst, oxnet::IpNet::V4(_));
+        let gw_v4 = route.gw.is_ipv4();
+        if dst_v4 != gw_v4 {
+            return Err(Error::invalid_request(&format!(
+                "static route {}: destination {} and gateway {} must be of \
+                 the same address family",
+                route.name, route.dst, route.gw,
+            )));
+        }
+        Ok(Self {
             router_configuration_id: router_configuration_id.into(),
             name: route.name.into(),
             dst: route.dst.into(),
             gw: route.gw.into(),
             rib_priority: route.rib_priority.map(Into::into),
             vlan_id: route.vlan_id.map(Into::into),
-        }
+        })
     }
 }
 
@@ -462,5 +475,42 @@ impl ControlPlaneRouterConfiguration {
     /// The marker row meaning "explicitly configured empty".
     pub fn empty_marker() -> Self {
         Self { router_configuration_id: None, priority: 0.into() }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use omicron_common::api::external;
+
+    fn name(s: &str) -> external::Name {
+        s.parse().unwrap()
+    }
+
+    fn route(dst: &str, gw: &str) -> networking::StaticRoute {
+        networking::StaticRoute {
+            name: name("r"),
+            dst: dst.parse().unwrap(),
+            gw: gw.parse().unwrap(),
+            rib_priority: None,
+            vlan_id: None,
+        }
+    }
+
+    fn is_invalid_request(e: &Error) -> bool {
+        matches!(e, Error::InvalidRequest { .. })
+    }
+
+    #[test]
+    fn static_route_requires_matching_families() {
+        let id = RouterConfigurationUuid::new_v4();
+        assert!(RouterConfigurationStaticRoute::new(id, route("10.0.0.0/8", "10.1.1.1")).is_ok());
+        assert!(RouterConfigurationStaticRoute::new(id, route("fd00::/8", "fd00::1")).is_ok());
+        let e = RouterConfigurationStaticRoute::new(id, route("10.0.0.0/8", "fd00::1"))
+            .unwrap_err();
+        assert!(is_invalid_request(&e), "{e}");
+        let e = RouterConfigurationStaticRoute::new(id, route("fd00::/8", "10.1.1.1"))
+            .unwrap_err();
+        assert!(is_invalid_request(&e), "{e}");
     }
 }

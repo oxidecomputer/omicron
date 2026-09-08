@@ -512,7 +512,7 @@ impl super::Nexus {
                 RouterConfigurationStaticRoute::new(
                     authz_configuration.id(),
                     route,
-                ),
+                )?,
             )
             .await?;
         self.activate_router_configuration_propagation();
@@ -562,7 +562,7 @@ impl super::Nexus {
                 RouterConfigurationStaticRoute::new(
                     authz_configuration.id(),
                     route,
-                ),
+                )?,
             )
             .await?;
         self.activate_router_configuration_propagation();

@@ -955,3 +955,134 @@ async fn test_silo_router_configurations(ctx: &ControlPlaneTestContext) {
         .await
         .unwrap();
 }
+
+async fn create_configuration(ctx: &ControlPlaneTestContext, name: &str) {
+    let params = RouterConfigurationCreate {
+        identity: IdentityMetadataCreateParams {
+            name: name.parse().unwrap(),
+            description: "validation tests".into(),
+        },
+        switch: SwitchSlot::Switch0,
+    };
+    NexusRequest::objects_post(&ctx.external_client, CONFIGURATIONS_URL, &params)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+}
+
+/// POST/PUT a raw JSON body and expect 400; return the error message.
+async fn expect_bad_request(
+    ctx: &ControlPlaneTestContext,
+    method: Method,
+    url: &str,
+    body: &str,
+) -> String {
+    let error = NexusRequest::new(
+        RequestBuilder::new(&ctx.external_client, method, url)
+            .raw_body(Some(body.to_string()))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<dropshot::HttpErrorResponseBody>()
+    .unwrap();
+    error.message
+}
+
+async fn get_json<T: serde::de::DeserializeOwned>(
+    ctx: &ControlPlaneTestContext,
+    url: &str,
+) -> T {
+    NexusRequest::object_get(&ctx.external_client, url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap()
+        .parsed_body()
+        .unwrap()
+}
+
+/// A-16: a static route's destination and gateway must share an address
+/// family; mismatches are rejected before anything is stored or changed.
+#[nexus_test]
+async fn test_router_configuration_static_route_family_mismatch(
+    ctx: &ControlPlaneTestContext,
+) {
+    let client = &ctx.external_client;
+    create_configuration(ctx, "famcheck").await;
+    let routes_url = format!("{CONFIGURATIONS_URL}/famcheck/routes");
+
+    let v4_dst_v6_gw = StaticRoute {
+        name: "mixed-a".parse().unwrap(),
+        dst: "10.0.0.0/8".parse().unwrap(),
+        gw: "fd00::1".parse().unwrap(),
+        rib_priority: None,
+        vlan_id: None,
+    };
+    let v6_dst_v4_gw = StaticRoute {
+        name: "mixed-b".parse().unwrap(),
+        dst: "fd00::/8".parse().unwrap(),
+        gw: "10.1.1.1".parse().unwrap(),
+        rib_priority: None,
+        vlan_id: None,
+    };
+    for route in [&v4_dst_v6_gw, &v6_dst_v4_gw] {
+        let msg = expect_bad_request(
+            ctx,
+            Method::POST,
+            &routes_url,
+            &serde_json::to_string(route).unwrap(),
+        )
+        .await;
+        assert!(msg.contains("same address family"), "{msg}");
+    }
+    let routes: Vec<StaticRoute> = get_json(ctx, &routes_url).await;
+    assert!(routes.is_empty(), "rejected routes were stored: {routes:?}");
+
+    // A valid route is accepted; a mismatched update leaves it untouched.
+    let valid = StaticRoute {
+        name: "good".parse().unwrap(),
+        dst: "10.0.0.0/8".parse().unwrap(),
+        gw: "10.1.1.1".parse().unwrap(),
+        rib_priority: Some(5),
+        vlan_id: None,
+    };
+    let created: StaticRoute =
+        NexusRequest::objects_post(client, &routes_url, &valid)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body()
+            .unwrap();
+    assert_eq!(created, valid);
+    let route_url = format!("{routes_url}/good");
+    let mut bad_update = valid.clone();
+    bad_update.gw = "fd00::1".parse().unwrap();
+    let msg = expect_bad_request(
+        ctx,
+        Method::PUT,
+        &route_url,
+        &serde_json::to_string(&bad_update).unwrap(),
+    )
+    .await;
+    assert!(msg.contains("same address family"), "{msg}");
+    let after: StaticRoute = get_json(ctx, &route_url).await;
+    assert_eq!(after, valid, "rejected update changed the stored route");
+    // An IPv6 route with an IPv6 gateway is still fine.
+    let v6 = StaticRoute {
+        name: "v6".parse().unwrap(),
+        dst: "fd00::/8".parse().unwrap(),
+        gw: "fd00::1".parse().unwrap(),
+        rib_priority: None,
+        vlan_id: None,
+    };
+    NexusRequest::objects_post(client, &routes_url, &v6)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+}
