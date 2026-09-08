@@ -29,9 +29,9 @@ use tufaceous_artifact::ArtifactHash;
 
 use crate::InternalDisksReceiver;
 use crate::SledAgentArtifactStore;
-use ledgered_sled_config_versioning::read_ledgered_sled_config;
+use ledgered_config_versioning::read_ledgered_sled_config;
 
-mod ledgered_sled_config_versioning;
+pub(crate) mod ledgered_config_versioning;
 
 const CONFIG_LEDGER_FILENAME: &str = "omicron-sled-config.json";
 

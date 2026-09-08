@@ -41,6 +41,7 @@ use sha2::{Digest, Sha256};
 use sled_agent_config_reconciler::ConfigReconcilerHandle;
 use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_config_reconciler::SledAgentArtifactStore;
+use sled_agent_config_reconciler::read_ledgered_artifact_config;
 use sled_agent_types::artifact::ArtifactConfig;
 use sled_agent_types::artifact::{ArtifactListResponse, ArtifactPutResponse};
 use slog::{Logger, error, info};
@@ -135,9 +136,8 @@ impl<T: DatasetsManager> ArtifactStore<T> {
             }
         }
 
-        let config = Ledger::new(&log, ledger_paths.clone())
-            .await
-            .map(Ledger::into_inner);
+        let config =
+            read_ledgered_artifact_config(&log, ledger_paths.clone()).await;
         let (config_tx, config) = watch::channel(config);
         // Somewhat arbitrary bound size, large enough that we should never hit it.
         let (ledger_tx, ledger_rx) = mpsc::channel(256);
