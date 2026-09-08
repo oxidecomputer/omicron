@@ -42,7 +42,6 @@ impl Reconciler for MgdReconciler {
     ) -> Self {
         let bgp_dispatcher_addr = match mode {
             ScrimletReconcilersMode::SwitchZone(_) => None,
-            #[cfg(any(test, feature = "testing"))]
             ScrimletReconcilersMode::Test { bgp_dispatcher_addr, .. } => {
                 Some(bgp_dispatcher_addr)
             }

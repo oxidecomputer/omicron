@@ -77,7 +77,6 @@ impl ScrimletReconcilersMode {
                     .build()
                     .expect("reqwest parameters are valid")
             }
-            #[cfg(any(test, feature = "testing"))]
             ScrimletReconcilersMode::Test { .. } => {
                 // Some of our tests use tokio's paused time. We want to
                 // construct a reqwest client that does not specify any timeouts
@@ -98,7 +97,6 @@ impl ScrimletReconcilersMode {
             ScrimletReconcilersMode::SwitchZone(ip) => {
                 SocketAddrV6::new(ip.into(), MGS_PORT, 0, 0).into()
             }
-            #[cfg(any(test, feature = "testing"))]
             ScrimletReconcilersMode::Test { mgs_addr, .. } => mgs_addr,
         };
         let baseurl = format!("http://{addr}");
@@ -117,7 +115,6 @@ impl ScrimletReconcilersMode {
             ScrimletReconcilersMode::SwitchZone(ip) => {
                 SocketAddrV6::new(ip.into(), DENDRITE_PORT, 0, 0).into()
             }
-            #[cfg(any(test, feature = "testing"))]
             ScrimletReconcilersMode::Test { dpd_addr, .. } => dpd_addr,
         };
         let baseurl = format!("http://{addr}");
@@ -140,7 +137,6 @@ impl ScrimletReconcilersMode {
             ScrimletReconcilersMode::SwitchZone(ip) => {
                 SocketAddrV6::new(ip.into(), MGD_PORT, 0, 0).into()
             }
-            #[cfg(any(test, feature = "testing"))]
             ScrimletReconcilersMode::Test { mgd_addr, .. } => mgd_addr,
         };
         let baseurl = format!("http://{addr}");

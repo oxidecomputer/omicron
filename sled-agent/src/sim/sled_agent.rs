@@ -45,8 +45,7 @@ use propolis_client::{
 use range_requests::PotentialRange;
 use sled_agent_health_monitor::HealthMonitorHandle;
 use sled_agent_scrimlet_reconcilers::{
-    ScrimletReconcilers, ScrimletReconcilersMode, ScrimletStatus,
-    SledAgentNetworkingInfo,
+    ScrimletReconcilersMode, ScrimletStatus, SledAgentNetworkingInfo,
 };
 use sled_agent_types::attached_subnet::{AttachedSubnet, AttachedSubnets};
 use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
@@ -125,17 +124,14 @@ pub struct SledAgent {
     /// Watch channel that sends the deserialized [`SystemNetworkingConfig`]
     /// whenever Nexus writes a new bootstore config. Only populated for
     /// scrimlet sleds; used to drive the scrimlet reconcilers.
-    #[cfg(feature = "testing")]
     network_config_tx: Option<
         tokio::sync::watch::Sender<
             sled_agent_types::system_networking::SystemNetworkingConfig,
         >,
     >,
-    /// Keeps the scrimlet reconcilers alive once started.
-    #[cfg(feature = "testing")]
-    scrimlet_reconcilers: std::sync::OnceLock<
+    /// Keeps the scrimlet reconcilers alive.
+    scrimlet_reconcilers:
         std::sync::Arc<sled_agent_scrimlet_reconcilers::ScrimletReconcilers>,
-    >,
 }
 
 impl SledAgent {
@@ -196,7 +192,6 @@ impl SledAgent {
 
         let health_monitor = HealthMonitorHandle::stub();
 
-        #[cfg(feature = "testing")]
         let network_config_tx = match config.sled_role {
             SledRole::Scrimlet => {
                 let (tx, _) =
@@ -223,6 +218,10 @@ impl SledAgent {
             SledRole::Gimlet => None,
         };
 
+        let scrimlet_reconcilers = std::sync::Arc::new(
+            sled_agent_scrimlet_reconcilers::ScrimletReconcilers::new(&log),
+        );
+
         Arc::new(SledAgent {
             id,
             ip: config.dropshot.bind_address.ip(),
@@ -247,35 +246,30 @@ impl SledAgent {
             log,
             bootstore_network_config,
             health_monitor,
-            #[cfg(feature = "testing")]
             network_config_tx,
-            #[cfg(feature = "testing")]
-            scrimlet_reconcilers: std::sync::OnceLock::new(),
+            scrimlet_reconcilers,
         })
     }
 
     /// Called after every `write_network_bootstore_config_vXX` handler updates
-    /// [`Self::bootstore_network_config`]. No-op when the `testing` feature is
-    /// not enabled or this sled is not a scrimlet.
+    /// [`Self::bootstore_network_config`]. No-op for gimlet sleds (which have
+    /// no `network_config_tx`).
     pub(crate) fn notify_network_config_changed(&self) {
-        #[cfg(feature = "testing")]
+        let Some(tx) = &self.network_config_tx else { return };
+        let config = self.bootstore_network_config.lock().unwrap().clone();
+        match sled_agent_types::early_networking::EarlyNetworkConfigEnvelope::deserialize_from_bootstore(&config)
+            .and_then(|e| e.deserialize_body())
         {
-            let Some(tx) = &self.network_config_tx else { return };
-            let config = self.bootstore_network_config.lock().unwrap().clone();
-            match sled_agent_types::early_networking::EarlyNetworkConfigEnvelope::deserialize_from_bootstore(&config)
-                .and_then(|e| e.deserialize_body())
-            {
-                Ok(system_config) => {
-                    tx.send_modify(|c| *c = system_config);
-                }
-                Err(e) => {
-                    slog::warn!(
-                        self.log,
-                        "failed to deserialize bootstore config for \
-                         scrimlet reconcilers (reconcilers may lag)";
-                        "error" => %e,
-                    );
-                }
+            Ok(system_config) => {
+                tx.send_modify(|c| *c = system_config);
+            }
+            Err(e) => {
+                slog::warn!(
+                    self.log,
+                    "failed to deserialize bootstore config for \
+                     scrimlet reconcilers (reconcilers may lag)";
+                    "error" => %e,
+                );
             }
         }
     }
@@ -288,30 +282,23 @@ impl SledAgent {
             .as_ref()
             .expect("network_config_tx must be Some for scrimlet sleds");
 
-        let reconcilers = ScrimletReconcilers::new(&self.log);
-        reconcilers.set_sled_agent_networking_info_once(
+        // Reconcilers already exist; just provide networking info and mark as
+        // scrimlet.
+        self.scrimlet_reconcilers.set_sled_agent_networking_info_once(
             SledAgentNetworkingInfo {
                 system_networking_config_rx: tx.subscribe(),
                 mode,
             },
         );
-        reconcilers.set_scrimlet_status(ScrimletStatus::Scrimlet);
-
-        // Store to keep the reconcilers alive. Ignore the error: if called
-        // twice it is a programmer error and we just silently drop the second
-        // set (the first set is already running).
-        let _ = self.scrimlet_reconcilers.set(std::sync::Arc::new(reconcilers));
+        self.scrimlet_reconcilers.set_scrimlet_status(ScrimletStatus::Scrimlet);
     }
 
-    /// Returns the current status of the scrimlet reconcilers, or `None` if
-    /// `start_scrimlet_reconcilers()` has not yet been called.
-    #[cfg(feature = "testing")]
+    /// Returns the current status of the scrimlet reconcilers.
     pub fn scrimlet_reconcilers_status(
         &self,
-    ) -> Option<
-        bootstrap_agent_lockstep_types::scrimlet_reconcilers::ScrimletReconcilersStatus,
-    >{
-        self.scrimlet_reconcilers.get().map(|r| r.status())
+    ) -> bootstrap_agent_lockstep_types::scrimlet_reconcilers::ScrimletReconcilersStatus
+    {
+        self.scrimlet_reconcilers.status()
     }
 
     pub async fn instance_register(

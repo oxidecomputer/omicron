@@ -1113,12 +1113,7 @@ async fn test_scrimlet_reconcilers_update_on_bootstore_change(
         let sled_agent = sled_agent.sled_agent().clone();
         wait_for_condition(
             || async {
-                let Some(status) = sled_agent.scrimlet_reconcilers_status()
-                else {
-                    // Reconcilers not yet started (start_scrimlet_reconcilers
-                    // hasn't been called yet).
-                    return Err(CondCheckError::<()>::NotYet { status: None });
-                };
+                let status = sled_agent.scrimlet_reconcilers_status();
                 match status {
                     ScrimletReconcilersStatus::Running {
                         mgd_reconciler, ..
