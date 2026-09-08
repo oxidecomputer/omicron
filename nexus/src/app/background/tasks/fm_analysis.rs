@@ -5,6 +5,7 @@
 use crate::app::background::Activator;
 use crate::app::background::BackgroundTask;
 use crate::app::background::tasks::fm_sitrep_load::CurrentSitrep;
+use crate::app::external_endpoints::TlsCertificate;
 use anyhow::Context;
 use chrono::Utc;
 use fm::analysis_input::Input;
@@ -16,11 +17,14 @@ use nexus_db_model::DbMetadataNexusState;
 use nexus_db_model::PhysicalDiskPolicy;
 use nexus_db_model::SagaExecState;
 use nexus_db_model::SagaReasonAbandoned;
+use nexus_db_model::ServiceKind;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore;
+use nexus_db_queries::db::datastore::Discoverability;
 use nexus_db_queries::db::identity::Asset;
+use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_fm as fm;
 use nexus_types::fm::FmConfig;
@@ -30,16 +34,20 @@ use nexus_types::in_service_disk::InServiceDisk;
 use nexus_types::internal_api::background::FmAnalysisStatus;
 use nexus_types::internal_api::background::fm_analysis as status;
 use nexus_types::inventory;
+use nexus_types::observed_certificate::ObservedCertificate;
+use nexus_types::observed_certificate::ObservedSiloCertificates;
 use nexus_types::observed_saga::{
     ObservedSaga, ObservedSagaState, SagaAbandonInfo, SagaAbandonReason,
     SagaOwnerState,
 };
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use serde_json::json;
 use slog_error_chain::InlineErrorChain;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::watch;
 
@@ -227,7 +235,7 @@ impl FmAnalysis {
 
         // Prepare analysis inputs.
         let (inputs, prep_status, input_report) = match self
-            .prepare_inputs(&opctx, parent_sitrep, inv)
+            .prepare_inputs(&opctx, parent_sitrep, inv, &cfg)
             .await
         {
             Ok(inputs) => inputs,
@@ -321,6 +329,7 @@ impl FmAnalysis {
         opctx: &OpContext,
         parent_sitrep: Option<CurrentSitrep>,
         inv: Arc<inventory::Collection>,
+        cfg: &FmConfig,
     ) -> Result<(Input, status::PreparationStatus, InputReport), PreparationError>
     {
         let mut warnings = Vec::new();
@@ -331,10 +340,15 @@ impl FmAnalysis {
         let observed_sagas =
             Arc::new(self.prepare_observed_sagas(opctx).await?);
 
+        let observed_silo_certificates =
+            Arc::new(self.load_silo_certificates(opctx, &mut warnings).await?);
+
         let mut builder =
             fm::analysis_input::Input::builder(parent_sitrep.clone(), inv)?
                 .in_service_disks(in_service_disks)
-                .observed_sagas(observed_sagas);
+                .observed_sagas(observed_sagas)
+                .observed_silo_certificates(observed_silo_certificates)
+                .config(*cfg);
         self.load_ereporter_restarts(opctx, &mut builder)
             .await
             .context("failed to load ereporter restarts")?;
@@ -421,6 +435,90 @@ impl FmAnalysis {
         Ok(in_service_disks)
     }
 
+    /// Build the certificate diagnosis engine's input: every silo, with the
+    /// leaf validity window of each of its external TLS certificates.
+    ///
+    /// This reads the same rows the `external_endpoints` background task uses
+    /// to decide which certificate to serve, and applies the same acceptance
+    /// check (`TlsCertificate::try_from`), so the engine reasons about exactly
+    /// the certificates Nexus can present. A certificate that fails that check
+    /// is never served, however far off its expiration is, so it must not be
+    /// allowed to mask an expiring certificate that is served. Certificates
+    /// that fail the check, or that belong to a silo that no longer exists,
+    /// are skipped with a warning, mirroring how `external_endpoints` skips
+    /// them.
+    async fn load_silo_certificates(
+        &self,
+        opctx: &OpContext,
+        warnings: &mut Vec<String>,
+    ) -> anyhow::Result<IdOrdMap<ObservedSiloCertificates>> {
+        let mut silos = IdOrdMap::new();
+        for silo in self
+            .datastore
+            .silo_list_all_batched(opctx, Discoverability::All)
+            .await
+            .context("failed to list silos")?
+        {
+            silos
+                .insert_unique(ObservedSiloCertificates {
+                    silo_id: silo.id(),
+                    silo_name: silo.name().clone(),
+                    certificates: IdOrdMap::new(),
+                })
+                .expect("silo IDs are unique");
+        }
+
+        let mut paginator = Paginator::new(
+            datastore::SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
+        while let Some(p) = paginator.next() {
+            let batch = self
+                .datastore
+                .certificate_list_for(
+                    opctx,
+                    Some(ServiceKind::Nexus),
+                    &PaginatedBy::Id(p.current_pagparams()),
+                    false,
+                )
+                .await
+                .context("failed to list certificates")?;
+            paginator = p.found_batch(&batch, &|c| c.id());
+            for cert in batch {
+                let cert_id = cert.id();
+                let cert_name = cert.name().clone();
+                let silo_id = cert.silo_id;
+                let Some(mut silo) = silos.get_mut(&silo_id) else {
+                    warnings.push(format!(
+                        "certificate {cert_id} belongs to silo {silo_id}, \
+                         which was not found; ignoring it",
+                    ));
+                    continue;
+                };
+                let validity = match TlsCertificate::try_from(cert) {
+                    Ok(tls_cert) => tls_cert.validity(),
+                    Err(e) => {
+                        warnings.push(format!(
+                            "certificate {cert_id} for silo {silo_id} cannot \
+                             be served; ignoring it: {e:#}",
+                        ));
+                        continue;
+                    }
+                };
+                silo.certificates
+                    .insert_unique(ObservedCertificate {
+                        id: cert_id,
+                        name: cert_name,
+                        not_before: validity.not_before,
+                        not_after: validity.not_after,
+                    })
+                    .expect("certificate IDs are unique");
+            }
+        }
+
+        Ok(silos)
+    }
+
     /// Build the saga diagnosis engine's input: every non-terminal saga,
     /// annotated with the timestamp of its latest node event (the progress
     /// signal) and the state of its owning Nexus.
@@ -428,8 +526,6 @@ impl FmAnalysis {
         &self,
         opctx: &OpContext,
     ) -> anyhow::Result<IdOrdMap<ObservedSaga>> {
-        use std::collections::BTreeMap;
-
         // All unfinished (running, unwinding, or abandoned) sagas. Completed
         // sagas are excluded; a parent case whose saga is absent from this
         // set is closed by the engine.
@@ -967,6 +1063,7 @@ mod tests {
             analysis_enabled: Setting::new(true),
             sitrep_limit: Setting::new(sitrep_limit),
             history_pruning_threshold: Setting::new(history_pruning_threshold),
+            certificate_expiry_warning_days: Setting::Default,
         };
         FmConfigView { config, source: Default::default() }
     }
@@ -1347,7 +1444,7 @@ mod tests {
         );
 
         let (input, prep, report) = task
-            .prepare_inputs(opctx, Some(parent), inv)
+            .prepare_inputs(opctx, Some(parent), inv, &FmConfig::default())
             .await
             .expect("input preparation should succeed");
         assert!(
@@ -1385,6 +1482,205 @@ mod tests {
         );
         assert!(carried.unmarked_ereports.is_empty());
         assert_eq!(report.closed_cases_copied_forward.len(), 1);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Builds a self-signed certificate whose key is 1024-bit RSA, returning
+    /// the certificate and key as PEM.
+    ///
+    /// Upload validation (`CertificateValidator`) accepts such a certificate:
+    /// openssl parses the key, and it matches the leaf's public key. But
+    /// rustls (via aws-lc-rs) refuses RSA keys shorter than 2048 bits, so
+    /// `TlsCertificate::try_from` rejects it and Nexus never serves it.
+    fn unservable_certificate(
+        hostname: &str,
+        not_after: chrono::DateTime<Utc>,
+    ) -> (String, String) {
+        use openssl::asn1::Asn1Time;
+        use openssl::hash::MessageDigest;
+        use openssl::nid::Nid;
+        use openssl::pkey::PKey;
+        use openssl::rsa::Rsa;
+        use openssl::x509::X509Builder;
+        use openssl::x509::X509NameBuilder;
+        use openssl::x509::extension::SubjectAlternativeName;
+
+        let key = PKey::from_rsa(Rsa::generate(1024).unwrap()).unwrap();
+        let mut name = X509NameBuilder::new().unwrap();
+        name.append_entry_by_nid(Nid::COMMONNAME, hostname).unwrap();
+        let name = name.build();
+
+        let mut builder = X509Builder::new().unwrap();
+        builder.set_version(2).unwrap();
+        builder.set_subject_name(&name).unwrap();
+        builder.set_issuer_name(&name).unwrap();
+        builder.set_pubkey(&key).unwrap();
+        builder.set_not_before(&Asn1Time::days_from_now(0).unwrap()).unwrap();
+        builder
+            .set_not_after(&Asn1Time::from_unix(not_after.timestamp()).unwrap())
+            .unwrap();
+        let san = SubjectAlternativeName::new()
+            .dns(hostname)
+            .build(&builder.x509v3_context(None, None))
+            .unwrap();
+        builder.append_extension(san).unwrap();
+        builder.sign(&key, MessageDigest::sha256()).unwrap();
+        let cert = builder.build();
+
+        let cert_pem = String::from_utf8(cert.to_pem().unwrap()).unwrap();
+        let key_pem =
+            String::from_utf8(key.private_key_to_pem_pkcs8().unwrap()).unwrap();
+        (cert_pem, key_pem)
+    }
+
+    /// The certificate loader must apply the same acceptance check as the
+    /// external endpoint code, so that a stored certificate Nexus cannot
+    /// serve does not mask the expiring certificate it does serve.
+    #[tokio::test]
+    async fn test_load_silo_certificates_skips_unservable_certificates() {
+        use async_bb8_diesel::AsyncRunQueryDsl;
+        use nexus_db_model::Certificate;
+        use nexus_db_schema::schema::certificate::dsl;
+        use nexus_types::external_api::certificate::CertificateCreate;
+        use nexus_types::external_api::certificate::ServiceUsingCertificate;
+        use nexus_types::silo::DEFAULT_SILO_ID;
+        use omicron_certificates::CertificateValidator;
+        use omicron_common::api::external::IdentityMetadataCreateParams;
+        use omicron_test_utils::certificates::CertificateChain;
+        use uuid::Uuid;
+
+        let logctx = dev::test_setup_log(
+            "test_load_silo_certificates_skips_unservable_certificates",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        const HOSTNAME: &str = "fake.test.oxide.computer";
+        let make_cert =
+            |silo_id: Uuid, name: &str, cert: String, key: String| {
+                Certificate::new_unvalidated(
+                    silo_id,
+                    Uuid::new_v4(),
+                    ServiceKind::Nexus,
+                    CertificateCreate {
+                        identity: IdentityMetadataCreateParams {
+                            name: name.parse().unwrap(),
+                            description: String::new(),
+                        },
+                        cert,
+                        key,
+                        service: ServiceUsingCertificate::ExternalApi,
+                    },
+                )
+            };
+
+        // A certificate Nexus can serve, expiring soon.
+        let mut params =
+            rcgen::CertificateParams::new(vec![HOSTNAME.to_string()]);
+        params.not_after = (std::time::SystemTime::now()
+            + std::time::Duration::from_secs(5 * 24 * 60 * 60))
+        .into();
+        let chain = CertificateChain::with_params(params);
+        let servable = make_cert(
+            DEFAULT_SILO_ID,
+            "servable",
+            chain.cert_chain_as_pem(),
+            chain.end_cert_private_key_as_pem(),
+        );
+        let servable_id = servable.id();
+
+        // A certificate Nexus cannot serve, expiring much later. If the
+        // loader admitted it, it would be the silo's "best" certificate and
+        // the expiring one above would go unreported.
+        let (cert, key) = unservable_certificate(
+            HOSTNAME,
+            Utc::now() + chrono::Duration::days(730),
+        );
+        // Confirm the premise: upload validation accepts this certificate...
+        CertificateValidator::default()
+            .validate(cert.as_bytes(), key.as_bytes(), &[HOSTNAME])
+            .expect("upload validation accepts a 1024-bit RSA certificate");
+        let unservable = make_cert(DEFAULT_SILO_ID, "unservable", cert, key);
+        let unservable_id = unservable.id();
+        // ...but the external endpoint code refuses to serve it.
+        TlsCertificate::try_from(unservable.clone())
+            .err()
+            .expect("external endpoints reject a 1024-bit RSA certificate");
+
+        // A servable certificate whose silo does not exist. The loader has
+        // no silo to attach it to, so it is skipped with a warning.
+        let orphan_silo_id = Uuid::new_v4();
+        let orphan_chain = CertificateChain::new(HOSTNAME);
+        let orphan = make_cert(
+            orphan_silo_id,
+            "orphan",
+            orphan_chain.cert_chain_as_pem(),
+            orphan_chain.end_cert_private_key_as_pem(),
+        );
+        let orphan_id = orphan.id();
+
+        diesel::insert_into(dsl::certificate)
+            .values(vec![servable, unservable, orphan])
+            .execute_async(
+                &*datastore.pool_connection_for_tests().await.unwrap(),
+            )
+            .await
+            .expect("inserted certificates");
+
+        let (_sitrep_tx, sitrep_rx) = watch::channel(None);
+        let (_inv_tx, inv_rx) = watch::channel(None);
+        let task = FmAnalysis::new(
+            datastore.clone(),
+            sitrep_rx,
+            inv_rx,
+            config_rx(Default::default()),
+            activators(),
+            OmicronZoneUuid::new_v4(),
+        );
+
+        let mut warnings = Vec::new();
+        let silos = task
+            .load_silo_certificates(opctx, &mut warnings)
+            .await
+            .expect("loaded silo certificates");
+
+        let silo = silos.get(&DEFAULT_SILO_ID).expect("default silo observed");
+        let observed_ids: Vec<Uuid> =
+            silo.certificates.iter().map(|c| c.id).collect();
+        assert_eq!(observed_ids, vec![servable_id]);
+        assert_eq!(
+            silo.best_certificate().map(|c| c.id),
+            Some(servable_id),
+            "the expiring servable certificate must be the best one"
+        );
+        let observed = silo.certificates.get(&servable_id).unwrap();
+        assert!(observed.not_before <= Utc::now());
+        assert!(observed.not_after > Utc::now());
+        assert!(observed.not_after < Utc::now() + chrono::Duration::days(6));
+
+        // Both skipped certificates are reported, and the warnings are
+        // readable: no run of interior whitespace from a wrapped literal.
+        assert_eq!(warnings.len(), 2, "unexpected warnings: {warnings:?}");
+        for warning in &warnings {
+            assert!(!warning.contains("  "), "unexpected warning: {warning}");
+        }
+        assert!(
+            warnings.iter().any(|w| {
+                w.contains(&unservable_id.to_string())
+                    && w.contains("cannot be served")
+            }),
+            "unexpected warnings: {warnings:?}"
+        );
+        assert!(
+            warnings.iter().any(|w| {
+                w.contains(&orphan_id.to_string())
+                    && w.contains(&orphan_silo_id.to_string())
+                    && w.contains("which was not found")
+            }),
+            "unexpected warnings: {warnings:?}"
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();

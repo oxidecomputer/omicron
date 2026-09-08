@@ -8,6 +8,7 @@ license = "MPL-2.0"
 workspace = true
 
 [dependencies]
+chrono.workspace = true
 display-error-chain.workspace = true
 foreign-types.workspace = true
 openssl.workspace = true

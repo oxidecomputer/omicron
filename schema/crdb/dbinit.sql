@@ -7474,7 +7474,9 @@ CREATE TYPE IF NOT EXISTS omicron.public.alert_class AS ENUM (
     'test.quux.bar',
     'test.quux.bar.baz',
     'hardware.power_shelf.psu.insert',
-    'hardware.power_shelf.psu.remove'
+    'hardware.power_shelf.psu.remove',
+    'silo.certificate.expiring',
+    'silo.certificate.expired'
     -- Add new alert classes here!
 );
 
@@ -8268,7 +8270,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_sitrep_analysis_report (
 CREATE TYPE IF NOT EXISTS omicron.public.diagnosis_engine AS ENUM (
     'power_shelf',
     'physical_disk',
-    'saga'
+    'saga',
+    'certificate'
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.fm_case (
@@ -8411,6 +8414,50 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_fact_saga (
             AND orphan_reason IS NOT NULL
         )
     )
+);
+
+-- The certificate diagnosis engine's facts. See the comment on the
+-- physical-disk engine above: one table per engine, fact content as typed
+-- columns.
+CREATE TYPE IF NOT EXISTS omicron.public.fm_fact_certificate_kind AS ENUM (
+    'best_certificate_expiring',
+    'best_certificate_expired'
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.fm_fact_certificate (
+    -- Stable UUID for this fact across sitreps.
+    id UUID NOT NULL,
+    -- Sitrep this row belongs to.
+    sitrep_id UUID NOT NULL,
+    -- UUID of the case this fact attaches to.
+    case_id UUID NOT NULL,
+    -- UUID of the sitrep in which this fact was first added. Preserved
+    -- unchanged when the fact is carried forward into a child sitrep.
+    -- Debug-only.
+    created_sitrep_id UUID NOT NULL,
+    -- Free-form, debug-only comment.
+    comment TEXT NOT NULL,
+
+    -- The silo this fact is about. Common to every kind of certificate fact
+    -- (the case is keyed by it), so it is always present regardless of
+    -- `kind`.
+    --
+    -- Fact payloads carry only the fields that define the condition; data
+    -- that merely describes the silo or certificate (e.g., their names) is
+    -- looked up from the silo and certificate tables when a case is acted on.
+    silo_id UUID NOT NULL,
+
+    -- Which certificate fact this row represents.
+    kind omicron.public.fm_fact_certificate_kind NOT NULL,
+
+    -- Both kinds carry the same payload: the silo's best certificate (latest
+    -- leaf `not_after`) when the fact was recorded, and that `not_after`. A
+    -- kind with a different payload would add nullable columns here with a
+    -- CHECK constraint keyed on `kind`, as `fm_fact_saga` does.
+    certificate_id UUID NOT NULL,
+    not_after TIMESTAMPTZ NOT NULL,
+
+    PRIMARY KEY (sitrep_id, id)
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.fm_ereport_in_case (
@@ -9469,6 +9516,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_config (
     --
     -- This must be less than `sitrep_limit`, and must be at least 2.
     history_pruning_threshold INT8,
+    -- The number of days before a silo's external TLS certificate expires at
+    -- which the certificate diagnosis engine opens a case and requests an
+    -- alert, if no later-expiring certificate is installed for the silo.
+    --
+    -- This must be at least 1 and at most 3650.
+    certificate_expiry_warning_days INT8,
 
     CONSTRAINT versions_are_positive CHECK (version > 0),
 
@@ -9493,6 +9546,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_config (
     CONSTRAINT history_limit_is_less_than_sirep_limit CHECK (
         (history_pruning_threshold IS NULL OR sitrep_limit IS NULL) OR
             history_pruning_threshold < sitrep_limit
+    ),
+    CONSTRAINT certificate_expiry_warning_days_validity CHECK (
+        certificate_expiry_warning_days IS NULL OR (
+            certificate_expiry_warning_days >= 1 AND
+            certificate_expiry_warning_days <= 3650
+        )
     )
 );
 
@@ -9506,7 +9565,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '299.0.0', NULL)
+    (TRUE, NOW(), NOW(), '300.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

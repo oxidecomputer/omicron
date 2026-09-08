@@ -1,6 +1,7 @@
 parent sitrep:        aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
 inventory collection: bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb
  --> same collection as parent sitrep
+reference time: 2024-01-01 00:00:00 UTC
 total known ereport restart IDs: 420
 no new ereports since the parent sitrep
 no cases copied forward
@@ -8,3 +9,5 @@ no cases copied forward
 no in-service control plane disks
 
 no non-terminal sagas observed
+
+no silos observed

@@ -8706,6 +8706,7 @@ dependencies = [
 name = "omicron-certificates"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "display-error-chain",
  "foreign-types 0.3.2",
  "omicron-common",
@@ -9249,6 +9250,7 @@ dependencies = [
  "nexus-types-versions",
  "ntp-admin-client",
  "num-integer",
+ "omicron-certificates",
  "omicron-cockroach-metrics",
  "omicron-common",
  "omicron-debug-dropbox",

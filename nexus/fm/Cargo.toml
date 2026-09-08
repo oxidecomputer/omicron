@@ -36,6 +36,7 @@ slog-error-chain.workspace = true
 steno.workspace = true
 thiserror.workspace = true
 typed-rng.workspace = true
+uuid.workspace = true
 
 # deps for test utils
 omicron-test-utils = { workspace = true, optional = true }
@@ -49,4 +50,3 @@ omicron-test-utils.workspace = true
 nexus-inventory.workspace = true
 nexus-reconfigurator-planning.workspace = true
 ereport-types.workspace = true
-uuid.workspace = true
