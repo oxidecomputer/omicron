@@ -27,6 +27,7 @@ use crate::db::queries::disk::MAX_DISKS_PER_INSTANCE;
 use crate::db::queries::sled_reservation::LocalStorageAllocation;
 use crate::db::queries::sled_reservation::LocalStorageAllocationRequired;
 use crate::db::queries::sled_reservation::SLED_INSERT_QUERY_SENTINELS;
+use crate::db::queries::sled_reservation::SledFindTargetsRow;
 use crate::db::queries::sled_reservation::sentinel_to_reason;
 use crate::db::queries::sled_reservation::sled_find_targets_query;
 use crate::db::queries::sled_reservation::sled_insert_resource_query;
@@ -200,6 +201,59 @@ enum SledReservationTransactionError {
     Diesel(#[from] diesel::result::Error),
     #[error(transparent)]
     Reservation(#[from] SledReservationError),
+}
+
+#[derive(Debug, Default)]
+struct SledTargetSets {
+    targets: HashSet<SledUuid>,
+    banned: HashSet<SledUuid>,
+    unpreferred: HashSet<SledUuid>,
+    required: HashSet<SledUuid>,
+    preferred: HashSet<SledUuid>,
+}
+
+fn classify_sled_targets(
+    rows: Vec<SledFindTargetsRow>,
+    must_use_sleds: Option<&HashSet<SledUuid>>,
+) -> SledTargetSets {
+    let mut sets = SledTargetSets::default();
+
+    for row in rows {
+        let sled_id = row.sled_id();
+
+        if row.fits {
+            // If there is a Some list of sleds to select from, only add
+            // this target if it is in that list. A None list means that any
+            // sled could be a target.
+            match must_use_sleds {
+                Some(must_use_sleds) => {
+                    if must_use_sleds.contains(&sled_id) {
+                        sets.targets.insert(sled_id);
+                    }
+                }
+
+                None => {
+                    sets.targets.insert(sled_id);
+                }
+            }
+        }
+
+        if let Some(policy) = row.affinity_policy {
+            match policy {
+                AffinityPolicy::Fail => sets.required.insert(sled_id),
+                AffinityPolicy::Allow => sets.preferred.insert(sled_id),
+            };
+        }
+
+        if let Some(policy) = row.anti_affinity_policy {
+            match policy {
+                AffinityPolicy::Fail => sets.banned.insert(sled_id),
+                AffinityPolicy::Allow => sets.unpreferred.insert(sled_id),
+            };
+        }
+    }
+
+    sets
 }
 
 // Chooses a sled for reservation with the supplied constraints.
@@ -1414,67 +1468,23 @@ impl DataStore {
             &resources,
             constraints.cpu_families(),
         )
-            .get_results_async::<(
-                // Sled UUID
-                Uuid,
-                // Would an allocation to this sled fit?
-                bool,
-                // Affinity policy on this sled
-                Option<AffinityPolicy>,
-                // Anti-affinity policy on this sled
-                Option<AffinityPolicy>,
-            )>(&*conn).await?;
+        .get_results_async::<SledFindTargetsRow>(&*conn)
+        .await?;
 
         // Translate the database results into a format which we can use to pick
         // a sled using more complex rules.
         //
         // See: `pick_sled_reservation_target(...)`
-        let mut sled_targets = HashSet::new();
-        let mut banned = HashSet::new();
-        let mut unpreferred = HashSet::new();
-        let mut required = HashSet::new();
-        let mut preferred = HashSet::new();
-
-        for (sled_id, fits, affinity_policy, anti_affinity_policy) in
-            possible_sleds
-        {
-            // this is required because [`sled_find_targets_query`] returns a
-            // query where the first element in the tuple is
-            // ['`sql_types::Uuid`], and typed uuids can't be returned in
-            // queries like this.
-            let sled_id = SledUuid::from_untyped_uuid(sled_id);
-
-            if fits {
-                // If there is a Some list of sleds to select from, only add
-                // this target if it is in that list. A None list means that any
-                // sled could be a target.
-                match &maybe_must_use_sleds {
-                    Some(must_use_sleds) => {
-                        if must_use_sleds.contains(&sled_id) {
-                            sled_targets.insert(sled_id);
-                        }
-                    }
-
-                    None => {
-                        sled_targets.insert(sled_id);
-                    }
-                }
-            }
-
-            if let Some(policy) = affinity_policy {
-                match policy {
-                    AffinityPolicy::Fail => required.insert(sled_id),
-                    AffinityPolicy::Allow => preferred.insert(sled_id),
-                };
-            }
-
-            if let Some(policy) = anti_affinity_policy {
-                match policy {
-                    AffinityPolicy::Fail => banned.insert(sled_id),
-                    AffinityPolicy::Allow => unpreferred.insert(sled_id),
-                };
-            }
-        }
+        let SledTargetSets {
+            targets: mut sled_targets,
+            mut banned,
+            mut unpreferred,
+            required,
+            mut preferred,
+        } = classify_sled_targets(
+            possible_sleds,
+            maybe_must_use_sleds.as_ref(),
+        );
 
         // Prior to R18, all Disks using the encrypted local storage dataset
         // should have been deleted, and we will be revisiting how to do
@@ -2405,6 +2415,7 @@ pub(in crate::db::datastore) mod test {
     use crate::db::pub_test_utils::helpers::create_anti_affinity_group;
     use crate::db::pub_test_utils::helpers::create_project;
     use crate::db::pub_test_utils::helpers::small_resource_request;
+    use crate::db::pub_test_utils::simulated_sleds::initialize_sled_bp_availability;
     use crate::db::pub_test_utils::simulated_sleds::sled_updates_from_system;
     use crate::db::pub_test_utils::simulated_sleds::test_sled_resources;
     use crate::db::pub_test_utils::simulated_sleds::upsert_sleds_from_system;
@@ -2419,12 +2430,17 @@ pub(in crate::db::datastore) mod test {
     use nexus_db_model::PhysicalDiskPolicy;
     use nexus_db_model::PhysicalDiskState;
     use nexus_db_model::{InstanceCpuPlatform, PhysicalDisk};
+    use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_reconfigurator_planning::example::ExampleSystem;
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
+    use nexus_reconfigurator_planning::planner::PlannerRng;
     use nexus_reconfigurator_planning::system::SimulatedSledResources;
+    use nexus_types::deployment::Blueprint;
+    use nexus_types::deployment::BlueprintSource;
     use nexus_types::external_api::{affinity, disk, instance};
     use nexus_types::identity::Asset;
     use nexus_types::identity::Resource;
+    use omicron_common::address::Ipv6Subnet;
     use omicron_common::api::external;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::AffinityGroupUuid;
@@ -2440,6 +2456,7 @@ pub(in crate::db::datastore) mod test {
     use sled_agent_types::inventory::ZpoolHealth;
     use std::collections::BTreeMap;
     use std::collections::HashMap;
+    use std::net::Ipv6Addr;
     use std::net::SocketAddrV6;
 
     #[tokio::test]
@@ -2590,7 +2607,11 @@ pub(in crate::db::datastore) mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let example = example_system_with_resources(&opctx, 5);
+        // (Note that all five sleds have their update disposition set to
+        // available in the blueprint, so the only thing making a sled
+        // ineligible below is its policy and/or state.)
+        let (example, blueprint) = example_system_with_resources(&opctx, 5);
+        initialize_sled_bp_availability(&datastore, &blueprint).await;
         let [
             non_provisionable_update,
             expunged_update,
@@ -2740,13 +2761,11 @@ pub(in crate::db::datastore) mod test {
     fn example_system_with_resources(
         opctx: &OpContext,
         nsleds: usize,
-    ) -> ExampleSystem {
-        let (example, _) =
-            ExampleSystemBuilder::new(&opctx.log, "sled_reservation_tests")
-                .nsleds(nsleds)
-                .sled_resources(test_sled_resources())
-                .build();
-        example
+    ) -> (ExampleSystem, Blueprint) {
+        ExampleSystemBuilder::new(&opctx.log, "sled_reservation_tests")
+            .nsleds(nsleds)
+            .sled_resources(test_sled_resources())
+            .build()
     }
 
     async fn create_sleds(
@@ -2754,7 +2773,8 @@ pub(in crate::db::datastore) mod test {
         datastore: &DataStore,
         count: usize,
     ) -> Vec<Sled> {
-        let example = example_system_with_resources(opctx, count);
+        let (example, blueprint) = example_system_with_resources(opctx, count);
+        initialize_sled_bp_availability(datastore, &blueprint).await;
         upsert_sleds_from_system(
             datastore,
             &example.system,
@@ -2842,13 +2862,6 @@ pub(in crate::db::datastore) mod test {
         cpu_platform: Option<db::model::InstanceCpuPlatform>,
     }
 
-    struct FindTargetsOutput {
-        id: SledUuid,
-        fits: bool,
-        affinity_policy: Option<AffinityPolicy>,
-        anti_affinity_policy: Option<AffinityPolicy>,
-    }
-
     impl Instance {
         fn new() -> Self {
             Self::new_with_id(InstanceUuid::new_v4())
@@ -2889,31 +2902,18 @@ pub(in crate::db::datastore) mod test {
         async fn find_targets(
             &self,
             datastore: &DataStore,
-        ) -> Vec<FindTargetsOutput> {
+        ) -> Vec<SledFindTargetsRow> {
             assert!(self.force_onto_sled.is_none());
 
             let families =
                 self.cpu_platform.map(|p| p.compatible_sled_cpu_families());
 
             sled_find_targets_query(self.id, &self.resources, families)
-                .get_results_async::<(
-                    Uuid,
-                    bool,
-                    Option<AffinityPolicy>,
-                    Option<AffinityPolicy>,
-                )>(&*datastore.pool_connection_for_tests().await.unwrap())
+                .get_results_async::<SledFindTargetsRow>(
+                    &*datastore.pool_connection_for_tests().await.unwrap(),
+                )
                 .await
                 .unwrap()
-                .into_iter()
-                .map(|(id, fits, affinity_policy, anti_affinity_policy)| {
-                    FindTargetsOutput {
-                        id: SledUuid::from_untyped_uuid(id),
-                        fits,
-                        affinity_policy,
-                        anti_affinity_policy,
-                    }
-                })
-                .collect()
         }
 
         // This is the second half of creating a sled reservation.
@@ -3841,7 +3841,7 @@ pub(in crate::db::datastore) mod test {
         );
         let affine_sled = possible_sleds
             .iter()
-            .find(|sled| sled.id == sleds[0].id())
+            .find(|sled| sled.sled_id() == sleds[0].id())
             .unwrap();
         assert!(matches!(
             affine_sled.affinity_policy.expect("Sled 0 should be affine"),
@@ -3942,7 +3942,7 @@ pub(in crate::db::datastore) mod test {
         );
         let anti_affine_sled = possible_sleds
             .iter()
-            .find(|sled| sled.id == sleds[0].id())
+            .find(|sled| sled.sled_id() == sleds[0].id())
             .unwrap();
         assert!(matches!(
             anti_affine_sled
@@ -4034,7 +4034,7 @@ pub(in crate::db::datastore) mod test {
         assert!(possible_sleds[0].affinity_policy.is_none());
         assert!(possible_sleds[0].anti_affinity_policy.is_none());
         assert!(possible_sleds[0].fits);
-        assert_eq!(possible_sleds[0].id, sleds[1].id());
+        assert_eq!(possible_sleds[0].sled_id(), sleds[1].id());
 
         // Inserting onto sleds[0, 2, 3] should fail - there shouldn't
         // be enough space on these sleds.
@@ -4096,7 +4096,8 @@ pub(in crate::db::datastore) mod test {
                 )
                 .expect("sled index is in range");
         }
-        let (example, _) = builder.build();
+        let (example, blueprint) = builder.build();
+        initialize_sled_bp_availability(&datastore, &blueprint).await;
         upsert_sleds_from_system(
             &datastore,
             &example.system,
@@ -4583,6 +4584,28 @@ pub(in crate::db::datastore) mod test {
         datastore: &DataStore,
         config: &LocalStorageTest,
     ) {
+        // Ordinarily we would use ExampleSystem to build a blueprint, but do it
+        // blueprint manually here because the test config in this file sets up
+        // a number of things not currently modeled by that.
+        //
+        // TODO: port this over to ExampleSystem.
+        let empty = BlueprintBuilder::build_empty("local storage tests");
+        let mut builder = BlueprintBuilder::new_based_on(
+            &opctx.log,
+            &empty,
+            "local storage tests",
+            PlannerRng::from_entropy(),
+        )
+        .expect("created BlueprintBuilder from empty blueprint");
+        for sled_config in &config.sleds {
+            builder.ensure_sled_exists(
+                sled_config.sled_id,
+                Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
+            );
+        }
+        let blueprint = builder.build(BlueprintSource::Test);
+        initialize_sled_bp_availability(datastore, &blueprint).await;
+
         for sled_config in &config.sleds {
             let sled = SledUpdate::new(
                 sled_config.sled_id,
