@@ -86,7 +86,7 @@ fn default_vpc_defaults(
         None => Some(None),
         Some(defaults) => {
             defaults.vpc.as_ref().map(|selection| match selection {
-                vpc::VpcCreateDefaultsSelection::All => None,
+                vpc::VpcCreateDefaultsSelection::All {} => None,
                 vpc::VpcCreateDefaultsSelection::Explicit { defaults } => {
                     Some(defaults)
                 }
@@ -217,7 +217,7 @@ mod test {
         assert_eq!(default_vpc_defaults(&project_create), None);
 
         project_create.defaults = Some(project::ProjectCreateDefaults {
-            vpc: Some(vpc::VpcCreateDefaultsSelection::All),
+            vpc: Some(vpc::VpcCreateDefaultsSelection::All {}),
         });
         assert_eq!(default_vpc_defaults(&project_create), Some(None));
 

@@ -8,11 +8,18 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// Default resources to create with a project.
+/// Default resources to create in a project
+///
+/// Each field corresponds to one resource. Set a field to an object to create
+/// that resource. Omit it or pass `null` to skip it.
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectCreateDefaults {
-    /// Create a default VPC with all or explicitly selected VPC defaults.
+    /// Create the default VPC. Omit this field or pass `null` to skip it.
+    ///
+    /// When present, the value also determines which of the VPC's own defaults
+    /// to create: `{"type": "all"}` creates all of them, and `{"type":
+    /// "explicit", "defaults": {...}}` creates only those specified.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vpc: Option<VpcCreateDefaultsSelection>,
 }
@@ -23,10 +30,14 @@ pub struct ProjectCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
 
-    /// Default resources to create.
+    /// Default resources to create in the project
     ///
-    /// If omitted, all default resources are created. If provided, only the
-    /// selected default resources are created.
+    /// Omit this field or pass `null` to create all defaults: currently, a
+    /// default VPC with its own defaults. Pass an object to specify which
+    /// resources to create. `{}` creates none.
+    ///
+    /// For example, to create the default VPC but not its default subnet, pass
+    /// `{"vpc": {"type": "explicit", "defaults": {}}}`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub defaults: Option<ProjectCreateDefaults>,
 }
@@ -44,6 +55,23 @@ mod tests {
         SubnetCreateDefaults, VpcCreateDefaults, VpcCreateDefaultsSelection,
     };
     use serde_json::json;
+
+    #[test]
+    fn defaults_selection_rejects_unknown_fields() {
+        for selection in [
+            json!({ "type": "all", "defaults": {} }),
+            json!({ "type": "explicit", "defaults": {}, "subnet": {} }),
+        ] {
+            let request = json!({
+                "name": "my-project",
+                "description": "My project",
+                "defaults": { "vpc": selection },
+            });
+            let error = serde_json::from_value::<ProjectCreate>(request)
+                .expect_err("unknown selection fields must be rejected");
+            assert!(error.to_string().contains("unknown field"), "{error}");
+        }
+    }
 
     #[test]
     fn defaults_wire_format() {
@@ -77,7 +105,7 @@ mod tests {
         assert_eq!(
             vpc_all.defaults.unwrap(),
             ProjectCreateDefaults {
-                vpc: Some(VpcCreateDefaultsSelection::All),
+                vpc: Some(VpcCreateDefaultsSelection::All {}),
             }
         );
 

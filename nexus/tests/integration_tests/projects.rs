@@ -178,7 +178,7 @@ async fn test_project_create_defaults(cptestctx: &ControlPlaneTestContext) {
         client,
         "defaults-vpc-all",
         Some(project::ProjectCreateDefaults {
-            vpc: Some(vpc::VpcCreateDefaultsSelection::All),
+            vpc: Some(vpc::VpcCreateDefaultsSelection::All {}),
         }),
     )
     .await;

@@ -8,27 +8,39 @@ use oxnet::Ipv6Net;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// Select default resources to create with a VPC.
+/// Default resources to create in a VPC
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum VpcCreateDefaultsSelection {
-    /// Create all current and future default resources.
-    All,
+    /// Create all default resources
+    All {},
 
-    /// Create only the explicitly selected default resources.
+    /// Create only the default resources listed in `defaults`. Pass `{}` as
+    /// `defaults` to skip them all.
     Explicit { defaults: VpcCreateDefaults },
 }
 
-/// Default resources to create with a VPC.
+/// Default resources to create in a VPC
+///
+/// Each field corresponds to one resource. Set a field to an object to create
+/// that resource. Omit it or pass `null` to skip it.
+///
+/// This does not affect the system router, default firewall rules, or default
+/// internet gateway, which are always created and do not block deletion of
+/// the VPC.
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct VpcCreateDefaults {
-    /// Create a default subnet.
+    /// Create the default subnet. Pass `{}` to create it and omit this field
+    /// (or pass `null`) to skip it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subnet: Option<SubnetCreateDefaults>,
 }
 
-/// Configuration for a default subnet.
+/// Default resources to create in the default subnet
+///
+/// Including this object in the request creates the default subnet. A subnet
+/// has no default resources yet, so the object is always empty.
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SubnetCreateDefaults {}
@@ -43,15 +55,21 @@ pub struct VpcCreate {
     ///
     /// All IPv6 subnets created from this VPC must be taken from this range,
     /// which should be a Unique Local Address in the range `fd00::/48`. The
-    /// default VPC Subnet will have the first `/64` range from this prefix.
+    /// default subnet, if requested, will take the first `/64` range from this
+    /// prefix.
     pub ipv6_prefix: Option<Ipv6Net>,
 
     pub dns_name: Name,
 
-    /// Default resources to create.
+    /// Default resources to create in the VPC
     ///
-    /// If omitted, all default resources are created. If provided, only the
-    /// selected default resources are created.
+    /// Omit this field  or pass `null`  to create all defaults: currently, the
+    /// default subnet. Pass an object to specify which resources to create. `{}`
+    /// creates none.
+    ///
+    /// This does not affect the system router, default firewall rules, or default
+    /// internet gateway, which are always created and do not block deletion of
+    /// the VPC.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub defaults: Option<VpcCreateDefaults>,
 }
