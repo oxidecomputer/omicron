@@ -484,7 +484,7 @@ mod test {
         // Create a pool.  Make sure there's a connection established to the
         // database.
         let cfg = crate::db::Config { url: db.pg_config().clone() };
-        let pool = Pool::new_single_host(&log, &cfg);
+        let pool = Pool::new_single_host(&log, &cfg, true);
         let _conn = pool.claim().await.expect("established db connection");
         let peer_addr = db.pg_config().address();
 
