@@ -9,6 +9,7 @@ use core::fmt;
 use nexus_types::fm::DiagnosisEngineKind;
 use nexus_types::fm::EreportId;
 use nexus_types::fm::Sitrep;
+use nexus_types::fm::ereport::Ereport;
 use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::CaseEreportUuid;
 use omicron_uuid_kinds::CaseUuid;
@@ -121,7 +122,26 @@ pub enum DerivedKind {
     OrphanedIndexedEreport { ereport_id: EreportId },
     /// A case's copy of an ereport differs from the `ereports_by_id` entry
     /// with the same ereport ID.
-    IndexedEreportContentMismatch { case_id: CaseUuid, ereport_id: EreportId },
+    ///
+    /// Both copies are carried as pretty-printed JSON so the difference can
+    /// be seen from the note alone. `omdb db sitrep show` does not display
+    /// the `ereports_by_id` index.
+    IndexedEreportContentMismatch {
+        case_id: CaseUuid,
+        ereport_id: EreportId,
+        /// The case's copy of the ereport, as pretty-printed JSON.
+        case_copy: String,
+        /// The `ereports_by_id` entry, as pretty-printed JSON.
+        indexed: String,
+    },
+}
+
+impl DerivedKind {
+    /// Render an ereport as pretty-printed JSON for inclusion in a note.
+    pub fn ereport_json(ereport: &Ereport) -> String {
+        serde_json::to_string_pretty(ereport)
+            .unwrap_or_else(|_| format!("{ereport:#?}"))
+    }
 }
 
 impl fmt::Display for DerivedKind {
@@ -144,12 +164,28 @@ impl fmt::Display for DerivedKind {
             DerivedKind::IndexedEreportContentMismatch {
                 case_id,
                 ereport_id,
+                case_copy,
+                indexed,
             } => {
-                write!(
+                writeln!(
                     f,
                     "case {case_id}'s copy of ereport {ereport_id} differs \
                      from the ereports_by_id entry with the same ID",
-                )
+                )?;
+                writeln!(f, "    case copy:")?;
+                for line in case_copy.lines() {
+                    writeln!(f, "      {line}")?;
+                }
+                writeln!(f, "    indexed:")?;
+                let mut lines = indexed.lines().peekable();
+                while let Some(line) = lines.next() {
+                    if lines.peek().is_some() {
+                        writeln!(f, "      {line}")?;
+                    } else {
+                        write!(f, "      {line}")?;
+                    }
+                }
+                Ok(())
             }
         }
     }
@@ -260,6 +296,12 @@ pub enum CaseKind {
     },
     /// Problems specific to the physical-disk diagnosis engine's cases.
     PhysicalDisk(PhysicalDiskCaseKind),
+}
+
+impl From<PhysicalDiskCaseKind> for CaseKind {
+    fn from(kind: PhysicalDiskCaseKind) -> Self {
+        CaseKind::PhysicalDisk(kind)
+    }
 }
 
 impl fmt::Display for CaseKind {

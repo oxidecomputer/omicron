@@ -4,7 +4,6 @@
 
 //! Checks specific to the physical-disk diagnosis engine.
 
-use crate::slippy::CaseKind;
 use crate::slippy::PhysicalDiskCaseKind;
 use crate::slippy::Severity;
 use crate::slippy::Slippy;
@@ -16,10 +15,9 @@ use std::collections::BTreeMap;
 pub(super) fn check_physical_disk_cases(slippy: &mut Slippy<'_>) {
     let mut open_case_by_disk: BTreeMap<PhysicalDiskUuid, CaseUuid> =
         BTreeMap::new();
-    let mut notes = Vec::new();
 
-    for case in slippy
-        .sitrep()
+    let sitrep = slippy.sitrep();
+    for case in sitrep
         .cases
         .iter()
         .filter(|c| c.metadata.de == DiagnosisEngineKind::PhysicalDisk)
@@ -50,15 +48,16 @@ pub(super) fn check_physical_disk_cases(slippy: &mut Slippy<'_>) {
             // Catch the case where multiple facts exist for a single case, but
             // point to different disks.
             if disk_id != expected {
-                notes.push((
+                slippy.push_case_note(
                     case.id,
                     severity,
                     PhysicalDiskCaseKind::DisagreeingDisks {
                         expected,
                         found: disk_id,
                         fact_id: fact.metadata.id,
-                    },
-                ));
+                    }
+                    .into(),
+                );
             }
         }
 
@@ -72,31 +71,28 @@ pub(super) fn check_physical_disk_cases(slippy: &mut Slippy<'_>) {
         }
         match case_disk_id {
             None => {
-                notes.push((
+                slippy.push_case_note(
                     case.id,
                     Severity::Fatal,
-                    PhysicalDiskCaseKind::OpenCaseWithNoFacts,
-                ));
+                    PhysicalDiskCaseKind::OpenCaseWithNoFacts.into(),
+                );
             }
             Some(disk_id) => {
                 if let Some(other_case) =
                     open_case_by_disk.insert(disk_id, case.id)
                 {
-                    notes.push((
+                    slippy.push_case_note(
                         case.id,
                         Severity::Fatal,
                         PhysicalDiskCaseKind::DuplicateOpenCaseForDisk {
                             other_case,
                             physical_disk_id: disk_id,
-                        },
-                    ));
+                        }
+                        .into(),
+                    );
                 }
             }
         }
-    }
-
-    for (case_id, severity, kind) in notes {
-        slippy.push_case_note(case_id, severity, CaseKind::PhysicalDisk(kind));
     }
 }
 

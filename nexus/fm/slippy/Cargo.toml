@@ -13,6 +13,7 @@ omicron-rpaths.workspace = true
 nexus-types.workspace = true
 omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
+serde_json.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
 
@@ -20,4 +21,3 @@ pq-sys = "*"
 chrono.workspace = true
 nexus-fm = { workspace = true, features = ["testing"] }
 omicron-test-utils.workspace = true
-serde_json.workspace = true

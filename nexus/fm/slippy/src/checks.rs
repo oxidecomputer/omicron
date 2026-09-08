@@ -32,7 +32,7 @@ pub(crate) fn perform_single_sitrep_checks(slippy: &mut Slippy<'_>) {
 /// `ereports_by_id` is a derived index of every ereport referenced by a case.
 ///
 /// Check that it's consistent:
-/// - Each erpeort in this index should match a "CaseEreport"
+/// - Each ereport in this index should match a "CaseEreport"
 /// - Each "CaseEreport" should appear in the index
 /// - Their values should match
 ///
@@ -65,6 +65,10 @@ fn check_ereport_index(slippy: &mut Slippy<'_>) {
                         DerivedKind::IndexedEreportContentMismatch {
                             case_id: case.id,
                             ereport_id,
+                            case_copy: DerivedKind::ereport_json(
+                                &case_ereport.ereport,
+                            ),
+                            indexed: DerivedKind::ereport_json(indexed),
                         },
                     );
                 }
@@ -301,9 +305,8 @@ pub(crate) mod test_helpers {
         f: impl FnOnce(&mut fm::Case),
     ) {
         let mut case =
-            sitrep.cases.remove(&case_id).expect("case is in the sitrep");
+            sitrep.cases.get_mut(&case_id).expect("case is in the sitrep");
         f(&mut case);
-        sitrep.cases.insert_unique(case).expect("case ID is unchanged");
     }
 }
 
@@ -437,6 +440,7 @@ mod tests {
         let restart_id = EreporterRestartUuid::new_v4();
         let ereport = Arc::new(mk_test_ereport(restart_id, 1));
         let ereport_id = ereport.id;
+        let case_copy = DerivedKind::ereport_json(&ereport);
         assign_ereport(
             &mut sitrep,
             case_id,
@@ -447,12 +451,16 @@ mod tests {
         // Index an ereport with the same ID but a different collector.
         let mut doppelganger = mk_test_ereport(restart_id, 1);
         doppelganger.collector_id = OmicronZoneUuid::new_v4();
+        let indexed = DerivedKind::ereport_json(&doppelganger);
+        assert_ne!(case_copy, indexed);
         sitrep.ereports_by_id.insert_overwrite(Arc::new(doppelganger));
         assert_eq!(
             slippy_notes_for(&sitrep),
             [derived_note(DerivedKind::IndexedEreportContentMismatch {
                 case_id,
                 ereport_id,
+                case_copy,
+                indexed,
             })]
         );
         logctx.cleanup_successful();
