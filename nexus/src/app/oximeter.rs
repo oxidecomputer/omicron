@@ -15,6 +15,7 @@ use omicron_common::api::internal::nexus::{self, ProducerEndpoint};
 use oximeter_client::Client as OximeterClient;
 use oximeter_db::Measurement;
 use oximeter_db::query::Timestamp;
+use slog_error_chain::InlineErrorChain;
 use std::net::SocketAddr;
 use std::num::NonZeroU32;
 use std::time::Duration;
@@ -254,13 +255,16 @@ pub(crate) async fn unassign_producer(
     }
 }
 
-fn map_oximeter_err(error: oximeter_db::Error) -> Error {
-    match error {
+pub(crate) fn map_oximeter_err(e: oximeter_db::Error) -> Error {
+    let as_str = InlineErrorChain::new(&e).to_string();
+    match e {
         oximeter_db::Error::DatabaseUnavailable(_)
-        | oximeter_db::Error::Connection(_) => {
-            Error::ServiceUnavailable { internal_message: error.to_string() }
+        | oximeter_db::Error::Connection(_) => Error::unavail(&as_str),
+        oximeter_db::Error::Oxql(_)
+        | oximeter_db::Error::TimeseriesNotFound(_) => {
+            Error::invalid_request(as_str)
         }
-        _ => Error::InternalError { internal_message: error.to_string() },
+        _ => Error::internal_error(as_str),
     }
 }
 

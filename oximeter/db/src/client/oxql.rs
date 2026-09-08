@@ -4,7 +4,6 @@
 
 //! Client methods for running OxQL queries against the timeseries database.
 
-use super::Handle;
 use crate::Error;
 use crate::Metric;
 use crate::Target;
@@ -177,7 +176,6 @@ impl Client {
         let result = self
             .run_oxql_query(
                 &query_log,
-                &mut self.claim_connection().await?,
                 query_id,
                 filtered_query,
                 &mut total_rows_fetched,
@@ -330,11 +328,9 @@ impl Client {
     // concatenate the results; and then apply all the remaining
     // transformations.
     #[async_recursion::async_recursion]
-    #[allow(clippy::too_many_arguments)]
     async fn run_oxql_query(
         &self,
         query_log: &Logger,
-        handle: &mut Handle,
         query_id: Uuid,
         query: oxql::Query,
         total_rows_fetched: &mut u64,
@@ -365,7 +361,6 @@ impl Client {
                 let res = self
                     .run_oxql_query(
                         query_log,
-                        handle,
                         query_id,
                         subq,
                         total_rows_fetched,
@@ -403,6 +398,18 @@ impl Client {
 
         // This is a flat query, let's just run it directly. First step is
         // getting the schema itself.
+        //
+        // TODO-robustness: This seems fragile when running against a replicated
+        // ClickHouse cluster. In that case, each of these different query
+        // components could execute against a different replica, which might
+        // have different sets of data from one another depending on the
+        // replication status. In that case, we could run into weird races or
+        // inconsistencies. Holding a database claim across the entire OxQL
+        // query is slightly better (though terrible for other reasons), but
+        // still not perfect: ClickHouse's weak gaurantees around consistency
+        // and the fact that we're inserting into multiple tables today make it
+        // possible that querying even a single replica could cause consistency
+        // problems.
         let query_start = Instant::now();
         let oxql::ast::SplitQuery::Flat(query) = split else {
             unreachable!();
@@ -503,11 +510,7 @@ impl Client {
             let all_fields_query =
                 self.all_fields_query(&schema, predicates.as_ref())?;
             let (summary, consistent_keys) = self
-                .select_matching_timeseries_info(
-                    handle,
-                    &all_fields_query,
-                    &schema,
-                )
+                .select_matching_timeseries_info(&all_fields_query, &schema)
                 .await?;
             debug!(
                 query_log,
@@ -551,7 +554,6 @@ impl Client {
         let (summaries, timeseries_by_key) = self
             .select_matching_samples(
                 query_log,
-                handle,
                 &schema,
                 &consistent_key_groups,
                 limit,
@@ -607,7 +609,6 @@ impl Client {
     async fn select_matching_samples(
         &self,
         query_log: &Logger,
-        handle: &mut Handle,
         schema: &TimeseriesSchema,
         consistent_key_groups: &[ConsistentKeyGroup],
         limit: Option<Limit>,
@@ -641,8 +642,12 @@ impl Client {
                 limit,
                 total_rows_fetched,
             )?;
-            let result =
-                self.execute_with_block(handle, &measurements_query).await?;
+            let result = self
+                .execute_with_block(
+                    &mut self.claim_connection().await?,
+                    &measurements_query,
+                )
+                .await?;
             let summary = result.query_summary();
             summaries.push(summary);
             let Some(block) = result.data.as_ref() else {
