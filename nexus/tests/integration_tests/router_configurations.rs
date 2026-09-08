@@ -25,6 +25,7 @@ use sled_agent_types::early_networking::BfdMode;
 use sled_agent_types::early_networking::ImportExportPolicy;
 use sled_agent_types::early_networking::MaxPathConfig;
 use sled_agent_types::early_networking::SwitchSlot;
+use std::num::NonZeroU8;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -536,8 +537,8 @@ fn demo_bfd_peer() -> BfdPeer {
         remote: "203.0.113.10".parse().unwrap(),
         local: None,
         mode: BfdMode::MultiHop,
-        detection_threshold: 3,
-        required_rx: 1000000,
+        detection_threshold: NonZeroU8::new(3).unwrap(),
+        required_rx: 1_000_000,
     }
 }
 
@@ -1085,4 +1086,87 @@ async fn test_router_configuration_static_route_family_mismatch(
         .execute()
         .await
         .unwrap();
+}
+
+/// A-21: BFD `required_rx` is a bounded u32 that round-trips exactly, the
+/// detection threshold must be nonzero, and local/remote addresses must
+/// share a family; every rejection happens before persistence.
+#[nexus_test]
+async fn test_router_configuration_bfd_peer_validation(
+    ctx: &ControlPlaneTestContext,
+) {
+    let client = &ctx.external_client;
+    create_configuration(ctx, "bfdcheck").await;
+    let peers_url = format!("{CONFIGURATIONS_URL}/bfdcheck/bfd-peers");
+
+    // Boundary values round-trip unchanged.
+    for required_rx in [1u32, 1_000_000, u32::MAX] {
+        let peer = BfdPeer {
+            name: format!("rx-{required_rx}").parse().unwrap(),
+            remote: "203.0.113.10".parse().unwrap(),
+            local: Some("203.0.113.1".parse().unwrap()),
+            mode: BfdMode::SingleHop,
+            detection_threshold: NonZeroU8::new(1).unwrap(),
+            required_rx,
+        };
+        let created: BfdPeer =
+            NexusRequest::objects_post(client, &peers_url, &peer)
+                .authn_as(AuthnMode::PrivilegedUser)
+                .execute()
+                .await
+                .unwrap()
+                .parsed_body()
+                .unwrap();
+        assert_eq!(created, peer);
+        let fetched: BfdPeer =
+            get_json(ctx, &format!("{peers_url}/rx-{required_rx}")).await;
+        assert_eq!(fetched, peer);
+    }
+    let max_url = format!("{peers_url}/rx-{}", u32::MAX);
+    let max_peer: BfdPeer = get_json(ctx, &max_url).await;
+
+    // Beyond 32 bits, a zero threshold, and mixed families are rejected.
+    let base = r#""remote":"203.0.113.10","local":null,"mode":"multi_hop""#;
+    let too_wide = format!(
+        r#"{{"name":"bad",{base},"detection_threshold":3,"required_rx":4294967296}}"#
+    );
+    let zero_threshold = format!(
+        r#"{{"name":"bad",{base},"detection_threshold":0,"required_rx":1000}}"#
+    );
+    let mixed_a = r#"{"name":"bad","remote":"203.0.113.10","local":"fd00::1","mode":"multi_hop","detection_threshold":3,"required_rx":1000}"#.to_string();
+    let mixed_b = r#"{"name":"bad","remote":"fd00::10","local":"203.0.113.1","mode":"multi_hop","detection_threshold":3,"required_rx":1000}"#.to_string();
+    for (body, needle) in [
+        (&too_wide, "required_rx"),
+        (&zero_threshold, "detection_threshold"),
+        (&mixed_a, "same address family"),
+        (&mixed_b, "same address family"),
+    ] {
+        let msg = expect_bad_request(ctx, Method::POST, &peers_url, body).await;
+        assert!(msg.contains(needle), "expected {needle:?} in {msg:?}");
+    }
+    let peers: Vec<BfdPeer> = get_json(ctx, &peers_url).await;
+    assert_eq!(peers.len(), 3, "a rejected peer was stored: {peers:?}");
+    assert!(peers.iter().all(|p| p.name.as_str() != "bad"));
+
+    // Rejected updates leave the previous configuration in place.
+    let too_wide_update = too_wide.replace(r#""name":"bad""#, &format!(r#""name":"rx-{}""#, u32::MAX));
+    let mixed_update = mixed_a.replace(r#""name":"bad""#, &format!(r#""name":"rx-{}""#, u32::MAX));
+    for body in [&too_wide_update, &mixed_update] {
+        expect_bad_request(ctx, Method::PUT, &max_url, body).await;
+        let after: BfdPeer = get_json(ctx, &max_url).await;
+        assert_eq!(after, max_peer, "rejected update changed the stored peer");
+    }
+    // A valid update still works and round-trips.
+    let mut updated = max_peer.clone();
+    updated.required_rx = u32::MAX - 1;
+    updated.detection_threshold = NonZeroU8::new(255).unwrap();
+    let result: BfdPeer =
+        NexusRequest::object_put(client, &max_url, Some(&updated))
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body()
+            .unwrap();
+    assert_eq!(result, updated);
 }

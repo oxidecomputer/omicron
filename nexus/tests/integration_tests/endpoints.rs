@@ -1098,7 +1098,7 @@ pub static DEMO_ROUTER_CONFIGURATION_BFD_PEER: LazyLock<networking::BfdPeer> =
         remote: "10.0.0.1".parse().unwrap(),
         local: None,
         mode: BfdMode::MultiHop,
-        detection_threshold: 3,
+        detection_threshold: std::num::NonZeroU8::new(3).unwrap(),
         required_rx: 1000000,
     });
 pub const DEMO_CONTROL_PLANE_ROUTER_CONFIGURATIONS_URL: &'static str =

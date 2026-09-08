@@ -38,6 +38,7 @@ use sled_agent_types_versions::v20::early_networking::MaxPathConfig;
 use sled_agent_types_versions::v20::early_networking::RouterLifetimeConfig;
 use sled_agent_types_versions::v30::early_networking::RouterPeerIpAddr;
 use std::net::IpAddr;
+use std::num::NonZeroU8;
 use uuid::Uuid;
 
 /// A router configuration
@@ -262,12 +263,14 @@ pub struct BfdPeer {
 
     /// The negotiated Control packet transmission interval, multiplied by this
     /// variable, will be the Detection Time for this session (as seen by the
-    /// remote system)
-    pub detection_threshold: u8,
+    /// remote system). Must be at least 1.
+    pub detection_threshold: NonZeroU8,
 
     /// The minimum interval, in microseconds, between received BFD
-    /// Control packets that this system requires
-    pub required_rx: u64,
+    /// Control packets that this system requires. Bounded to 32 bits (the
+    /// BFD Required Min RX Interval field width, RFC 5880 §4.1); the value
+    /// is stored and rendered to the routing daemon unchanged.
+    pub required_rx: u32,
 }
 
 /// Select a BFD peer within a router configuration

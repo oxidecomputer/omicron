@@ -18470,10 +18470,10 @@
         "type": "object",
         "properties": {
           "detection_threshold": {
-            "description": "The negotiated Control packet transmission interval, multiplied by this variable, will be the Detection Time for this session (as seen by the remote system)",
+            "description": "The negotiated Control packet transmission interval, multiplied by this variable, will be the Detection Time for this session (as seen by the remote system). Must be at least 1.",
             "type": "integer",
             "format": "uint8",
-            "minimum": 0
+            "minimum": 1
           },
           "local": {
             "nullable": true,
@@ -18503,9 +18503,9 @@
             "format": "ip"
           },
           "required_rx": {
-            "description": "The minimum interval, in microseconds, between received BFD Control packets that this system requires",
+            "description": "The minimum interval, in microseconds, between received BFD Control packets that this system requires. Bounded to 32 bits (the BFD Required Min RX Interval field width, RFC 5880 §4.1); the value is stored and rendered to the routing daemon unchanged.",
             "type": "integer",
-            "format": "uint64",
+            "format": "uint32",
             "minimum": 0
           }
         },

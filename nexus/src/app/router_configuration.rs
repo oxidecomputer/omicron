@@ -86,8 +86,8 @@ impl super::Nexus {
             .router_configuration_bfd_peer_list(opctx, authz_configuration)
             .await?
             .into_iter()
-            .map(Into::into)
-            .collect();
+            .map(TryInto::try_into)
+            .collect::<Result<_, _>>()?;
         Ok(view)
     }
 
@@ -164,7 +164,7 @@ impl super::Nexus {
             bfd_peers
                 .entry(peer.router_configuration_id.into())
                 .or_default()
-                .push(networking::BfdPeer::from(peer));
+                .push(networking::BfdPeer::try_from(peer)?);
         }
 
         db_configurations
@@ -606,8 +606,8 @@ impl super::Nexus {
             .router_configuration_bfd_peer_list(opctx, &authz_configuration)
             .await?
             .into_iter()
-            .map(Into::into)
-            .collect())
+            .map(TryInto::try_into)
+            .collect::<Result<_, _>>()?)
     }
 
     pub async fn router_configuration_bfd_peer_create(
@@ -625,11 +625,11 @@ impl super::Nexus {
             .db_datastore
             .router_configuration_bfd_peer_create(
                 opctx,
-                RouterConfigurationBfdPeer::new(authz_configuration.id(), peer),
+                RouterConfigurationBfdPeer::new(authz_configuration.id(), peer)?,
             )
             .await?;
         self.activate_router_configuration_propagation();
-        Ok(db_peer.into())
+        Ok(db_peer.try_into()?)
     }
 
     pub async fn router_configuration_bfd_peer_view(
@@ -651,7 +651,7 @@ impl super::Nexus {
                 peer,
             )
             .await?
-            .into())
+            .try_into()?)
     }
 
     pub async fn router_configuration_bfd_peer_update(
@@ -672,11 +672,11 @@ impl super::Nexus {
                 opctx,
                 &authz_configuration,
                 peer_name,
-                RouterConfigurationBfdPeer::new(authz_configuration.id(), peer),
+                RouterConfigurationBfdPeer::new(authz_configuration.id(), peer)?,
             )
             .await?;
         self.activate_router_configuration_propagation();
-        Ok(db_peer.into())
+        Ok(db_peer.try_into()?)
     }
 
     pub async fn router_configuration_bfd_peer_delete(

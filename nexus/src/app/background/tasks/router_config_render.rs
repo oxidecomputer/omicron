@@ -433,4 +433,26 @@ mod tests {
         plain.bgp_config = None;
         assert!(build_bgp_spec(&plain, &[], Vec::new(), &mut errors).is_none());
     }
+
+    /// A-21: `required_rx` is widened losslessly from the stored u32.
+    #[test]
+    fn bfd_required_rx_is_widened_losslessly() {
+        let config = config(1);
+        let peer = RouterConfigurationBfdPeer {
+            router_configuration_id: config.id().into(),
+            name: "spine1-bfd".parse::<omicron_common::api::external::Name>().unwrap().into(),
+            remote: "203.0.113.10".parse::<IpAddr>().unwrap().into(),
+            local: None,
+            mode: nexus_db_model::BfdMode::MultiHop,
+            detection_threshold: SqlU8::new(3),
+            required_rx: SqlU32::new(u32::MAX),
+        };
+        let mut errors = Vec::new();
+        let rendered = build_bfd_peers(&config, &[&peer], &mut errors);
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(rendered.len(), 1);
+        assert_eq!(rendered[0].required_rx, u64::from(u32::MAX));
+        assert_eq!(rendered[0].detection_threshold.get(), 3);
+        assert_eq!(rendered[0].listen, IpAddr::V4(Ipv4Addr::UNSPECIFIED));
+    }
 }

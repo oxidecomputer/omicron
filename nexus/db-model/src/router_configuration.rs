@@ -29,6 +29,7 @@ use sled_agent_types::early_networking::RouterLifetimeConfig;
 use sled_agent_types::early_networking::RouterPeerIpAddr;
 use slog_error_chain::InlineErrorChain;
 use std::net::IpAddr;
+use std::num::NonZeroU8;
 use uuid::Uuid;
 
 /// The BGP configuration stored inline on a `router_configuration` row.
@@ -392,34 +393,56 @@ pub struct RouterConfigurationBfdPeer {
 }
 
 impl RouterConfigurationBfdPeer {
+    /// Convert an API BFD peer for storage. This is the single admission
+    /// point for create and update. The API type already bounds
+    /// `required_rx` to 32 bits and `detection_threshold` to a nonzero
+    /// value, so both are stored exactly as given; a local address, when
+    /// present, must be of the remote address's family.
     pub fn new(
         router_configuration_id: RouterConfigurationUuid,
         peer: networking::BfdPeer,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, Error> {
+        if let Some(local) = peer.local {
+            if local.is_ipv4() != peer.remote.is_ipv4() {
+                return Err(Error::invalid_request(&format!(
+                    "bfd peer {}: local address {local} and remote address \
+                     {} must be of the same address family",
+                    peer.name, peer.remote,
+                )));
+            }
+        }
+        Ok(Self {
             router_configuration_id: router_configuration_id.into(),
             name: peer.name.into(),
             remote: peer.remote.into(),
             local: peer.local.map(Into::into),
             mode: peer.mode.into(),
-            detection_threshold: peer.detection_threshold.into(),
-            required_rx: SqlU32::new(
-                peer.required_rx.try_into().unwrap_or(u32::MAX),
-            ),
-        }
+            detection_threshold: SqlU8::new(peer.detection_threshold.get()),
+            required_rx: SqlU32::new(peer.required_rx),
+        })
     }
 }
 
-impl From<RouterConfigurationBfdPeer> for networking::BfdPeer {
-    fn from(value: RouterConfigurationBfdPeer) -> Self {
-        Self {
+impl TryFrom<RouterConfigurationBfdPeer> for networking::BfdPeer {
+    type Error = Error;
+
+    fn try_from(value: RouterConfigurationBfdPeer) -> Result<Self, Error> {
+        let detection_threshold = NonZeroU8::new(value.detection_threshold.0)
+            .ok_or_else(|| {
+                Error::internal_error(&format!(
+                    "invalid database contents: bfd peer {} has a zero \
+                     detection threshold",
+                    value.name,
+                ))
+            })?;
+        Ok(Self {
             name: value.name.into(),
             remote: value.remote.ip(),
             local: value.local.map(|v| v.ip()),
             mode: value.mode.into(),
-            detection_threshold: value.detection_threshold.0,
-            required_rx: (*value.required_rx).into(),
-        }
+            detection_threshold,
+            required_rx: *value.required_rx,
+        })
     }
 }
 
@@ -482,6 +505,7 @@ impl ControlPlaneRouterConfiguration {
 mod tests {
     use super::*;
     use omicron_common::api::external;
+    use sled_agent_types::early_networking::BfdMode as ApiBfdMode;
 
     fn name(s: &str) -> external::Name {
         s.parse().unwrap()
@@ -494,6 +518,17 @@ mod tests {
             gw: gw.parse().unwrap(),
             rib_priority: None,
             vlan_id: None,
+        }
+    }
+
+    fn bfd(remote: &str, local: Option<&str>) -> networking::BfdPeer {
+        networking::BfdPeer {
+            name: name("b"),
+            remote: remote.parse().unwrap(),
+            local: local.map(|l| l.parse().unwrap()),
+            mode: ApiBfdMode::MultiHop,
+            detection_threshold: NonZeroU8::new(3).unwrap(),
+            required_rx: u32::MAX,
         }
     }
 
@@ -512,5 +547,33 @@ mod tests {
         let e = RouterConfigurationStaticRoute::new(id, route("fd00::/8", "10.1.1.1"))
             .unwrap_err();
         assert!(is_invalid_request(&e), "{e}");
+    }
+
+    #[test]
+    fn bfd_peer_requires_matching_families_and_keeps_required_rx() {
+        let id = RouterConfigurationUuid::new_v4();
+        let db = RouterConfigurationBfdPeer::new(id, bfd("203.0.113.10", None)).unwrap();
+        assert_eq!(*db.required_rx, u32::MAX);
+        let back: networking::BfdPeer = db.try_into().unwrap();
+        assert_eq!(back.required_rx, u32::MAX);
+        assert_eq!(back.detection_threshold.get(), 3);
+
+        assert!(RouterConfigurationBfdPeer::new(id, bfd("203.0.113.10", Some("203.0.113.1"))).is_ok());
+        assert!(RouterConfigurationBfdPeer::new(id, bfd("fd00::10", Some("fd00::1"))).is_ok());
+        let e = RouterConfigurationBfdPeer::new(id, bfd("203.0.113.10", Some("fd00::1")))
+            .unwrap_err();
+        assert!(is_invalid_request(&e), "{e}");
+        let e = RouterConfigurationBfdPeer::new(id, bfd("fd00::10", Some("203.0.113.1")))
+            .unwrap_err();
+        assert!(is_invalid_request(&e), "{e}");
+    }
+
+    #[test]
+    fn bfd_peer_zero_threshold_in_database_is_an_internal_error() {
+        let id = RouterConfigurationUuid::new_v4();
+        let mut db = RouterConfigurationBfdPeer::new(id, bfd("203.0.113.10", None)).unwrap();
+        db.detection_threshold = SqlU8::new(0);
+        let e = networking::BfdPeer::try_from(db).unwrap_err();
+        assert!(matches!(e, Error::InternalError { .. }), "{e}");
     }
 }
