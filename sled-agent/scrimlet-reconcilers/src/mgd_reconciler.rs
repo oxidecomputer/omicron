@@ -465,6 +465,7 @@ fn uplink_peer_parameters(peer: &UplinkBgpPeerConfig) -> MgdBgpPeerParameters {
         local_pref: peer.local_pref,
         enforce_first_as: peer.enforce_first_as,
         vlan_id: peer.vlan_id,
+        src_addr: peer.addr.src_addr().map(Into::into),
         ..daemon_tunables(
             as_list(&peer.allowed_import),
             as_list(&peer.allowed_export),

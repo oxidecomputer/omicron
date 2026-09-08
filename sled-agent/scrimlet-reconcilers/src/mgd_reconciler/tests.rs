@@ -145,6 +145,55 @@ fn empty_operator_spec(name: &str) -> RouterConfigSpec {
 }
 
 #[test]
+fn uplink_numbered_sources_reach_mgd_and_clear() {
+    for (target, first, second) in [
+        ("10.99.0.3", "10.99.0.4", "10.99.0.2"),
+        ("2001:db8::3", "2001:db8::4", "2001:db8::2"),
+    ] {
+        for source in [None, Some(first), Some(second), None] {
+            let source = source.map(|s| s.parse::<RouterPeerIpAddr>().unwrap());
+            let peer = uplink_peer(
+                65000,
+                "qsfp0",
+                NumberedRouter::new(target.parse().unwrap(), source)
+                    .unwrap()
+                    .into(),
+            );
+            let config = system_config(
+                rack_config(
+                    vec![port_config(
+                        SwitchSlot::Switch0,
+                        "qsfp0",
+                        vec![peer, uplink_peer(65000, "qsfp0", unnumbered(0))],
+                        Vec::new(),
+                    )],
+                    vec![BgpConfig {
+                        asn: 65000,
+                        originate: Vec::new(),
+                        checker: None,
+                        shaper: None,
+                        max_paths: MaxPathConfig::default(),
+                    }],
+                    Vec::new(),
+                ),
+                SwitchRouterConfigs::new(),
+            );
+            let rendered =
+                render_desired_routers(&config, ThisSledSwitchSlot::TEST_FAKE)
+                    .unwrap();
+            let bgp = rendered[0].bgp.as_ref().unwrap();
+            let parameters = &bgp.peers["qsfp0"][0].parameters;
+            assert_eq!(parameters.src_addr, source.map(IpAddr::from));
+            assert_eq!(parameters.src_port, None);
+            assert_eq!(
+                bgp.unnumbered_peers["qsfp0"][0].parameters.src_addr,
+                None
+            );
+        }
+    }
+}
+
+#[test]
 fn uplink_render_full() {
     let mut peer_a = uplink_peer(65000, "qsfp0", numbered("192.0.2.1"));
     peer_a.allowed_import = ImportExportPolicy::Allow(vec![
