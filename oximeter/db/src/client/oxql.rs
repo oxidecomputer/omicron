@@ -1199,6 +1199,8 @@ mod tests {
     };
     use oximeter::{FieldValue, TimeseriesName, types::Cumulative};
     use oxql_types::{Table, Timeseries, point::Points};
+    use qorb::policy::{Policy, SetConfig};
+    use qorb::resolvers::fixed::FixedResolver;
     use std::collections::{BTreeMap, BTreeSet};
     use std::time::Duration;
 
@@ -1903,5 +1905,45 @@ mod tests {
             )
         );
         logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn oxql_query_uses_at_most_one_concurrent_claim() {
+        let ctx =
+            setup_oxql_test("oxql_query_uses_at_most_one_concurrent_claim")
+                .await;
+
+        // Construct a pool with exactly one claim. This ensures that we never
+        // try to acquire a claim while already holding one.
+        let policy = Policy {
+            max_slots: 1,
+            claim_timeout: Duration::from_secs(5),
+            set_config: SetConfig { max_count: 1, ..Default::default() },
+            ..Default::default()
+        };
+        let client = Client::new_with_pool_policy(
+            Box::new(FixedResolver::new([ctx
+                .clickhouse
+                .native_address()
+                .into()])),
+            "single-slot-test",
+            policy,
+            &ctx.logctx.log,
+        );
+
+        // Run a stupid-simple query under a timeout to avoid stalling the test
+        // itself.
+        let result = tokio::time::timeout(
+            Duration::from_secs(30),
+            client.oxql_query(
+                "get some_target:some_metric | last 1",
+                QueryAuthzScope::Fleet,
+            ),
+        )
+        .await
+        .expect("oxql query should not time out")
+        .expect("oxql query should succeed with a single-slot pool");
+        assert!(!result.tables.is_empty(), "Should have some result tables");
+        ctx.cleanup_successful().await;
     }
 }
