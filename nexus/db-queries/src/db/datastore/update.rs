@@ -26,9 +26,9 @@ use nexus_db_errors::OptionalError;
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::{
-    ArtifactHash, TargetRelease, TufArtifact, TufArtifactDescription,
-    TufArtifactFile, TufArtifactTag, TufMetadataEntry, TufRepo,
-    TufRepoDescription, TufRepoUpload, TufTrustRoot, to_db_typed_uuid,
+    ArtifactHash, DbTypedGeneration, TargetRelease, TufArtifact,
+    TufArtifactDescription, TufArtifactFile, TufArtifactTag, TufMetadataEntry,
+    TufRepo, TufRepoDescription, TufRepoUpload, TufTrustRoot, to_db_typed_uuid,
 };
 use nexus_types::external_api::update::TufRepoUploadStatus;
 use omicron_common::api::external::{
@@ -36,7 +36,9 @@ use omicron_common::api::external::{
     ListResultVec, LookupResult, LookupType, ResourceType, UpdateResult,
 };
 use omicron_common::api::external::{Error, InternalContext};
-use omicron_generation_kinds::Generation;
+use omicron_generation_kinds::{
+    ArtifactConfigGeneration, ArtifactConfigGenerationKind,
+};
 use omicron_uuid_kinds::{GenericUuid, TufRepoUuid};
 use semver::Version;
 use sled_agent_types::artifact::ArtifactConfig;
@@ -417,7 +419,7 @@ impl DataStore {
     pub async fn tuf_repo_mark_pruned(
         &self,
         opctx: &OpContext,
-        initial_tuf_generation: Generation,
+        initial_tuf_generation: ArtifactConfigGeneration,
         recent_releases: &RecentTargetReleases,
         tuf_repo_id: TufRepoUuid,
     ) -> UpdateResult<()> {
@@ -578,7 +580,7 @@ impl DataStore {
     pub async fn tuf_get_generation(
         &self,
         opctx: &OpContext,
-    ) -> LookupResult<Generation> {
+    ) -> LookupResult<ArtifactConfigGeneration> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         get_generation(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -1110,22 +1112,23 @@ async fn insert_impl(
 
 async fn get_generation(
     conn: &async_bb8_diesel::Connection<DbConnection>,
-) -> Result<Generation, DieselError> {
+) -> Result<ArtifactConfigGeneration, DieselError> {
     use nexus_db_schema::schema::tuf_generation::dsl;
 
-    let generation: nexus_db_model::Generation = dsl::tuf_generation
-        .filter(dsl::singleton.eq(true))
-        .select(dsl::generation)
-        .get_result_async(conn)
-        .await?;
-    Ok(generation.0)
+    let generation: DbTypedGeneration<ArtifactConfigGenerationKind> =
+        dsl::tuf_generation
+            .filter(dsl::singleton.eq(true))
+            .select(dsl::generation)
+            .get_result_async(conn)
+            .await?;
+    Ok(generation.into())
 }
 
 async fn put_generation(
     conn: &async_bb8_diesel::Connection<DbConnection>,
-    old_generation: nexus_db_model::Generation,
-    new_generation: nexus_db_model::Generation,
-) -> Result<nexus_db_model::Generation, DieselError> {
+    old_generation: DbTypedGeneration<ArtifactConfigGenerationKind>,
+    new_generation: DbTypedGeneration<ArtifactConfigGenerationKind>,
+) -> Result<DbTypedGeneration<ArtifactConfigGenerationKind>, DieselError> {
     use nexus_db_schema::schema::tuf_generation::dsl;
 
     // We use `get_result_async` instead of `execute_async` to check that we
