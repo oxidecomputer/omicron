@@ -18,6 +18,7 @@ use crate::blueprint_editor::DisksEditError;
 use crate::blueprint_editor::ExternalNetworkingAllocator;
 use crate::blueprint_editor::SledEditError;
 use crate::measurements::plan_measurement_updates;
+use crate::mgs_updates::EvacuatingSleds;
 use crate::mgs_updates::ImpossibleUpdatePolicy;
 use crate::mgs_updates::MgsUpdatePlanner;
 use crate::mgs_updates::PlannedMgsUpdates;
@@ -326,6 +327,12 @@ impl<'a> Planner<'a> {
             // RoT bootloader.
             PlanningZoneUpdatesStepReport::waiting_on(
                 ZoneUpdatesWaitingOn::BlockedMgsUpdates,
+            )
+        } else if !mgs_updates.update_disposition_changes.is_empty() {
+            // ... or if we need to change sleds to or from the evacuating
+            // update disposition
+            PlanningZoneUpdatesStepReport::waiting_on(
+                ZoneUpdatesWaitingOn::SledUpdateDispositionChanges,
             )
         } else if !add.add_update_blocked_reasons.is_empty() {
             // ... or if there are pending zone add blockers.
@@ -1632,14 +1639,18 @@ impl<'a> Planner<'a> {
             } else {
                 ImpossibleUpdatePolicy::Reevaluate
             };
+        let evacuating_sleds =
+            EvacuatingSleds::from_blueprint(self.blueprint.parent_blueprint());
         let PlannedMgsUpdates {
             pending_updates,
             pending_host_phase_2_changes,
+            pending_update_disposition_changes,
             blocked_mgs_updates,
         } = MgsUpdatePlanner {
             log: &self.log,
             inventory: &self.inventory,
             current_boards: &included_baseboards,
+            evacuating_sleds: &evacuating_sleds,
             zone_safety_checks,
             current_updates,
             current_artifacts,
@@ -1656,13 +1667,25 @@ impl<'a> Planner<'a> {
                 self.blueprint.comment(update.description());
             }
         }
+        for (sled_id, new_disposition) in
+            pending_update_disposition_changes.iter()
+        {
+            self.blueprint.comment(format!(
+                "setting sled {sled_id} update disposition to {new_disposition}"
+            ));
+        }
         self.blueprint
             .apply_pending_host_phase_2_changes(pending_host_phase_2_changes)?;
+        self.blueprint.apply_pending_update_disposition_changes(
+            &pending_update_disposition_changes,
+        )?;
 
         self.blueprint.pending_mgs_updates_replace_all(pending_updates.clone());
 
         report.pending_mgs_updates = pending_updates;
         report.blocked_mgs_updates = blocked_mgs_updates;
+        report.update_disposition_changes =
+            pending_update_disposition_changes.into_map();
         Ok(report)
     }
 
