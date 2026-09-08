@@ -1445,6 +1445,8 @@ mod test {
                         interface: Some("opte0".to_string()),
                         treat_loopback_as_external: TreatLoopbackAsExternal::YesForTestPurposesOnly,
                     },
+                    // Just a debug/test flag, and set via an env var, so no need to check this:
+                    record_db_claim_backtraces: config.deployment.record_db_claim_backtraces,
                 },
                 pkg: PackageConfig {
                     console: ConsoleConfig {
