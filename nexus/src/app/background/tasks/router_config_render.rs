@@ -32,7 +32,7 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_uuid_kinds::{BgpAnnounceSetUuid, GenericUuid};
 use oxnet::IpNet;
-use sled_agent_types::early_networking::{BfdMode, SwitchSlot};
+use sled_agent_types::early_networking::{BfdMode, MaxPathConfig, SwitchSlot};
 use sled_agent_types::router_config::{
     RouterConfigBfdPeer, RouterConfigBgpPeer, RouterConfigBgpPeerParameters,
     RouterConfigBgpSpec, RouterConfigSpec, RouterConfigStaticRoute4,
@@ -283,11 +283,27 @@ fn build_bgp_spec(
             )),
         }
     }
+    // The stored value is bounded (1..=32, CHECK-constrained); render it
+    // exactly. mgd applies it as the router's bestpath fanout; the API
+    // default of 1 therefore renders as a single best path.
+    let max_paths = match MaxPathConfig::new(*bgp.bgp_max_paths) {
+        Ok(v) => Some(v.as_nonzero_u8()),
+        Err(e) => {
+            // Cannot happen with the CHECK constraint in place; keep BGP up
+            // with mgd's default rather than tearing the router down.
+            errors.push(format!(
+                "router configuration {}: stored bgp max_paths {} is \
+                 invalid ({e}); rendering the default of 1",
+                config.name(),
+                *bgp.bgp_max_paths,
+            ));
+            None
+        }
+    };
     Some(RouterConfigBgpSpec {
         asn,
         originate,
-        // The RC data model has no max-paths knob yet; 1 (mgd's default).
-        max_paths: None,
+        max_paths,
         checker: None,
         shaper: None,
         peers: numbered,
@@ -368,4 +384,53 @@ fn build_bfd_peers(
         });
     }
     bfd_peers
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nexus_db_model::{RouterConfigurationBgpConfig, SqlU8, SqlU32};
+    use nexus_types::external_api::networking::RouterConfigurationCreate;
+    use omicron_common::api::external::IdentityMetadataCreateParams;
+    use omicron_uuid_kinds::BgpAnnounceSetUuid;
+
+    fn config(max_paths: u8) -> RouterConfiguration {
+        let mut config = RouterConfiguration::new(&RouterConfigurationCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "routy".parse().unwrap(),
+                description: String::new(),
+            },
+            switch: SwitchSlot::Switch0,
+        });
+        config.bgp_config = Some(RouterConfigurationBgpConfig {
+            bgp_asn: SqlU32::new(65001),
+            bgp_max_paths: SqlU8::new(max_paths),
+            bgp_announce_set_id: BgpAnnounceSetUuid::new_v4().into(),
+        });
+        config
+    }
+
+    /// A-14: the stored max-paths value reaches the rendered spec; the API
+    /// default (1) renders as a single path.
+    #[test]
+    fn bgp_max_paths_is_rendered() {
+        let mut errors = Vec::new();
+        for value in [1u8, 2, 32] {
+            let spec =
+                build_bgp_spec(&config(value), &[], Vec::new(), &mut errors)
+                    .expect("bgp spec");
+            assert_eq!(spec.max_paths, NonZeroU8::new(value), "value {value}");
+        }
+        assert!(errors.is_empty(), "{errors:?}");
+        // Out-of-range storage (impossible under the CHECK constraint) is
+        // reported and falls back to mgd's default instead of dropping BGP.
+        let spec = build_bgp_spec(&config(33), &[], Vec::new(), &mut errors)
+            .expect("bgp spec");
+        assert_eq!(spec.max_paths, None);
+        assert_eq!(errors.len(), 1);
+        // No BGP configuration at all renders no BGP spec.
+        let mut plain = config(2);
+        plain.bgp_config = None;
+        assert!(build_bgp_spec(&plain, &[], Vec::new(), &mut errors).is_none());
+    }
 }
