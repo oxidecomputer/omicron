@@ -486,6 +486,8 @@ pub struct BackgroundTaskConfig {
     pub audit_log_cleanup: AuditLogCleanupConfig,
     /// configuration for populate switch ports task
     pub populate_switch_ports: PopulateSwitchPortsConfig,
+    /// configuration for the task that marks VMMs to stop for an update
+    pub vmm_mark_stop_for_update: VmmMarkStopForUpdateConfig,
 }
 
 #[serde_as]
@@ -530,6 +532,23 @@ pub struct AuditLogCleanupConfig {
 
     /// maximum rows hard-deleted per activation
     pub max_deleted_per_activation: u32,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct VmmMarkStopForUpdateConfig {
+    /// period (in seconds) for periodic activations of this task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+
+    /// disable marking VMMs to stop for a sled update.
+    ///
+    /// This is an emergency lever for support / operations. It should only be
+    /// necessary if something has gone extremely wrong.
+    ///
+    /// Default: Off
+    #[serde(default)]
+    pub disable: bool,
 }
 
 #[serde_as]
@@ -1394,6 +1413,7 @@ mod test {
             audit_log_cleanup.retention_days = 90
             audit_log_cleanup.max_deleted_per_activation = 10000
             populate_switch_ports.period_secs = 31
+            vmm_mark_stop_for_update.period_secs = 300
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -1681,6 +1701,10 @@ mod test {
                         populate_switch_ports: PopulateSwitchPortsConfig {
                             period_secs: Duration::from_secs(31),
                         },
+                        vmm_mark_stop_for_update: VmmMarkStopForUpdateConfig {
+                            period_secs: Duration::from_secs(300),
+                            disable: false,
+                        },
                     },
                     multicast: MulticastConfig { enabled: false },
                     default_region_allocation_strategy:
@@ -1798,6 +1822,7 @@ mod test {
             audit_log_cleanup.retention_days = 90
             audit_log_cleanup.max_deleted_per_activation = 10000
             populate_switch_ports.period_secs = 31
+            vmm_mark_stop_for_update.period_secs = 300
 
             [default_region_allocation_strategy]
             type = "random"

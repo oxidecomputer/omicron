@@ -106,6 +106,31 @@ impl VmmState {
     pub fn exists_on_sled(&self) -> bool {
         self.to_nexus_state().exists_on_sled()
     }
+
+    /// Returns the states from which a VMM can still be stopped during sled
+    /// evacuation.
+    pub fn stoppable_states() -> Vec<Self> {
+        Self::ALL_STATES
+            .iter()
+            .copied()
+            .filter(|state| match state {
+                // A VMM in one of these states is on its way, or is already
+                // running, and can be stopped.
+                VmmState::Creating
+                | VmmState::Starting
+                | VmmState::Running
+                | VmmState::Rebooting => true,
+                // A VMM in one of these states is already stopping/stopped,
+                // migrating, or terminal, so there is nothing to stop.
+                VmmState::Stopping
+                | VmmState::Stopped
+                | VmmState::Migrating
+                | VmmState::Failed
+                | VmmState::Destroyed
+                | VmmState::SagaUnwound => false,
+            })
+            .collect()
+    }
 }
 
 impl fmt::Display for VmmState {
