@@ -33,30 +33,30 @@ impl ObservedSiloCertificates {
     /// The certificate Nexus serves for this silo, chosen by
     /// [`best_certificate`], or `None` if the silo has no certificates.
     pub fn best_certificate(&self) -> Option<&ObservedCertificate> {
-        best_certificate(self.certificates.iter(), |cert| {
-            (cert.not_after, cert.id)
-        })
+        let candidates: Vec<_> = self
+            .certificates
+            .iter()
+            .map(|c| CertificateCandidate { id: c.id, not_after: c.not_after })
+            .collect();
+        let id = best_certificate(&candidates)?;
+        self.certificates.get(&id)
     }
 }
 
-/// Chooses which of a silo's certificates Nexus serves for its external API:
-/// the one whose leaf `not_after` is latest, breaking ties toward the
-/// greatest certificate id. `not_before` is not considered.
-///
-/// `key` returns a certificate's `(not_after, id)`. Nexus calls this when
-/// choosing the certificate to present to TLS clients, and the certificate
-/// diagnosis engine calls it when predicting which certificate is served, so
-/// the engine's facts name exactly the certificate clients receive.
-///
-/// The tie-break must be deterministic because the engine records the chosen
-/// certificate's id in its facts and treats a change of id as a new
-/// condition worth a fresh alert; the choice must not vary between analyses
-/// of the same set of certificates.
-pub fn best_certificate<T>(
-    certs: impl IntoIterator<Item = T>,
-    key: impl Fn(&T) -> (DateTime<Utc>, Uuid),
-) -> Option<T> {
-    certs.into_iter().max_by_key(|cert| key(cert))
+/// What Nexus needs to know about one of a silo's certificates to decide
+/// whether to serve it: its identity and when it expires.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CertificateCandidate {
+    pub id: Uuid,
+    pub not_after: DateTime<Utc>,
+}
+
+/// Chooses which of a silo's certificates Nexus serves for its external API
+/// and returns its id: the candidate whose leaf `not_after` is latest,
+/// breaking ties toward the greatest id so the choice is deterministic.
+/// `not_before` is not considered. Returns `None` if there are no candidates.
+pub fn best_certificate(candidates: &[CertificateCandidate]) -> Option<Uuid> {
+    candidates.iter().max_by_key(|c| (c.not_after, c.id)).map(|c| c.id)
 }
 
 impl IdOrdItem for ObservedSiloCertificates {

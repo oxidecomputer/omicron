@@ -41,6 +41,8 @@ use nexus_db_queries::db::datastore::Discoverability;
 use nexus_db_queries::db::model::ServiceKind;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_types::identity::Resource;
+use nexus_types::observed_certificate::CertificateCandidate;
+use nexus_types::observed_certificate::best_certificate;
 use nexus_types::silo::DEFAULT_SILO_ID;
 use nexus_types::silo::silo_dns_name;
 use omicron_certificates::CertificateValidity;
@@ -312,17 +314,22 @@ impl ExternalEndpoint {
         // certificate chain whose leaf certificate has the latest expiration
         // time.
         //
-        // The choice is made by `nexus_types::observed_certificate::
-        // best_certificate`, which the fault management certificate diagnosis
-        // engine also uses to predict which certificate we serve, so that its
-        // alerts name the certificate clients actually receive.
-        nexus_types::observed_certificate::best_certificate(
-            self.tls_certs.iter(),
-            |t| (t.validity().not_after, t.id),
-        )
-        .ok_or_else(|| {
-            anyhow!("silo {} has no usable certificates", self.silo_id)
-        })
+        // The choice is made by
+        // `nexus_types::observed_certificate::best_certificate`, which the
+        // fault management certificate diagnosis engine also uses.
+        let candidates: Vec<_> = self
+            .tls_certs
+            .iter()
+            .map(|t| CertificateCandidate {
+                id: t.id,
+                not_after: t.validity().not_after,
+            })
+            .collect();
+        best_certificate(&candidates)
+            .and_then(|id| self.tls_certs.iter().find(|t| t.id == id))
+            .ok_or_else(|| {
+                anyhow!("silo {} has no usable certificates", self.silo_id)
+            })
     }
 }
 
