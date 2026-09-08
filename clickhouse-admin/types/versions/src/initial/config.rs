@@ -7,7 +7,7 @@
 use super::keeper::KeeperId;
 use super::server::ServerId;
 use camino::Utf8PathBuf;
-use omicron_common::api::external::Generation;
+use omicron_generation_kinds::Generation;
 use schemars::{
     JsonSchema,
     r#gen::SchemaGenerator,

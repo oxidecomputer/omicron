@@ -21,6 +21,7 @@ pub mod uplinkd;
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
 )]
+#[serde(rename_all = "snake_case")]
 pub enum ScrimletStatus {
     Scrimlet,
     NotScrimlet,
@@ -29,6 +30,7 @@ pub enum ScrimletStatus {
 /// Status of attempting to determine this sled's switch slot via MGS within
 /// this sled's switch zone.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", tag = "status")]
 pub enum DetermineSwitchSlotStatus {
     /// We're not attempting to contact MGS because we're not a scrimlet.
     NotScrimlet,
@@ -47,6 +49,7 @@ pub enum DetermineSwitchSlotStatus {
 
 /// Why a reconciler task has gone inert.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 pub enum ReconcilerInertReason {
     /// The reconciler task started when this sled was a scrimlet, but it has
     /// since become "not a scrimlet" (e.g., because the attached switch has
@@ -61,6 +64,7 @@ pub enum ReconcilerInertReason {
 
 /// Why a reconciler task was activated.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 pub enum ReconcilerActivationReason {
     /// Each reconciler runs once on startup.
     Startup,
@@ -75,6 +79,7 @@ pub enum ReconcilerActivationReason {
 
 /// Status of a completed-in-the-past reconciliation attempt.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[schemars(rename = "ReconciliationCompletedStatus{T}")]
 pub struct ReconciliationCompletedStatus<T> {
     /// Why the reconciliation attempt fired.
     pub activation_reason: ReconcilerActivationReason,
@@ -82,8 +87,8 @@ pub struct ReconciliationCompletedStatus<T> {
     pub completed_at_time: DateTime<Utc>,
     /// How long the attempt ran.
     pub ran_for: Duration,
-    /// The 0-based index of this reconciler's activation since the last time
-    /// sled-agent started.
+    /// 0-based counter of the number of times this reconciler has activated
+    /// since the last time sled-agent started.
     pub activation_count: u64,
     /// Reconciler-specific status.
     pub status: T,
@@ -106,6 +111,7 @@ pub struct ReconcilerRunningStatus {
 /// running and will continue to not run for a given reason", whereas `Idle`
 /// means "not currently running but will run again soon".
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", tag = "status", content = "value")]
 pub enum ReconcilerCurrentStatus {
     /// The reconciler is inert: it will not or cannot run for some reason.
     Inert(ReconcilerInertReason),
@@ -117,6 +123,7 @@ pub enum ReconcilerCurrentStatus {
 
 /// Status of a single scrimlet reconciler.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[schemars(rename = "ReconcilerStatus{T}")]
 pub struct ReconcilerStatus<T> {
     /// Status of the task at this moment.
     pub current_status: ReconcilerCurrentStatus,
@@ -128,6 +135,7 @@ pub struct ReconcilerStatus<T> {
 
 /// Status of the collective set of scrimlet reconcilers.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", tag = "status", content = "value")]
 pub enum ScrimletReconcilersStatus {
     /// `sled-agent` has not yet provided underlay networking information.
     WaitingForSledAgentNetworkingInfo,

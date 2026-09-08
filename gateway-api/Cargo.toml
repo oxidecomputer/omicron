@@ -12,7 +12,6 @@ dropshot.workspace = true
 dropshot-api-manager-types.workspace = true
 ereport-types.workspace = true
 gateway-types-versions.workspace = true
-omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
 schemars.workspace = true

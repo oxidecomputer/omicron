@@ -16,7 +16,6 @@ use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::identity::Resource;
 use crate::db::model::ByteCount;
-use crate::db::model::Generation;
 use crate::db::model::Instance;
 use crate::db::model::InstanceAutoRestart;
 use crate::db::model::InstanceAutoRestartPolicy;
@@ -48,6 +47,7 @@ use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::Disk;
+use nexus_db_model::to_db_typed_generation;
 use nexus_types::external_api::instance as instance_types;
 use nexus_types::internal_api::background::ReincarnationReason;
 use omicron_common::api;
@@ -64,6 +64,8 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::bail_unless;
+use omicron_generation_kinds::InstanceStateGeneration;
+use omicron_generation_kinds::InstanceUpdaterGeneration;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
@@ -213,7 +215,7 @@ pub struct InstanceGestalt {
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct UpdaterLock {
     pub updater_id: Uuid,
-    locked_gen: Generation,
+    locked_gen: InstanceUpdaterGeneration,
 }
 
 /// Errors returned by [`DataStore::instance_updater_lock`].
@@ -1016,12 +1018,18 @@ impl DataStore {
             // sled. Since this query drives instance-watcher health checking,
             // it is not necessary to perform health checks for VMMs that don't
             // actually exist in real life.
-            .filter(vmm_dsl::state.ne_all(VmmState::NONEXISTENT_STATES));
+            .filter(vmm_dsl::state.ne_all(VmmState::NONEXISTENT_STATES))
+            // Also ignore VMMs in terminal states, which will never
+            // transition to another state, so a health check can learn
+            // nothing further about them.
+            .filter(vmm_dsl::state.ne_all(VmmState::TERMINAL_STATES));
         // Now, join with the `instance` table on the instance's VMM ID.
-        let query = query.inner_join(
-            instance_dsl::instance
-                .on(instance_dsl::id.eq(vmm_dsl::instance_id)),
-        );
+        let query = query
+            .inner_join(
+                instance_dsl::instance
+                    .on(instance_dsl::id.eq(vmm_dsl::instance_id)),
+            )
+            .filter(instance_dsl::time_deleted.is_null());
         // Finally, join with the `project` table on the instance's project ID,
         // to return the project that each instance belongs to.
         let query = query.inner_join(
@@ -1575,7 +1583,8 @@ impl DataStore {
         // *same* instance at the same time. So, idempotency is probably more
         // important than handling that extremely unlikely edge case.
         let mut did_lock = false;
-        let mut locked_gen = instance.updater_gen;
+        let mut locked_gen =
+            InstanceUpdaterGeneration::from(instance.updater_gen);
         loop {
             match instance.updater_id {
                 // If the `updater_id` field is not null and the ID equals this
@@ -1609,8 +1618,9 @@ impl DataStore {
             }
 
             // Okay, now attempt to acquire the lock
-            let current_gen = instance.updater_gen;
-            locked_gen = Generation(current_gen.0.next());
+            let current_gen =
+                InstanceUpdaterGeneration::from(instance.updater_gen);
+            locked_gen = current_gen.next();
             slog::debug!(
                 &opctx.log,
                 "attempting to acquire instance updater lock";
@@ -1633,9 +1643,12 @@ impl DataStore {
                     // This query is used equivalently to an atomic
                     // compare-and-swap instruction in the implementation of a
                     // non-distributed, single-process mutex.
-                    .filter(dsl::updater_gen.eq(current_gen))
+                    .filter(
+                        dsl::updater_gen
+                            .eq(to_db_typed_generation(current_gen)),
+                    )
                     .set((
-                        dsl::updater_gen.eq(locked_gen),
+                        dsl::updater_gen.eq(to_db_typed_generation(locked_gen)),
                         dsl::updater_id.eq(Some(updater_id)),
                     ))
                     .check_if_exists::<Instance>(instance_id)
@@ -1737,15 +1750,15 @@ impl DataStore {
         use nexus_db_schema::schema::instance::dsl;
         let &UpdaterLock { updater_id: parent_id, locked_gen } = parent_lock;
         let instance_id = authz_instance.id();
-        let new_gen = Generation(locked_gen.0.next());
+        let new_gen = locked_gen.next();
 
         let result = diesel::update(dsl::instance)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(instance_id))
-            .filter(dsl::updater_gen.eq(locked_gen))
+            .filter(dsl::updater_gen.eq(to_db_typed_generation(locked_gen)))
             .filter(dsl::updater_id.eq(parent_id))
             .set((
-                dsl::updater_gen.eq(new_gen),
+                dsl::updater_gen.eq(to_db_typed_generation(new_gen)),
                 dsl::updater_id.eq(Some(child_lock_id)),
             ))
             .check_if_exists::<Instance>(instance_id)
@@ -1806,7 +1819,10 @@ impl DataStore {
                     "parent_id" => %parent_id,
                     "parent_gen" => ?locked_gen,
                 );
-                debug_assert_eq!(found.updater_gen, new_gen);
+                debug_assert_eq!(
+                    InstanceUpdaterGeneration::from(found.updater_gen),
+                    new_gen
+                );
                 Ok(UpdaterLock {
                     updater_id: child_lock_id,
                     locked_gen: new_gen,
@@ -1854,9 +1870,9 @@ impl DataStore {
             .filter(dsl::updater_id.eq(Some(updater_id)))
             // - the provided updater generation matches the current updater
             //   generation.
-            .filter(dsl::updater_gen.eq(locked_gen))
+            .filter(dsl::updater_gen.eq(to_db_typed_generation(locked_gen)))
             .set((
-                dsl::updater_gen.eq(Generation(locked_gen.0.next())),
+                dsl::updater_gen.eq(to_db_typed_generation(locked_gen.next())),
                 dsl::updater_id.eq(None::<Uuid>),
             ))
             .check_if_exists::<Instance>(instance_id)
@@ -1906,7 +1922,9 @@ impl DataStore {
             UpdateAndQueryResult { ref found, .. }
                 if found.updater_id != Some(updater_id) =>
             {
-                if found.updater_gen > locked_gen {
+                if InstanceUpdaterGeneration::from(found.updater_gen)
+                    > locked_gen
+                {
                     // The generation has advanced past the generation where we
                     // acquired the lock. That's totally fine: a previous
                     // execution of the same saga action must have unlocked it,
@@ -2015,10 +2033,10 @@ impl DataStore {
             .filter(dsl::updater_id.eq(Some(updater_id)))
             // - the provided updater generation matches the current updater
             //   generation.
-            .filter(dsl::updater_gen.eq(locked_gen))
+            .filter(dsl::updater_gen.eq(to_db_typed_generation(locked_gen)))
             .filter(dsl::state_generation.lt(new_runtime.generation))
             .set((
-                dsl::updater_gen.eq(Generation(locked_gen.0.next())),
+                dsl::updater_gen.eq(to_db_typed_generation(locked_gen.next())),
                 dsl::updater_id.eq(None::<Uuid>),
                 new_runtime.clone(),
                 IntentUpdate { intended_state: new_intent },
@@ -2039,7 +2057,9 @@ impl DataStore {
         // The expected state generation number of the instance record *before*
         // applying the update.
         let prev_state_gen =
-            u64::from(new_runtime.generation.0).saturating_sub(1);
+            InstanceStateGeneration::from(new_runtime.generation)
+                .as_u64()
+                .saturating_sub(1);
         match result {
             // If we updated the record, the lock has been released! Return
             // `Ok(true)` to indicate that we released the lock successfully.
@@ -2070,9 +2090,13 @@ impl DataStore {
             // another execution of the same saga action has already updated the
             // instance record.
             UpdateAndQueryResult { ref found, .. }
-                if u64::from(found.runtime().generation.0)
+                if InstanceStateGeneration::from(
+                    found.runtime().generation,
+                )
+                .as_u64()
                     != prev_state_gen
-                    && found.updater_gen != locked_gen =>
+                    && InstanceUpdaterGeneration::from(found.updater_gen)
+                        != locked_gen =>
             {
                 debug_assert_ne!(found.updater_id, Some(updater_id));
                 debug!(
@@ -2095,9 +2119,13 @@ impl DataStore {
             // longer update the instance, as its state has changed, potentially
             // invalidating the updates. We need to unwind.
             UpdateAndQueryResult { ref found, .. }
-                if u64::from(found.runtime().generation.0)
+                if InstanceStateGeneration::from(
+                    found.runtime().generation,
+                )
+                .as_u64()
                     != prev_state_gen
-                    && found.updater_gen == locked_gen
+                    && InstanceUpdaterGeneration::from(found.updater_gen)
+                        == locked_gen
                     && found.updater_id == Some(updater_id) =>
             {
                 info!(
@@ -2253,18 +2281,19 @@ impl DataStore {
 mod tests {
     use super::*;
     use crate::db::datastore::sled;
+    use crate::db::model::Generation;
     use crate::db::pagination::Paginator;
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_db_lookup::LookupPath;
     use nexus_db_model::InstanceState;
     use nexus_db_model::Project;
     use nexus_db_model::VmmCpuPlatform;
+    use nexus_db_model::VmmFailureReason;
     use nexus_db_model::VmmState;
     use nexus_types::external_api::instance as instance_types;
     use nexus_types::external_api::project;
     use nexus_types::identity::Asset;
     use nexus_types::silo::DEFAULT_SILO_ID;
-    use omicron_common::api::external;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev;
@@ -2341,6 +2370,89 @@ mod tests {
             .await
             .expect("instance must exist");
         authz_instance
+    }
+
+    /// Inserts a VMM record in `state` on `sled_id` for an existing
+    /// instance, and updates the instance's runtime state to make it the
+    /// instance's active VMM.
+    async fn set_test_vmm(
+        datastore: &DataStore,
+        opctx: &OpContext,
+        instance_id: InstanceUuid,
+        sled_id: SledUuid,
+        state: VmmState,
+    ) -> Vmm {
+        let failure_reason = if state == VmmState::Failed {
+            Some(VmmFailureReason::FromSledAgent)
+        } else {
+            None
+        };
+        let vmm = datastore
+            .vmm_insert(
+                opctx,
+                Vmm {
+                    id: Uuid::new_v4(),
+                    time_created: Utc::now(),
+                    time_deleted: None,
+                    instance_id: instance_id.into_untyped_uuid(),
+                    sled_id: sled_id.into(),
+                    propolis_ip: "10.1.9.42".parse().unwrap(),
+                    propolis_port: 420.into(),
+                    cpu_platform: VmmCpuPlatform::SledDefault,
+                    time_state_updated: Utc::now(),
+                    generation: Generation::new(),
+                    state,
+                    failure_reason,
+                    stop_for_update_disposition_generation: None,
+                },
+            )
+            .await
+            .expect("test VMM should insert");
+        let updated = datastore
+            .instance_update_runtime(
+                &instance_id,
+                &InstanceRuntimeState {
+                    time_updated: Utc::now(),
+                    generation: InstanceStateGeneration::new().next().into(),
+                    nexus_state: InstanceState::Vmm,
+                    propolis_id: Some(vmm.id),
+                    dst_propolis_id: None,
+                    migration_id: None,
+                    time_last_auto_restarted: None,
+                },
+            )
+            .await
+            .expect("instance should be updated");
+        assert!(updated, "instance should be updated");
+        vmm
+    }
+
+    /// Creates a test instance named `instance_name` with an active VMM in
+    /// `state` on `sled_id`.
+    async fn create_test_instance_with_vmm(
+        datastore: &DataStore,
+        opctx: &OpContext,
+        authz_project: &authz::Project,
+        sled_id: SledUuid,
+        instance_name: &str,
+        state: VmmState,
+    ) -> (authz::Instance, Vmm) {
+        let authz_instance = create_test_instance(
+            datastore,
+            opctx,
+            authz_project,
+            instance_name,
+        )
+        .await;
+        let vmm = set_test_vmm(
+            datastore,
+            opctx,
+            InstanceUuid::from_untyped_uuid(authz_instance.id()),
+            sled_id,
+            state,
+        )
+        .await;
+        (authz_instance, vmm)
     }
 
     #[tokio::test]
@@ -2513,7 +2625,7 @@ mod tests {
                 &InstanceUuid::from_untyped_uuid(authz_instance.id()),
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    generation: Generation(external::Generation::from_u32(2)),
+                    generation: InstanceStateGeneration::from_u32(2).into(),
                     propolis_id: None,
                     dst_propolis_id: None,
                     migration_id: None,
@@ -2613,9 +2725,12 @@ mod tests {
             dbg!(datastore.instance_refetch(&opctx, &authz_instance).await)
                 .expect("instance should exist");
         assert_eq!(instance.updater_id, Some(saga1));
-        assert_eq!(instance.updater_gen, lock1.locked_gen);
+        assert_eq!(
+            InstanceUpdaterGeneration::from(instance.updater_gen),
+            lock1.locked_gen
+        );
 
-        let next_gen = Generation(lock1.locked_gen.0.next());
+        let next_gen = lock1.locked_gen.next();
 
         // unlocking with the correct ID should succeed.
         let unlocked = dbg!(
@@ -2630,7 +2745,10 @@ mod tests {
             dbg!(datastore.instance_refetch(&opctx, &authz_instance).await)
                 .expect("instance should exist");
         assert_eq!(instance.updater_id, None);
-        assert_eq!(instance.updater_gen, next_gen);
+        assert_eq!(
+            InstanceUpdaterGeneration::from(instance.updater_gen),
+            next_gen
+        );
 
         // unlocking with the lock holder's ID *again* at a new generation
         // (where the lock is no longer held) shouldn't do anything
@@ -2683,7 +2801,7 @@ mod tests {
                 &InstanceUuid::from_untyped_uuid(authz_instance.id()),
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    generation: Generation(external::Generation::from_u32(2)),
+                    generation: InstanceStateGeneration::from_u32(2).into(),
                     propolis_id: None,
                     dst_propolis_id: None,
                     migration_id: None,
@@ -2728,7 +2846,7 @@ mod tests {
                 &InstanceUuid::from_untyped_uuid(authz_instance.id()),
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    generation: Generation(external::Generation::from_u32(2)),
+                    generation: InstanceStateGeneration::from_u32(2).into(),
                     propolis_id: None,
                     dst_propolis_id: None,
                     migration_id: None,
@@ -2804,7 +2922,7 @@ mod tests {
                 &InstanceUuid::from_untyped_uuid(authz_instance.id()),
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    generation: Generation(external::Generation::from_u32(2)),
+                    generation: InstanceStateGeneration::from_u32(2).into(),
                     propolis_id: None,
                     dst_propolis_id: None,
                     migration_id: None,
@@ -2866,7 +2984,7 @@ mod tests {
         .expect("instance should be locked");
         let new_runtime = &InstanceRuntimeState {
             time_updated: Utc::now(),
-            generation: Generation(external::Generation::from_u32(2)),
+            generation: InstanceStateGeneration::from_u32(2).into(),
             propolis_id: Some(Uuid::new_v4()),
             dst_propolis_id: None,
             migration_id: None,
@@ -2971,7 +3089,7 @@ mod tests {
         // acquired.
         let new_runtime = &InstanceRuntimeState {
             time_updated: Utc::now(),
-            generation: Generation(external::Generation::from_u32(2)),
+            generation: InstanceStateGeneration::from_u32(2).into(),
             propolis_id: Some(Uuid::new_v4()),
             dst_propolis_id: Some(Uuid::new_v4()),
             migration_id: Some(Uuid::new_v4()),
@@ -3000,9 +3118,7 @@ mod tests {
                     &lock,
                     &InstanceRuntimeState {
                         time_updated: Utc::now(),
-                        generation: Generation(external::Generation::from_u32(
-                            2
-                        )),
+                        generation: InstanceStateGeneration::from_u32(2).into(),
                         propolis_id: None,
                         dst_propolis_id: None,
                         migration_id: None,
@@ -3089,6 +3205,7 @@ mod tests {
                     generation: Generation::new(),
                     state: VmmState::Running,
                     failure_reason: None,
+                    stop_for_update_disposition_generation: None,
                 },
             )
             .await
@@ -3100,9 +3217,11 @@ mod tests {
                 &instance_id,
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    generation: Generation(
-                        snapshot.instance.state_generation.0.next(),
-                    ),
+                    generation: InstanceStateGeneration::from(
+                        snapshot.instance.state_generation,
+                    )
+                    .next()
+                    .into(),
                     nexus_state: InstanceState::Vmm,
                     propolis_id: Some(active_vmm.id),
                     ..snapshot.instance.runtime()
@@ -3151,6 +3270,7 @@ mod tests {
                     generation: Generation::new(),
                     state: VmmState::Running,
                     failure_reason: None,
+                    stop_for_update_disposition_generation: None,
                 },
             )
             .await
@@ -3172,9 +3292,11 @@ mod tests {
                 &instance_id,
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    generation: Generation(
-                        snapshot.instance.state_generation.0.next(),
-                    ),
+                    generation: InstanceStateGeneration::from(
+                        snapshot.instance.state_generation,
+                    )
+                    .next()
+                    .into(),
                     nexus_state: InstanceState::Vmm,
                     propolis_id: Some(active_vmm.id),
                     dst_propolis_id: Some(target_vmm.id),
@@ -3248,6 +3370,7 @@ mod tests {
                     generation: Generation::new(),
                     state: VmmState::Stopped,
                     failure_reason: None,
+                    stop_for_update_disposition_generation: None,
                 },
             )
             .await
@@ -3263,7 +3386,11 @@ mod tests {
                 &instance_id,
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    generation: Generation(instance.state_generation.0.next()),
+                    generation: InstanceStateGeneration::from(
+                        instance.state_generation,
+                    )
+                    .next()
+                    .into(),
                     nexus_state: InstanceState::Vmm,
                     propolis_id: Some(vmm1.id),
                     ..instance.runtime()
@@ -3288,6 +3415,7 @@ mod tests {
                     generation: Generation::new(),
                     state: VmmState::Running,
                     failure_reason: None,
+                    stop_for_update_disposition_generation: None,
                 },
             )
             .await
@@ -3388,6 +3516,7 @@ mod tests {
                     generation: Generation::new(),
                     state: VmmState::Running,
                     failure_reason: None,
+                    stop_for_update_disposition_generation: None,
                 },
             )
             .await
@@ -3497,7 +3626,9 @@ mod tests {
             vmm_id: Uuid,
             instance_id: Uuid,
         }
+
         // Make some sleds, and put some instances and VMMs on those sleds.
+        let mut sled_ids = Vec::new();
         for s in 0..2 {
             let (sled, updated) = datastore
                 .sled_upsert(sled::test::test_new_sled_update())
@@ -3505,55 +3636,24 @@ mod tests {
                 .unwrap();
             assert!(updated);
             let sled_id = sled.id();
+            sled_ids.push(sled_id);
             for i in 0..INSTANCES_PER_SLED {
                 // Make sure the instance has a unique name.
                 let instance_name = format!("s{s}i{i}");
-                let authz_instance = create_test_instance(
+                let (authz_instance, vmm) = create_test_instance_with_vmm(
                     &datastore,
                     &opctx,
                     &authz_project,
+                    sled_id,
                     &instance_name,
+                    VmmState::Running,
                 )
                 .await;
-                let instance_id = authz_instance.id();
-                let vmm = datastore
-                    .vmm_insert(
-                        &opctx,
-                        Vmm {
-                            id: Uuid::new_v4(),
-                            time_created: Utc::now(),
-                            time_deleted: None,
-                            instance_id,
-                            sled_id: sled_id.into(),
-                            propolis_ip: "10.1.9.42".parse().unwrap(),
-                            propolis_port: 420.into(),
-                            cpu_platform: VmmCpuPlatform::SledDefault,
-                            time_state_updated: Utc::now(),
-                            generation: Generation::new(),
-                            state: VmmState::Running,
-                            failure_reason: None,
-                        },
-                    )
-                    .await
-                    .expect("test VMM should insert");
-                let vmm_id = vmm.id;
-                let updated = datastore
-                    .instance_update_runtime(
-                        &InstanceUuid::from_untyped_uuid(instance_id),
-                        &InstanceRuntimeState {
-                            time_updated: Utc::now(),
-                            generation: Generation(Generation::new().next()),
-                            nexus_state: InstanceState::Vmm,
-                            propolis_id: Some(vmm_id),
-                            dst_propolis_id: None,
-                            migration_id: None,
-                            time_last_auto_restarted: None,
-                        },
-                    )
-                    .await
-                    .expect("instance should be updated");
-                assert!(updated, "instance should be updated");
-                expected_instances.insert(Ids { sled_id, vmm_id, instance_id });
+                expected_instances.insert(Ids {
+                    sled_id,
+                    vmm_id: vmm.id,
+                    instance_id: authz_instance.id(),
+                });
             }
         }
 
@@ -3567,6 +3667,47 @@ mod tests {
                 &instance_name,
             )
             .await;
+        }
+
+        // Instances with VMMs in terminal states should not be listed, as
+        // there is nothing left to health check.
+        for state in VmmState::TERMINAL_STATES {
+            let instance_name = format!("terminal-{state}");
+            let _ = create_test_instance_with_vmm(
+                &datastore,
+                &opctx,
+                &authz_project,
+                sled_ids[0],
+                &instance_name,
+                *state,
+            )
+            .await;
+        }
+
+        // A deleted instance whose VMM row still exists should not be listed.
+        {
+            let (authz_instance, _) = create_test_instance_with_vmm(
+                &datastore,
+                &opctx,
+                &authz_project,
+                sled_ids[0],
+                "deleted",
+                VmmState::Running,
+            )
+            .await;
+            use nexus_db_schema::schema::instance::dsl as instance_dsl;
+            diesel::update(instance_dsl::instance)
+                .filter(instance_dsl::id.eq(authz_instance.id()))
+                .set((
+                    instance_dsl::state.eq(InstanceState::Destroyed),
+                    instance_dsl::active_propolis_id.eq(Option::<Uuid>::None),
+                    instance_dsl::time_deleted.eq(Utc::now()),
+                ))
+                .execute_async(
+                    &*datastore.pool_connection_for_tests().await.unwrap(),
+                )
+                .await
+                .expect("instance should be marked deleted");
         }
 
         // Okay, now list instances by sled.

@@ -778,7 +778,7 @@ async fn test_floating_ip_create_attachment(
     .await;
     assert_eq!(
         error.message,
-        format!("Floating IP cannot be deleted while attached to an instance"),
+        "Floating IP cannot be deleted while attached to an instance",
     );
 
     // Stop and delete the instance.

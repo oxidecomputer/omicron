@@ -68,7 +68,6 @@ pub mod rack_setup {
     pub use crate::v1::rack_setup::LinkSpeed;
     pub use crate::v1::rack_setup::LldpAdminStatus;
     pub use crate::v1::rack_setup::LldpPortConfig;
-    pub use crate::v1::rack_setup::ManualPortConfig;
     pub use crate::v1::rack_setup::MaxPathConfig;
     pub use crate::v1::rack_setup::NewPasswordHash;
     pub use crate::v1::rack_setup::PrivateKeyPem;
@@ -87,15 +86,18 @@ pub mod rack_setup {
     pub use crate::v1::rack_setup::TxEqConfig;
     pub use crate::v1::rack_setup::UplinkAddress;
     pub use crate::v1::rack_setup::UplinkIpNet;
-    pub use crate::v1::rack_setup::UserSpecifiedBgpPeerConfig;
     pub use crate::v1::rack_setup::UserSpecifiedImportExportPolicy;
-    pub use crate::v1::rack_setup::UserSpecifiedPortConfig;
-    pub use crate::v1::rack_setup::UserSpecifiedRackNetworkConfig;
     pub use crate::v1::rack_setup::UserSpecifiedRouterPeerAddr;
     pub use crate::v1::rack_setup::UserSpecifiedUplinkAddressConfig;
-    pub use crate::v2::rack_setup::PutRssUserConfigInsensitive;
+
     pub use crate::v2::rack_setup::ServiceIpPoolConfig;
     pub use crate::v2::rack_setup::ServiceIpPoolError;
+
+    pub use crate::v3::rack_setup::ManualPortConfig;
+    pub use crate::v3::rack_setup::PutRssUserConfigInsensitive;
+    pub use crate::v3::rack_setup::UserSpecifiedBgpPeerConfig;
+    pub use crate::v3::rack_setup::UserSpecifiedPortConfig;
+    pub use crate::v3::rack_setup::UserSpecifiedRackNetworkConfig;
 }
 
 pub mod update {

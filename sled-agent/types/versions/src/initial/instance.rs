@@ -9,10 +9,10 @@ use std::net::{IpAddr, SocketAddr};
 
 use chrono::{DateTime, Utc};
 use omicron_common::api::external;
-use omicron_common::api::external::Generation;
 use omicron_common::api::external::Hostname;
 use omicron_common::api::internal::nexus::HostIdentifier;
 use omicron_common::api::internal::shared::DhcpConfig;
+use omicron_generation_kinds::Generation;
 use omicron_uuid_kinds::{InstanceUuid, PropolisUuid};
 use propolis_api_types_versions::v1::instance_spec::InstanceSpec;
 use schemars::JsonSchema;

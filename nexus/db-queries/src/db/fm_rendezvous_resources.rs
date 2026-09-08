@@ -23,12 +23,35 @@ use diesel::pg::Pg;
 use diesel::query_builder::QueryFragment;
 use diesel::query_source::QuerySource;
 use nexus_db_schema::schema;
+use omicron_generation_kinds::TypedGenerationKind;
 
 /// The creation marker table corresponding to some [`FmRendezvousResource`]
 /// `R`. This is the table that defines the column referenced by the
 /// [`FmRendezvousResource::IdColumn`] associated type.
 pub type MarkerTable<R> =
     <<R as FmRendezvousResource>::IdColumn as Column>::Table;
+
+/// The generation kind stored in some [`FmRendezvousResource`] `R`'s
+/// [`FmRendezvousResource::GenerationColumn`].
+pub type GenerationKind<R> =
+    <<R as FmRendezvousResource>::GenerationColumn as SitrepGenerationColumn>::Kind;
+
+/// A per-resource-type generation column on the `fm_sitrep` table, paired
+/// with the generation kind of the values it stores.
+pub trait SitrepGenerationColumn:
+    Column<Table = schema::fm_sitrep::table>
+{
+    /// The generation kind of the values stored in this column.
+    type Kind: TypedGenerationKind;
+}
+
+impl SitrepGenerationColumn for schema::fm_sitrep::alert_generation {
+    type Kind = omicron_generation_kinds::AlertGenerationKind;
+}
+
+impl SitrepGenerationColumn for schema::fm_sitrep::support_bundle_generation {
+    type Kind = omicron_generation_kinds::SupportBundleGenerationKind;
+}
 
 /// A resource created by FM rendezvous, comprising the Diesel schema types
 /// required to generically construct useful queries / CTEs that operate on that
@@ -84,7 +107,7 @@ where
     /// [`SitrepGuardedInsert`] to guard against stale execution.
     ///
     /// [`SitrepGuardedInsert`]: crate::db::sitrep_guard::SitrepGuardedInsert
-    type GenerationColumn: Column<Table = schema::fm_sitrep::table>;
+    type GenerationColumn: SitrepGenerationColumn;
 
     /// The id column in the creation marker table
     /// (e.g. `rendezvous_alert_created::alert_id` for `Alert`).
@@ -97,13 +120,13 @@ where
 }
 
 impl FmRendezvousResource for nexus_db_model::Alert {
-    type GenerationColumn = schema::fm_sitrep::dsl::alert_generation;
+    type GenerationColumn = schema::fm_sitrep::alert_generation;
     type IdColumn = schema::rendezvous_alert_created::dsl::alert_id;
     type RequestTable = schema::fm_alert_request::table;
 }
 
 impl FmRendezvousResource for nexus_db_model::SupportBundle {
-    type GenerationColumn = schema::fm_sitrep::dsl::support_bundle_generation;
+    type GenerationColumn = schema::fm_sitrep::support_bundle_generation;
     type IdColumn =
         schema::rendezvous_support_bundle_created::dsl::support_bundle_id;
     type RequestTable = schema::fm_support_bundle_request::table;
@@ -119,6 +142,7 @@ impl FmRendezvousResource for nexus_db_model::SupportBundle {
 #[cfg(test)]
 pub(crate) mod test_utils {
     use super::FmRendezvousResource;
+    use super::SitrepGenerationColumn;
     use crate::context::OpContext;
     use crate::db::DataStore;
     use async_bb8_diesel::AsyncRunQueryDsl;
@@ -129,7 +153,10 @@ pub(crate) mod test_utils {
     use nexus_db_lookup::DbConnection;
     use nexus_types::fm::Sitrep;
     use nexus_types::fm::SitrepMetadata;
-    use omicron_common::api::external;
+    use omicron_generation_kinds::AlertGeneration;
+    use omicron_generation_kinds::SupportBundleGeneration;
+    use omicron_generation_kinds::TypedGenerationKind;
+    use omicron_generation_kinds::TypedGenerationTag;
     use omicron_uuid_kinds::CollectionUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::SitrepUuid;
@@ -178,6 +205,17 @@ pub(crate) mod test_utils {
     pub(crate) struct DummyResource {
         pub id: Uuid,
         pub name: String,
+    }
+
+    /// Generation kind for the synthetic resource.
+    pub(crate) enum DummyGenerationKind {}
+
+    impl TypedGenerationKind for DummyGenerationKind {
+        const TAG: TypedGenerationTag = TypedGenerationTag::new("dummy");
+    }
+
+    impl SitrepGenerationColumn for dummy_generation {
+        type Kind = DummyGenerationKind;
     }
 
     impl FmRendezvousResource for DummyResource {
@@ -238,8 +276,8 @@ pub(crate) mod test_utils {
                 creator_id: OmicronZoneUuid::new_v4(),
                 comment: "rendezvous resource test sitrep".to_string(),
                 time_created: Utc::now(),
-                alert_generation: external::Generation::new(),
-                support_bundle_generation: external::Generation::new(),
+                alert_generation: AlertGeneration::new(),
+                support_bundle_generation: SupportBundleGeneration::new(),
             },
             cases: IdOrdMap::new(),
             ereports_by_id: IdOrdMap::new(),

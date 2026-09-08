@@ -100,7 +100,7 @@ use internal_dns_types::{
     config::{DnsConfig, DnsConfigParams, DnsConfigZone, DnsRecord},
     names::ZONE_APEX_NAME,
 };
-use omicron_common::api::external::Generation;
+use omicron_generation_kinds::Generation;
 use serde::{Deserialize, Serialize};
 use sled::transaction::ConflictableTransactionError;
 use slog::{debug, error, info, o, warn};
@@ -994,7 +994,7 @@ mod test {
     use internal_dns_types::config::DnsConfigZone;
     use internal_dns_types::config::DnsRecord;
     use internal_dns_types::names::ZONE_APEX_NAME;
-    use omicron_common::api::external::Generation;
+    use omicron_generation_kinds::Generation;
     use omicron_test_utils::dev::test_setup_log;
     use std::collections::BTreeSet;
     use std::collections::HashMap;

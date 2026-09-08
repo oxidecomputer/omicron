@@ -8,6 +8,7 @@ use crate::impls::id_path_param;
 use omicron_uuid_kinds::{PhysicalDiskAdoptionRequestUuid, SledUuid};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sled_agent_types_versions::v1::disk::DiskIdentity;
 use uuid::Uuid;
 
 use crate::v2025_11_20_00::physical_disk::PhysicalDiskKind;
@@ -29,10 +30,8 @@ pub struct PhysicalDiskManufacturerIdentity {
     pub model: String,
 }
 
-impl From<omicron_common::disk::DiskIdentity>
-    for PhysicalDiskManufacturerIdentity
-{
-    fn from(value: omicron_common::disk::DiskIdentity) -> Self {
+impl From<DiskIdentity> for PhysicalDiskManufacturerIdentity {
+    fn from(value: DiskIdentity) -> Self {
         Self { vendor: value.vendor, serial: value.serial, model: value.model }
     }
 }

@@ -2986,7 +2986,7 @@ mod tests {
     use nexus_types::external_api::vpc;
     use nexus_types::identity::Asset;
     use omicron_common::api::external;
-    use omicron_common::api::external::Generation;
+    use omicron_generation_kinds::SledConfigGeneration;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::GenericUuid;
@@ -3521,7 +3521,7 @@ mod tests {
                 bp4.sleds.get_mut(&sled_ids[3]).expect("config for sled");
             sled3.zones.iter_mut().next().unwrap().disposition =
                 BlueprintZoneDisposition::Expunged {
-                    as_of_generation: Generation::new(),
+                    as_of_generation: SledConfigGeneration::new(),
                     ready_for_cleanup: false,
                 };
             sled3.sled_agent_generation = sled3.sled_agent_generation.next();

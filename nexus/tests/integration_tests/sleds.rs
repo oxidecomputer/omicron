@@ -8,13 +8,11 @@ use dropshot::test_util::ClientTestContext;
 use nexus_db_model::PhysicalDisk as DbPhysicalDisk;
 use nexus_db_model::PhysicalDiskKind as DbPhysicalDiskKind;
 use nexus_db_queries::context::OpContext;
-use nexus_test_interface::NexusServer;
 use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils::resource_helpers::create_default_ip_pools;
 use nexus_test_utils::resource_helpers::create_instance;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
-use nexus_test_utils::start_sled_agent;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::physical_disk::PhysicalDisk;
 use nexus_types::external_api::sled::Sled;
@@ -24,6 +22,7 @@ use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
+use sled_agent_types::inventory::SledCpuFamily;
 use std::str::FromStr;
 use uuid::Uuid;
 
@@ -62,24 +61,15 @@ async fn test_sleds_list(cptestctx: &ControlPlaneTestContext) {
     // Now start a few more sled agents.
     let nsleds = 3;
     let mut sas = Vec::with_capacity(nsleds);
-    for i in 0..nsleds {
-        let sa_id = SledUuid::new_v4();
-        let log =
-            cptestctx.logctx.log.new(o!( "sled_id" => sa_id.to_string() ));
-        let addr = cptestctx.server.get_http_server_internal_address();
+    for _ in 0..nsleds {
         sas.push(
-            start_sled_agent(
-                log,
-                addr,
-                sa_id,
-                // Index starts at 2: the `nexus_test` macro already created two
-                // sled agents as part of the ControlPlaneTestContext setup.
-                2 + i as u16,
-                sim::SimMode::Explicit,
-                &cptestctx.first_sled_agent().simulated_upstairs,
-            )
-            .await
-            .unwrap(),
+            cptestctx
+                .add_sled(
+                    SledUuid::new_v4(),
+                    sim::SimMode::Explicit,
+                    SledCpuFamily::AmdMilan,
+                )
+                .await,
         );
     }
 

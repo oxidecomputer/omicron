@@ -98,6 +98,7 @@ use super::tasks::blueprint_execution;
 use super::tasks::blueprint_load;
 use super::tasks::blueprint_load::LoadedTargetBlueprint;
 use super::tasks::blueprint_planner;
+use super::tasks::blueprint_pruner;
 use super::tasks::blueprint_rendezvous;
 use super::tasks::crdb_node_id_collector;
 use super::tasks::decommissioned_disk_cleaner;
@@ -241,6 +242,7 @@ impl BackgroundTasksInitializer {
             task_blueprint_planner: Activator::new(),
             task_blueprint_executor: Activator::new(),
             task_blueprint_rendezvous: Activator::new(),
+            task_blueprint_pruner: Activator::new(),
             task_crdb_node_id_collector: Activator::new(),
             task_switch_port_settings_manager: Activator::new(),
             task_v2p_manager: Activator::new(),
@@ -338,6 +340,7 @@ impl BackgroundTasksInitializer {
             task_blueprint_planner,
             task_blueprint_executor,
             task_blueprint_rendezvous,
+            task_blueprint_pruner,
             task_crdb_node_id_collector,
             task_switch_port_settings_manager,
             task_v2p_manager,
@@ -575,6 +578,7 @@ impl BackgroundTasksInitializer {
             reconfigurator_config_watcher.clone(),
             inventory_load_watcher.clone(),
             rx_blueprint.clone(),
+            args.debug_dropbox_reconfigurator.clone(),
             nexus_id,
         );
         let rx_planner = blueprint_planner.watcher();
@@ -680,6 +684,19 @@ impl BackgroundTasksInitializer {
         });
 
         driver.register(TaskDefinition {
+            name: "blueprint_pruner",
+            description: "prunes old blueprints from the database",
+            period: config.blueprints.period_secs_prune,
+            task_impl: Box::new(blueprint_pruner::BlueprintPruner::new(
+                datastore.clone(),
+                reconfigurator_config_watcher.clone(),
+            )),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![Box::new(reconfigurator_config_watcher.clone())],
+            activator: task_blueprint_pruner,
+        });
+
+        driver.register(TaskDefinition {
             name: "decommissioned_disk_cleaner",
             description:
                 "deletes DB records for decommissioned disks, after regions \
@@ -702,7 +719,6 @@ impl BackgroundTasksInitializer {
             period: config.switch_port_settings_manager.period_secs,
             task_impl: Box::new(SwitchPortSettingsManager::new(
                 datastore.clone(),
-                resolver.clone(),
                 rx_blueprint.clone(),
             )),
             opctx: opctx.child(BTreeMap::new()),
@@ -1358,6 +1374,8 @@ pub struct BackgroundTasksData {
     /// Console session absolute timeout, from
     /// `pkg.console.session_absolute_timeout_minutes`.
     pub console_session_absolute_timeout: chrono::TimeDelta,
+    /// Handle for Reconfigurator to emit debug data
+    pub debug_dropbox_reconfigurator: Arc<omicron_debug_dropbox::Producer>,
 }
 
 /// Starts the three DNS-propagation-related background tasks for either
@@ -1453,7 +1471,7 @@ pub mod test {
     use nexus_types::internal_api::params as nexus_params;
     use nexus_types::internal_api::params::DnsRecord;
     use omicron_common::api::external::Error;
-    use omicron_common::api::external::Generation;
+    use omicron_generation_kinds::Generation;
     use omicron_test_utils::dev::poll;
     use std::net::SocketAddr;
     use std::sync::atomic::AtomicU64;

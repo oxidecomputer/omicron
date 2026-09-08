@@ -368,7 +368,7 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
         )?;
 
         let response = rss_config
-            .push_cert(body.into_inner().0)
+            .push_cert(body.into_inner())
             .map_err(|err| HttpError::for_bad_request(None, err))?;
 
         Ok(HttpResponseOk(response))
@@ -386,7 +386,7 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
         )?;
 
         let response = rss_config
-            .push_key(body.into_inner().0)
+            .push_key(body.into_inner())
             .map_err(|err| HttpError::for_bad_request(None, err))?;
 
         Ok(HttpResponseOk(response))

@@ -83,10 +83,10 @@ pub struct ServiceZoneNatEntry {
 }
 
 impl IdOrdItem for ServiceZoneNatEntry {
-    type Key<'a> = OmicronZoneUuid;
+    type Key<'a> = (OmicronZoneUuid, IpAddr);
 
     fn key(&self) -> Self::Key<'_> {
-        self.zone_id
+        (self.zone_id, self.kind.external_ip())
     }
 
     iddqd::id_upcast!();

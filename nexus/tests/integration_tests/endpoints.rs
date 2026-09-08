@@ -154,8 +154,7 @@ pub static SLED_INSTANCES_URL: LazyLock<String> = LazyLock::new(|| {
     format!("/v1/system/hardware/sleds/{}/instances", SLED_AGENT_UUID)
 });
 
-pub const SUPPORT_BUNDLES_URL: &'static str =
-    "/experimental/v1/system/support-bundles";
+pub const SUPPORT_BUNDLES_URL: &'static str = "/v1/system/support-bundles";
 pub static SUPPORT_BUNDLE_URL: LazyLock<String> =
     LazyLock::new(|| format!("{SUPPORT_BUNDLES_URL}/{{id}}"));
 pub static SUPPORT_BUNDLE_DOWNLOAD_URL: LazyLock<String> =

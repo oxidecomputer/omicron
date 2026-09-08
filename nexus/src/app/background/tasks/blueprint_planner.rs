@@ -5,17 +5,21 @@
 //! Background task for automatic update planning.
 
 use super::reconfigurator_config::ReconfiguratorConfigLoaderState;
+use crate::app::BlueprintDebugAction;
 use crate::app::background::BackgroundTask;
 use crate::app::background::tasks::blueprint_load::LoadedTargetBlueprint;
-use chrono::Utc;
+use crate::app::deployment::SetTargetDebugWriter;
 use futures::future::BoxFuture;
+use iddqd::IdOrdMap;
 use nexus_auth::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
+use nexus_inventory::now_db_precision;
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::planner::PlannerRng;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
+use nexus_reconfigurator_preparation::reconfigurator_state_assemble;
 use nexus_types::deployment::BlueprintSource;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::PlanningReport;
@@ -63,6 +67,7 @@ pub struct BlueprintPlanner {
     rx_blueprint: Receiver<Option<LoadedTargetBlueprint>>,
     tx_planned: Sender<Option<BlueprintUuid>>,
     blueprint_limit: u64,
+    debug_dropbox: Arc<omicron_debug_dropbox::Producer>,
     creator: String,
 }
 
@@ -88,6 +93,7 @@ impl BlueprintPlanner {
         rx_config: Receiver<ReconfiguratorConfigLoaderState>,
         rx_inventory: Receiver<Option<Arc<Collection>>>,
         rx_blueprint: Receiver<Option<LoadedTargetBlueprint>>,
+        debug_dropbox: Arc<omicron_debug_dropbox::Producer>,
         nexus_id: OmicronZoneUuid,
     ) -> Self {
         let (tx_planned, _) = watch::channel(None);
@@ -98,6 +104,7 @@ impl BlueprintPlanner {
             rx_blueprint,
             tx_planned,
             blueprint_limit: DEFAULT_BLUEPRINT_LIMIT,
+            debug_dropbox,
             creator: format!("nexus {}", nexus_id),
         }
     }
@@ -272,7 +279,7 @@ impl BlueprintPlanner {
             }
         }
 
-        // We have a fresh blueprint; save it.
+        // We have a fresh blueprint.  Insert it into the database.
         let blueprint_id = blueprint.id;
         info!(
             &opctx.log,
@@ -280,15 +287,41 @@ impl BlueprintPlanner {
             "parent_blueprint_id" => %parent_blueprint_id,
             "blueprint_id" => %blueprint_id,
         );
+
         self.datastore.blueprint_insert(opctx, &blueprint).await.map_err(
             |error| PlanError::SaveBlueprint { blueprint_id, source: error },
         )?;
+
+        // Before we try to make this the new target blueprint, assemble some
+        // Reconfigurator state files that can be used to document and
+        // potentially debug the planning choices we made.  The details of
+        // writing out the files are handled by `SetTargetDebugWriter`.
+        //
+        // This part of the process is best-effort.  If any of it fails, we'll
+        // proceed anyway.
+        let maybe_debug_intent = reconfigurator_state_assemble(
+            opctx,
+            &self.datastore,
+            input,
+            IdOrdMap::from_iter([(*collection).clone()]),
+            IdOrdMap::from_iter([(*parent).clone(), blueprint.clone()]),
+            target,
+            Some(blueprint_id),
+        )
+        .await;
+        let debug_dropbox_writer = SetTargetDebugWriter::new(
+            &opctx.log,
+            &self.debug_dropbox,
+            maybe_debug_intent,
+        )
+        .write_intent(BlueprintDebugAction::AutoplanIntent)
+        .await;
 
         // Try to make it the current target.
         let target = BlueprintTarget {
             target_id: blueprint_id,
             enabled: target.enabled, // copy previous `enabled` flag
-            time_made_target: Utc::now(),
+            time_made_target: now_db_precision(),
         };
         match self.datastore.blueprint_target_set_current(opctx, target).await {
             Ok(()) => (),
@@ -299,6 +332,11 @@ impl BlueprintPlanner {
                     "error" => %error,
                     "blueprint_id" => %blueprint_id
                 );
+
+                // Try to cancel the dropbox deposit since the information is
+                // useless now.
+                debug_dropbox_writer.cancel().await;
+
                 let blueprint_id = blueprint_id.into_untyped_uuid();
                 let authz_blueprint = authz::Blueprint::new(
                     authz::FLEET,
@@ -331,6 +369,13 @@ impl BlueprintPlanner {
         }
 
         // We have a new target!
+        //
+        // There's no point in failing after this, whatever happens.
+
+        // Write a new state file for the dropbox that reflects the new target.
+        debug_dropbox_writer
+            .write_committed(target, BlueprintDebugAction::Autoplan)
+            .await;
 
         self.tx_planned.send_replace(Some(blueprint.id));
         Ok(BlueprintPlannerStatus::Targeted {
@@ -452,6 +497,7 @@ mod test {
     use nexus_types::deployment::{
         PendingMgsUpdates, ReconfiguratorConfig, ReconfiguratorConfigView,
     };
+    use omicron_debug_dropbox::DebugDropbox;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use std::collections::BTreeMap;
@@ -464,10 +510,8 @@ mod test {
         // Set up the test context.
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
-        let opctx = OpContext::for_tests(
-            cptestctx.logctx.log.clone(),
-            datastore.clone(),
-        );
+        let log = &cptestctx.logctx.log;
+        let opctx = OpContext::for_tests(log.clone(), datastore.clone());
 
         // Spin up the blueprint loader background task.
         let (tx_loader, _) = watch::channel(None);
@@ -483,7 +527,7 @@ mod test {
 
         // Spin up the inventory collector background task.
         let resolver = internal_dns_resolver::Resolver::new_from_addrs(
-            cptestctx.logctx.log.clone(),
+            log.clone(),
             &[cptestctx.internal_dns.dns_server.local_address()],
         )
         .expect("can't start resolver");
@@ -514,6 +558,12 @@ mod test {
                 time_modified: now_db_precision(),
             }),
         );
+        let debug_dropbox = Arc::new(
+            DebugDropbox::for_tests_noop(log)
+                .initialize_producer("test")
+                .await
+                .unwrap(),
+        );
 
         // Finally, spin up the planner background task.
         let mut planner = BlueprintPlanner::new(
@@ -521,6 +571,7 @@ mod test {
             rx_config_loader,
             rx_inventory,
             rx_loader.clone(),
+            debug_dropbox,
             nexus.id,
         );
 
@@ -576,7 +627,7 @@ mod test {
                 report: _,
                 blueprint_count: _,
                 limit: _,
-            } if parent_blueprint_id == parent_blueprint_id
+            } if parent_blueprint_id == blueprint_id
         );
 
         // Enable execution.
@@ -698,6 +749,12 @@ mod test {
         // check_blueprint_limit_reached.
         let (_tx_inventory, rx_inventory) = watch::channel(None);
         let (_tx_blueprint, rx_blueprint) = watch::channel(None);
+        let debug_dropbox = Arc::new(
+            DebugDropbox::for_tests_noop(&logctx.log)
+                .initialize_producer("test")
+                .await
+                .unwrap(),
+        );
 
         let test_nexus_id = OmicronZoneUuid::new_v4();
         let mut planner = BlueprintPlanner::new(
@@ -705,6 +762,7 @@ mod test {
             rx_config_loader,
             rx_inventory,
             rx_blueprint,
+            debug_dropbox,
             test_nexus_id,
         );
 

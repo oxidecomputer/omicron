@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 pub struct SystemNetworkingSettings {
     /// When true, end users may opt in to jumbo frames (8500 byte MTU) on the
     /// primary interface of an instance. When false, instance-level opt-in is
-    /// ignored and OPTE ports are created with the default MTU.
+    /// ignored and the primary interface uses the default MTU.
     pub external_jumbo_frames_opt_in_enabled: bool,
 }
 

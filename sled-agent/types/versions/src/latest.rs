@@ -5,13 +5,14 @@
 //! Re-exports of the latest versions of all types.
 
 pub mod artifact {
-    pub use crate::v1::artifact::ArtifactConfig;
     pub use crate::v1::artifact::ArtifactCopyFromDepotBody;
     pub use crate::v1::artifact::ArtifactCopyFromDepotResponse;
-    pub use crate::v1::artifact::ArtifactListResponse;
     pub use crate::v1::artifact::ArtifactPathParam;
     pub use crate::v1::artifact::ArtifactPutResponse;
-    pub use crate::v1::artifact::ArtifactQueryParam;
+
+    pub use crate::v52::artifact::ArtifactConfig;
+    pub use crate::v52::artifact::ArtifactListResponse;
+    pub use crate::v52::artifact::ArtifactQueryParam;
 }
 
 pub mod attached_subnet {
@@ -45,10 +46,17 @@ pub mod diagnostics {
 }
 
 pub mod disk {
+    pub use crate::v1::disk::CompressionAlgorithm;
+    pub use crate::v1::disk::DatasetConfig;
     pub use crate::v1::disk::DiskEnsureBody;
+    pub use crate::v1::disk::DiskIdentity;
     pub use crate::v1::disk::DiskPathParam;
     pub use crate::v1::disk::DiskStateRequested;
-    pub use crate::v1::disk::DiskType;
+    pub use crate::v1::disk::DiskVariant;
+    pub use crate::v1::disk::GzipLevel;
+    pub use crate::v1::disk::M2Slot;
+    pub use crate::v1::disk::OmicronPhysicalDiskConfig;
+    pub use crate::v1::disk::SharedDatasetConfig;
     pub use crate::v1::disk::Zpool;
 }
 
@@ -72,20 +80,24 @@ pub mod early_networking {
     pub use crate::v20::early_networking::RouterLifetimeConfig;
     pub use crate::v20::early_networking::RouterLifetimeConfigError;
 
-    pub use crate::v30::early_networking::BgpPeerConfig;
     pub use crate::v30::early_networking::InvalidIpAddrError;
-    pub use crate::v30::early_networking::PortConfig;
     pub use crate::v30::early_networking::RouterPeerIpAddr;
     pub use crate::v30::early_networking::RouterPeerIpAddrError;
-    pub use crate::v30::early_networking::RouterPeerType;
     pub use crate::v30::early_networking::UplinkAddress;
     pub use crate::v30::early_networking::UplinkAddressConfig;
     pub use crate::v30::early_networking::UplinkIpNet;
     pub use crate::v30::early_networking::UplinkIpNetError;
 
-    pub use crate::v42::early_networking::EmptyUplinkPortsError;
-    pub use crate::v42::early_networking::RackNetworkConfig;
-    pub use crate::v42::early_networking::UplinkPorts;
+    pub use crate::v47::early_networking::AddressFamilyMismatchError;
+    pub use crate::v47::early_networking::BgpPeerConfig;
+    pub use crate::v47::early_networking::EmptyUplinkPortsError;
+    pub use crate::v47::early_networking::NumberedRouter;
+    pub use crate::v47::early_networking::RouterPeerType;
+    pub use crate::v47::early_networking::UnnumberedRouter;
+
+    pub use crate::v48::early_networking::PortConfig;
+    pub use crate::v48::early_networking::RackNetworkConfig;
+    pub use crate::v48::early_networking::UplinkPorts;
 }
 
 pub mod firewall_rules {
@@ -154,9 +166,6 @@ pub mod inventory {
 
     pub use crate::v10::inventory::NetworkInterface;
 
-    pub use crate::v11::inventory::OmicronZoneConfig;
-    pub use crate::v11::inventory::OmicronZoneType;
-    pub use crate::v11::inventory::OmicronZonesConfig;
     pub use crate::v11::inventory::SourceNatConfig;
     pub use crate::v11::inventory::SourceNatConfigGeneric;
     pub use crate::v11::inventory::SourceNatConfigV4;
@@ -164,13 +173,10 @@ pub mod inventory {
 
     pub use crate::v12::inventory::HealthMonitorInventory;
 
-    pub use crate::v14::inventory::ConfigReconcilerInventoryStatus;
     pub use crate::v14::inventory::OmicronFileSourceResolverInventory;
     pub use crate::v14::inventory::OmicronSingleMeasurement;
-    pub use crate::v14::inventory::OmicronSledConfig;
     pub use crate::v14::inventory::ReconciledSingleMeasurement;
 
-    pub use crate::v16::inventory::ConfigReconcilerInventory;
     pub use crate::v16::inventory::SingleMeasurementInventory;
 
     pub use crate::v24::inventory::InventoryZpool;
@@ -186,13 +192,25 @@ pub mod inventory {
     pub use crate::v40::inventory::FmdInventoryErrorKind;
     pub use crate::v40::inventory::FmdResource;
 
-    pub use crate::v46::inventory::Inventory;
     pub use crate::v46::inventory::Svc;
     pub use crate::v46::inventory::SvcEnabledNotOnline;
     pub use crate::v46::inventory::SvcEnabledNotOnlineState;
     pub use crate::v46::inventory::SvcState;
     pub use crate::v46::inventory::SvcsEnabledNotOnline;
     pub use crate::v46::inventory::SvcsEnabledNotOnlineResult;
+
+    pub use crate::v49::inventory::OmicronSledUpdateDisposition;
+
+    pub use crate::v51::inventory::ConfigReconcilerInventory;
+    pub use crate::v51::inventory::ConfigReconcilerInventoryStatus;
+    pub use crate::v51::inventory::ExternalDnsAddrs;
+    pub use crate::v51::inventory::Inventory;
+    pub use crate::v51::inventory::NexusExternalIps;
+    pub use crate::v51::inventory::OmicronSledConfig;
+    pub use crate::v51::inventory::OmicronZoneConfig;
+    pub use crate::v51::inventory::OmicronZoneType;
+    pub use crate::v51::inventory::OmicronZonesConfig;
+    pub use crate::v51::inventory::ZoneSnatConfig;
 
     pub use crate::impls::inventory::FmdHostCaseDisplay;
     pub use crate::impls::inventory::FmdInventoryDisplay;
@@ -254,8 +272,8 @@ pub mod system_networking {
 
     pub use crate::v39::system_networking::BlueprintExternalNetworkingConfig;
 
-    pub use crate::v42::system_networking::SystemNetworkingConfig;
-    pub use crate::v42::system_networking::WriteNetworkConfigRequest;
+    pub use crate::v48::system_networking::SystemNetworkingConfig;
+    pub use crate::v48::system_networking::WriteNetworkConfigRequest;
 }
 
 pub mod trust_quorum {

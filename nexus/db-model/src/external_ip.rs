@@ -396,25 +396,19 @@ impl IncompleteExternalIp {
         zone_id: OmicronZoneUuid,
         zone_kind: ZoneKind,
     ) -> Self {
-        let (kind, port_range, name, description, state) = match external_ip {
+        // We'll name this external IP the same as we'll name the NIC
+        // associated with this zone.
+        let name = Some(ServiceNetworkInterface::name(zone_id, zone_kind));
+        let description = Some(zone_kind.report_str().to_string());
+        let (kind, port_range, state) = match external_ip {
             OmicronZoneExternalIp::Floating(_) => {
-                // We'll name this external IP the same as we'll name the NIC
-                // associated with this zone.
-                let name = ServiceNetworkInterface::name(zone_id, zone_kind);
-
                 // Using `IpAttachState::Attached` preserves existing behavior,
                 // `IpKind::Floating.initial_state()` is `::Detached`. If/when
                 // we do more to unify IPs between services and instances, this
                 // probably needs to be addressed.
                 let state = IpAttachState::Attached;
 
-                (
-                    IpKind::Floating,
-                    Some((0, u16::MAX.into())),
-                    Some(name),
-                    Some(zone_kind.report_str().to_string()),
-                    state,
-                )
+                (IpKind::Floating, Some((0, u16::MAX.into())), state)
             }
             OmicronZoneExternalIp::Snat(OmicronZoneExternalSnatIp {
                 snat_cfg,
@@ -425,10 +419,6 @@ impl IncompleteExternalIp {
                 (
                     kind,
                     Some((first_port.into(), last_port.into())),
-                    // Only floating IPs are allowed to have names and
-                    // descriptions.
-                    None,
-                    None,
                     kind.initial_state(),
                 )
             }

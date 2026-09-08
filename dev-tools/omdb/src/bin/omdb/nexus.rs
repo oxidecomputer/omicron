@@ -58,6 +58,7 @@ use nexus_types::internal_api::background::AttachedSubnetManagerStatus;
 use nexus_types::internal_api::background::AuditLogCleanupStatus;
 use nexus_types::internal_api::background::AuditLogTimeoutIncompleteStatus;
 use nexus_types::internal_api::background::BlueprintPlannerStatus;
+use nexus_types::internal_api::background::BlueprintPrunerStatus;
 use nexus_types::internal_api::background::BlueprintRendezvousStats;
 use nexus_types::internal_api::background::BlueprintRendezvousStatus;
 use nexus_types::internal_api::background::DatasetsRendezvousStats;
@@ -120,6 +121,7 @@ use quiesce::cmd_nexus_quiesce;
 use reconfigurator_config::ReconfiguratorConfigArgs;
 use reconfigurator_config::cmd_nexus_reconfigurator_config;
 use serde::Deserialize;
+use sled_agent_types::disk::DiskIdentity;
 use sled_hardware_types::BaseboardId;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
@@ -1308,6 +1310,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         "blueprint_rendezvous" => {
             print_task_blueprint_rendezvous(details);
         }
+        "blueprint_pruner" => {
+            print_task_blueprint_pruner(details);
+        }
         "dns_config_external" | "dns_config_internal" => {
             print_task_dns_config(details);
         }
@@ -1706,6 +1711,7 @@ fn print_task_blueprint_rendezvous(details: &serde_json::Value) {
                 crucible_dataset,
                 local_storage_dataset,
                 local_storage_unencrypted_dataset,
+                sled_blueprint_availability,
             } = status.stats;
 
             print_datasets_rendezvous_stats(&debug_dataset, "debug_dataset");
@@ -1734,6 +1740,53 @@ fn print_task_blueprint_rendezvous(details: &serde_json::Value) {
                 &local_storage_unencrypted_dataset,
                 "local_storage_unencrypted_dataset",
             );
+
+            println!("    sled_blueprint_availability rendezvous counts:");
+            println!(
+                "        num_marked_available:                {}",
+                sled_blueprint_availability.num_marked_available
+            );
+            println!(
+                "        num_marked_unavailable:              {}",
+                sled_blueprint_availability.num_marked_unavailable
+            );
+            println!(
+                "        num_unchanged:                       {}",
+                sled_blueprint_availability.num_unchanged
+            );
+            println!(
+                "        num_invariant_violations:            {}",
+                sled_blueprint_availability.num_invariant_violations
+            );
+            println!(
+                "        num_decommissioned:                  {}",
+                sled_blueprint_availability.num_decommissioned
+            );
+            println!(
+                "        num_already_decommissioned:          {}",
+                sled_blueprint_availability.num_already_decommissioned
+            );
+            println!(
+                "        num_not_in_blueprint:                {}",
+                sled_blueprint_availability.num_not_in_blueprint
+            );
+            println!(
+                "        num_decommissioned_not_in_blueprint: {}",
+                sled_blueprint_availability.num_decommissioned_not_in_blueprint
+            );
+        }
+    }
+}
+
+fn print_task_blueprint_pruner(details: &serde_json::Value) {
+    match serde_json::from_value::<BlueprintPrunerStatus>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {}: {:?}",
+            InlineErrorChain::new(&error),
+            details
+        ),
+        Ok(status) => {
+            print!("{}", status);
         }
     }
 }
@@ -5324,7 +5377,7 @@ async fn cmd_nexus_sled_expunge_disk_with_datastore(
         .context("loading latest collection")?
     {
         Some(collection) => {
-            let disk_identity = omicron_common::disk::DiskIdentity {
+            let disk_identity = DiskIdentity {
                 vendor: physical_disk.vendor.clone(),
                 serial: physical_disk.serial.clone(),
                 model: physical_disk.model.clone(),

@@ -193,7 +193,8 @@ mod test {
     use crate::app::background::BackgroundTask;
     use nexus_db_queries::db::pub_test_utils::TestDatabase;
     use nexus_types::fm::SitrepMetadata;
-    use omicron_common::api::external::Generation;
+    use omicron_generation_kinds::AlertGeneration;
+    use omicron_generation_kinds::SupportBundleGeneration;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::CollectionUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
@@ -225,8 +226,8 @@ mod test {
                 comment: "test sitrep 1".to_string(),
                 time_created: Utc::now(),
                 next_inv_min_time_started: Utc::now(),
-                alert_generation: Generation::new(),
-                support_bundle_generation: Generation::new(),
+                alert_generation: AlertGeneration::new(),
+                support_bundle_generation: SupportBundleGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -294,8 +295,8 @@ mod test {
                 comment: "test sitrep 2".to_string(),
                 time_created: Utc::now(),
                 next_inv_min_time_started: Utc::now(),
-                alert_generation: Generation::new(),
-                support_bundle_generation: Generation::new(),
+                alert_generation: AlertGeneration::new(),
+                support_bundle_generation: SupportBundleGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),

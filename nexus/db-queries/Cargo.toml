@@ -32,6 +32,7 @@ ipnetwork.workspace = true
 itertools.workspace = true
 macaddr.workspace = true
 nonempty.workspace = true
+omicron-generation-kinds.workspace = true
 oxnet.workspace = true
 paste.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
@@ -83,6 +84,7 @@ oximeter.workspace = true
 omicron-workspace-hack.workspace = true
 
 # only enabled during tests or via the `testing` feature
+nexus-reconfigurator-planning = { workspace = true, optional = true }
 omicron-test-utils = { workspace = true, optional = true }
 
 [target.'cfg(target_os = "illumos")'.dependencies]
@@ -91,7 +93,7 @@ fmd-adm-sys.workspace = true
 
 [features]
 # Enable to export `TestDatabase`
-testing = ["omicron-test-utils"]
+testing = ["nexus-reconfigurator-planning", "omicron-test-utils"]
 
 [dev-dependencies]
 assert_matches.workspace = true
@@ -117,6 +119,7 @@ pem.workspace = true
 petgraph.workspace = true
 predicates.workspace = true
 pretty_assertions.workspace = true
+proptest.workspace = true
 rcgen.workspace = true
 regex.workspace = true
 rustls.workspace = true

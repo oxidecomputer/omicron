@@ -79,6 +79,7 @@ fn any_uplink_ports() -> UplinkPorts {
         autoneg: false,
         lldp: None,
         tx_eq: None,
+        allow_ddm_traffic: false,
     }])
     .unwrap()
 }

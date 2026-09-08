@@ -25,9 +25,6 @@ use dropshot::HttpError;
 use illumos_utils::zfs::DatasetProperties;
 use omicron_common::api::external::ByteCount;
 use omicron_common::disk::DatasetName;
-use omicron_common::disk::DiskIdentity;
-use omicron_common::disk::DiskVariant;
-use omicron_common::disk::SharedDatasetConfig;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ExternalZpoolUuid;
 use omicron_uuid_kinds::GenericUuid;
@@ -37,6 +34,9 @@ use omicron_uuid_kinds::ZpoolUuid;
 use propolis_client::VolumeConstructionRequest;
 use serde::Serialize;
 use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
+use sled_agent_types::disk::DiskIdentity;
+use sled_agent_types::disk::DiskVariant;
+use sled_agent_types::disk::SharedDatasetConfig;
 use sled_agent_types::inventory::OmicronSledConfig;
 use sled_agent_types::inventory::ZpoolHealth;
 use sled_agent_types::support_bundle::NESTED_DATASET_NOT_FOUND;
@@ -468,11 +468,11 @@ impl CrucibleDataInner {
 #[cfg(test)]
 mod test {
     use super::*;
-    use omicron_common::disk::DatasetConfig;
     use omicron_common::disk::DatasetKind;
     use omicron_common::disk::DatasetName;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev::test_setup_log;
+    use sled_agent_types::disk::DatasetConfig;
 
     fn append_dataset_to_config(
         storage: &mut StorageInner,

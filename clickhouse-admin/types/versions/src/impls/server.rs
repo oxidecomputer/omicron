@@ -15,7 +15,7 @@ use crate::latest::server::{
 use anyhow::{Context, Result};
 use atomicwrites::AtomicFile;
 use camino::Utf8PathBuf;
-use omicron_common::api::external::Generation;
+use omicron_generation_kinds::Generation;
 use slog::{Logger, info};
 use std::fs::create_dir;
 use std::io::{ErrorKind, Write};
@@ -244,7 +244,7 @@ mod tests {
     use camino::Utf8PathBuf;
     use camino_tempfile::Builder;
     use chrono::{DateTime, Utc};
-    use omicron_common::api::external::Generation;
+    use omicron_generation_kinds::Generation;
     use slog::{Drain, o};
     use slog_term::{FullFormat, PlainDecorator, TestStdoutWriter};
     use std::collections::BTreeMap;

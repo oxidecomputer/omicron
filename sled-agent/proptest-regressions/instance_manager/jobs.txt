@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 4e8e2817576416a57a68a138b38cb2149073cc0c83d9fd1a2e99d48f9660a04a # shrinks to input = _JobsUpholdsInvariantsArgs { initial_disposition: ConfigNotAvailable, ops: [UpdateDisposition(Known(Available)), TryEnsure { id: 0, instance: 0, insert_if_allowed: true }] }
+cc 31617f3aa73d1436ff8241d0884d022023fe7d2598ee2071898e8c90300aa2a9 # shrinks to input = _JobsUpholdsInvariantsArgs { initial_disposition: ConfigNotAvailable, ops: [UpdateDisposition(Known(Available)), TryEnsure { id: 208, instance: 0, insert_if_allowed: true }, Remove { id: 208 }] }

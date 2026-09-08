@@ -13,10 +13,12 @@
 //! sled agent or that sled agent will never update (like the sled ID).
 
 use super::{Generation, VmmState};
+use crate::typed_generation::DbTypedGeneration;
 use crate::typed_uuid::DbTypedUuid;
 use crate::{SqlU16, VmmCpuPlatform, VmmFailureReason};
 use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::vmm;
+use omicron_generation_kinds::UpdateDispositionGenerationKind;
 use omicron_uuid_kinds::*;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -76,6 +78,24 @@ pub struct Vmm {
     /// If this VMM is in the `Failed` state, this field describes why it
     /// failed. This is `None` for VMMs that are not in the `Failed` state.
     pub failure_reason: Option<VmmFailureReason>,
+
+    /// The sled's `update_disposition` generation at which this VMM was marked
+    /// as needing to be stopped in order to update the sled.
+    ///
+    /// This is set when the sled begins evacuating its VMs. It indicates two
+    /// things: that the VMM needs to be stopped, and that when it is stopped,
+    /// this was in order to update the sled.
+    ///
+    /// This field is set just as a blueprint containing sleds to be updated
+    /// is executed. So, depending on _when_ this field is observed, the sled
+    /// and/or associated VMMs may not have been stopped yet.
+    ///
+    /// The `update_disposition` generation number is used primarily for
+    /// debugging purposes. During the process to stop VMMs for an update, we
+    /// only care if this field is stopped or not. THe field is NULL when its
+    /// state has not been modified by an update.
+    pub stop_for_update_disposition_generation:
+        Option<DbTypedGeneration<UpdateDispositionGenerationKind>>,
 }
 
 impl Vmm {
@@ -106,6 +126,7 @@ impl Vmm {
             state: VmmState::Creating,
             cpu_platform,
             failure_reason: None,
+            stop_for_update_disposition_generation: None,
         }
     }
 

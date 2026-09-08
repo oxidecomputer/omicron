@@ -5,7 +5,7 @@
 use super::scalar::ScalarEditor;
 use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
-use omicron_common::disk::M2Slot;
+use sled_agent_types::disk::M2Slot;
 
 #[derive(Debug)]
 pub(super) struct HostPhase2Editor {

@@ -229,5 +229,6 @@ fn port_input_from_db(
                 post1: c.post1,
             })
             .collect(),
+        allow_ddm_traffic: info.port.allow_ddm_traffic,
     }
 }

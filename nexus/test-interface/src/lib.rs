@@ -41,6 +41,7 @@ use nexus_types::internal_api::params::{
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::Error;
 use omicron_common::disk::DatasetKind;
+use omicron_debug_dropbox::DebugDropbox;
 use omicron_uuid_kinds::DatasetUuid;
 use slog::Logger;
 use std::net::{SocketAddr, SocketAddrV6};
@@ -54,6 +55,7 @@ pub trait NexusServer: Send + Sync + 'static {
     async fn start_internal(
         config: &NexusConfig,
         log: &Logger,
+        debug_dropbox: DebugDropbox,
     ) -> Result<Self::InternalServer, String>;
 
     /// Stops the execution of a `Self::InternalServer`.
@@ -88,7 +90,7 @@ pub trait NexusServer: Send + Sync + 'static {
 
     fn inventory_load_rx(&self) -> watch::Receiver<Option<Arc<Collection>>>;
 
-    fn get_http_server_external_address(&self) -> SocketAddr;
+    fn get_all_http_server_external_addresses(&self) -> Vec<SocketAddr>;
     fn get_http_server_techport_address(&self) -> SocketAddr;
     fn get_http_server_internal_address(&self) -> SocketAddr;
     fn get_http_server_lockstep_address(&self) -> SocketAddr;

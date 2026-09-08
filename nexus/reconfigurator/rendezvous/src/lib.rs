@@ -10,6 +10,7 @@
 
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use nexus_db_queries::db::model::SledBlueprintAvailabilityInput;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::internal_api::background::BlueprintRendezvousStats;
@@ -19,6 +20,7 @@ mod crucible_dataset;
 mod debug_dataset;
 mod local_storage_dataset;
 mod local_storage_unencrypted_dataset;
+mod sled_blueprint_availability;
 
 pub async fn reconcile_blueprint_rendezvous_tables(
     opctx: &OpContext,
@@ -77,11 +79,23 @@ pub async fn reconcile_blueprint_rendezvous_tables(
         )
         .await?;
 
+    let sled_inputs =
+        SledBlueprintAvailabilityInput::all_from_blueprint(blueprint);
+    let sled_blueprint_availability =
+        sled_blueprint_availability::reconcile_sled_blueprint_availability(
+            opctx,
+            datastore,
+            blueprint.id,
+            sled_inputs,
+        )
+        .await?;
+
     Ok(BlueprintRendezvousStats {
         debug_dataset,
         crucible_dataset,
         local_storage_dataset,
         local_storage_unencrypted_dataset,
+        sled_blueprint_availability,
     })
 }
 

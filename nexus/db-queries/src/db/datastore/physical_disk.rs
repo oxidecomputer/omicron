@@ -769,9 +769,10 @@ mod test {
     use nexus_db_lookup::LookupPath;
     use nexus_types::identity::Asset;
     use omicron_common::api::external::ByteCount;
-    use omicron_common::disk::{DiskIdentity, DiskVariant};
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::ZpoolUuid;
+    use sled_agent_types::disk::DiskIdentity;
+    use sled_agent_types::disk::DiskVariant;
     use sled_agent_types::inventory::{
         ConfigReconcilerInventoryStatus, FmdInventory, Inventory,
         InventoryDisk, OmicronFileSourceResolverInventory, SledCpuFamily,

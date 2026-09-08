@@ -1979,6 +1979,7 @@ mod tests {
     use omicron_common::api::external::Error;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::api::external::MacAddr;
+    use omicron_generation_kinds::InstanceStateGeneration;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::InstanceUuid;
@@ -2060,7 +2061,11 @@ mod tests {
         let new_runtime = model::InstanceRuntimeState {
             nexus_state: state,
             propolis_id,
-            generation: instance.state_generation.next().into(),
+            generation: InstanceStateGeneration::from(
+                instance.state_generation,
+            )
+            .next()
+            .into(),
             ..instance.runtime()
         };
         let res = db_datastore

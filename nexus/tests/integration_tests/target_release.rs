@@ -452,7 +452,7 @@ async fn install_target_blueprint<N: NexusServer>(
             .await
             .context("getting current target release")?;
         blueprint.target_release_minimum_generation =
-            (*current_target_release.generation).next();
+            current_target_release.generation().next();
     }
 
     // Import this blueprint and make it the new target, reflecting a

@@ -424,9 +424,6 @@ async fn test_ip_pool_silo_link(cptestctx: &ControlPlaneTestContext) {
     let assocs_p0 = silos_for_pool(client, "p0").await;
     assert_eq!(assocs_p0.items.len(), 0);
 
-    // we need to use a discoverable silo because non-discoverable silos, while
-    // linkable, are filtered out of the list of linked silos for a pool. the
-    // test silo at cptestctx.silo_name is non-discoverable.
     let silo =
         create_silo(&client, "my-silo", true, SiloIdentityMode::SamlJit).await;
 
@@ -644,11 +641,8 @@ async fn cannot_unlink_ip_pool_with_outstanding_floating_ips(
     object_delete(client, &url).await;
 }
 
-/// Non-discoverable silos can be linked to a pool, but they do not show up
-/// in the list of silos for that pool, just as they do not show up in the
-/// top-level list of silos
 #[nexus_test]
-async fn test_ip_pool_silo_list_only_discoverable(
+async fn test_ip_pool_silo_list_includes_non_discoverable(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
@@ -669,8 +663,11 @@ async fn test_ip_pool_silo_list_only_discoverable(
     link_ip_pool(client, "p0", &silo_non_disc.id(), false).await;
 
     let silos_p0 = silos_for_pool(client, "p0").await;
-    assert_eq!(silos_p0.items.len(), 1);
-    assert_eq!(silos_p0.items[0].silo_id, silo_disc.id());
+    assert_eq!(silos_p0.items.len(), 2);
+    assert_eq!(
+        silos_p0.items.iter().map(|link| link.silo_id).collect::<BTreeSet<_>>(),
+        BTreeSet::from([silo_disc.id(), silo_non_disc.id()]),
+    );
 }
 
 #[nexus_test]
@@ -687,9 +684,6 @@ async fn test_ip_pool_update_default(cptestctx: &ControlPlaneTestContext) {
     let silos_p1 = silos_for_pool(client, "p1").await;
     assert_eq!(silos_p1.items.len(), 0);
 
-    // we need to use a discoverable silo because non-discoverable silos, while
-    // linkable, are filtered out of the list of linked silos for a pool. the
-    // test silo at cptestctx.silo_name is non-discoverable.
     let silo =
         create_silo(&client, "my-silo", true, SiloIdentityMode::SamlJit).await;
 
@@ -838,9 +832,7 @@ async fn test_ip_pool_silos_pagination(cptestctx: &ControlPlaneTestContext) {
     let silos_p0 = silos_for_pool(client, "p0").await;
     assert_eq!(silos_p0.items.len(), 0);
 
-    // create and link some silos. we need to use discoverable silos because
-    // non-discoverable silos, while linkable, are filtered out of the list of
-    // linked silos for a pool
+    // Create and link some silos.
     let mut silo_ids = vec![];
     for i in 1..=8 {
         let name = format!("silo-{}", i);

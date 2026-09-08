@@ -9,7 +9,6 @@ workspace = true
 
 [dependencies]
 ciborium.workspace = true
-omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
 serde.workspace = true
 tufaceous-artifact.workspace = true
@@ -19,6 +18,5 @@ libipcc.workspace = true
 slog-error-chain.workspace = true
 
 [dev-dependencies]
-omicron-common = { workspace = true, features = ["testing"] }
 proptest.workspace = true
 test-strategy.workspace = true

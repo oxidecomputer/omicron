@@ -208,7 +208,10 @@ async fn test_sled_move_updates_multicast_port_mapping(
     // Activate the inventory loader to update the watch channel with the new
     // collection, then activate the reconciler which will detect the sled
     // location change and invalidate caches.
-    activate_inventory_loader(&cptestctx.lockstep_client).await;
+    nexus_test_utils::background::run_inventory_loader(
+        &cptestctx.lockstep_client,
+    )
+    .await;
     nexus.invalidate_multicast_caches();
     wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
 

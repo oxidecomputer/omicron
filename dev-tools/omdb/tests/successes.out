@@ -89,9 +89,9 @@ EXECUTING COMMAND: omdb ["db", "sleds"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
- SERIAL       IP           ROLE      POLICY      STATE   ID                                   
- SimGimlet01  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
- SimGimlet00  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
+ SERIAL       IP           ROLE      POLICY      STATE   BP AVAIL   ID                                   
+ SimGimlet01  [::1]:REDACTED_PORT  scrimlet  in service  active  available  ..........<REDACTED_UUID>........... 
+ SimGimlet00  [::1]:REDACTED_PORT  scrimlet  in service  active  available  ..........<REDACTED_UUID>........... 
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
@@ -102,9 +102,9 @@ EXECUTING COMMAND: omdb ["db", "sleds", "-F", "discretionary"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
- SERIAL       IP           ROLE      POLICY      STATE   ID                                   
- SimGimlet01  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
- SimGimlet00  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
+ SERIAL       IP           ROLE      POLICY      STATE   BP AVAIL   ID                                   
+ SimGimlet01  [::1]:REDACTED_PORT  scrimlet  in service  active  available  ..........<REDACTED_UUID>........... 
+ SimGimlet00  [::1]:REDACTED_PORT  scrimlet  in service  active  available  ..........<REDACTED_UUID>........... 
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
@@ -292,6 +292,10 @@ task: "blueprint_loader"
 
 task: "blueprint_planner"
     Updates the target blueprint
+
+
+task: "blueprint_pruner"
+    prunes old blueprints from the database
 
 
 task: "blueprint_rendezvous"
@@ -633,6 +637,12 @@ task: "blueprint_planner"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     blueprint planning explicitly disabled by config!
 
+task: "blueprint_pruner"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: Internal Error: no bp_target rows found
+
 task: "blueprint_rendezvous"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
@@ -661,6 +671,15 @@ task: "blueprint_rendezvous"
         num_not_in_inventory:   0
         num_tombstoned:         0
         num_already_tombstoned: 0
+    sled_blueprint_availability rendezvous counts:
+        num_marked_available:                0
+        num_marked_unavailable:              0
+        num_unchanged:                       2
+        num_invariant_violations:            0
+        num_decommissioned:                  0
+        num_already_decommissioned:          0
+        num_not_in_blueprint:                0
+        num_decommissioned_not_in_blueprint: 0
 
 task: "crdb_node_id_collector"
   configured period: every <REDACTED_DURATION>m
@@ -1346,6 +1365,12 @@ task: "blueprint_planner"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     blueprint planning explicitly disabled by config!
 
+task: "blueprint_pruner"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: Internal Error: no bp_target rows found
+
 task: "blueprint_rendezvous"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
@@ -1374,6 +1399,15 @@ task: "blueprint_rendezvous"
         num_not_in_inventory:   0
         num_tombstoned:         0
         num_already_tombstoned: 0
+    sled_blueprint_availability rendezvous counts:
+        num_marked_available:                0
+        num_marked_unavailable:              0
+        num_unchanged:                       2
+        num_invariant_violations:            0
+        num_decommissioned:                  0
+        num_already_decommissioned:          0
+        num_not_in_blueprint:                0
+        num_decommissioned_not_in_blueprint: 0
 
 task: "crdb_node_id_collector"
   configured period: every <REDACTED_DURATION>m
@@ -2213,6 +2247,8 @@ Reconfigurator config:
     tuf repo pruner enabled: true
     disruption policy: terminate
     planner enabled: false
+    blueprint pruner enabled: true
+    blueprint pruner nkeep: 1000
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
@@ -2290,9 +2326,11 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 reconfigurator config updated to version 2:
-    tuf repo pruner enabled:   true (unchanged)
-*   planner enabled:::::::::   false -> true
-    disruption policy:::::::   terminate (unchanged)
+    tuf repo pruner enabled::   true (unchanged)
+*   planner enabled::::::::::   false -> true
+    disruption policy::::::::   terminate (unchanged)
+    blueprint pruner enabled:   true (unchanged)
+    blueprint pruner nkeep:::   1000 (unchanged)
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
@@ -2302,9 +2340,11 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 reconfigurator config updated to version 3:
-    tuf repo pruner enabled:   true (unchanged)
-    planner enabled:::::::::   true (unchanged)
-*   disruption policy:::::::   terminate -> live-migrate or terminate
+    tuf repo pruner enabled::   true (unchanged)
+    planner enabled::::::::::   true (unchanged)
+*   disruption policy::::::::   terminate -> live-migrate or terminate
+    blueprint pruner enabled:   true (unchanged)
+    blueprint pruner nkeep:::   1000 (unchanged)
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
@@ -2319,6 +2359,8 @@ Reconfigurator config:
     tuf repo pruner enabled: true
     disruption policy: live-migrate or terminate
     planner enabled: true
+    blueprint pruner enabled: true
+    blueprint pruner nkeep: 1000
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/

@@ -7,7 +7,6 @@
 use super::RssAccessError;
 use super::http_entrypoints_lockstep;
 use super::http_entrypoints_lockstep::BootstrapServerContext;
-use super::views::SledAgentResponse;
 use crate::bootstrap::maghemite;
 use crate::bootstrap::pre_server::BootstrapAgentStartup;
 use crate::bootstrap::pumpkind;
@@ -36,6 +35,7 @@ use omicron_ledger as ledger;
 use omicron_ledger::Ledger;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackInitUuid;
+use sled_agent_bootstrap_common::sprockets::SledAgentResponse;
 use sled_agent_config_reconciler::ConfigReconcilerSpawnToken;
 use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_rack_setup::RackInitializeRequestParams;
@@ -47,6 +47,7 @@ use slog_error_chain::InlineErrorChain;
 use std::io;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
@@ -209,9 +210,12 @@ impl Server {
             internal_disks_rx,
             bootstore_node_handle: long_running_task_handles.bootstore.clone(),
             rss_access,
-            sprockets: config.sprockets.clone(),
+            sprockets_config: config.sprockets.clone(),
             trust_quorum_handle: long_running_task_handles.trust_quorum.clone(),
             measurements: long_running_task_handles.measurements.clone(),
+            scrimlet_reconcilers: Arc::clone(
+                &long_running_task_handles.scrimlet_reconcilers,
+            ),
         };
 
         // Start the lockstep dropshot server for rack initialization.

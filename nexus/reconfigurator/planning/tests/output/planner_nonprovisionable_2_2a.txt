@@ -436,9 +436,7 @@ mismatched zone type: after: Nexus(
         },
         external_tls: false,
         external_dns_servers: [],
-        nexus_generation: Generation(
-            1,
-        ),
+        nexus_generation: 1 (nexus),
     },
 )
 

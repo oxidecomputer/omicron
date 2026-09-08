@@ -48,17 +48,18 @@ use omicron_common::address::RACK_PREFIX_LENGTH;
 use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::address::get_sled_address;
 use omicron_common::api::external::ByteCount;
-use omicron_common::api::external::Generation;
-use omicron_common::disk::DiskIdentity;
-use omicron_common::disk::DiskVariant;
-use omicron_common::disk::M2Slot;
 use omicron_common::policy::CRUCIBLE_PANTRY_REDUNDANCY;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_common::policy::NEXUS_REDUNDANCY;
+use omicron_generation_kinds::Generation;
 use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use sled_agent_types::disk::DatasetConfig;
+use sled_agent_types::disk::DiskIdentity;
+use sled_agent_types::disk::DiskVariant;
+use sled_agent_types::disk::M2Slot;
 use sled_agent_types::inventory::ConfigReconcilerInventory;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
 use sled_agent_types::inventory::FmdInventory;
@@ -428,6 +429,11 @@ impl SystemDescription {
         })
     }
 
+    /// Return an iterator over every sled in the system, in sled ID order.
+    pub fn sleds(&self) -> impl Iterator<Item = &Sled> + '_ {
+        self.sleds.values().map(|sled| &**sled)
+    }
+
     pub fn get_sled(&self, sled_id: SledUuid) -> anyhow::Result<&Sled> {
         let Some(sled) = self.sleds.get(&sled_id) else {
             bail!("Sled not found with id {sled_id}");
@@ -491,6 +497,7 @@ impl SystemDescription {
             sled.policy,
             sled.sled_config,
             sled.npools,
+            sled.resources,
         );
         self.sleds.insert(sled_id, Arc::new(sled));
         Ok(self)
@@ -1255,6 +1262,36 @@ pub enum SledHardware {
     Empty,
 }
 
+/// The hardware resources for a simulated sled in the example system.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SimulatedSledResources {
+    /// The number of hardware threads available to the sled.
+    pub usable_hardware_threads: u32,
+    /// The amount of physical RAM available to the sled.
+    pub usable_physical_ram: ByteCount,
+    /// The size of the reservoir available to the sled.
+    pub reservoir_size: ByteCount,
+    /// The CPU family of the sled.
+    pub cpu_family: SledCpuFamily,
+}
+
+impl Default for SimulatedSledResources {
+    /// Return the default simulated sled resources.
+    ///
+    /// These defaults are fairly small. Tests that place instances should set
+    /// more realistic values.
+    fn default() -> Self {
+        // The default values match the fixed ones SystemDescription used to
+        // report in the past -- existing fixtures might depend on those values.
+        Self {
+            usable_hardware_threads: 10,
+            usable_physical_ram: ByteCount::from(1024 * 1024),
+            reservoir_size: ByteCount::from(1024),
+            cpu_family: SledCpuFamily::AmdMilan,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct SledBuilder {
     id: Option<SledUuid>,
@@ -1265,6 +1302,7 @@ pub struct SledBuilder {
     policy: SledPolicy,
     sled_config: OmicronSledConfig,
     npools: u8,
+    resources: SimulatedSledResources,
 }
 
 impl SledBuilder {
@@ -1286,6 +1324,7 @@ impl SledBuilder {
                 provision_policy: SledProvisionPolicy::Provisionable,
             },
             npools: Self::DEFAULT_NPOOLS,
+            resources: SimulatedSledResources::default(),
         }
     }
 
@@ -1345,6 +1384,12 @@ impl SledBuilder {
         self.policy = policy;
         self
     }
+
+    /// Sets the hardware resources this sled reports in inventory.
+    pub fn resources(mut self, resources: SimulatedSledResources) -> Self {
+        self.resources = resources;
+        self
+    }
 }
 
 /// Convenience structure summarizing `Sled` inputs that come from inventory
@@ -1399,6 +1444,7 @@ impl Sled {
         policy: SledPolicy,
         sled_config: OmicronSledConfig,
         nzpools: u8,
+        resources: SimulatedSledResources,
     ) -> Sled {
         use typed_rng::TypedUuidRng;
         let unique = unique.unwrap_or_else(|| hardware_slot.to_string());
@@ -1474,13 +1520,13 @@ impl Sled {
             let sled_agent_address = get_sled_address(sled_subnet);
             Inventory {
                 baseboard_id,
-                reservoir_size: ByteCount::from(1024),
+                reservoir_size: resources.reservoir_size,
                 sled_role,
                 sled_agent_address,
                 sled_id,
-                usable_hardware_threads: 10,
-                usable_physical_ram: ByteCount::from(1024 * 1024),
-                cpu_family: SledCpuFamily::AmdMilan,
+                usable_hardware_threads: resources.usable_hardware_threads,
+                usable_physical_ram: resources.usable_physical_ram,
+                cpu_family: resources.cpu_family,
                 // Populate disks, appearing like a real device.
                 disks: zpools
                     .values()
@@ -1736,10 +1782,7 @@ impl Sled {
     ///
     /// The inventory values for "available space" and "used space" are
     /// made up, since this is a synthetic dataset.
-    pub fn add_synthetic_dataset(
-        &mut self,
-        config: omicron_common::disk::DatasetConfig,
-    ) {
+    pub fn add_synthetic_dataset(&mut self, config: DatasetConfig) {
         self.inventory_sled_agent.datasets.push(InventoryDataset {
             id: Some(config.id),
             name: config.name.full_name(),
@@ -1771,7 +1814,9 @@ impl Sled {
             .map(|(&slot, &hash)| (slot, hash))
     }
 
-    fn sled_agent_inventory(&self) -> &Inventory {
+    /// Returns the inventory as the simulated sled's Sled Agent would report up
+    /// to Nexus.
+    pub fn sled_agent_inventory(&self) -> &Inventory {
         &self.inventory_sled_agent
     }
 

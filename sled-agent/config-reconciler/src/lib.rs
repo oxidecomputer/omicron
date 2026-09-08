@@ -65,9 +65,11 @@ pub use dataset_serialization_task::NestedDatasetMountError;
 pub use handle::AvailableDatasetsReceiver;
 pub use handle::ConfigReconcilerHandle;
 pub use handle::ConfigReconcilerSpawnToken;
+pub use handle::CurrentUpdateDisposition;
 pub use handle::InventoryError;
 pub use handle::ReconcilerInventory;
 pub use handle::TimeSyncConfig;
+pub use handle::UpdateDispositionReceiver;
 pub use host_phase_2::HostPhase2PreparedContents;
 pub use internal_disks::InternalDisks;
 pub use internal_disks::InternalDisksReceiver;
@@ -75,6 +77,7 @@ pub use internal_disks::InternalDisksWithBootDisk;
 pub use ledger::LedgerArtifactConfigError;
 pub use ledger::LedgerNewConfigError;
 pub use ledger::LedgerTaskError;
+pub use ledger::ledgered_config_versioning::read_ledgered_artifact_config;
 pub use mupdate_override::ResolverStatusExt;
 pub use raw_disks::RawDisksSender;
 pub use reconciler_task::CurrentlyManagedZpools;
@@ -84,5 +87,7 @@ pub use reconciler_task::TimeSyncStatus;
 pub use sled_agent_facilities::SledAgentArtifactStore;
 pub use sled_agent_facilities::SledAgentFacilities;
 
+#[cfg(any(test, feature = "testing"))]
+pub use handle::FakeUpdateDispositionSender;
 #[cfg(any(test, feature = "testing"))]
 pub use internal_disks::InternalDiskDetails;

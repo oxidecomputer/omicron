@@ -45,8 +45,10 @@ enum Commands {
         #[command(flatten)]
         filter: FilterArgs,
 
-        /// Show log files with an `mtime` before this timestamp. May be absolute or relative,
-        /// e.g. '2025-04-01T01:01:01', '-1 hour', '3 days ago'
+        /// Show log files whose content begins before this timestamp, judged
+        /// by creation time where available and `mtime` otherwise. May be
+        /// absolute or relative, e.g. '2025-04-01T01:01:01', '-1 hour',
+        /// '3 days ago'
         #[arg(short = 'B', long, value_parser = parse_timestamp_now)]
         before: Option<Timestamp>,
 

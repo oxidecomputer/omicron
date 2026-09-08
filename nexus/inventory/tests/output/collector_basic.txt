@@ -88,6 +88,7 @@ sled agents found:
     ledgered sled config:
         generation: 3
         remove_mupdate_override: None
+        update_disposition: Available
         host_phase_2.slot_a: CurrentContents
         host_phase_2.slot_b: CurrentContents
         zone 8b88a56f-3eb6-4d80-ba42-75d867bc427d type oximeter
@@ -96,6 +97,7 @@ sled agents found:
     last reconciled config:
         generation: 3
         remove_mupdate_override: None
+        update_disposition: Available
         host_phase_2.slot_a: CurrentContents
         host_phase_2.slot_b: CurrentContents
         zone 8b88a56f-3eb6-4d80-ba42-75d867bc427d type oximeter
@@ -108,6 +110,7 @@ sled agents found:
     ledgered sled config:
         generation: 3
         remove_mupdate_override: None
+        update_disposition: Available
         host_phase_2.slot_a: CurrentContents
         host_phase_2.slot_b: CurrentContents
         zone 5125277f-0988-490b-ac01-3bba20cc8f07 type oximeter
@@ -116,6 +119,7 @@ sled agents found:
     last reconciled config:
         generation: 3
         remove_mupdate_override: None
+        update_disposition: Available
         host_phase_2.slot_a: CurrentContents
         host_phase_2.slot_b: CurrentContents
         zone 5125277f-0988-490b-ac01-3bba20cc8f07 type oximeter

@@ -8,7 +8,7 @@ use super::config::{ClickhouseHost, RaftServerSettings};
 use camino::Utf8PathBuf;
 use daft::Diffable;
 use derive_more::{Add, AddAssign, Display, From};
-use omicron_common::api::external::Generation;
+use omicron_generation_kinds::Generation;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;

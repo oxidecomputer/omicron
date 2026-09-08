@@ -481,6 +481,9 @@ impl FmAnalysis {
                             SagaReasonAbandoned::Unrecoverable => {
                                 SagaAbandonReason::Unrecoverable
                             }
+                            SagaReasonAbandoned::Orphaned => {
+                                SagaAbandonReason::Orphaned
+                            }
                         },
                         comment: metadata.comment,
                     })
@@ -938,7 +941,8 @@ mod tests {
     use nexus_types::fm::SitrepMetadata;
     use nexus_types::fm::SitrepVersion;
     use nexus_types::fm::case;
-    use omicron_common::api::external::Generation;
+    use omicron_generation_kinds::AlertGeneration;
+    use omicron_generation_kinds::SupportBundleGeneration;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::CaseUuid;
     use omicron_uuid_kinds::SitrepUuid;
@@ -1004,8 +1008,8 @@ mod tests {
                     creator_id: OmicronZoneUuid::new_v4(),
                     comment: "test sitrep".to_string(),
                     time_created: Utc::now(),
-                    alert_generation: Generation::new(),
-                    support_bundle_generation: Generation::new(),
+                    alert_generation: AlertGeneration::new(),
+                    support_bundle_generation: SupportBundleGeneration::new(),
                 },
                 cases: Default::default(),
                 ereports_by_id: Default::default(),
@@ -1297,8 +1301,8 @@ mod tests {
                 creator_id: OmicronZoneUuid::new_v4(),
                 comment: "test sitrep".to_string(),
                 time_created: Utc::now(),
-                alert_generation: Generation::new(),
-                support_bundle_generation: Generation::new(),
+                alert_generation: AlertGeneration::new(),
+                support_bundle_generation: SupportBundleGeneration::new(),
             },
             cases,
             ereports_by_id: Default::default(),
@@ -1317,7 +1321,7 @@ mod tests {
                 opctx,
                 &alert_request(satisfied_alert_id),
                 satisfied_case_id,
-                Generation::new(),
+                AlertGeneration::new(),
             )
             .await
             .expect("created the satisfied case's alert");

@@ -41,6 +41,7 @@ use nexus_types::external_api::project;
 use nexus_types::identity::Resource;
 use nexus_types::tuf_repo::TufRepoDescription;
 use omicron_common::api::external;
+use omicron_generation_kinds::InstanceStateGeneration;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
@@ -276,7 +277,7 @@ pub async fn create_stopped_instance_record(
                 propolis_id: None,
                 migration_id: None,
                 dst_propolis_id: None,
-                generation: Generation::from(Generation::new().0.next()),
+                generation: InstanceStateGeneration::new().next().into(),
                 time_last_auto_restarted: None,
             },
         )
@@ -560,9 +561,11 @@ pub async fn attach_instance_to_vmm(
                 propolis_id: Some(vmm_id.into_untyped_uuid()),
                 dst_propolis_id: None,
                 migration_id: None,
-                generation: Generation::from(
-                    instance.runtime().generation.next(),
-                ),
+                generation: InstanceStateGeneration::from(
+                    instance.runtime().generation,
+                )
+                .next()
+                .into(),
                 time_updated: Utc::now(),
                 time_last_auto_restarted: None,
             },

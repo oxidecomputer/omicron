@@ -19,7 +19,7 @@ use omicron_common::address::{
     CLICKHOUSE_KEEPER_RAFT_PORT, CLICKHOUSE_KEEPER_TCP_PORT,
     CLICKHOUSE_TCP_PORT,
 };
-use omicron_common::api::external::Generation;
+use omicron_generation_kinds::Generation;
 use std::fmt::Display;
 use std::net::Ipv6Addr;
 use std::str::FromStr;

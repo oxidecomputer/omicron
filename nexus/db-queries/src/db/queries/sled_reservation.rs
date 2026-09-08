@@ -16,15 +16,16 @@ use nexus_db_schema::enums::SledCpuFamilyEnum;
 use nexus_db_schema::enums::SledResourceVmmStateEnum;
 use nonempty::NonEmpty;
 use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::DiskUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
-use uuid::Uuid;
 
 #[derive(Debug, Clone)]
 pub struct LocalStorageAllocation {
-    pub disk_id: Uuid,
+    /// The virtual disk requiring this allocation
+    pub disk_id: DiskUuid,
     pub local_storage_unencrypted_dataset_allocation_id: DatasetUuid,
     pub required_dataset_size: i64,
     pub local_storage_unencrypted_dataset_id: DatasetUuid,
@@ -614,7 +615,9 @@ pub fn sled_insert_resource_query(
                     .bind::<sql_types::Uuid, _>(instance_id)
                     .sql(" FROM DISK WHERE ID = ")
                     .param()
-                    .bind::<sql_types::Uuid, _>(allocation.disk_id);
+                    .bind::<sql_types::Uuid, _>(
+                        allocation.disk_id.into_untyped_uuid(),
+                    );
 
                 query.sql(") ");
 
@@ -676,7 +679,7 @@ pub fn sled_insert_resource_query(
                 query
                     .sql("WHEN ")
                     .param()
-                    .bind::<sql_types::Uuid, _>(*disk_id)
+                    .bind::<sql_types::Uuid, _>(disk_id.into_untyped_uuid())
                     .sql(" THEN ")
                     .param()
                     .bind::<sql_types::Uuid, _>(
@@ -691,7 +694,9 @@ pub fn sled_insert_resource_query(
             for (index, allocation) in allocations.iter().enumerate() {
                 let LocalStorageAllocation { disk_id, .. } = allocation;
 
-                query.param().bind::<sql_types::Uuid, _>(*disk_id);
+                query
+                    .param()
+                    .bind::<sql_types::Uuid, _>(disk_id.into_untyped_uuid());
 
                 if index != (allocations.len() - 1) {
                     query.sql(",");
@@ -1010,7 +1015,7 @@ mod test {
             &LocalStorageAllocationRequired::Yes {
                 allocations: nonempty![
                     LocalStorageAllocation {
-                        disk_id: Uuid::nil(),
+                        disk_id: DiskUuid::nil(),
                         local_storage_unencrypted_dataset_allocation_id:
                             DatasetUuid::nil(),
                         required_dataset_size: 64 * 1024 * 1024 * 1024,
@@ -1020,7 +1025,7 @@ mod test {
                         sled_id: SledUuid::nil(),
                     },
                     LocalStorageAllocation {
-                        disk_id: Uuid::nil(),
+                        disk_id: DiskUuid::nil(),
                         local_storage_unencrypted_dataset_allocation_id:
                             DatasetUuid::nil(),
                         required_dataset_size: 128 * 1024 * 1024 * 1024,
@@ -1080,7 +1085,7 @@ mod test {
             &resource,
             &LocalStorageAllocationRequired::Yes {
                 allocations: nonempty![LocalStorageAllocation {
-                    disk_id: Uuid::nil(),
+                    disk_id: DiskUuid::nil(),
                     local_storage_unencrypted_dataset_allocation_id:
                         DatasetUuid::nil(),
                     required_dataset_size: 128 * 1024 * 1024 * 1024,
@@ -1101,7 +1106,7 @@ mod test {
             &LocalStorageAllocationRequired::Yes {
                 allocations: nonempty![
                     LocalStorageAllocation {
-                        disk_id: Uuid::nil(),
+                        disk_id: DiskUuid::nil(),
                         local_storage_unencrypted_dataset_allocation_id:
                             DatasetUuid::nil(),
                         required_dataset_size: 128 * 1024 * 1024 * 1024,
@@ -1111,7 +1116,7 @@ mod test {
                         sled_id: SledUuid::nil(),
                     },
                     LocalStorageAllocation {
-                        disk_id: Uuid::nil(),
+                        disk_id: DiskUuid::nil(),
                         local_storage_unencrypted_dataset_allocation_id:
                             DatasetUuid::nil(),
                         required_dataset_size: 256 * 1024 * 1024 * 1024,

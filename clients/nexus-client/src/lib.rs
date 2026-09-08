@@ -26,7 +26,7 @@ progenitor::generate_api!(
         "oxnet" = "0.1.0",
     },
     replace = {
-        Generation = omicron_common::api::external::Generation,
+        Generation = omicron_generation_kinds::Generation,
         MacAddr = omicron_common::api::external::MacAddr,
         Name = omicron_common::api::external::Name,
         NetworkInterface = sled_agent_types::inventory::NetworkInterface,

@@ -8,12 +8,12 @@ use gateway_messages::SpPort;
 use mg_admin_client::types::Neighbor as MgdNeighbor;
 use mg_api_types::bgp::config::Origin4 as MgdOrigin4;
 use mg_api_types::bgp::history::Origin6 as MgdOrigin6;
-use proptest::collection::btree_map;
 use proptest::collection::vec;
 use proptest::prelude::Strategy;
 use proptest::prelude::any;
 use proptest::prelude::proptest as proptest_macro;
 use sled_agent_types::early_networking::LinkSpeed;
+use sled_agent_types::early_networking::NumberedRouter;
 use sled_agent_types::early_networking::PortConfig;
 use sled_agent_types::early_networking::RouterLifetimeConfig;
 use sled_agent_types::early_networking::RouterPeerIpAddr;
@@ -40,6 +40,7 @@ fn port_config(
         autoneg: false,
         lldp: None,
         tx_eq: None,
+        allow_ddm_traffic: false,
     }
 }
 
@@ -55,6 +56,67 @@ fn rack_config(
         bgp,
         bfd: Vec::new(),
     }
+}
+
+#[derive(Debug, Clone)]
+struct TestInputPeers {
+    // Numbered peers keyed by peer IP.
+    numbered: BTreeMap<RouterPeerIpAddr, BgpPeerConfig>,
+    // Unnumbered peers keyed by interface name.
+    unnumbered: BTreeMap<String, BgpPeerConfig>,
+}
+
+fn arb_peers(asn: u32) -> impl Strategy<Value = TestInputPeers> {
+    #[derive(Debug, Clone)]
+    enum SinglePeer {
+        Numbered(RouterPeerIpAddr, BgpPeerConfig),
+        Unnumbered(String, BgpPeerConfig),
+    }
+
+    // This is a minor proptest sin: we always generate an interface string, but
+    // throw it away ~half the time (only used for unnumbered peers).
+    let interface_strat = "[0-9a-zA-Z]{0,16}";
+
+    // Given an arbitrary interface string, peer type, and config, patch things
+    // up to be consistent:
+    //
+    // 1. Set the config's ASN to match `asn`
+    // 2. Set the config's address to match the peer type
+    // 3. Convert the triple into a `SinglePeer` (this discards `interface` for
+    //    numbered peers)
+    let single_peer = (
+        interface_strat,
+        any::<(RouterPeerType, BgpPeerConfig)>(),
+    )
+        .prop_map(move |(interface, (addr, mut config))| {
+            config.asn = asn;
+            config.addr = addr;
+            match addr {
+                RouterPeerType::Unnumbered(_) => {
+                    SinglePeer::Unnumbered(interface, config)
+                }
+                RouterPeerType::Numbered(numbered_router) => {
+                    SinglePeer::Numbered(numbered_router.target_addr(), config)
+                }
+            }
+        });
+
+    // Partition a list of peers into the two maps `TestInput` wants.
+    vec(single_peer, 1..=16).prop_map(|peers| {
+        let mut numbered = BTreeMap::new();
+        let mut unnumbered = BTreeMap::new();
+        for peer in peers {
+            match peer {
+                SinglePeer::Numbered(ip, config) => {
+                    numbered.insert(ip, config);
+                }
+                SinglePeer::Unnumbered(interface, config) => {
+                    unnumbered.insert(interface, config);
+                }
+            }
+        }
+        TestInputPeers { numbered, unnumbered }
+    })
 }
 
 // Description of a single desired BGP configuration. This attempts to be more
@@ -73,36 +135,8 @@ struct TestInput {
     }))]
     bgp_config: BgpConfig,
 
-    #[strategy(
-        vec(any::<(RouterPeerIpAddr, BgpPeerConfig)>(), 1..=8)
-            .prop_map(move |items| {
-                items
-                    .into_iter()
-                    .map(|(ip, mut peer)| {
-                        peer.asn = #asn;
-                        peer.addr = RouterPeerType::Numbered { ip };
-                        (ip, peer)
-                    })
-                    .collect()
-            })
-    )]
-    numbered_peers: BTreeMap<RouterPeerIpAddr, BgpPeerConfig>,
-
-    #[strategy(
-        btree_map(
-            "[0-9a-zA-Z]{0,16}",
-            any::<(RouterLifetimeConfig, BgpPeerConfig)>()
-                .prop_map(move |(router_lifetime, mut peer)| {
-                    peer.asn = #asn;
-                    peer.addr = RouterPeerType::Unnumbered {
-                        router_lifetime,
-                    };
-                    peer
-                }),
-            1..=8
-        )
-    )]
-    unnumbered_peers: BTreeMap<String, BgpPeerConfig>,
+    #[strategy(arb_peers(#asn))]
+    peers: TestInputPeers,
 }
 
 impl TestInput {
@@ -110,13 +144,13 @@ impl TestInput {
         // port name for numbered peers doesn't matter - see
         // https://github.com/oxidecomputer/maghemite/issues/768
         let mut qsfp0 =
-            self.numbered_peers.values().cloned().collect::<Vec<_>>();
-        if let Some(unnumbered_qsfp0) = self.unnumbered_peers.get("qsfp0") {
+            self.peers.numbered.values().cloned().collect::<Vec<_>>();
+        if let Some(unnumbered_qsfp0) = self.peers.unnumbered.get("qsfp0") {
             qsfp0.push(unnumbered_qsfp0.clone());
         }
         let mut all_ports =
             vec![port_config(SwitchSlot::Switch0, "qsfp0", qsfp0)];
-        for (port, config) in &self.unnumbered_peers {
+        for (port, config) in &self.peers.unnumbered {
             if port != "qsfp0" {
                 all_ports.push(port_config(
                     SwitchSlot::Switch0,
@@ -244,7 +278,15 @@ impl MgdNeighborKind for MgdNeighbor {
         self.vlan_id
     }
     fn peer_type(&self) -> RouterPeerType {
-        RouterPeerType::Numbered { ip: self.host.ip().try_into().unwrap() }
+        NumberedRouter::new(
+            self.host.ip().try_into().unwrap(),
+            self.src_addr.map(|ip| {
+                RouterPeerIpAddr::try_from(ip)
+                    .expect("invalid src_addr ip from mgd")
+            }),
+        )
+        .unwrap()
+        .into()
     }
 }
 
@@ -298,12 +340,13 @@ impl MgdNeighborKind for MgdUnnumberedNeighbor {
         self.vlan_id
     }
     fn peer_type(&self) -> RouterPeerType {
-        RouterPeerType::Unnumbered {
+        UnnumberedRouter {
             router_lifetime: RouterLifetimeConfig::new(
                 self.act_as_a_default_ipv6_router,
             )
             .unwrap(),
         }
+        .into()
     }
 }
 
@@ -505,16 +548,16 @@ async fn run_one_proptest_input(
         client.read_neighbors(input.asn).await.unwrap().into_inner();
     for neighbor in &numbered_neighbors {
         let addr: RouterPeerIpAddr = neighbor.name.parse().unwrap();
-        let config = input.numbered_peers.get(&addr).unwrap();
+        let config = input.peers.numbered.get(&addr).unwrap();
         check_mgd_state_against_expected_config(neighbor, config);
     }
-    assert_eq!(numbered_neighbors.len(), input.numbered_peers.len());
+    assert_eq!(numbered_neighbors.len(), input.peers.numbered.len());
 
     // confirm unnumbered peers
     let unnumbered_neighbors =
         client.read_unnumbered_neighbors(input.asn).await.unwrap().into_inner();
     for neighbor in &unnumbered_neighbors {
-        let Some(config) = input.unnumbered_peers.get(&neighbor.group) else {
+        let Some(config) = input.peers.unnumbered.get(&neighbor.group) else {
             panic!(
                 "mgd has unnumbered peer {neighbor:?} that is not present \
                  in our input"
@@ -522,7 +565,7 @@ async fn run_one_proptest_input(
         };
         check_mgd_state_against_expected_config(neighbor, config);
     }
-    assert_eq!(unnumbered_neighbors.len(), input.unnumbered_peers.len());
+    assert_eq!(unnumbered_neighbors.len(), input.peers.unnumbered.len());
 
     // ----
     // After the successful reconciliation above, reconciling again should do

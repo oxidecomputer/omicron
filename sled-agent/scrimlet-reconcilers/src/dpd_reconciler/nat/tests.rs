@@ -132,7 +132,8 @@ fn filter_out_overlapping_arbitrary_service_entries(
 ) -> bool {
     let mut entry_ips = BTreeSet::new();
     for entry in entries {
-        if desired_service_nat_entries.contains_key(&entry.zone_id) {
+        let key = (entry.zone_id, entry.kind.external_ip());
+        if desired_service_nat_entries.contains_key(&key) {
             return false;
         }
         if !entry_ips.insert(collapse_ipv4_mapped(entry.kind.external_ip())) {
