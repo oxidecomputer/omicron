@@ -7,12 +7,15 @@
 mod host_phase_1;
 mod rot;
 mod rot_bootloader;
+mod sled_evacuation;
 mod sp;
 
 use crate::mgs_updates::rot::RotUpdateState;
+use crate::mgs_updates::sled_evacuation::EvacuationStatus;
 use crate::planner::ZoneSafetyChecks;
 
 use gateway_types::rot::RotSlot;
+use nexus_types::deployment::BlueprintSledUpdateDispositionKind;
 use nexus_types::deployment::ExpectedActiveRotSlot;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::MgsUpdateComponent;
@@ -22,8 +25,10 @@ use nexus_types::deployment::PendingMgsUpdateRotBootloaderDetails;
 use nexus_types::deployment::PendingMgsUpdateRotDetails;
 use nexus_types::deployment::PendingMgsUpdateSpDetails;
 use nexus_types::deployment::PendingMgsUpdates;
+use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
 use nexus_types::deployment::TargetReleaseDescription;
 use nexus_types::deployment::planning_report::BlockedMgsUpdate;
+use nexus_types::deployment::planning_report::FailedMgsUpdateReason;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
 use nexus_types::tuf_repo::TufRepoDescription;
@@ -39,6 +44,13 @@ use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::ArtifactVersionError;
 
 pub(crate) use host_phase_1::PendingHostPhase2Changes;
+pub(crate) use sled_evacuation::EvacuatingSleds;
+pub(crate) use sled_evacuation::PendingUpdateDispositionChanges;
+
+// TODO-john What policy do we use for evacuating sleds? This should come from
+// the PlanningInput's policy.
+const DEFAULT_EVAC_POLICY: ReconfiguratorDisruptionPolicy =
+    ReconfiguratorDisruptionPolicy::Terminate;
 
 /// How to handle an MGS-driven update that has become impossible due to
 /// unsatisfied preconditions.
@@ -63,43 +75,14 @@ pub(crate) struct PlannedMgsUpdates {
     /// result in a change to the respective sled's `BlueprintSledConfig`.
     pub(crate) pending_host_phase_2_changes: PendingHostPhase2Changes,
 
+    /// Pending changes to sleds' update dispositions; each of these should
+    /// result in a change to the respective sled's `BlueprintSledConfig`.
+    pub(crate) pending_update_disposition_changes:
+        PendingUpdateDispositionChanges,
+
     /// Updates to components that cannot be planned due to a failure in a
     /// previous attempt.
     pub(crate) blocked_mgs_updates: Vec<BlockedMgsUpdate>,
-}
-
-impl PlannedMgsUpdates {
-    fn new() -> Self {
-        Self {
-            pending_updates: PendingMgsUpdates::new(),
-            pending_host_phase_2_changes: PendingHostPhase2Changes::empty(),
-            blocked_mgs_updates: Vec::new(),
-        }
-    }
-
-    fn add_pending_update(
-        &mut self,
-        pending_update: PendingMgsUpdate,
-    ) -> &mut Self {
-        self.pending_updates.insert(pending_update);
-        self
-    }
-
-    fn add_blocked_update(
-        &mut self,
-        blocked_update: BlockedMgsUpdate,
-    ) -> &mut Self {
-        self.blocked_mgs_updates.push(blocked_update);
-        self
-    }
-
-    fn set_pending_host_os_phase2_changes(
-        &mut self,
-        pending_host_os_phase2_changes: PendingHostPhase2Changes,
-    ) -> &mut Self {
-        self.pending_host_phase_2_changes = pending_host_os_phase2_changes;
-        self
-    }
 }
 
 /// Moral equivalent to `SpType`, but that includes additional information we
@@ -177,6 +160,13 @@ pub(crate) struct MgsUpdatePlanner<'a> {
     /// baseboards in inventory that would never be updated because they're not
     /// considered part of the current system)
     pub(crate) current_boards: &'a BTreeSet<UpdateableBoard>,
+    /// the set of sleds that are already set to the evacuating update
+    /// disposition, per the parent blueprint
+    ///
+    /// This set does _not_ account for the contents of `inventory`; e.g., a
+    /// sled in this set may not yet be evacuated, or may not not even be aware
+    /// it's being evacuated!
+    pub(crate) evacuating_sleds: &'a EvacuatingSleds,
     /// details about zones (and therefore sleds) that are unsafe to shut down
     pub(crate) zone_safety_checks: &'a ZoneSafetyChecks,
     /// the most recent set of configured `PendingMgsUpdates`
@@ -198,12 +188,15 @@ impl<'a> MgsUpdatePlanner<'a> {
         let mut pending_updates = PendingMgsUpdates::new();
         let mut pending_host_phase_2_changes =
             PendingHostPhase2Changes::empty();
+        let mut pending_update_disposition_changes =
+            PendingUpdateDispositionChanges::empty();
         let mut boards_preferred = BTreeSet::new();
         let mut blocked_mgs_updates = Vec::new();
         let MgsUpdatePlanner {
             log,
             inventory,
             current_boards,
+            evacuating_sleds,
             zone_safety_checks,
             current_updates,
             current_artifacts,
@@ -288,16 +281,46 @@ impl<'a> MgsUpdatePlanner<'a> {
                 info!(
                     log,
                     "system in initial release state \
-                no update artifacts available (no update necessary)",
+                     no update artifacts available (no update necessary)",
                 );
                 return PlannedMgsUpdates {
                     pending_updates,
                     pending_host_phase_2_changes,
+                    pending_update_disposition_changes,
                     blocked_mgs_updates,
                 };
             }
             TargetReleaseDescription::TufRepo(description) => description,
         };
+
+        // Track which boards are currently undergoing updates for the purposes
+        // of capping at `nmax_updates`. This includes:
+        //
+        // * Any boards that still have a pending update
+        // * Any sled currently marked for evacuation (which may or may not
+        //   also have a pending update)
+        //
+        // When we get to the main loop over candidate-for-update boards below,
+        // we'll keep this set up to date when we add or remove a board from
+        // either of these conditions.
+        //
+        // Create the initial set containing all boards with a pending update,
+        // then we'll add in any sleds marked for evacuation.
+        let mut boards_being_updated = pending_updates
+            .iter()
+            .map(|update| Arc::clone(&update.baseboard_id))
+            .collect::<BTreeSet<_>>();
+
+        // Find all the boards that correspond to sleds marked for evacuation.
+        // For each such board, add it to both `boards_preferred` (so we
+        // prioritize reevaluating it) and `boards_being_updated` (so we count
+        // it against `nmax_updates`).
+        for board in current_boards {
+            if evacuating_sleds.contains_board(board) {
+                boards_preferred.insert(board.baseboard_id().clone());
+                boards_being_updated.insert(Arc::clone(board.baseboard_id()));
+            }
+        }
 
         // Next, configure new updates for any boards that need an update, up to
         // `nmax_updates`.
@@ -319,64 +342,109 @@ impl<'a> MgsUpdatePlanner<'a> {
                 .filter(|b| !boards_preferred.contains(b.baseboard_id()));
             preferred.chain(non_preferred)
         };
+
+        // Remember whether we skipped evaluating any boards due to hitting the
+        // `nmax_updates` cap (only affects how we log before returning).
+        let mut reached_nmax_updates_cap = false;
+
         for board in candidates {
-            if pending_updates.len() >= nmax_updates {
-                info!(
-                    log,
-                    "reached maximum number of pending MGS-driven updates";
-                    "max" => nmax_updates
-                );
-                return PlannedMgsUpdates {
-                    pending_updates,
-                    pending_host_phase_2_changes,
-                    blocked_mgs_updates,
-                };
+            // If we still have a pending update for this board, move on.
+            if pending_updates.contains_key(board.baseboard_id()) {
+                continue;
             }
 
-            // `try_make_update` will always return at most a single update at a
-            // time. This means that this instance of `PlannedMgsUpdates`
-            // describes a single device update.
-            let PlannedMgsUpdates {
-                pending_updates: updates,
-                pending_host_phase_2_changes: mut host_phase_2,
-                blocked_mgs_updates: mut blocked_updates,
-            } = try_make_update(
+            // If we've hit `nmax_updates` and `boards_being_updated` does _not_
+            // contain this board, skip it: we're already at our limit.
+            //
+            // We already know that `pending_updates` does _not_ contain this
+            // board. If `boards_being_updated` does contain it, it must mean
+            // this is a sled marked for evacuation, and we should reevaluate
+            // it.
+            if boards_being_updated.len() >= nmax_updates
+                && !boards_being_updated.contains(board.baseboard_id())
+            {
+                reached_nmax_updates_cap = true;
+                continue;
+            }
+
+            match try_make_update(
                 log,
                 board,
                 inventory,
                 current_artifacts,
                 zone_safety_checks,
-            );
-
-            if let Some(update) = updates.into_iter().next() {
-                info!(log, "configuring MGS-driven update"; update);
-                pending_updates.insert(update.clone());
-            } else {
-                if blocked_updates.is_empty() && host_phase_2.is_empty() {
-                    info!(
-                        log,
-                        "skipping board for MGS-driven update \
-                         (no update necessary)";
-                        board.baseboard_id(),
-                    );
-                } else {
+                evacuating_sleds,
+            ) {
+                TryMakeUpdateResult::Update(update, mut host_phase_2) => {
+                    info!(log, "configuring MGS-driven update"; &update);
+                    pending_updates.insert(update);
+                    pending_host_phase_2_changes.append(&mut host_phase_2);
+                    boards_being_updated
+                        .insert(Arc::clone(board.baseboard_id()));
+                }
+                TryMakeUpdateResult::Blocked(blocked) => {
                     info!(
                         log,
                         "skipping board for MGS-driven update \
                          (found issues)";
                         board.baseboard_id(),
                     );
+                    blocked_mgs_updates.push(blocked);
+                }
+                TryMakeUpdateResult::StartEvacuating(sled_id) => {
+                    info!(
+                        log,
+                        "marking sled for evacuation";
+                        "sled_id" => %sled_id,
+                        board.baseboard_id(),
+                    );
+                    pending_update_disposition_changes.insert(
+                        sled_id,
+                        BlueprintSledUpdateDispositionKind::Evacuating {
+                            policy: DEFAULT_EVAC_POLICY,
+                        },
+                    );
+                    boards_being_updated
+                        .insert(Arc::clone(board.baseboard_id()));
+                }
+                TryMakeUpdateResult::EndEvacuating(sled_id) => {
+                    info!(
+                        log,
+                        "marking evacuated sled as available";
+                        "sled_id" => %sled_id,
+                        board.baseboard_id(),
+                    );
+                    pending_update_disposition_changes.insert(
+                        sled_id,
+                        BlueprintSledUpdateDispositionKind::Available,
+                    );
+                    boards_being_updated.remove(board.baseboard_id());
+                }
+                TryMakeUpdateResult::NoChangesNeeded => {
+                    info!(
+                        log,
+                        "skipping board for MGS-driven update \
+                         (no update necessary)";
+                        board.baseboard_id(),
+                    );
                 }
             }
-
-            pending_host_phase_2_changes.append(&mut host_phase_2);
-            blocked_mgs_updates.append(&mut blocked_updates);
         }
 
-        info!(log, "ran out of boards for MGS-driven update");
+        if reached_nmax_updates_cap {
+            info!(
+                log,
+                "reached maximum number of pending MGS-driven updates";
+                "max" => nmax_updates
+            );
+        } else {
+            info!(log, "ran out of boards for MGS-driven update");
+        }
+
         PlannedMgsUpdates {
             pending_updates,
             pending_host_phase_2_changes,
+            pending_update_disposition_changes,
             blocked_mgs_updates,
         }
     }
@@ -670,20 +738,32 @@ impl MgsUpdateOutcome {
     }
 }
 
+#[allow(clippy::large_enum_variant)]
+enum TryMakeUpdateResult {
+    /// An update should be scheduled for this board.
+    Update(PendingMgsUpdate, PendingHostPhase2Changes),
+    /// We want to update this board, but are blocked for the given reason.
+    Blocked(BlockedMgsUpdate),
+    /// We want to update this sled, but first need to evacuate it.
+    StartEvacuating(SledUuid),
+    /// Updates to this evacuated sled are complete, and it can be marked as
+    /// available.
+    EndEvacuating(SledUuid),
+    /// This board is fully up to date.
+    NoChangesNeeded,
+}
+
 /// Determine if the given baseboard needs any MGS-driven update (e.g., update
-/// to its SP, RoT, etc.).  If so, returns the update and a set of changes that
-/// need to be made to sled configs related to host phase 2 images (this set
-/// will be empty if we made a non-host update).  If not, returns
-/// `NoUpdateNeeded`.
+/// to its SP, RoT, etc.) or, if it's a sled, whether its update disposition
+/// status needs to change to or from evacuating.
 fn try_make_update(
     log: &slog::Logger,
     board: &UpdateableBoard,
     inventory: &Collection,
     current_artifacts: &TufRepoDescription,
     zone_safety_checks: &ZoneSafetyChecks,
-) -> PlannedMgsUpdates {
-    let mut pending_actions = PlannedMgsUpdates::new();
-
+    evacuating_sleds: &EvacuatingSleds,
+) -> TryMakeUpdateResult {
     // We try MGS-driven update components in a hardcoded priority order until
     // any of them returns `Some`.  The order is described in RFD 565 section
     // "Update Sequence".
@@ -739,25 +819,73 @@ fn try_make_update(
                 update,
                 pending_host_os_phase2_changes,
             )) => {
-                pending_actions.add_pending_update(update);
-                // If update_attempt is a host OS update, stage the phase 2
-                // changes. For any other type, this set will be empty
-                pending_actions.set_pending_host_os_phase2_changes(
-                    pending_host_os_phase2_changes,
-                );
-                break;
+                // If updating this component will reboot the sled, we need to
+                // check whether we're supposed to wait for the sled to be
+                // evacuated first (and whether it _is_ evacuated, if so).
+                let status = if let Some(sled_id) = board.sled_id()
+                    && component.update_requires_sled_reboot()
+                {
+                    match evacuating_sleds.evacuation_status(sled_id, inventory)
+                    {
+                        EvacuationStatus::Evacuated => {
+                            // Sled is evacuated - we can proceed with the
+                            // update.
+                            TryMakeUpdateResult::Update(
+                                update,
+                                pending_host_os_phase2_changes,
+                            )
+                        }
+                        EvacuationStatus::NeedsEvacuatingUpdateDisposition => {
+                            // Sled needs to be evacuated - mark that now, and
+                            // do _not_ proceed with the update.
+                            TryMakeUpdateResult::StartEvacuating(sled_id)
+                        }
+                        EvacuationStatus::WaitingOnEvacuation(details) => {
+                            // Sled is already marked for evacuation but is not
+                            // yet evacuated - this update is blocked.
+                            let baseboard_id = Arc::clone(board.baseboard_id());
+                            let reason = FailedMgsUpdateReason::WaitingOnSledEvacuation {
+                                component,
+                                details,
+                            };
+                            TryMakeUpdateResult::Blocked(BlockedMgsUpdate {
+                                baseboard_id,
+                                reason,
+                            })
+                        }
+                    }
+                } else {
+                    // No reboot required for this component - always add
+                    // the pending update.
+                    TryMakeUpdateResult::Update(
+                        update,
+                        pending_host_os_phase2_changes,
+                    )
+                };
+
+                return status;
             }
             Err(e) => {
-                pending_actions.add_blocked_update(BlockedMgsUpdate {
+                return TryMakeUpdateResult::Blocked(BlockedMgsUpdate {
                     baseboard_id: Arc::clone(board.baseboard_id()),
                     reason: e,
                 });
-                break;
             }
         }
     }
 
-    pending_actions
+    // If we made it through the loop above without returning early, then every
+    // component evaluated as `NoUpdateNeeded`; i.e., every component is running
+    // its current version. We have one more thing to check: if this is a sled
+    // and it's current in the `Evacuating` disposition, we need to make it
+    // `Available` now that all updates are complete.
+    if let Some(sled_id) = board.sled_id()
+        && evacuating_sleds.contains(&sled_id)
+    {
+        TryMakeUpdateResult::EndEvacuating(sled_id)
+    } else {
+        TryMakeUpdateResult::NoChangesNeeded
+    }
 }
 
 #[cfg(test)]

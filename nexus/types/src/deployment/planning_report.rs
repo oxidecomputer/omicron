@@ -10,6 +10,8 @@ use super::BlueprintZoneImageSource;
 use super::CockroachDbPreserveDowngrade;
 use super::PendingMgsUpdates;
 use super::PlannerConfig;
+use crate::deployment::BlueprintSledUpdateDispositionKind;
+use crate::deployment::MgsUpdateComponent;
 use crate::inventory::CabooseWhich;
 
 use daft::Diffable;
@@ -20,6 +22,7 @@ use omicron_common::policy::BOUNDARY_NTP_REDUNDANCY;
 use omicron_common::policy::COCKROACHDB_REDUNDANCY;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_generation_kinds::NexusGeneration;
+use omicron_generation_kinds::SledConfigGeneration;
 use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -36,6 +39,7 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
 use std::fmt::Write;
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -566,6 +570,14 @@ pub enum FailedMgsUpdateReason {
     /// There was a failed attempt to plan an SP update
     #[error("failed to plan an SP update")]
     Sp(#[from] FailedSpUpdateReason),
+    /// An update to the given component could be scheduled, but we're waiting
+    /// for the sled to evacuate
+    #[error("cannot update {component} until sled is evacuated")]
+    WaitingOnSledEvacuation {
+        component: MgsUpdateComponent,
+        #[source]
+        details: WaitingOnSledEvacuationDetails,
+    },
 }
 
 /// Describes the reason why an RoT bootloader failed to update
@@ -763,6 +775,45 @@ pub enum FailedHostOsUpdateReason {
     UnableToDetermineSledModel(String),
 }
 
+/// Describes the details of what we're waiting on when a sled is being
+/// evacuated
+#[derive(
+    Error,
+    Debug,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    Eq,
+    Diffable,
+    PartialOrd,
+    JsonSchema,
+    Ord,
+    Clone,
+)]
+#[serde(rename_all = "snake_case")]
+#[serde(tag = "type", content = "value")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
+pub enum WaitingOnSledEvacuationDetails {
+    #[error("sled is missing from inventory")]
+    MissingFromInventory,
+    #[error("ledgered sled config is not available from inventory")]
+    MissingLedgeredSledConfig,
+    #[error(
+        "waiting for ledgered sled config generation to be {desired} \
+         (currently {current})"
+    )]
+    WaitingForSledConfigGeneration {
+        desired: SledConfigGeneration,
+        current: SledConfigGeneration,
+    },
+    #[error("instance manager has not received its config")]
+    InstanceManagerNoConfig,
+    #[error("instance manager is still available")]
+    InstanceManagerAvailable,
+    #[error("instance manager still has {num_registered_vmms} registered VMMs")]
+    InstanceManagerRegisteredVmms { num_registered_vmms: NonZeroUsize },
+}
+
 #[derive(
     Clone,
     Debug,
@@ -878,6 +929,9 @@ impl fmt::Display for PlanningMeasurementUpdatesStepReport {
 pub struct PlanningMgsUpdatesStepReport {
     pub blocked_mgs_updates: Vec<BlockedMgsUpdate>,
     pub pending_mgs_updates: PendingMgsUpdates,
+    #[cfg_attr(test, any(((0, 16).into(), Default::default(), Default::default())))]
+    pub update_disposition_changes:
+        BTreeMap<SledUuid, BlueprintSledUpdateDispositionKind>,
 }
 
 impl PlanningMgsUpdatesStepReport {
@@ -885,18 +939,29 @@ impl PlanningMgsUpdatesStepReport {
         Self {
             blocked_mgs_updates: Vec::new(),
             pending_mgs_updates: PendingMgsUpdates::new(),
+            update_disposition_changes: BTreeMap::new(),
         }
     }
 
     pub fn is_empty(&self) -> bool {
-        self.pending_mgs_updates.is_empty()
-            && self.blocked_mgs_updates.is_empty()
+        let Self {
+            blocked_mgs_updates,
+            pending_mgs_updates,
+            update_disposition_changes,
+        } = self;
+        pending_mgs_updates.is_empty()
+            && blocked_mgs_updates.is_empty()
+            && update_disposition_changes.is_empty()
     }
 }
 
 impl fmt::Display for PlanningMgsUpdatesStepReport {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let Self { blocked_mgs_updates, pending_mgs_updates } = self;
+        let Self {
+            blocked_mgs_updates,
+            pending_mgs_updates,
+            update_disposition_changes,
+        } = self;
         if !pending_mgs_updates.is_empty() {
             let n = pending_mgs_updates.len();
             let s = plural(n);
@@ -923,6 +988,16 @@ impl fmt::Display for PlanningMgsUpdatesStepReport {
                 )?;
             }
         }
+
+        if !update_disposition_changes.is_empty() {
+            let n = update_disposition_changes.len();
+            let s = plural(n);
+            writeln!(f, "* {n} sled{s} changed update disposition:")?;
+            for (sled_id, new_disposition) in update_disposition_changes {
+                writeln!(f, "  * {sled_id}: {new_disposition}")?;
+            }
+        }
+
         Ok(())
     }
 }
@@ -1529,6 +1604,9 @@ pub enum ZoneUpdatesWaitingOn {
     /// Waiting on updates to RoT bootloader / RoT / SP / Host OS.
     PendingMgsUpdates,
 
+    /// Waiting on sled update disposition changes in support of MGS updates
+    SledUpdateDispositionChanges,
+
     /// Waiting on the same set of blockers zone adds are waiting on.
     ZoneAddBlockers,
 
@@ -1546,6 +1624,9 @@ impl ZoneUpdatesWaitingOn {
             Self::InventoryPropagation => "zone propagation to inventory",
             Self::PendingMgsUpdates => {
                 "pending MGS updates (RoT bootloader / RoT / SP / Host OS)"
+            }
+            Self::SledUpdateDispositionChanges => {
+                "sled update disposition changes"
             }
             Self::ZoneAddBlockers => "zone add blockers",
             Self::Measurements => "reference measurement changes",

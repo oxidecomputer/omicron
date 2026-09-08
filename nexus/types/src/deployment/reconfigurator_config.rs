@@ -164,6 +164,7 @@ impl Default for ReconfiguratorConfig {
     strum::VariantArray,
 )]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum ReconfiguratorDisruptionPolicy {
     /// Terminate instances during updates -- do not attempt to migrate
     /// instances. This is currently the default.

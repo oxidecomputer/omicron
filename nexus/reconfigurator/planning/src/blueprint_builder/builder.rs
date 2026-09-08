@@ -13,6 +13,7 @@ use crate::blueprint_editor::ExternalSnatNetworkingChoice;
 use crate::blueprint_editor::SledEditError;
 use crate::blueprint_editor::SledEditor;
 use crate::mgs_updates::PendingHostPhase2Changes;
+use crate::mgs_updates::PendingUpdateDispositionChanges;
 use crate::planner::NoopConvertInfo;
 use crate::planner::NoopConvertSledIneligibleReason;
 use crate::planner::ZoneExpungeReason;
@@ -2153,6 +2154,16 @@ impl<'a> BlueprintBuilder<'a> {
             ))
         })?;
         editor.set_host_phase_2(host_phase_2);
+        Ok(())
+    }
+
+    pub(crate) fn apply_pending_update_disposition_changes(
+        &mut self,
+        changes: &PendingUpdateDispositionChanges,
+    ) -> Result<(), Error> {
+        for (&sled_id, &kind) in changes.iter() {
+            self.sled_set_update_disposition_kind(sled_id, kind)?;
+        }
         Ok(())
     }
 
