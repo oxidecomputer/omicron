@@ -103,3 +103,5 @@ pub mod v2026_08_12_00;
 pub mod v2026_08_14_00;
 #[path = "bgp_peer_src_addr/mod.rs"]
 pub mod v2026_08_14_01;
+#[path = "add_physical_disk_slot/mod.rs"]
+pub mod v2026_09_01_00;

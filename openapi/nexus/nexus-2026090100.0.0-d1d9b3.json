@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026082800.0.0"
+    "version": "2026090100.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -25657,6 +25657,12 @@
             "description": "The sled to which this disk is attached, if any.",
             "type": "string",
             "format": "uuid"
+          },
+          "slot": {
+            "nullable": true,
+            "description": "The physical slot in the sled where this disk was last observed to be located, or null if its location is not known at this time.",
+            "type": "integer",
+            "format": "int64"
           },
           "state": {
             "description": "The current state Nexus believes the disk to be in.",

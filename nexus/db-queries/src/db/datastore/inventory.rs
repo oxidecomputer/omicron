@@ -4939,10 +4939,12 @@ impl DataStore {
                 // only populated if there is at least one disk/zpool/dataset
                 // for that sled. The `unwrap_or_default` calls cover the case
                 // where there are no disks/zpools/datasets for a sled.
-                disks: physical_disks
-                    .get(&sled_id)
-                    .map(|disks| disks.to_vec())
-                    .unwrap_or_default(),
+                disks: IdOrdMap::from_iter(
+                    physical_disks
+                        .get(&sled_id)
+                        .map(|disks| disks.to_vec())
+                        .unwrap_or_default(),
+                ),
                 zpools: zpools
                     .get(sled_id.as_untyped_uuid())
                     .map(|zpools| zpools.to_vec())

@@ -87,6 +87,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_09_01_00, ADD_PHYSICAL_DISK_SLOT),
     (2026_08_28_00, SILO_USER_DOCS),
     (2026_08_19_01, BGP_PEER_SRC_ADDR),
     (2026_08_17_00, SUPPORT_BUNDLES_STABLE),
@@ -7720,6 +7721,7 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/hardware/disks",
         tags = ["system/hardware"],
+        versions = VERSION_ADD_PHYSICAL_DISK_SLOT..,
     }]
     async fn physical_disk_list(
         rqctx: RequestContext<Self::Context>,
@@ -7729,16 +7731,66 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
+    /// List physical disks
+    #[endpoint {
+        operation_id = "physical_disk_list",
+        method = GET,
+        path = "/v1/system/hardware/disks",
+        tags = ["system/hardware"],
+        versions = ..VERSION_ADD_PHYSICAL_DISK_SLOT,
+    }]
+    async fn physical_disk_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<v2025_11_20_00::physical_disk::PhysicalDisk>,
+        >,
+        HttpError,
+    > {
+        let page = Self::physical_disk_list(rqctx, query_params).await?.0;
+        let items = page
+            .items
+            .into_iter()
+            .map(v2025_11_20_00::physical_disk::PhysicalDisk::from)
+            .collect();
+
+        Ok(HttpResponseOk(ResultsPage { items, next_page: page.next_page }))
+    }
+
     /// Get physical disk
     #[endpoint {
         method = GET,
         path = "/v1/system/hardware/disks/{disk_id}",
         tags = ["system/hardware"],
+        versions = VERSION_ADD_PHYSICAL_DISK_SLOT..,
     }]
     async fn physical_disk_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::path_params::PhysicalDiskPath>,
     ) -> Result<HttpResponseOk<latest::physical_disk::PhysicalDisk>, HttpError>;
+
+    /// Get physical disk
+    #[endpoint {
+        operation_id = "physical_disk_view",
+        method = GET,
+        path = "/v1/system/hardware/disks/{disk_id}",
+        tags = ["system/hardware"],
+        versions = ..VERSION_ADD_PHYSICAL_DISK_SLOT,
+    }]
+    async fn physical_disk_view_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::PhysicalDiskPath>,
+    ) -> Result<
+        HttpResponseOk<v2025_11_20_00::physical_disk::PhysicalDisk>,
+        HttpError,
+    > {
+        let disk = Self::physical_disk_view(rqctx, path_params).await?.0;
+
+        Ok(HttpResponseOk(v2025_11_20_00::physical_disk::PhysicalDisk::from(
+            disk,
+        )))
+    }
 
     /// List physical disks that have not yet been adopted for use
     #[endpoint {
@@ -7832,6 +7884,7 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/hardware/sleds/{sled_id}/disks",
         tags = ["system/hardware"],
+        versions = VERSION_ADD_PHYSICAL_DISK_SLOT..,
     }]
     async fn sled_physical_disk_list(
         rqctx: RequestContext<Self::Context>,
@@ -7841,6 +7894,37 @@ pub trait NexusExternalApi {
         HttpResponseOk<ResultsPage<latest::physical_disk::PhysicalDisk>>,
         HttpError,
     >;
+
+    /// List physical disks attached to sleds
+    #[endpoint {
+        operation_id = "sled_physical_disk_list",
+        method = GET,
+        path = "/v1/system/hardware/sleds/{sled_id}/disks",
+        tags = ["system/hardware"],
+        versions = ..VERSION_ADD_PHYSICAL_DISK_SLOT,
+    }]
+    async fn sled_physical_disk_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::SledPath>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<v2025_11_20_00::physical_disk::PhysicalDisk>,
+        >,
+        HttpError,
+    > {
+        let page =
+            Self::sled_physical_disk_list(rqctx, path_params, query_params)
+                .await?
+                .0;
+        let items = page
+            .items
+            .into_iter()
+            .map(v2025_11_20_00::physical_disk::PhysicalDisk::from)
+            .collect();
+
+        Ok(HttpResponseOk(ResultsPage { items, next_page: page.next_page }))
+    }
 
     // Metrics
 
