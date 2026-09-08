@@ -24,6 +24,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (4, COMPONENT_VPD),
     (3, NEWTYPE_UUID_BUMP),
     (2, COSMO),
     (1, INITIAL),

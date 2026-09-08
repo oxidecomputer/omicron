@@ -46,6 +46,13 @@ pub mod component_details {
     pub use crate::v1::component_details::UnsupportedComponentDetails;
 }
 
+pub mod component_vpd {
+    pub use crate::v4::component_vpd::Barcode;
+    pub use crate::v4::component_vpd::Mpn1Barcode;
+    pub use crate::v4::component_vpd::OxideBarcode;
+    pub use crate::v4::component_vpd::SledFanTray;
+}
+
 pub mod host {
     pub use crate::v1::host::ComponentFirmwareHashStatus;
     pub use crate::v1::host::HostStartupOptions;
