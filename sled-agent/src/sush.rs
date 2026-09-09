@@ -84,7 +84,9 @@ use tokio_util::sync::CancellationToken;
 
 use sush_common::targets::{Cubbies, MAX_CUBBY};
 use sush_server::executor::PathIsolation;
-use sush_server::gossip::{GossipConfig, isolated, lonely, spawn_gossip};
+use sush_server::gossip::{
+    GossipConfig, LinkedBaseboards, Universe, spawn_gossip,
+};
 use sush_server::link::CorpusSource;
 use sush_server::locker::Locker;
 use sush_server::output::{JobOutputDir, OutputDirs};
@@ -250,7 +252,7 @@ pub async fn spawn_sush_tasks(
             // storing. The null locker stores nothing, leaving the
             // bookmark on the M.2s untouched for the next boot.
             let seed = seed_gossip(&log, &Locker::null()).await;
-            (isolated(seed.into_rumors()), lonely())
+            (Universe::isolated(seed.into_rumors()), LinkedBaseboards::lonely())
         }
     };
 
