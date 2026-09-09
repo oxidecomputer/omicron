@@ -108,7 +108,11 @@ impl ReconfiguratorExec {
             internal_dns_resolver::QorbResolver::new(vec![self.dns_server]);
 
         info!(&log, "setting up database pool");
-        let pool = Arc::new(db::Pool::new(&log, &qorb_resolver, true));
+        let pool = Arc::new(db::Pool::new(
+            &log,
+            &qorb_resolver,
+            db::DbClaimBacktraceSetting::Capture,
+        ));
         let datastore = Arc::new(
             DataStore::new_failfast(&log, pool)
                 .await

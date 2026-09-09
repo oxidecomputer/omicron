@@ -39,6 +39,35 @@ const CFG_TCP_KEEPIDLE: Duration = Duration::from_secs(30);
 const CFG_TCP_KEEPINTVL: Duration = Duration::from_secs(10);
 const CFG_TCP_KEEPCNT: u32 = 12;
 
+/// Used for setting the behavior around saving backtraces in the [`Pool::claim`] method.
+///
+/// This is normally set to `Capture`, but it may be useful to override this in the Nexus config
+/// during development and testing in certain non-Illumos dev environments where capturing
+/// backtraces is expensive. See the corresponding flag in [`DeploymentConfig`] for more details.
+///
+/// [`DeploymentConfig`]: nexus_config::DeploymentConfig
+pub enum DbClaimBacktraceSetting {
+    Capture,
+    Skip,
+}
+
+impl DbClaimBacktraceSetting {
+    /// Convert a bool config flag to a [`DbClaimBacktraceSetting`] value.
+    ///
+    /// Assumes the same semantics used for the `record_db_claim_backtraces` flag in
+    /// [`DeploymentConfig`], where `true` maps to the default behavior of capturing backtraces, and
+    /// `false` disables backtrace capture.
+    ///
+    /// [`DeploymentConfig`]: nexus_config::DeploymentConfig
+    pub fn from_config_flag(record_db_claim_backtraces: bool) -> Self {
+        if record_db_claim_backtraces {
+            DbClaimBacktraceSetting::Capture
+        } else {
+            DbClaimBacktraceSetting::Skip
+        }
+    }
+}
+
 /// Wrapper around a database connection pool.
 ///
 /// Expected to be used as the primary interface to the database.
@@ -51,7 +80,7 @@ pub struct Pool {
     log: Logger,
     terminated: std::sync::atomic::AtomicBool,
     quiesce: watch::Sender<Quiesce>,
-    record_db_claim_backtraces: bool,
+    backtrace_setting: DbClaimBacktraceSetting,
 }
 
 // Provides an alternative to the DNS resolver for cases where we want to
@@ -120,7 +149,7 @@ impl Pool {
     pub fn new(
         log: &Logger,
         resolver: &QorbResolver,
-        record_db_claim_backtraces: bool,
+        backtrace_setting: DbClaimBacktraceSetting,
     ) -> Self {
         let resolver = resolver.for_service(ServiceName::Cockroach);
         let connector = make_postgres_connector(log);
@@ -140,7 +169,7 @@ impl Pool {
                 err.into_inner()
             }
         };
-        Self::new_common(inner, log.clone(), record_db_claim_backtraces)
+        Self::new_common(inner, log.clone(), backtrace_setting)
     }
 
     /// Creates a new qorb-backed connection pool to a single instance of the
@@ -153,7 +182,7 @@ impl Pool {
     pub fn new_single_host(
         log: &Logger,
         db_config: &DbConfig,
-        record_db_claim_backtraces: bool,
+        backtrace_setting: DbClaimBacktraceSetting,
     ) -> Self {
         let resolver = make_single_host_resolver(db_config);
         let connector = make_postgres_connector(log);
@@ -173,7 +202,7 @@ impl Pool {
                 err.into_inner()
             }
         };
-        Self::new_common(inner, log.clone(), record_db_claim_backtraces)
+        Self::new_common(inner, log.clone(), backtrace_setting)
     }
 
     /// Creates a new qorb-backed connection pool to a fixed set of database
@@ -203,7 +232,7 @@ impl Pool {
                 err.into_inner()
             }
         };
-        Self::new_common(inner, log.clone(), true)
+        Self::new_common(inner, log.clone(), DbClaimBacktraceSetting::Capture)
     }
 
     /// Creates a new qorb-backed connection pool which returns an error
@@ -238,13 +267,13 @@ impl Pool {
                 err.into_inner()
             }
         };
-        Self::new_common(inner, log.clone(), true)
+        Self::new_common(inner, log.clone(), DbClaimBacktraceSetting::Capture)
     }
 
     fn new_common(
         inner: qorb::pool::Pool<AsyncConnection>,
         log: Logger,
-        record_db_claim_backtraces: bool,
+        backtrace_setting: DbClaimBacktraceSetting,
     ) -> Self {
         let (quiesce, _) = watch::channel(Quiesce {
             new_claims_allowed: ClaimsAllowed::Allowed,
@@ -256,7 +285,7 @@ impl Pool {
             log,
             terminated: std::sync::atomic::AtomicBool::new(false),
             quiesce,
-            record_db_claim_backtraces,
+            backtrace_setting,
         }
     }
 
@@ -266,10 +295,13 @@ impl Pool {
         let held_since = Utc::now();
         // This is an escape hatch in case we ever encounter an unexpected pathological case where
         // capturing backtraces is slow enough to be an issue:
-        let debug = if self.record_db_claim_backtraces {
-            Backtrace::force_capture().to_string()
-        } else {
-            "(backtraces disabled)".to_string()
+        let debug = match self.backtrace_setting {
+            DbClaimBacktraceSetting::Capture => {
+                Backtrace::force_capture().to_string()
+            }
+            DbClaimBacktraceSetting::Skip => {
+                "(backtraces disabled)".to_string()
+            }
         };
         let allowed = self.quiesce.send_if_modified(|q| {
             if let ClaimsAllowed::Disallowed = q.new_claims_allowed {
@@ -447,7 +479,11 @@ mod test {
         let mut db = crdb::test_setup_database(log).await;
         let cfg = crate::db::Config { url: db.pg_config().clone() };
         {
-            let pool = Pool::new_single_host(&log, &cfg, true);
+            let pool = Pool::new_single_host(
+                &log,
+                &cfg,
+                DbClaimBacktraceSetting::Capture,
+            );
             pool.terminate().await;
         }
         db.cleanup().await.unwrap();
@@ -464,7 +500,11 @@ mod test {
         let mut db = crdb::test_setup_database(log).await;
         let cfg = crate::db::Config { url: db.pg_config().clone() };
         {
-            let pool = Pool::new_single_host(&log, &cfg, true);
+            let pool = Pool::new_single_host(
+                &log,
+                &cfg,
+                DbClaimBacktraceSetting::Capture,
+            );
             drop(pool);
         }
         db.cleanup().await.unwrap();
@@ -484,7 +524,8 @@ mod test {
         // Create a pool.  Make sure there's a connection established to the
         // database.
         let cfg = crate::db::Config { url: db.pg_config().clone() };
-        let pool = Pool::new_single_host(&log, &cfg, true);
+        let pool =
+            Pool::new_single_host(&log, &cfg, DbClaimBacktraceSetting::Capture);
         let _conn = pool.claim().await.expect("established db connection");
         let peer_addr = db.pg_config().address();
 

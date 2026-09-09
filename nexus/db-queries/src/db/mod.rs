@@ -49,6 +49,7 @@ pub use check_if_limit_reached::IsLimitReached;
 pub use config::Config;
 pub use datastore::DataStore;
 pub use on_conflict_ext::IncompleteOnConflictExt;
+pub use pool::DbClaimBacktraceSetting;
 pub use pool::Pool;
 pub use saga_types::SecId;
 pub use sec_store::CockroachDbSecStore;

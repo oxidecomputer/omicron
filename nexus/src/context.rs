@@ -274,6 +274,10 @@ impl ServerContext {
             }
         };
 
+        let backtrace_setting = db::DbClaimBacktraceSetting::from_config_flag(
+            config.deployment.record_db_claim_backtraces,
+        );
+
         // Once this database pool is created, it spawns workers which will
         // be continually attempting to access database backends.
         //
@@ -288,7 +292,7 @@ impl ServerContext {
                 db::Pool::new_single_host(
                     &log,
                     &db::Config { url: url.clone() },
-                    config.deployment.record_db_claim_backtraces,
+                    backtrace_setting,
                 )
             }
             nexus_config::Database::FromDns => {
@@ -296,11 +300,7 @@ impl ServerContext {
                     log, "Setting up qorb database pool from DNS";
                     "dns_addrs" => ?qorb_resolver.bootstrap_dns_ips(),
                 );
-                db::Pool::new(
-                    &log,
-                    &qorb_resolver,
-                    config.deployment.record_db_claim_backtraces,
-                )
+                db::Pool::new(&log, &qorb_resolver, backtrace_setting)
             }
         };
 
