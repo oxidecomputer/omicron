@@ -197,15 +197,19 @@ pub async fn spawn_sush_tasks(
     }
     let locker = Locker::new(&log, slots);
 
-    // Gossip re-reads the attestation corpus on every handshake, because a
-    // software update changes it. A sled that cannot gossip still serves local
-    // jobs.
     let GossipInputs { sprockets, measurements, bootstrap_ip, peers } = gossip;
+    
+    // On every gossip protocol handshake, we must re-read the attestation
+    // corpus, because a software update may have changed it. This closure
+    // is invoked in order to do that.
     let corpus: CorpusSource = Arc::new({
         let log = log.clone();
         move || match measurements.current_measurements() {
             Ok(corpus) => corpus,
             Err(e) => {
+                // If reading the measurements fails, this sled cannot
+                // participate in the gossip protocol, but can still serve
+                // local jobs.
                 error!(log, "measurement error"; e);
                 vec![]
             }
