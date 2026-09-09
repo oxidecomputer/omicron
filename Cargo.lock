@@ -7430,6 +7430,7 @@ dependencies = [
  "nexus-db-lookup",
  "nexus-db-model",
  "nexus-db-schema",
+ "nexus-fm-slippy",
  "nexus-inventory",
  "nexus-reconfigurator-planning",
  "nexus-test-utils",
@@ -7562,6 +7563,7 @@ dependencies = [
  "ereport-types",
  "iddqd",
  "nexus-db-model",
+ "nexus-fm-slippy",
  "nexus-inventory",
  "nexus-reconfigurator-planning",
  "nexus-types",
@@ -7582,6 +7584,21 @@ dependencies = [
  "thiserror 2.0.18",
  "typed-rng",
  "uuid",
+]
+
+[[package]]
+name = "nexus-fm-slippy"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "nexus-fm",
+ "nexus-types",
+ "omicron-rpaths",
+ "omicron-test-utils",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "pq-sys",
+ "serde_json",
 ]
 
 [[package]]
@@ -8032,6 +8049,7 @@ dependencies = [
  "serde",
  "sled-agent-types",
  "slog",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "test-strategy",
  "tokio",
  "uuid",
@@ -9430,6 +9448,7 @@ dependencies = [
  "nexus-db-model",
  "nexus-db-queries",
  "nexus-db-schema",
+ "nexus-fm-slippy",
  "nexus-inventory",
  "nexus-lockstep-client",
  "nexus-networking",
@@ -14190,6 +14209,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "byte-wrapper",
  "chrono",
  "omicron-common",
  "omicron-generation-kinds",
@@ -17832,6 +17852,7 @@ dependencies = [
  "bootstrap-agent-lockstep-types",
  "dropshot",
  "gateway-client",
+ "iddqd",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "schemars 0.8.22",
@@ -17849,6 +17870,7 @@ version = "0.1.0"
 dependencies = [
  "bootstrap-agent-lockstep-types",
  "chrono",
+ "iddqd",
  "installinator-common",
  "omicron-common",
  "omicron-uuid-kinds",

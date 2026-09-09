@@ -2114,6 +2114,7 @@ mod tests {
                             name: "testpost".parse().unwrap(),
                             description: "please ignore".to_string(),
                         },
+                        defaults: None,
                     },
                 ),
             )

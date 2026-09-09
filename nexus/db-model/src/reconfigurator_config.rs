@@ -17,6 +17,8 @@ pub struct ReconfiguratorConfig {
     pub time_modified: DateTime<Utc>,
     pub tuf_repo_pruner_enabled: bool,
     pub disruption_policy: DbReconfiguratorDisruptionPolicy,
+    pub blueprint_pruner_enabled: bool,
+    pub blueprint_pruner_nkeep: SqlU32,
 }
 
 impl From<deployment::ReconfiguratorConfigView> for ReconfiguratorConfig {
@@ -27,6 +29,8 @@ impl From<deployment::ReconfiguratorConfigView> for ReconfiguratorConfig {
             time_modified: value.time_modified,
             tuf_repo_pruner_enabled: value.config.tuf_repo_pruner_enabled,
             disruption_policy: value.config.disruption_policy.into(),
+            blueprint_pruner_enabled: value.config.blueprint_pruner_enabled,
+            blueprint_pruner_nkeep: value.config.blueprint_pruner_nkeep.into(),
         }
     }
 }
@@ -40,6 +44,8 @@ impl From<ReconfiguratorConfig> for deployment::ReconfiguratorConfigView {
                 planner_config: deployment::PlannerConfig::default(),
                 tuf_repo_pruner_enabled: value.tuf_repo_pruner_enabled,
                 disruption_policy: value.disruption_policy.into(),
+                blueprint_pruner_enabled: value.blueprint_pruner_enabled,
+                blueprint_pruner_nkeep: value.blueprint_pruner_nkeep.into(),
             },
             time_modified: value.time_modified,
         }

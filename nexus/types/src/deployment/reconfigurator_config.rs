@@ -119,7 +119,16 @@ pub struct ReconfiguratorConfig {
     pub planner_config: PlannerConfig,
     pub tuf_repo_pruner_enabled: bool,
     pub disruption_policy: ReconfiguratorDisruptionPolicy,
+    pub blueprint_pruner_enabled: bool,
+    pub blueprint_pruner_nkeep: u32,
 }
+
+/// Default value for `ReconfiguratorConfig::blueprint_pruner_nkeep`
+///
+/// This is intended to cover 1-2 upgrades' worth of blueprints so that
+/// developers and support can debug a live system back through its last
+/// upgrade.
+pub const DEFAULT_BLUEPRINT_PRUNER_NKEEP: u32 = 1000;
 
 impl ReconfiguratorConfig {
     pub fn display(&self) -> ReconfiguratorConfigDisplay<'_> {
@@ -134,6 +143,8 @@ impl Default for ReconfiguratorConfig {
             planner_config: PlannerConfig::default(),
             tuf_repo_pruner_enabled: true,
             disruption_policy: ReconfiguratorDisruptionPolicy::default(),
+            blueprint_pruner_enabled: true,
+            blueprint_pruner_nkeep: DEFAULT_BLUEPRINT_PRUNER_NKEEP,
         }
     }
 }
@@ -204,11 +215,15 @@ impl fmt::Display for ReconfiguratorConfigDisplay<'_> {
                     planner_config: _,
                     tuf_repo_pruner_enabled,
                     disruption_policy,
+                    blueprint_pruner_enabled,
+                    blueprint_pruner_nkeep,
                 },
         } = self;
         writeln!(f, "tuf repo pruner enabled: {}", tuf_repo_pruner_enabled)?;
         writeln!(f, "disruption policy: {}", disruption_policy)?;
         writeln!(f, "planner enabled: {}", planner_enabled)?;
+        writeln!(f, "blueprint pruner enabled: {}", blueprint_pruner_enabled)?;
+        writeln!(f, "blueprint pruner nkeep: {}", blueprint_pruner_nkeep)?;
 
         Ok(())
     }
@@ -231,6 +246,8 @@ impl fmt::Display for ReconfiguratorConfigDiffDisplay<'_, '_> {
             planner_config: _,
             tuf_repo_pruner_enabled,
             disruption_policy,
+            blueprint_pruner_enabled,
+            blueprint_pruner_nkeep,
         } = self.diff;
 
         let list = KvList::new(
@@ -239,6 +256,8 @@ impl fmt::Display for ReconfiguratorConfigDiffDisplay<'_, '_> {
                 diff_row!(tuf_repo_pruner_enabled, "tuf repo pruner enabled"),
                 diff_row!(planner_enabled, "planner enabled"),
                 diff_row!(disruption_policy, "disruption policy"),
+                diff_row!(blueprint_pruner_enabled, "blueprint pruner enabled"),
+                diff_row!(blueprint_pruner_nkeep, "blueprint pruner nkeep"),
             ],
         );
         // No need for writeln! here because KvList adds its own newlines.

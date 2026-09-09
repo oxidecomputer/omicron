@@ -57,6 +57,12 @@ pub struct ReconfiguratorConfigOpts {
 
     #[clap(long)]
     disruption_policy: Option<ReconfiguratorDisruptionPolicyOpt>,
+
+    #[clap(long, action = ArgAction::Set)]
+    blueprint_pruner_enabled: Option<bool>,
+
+    #[clap(long)]
+    blueprint_pruner_nkeep: Option<u32>,
 }
 
 impl ReconfiguratorConfigOpts {
@@ -75,6 +81,12 @@ impl ReconfiguratorConfigOpts {
                 .disruption_policy
                 .map(|p| p.into())
                 .unwrap_or(current.disruption_policy),
+            blueprint_pruner_enabled: self
+                .blueprint_pruner_enabled
+                .unwrap_or(current.blueprint_pruner_enabled),
+            blueprint_pruner_nkeep: self
+                .blueprint_pruner_nkeep
+                .unwrap_or(current.blueprint_pruner_nkeep),
         }
     }
 
