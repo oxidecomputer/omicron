@@ -134,12 +134,14 @@ pub struct Config {
 pub struct SushConfig {
     /// PEM files holding the trusted root certificates for job requests,
     /// one certificate per file. A job whose signature does not chain to
-    /// one of these is refused, so an empty list means no job can ever run.
+    /// one of these is refused, so an empty list means no job could ever
+    /// run, and config parsing rejects it. To run a sled with no Support
+    /// Shell server, omit the `[sush]` section instead.
+    #[serde(deserialize_with = "SushConfig::nonempty_roots")]
     pub roots: Vec<Utf8PathBuf>,
 
     /// Where to record job output before an encrypted dataset is available.
-    /// This is on the ramdisk, so it costs global zone memory and does not
-    /// survive a reboot.
+    /// Must be on a ramdisk so that it is never persisted unencrypted.
     #[serde(default = "SushConfig::default_ramdisk_dir")]
     pub ramdisk_dir: Utf8PathBuf,
 
@@ -169,6 +171,18 @@ impl SushConfig {
 
     fn default_max_output_mb() -> u32 {
         10 * 1024
+    }
+
+    fn nonempty_roots<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Vec<Utf8PathBuf>, D::Error> {
+        let roots = Vec::deserialize(deserializer)?;
+        if roots.is_empty() {
+            return Err(serde::de::Error::custom(
+                "sush needs at least one root certificate to run",
+            ));
+        }
+        Ok(roots)
     }
 }
 
@@ -276,16 +290,21 @@ mod test {
 
         let sush: SushConfig = toml::from_str(
             r#"
-            roots = []
+            roots = ["/pkg/sush-root.pem"]
             ramdisk_dir = "/var/run/sush"
             ramdisk_max_output_mb = 8
             max_output_mb = 128
             "#,
         )
         .unwrap();
-        assert!(sush.roots.is_empty());
         assert_eq!(sush.ramdisk_dir, "/var/run/sush");
         assert_eq!(sush.ramdisk_max_output_mb, 8);
         assert_eq!(sush.max_output_mb, 128);
+
+        // No roots would mean no jobs can ever run, so reject at parse time.
+        let err = toml::from_str::<SushConfig>("roots = []").unwrap_err();
+        assert!(
+            err.to_string().contains("needs at least one root certificate")
+        );
     }
 }

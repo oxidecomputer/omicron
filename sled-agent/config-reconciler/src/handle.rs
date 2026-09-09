@@ -20,6 +20,7 @@ use sled_storage::nested_dataset::NestedDatasetConfig;
 use sled_storage::nested_dataset::NestedDatasetListOptions;
 use sled_storage::nested_dataset::NestedDatasetLocation;
 use slog::Logger;
+use slog::warn;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::OnceLock;
@@ -650,12 +651,15 @@ impl AvailableDatasetsReceiver {
     /// Returns immediately if the set has changed since this receiver last
     /// observed it. The test variants' datasets never change, so for them this
     /// never returns.
-    pub async fn changed(&mut self) {
+    pub async fn changed(&mut self, log: &Logger) {
         match &mut self.inner {
             AvailableDatasetsReceiverInner::Real(receiver) => {
-                // An error means the reconciler task is gone, in which case the
-                // set can never change again.
                 if receiver.changed().await.is_err() {
+                    warn!(
+                        log,
+                        "config reconciler task is gone; the set of available \
+                         datasets will never change again",
+                    );
                     std::future::pending().await
                 }
             }

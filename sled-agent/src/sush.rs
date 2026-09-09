@@ -23,23 +23,37 @@
 //!   and is called from `server` once this sled has been told its
 //!   underlay address.
 //!
-//! Gossip runs over sprockets on the bootstrap network, so jobs and
-//! sessions are shared across sleds. A universe is a shared gossip
-//! history; peers that meet merge into one by a dominance rule.
-//! A restarted sled re-seeds its universe, rejoins the rack's, then
-//! replays its history without re-executing it. Its gossip identity
-//! is stored in a _bookmark_.
+//! Gossip runs over sprockets on the bootstrap network. A job may be
+//! addressed to a single sled, but the messages carrying jobs,
+//! sessions, and events spread to every sled. The set of causally
+//! related messages is called a _universe_: peers in the same universe
+//! can gossip and converge on its contents; peers in different
+//! universes cannot gossip at all. Every identity in a universe
+//! descends from a single seed. When sleds meet, a deterministic rule
+//! picks whose seed wins, and the others bootstrap from it, each
+//! taking a slice of the winner's identity space. A restarted sled
+//! therefore rejoins the rack's universe and replays what it missed
+//! without re-executing it. Each sled stores its identity in a
+//! _bookmark_, so that a restart resumes it rather than growing a new
+//! one on every boot.
 //!
-//! The bookmark, like every record sush must trust across reboots,
-//! lives in the [sush locker](https://github.com/oxidecomputer/sush/blob/main/server/src/locker.rs).
-//! Each locker record is one file on each M.2. Stores write every
-//! copy, and loads adopt a record only when the copies show it cannot
-//! be stale. The locker is not a small bootstore: the bootstore holds
-//! rack-wide facts that sleds may recover from their peers, but a locker
-//! record says what this sled itself did or committed to do. These
-//! guarantees are critical to the correctness of the
-//! [rumors](https://github.com/oxidecomputer/rumors) gossip algorithm,
-//! which sush uses to synchronize job and event sets.
+//! The bookmark, like every record sush must trust across reboots, lives
+//! in the [sush locker]. When we write a record to the locker, we actually
+//! write two copies, one to each M.2. When we load a record, it only
+//! succeeds if both copies are exact matches, or if one of them is
+//! entirely missing (the latter to handle the case of M.2 hardware
+//! replacement in the field). A load fails on mismatched copies, so that
+//! a torn write or corruption on one drive cannot induce the reader to
+//! load stale or invalid information from the other drive. This turns the
+//! pair of M.2 drives into a single mirrored storage container that fails
+//! closed on any disagreement. We accept this because an M.2 failure is
+//! considered a non-user-replaceable part failure, for which the solution
+//! is an RMA. If this occurs in the field, sush may refuse to run jobs on
+//! the sled containing the failed M.2; we report this error to the user,
+//! who should replace the sled.
+//!
+//! [sush locker]:
+//!   https://github.com/oxidecomputer/sush/blob/main/server/src/locker.rs
 
 use crate::config::SushConfig;
 use anyhow::Context;
@@ -50,6 +64,7 @@ use gateway_types::component::SpType;
 use omicron_common::address::{
     MGS_PORT, SUSH_API_PORT, SUSH_GOSSIP_PORT, get_switch_zone_address,
 };
+use omicron_common::api::external::ByteCount;
 use omicron_ddm_admin_client::Client as DdmClient;
 use sha3::{Digest as _, Sha3_256};
 use sled_agent_config_reconciler::AvailableDatasetsReceiver;
@@ -81,7 +96,9 @@ use x509_cert::time::Validity;
 use sush_common::keys::{EphemeralKey, KeyType, pem_cert_chain};
 use sush_common::targets::{Cubbies, MAX_CUBBY};
 use sush_server::executor::PathIsolation;
-use sush_server::gossip::{GossipConfig, isolated, lonely, spawn_gossip};
+use sush_server::gossip::{
+    GossipConfig, LinkedBaseboards, Universe, spawn_gossip,
+};
 use sush_server::link::CorpusSource;
 use sush_server::locker::Locker;
 use sush_server::output::{JobOutputDir, OutputDirs};
@@ -108,8 +125,14 @@ const MGS_POLL_INTERVAL: Duration = Duration::from_secs(30);
 /// How long to wait for an MGS candidate to answer.
 const MGS_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Maximum size of a request body the API will accept. The largest thing a
-/// client sends is a signed job request or a certificate, both small.
+/// Maximum size of a request body the API will accept. The protocol
+/// defines no message size limits, so we chose this cap rather than
+/// deriving it. The largest bodies a client sends are the command in
+/// a signed job request and a PEM-encoded certificate. Neither has
+/// exceeded a few KB in practice, so this leaves an order of magnitude
+/// of headroom while bounding how much the server needs to buffer for
+/// any one request. We should raise it if we start seeing significantly
+/// larger requests or certs in the wild.
 const REQUEST_MAX_BODY_BYTES: usize = 0xFFFF;
 
 /// Handles to the Support Shell server's tasks.
@@ -125,11 +148,11 @@ impl SushHandles {
     pub fn start_api(
         &self,
         ip: Ipv6Addr,
-    ) -> Result<HttpServer<Arc<JobManager>>, String> {
+    ) -> anyhow::Result<HttpServer<Arc<JobManager>>> {
         let bind_address =
             SocketAddr::V6(SocketAddrV6::new(ip, SUSH_API_PORT, 0, 0));
         let api = sush_api::sush_api_mod::api_description::<ApiServer>()
-            .map_err(|err| format!("failed to describe sush API: {err}"))?;
+            .context("describing the sush API")?;
         let server = ServerBuilder::new(
             api,
             Arc::clone(&self.manager),
@@ -145,7 +168,7 @@ impl SushHandles {
             compression: Default::default(),
         })
         .start()
-        .map_err(|err| err.to_string())?;
+        .context("starting the sush API server")?;
         info!(
             self.log, "started sush server";
             "address" => %bind_address,
@@ -159,9 +182,6 @@ impl SushHandles {
     }
 }
 
-/// What gossip needs from the sled: its sprockets identity, its reference
-/// measurements, the bootstrap address to listen on, and where to find its
-/// peers.
 pub struct GossipInputs {
     pub sprockets: SprocketsConfig,
     pub measurements: Arc<MeasurementsHandle>,
@@ -196,12 +216,9 @@ pub async fn spawn_sush_tasks(
     }
     let (output_dirs_tx, output_dirs_rx) = watch::channel(OutputDirs::new(
         config.ramdisk_dir.as_std_path(),
-        mb_to_bytes(config.ramdisk_max_output_mb),
+        ByteCount::from_mebibytes_u32(config.ramdisk_max_output_mb).to_bytes(),
     ));
 
-    if config.roots.is_empty() {
-        warn!(log, "sush has no root certificates, so no job will ever run");
-    }
     let shutdown = CancellationToken::new();
 
     // A slot that cannot be created is still handed to the locker, which
@@ -219,15 +236,19 @@ pub async fn spawn_sush_tasks(
     }
     let locker = Locker::new(&log, slots);
 
-    // Gossip re-reads the attestation corpus on every handshake, because a
-    // software update changes it. A sled that cannot gossip still serves local
-    // jobs.
     let GossipInputs { sprockets, measurements, bootstrap_ip, peers } = gossip;
+
+    // On every gossip protocol handshake, we must re-read the attestation
+    // corpus, because a software update may have changed it. This closure
+    // is invoked in order to do that.
     let corpus: CorpusSource = Arc::new({
         let log = log.clone();
         move || match measurements.current_measurements() {
             Ok(corpus) => corpus,
             Err(e) => {
+                // If reading the measurements fails, this sled cannot
+                // participate in the gossip protocol, but can still serve
+                // local jobs.
                 error!(log, "measurement error"; e);
                 vec![]
             }
@@ -257,7 +278,7 @@ pub async fn spawn_sush_tasks(
             // storing. The null locker stores nothing, leaving the
             // bookmark on the M.2s untouched for the next boot.
             let seed = seed_gossip(&log, &Locker::null()).await;
-            (isolated(seed.into_rumors()), lonely())
+            (Universe::isolated(seed.into_rumors()), LinkedBaseboards::lonely())
         }
     };
 
@@ -307,7 +328,7 @@ pub async fn spawn_sush_tasks(
         log.clone(),
         available_datasets_rx,
         output_dirs_tx,
-        mb_to_bytes(config.max_output_mb),
+        ByteCount::from_mebibytes_u32(config.max_output_mb).to_bytes(),
     ));
 
     info!(log, "started sush job manager");
@@ -324,7 +345,7 @@ pub async fn spawn_sush_tasks(
         Err(err) => warn!(
             handles.log,
             "sush is not serving on the bootstrap network";
-            "error" => err,
+            "error" => #%err,
         ),
     }
 
@@ -359,28 +380,24 @@ async fn promote_output_dir(
                 }
                 Err(err) => error!(
                     log,
-                    "could not create job output directory on encrypted dataset, leaving it on the ramdisk";
+                    "could not create job output directory on encrypted dataset, \
+                     leaving it on the ramdisk";
                     "directory" => %dir,
                     "error" => InlineErrorChain::new(&err),
                 ),
             }
         }
-        available_datasets_rx.changed().await;
+        available_datasets_rx.changed(&log).await;
     }
 }
 
-fn mb_to_bytes(mb: u32) -> u64 {
-    u64::from(mb) * 1024 * 1024
-}
-
-/// Keep the cubby map current from MGS's view of the SPs. A job may
-/// name its target sled by cubby, and the map says which baseboard
-/// is in each cubby.
-///
-/// DDM's advertised subnets are only candidates (see
-/// [`DdmClient::derive_underlay_subnets_from_prefixes`]), so we must
-/// probe for MGS. Each round's answers merge into the existing map,
-/// so a probe outage never erases it.
+/// Periodically ask MGS which baseboard sits in each cubby, and
+/// publish the map. A job may name its target sled by cubby;
+/// this map resolves it. MGS answers at a fixed address within its
+/// switch zone's subnet, so each round we ask at that address in every
+/// /64 ddmd has learned, and take answers from any that respond. The
+/// answers merge into the map, so a round that goes unanswered never
+/// erases it.
 async fn poll_mgs_for_cubbies(log: Logger, cubbies: watch::Sender<Cubbies>) {
     let ddm = match DdmClient::localhost(&log) {
         Ok(ddm) => ddm,
