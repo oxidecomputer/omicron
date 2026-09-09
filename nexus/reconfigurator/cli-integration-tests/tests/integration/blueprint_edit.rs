@@ -133,7 +133,7 @@ async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
             .planning_input
             .external_ip_policy()
             .clone()
-            .into_non_external_dns_ips()
+            .into_nexus_ips()
             .next(),
         None,
     );

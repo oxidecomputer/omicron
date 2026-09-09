@@ -670,11 +670,8 @@ fn test_reuse_external_ips_from_expunged_zones() {
     // the service IP pool. This will force reuse of the IP that was
     // allocated to the expunged Nexus zone.
     sim.change_description("adjust target Nexus count", |desc| {
-        let num_available_external_ips = desc
-            .external_ip_policy()
-            .clone()
-            .into_non_external_dns_ips()
-            .count();
+        let num_available_external_ips =
+            desc.external_ip_policy().clone().into_nexus_ips().count();
         desc.set_target_nexus_zone_count(num_available_external_ips);
         Ok(())
     })
