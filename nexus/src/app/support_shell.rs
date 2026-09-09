@@ -20,6 +20,7 @@ use dropshot::{
 };
 use futures::stream::FuturesUnordered;
 use futures::{SinkExt, StreamExt};
+use internal_dns_types::names::ServiceName;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use omicron_common::address::SUSH_PROXY_PORT;
@@ -33,8 +34,6 @@ use tokio::time::timeout;
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::protocol::{Role, WebSocketConfig};
-
-use crate::app::switch_zone_address_mappings;
 
 /// How long to wait for a switch's proxy to answer a connect.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -103,15 +102,16 @@ impl super::Nexus {
         // single rack is ours (omicron#1276).
         self.rack_lookup(opctx, rack_id).await?;
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
-        let proxy_addrs =
-            switch_zone_address_mappings(&self.internal_resolver, log)
-                .await
-                .map_err(|e| Error::unavail(&e))?
-                .into_values()
-                .map(|ip| {
-                    SocketAddr::V6(SocketAddrV6::new(ip, SUSH_PROXY_PORT, 0, 0))
-                })
-                .collect::<Vec<_>>();
+        let proxy_addrs = self
+            .internal_resolver
+            .lookup_all_ipv6(ServiceName::Dendrite)
+            .await
+            .map_err(|e| Error::unavail(&e.to_string()))?
+            .into_iter()
+            .map(|ip| {
+                SocketAddr::V6(SocketAddrV6::new(ip, SUSH_PROXY_PORT, 0, 0))
+            })
+            .collect::<Vec<_>>();
         let mut connects = proxy_addrs
             .iter()
             .map(|&addr| async move {
