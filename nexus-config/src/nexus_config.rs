@@ -193,11 +193,8 @@ pub struct DeploymentConfig {
     ///
     /// This flag is intended as an escape hatch in case we ever encounter an unexpected
     /// pathological case where capturing backtraces is slow enough to be an issue.
-    ///
-    /// Since we don't expect to encounter this in production, it can only currently be disabled for
-    /// debug and testing use cases. For this reason, we skip it when serializing and deseralizing
-    /// and default it to `true`.
-    #[serde(skip, default = "default_record_db_claim_backtraces")]
+    #[schemars(skip)] // TODO we're protected against dropshot changes
+    #[serde(default = "default_record_db_claim_backtraces")]
     pub record_db_claim_backtraces: bool,
 }
 

@@ -204,12 +204,6 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
 
         let debug_dropbox_dir = TestTempDir::new(&logctx.log);
 
-        // Note that the record_db_claim_backtraces flag defaults to true; we only disable the flag
-        // specifically when this env var is set to "0":
-        if env::var_os("NEXUS_ENABLE_DB_CLAIM_BACKTRACES") == Some("0".into()) {
-            config.deployment.record_db_claim_backtraces = false;
-        }
-
         Self {
             config,
             test_name,
