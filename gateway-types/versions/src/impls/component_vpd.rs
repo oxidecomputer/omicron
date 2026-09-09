@@ -6,10 +6,11 @@ use crate::latest::component_vpd::{
     Barcode, Mpn1Barcode, OxideBarcode, SledFanTray,
 };
 use gateway_messages::vpd as gw;
+use std::fmt;
 use std::num::ParseIntError;
 use std::str::FromStr;
 
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, Eq, PartialEq)]
 pub enum ParseBarcodeError {
     #[error("barcode received from SP was not UTF-8")]
     // TODO(eliza): t'would be nice to format the invalid bytes in a nice-ish
@@ -110,11 +111,20 @@ impl FromStr for Barcode {
             "0XV1" | "OXV1" | "0XV2" | "OXV2" => {
                 OxideBarcode::from_parts(version, parts).map(Self::Oxide)
             }
-            "MPN1" => Mpn1Barcode::from_parts(parts).map(Self::Mpn1),
+            Mpn1Barcode::MPN1 => Mpn1Barcode::from_parts(parts).map(Self::Mpn1),
             version => Err(ParseBarcodeError::UnknownVersion {
                 version: version.to_string(),
                 expected: Self::EXPECTED_VERSION,
             }),
+        }
+    }
+}
+
+impl fmt::Display for Barcode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Oxide(oxide) => oxide.fmt(f),
+            Self::Mpn1(mpn1) => mpn1.fmt(f),
         }
     }
 }
@@ -157,12 +167,12 @@ impl OxideBarcode {
         }
         let part_number = match version {
             "0XV1" | "OXV1" => {
-                // V1 does not include the hyphen in the part number when stored
-                // in an EEPROM, so we need to insert it.
+                // V1 does not include the hyphen after the first three digits
+                // of the part number, so we need to insert it.
                 let pn_chars = part_number.chars();
                 let mut part_number = String::with_capacity(11);
                 for (i, ch) in pn_chars.enumerate() {
-                    if i == 4 && ch != '-' {
+                    if i == 3 && ch != '-' {
                         part_number.push('-');
                     }
                     part_number.push(ch);
@@ -206,20 +216,27 @@ impl FromStr for Mpn1Barcode {
         let mut parts = s.split(':');
         let version =
             parts.next().ok_or(ParseBarcodeError::MissingVersion {
-                expected: Self::EXPECTED_VERSION,
+                expected: Self::MPN1,
             })?;
-        if version != Self::EXPECTED_VERSION {
+        if version != Self::MPN1 {
             return Err(ParseBarcodeError::UnknownVersion {
                 version: version.to_string(),
-                expected: Self::EXPECTED_VERSION,
+                expected: Self::MPN1,
             });
         }
         Self::from_parts(parts)
     }
 }
 
+impl fmt::Display for OxideBarcode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { part_number, revision, serial_number } = self;
+        write!(f, "0XV2:{part_number}:{revision:03}:{serial_number}")
+    }
+}
+
 impl Mpn1Barcode {
-    const EXPECTED_VERSION: &str = "MPN1";
+    const MPN1: &str = "MPN1";
 
     fn from_parts<'parts>(
         mut parts: impl Iterator<Item = &'parts str> + 'parts,
@@ -242,6 +259,17 @@ impl Mpn1Barcode {
             revision: revision.to_owned(),
             serial_number: serial_number.to_owned(),
         })
+    }
+}
+
+impl fmt::Display for Mpn1Barcode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { manufacturer, part_number, revision, serial_number } = self;
+        write!(
+            f,
+            "{}:{manufacturer}:{part_number}:{revision:}:{serial_number}",
+            Self::MPN1
+        )
     }
 }
 
@@ -270,5 +298,192 @@ impl TryFrom<gw::SledFanTrayVpd> for SledFanTray {
                 .try_into()
                 .map_err(InvalidAssemblyBarcode::mk("fan 2"))?,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Most of the tests for barcode parsing in this module are lifted from
+    // the ones in Hubris' `oxide-barcode` crate.
+    // https://github.com/oxidecomputer/hubris/blob/0d1ba0453a5d80470f07ea9949eb82bc3c291e01/lib/oxide-barcode/src/lib.rs#L363-L614
+
+    #[track_caller]
+    fn check_parse_oxide(input: &str, expected: OxideBarcode) {
+        let parsed = dbg!(input).parse::<OxideBarcode>();
+        dbg!(&parsed);
+
+        assert_eq!(
+            parsed.as_ref(),
+            Ok(dbg!(&expected)),
+            "parsing Oxide barcodestring: {input}"
+        );
+
+        let formatted = parsed.as_ref().unwrap().to_string();
+        assert_eq!(
+            parsed,
+            dbg!(formatted).parse::<OxideBarcode>(),
+            "parsed Oxide barcode for string {input} should round-trip through \
+             `fmt::Display`",
+        );
+
+        // We accept barcode strings that start with both leading zero and
+        // leading capital-O. Permute our input from one of these to the other
+        // to make sure both forms parse equivalently.
+        let mut copy = input.to_owned();
+        match copy.as_bytes()[0] {
+            b'0' => copy.replace_range(0..1, "O"),
+            b'O' => copy.replace_range(0..1, "0"),
+            c => panic!("unexpected leading character: {}", c as char),
+        }
+
+        let parsed = dbg!(&copy).parse::<OxideBarcode>();
+
+        assert_eq!(
+            dbg!(&parsed).as_ref(),
+            Ok(&expected),
+            "parsing Oxide barcode string: {copy}"
+        );
+
+        let formatted = parsed.as_ref().unwrap().to_string();
+        assert_eq!(
+            parsed,
+            dbg!(formatted).parse::<OxideBarcode>(),
+            "parsed Oxide barcode for string {copy} should round-trip through \
+             `fmt::Display`",
+        );
+    }
+
+    #[test]
+    fn parse_oxv1() {
+        check_parse_oxide(
+            "0XV1:1230000456:023:TST01234567",
+            OxideBarcode {
+                part_number: "123-0000456".to_owned(),
+                revision: 23,
+                serial_number: "TST01234567".to_owned(),
+            },
+        );
+    }
+
+    #[test]
+    fn parse_oxv2() {
+        check_parse_oxide(
+            "0XV2:123-0000456:023:TST01234567",
+            OxideBarcode {
+                part_number: "123-0000456".to_owned(),
+                revision: 23,
+                serial_number: "TST01234567".to_owned(),
+            },
+        );
+    }
+
+    #[test]
+    fn parse_oxv2_shorter_serial() {
+        check_parse_oxide(
+            "0XV2:123-0000456:023:TST0123456",
+            OxideBarcode {
+                part_number: "123-0000456".to_owned(),
+                revision: 23,
+                serial_number: "TST0123456".to_owned(),
+            },
+        );
+    }
+
+    #[test]
+    fn parse_oxv2_shorter_part() {
+        check_parse_oxide(
+            "0XV2:123-000045:023:TST01234567",
+            OxideBarcode {
+                part_number: "123-000045".to_owned(),
+                revision: 23,
+                serial_number: "TST01234567".to_owned(),
+            },
+        );
+    }
+
+    #[track_caller]
+    fn check_parse_mpn1(input: &str, expected: Mpn1Barcode) {
+        let parsed = dbg!(input).parse::<Mpn1Barcode>();
+        dbg!(&parsed);
+
+        assert_eq!(
+            parsed.as_ref(),
+            Ok(dbg!(&expected)),
+            "parsing MPN1 identity {input}"
+        );
+        let formatted = parsed.as_ref().unwrap().to_string();
+        assert_eq!(
+            dbg!(formatted).parse::<Mpn1Barcode>().as_ref(),
+            Ok(&expected),
+            "parsed MPN1 barcode {input} should round-trip through \
+             `fmt::Display`",
+        );
+    }
+
+    #[test]
+    fn parse_mpn1() {
+        check_parse_mpn1(
+            "MPN1:ABC:ASDF-1000:032:123456789",
+            Mpn1Barcode {
+                manufacturer: "ABC".to_owned(),
+                part_number: "ASDF-1000".to_owned(),
+                revision: "032".to_owned(),
+                serial_number: "123456789".to_owned(),
+            },
+        );
+    }
+
+    #[test]
+    fn parse_mpn1_empty() {
+        check_parse_mpn1(
+            "MPN1::::",
+            Mpn1Barcode {
+                manufacturer: String::new(),
+                part_number: String::new(),
+                revision: String::new(),
+                serial_number: String::new(),
+            },
+        );
+    }
+
+    #[test]
+    fn parse_mpn1_no_mpn_rev() {
+        check_parse_mpn1(
+            "MPN1:XYZ:::12345ABCD",
+            Mpn1Barcode {
+                manufacturer: "XYZ".to_owned(),
+                part_number: String::new(),
+                revision: String::new(),
+                serial_number: "12345ABCD".to_owned(),
+            },
+        );
+    }
+
+    #[test]
+    fn parse_mpn1_no_serial() {
+        check_parse_mpn1(
+            "MPN1:XYZ:1234ABC:420:",
+            Mpn1Barcode {
+                manufacturer: "XYZ".to_owned(),
+                part_number: "1234ABC".to_owned(),
+                revision: "420".to_owned(),
+                serial_number: String::new(),
+            },
+        );
+    }
+
+    #[test]
+    fn parse_mpn1_from_andy() {
+        check_parse_mpn1(
+            "MPN1:SYD:9CRA0848P8G012:C:WWYY1SSS",
+            Mpn1Barcode {
+                manufacturer: "SYD".to_owned(),
+                part_number: "9CRA0848P8G012".to_owned(),
+                revision: "C".to_owned(),
+                serial_number: "WWYY1SSS".to_owned(),
+            },
+        );
     }
 }
