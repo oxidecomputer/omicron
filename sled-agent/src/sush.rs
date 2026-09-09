@@ -368,13 +368,15 @@ async fn promote_output_dir(
     }
 }
 
-/// Periodically ask MGS which baseboard sits in each cubby, and
-/// publish the map. A job may name its target sled by cubby;
-/// this map resolves it. MGS answers at a fixed address within its
-/// switch zone's subnet, so each round we ask at that address in every
-/// /64 ddmd has learned, and take answers from any that respond. The
-/// answers merge into the map, so a round that goes unanswered never
-/// erases it.
+/// Periodically ask MGS which baseboard sits in each cubby,
+/// and publish the map. (A job may name its target sled by cubby;
+/// this map resolves it.) MGS answers at a fixed address within its
+/// host sled's subnet, so in each round we try that address in every
+/// subnet ddmd knows about, and take answers from any that respond.
+/// To avoid stale entries (e.g., if a sled moves slots), any non-trivial
+/// response overwrites the map, and we merge multiple responses.
+/// If no responses are received, we leave the map alone, since
+/// we have no newer data to replace it with.
 async fn poll_mgs_for_cubbies(log: Logger, cubbies: watch::Sender<Cubbies>) {
     let ddm = match DdmClient::localhost(&log) {
         Ok(ddm) => ddm,
@@ -431,7 +433,11 @@ async fn poll_mgs_for_cubbies(log: Logger, cubbies: watch::Sender<Cubbies>) {
                         }
                     }
                 }
-                cubbies.send_modify(|current| current.extend(map));
+                // A truthful response is never empty, since the sled
+                // running this poll must be in a cubby.
+                if !map.is_empty() {
+                    cubbies.send_replace(map);
+                }
             }
             Err(err) => {
                 warn!(
