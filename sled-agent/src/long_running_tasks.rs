@@ -221,6 +221,7 @@ pub async fn spawn_all_longrunning_tasks(
     // `crate::server::Server::start` serves the same API there too.
     let sush = match &config.sush {
         Some(sush_config) => {
+            info!(log, "Starting sush tasks");
             spawn_sush_tasks(
                 log,
                 sush_config,
