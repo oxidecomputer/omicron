@@ -364,7 +364,14 @@ async fn promote_output_dir(
                 ),
             }
         }
-        available_datasets_rx.changed(&log).await;
+        if available_datasets_rx.changed().await.is_err() {
+            warn!(
+                log,
+                "no new datasets will appear, so job output will stay \
+                 on the ramdisk",
+            );
+            return;
+        }
     }
 }
 
