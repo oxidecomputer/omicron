@@ -7550,9 +7550,11 @@ pub trait NexusExternalApi {
     ) -> Result<HttpResponseOk<latest::rack::Rack>, HttpError>;
 
     /// Tunnel to a Support Shell proxy in a switch zone
-    // This should use `channel { protocol = WEBSOCKETS, .. }`, but
-    // that does not let us return (unauthorized) errors before the
-    // connection upgrade.
+    // Use #[endpoint] rather than #[channel] so this handler can
+    // authorize the request and connect to the proxy before upgrading
+    // to WebSocket. With #[channel], Dropshot upgrades the connection
+    // before calling the handler, making it too late to return HTTP
+    // errors.
     #[endpoint {
         method = GET,
         path = "/v1/system/hardware/racks/{rack_id}/support-shell/tunnel",
