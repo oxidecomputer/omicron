@@ -23,23 +23,34 @@
 //!   and is called from `server` once this sled has been told its
 //!   underlay address.
 //!
-//! Gossip runs over sprockets on the bootstrap network, so jobs and
-//! sessions are shared across sleds. A universe is a shared gossip
-//! history; peers that meet merge into one by a dominance rule.
-//! A restarted sled re-seeds its universe, rejoins the rack's, then
-//! replays its history without re-executing it. Its gossip identity
-//! is stored in a _bookmark_.
+//! Gossip runs over sprockets on the bootstrap network. A job may be
+//! addressed to a single sled, but the messages carrying jobs,
+//! sessions, and events spread to every sled. The set of causally
+//! related messages is called a _universe_: peers in the same universe
+//! can gossip and converge on its contents; peers in different
+//! universes cannot gossip at all. Every identity in a universe
+//! descends from a single seed. When sleds meet, a deterministic rule
+//! picks whose seed wins, and the others bootstrap from it, each
+//! taking a slice of the winner's identity space. A restarted sled
+//! therefore rejoins the rack's universe and replays what it missed
+//! without re-executing it. Each sled stores its identity in a
+//! _bookmark_, so that a restart resumes it rather than growing a new
+//! one on every boot.
 //!
-//! The bookmark, like every record sush must trust across reboots,
-//! lives in the [sush locker].
-//! Each locker record is one file on each M.2. Stores write every
-//! copy, and loads adopt a record only when the copies show it cannot
-//! be stale. The locker is not a small bootstore: the bootstore holds
-//! rack-wide facts that sleds may recover from their peers, but a locker
-//! record says what this sled itself did or committed to do. These
-//! guarantees are critical to the correctness of the
-//! [rumors](https://github.com/oxidecomputer/rumors) gossip algorithm,
-//! which sush uses to synchronize job and event sets.
+//! The bookmark, like every record sush must trust across reboots, lives
+//! in the [sush locker]. When we write a record to the locker, we actually
+//! write two copies, one to each M.2. When we load a record, it only
+//! succeeds if both copies are exact matches, or if one of them is
+//! entirely missing (the latter to handle the case of M.2 hardware
+//! replacement in the field). A load fails on mismatched copies, so that
+//! a torn write or corruption on one drive cannot induce the reader to
+//! load stale or invalid information from the other drive. This turns the
+//! pair of M.2 drives into a single mirrored storage container that fails
+//! closed on any disagreement. We accept this because an M.2 failure is
+//! considered a non-user-replaceable part failure, for which the solution
+//! is an RMA. If this occurs in the field, sush may refuse to run jobs on
+//! the sled containing the failed M.2; we report this error to the user,
+//! who should replace the sled.
 //!
 //! [sush locker]:
 //!   https://github.com/oxidecomputer/sush/blob/main/server/src/locker.rs
