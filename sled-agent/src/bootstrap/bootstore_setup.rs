@@ -77,6 +77,9 @@ fn bootstore_network_config_paths(
     Ok(paths)
 }
 
+/// Poll ddmd for the set of peer sleds on the bootstrap network, and
+/// publish it to the three consumers that each need it at their own
+/// port: the bootstore, the trust quorum node, and sush gossip.
 pub async fn poll_ddmd_for_peer_updates(
     log: Logger,
     bootstore_node_handle: bootstore::NodeHandle,
