@@ -42,6 +42,7 @@
 //! which sush uses to synchronize job and event sets.
 
 use crate::config::SushConfig;
+use anyhow::Context;
 use camino::Utf8PathBuf;
 use dropshot::{ConfigDropshot, HandlerTaskMode, HttpServer, ServerBuilder};
 use gateway_client::Client as MgsClient;
@@ -102,11 +103,11 @@ impl SushHandles {
     pub fn start_api(
         &self,
         ip: Ipv6Addr,
-    ) -> Result<HttpServer<Arc<JobManager>>, String> {
+    ) -> anyhow::Result<HttpServer<Arc<JobManager>>> {
         let bind_address =
             SocketAddr::V6(SocketAddrV6::new(ip, SUSH_API_PORT, 0, 0));
         let api = sush_api::sush_api_mod::api_description::<ApiServer>()
-            .map_err(|err| format!("failed to describe sush API: {err}"))?;
+            .context("describing the sush API")?;
         let server = ServerBuilder::new(
             api,
             Arc::clone(&self.manager),
@@ -122,7 +123,7 @@ impl SushHandles {
             compression: Default::default(),
         })
         .start()
-        .map_err(|err| err.to_string())?;
+        .context("starting the sush API server")?;
         info!(
             self.log, "started sush server";
             "address" => %bind_address,
@@ -301,7 +302,7 @@ pub async fn spawn_sush_tasks(
         Err(err) => warn!(
             handles.log,
             "sush is not serving on the bootstrap network";
-            "error" => err,
+            "error" => #%err,
         ),
     }
 
