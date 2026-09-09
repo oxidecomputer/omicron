@@ -49,6 +49,7 @@ use gateway_types::component::SpType;
 use omicron_common::address::{
     MGS_PORT, SUSH_API_PORT, SUSH_GOSSIP_PORT, get_switch_zone_address,
 };
+use omicron_common::api::external::ByteCount;
 use omicron_ddm_admin_client::Client as DdmClient;
 use sled_agent_config_reconciler::AvailableDatasetsReceiver;
 use sled_agent_measurements::MeasurementsHandle;
@@ -172,7 +173,7 @@ pub async fn spawn_sush_tasks(
     }
     let (output_dirs_tx, output_dirs_rx) = watch::channel(OutputDirs::new(
         config.ramdisk_dir.as_std_path(),
-        mb_to_bytes(config.ramdisk_max_output_mb),
+        ByteCount::from_mebibytes_u32(config.ramdisk_max_output_mb).to_bytes(),
     ));
 
     if config.roots.is_empty() {
@@ -283,7 +284,7 @@ pub async fn spawn_sush_tasks(
         log.clone(),
         available_datasets_rx,
         output_dirs_tx,
-        mb_to_bytes(config.max_output_mb),
+        ByteCount::from_mebibytes_u32(config.max_output_mb).to_bytes(),
     ));
 
     info!(log, "started sush job manager");
@@ -343,10 +344,6 @@ async fn promote_output_dir(
         }
         available_datasets_rx.changed().await;
     }
-}
-
-fn mb_to_bytes(mb: u32) -> u64 {
-    u64::from(mb) * 1024 * 1024
 }
 
 /// Periodically ask MGS which baseboard sits in each cubby, and
