@@ -73,7 +73,7 @@ pub struct ServerHandle {
 }
 
 impl ServerHandle {
-    /// Return the address the server is bound it, if there is exactly one, or
+    /// Return the address the server is bound to, if there is exactly one, or
     /// an error otherwise. This is mostly intended for test contexts.
     pub fn sole_local_address(&self) -> anyhow::Result<SocketAddr> {
         anyhow::ensure!(
