@@ -2285,6 +2285,7 @@ impl ServiceManager {
                             treat_loopback_as_external:
                                 nexus_config::TreatLoopbackAsExternal::No,
                         },
+                    record_db_claim_backtraces: true,
                 };
 
                 // Copy the partial config file to the expected

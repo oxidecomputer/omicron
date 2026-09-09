@@ -39,7 +39,11 @@ enum Interface {
 
 fn new_pool(log: &Logger, db: &CockroachInstance) -> Arc<db::Pool> {
     let cfg = db::Config { url: db.pg_config().clone() };
-    Arc::new(db::Pool::new_single_host(log, &cfg))
+    Arc::new(db::Pool::new_single_host(
+        log,
+        &cfg,
+        db::DbClaimBacktraceSetting::Capture,
+    ))
 }
 
 struct TestDatabaseBuilder {
@@ -326,7 +330,11 @@ async fn datastore_test(
     use crate::authn;
 
     let cfg = db::Config { url: db.pg_config().clone() };
-    let pool = Arc::new(db::Pool::new_single_host(&log, &cfg));
+    let pool = Arc::new(db::Pool::new_single_host(
+        &log,
+        &cfg,
+        db::DbClaimBacktraceSetting::Capture,
+    ));
     let datastore = Arc::new(
         DataStore::new(&log, pool, None, IdentityCheckPolicy::DontCare)
             .await

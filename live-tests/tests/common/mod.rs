@@ -10,6 +10,7 @@ use internal_dns_resolver::Resolver;
 use internal_dns_types::names::ServiceName;
 use nexus_config::PostgresConfigWithUrl;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::SledFilter;
 use omicron_common::address::Ipv6Subnet;
@@ -134,8 +135,11 @@ async fn create_datastore(
     .context("failed to parse constructed postgres URL")?;
 
     let db_config = nexus_db_queries::db::Config { url };
-    let pool =
-        Arc::new(nexus_db_queries::db::Pool::new_single_host(log, &db_config));
+    let pool = Arc::new(nexus_db_queries::db::Pool::new_single_host(
+        log,
+        &db_config,
+        db::DbClaimBacktraceSetting::Capture,
+    ));
     DataStore::new_failfast(log, pool)
         .await
         .context("creating DataStore")

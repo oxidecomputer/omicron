@@ -197,10 +197,22 @@ pub struct DeploymentConfig {
     /// Configuration for HTTP clients to external services.
     #[serde(default)]
     pub external_http_clients: ExternalHttpClientConfig,
+    /// By default, we capture backtraces when claiming a connection from the DB pool, but setting
+    /// this flag to `false` will disable that behavior.
+    ///
+    /// This flag is intended as an escape hatch in case we ever encounter an unexpected
+    /// pathological case where capturing backtraces is slow enough to be an issue.
+    #[schemars(skip)] // TODO we're protected against dropshot changes
+    #[serde(default = "default_record_db_claim_backtraces")]
+    pub record_db_claim_backtraces: bool,
 }
 
 fn default_techport_external_server_port() -> u16 {
     NEXUS_TECHPORT_EXTERNAL_PORT
+}
+
+fn default_record_db_claim_backtraces() -> bool {
+    true
 }
 
 impl DeploymentConfig {
@@ -1293,6 +1305,7 @@ mod test {
             rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
             external_dns_servers = [ "1.1.1.1", "9.9.9.9" ]
             dropshot_external_additional_addresses = [ "[::1]:4567" ]
+            record_db_claim_backtraces = false
             [deployment.external_http_clients]
             interface = "opte0"
             treat_loopback_as_external = "yes_for_test_purposes_only"
@@ -1451,6 +1464,7 @@ mod test {
                         interface: Some("opte0".to_string()),
                         treat_loopback_as_external: TreatLoopbackAsExternal::YesForTestPurposesOnly,
                     },
+                    record_db_claim_backtraces: false,
                 },
                 pkg: PackageConfig {
                     console: ConsoleConfig {
