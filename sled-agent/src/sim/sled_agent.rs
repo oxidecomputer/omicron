@@ -151,28 +151,30 @@ impl SledAgent {
         let instance_log = log.new(o!("kind" => "instances"));
         let storage_log = log.new(o!("kind" => "storage"));
 
+        let sys_net_config = SystemNetworkingConfig {
+            rack_network_config: RackNetworkConfig {
+                rack_subnet: Ipv6Net::new(Ipv6Addr::UNSPECIFIED, 56).unwrap(),
+                infra_ip_first: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                infra_ip_last: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                // The simulated sled-agent doesn't do real uplink setup,
+                // but `UplinkPorts` must be non-empty, so use a single
+                // placeholder port.
+                ports: UplinkPorts::new(vec![PortConfig::empty_for_tests(
+                    "qsfp0",
+                )])
+                .expect("placeholder port list is non-empty"),
+                bgp: Vec::new(),
+                bfd: Vec::new(),
+            },
+            // TODO-correctness Can we fill this in for the simulated
+            // sled-agent?
+            blueprint_external_networking_config: None,
+        };
+
         let initial_bootstore =
-            EarlyNetworkConfigEnvelope::from(&SystemNetworkingConfig {
-                rack_network_config: RackNetworkConfig {
-                    rack_subnet: Ipv6Net::new(Ipv6Addr::UNSPECIFIED, 56)
-                        .unwrap(),
-                    infra_ip_first: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-                    infra_ip_last: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-                    // The simulated sled-agent doesn't do real uplink setup,
-                    // but `UplinkPorts` must be non-empty, so use a single
-                    // placeholder port.
-                    ports: UplinkPorts::new(vec![PortConfig::empty_for_tests(
-                        "qsfp0",
-                    )])
-                    .expect("placeholder port list is non-empty"),
-                    bgp: Vec::new(),
-                    bfd: Vec::new(),
-                },
-                // TODO-correctness Can we fill this in for the simulated
-                // sled-agent?
-                blueprint_external_networking_config: None,
-            })
-            .serialize_to_bootstore_with_generation(0);
+            EarlyNetworkConfigEnvelope::from(&sys_net_config)
+                .serialize_to_bootstore_with_generation(0);
+
         let (bootstore_network_config, _) =
             tokio::sync::watch::channel(initial_bootstore);
 
@@ -193,21 +195,7 @@ impl SledAgent {
         let health_monitor = HealthMonitorHandle::stub();
 
         let (network_config_tx, _) =
-            tokio::sync::watch::channel(SystemNetworkingConfig {
-                rack_network_config: RackNetworkConfig {
-                    rack_subnet: Ipv6Net::new(Ipv6Addr::UNSPECIFIED, 56)
-                        .unwrap(),
-                    infra_ip_first: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-                    infra_ip_last: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-                    ports: UplinkPorts::new(vec![PortConfig::empty_for_tests(
-                        "qsfp0",
-                    )])
-                    .expect("placeholder port list is non-empty"),
-                    bgp: Vec::new(),
-                    bfd: Vec::new(),
-                },
-                blueprint_external_networking_config: None,
-            });
+            tokio::sync::watch::channel(sys_net_config);
 
         // Spawn a bridge task that watches bootstore changes and publishes
         // deserialized SystemNetworkingConfig values to network_config_tx.
