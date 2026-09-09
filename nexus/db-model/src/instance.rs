@@ -148,6 +148,10 @@ pub struct Instance {
     /// the OPTE port is created with the default MTU regardless of this field.
     /// Changes to this field only take effect on the next instance restart.
     pub enable_jumbo_frames: bool,
+
+    // TODO
+    pub instance_shutdown_policy_action: InstanceShutdownAction,
+    pub instance_shutdown_policy_timeout: Option<u64>,
 }
 
 impl Instance {
@@ -564,6 +568,35 @@ impl InstanceAutoRestart {
         .and(dsl::updater_id.is_null())
     }
 }
+
+// TODO
+#[derive(Copy, Clone, Default, Debug, PartialEq, Eq)]
+pub enum InstanceShutdownAction {
+    HardOff,
+    #[default]
+    PowerButton,
+}
+
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Selectable,
+    Insertable,
+    Queryable,
+    Serialize,
+    Deserialize,
+)]
+#[diesel(table_name = instance)]
+pub struct InstanceShutdownPolicy {
+    #[diesel(column_name = instance_shutdown_policy_action)]
+    #[serde(default)]
+    pub action: InstanceShutdownAction,
+    #[diesel(column_name = instance_shutdown_policy_timeout)]
+    #[serde(default)]
+    pub timeout_secs: Option<u64>,
+}
+
 /// The parts of an Instance that can be directly updated after creation.
 #[derive(Clone, Debug, AsChangeset, Serialize, Deserialize)]
 #[diesel(table_name = instance, treat_none_as_null = true)]

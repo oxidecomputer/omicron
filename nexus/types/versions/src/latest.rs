@@ -191,10 +191,12 @@ pub mod instance {
 
     pub use crate::v2026_06_05_00::instance::InstanceDiskAttachment;
 
-    pub use crate::v2026_06_08_00::instance::Instance;
     pub use crate::v2026_06_08_00::instance::InstanceCpuPlatform;
-    pub use crate::v2026_06_08_00::instance::InstanceCreate;
-    pub use crate::v2026_06_08_00::instance::InstanceUpdate;
+
+    pub use crate::v2026_09_04_00::instance::Instance;
+    pub use crate::v2026_09_04_00::instance::InstanceCreate;
+    pub use crate::v2026_09_04_00::instance::InstanceShutdownPolicy;
+    pub use crate::v2026_09_04_00::instance::InstanceUpdate;
 }
 
 pub mod internet_gateway {

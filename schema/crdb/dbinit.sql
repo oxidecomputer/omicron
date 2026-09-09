@@ -1380,6 +1380,12 @@ CREATE TYPE IF NOT EXISTS omicron.public.instance_intended_state AS ENUM (
     'destroyed'
 );
 
+/* TODO doc */
+CREATE TYPE IF NOT EXISTS omicron.public.instance_shutdown_action AS ENUM (
+    'hard_off',
+    'power_button'
+);
+
 /*
  * TODO consider how we want to manage multiple sagas operating on the same
  * Instance -- e.g., reboot concurrent with destroy or concurrent reboots or the
@@ -1470,6 +1476,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
      * action should be taken when the instance's VMM state changes.
      */
     intended_state omicron.public.instance_intended_state NOT NULL,
+
+    /* TODO: doc. note the above 'intended_state' has a 'guest_shutdown' already
+    so we may want this field's value to decide that gets set accordingly whenever
+    a stop request comes in */
+    shutdown_policy_action omicron.public.instance_shutdown_action,
+    shutdown_policy_timeout INTERVAL,
 
     /*
      * The required CPU platform for this instance. If set, the instance's VMs
