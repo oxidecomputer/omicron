@@ -31,7 +31,7 @@
 //! is stored in a _bookmark_.
 //!
 //! The bookmark, like every record sush must trust across reboots,
-//! lives in the [sush locker](https://github.com/oxidecomputer/sush/blob/main/server/src/locker.rs).
+//! lives in the [sush locker].
 //! Each locker record is one file on each M.2. Stores write every
 //! copy, and loads adopt a record only when the copies show it cannot
 //! be stale. The locker is not a small bootstore: the bootstore holds
@@ -40,6 +40,9 @@
 //! guarantees are critical to the correctness of the
 //! [rumors](https://github.com/oxidecomputer/rumors) gossip algorithm,
 //! which sush uses to synchronize job and event sets.
+//!
+//! [sush locker]:
+//!   https://github.com/oxidecomputer/sush/blob/main/server/src/locker.rs
 
 use crate::config::SushConfig;
 use anyhow::Context;
