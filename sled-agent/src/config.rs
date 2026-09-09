@@ -138,8 +138,7 @@ pub struct SushConfig {
     pub roots: Vec<Utf8PathBuf>,
 
     /// Where to record job output before an encrypted dataset is available.
-    /// This is on the ramdisk, so it costs global zone memory and does not
-    /// survive a reboot.
+    /// Must be on a ramdisk so that it is never persisted unencrypted.
     #[serde(default = "SushConfig::default_ramdisk_dir")]
     pub ramdisk_dir: Utf8PathBuf,
 
