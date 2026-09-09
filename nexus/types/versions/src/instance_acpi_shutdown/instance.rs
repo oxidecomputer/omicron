@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 use crate::v2025_11_20_00::instance::{
     InstanceAutoRestartPolicy, InstanceAutoRestartStatus, InstanceCpuCount,
-    InstanceRuntimeState,
+    InstanceRuntimeState, UserData, bool_true,
 };
 use crate::v2026_01_03_00::instance::InstanceNetworkInterfaceAttachment;
 use crate::v2026_01_05_00::instance::ExternalIpCreate;
@@ -21,6 +21,16 @@ use crate::v2026_01_08_00::multicast::MulticastGroupJoinSpec;
 use crate::v2026_06_05_00::instance::InstanceDiskAttachment;
 use crate::v2026_06_08_00;
 use crate::v2026_06_08_00::instance::InstanceCpuPlatform;
+
+// TODO proper doc
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum InstanceShutdownPolicy {
+    // instance is forcefully terminated
+    HardOff,
+    // sends PWRBTN_STS as described in ACPI ch. 4, instance hard terminated if not stopped after timeout
+    PowerButton { timeout_seconds: u64 },
+}
 
 /// View of an Instance
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -59,8 +69,8 @@ pub struct Instance {
     /// take effect on the next instance restart.
     pub enable_jumbo_frames: bool,
 
-    // TODO doc, type
-    pub shutdown_policy: Option<()>,
+    // TODO doc
+    pub shutdown_policy: Option<InstanceShutdownPolicy>,
 }
 
 impl From<v2026_06_08_00::instance::Instance> for Instance {
@@ -86,7 +96,7 @@ impl TryFrom<Instance> for v2026_06_08_00::instance::Instance {
 
     fn try_from(value: Instance) -> Result<Self, Self::Error> {
         if let Some(policy) = value.shutdown_policy
-        /* TODO(lif): && policy isn't the existing behavior of force shutdown always */
+            && policy != InstanceShutdownPolicy::HardOff
         {
             return Err(dropshot::HttpError::for_internal_error(
                 "Instance with shutdown_policy cannot be represented in \
@@ -210,9 +220,9 @@ pub struct InstanceCreate {
     /// effect on the next instance restart.
     #[serde(default)]
     pub enable_jumbo_frames: bool,
-    // TODO: doc, type
+    // TODO: doc
     #[serde(default)]
-    pub shutdown_policy: Option<()>,
+    pub shutdown_policy: Option<InstanceShutdownPolicy>,
 }
 
 impl From<v2026_06_08_00::instance::InstanceCreate> for InstanceCreate {
@@ -306,8 +316,8 @@ pub struct InstanceUpdate {
     /// take effect on the next instance restart.
     pub enable_jumbo_frames: bool,
 
-    // TODO doc, type
-    pub shutdown_policy: Option<()>,
+    // TODO doc
+    pub shutdown_policy: Option<InstanceShutdownPolicy>,
 }
 
 impl From<v2026_06_08_00::instance::InstanceUpdate> for InstanceUpdate {
