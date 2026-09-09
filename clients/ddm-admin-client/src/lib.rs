@@ -105,10 +105,10 @@ impl Client {
         self.inner.enable_stats(request).await.map(|resp| resp.into_inner())
     }
 
-    /// Returns the underlay subnets DDM advertises. Callers must probe
-    /// each subnet for what they expect to find, because sleds also
-    /// advertise internal DNS subnets, and RFD 63 reserves a services
-    /// prefix.
+    /// Returns every non-bootstrap /64 prefix ddmd has learned. These
+    /// are not all sled subnets: an internal DNS zone is reachable at
+    /// its own reserved /64, advertised by the sled hosting it, and
+    /// RFD 63 reserves others.
     pub async fn derive_underlay_subnets_from_prefixes(
         &self,
     ) -> Result<
@@ -118,9 +118,13 @@ impl Client {
         let prefixes = self.inner.get_prefixes().await?.into_inner();
         Ok(prefixes.into_values().flatten().filter_map(|prefix| {
             let addr = prefix.destination.addr();
-            (prefix.destination.width() == SLED_PREFIX_LENGTH
-                && addr.segments()[0] != BOOTSTRAP_PREFIX)
-                .then(|| Ipv6Subnet::new(addr))
+            if prefix.destination.width() == SLED_PREFIX_LENGTH
+                && addr.segments()[0] != BOOTSTRAP_PREFIX
+            {
+                Some(Ipv6Subnet::new(addr))
+            } else {
+                None
+            }
         }))
     }
 

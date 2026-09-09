@@ -349,14 +349,13 @@ fn mb_to_bytes(mb: u32) -> u64 {
     u64::from(mb) * 1024 * 1024
 }
 
-/// Keep the cubby map current from MGS's view of the SPs. A job may
-/// name its target sled by cubby, and the map says which baseboard
-/// is in each cubby.
-///
-/// DDM's advertised subnets are only candidates (see
-/// [`DdmClient::derive_underlay_subnets_from_prefixes`]), so we must
-/// probe for MGS. Each round's answers merge into the existing map,
-/// so a probe outage never erases it.
+/// Periodically ask MGS which baseboard sits in each cubby, and
+/// publish the map. A job may name its target sled by cubby;
+/// this map resolves it. MGS answers at a fixed address within its
+/// switch zone's subnet, so each round we ask at that address in every
+/// /64 ddmd has learned, and take answers from any that respond. The
+/// answers merge into the map, so a round that goes unanswered never
+/// erases it.
 async fn poll_mgs_for_cubbies(log: Logger, cubbies: watch::Sender<Cubbies>) {
     let ddm = match DdmClient::localhost(&log) {
         Ok(ddm) => ddm,
