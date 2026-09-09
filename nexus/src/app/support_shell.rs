@@ -185,7 +185,6 @@ async fn pipe(
                 Ok(_) => return "unexpected frame".to_string(),
             }
         }
-        let _ = proxy_write.shutdown().await;
         "client closed".to_string()
     };
 
@@ -214,7 +213,6 @@ async fn pipe(
                 }
             }
         }
-        let _ = ws_sink.send(Message::Close(None)).await;
         "proxy closed".to_string()
     };
 
@@ -222,5 +220,10 @@ async fn pipe(
         reason = inbound => reason,
         reason = outbound => reason,
     };
+    // Close both writers here rather than in the pipes, so that each
+    // side sees an orderly end (a Close frame, a FIN) no matter which
+    // pipe finished first or how.
+    let _ = ws_sink.close().await;
+    let _ = proxy_write.shutdown().await;
     PipeSummary { reason, to_proxy, to_client }
 }
