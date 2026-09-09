@@ -537,14 +537,27 @@ async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
                 .url
                 .replace("{id}", "00000000-0000-0000-0000-000000000000");
 
-            let result = NexusRequest::new(
+            let mut builder =
                 RequestBuilder::new(client, http_method.clone(), &url)
                     .body(body.as_ref())
-                    .expect_status(None), // accept any status
-            )
-            .authn_as(AuthnMode::UnprivilegedUser)
-            .execute()
-            .await;
+                    .expect_status(None); // accept any status
+
+            // A websocket endpoint rejects a request without handshake
+            // headers before it reaches authorization, and thus before
+            // any audit entry is made; send the headers so its coverage
+            // is actually measured.
+            if matches!(
+                method,
+                AllowedMethod::GetWebsocket
+                    | AllowedMethod::GetWebsocketUnavailable
+            ) {
+                builder = builder.websocket_handshake_headers();
+            }
+
+            let result = NexusRequest::new(builder)
+                .authn_as(AuthnMode::UnprivilegedUser)
+                .execute()
+                .await;
 
             if result.is_err() {
                 // Request itself failed (connection error, etc), skip
@@ -787,7 +800,11 @@ async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
     }
 
     // GET endpoints that are intentionally audit-logged (should be rare).
-    let allowed_audited_gets: BTreeMap<&str, (&str, &str)> = BTreeMap::new();
+    let allowed_audited_gets: BTreeMap<&str, (&str, &str)> =
+        BTreeMap::from([(
+            "rack_support_shell_tunnel",
+            ("get", "/v1/system/hardware/racks/{rack_id}/support-shell/tunnel"),
+        )]);
 
     let unexpected_audited: Vec<_> = unexpected_get_audit
         .keys()
@@ -820,6 +837,29 @@ async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
         "Unexpected audited GET endpoints: {:?}",
         unexpected_audited,
     );
+
+    // Check that every allowed_audited_gets entry was in fact observed
+    // to produce an audit entry, so that dropping the audit logging from
+    // such an endpoint fails this test.
+    for (op, (method, path)) in &allowed_audited_gets {
+        match unexpected_get_audit.get(*op) {
+            None => {
+                panic!(
+                    "Stale allowed_audited_gets entry: {} ({} {:?}); \
+                     endpoint lost its audit logging or no longer exists",
+                    op, method, path,
+                );
+            }
+            Some((actual_method, actual_path)) => {
+                assert_eq!(
+                    (actual_method.as_str(), actual_path.as_str()),
+                    (*method, *path),
+                    "allowed_audited_gets entry for {} has wrong method/path",
+                    op,
+                );
+            }
+        }
+    }
 }
 
 fn verify_entry(

@@ -6671,17 +6671,17 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<path_params::RackPath>,
         upgrade: WebsocketUpgrade,
     ) -> WebsocketEndpointResult {
-        let apictx = rqctx.context();
-        let nexus = &apictx.context.nexus;
-        let path = path_params.into_inner();
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        nexus
-            .support_shell_tunnel(
-                &opctx,
-                RackUuid::from_untyped_uuid(path.rack_id),
-                upgrade,
-            )
-            .await
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            nexus
+                .support_shell_tunnel(
+                    &opctx,
+                    RackUuid::from_untyped_uuid(path.rack_id),
+                    upgrade,
+                )
+                .await
+        })
+        .await
     }
 
     // This request isn't currently paginated. The query is somewhat complex
