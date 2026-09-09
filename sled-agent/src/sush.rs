@@ -102,8 +102,14 @@ const MGS_POLL_INTERVAL: Duration = Duration::from_secs(30);
 /// How long to wait for an MGS candidate to answer.
 const MGS_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Maximum size of a request body the API will accept. The largest thing a
-/// client sends is a signed job request or a certificate, both small.
+/// Maximum size of a request body the API will accept. The protocol
+/// defines no message size limits, so we chose this cap rather than
+/// deriving it. The largest bodies a client sends are the command in
+/// a signed job request and a PEM-encoded certificate. Neither has
+/// exceeded a few KB in practice, so this leaves an order of magnitude
+/// of headroom while bounding how much the server needs to buffer for
+/// any one request. We should raise it if we start seeing significantly
+/// larger requests or certs in the wild.
 const REQUEST_MAX_BODY_BYTES: usize = 0xFFFF;
 
 /// Handles to the Support Shell server's tasks.
