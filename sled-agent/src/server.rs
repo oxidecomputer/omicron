@@ -99,7 +99,7 @@ impl Server {
             match handles.start_api(*sled_address.ip()) {
                 Ok(server) => Some((handles, server)),
                 Err(error) => {
-                    warn!(log, "failed to start sush server"; "error" => error);
+                    warn!(log, "failed to start sush server"; "error" => #%error);
                     None
                 }
             }
