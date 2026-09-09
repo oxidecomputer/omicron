@@ -114,6 +114,12 @@ pub struct Tmp11x {
     pub eeprom3: u16,
 }
 
+/// PMBus vital product data (VPD) read from a PMBus device.
+///
+/// If the device does not support a particular VPD command, the field in this
+/// struct corresponding to that command will be `None`. Otherwise, the value
+/// contains the exact bytes returned by the device, including an empty value or
+/// any NUL bytes returned by the device.
 #[derive(
     Debug,
     Clone,
@@ -125,4 +131,21 @@ pub struct Tmp11x {
     Serialize,
     JsonSchema,
 )]
-pub struct PmbusDevice {}
+pub struct PmbusDevice {
+    /// `MFR_ID` (PMBus command 0x99).
+    pub mfr_id: Option<Vec<u8>>,
+    /// `MFR_MODEL` (PMBus command 0x9A).
+    pub mfr_model: Option<Vec<u8>>,
+    /// `MFR_REVISION` (PMBus command 0x9B).
+    pub mfr_revision: Option<Vec<u8>>,
+    /// `MFR_LOCATION` (PMBus command 0x9C).
+    pub mfr_location: Option<Vec<u8>>,
+    /// `MFR_DATE` (PMBus command 0x9D).
+    pub mfr_date: Option<Vec<u8>>,
+    /// `MFR_SERIAL` (PMBus command 0x9E).
+    pub mfr_serial: Option<Vec<u8>>,
+    /// `IC_DEVICE_ID` (PMBus command 0xAD).
+    pub ic_device_id: Option<Vec<u8>>,
+    /// `IC_DEVICE_REV` (PMBus command 0xAE).
+    pub ic_device_rev: Option<Vec<u8>>,
+}

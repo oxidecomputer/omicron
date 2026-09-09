@@ -343,7 +343,7 @@ pub trait GatewayApi {
     #[endpoint {
         method = GET,
         path = "/sp/{type}/{slot}/component/{component}/vpd",
-        versions = COMPONENT_VPD..,
+        versions = VERSION_COMPONENT_VPD..,
     }]
     async fn sp_component_vpd_get(
         rqctx: RequestContext<Self::Context>,

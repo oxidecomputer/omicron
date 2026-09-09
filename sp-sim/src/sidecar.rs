@@ -885,6 +885,12 @@ impl SpHandler for Handler {
         Ok(self.power_state)
     }
 
+    fn power_state_with_reason(
+        &mut self,
+    ) -> Result<gateway_messages::PowerStateWithReason, SpError> {
+        Err(SpError::RequestUnsupportedForSp)
+    }
+
     fn set_power_state(
         &mut self,
         sender: Sender<Self::VLanId>,
@@ -1149,6 +1155,22 @@ impl SpHandler for Handler {
         self.update_state.get_component_caboose_value(component, slot, key, buf)
     }
 
+    fn component_get_vpd(
+        &mut self,
+        component: SpComponent,
+        _buf: &mut [u8],
+    ) -> Result<usize, SpError> {
+        // TODO(eliza): we should allow configuring a VPD response in the sim
+        // config file...
+        warn!(
+            &self.log,
+            "asked to read VPD for component, which the simulator doesn't
+             implement yet";
+            "component" => ?component,
+        );
+        Err(SpError::RequestUnsupportedForComponent)
+    }
+
     fn read_sensor(
         &mut self,
         request: gateway_messages::SensorRequest,
@@ -1323,6 +1345,39 @@ impl SpHandler for Handler {
     }
 
     fn get_host_flash_hash(&mut self, _slot: u16) -> Result<[u8; 32], SpError> {
+        Err(SpError::RequestUnsupportedForSp)
+    }
+
+    fn get_pmbus_status(
+        &mut self,
+        rail: &gateway_messages::PowerRailName,
+    ) -> Result<gateway_messages::PmbusStatus, SpError> {
+        // TODO(eliza): we're gonna want a way to configure fake PMBus statuses
+        // in the config file...
+        warn!(
+            &self.log,
+            "asked to read PMBus status, which the simulator doesn't
+             implement yet";
+            "rail" => ?rail,
+        );
+        Err(SpError::RequestUnsupportedForSp)
+    }
+
+    fn get_host_panic_payload(
+        &mut self,
+        _request: Option<gateway_messages::HostInfoRequest>,
+        _len: u32,
+        _trailing_tx_buf: &mut [u8],
+    ) -> Result<gateway_messages::HostPanicPayloadData, SpError> {
+        Err(SpError::RequestUnsupportedForSp)
+    }
+
+    fn get_host_bootfail_payload(
+        &mut self,
+        _request: Option<gateway_messages::HostInfoRequest>,
+        _len: u32,
+        _trailing_tx_buf: &mut [u8],
+    ) -> Result<gateway_messages::HostBootfailPayloadData, SpError> {
         Err(SpError::RequestUnsupportedForSp)
     }
 }

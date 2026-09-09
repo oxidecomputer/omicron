@@ -3,7 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::latest::component_vpd::{
-    Barcode, Mpn1Barcode, OxideBarcode, SledFanTray,
+    Barcode, ComponentVpd, Mpn1Barcode, OxideBarcode, PmbusDevice, SledFanTray,
+    Tmp11x,
 };
 use gateway_messages::vpd as gw;
 use std::fmt;
@@ -39,7 +40,15 @@ pub enum ParseBarcodeError {
 }
 
 #[derive(thiserror::Error, Debug)]
-#[error("invalid {which_barcode} barcode")]
+pub enum InvalidComponentVpd {
+    #[error(transparent)]
+    Barcode(#[from] ParseBarcodeError),
+    #[error(transparent)]
+    SledFanTray(#[from] InvalidAssemblyBarcode),
+}
+
+#[derive(thiserror::Error, Debug)]
+#[error("invalid fan assembly {which_barcode} barcode")]
 pub struct InvalidAssemblyBarcode {
     which_barcode: &'static str,
     #[source]
@@ -270,6 +279,54 @@ impl fmt::Display for Mpn1Barcode {
             "{}:{manufacturer}:{part_number}:{revision:}:{serial_number}",
             Self::MPN1
         )
+    }
+}
+
+impl TryFrom<gw::Vpd> for ComponentVpd {
+    type Error = InvalidComponentVpd;
+
+    fn try_from(value: gw::Vpd) -> Result<Self, Self::Error> {
+        match value {
+            gw::Vpd::Pmbus(vpd) => Ok(Self::Pmbus(vpd.into())),
+            gw::Vpd::Barcode(barcode) => Ok(match barcode.try_into()? {
+                Barcode::Oxide(barcode) => Self::OxideBarcode(barcode),
+                Barcode::Mpn1(barcode) => Self::Mpn1Barcode(barcode),
+            }),
+            gw::Vpd::SledFanTray(vpd) => Ok(Self::SledFanTray(vpd.try_into()?)),
+            gw::Vpd::Tmp11x(vpd) => Ok(Self::Tmp11x(vpd.into())),
+        }
+    }
+}
+
+impl From<gw::PmbusVpd> for PmbusDevice {
+    fn from(value: gw::PmbusVpd) -> Self {
+        let gw::PmbusVpd {
+            mfr_id,
+            mfr_model,
+            mfr_revision,
+            mfr_location,
+            mfr_date,
+            mfr_serial,
+            ic_device_id,
+            ic_device_rev,
+        } = value;
+        Self {
+            mfr_id: mfr_id.as_bytes().map(<[u8]>::to_vec),
+            mfr_model: mfr_model.as_bytes().map(<[u8]>::to_vec),
+            mfr_revision: mfr_revision.as_bytes().map(<[u8]>::to_vec),
+            mfr_location: mfr_location.as_bytes().map(<[u8]>::to_vec),
+            mfr_date: mfr_date.as_bytes().map(<[u8]>::to_vec),
+            mfr_serial: mfr_serial.as_bytes().map(<[u8]>::to_vec),
+            ic_device_id: ic_device_id.as_bytes().map(<[u8]>::to_vec),
+            ic_device_rev: ic_device_rev.as_bytes().map(<[u8]>::to_vec),
+        }
+    }
+}
+
+impl From<gw::Tmp11xVpd> for Tmp11x {
+    fn from(value: gw::Tmp11xVpd) -> Self {
+        let gw::Tmp11xVpd { id, eeprom1, eeprom2, eeprom3 } = value;
+        Self { device_id: id, eeprom1, eeprom2, eeprom3 }
     }
 }
 
