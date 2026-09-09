@@ -15,7 +15,6 @@ use omicron_common::disk::DatasetName;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use sled_agent_types::disk::CompressionAlgorithm;
-use sled_agent_types::disk::GzipLevel;
 use std::collections::BTreeMap;
 use std::collections::btree_map::Entry;
 use std::net::SocketAddrV6;
@@ -69,9 +68,7 @@ impl PartialDatasetConfig {
             address: None,
             quota: Some(ByteCount::from_gibibytes_u32(DEBUG_QUOTA_SIZE_GB)),
             reservation: None,
-            compression: CompressionAlgorithm::GzipN {
-                level: GzipLevel::new::<9>(),
-            },
+            compression: CompressionAlgorithm::Lz4,
         }
     }
 
