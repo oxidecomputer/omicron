@@ -137,9 +137,6 @@ impl SushHandles {
     }
 }
 
-/// What gossip needs from the sled: its sprockets identity, its reference
-/// measurements, the bootstrap address to listen on, and where to find its
-/// peers.
 pub struct GossipInputs {
     pub sprockets: SprocketsConfig,
     pub measurements: Arc<MeasurementsHandle>,
