@@ -341,7 +341,7 @@ async fn promote_output_dir(
                 ),
             }
         }
-        available_datasets_rx.changed().await;
+        available_datasets_rx.changed(&log).await;
     }
 }
 
