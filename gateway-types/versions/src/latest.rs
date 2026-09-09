@@ -51,6 +51,11 @@ pub mod component_vpd {
     pub use crate::v4::component_vpd::Mpn1Barcode;
     pub use crate::v4::component_vpd::OxideBarcode;
     pub use crate::v4::component_vpd::SledFanTray;
+
+    // These error types are not part of the actual API, and are therefore not
+    // versioned. They are returned by `TryFrom` and similar.
+    pub use crate::impls::component_vpd::InvalidAssemblyBarcode;
+    pub use crate::impls::component_vpd::ParseBarcodeError;
 }
 
 pub mod host {
