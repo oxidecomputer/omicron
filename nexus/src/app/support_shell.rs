@@ -32,8 +32,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
 use tokio_tungstenite::WebSocketStream;
-use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::protocol::{Role, WebSocketConfig};
+use tokio_tungstenite::tungstenite::{Bytes, Message};
 
 /// How long to wait for a switch's proxy to answer a connect.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -61,11 +61,9 @@ impl super::Nexus {
             self.support_shell_proxy(opctx, &rack_id, &log).await?;
         let log = log.new(o!("proxy_addr" => proxy_addr));
         upgrade.handle(move |conn| async move {
-            let config = WebSocketConfig {
-                max_message_size: Some(MAX_WS_MESSAGE_SIZE),
-                max_frame_size: Some(MAX_WS_MESSAGE_SIZE),
-                ..Default::default()
-            };
+            let config = WebSocketConfig::default()
+                .max_message_size(Some(MAX_WS_MESSAGE_SIZE))
+                .max_frame_size(Some(MAX_WS_MESSAGE_SIZE));
             let client = WebSocketStream::from_raw_socket(
                 conn.into_inner(),
                 Role::Server,
@@ -194,7 +192,7 @@ async fn pipe(
             match proxy_read.read(&mut buf).await {
                 Ok(0) => break,
                 Ok(n) => {
-                    let data = buf[..n].to_vec();
+                    let data = Bytes::copy_from_slice(&buf[..n]);
                     if let Err(error) =
                         ws_sink.send(Message::Binary(data)).await
                     {
