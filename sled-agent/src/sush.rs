@@ -334,7 +334,8 @@ async fn promote_output_dir(
                 }
                 Err(err) => error!(
                     log,
-                    "could not create job output directory on encrypted dataset, leaving it on the ramdisk";
+                    "could not create job output directory on encrypted dataset, \
+                     leaving it on the ramdisk";
                     "directory" => %dir,
                     "error" => InlineErrorChain::new(&err),
                 ),
