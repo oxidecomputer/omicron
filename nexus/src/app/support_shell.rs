@@ -141,7 +141,7 @@ impl super::Nexus {
 
 /// Why a tunnel ended and how much it carried.
 struct PipeSummary {
-    reason: &'static str,
+    reason: String,
     to_proxy: u64,
     to_client: u64,
 }
@@ -163,39 +163,59 @@ async fn pipe(
         while let Some(message) = ws_source.next().await {
             match message {
                 Ok(Message::Binary(data)) => {
-                    if proxy_write.write_all(&data).await.is_err() {
-                        return "proxy write failed";
+                    if let Err(error) = proxy_write.write_all(&data).await {
+                        return format!(
+                            "proxy write failed: {}",
+                            InlineErrorChain::new(&error)
+                        );
                     }
                     to_proxy += data.len() as u64;
                 }
-                Ok(Message::Close(_)) | Err(_) => break,
+                Ok(Message::Close(_)) => break,
+                Err(error) => {
+                    return format!(
+                        "client read failed: {}",
+                        InlineErrorChain::new(&error)
+                    );
+                }
                 // Tungstenite answers pings itself.
                 Ok(Message::Ping(_)) | Ok(Message::Pong(_)) => {}
                 // Anything else would truncate the byte stream
                 // invisibly; fail loudly instead.
-                Ok(_) => return "unexpected frame",
+                Ok(_) => return "unexpected frame".to_string(),
             }
         }
         let _ = proxy_write.shutdown().await;
-        "client closed"
+        "client closed".to_string()
     };
 
     let outbound = async {
         let mut buf = [0; 0x2000];
         loop {
             match proxy_read.read(&mut buf).await {
-                Ok(0) | Err(_) => break,
+                Ok(0) => break,
                 Ok(n) => {
                     let data = buf[..n].to_vec();
-                    if ws_sink.send(Message::Binary(data)).await.is_err() {
-                        return "client send failed";
+                    if let Err(error) =
+                        ws_sink.send(Message::Binary(data)).await
+                    {
+                        return format!(
+                            "client send failed: {}",
+                            InlineErrorChain::new(&error)
+                        );
                     }
                     to_client += n as u64;
+                }
+                Err(error) => {
+                    return format!(
+                        "proxy read failed: {}",
+                        InlineErrorChain::new(&error)
+                    );
                 }
             }
         }
         let _ = ws_sink.send(Message::Close(None)).await;
-        "proxy closed"
+        "proxy closed".to_string()
     };
 
     let reason = tokio::select! {
