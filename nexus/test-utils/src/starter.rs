@@ -601,7 +601,8 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                 .as_ref()
                 .expect("Must initialize internal DNS server first")
                 .dns_server
-                .local_address(),
+                .sole_local_address()
+                .map_err(|e| e.to_string())?,
         };
         self.config.deployment.database = Database::FromUrl {
             url: self
@@ -1186,7 +1187,11 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
 
         let dns = TransientDnsServer::new(&log).await.unwrap();
 
-        let SocketAddr::V6(dns_address) = dns.dns_server.local_address() else {
+        let SocketAddr::V6(dns_address) = dns
+            .dns_server
+            .sole_local_address()
+            .expect("exactly one external DNS address")
+        else {
             panic!("Unsupported IPv4 DNS address");
         };
         let SocketAddr::V6(dropshot_address) = dns.dropshot_server.local_addr()
@@ -1212,7 +1217,12 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             .parse()
             .unwrap();
 
-        let ip_config = if dns.dns_server.local_address().is_ipv4() {
+        let ip_config = if dns
+            .dns_server
+            .sole_local_address()
+            .expect("exactly one external DNS address")
+            .is_ipv4()
+        {
             PrivateIpConfig::new_ipv4(
                 DNS_OPTE_IPV4_SUBNET
                     .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
@@ -1268,7 +1278,11 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         let log = self.logctx.log.new(o!("component" => "internal_dns_server"));
         let dns = TransientDnsServer::new(&log).await.unwrap();
 
-        let SocketAddr::V6(dns_address) = dns.dns_server.local_address() else {
+        let SocketAddr::V6(dns_address) = dns
+            .dns_server
+            .sole_local_address()
+            .expect("exactly one internal DNS address")
+        else {
             panic!("Unsupported IPv4 DNS address");
         };
         let SocketAddr::V6(http_address) = dns.dropshot_server.local_addr()
