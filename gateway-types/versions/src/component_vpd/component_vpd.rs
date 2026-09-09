@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
     JsonSchema,
 )]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[allow(clippy::large_enum_variant)]
 pub enum ComponentVpd {
     OxideBarcode(OxideBarcode),
     Mpn1Barcode(Mpn1Barcode),
