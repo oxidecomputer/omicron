@@ -734,7 +734,7 @@ async fn wait_for_sled_agent_bootstore_gen(
     wait_for_condition(
         || async {
             let generation =
-                sled_agent.bootstore_network_config.lock().unwrap().generation;
+                sled_agent.bootstore_network_config.borrow().generation;
             if generation == g {
                 Ok(())
             } else {
@@ -998,11 +998,8 @@ async fn test_scrimlet_reconcilers_update_on_bootstore_change(
         let sled_agent = sled_agent.sled_agent().clone();
         wait_for_condition(
             || async {
-                let generation = sled_agent
-                    .bootstore_network_config
-                    .lock()
-                    .unwrap()
-                    .generation;
+                let generation =
+                    sled_agent.bootstore_network_config.borrow().generation;
                 if generation == 3 {
                     Ok(())
                 } else {
@@ -1081,11 +1078,8 @@ async fn test_scrimlet_reconcilers_update_on_bootstore_change(
         let sled_agent = sled_agent.sled_agent().clone();
         wait_for_condition(
             || async {
-                let generation = sled_agent
-                    .bootstore_network_config
-                    .lock()
-                    .unwrap()
-                    .generation;
+                let generation =
+                    sled_agent.bootstore_network_config.borrow().generation;
                 if generation == 4 {
                     Ok(())
                 } else {
