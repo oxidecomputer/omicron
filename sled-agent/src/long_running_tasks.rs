@@ -219,7 +219,7 @@ pub async fn spawn_all_longrunning_tasks(
     // before waiting for rack membership. Initially, the sush API is served on
     // the bootstrap network. Once the sled is told its underlay address,
     // `crate::server::Server::start` will also serve the sush API on the
-    // bootstrap network.
+    // underlay network.
     let sush = match &config.sush {
         Some(sush_config) => {
             info!(log, "Starting sush tasks");

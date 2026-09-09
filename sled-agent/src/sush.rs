@@ -198,7 +198,7 @@ pub async fn spawn_sush_tasks(
     let locker = Locker::new(&log, slots);
 
     let GossipInputs { sprockets, measurements, bootstrap_ip, peers } = gossip;
-    
+
     // On every gossip protocol handshake, we must re-read the attestation
     // corpus, because a software update may have changed it. This closure
     // is invoked in order to do that.
