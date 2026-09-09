@@ -18,6 +18,7 @@ use std::time::Duration;
 use dropshot::{
     WebsocketConnectionRaw, WebsocketEndpointResult, WebsocketUpgrade,
 };
+use futures::stream::FuturesUnordered;
 use futures::{SinkExt, StreamExt};
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
@@ -35,7 +36,7 @@ use tokio_tungstenite::tungstenite::protocol::{Role, WebSocketConfig};
 
 use crate::app::switch_zone_address_mappings;
 
-/// How long to wait for one switch before trying the other.
+/// How long to wait for a switch's proxy to answer a connect.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The client's pipe sends 8 KiB frames; anything much bigger is not
@@ -57,11 +58,9 @@ impl super::Nexus {
             "rack_id" => rack_id.to_string(),
             "actor" => format!("{:?}", opctx.authn.actor()),
         ));
-        let proxy = self.support_shell_proxy(opctx, &rack_id, &log).await?;
-        let log = match proxy.peer_addr() {
-            Ok(addr) => log.new(o!("proxy_addr" => addr)),
-            Err(_) => log,
-        };
+        let (proxy_addr, proxy) =
+            self.support_shell_proxy(opctx, &rack_id, &log).await?;
+        let log = log.new(o!("proxy_addr" => proxy_addr));
         upgrade.handle(move |conn| async move {
             let config = WebSocketConfig {
                 max_message_size: Some(MAX_WS_MESSAGE_SIZE),
@@ -97,7 +96,7 @@ impl super::Nexus {
         opctx: &OpContext,
         rack_id: &RackUuid,
         log: &Logger,
-    ) -> Result<TcpStream, Error> {
+    ) -> Result<(SocketAddr, TcpStream), Error> {
         // The lookup comes first so an unauthorized caller gets the
         // same 404 as for a rack that does not exist. It otherwise
         // only validates existence: like lldpd_clients, we assume the
@@ -113,11 +112,17 @@ impl super::Nexus {
                     SocketAddr::V6(SocketAddrV6::new(ip, SUSH_PROXY_PORT, 0, 0))
                 })
                 .collect::<Vec<_>>();
-        for addr in &proxy_addrs {
-            match timeout(CONNECT_TIMEOUT, TcpStream::connect(addr)).await {
+        let mut connects = proxy_addrs
+            .iter()
+            .map(|&addr| async move {
+                (addr, timeout(CONNECT_TIMEOUT, TcpStream::connect(addr)).await)
+            })
+            .collect::<FuturesUnordered<_>>();
+        while let Some((addr, connect)) = connects.next().await {
+            match connect {
                 Ok(Ok(stream)) => {
                     let _ = stream.set_nodelay(true);
-                    return Ok(stream);
+                    return Ok((addr, stream));
                 }
                 Ok(Err(error)) => warn!(
                     log, "sush proxy unreachable";
