@@ -158,9 +158,11 @@ pub struct SushConfig {
 }
 
 impl SushConfig {
-    // TODO: check that this is the right default. `/var/run/oxide` is tmpfs
-    // and is created during bootstrap, but it exists to hold ZFS key files
-    // (see `illumos_utils::zfs::KEYPATH_ROOT`), not bulk job output.
+    /// We must never store job output unencrypted, so default
+    /// to a directory on the ramdisk. `/var/run` is a tmpfs
+    /// mounted by the `filesystem/minimal` service, and the
+    /// `oxide` subdirectory is created during bootstrap for
+    /// ZFS key files (see `illumos_utils::zfs::KEYPATH_ROOT`).
     fn default_ramdisk_dir() -> Utf8PathBuf {
         "/var/run/oxide/sush".into()
     }
