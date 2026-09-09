@@ -1290,6 +1290,7 @@ mod test {
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
             external_dns_servers = [ "1.1.1.1", "9.9.9.9" ]
+            record_db_claim_backtraces = false
             [deployment.external_http_clients]
             interface = "opte0"
             treat_loopback_as_external = "yes_for_test_purposes_only"
@@ -1442,8 +1443,7 @@ mod test {
                         interface: Some("opte0".to_string()),
                         treat_loopback_as_external: TreatLoopbackAsExternal::YesForTestPurposesOnly,
                     },
-                    // Just a debug/test flag, and set via an env var, so no need to check this:
-                    record_db_claim_backtraces: config.deployment.record_db_claim_backtraces,
+                    record_db_claim_backtraces: false,
                 },
                 pkg: PackageConfig {
                     console: ConsoleConfig {
