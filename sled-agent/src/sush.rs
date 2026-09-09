@@ -196,9 +196,6 @@ pub async fn spawn_sush_tasks(
         ByteCount::from_mebibytes_u32(config.ramdisk_max_output_mb).to_bytes(),
     ));
 
-    if config.roots.is_empty() {
-        warn!(log, "sush has no root certificates, so no job will ever run");
-    }
     let shutdown = CancellationToken::new();
 
     // A slot that cannot be created is still handed to the locker, which
