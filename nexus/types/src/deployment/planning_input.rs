@@ -49,6 +49,7 @@ use sled_agent_types::disk::DiskIdentity;
 use sled_agent_types_versions::latest::inventory::SourceNatConfigError;
 use sled_agent_types_versions::latest::inventory::ZoneKind;
 use sled_hardware_types::BaseboardId;
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::btree_map::Entry;
@@ -1182,28 +1183,107 @@ pub struct Policy {
     pub planner_config: PlannerConfig,
 }
 
+/// The ranges making up a single IP pool assigned to a service.
+///
+/// Right now, we collapse all ranges _and_ all pools when allocating IPs for a
+/// specific service (e.g., in `for_new_nexus()`). Keeping the pools themselves
+/// separate, and allocating addresses out of specific pools in the planner, is
+/// all tracked by <https://github.com/oxidecomputer/omicron/issues/8949>. The
+/// public API for operators to control that mapping is tracked by
+/// <https://github.com/oxidecomputer/omicron/issues/10574>.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ServiceIpPool {
+    V4(Vec<Ipv4Range>),
+    V6(Vec<Ipv6Range>),
+}
+
+impl ServiceIpPool {
+    // Consume this pool, returning an iterator over all of its IPs.
+    fn into_ips(self) -> Box<dyn Iterator<Item = IpAddr>> {
+        match self {
+            ServiceIpPool::V4(ranges) => Box::new(
+                ranges.into_iter().flat_map(|r| r.iter().map(IpAddr::V4)),
+            ),
+            ServiceIpPool::V6(ranges) => Box::new(
+                ranges.into_iter().flat_map(|r| r.iter().map(IpAddr::V6)),
+            ),
+        }
+    }
+}
+
 /// Subset of [`Policy`] specific to external IP addresses.
 ///
-/// Today, this type encompasses three logical parts of a policy:
+/// This encompasses the IP pools assigned to each externally-facing service,
+/// plus the set of external DNS addresses:
 ///
-/// * A single IPv4 service IP pool, made up of 0 or more ranges.
-/// * A single IPv6 service IP pool, made up of 0 or more ranges.
+/// * Nexus may be assigned any number of IP pools. The planner chooses (at
+///   least) one address from each.
+/// * Boundary NTP uses at most one source-NAT address per IP family, so it has
+///   at most one pool per family.
 /// * A set of external DNS IP addresses, each of which must be present in one
-///   of the two service IP pools.
+///   of the service IP pools.
 ///
-/// This is slightly more general than what deployed racks actually have: they
-/// all only populate the IPv4 service pool and external DNS IP addresses. But
-/// `#[nexus_test]` uses all of the above, and this a step in the direction
-/// we're moving where we will have more than one service IP pool (see
-/// <https://github.com/oxidecomputer/omicron/issues/8945>).
+/// Today every service is assigned the same pools (the single flat service
+/// pool, split by version): the builder duplicates them. Real per-service pool
+/// assignment in the planner is tracked by
+/// <https://github.com/oxidecomputer/omicron/issues/8949>, and the public API
+/// for controlling that mapping is tracked by
+/// <https://github.com/oxidecomputer/omicron/issues/10574>.
 // NOTE: The fields of the struct are private and we manually implement
-// `Deserialize` to maintain invariants (e.g., that every `external_dns_ip` is
-// contained in one of the service pool ranges).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+// `Serialize` / `Deserialize` to maintain invariants (e.g., that every
+// `external_dns_ip` is contained in one of the service pool ranges), and to
+// keep a flat wire format while every service still has identical pools.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExternalIpPolicy {
-    service_pool_ipv4_ranges: Vec<Ipv4Range>,
-    service_pool_ipv6_ranges: Vec<Ipv6Range>,
+    nexus_pools: Vec<ServiceIpPool>,
+    boundary_ntp_ipv4_pool: Option<Vec<Ipv4Range>>,
+    boundary_ntp_ipv6_pool: Option<Vec<Ipv6Range>>,
     external_dns_ips: BTreeSet<IpAddr>,
+}
+
+// A "shadow" type used to serialize and deserialize `ExternalIpPolicy`.
+//
+// Until https://github.com/oxidecomputer/omicron/issues/8949 is
+// implemented, every service has the same set of IP pools (all of them). To
+// keep backwards compatibility along the way, we'll always serialize only the
+// Boundary NTP IP ranges, and fan them all out to the different fields on
+// deserialization.
+//
+// This is only used in the explicitly-unstable reconfigurator state files, so
+// "backwards compat" is a bit of a non-goal -- but still, keep this stable
+// until we actually do make the distinction between the pools, at which point
+// we'll figure out whether and how to handle older files with flat lists of
+// ranges.
+//
+// We always deserialize into this type, and then construct an
+// `ExternalIpPolicy` fallibly, to enforce its invariants. That's true
+// regardless of the format.
+#[derive(Deserialize, Serialize)]
+struct ExternalIpPolicyShadow<'a> {
+    service_pool_ipv4_ranges: Cow<'a, [Ipv4Range]>,
+    service_pool_ipv6_ranges: Cow<'a, [Ipv6Range]>,
+    external_dns_ips: Cow<'a, BTreeSet<IpAddr>>,
+}
+
+impl Serialize for ExternalIpPolicy {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        // Every service holds the same pools today, so serialize the single
+        // flat service pool. Boundary NTP's per-family pools map directly onto
+        // the flat v4/v6 ranges.
+        ExternalIpPolicyShadow {
+            service_pool_ipv4_ranges: Cow::Borrowed(
+                self.boundary_ntp_ipv4_pool.as_deref().unwrap_or(&[]),
+            ),
+            service_pool_ipv6_ranges: Cow::Borrowed(
+                self.boundary_ntp_ipv6_pool.as_deref().unwrap_or(&[]),
+            ),
+            external_dns_ips: Cow::Borrowed(&self.external_dns_ips),
+        }
+        .serialize(serializer)
+    }
 }
 
 impl<'de> Deserialize<'de> for ExternalIpPolicy {
@@ -1213,22 +1293,8 @@ impl<'de> Deserialize<'de> for ExternalIpPolicy {
     {
         use serde::de::Error;
 
-        // The fields of `ExternalIpPolicyShadow` should exactly match the
-        // fields of `ExternalIpPolicy`. We're not really using serde's remote
-        // derive, but by adding the attribute we get compile-time checking that
-        // all the field names and types match. (It doesn't check the _order_,
-        // but that should be fine as long as we're using JSON or similar
-        // formats.)
-        #[derive(Deserialize)]
-        #[serde(remote = "ExternalIpPolicy")]
-        struct ExternalIpPolicyShadow {
-            service_pool_ipv4_ranges: Vec<Ipv4Range>,
-            service_pool_ipv6_ranges: Vec<Ipv6Range>,
-            external_dns_ips: BTreeSet<IpAddr>,
-        }
-
         // Deserialize without validation...
-        let ExternalIpPolicy {
+        let ExternalIpPolicyShadow {
             service_pool_ipv4_ranges,
             service_pool_ipv6_ranges,
             external_dns_ips,
@@ -1236,17 +1302,17 @@ impl<'de> Deserialize<'de> for ExternalIpPolicy {
 
         // ...then validate by going through the builder.
         let mut builder = ExternalIpPolicy::builder();
-        for r in service_pool_ipv4_ranges {
+        for r in service_pool_ipv4_ranges.into_owned() {
             builder
                 .push_service_pool_ipv4_range(r)
                 .map_err(D::Error::custom)?;
         }
-        for r in service_pool_ipv6_ranges {
+        for r in service_pool_ipv6_ranges.into_owned() {
             builder
                 .push_service_pool_ipv6_range(r)
                 .map_err(D::Error::custom)?;
         }
-        for ip in external_dns_ips {
+        for ip in external_dns_ips.into_owned() {
             builder.add_external_dns_ip(ip).map_err(D::Error::custom)?;
         }
 
@@ -1257,8 +1323,9 @@ impl<'de> Deserialize<'de> for ExternalIpPolicy {
 impl ExternalIpPolicy {
     pub fn empty() -> Self {
         Self {
-            service_pool_ipv4_ranges: Vec::new(),
-            service_pool_ipv6_ranges: Vec::new(),
+            nexus_pools: Vec::new(),
+            boundary_ntp_ipv4_pool: None,
+            boundary_ntp_ipv6_pool: None,
             external_dns_ips: BTreeSet::new(),
         }
     }
@@ -1269,14 +1336,19 @@ impl ExternalIpPolicy {
     /// This is used primarily by tests. A single pool with no external DNS IPs
     /// can be constructed infallibly.
     pub fn single_pool_no_external_dns(range: IpRange) -> Self {
-        let (service_pool_ipv4_ranges, service_pool_ipv6_ranges) = match range {
-            IpRange::V4(r) => (vec![r], vec![]),
-            IpRange::V6(r) => (vec![], vec![r]),
-        };
-        Self {
-            service_pool_ipv4_ranges,
-            service_pool_ipv6_ranges,
-            external_dns_ips: BTreeSet::new(),
+        match range {
+            IpRange::V4(r) => Self {
+                nexus_pools: vec![ServiceIpPool::V4(vec![r])],
+                boundary_ntp_ipv4_pool: Some(vec![r]),
+                boundary_ntp_ipv6_pool: None,
+                external_dns_ips: BTreeSet::new(),
+            },
+            IpRange::V6(r) => Self {
+                nexus_pools: vec![ServiceIpPool::V6(vec![r])],
+                boundary_ntp_ipv4_pool: None,
+                boundary_ntp_ipv6_pool: Some(vec![r]),
+                external_dns_ips: BTreeSet::new(),
+            },
         }
     }
 
@@ -1288,36 +1360,57 @@ impl ExternalIpPolicy {
     /// Construct an [`ExternalIpPolicyBuilder`] that contains all of this
     /// policy's IP pools and external DNS IPs.
     pub fn into_builder(self) -> ExternalIpPolicyBuilder {
+        // Every service holds the same pools today; recover the flat v4/v6
+        // ranges from boundary NTP's per-family pools.
         let Self {
-            service_pool_ipv4_ranges,
-            service_pool_ipv6_ranges,
+            boundary_ntp_ipv4_pool,
+            boundary_ntp_ipv6_pool,
             external_dns_ips,
+            ..
         } = self;
         ExternalIpPolicyBuilder {
-            service_pool_ipv4_ranges,
-            service_pool_ipv6_ranges,
+            service_pool_ipv4_ranges: boundary_ntp_ipv4_pool
+                .unwrap_or_default(),
+            service_pool_ipv6_ranges: boundary_ntp_ipv6_pool
+                .unwrap_or_default(),
             external_dns_ips,
         }
     }
 
-    /// Consume this `ExternalIpPolicy`, returning an iterator over all IPs that
-    /// should be used for services other than external DNS (i.e., Nexus and
-    /// boundary NTP).
-    pub fn into_non_external_dns_ips(self) -> impl Iterator<Item = IpAddr> {
+    /// Consume this `ExternalIpPolicy`, returning an iterator over the IPs
+    /// available to Nexus (i.e., all of its assigned pools, excluding any
+    /// addresses reserved for external DNS).
+    //
+    // NOTE: This chains all of Nexus's pools together. Allocating one address
+    // per pool (#8949) is a separate change; today Nexus is handed a
+    // single address as before.
+    pub fn into_nexus_ips(self) -> impl Iterator<Item = IpAddr> {
+        let Self { nexus_pools, external_dns_ips, .. } = self;
+        nexus_pools
+            .into_iter()
+            .flat_map(ServiceIpPool::into_ips)
+            .filter(move |ip| !external_dns_ips.contains(ip))
+    }
+
+    /// Consume this `ExternalIpPolicy`, returning an iterator over the IPs
+    /// available to boundary NTP (i.e., its assigned pools, excluding any
+    /// addresses reserved for external DNS).
+    pub fn into_boundary_ntp_ips(self) -> impl Iterator<Item = IpAddr> {
         let Self {
-            service_pool_ipv4_ranges,
-            service_pool_ipv6_ranges,
+            boundary_ntp_ipv4_pool,
+            boundary_ntp_ipv6_pool,
             external_dns_ips,
+            ..
         } = self;
-
-        let v4_ips = service_pool_ipv4_ranges
+        let v4 = boundary_ntp_ipv4_pool
             .into_iter()
+            .flatten()
             .flat_map(|r| r.iter().map(IpAddr::V4));
-        let v6_ips = service_pool_ipv6_ranges
+        let v6 = boundary_ntp_ipv6_pool
             .into_iter()
+            .flatten()
             .flat_map(|r| r.iter().map(IpAddr::V6));
-
-        v4_ips.chain(v6_ips).filter(move |ip| !external_dns_ips.contains(ip))
+        v4.chain(v6).filter(move |ip| !external_dns_ips.contains(ip))
     }
 
     /// The set of external IP addresses on which we should run external DNS
@@ -1332,10 +1425,18 @@ impl ExternalIpPolicy {
     /// This destroys all meaningful information (e.g., v4 vs v6 pool; which IPs
     /// are reserved for external DNS) and should only be used by tests.
     pub fn into_raw_ranges(self) -> impl Iterator<Item = IpRange> {
-        let v4_ranges =
-            self.service_pool_ipv4_ranges.into_iter().map(IpRange::from);
-        let v6_ranges =
-            self.service_pool_ipv6_ranges.into_iter().map(IpRange::from);
+        // Every service holds the same pools today; recover the ranges from
+        // boundary NTP's per-family pools.
+        let v4_ranges = self
+            .boundary_ntp_ipv4_pool
+            .into_iter()
+            .flatten()
+            .map(IpRange::from);
+        let v6_ranges = self
+            .boundary_ntp_ipv6_pool
+            .into_iter()
+            .flatten()
+            .map(IpRange::from);
         v4_ranges.chain(v6_ranges)
     }
 }
@@ -1451,9 +1552,26 @@ impl ExternalIpPolicyBuilder {
             service_pool_ipv6_ranges,
             external_dns_ips,
         } = self;
+        // Duplicate the single flat service pool into each service. The flat
+        // pool splits by version into (up to) one IPv4 and one IPv6 pool; Nexus
+        // gets both as its list, and boundary NTP gets one per family. Real
+        // per-service pool assignment is tracked by
+        // https://github.com/oxidecomputer/omicron/issues/8949.
+        let boundary_ntp_ipv4_pool = (!service_pool_ipv4_ranges.is_empty())
+            .then(|| service_pool_ipv4_ranges.clone());
+        let boundary_ntp_ipv6_pool = (!service_pool_ipv6_ranges.is_empty())
+            .then(|| service_pool_ipv6_ranges.clone());
+        let mut nexus_pools = Vec::new();
+        if !service_pool_ipv4_ranges.is_empty() {
+            nexus_pools.push(ServiceIpPool::V4(service_pool_ipv4_ranges));
+        }
+        if !service_pool_ipv6_ranges.is_empty() {
+            nexus_pools.push(ServiceIpPool::V6(service_pool_ipv6_ranges));
+        }
         ExternalIpPolicy {
-            service_pool_ipv4_ranges,
-            service_pool_ipv6_ranges,
+            nexus_pools,
+            boundary_ntp_ipv4_pool,
+            boundary_ntp_ipv6_pool,
             external_dns_ips,
         }
     }
