@@ -33,9 +33,9 @@
 //! picks whose seed wins, and the others bootstrap from it, each
 //! taking a slice of the winner's identity space. A restarted sled
 //! therefore rejoins the rack's universe and replays what it missed
-//! without re-executing it. Each sled stores its identity in a
-//! _bookmark_, so that a restart resumes it rather than growing a new
-//! one on every boot.
+//! without re-executing previously run jobs. Each sled stores its identity in
+//! a record called a _bookmark_, which is persisted to disk in order to survive
+//! the sled restarting.
 //!
 //! The bookmark, like every record sush must trust across reboots, lives
 //! in the [sush locker]. When we write a record to the locker, we actually
