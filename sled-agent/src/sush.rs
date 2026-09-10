@@ -205,7 +205,16 @@ pub async fn spawn_sush_tasks(
             );
         }
     }
-    let locker = Locker::new(&log, slots);
+    let locker = match Locker::new(&log, slots) {
+        Ok(locker) => locker,
+        Err(err) => {
+            error!(
+                log, "locker is locked, not starting sush server";
+                "error" => InlineErrorChain::new(&err),
+            );
+            return None;
+        }
+    };
 
     let GossipInputs { sprockets, measurements, bootstrap_ip, peers } = gossip;
 
