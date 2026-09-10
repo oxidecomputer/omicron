@@ -78,8 +78,13 @@ fn bootstore_network_config_paths(
 }
 
 /// Poll ddmd for the set of peer sleds on the bootstrap network, and
-/// publish it to the three consumers that each need it at their own
-/// port: the bootstore, the trust quorum node, and sush gossip.
+/// publish the discovered peer IP addresses to the bootstore, the trust quorum
+/// node, and sush gossip.
+// TODO: currently, this function takes three separate watch channels that
+// publish a set of socket addresses composed of the same set of IPs, but with
+// different port numbers for each consumer. In the future, it might be worth
+// refactoring this to just use one `watch` channel to publish the set of IPs
+// and have the consumers construct socket addresses themselves.
 pub async fn poll_ddmd_for_peer_updates(
     log: Logger,
     bootstore_node_handle: bootstore::NodeHandle,

@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026082800.0.0"
+    "version": "2026090800.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -26552,6 +26552,15 @@
         "description": "Create-time parameters for a `Project`",
         "type": "object",
         "properties": {
+          "defaults": {
+            "nullable": true,
+            "description": "Default resources to create in the project\n\nOmit this field or pass `null` to create all defaults: currently, a default VPC with its own defaults. Pass an object to specify which resources to create. `{}` creates none.\n\nFor example, to create the default VPC but not its default subnet, pass `{\"vpc\": {\"type\": \"explicit\", \"defaults\": {}}}`.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProjectCreateDefaults"
+              }
+            ]
+          },
           "description": {
             "type": "string"
           },
@@ -26563,6 +26572,22 @@
           "description",
           "name"
         ]
+      },
+      "ProjectCreateDefaults": {
+        "description": "Default resources to create in a project\n\nEach field corresponds to one resource. Set a field to an object to create that resource. Omit it or pass `null` to skip it.",
+        "type": "object",
+        "properties": {
+          "vpc": {
+            "nullable": true,
+            "description": "Create the default VPC. Omit this field or pass `null` to skip it.\n\nWhen present, the value also determines which of the VPC's own defaults to create: `{\"type\": \"all\"}` creates all of them, and `{\"type\": \"explicit\", \"defaults\": {...}}` creates only those specified.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VpcCreateDefaultsSelection"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
       },
       "ProjectResultsPage": {
         "description": "A single page of results",
@@ -28694,6 +28719,11 @@
         "required": [
           "items"
         ]
+      },
+      "SubnetCreateDefaults": {
+        "description": "Default resources to create in the default subnet\n\nIncluding this object in the request creates the default subnet. A subnet has no default resources yet, so the object is always empty.",
+        "type": "object",
+        "additionalProperties": false
       },
       "SubnetPool": {
         "description": "A pool of subnets for external subnet allocation",
@@ -30956,6 +30986,15 @@
         "description": "Create-time parameters for a `Vpc`",
         "type": "object",
         "properties": {
+          "defaults": {
+            "nullable": true,
+            "description": "Default resources to create in the VPC\n\nOmit this field  or pass `null`  to create all defaults: currently, the default subnet. Pass an object to specify which resources to create. `{}` creates none.\n\nThis does not affect the system router, default firewall rules, or default internet gateway, which are always created and do not block deletion of the VPC.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VpcCreateDefaults"
+              }
+            ]
+          },
           "description": {
             "type": "string"
           },
@@ -30964,7 +31003,7 @@
           },
           "ipv6_prefix": {
             "nullable": true,
-            "description": "The IPv6 prefix for this VPC\n\nAll IPv6 subnets created from this VPC must be taken from this range, which should be a Unique Local Address in the range `fd00::/48`. The default VPC Subnet will have the first `/64` range from this prefix.",
+            "description": "The IPv6 prefix for this VPC\n\nAll IPv6 subnets created from this VPC must be taken from this range, which should be a Unique Local Address in the range `fd00::/48`. The default subnet, if requested, will take the first `/64` range from this prefix.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Ipv6Net"
@@ -30979,6 +31018,63 @@
           "description",
           "dns_name",
           "name"
+        ]
+      },
+      "VpcCreateDefaults": {
+        "description": "Default resources to create in a VPC\n\nEach field corresponds to one resource. Set a field to an object to create that resource. Omit it or pass `null` to skip it.\n\nThis does not affect the system router, default firewall rules, or default internet gateway, which are always created and do not block deletion of the VPC.",
+        "type": "object",
+        "properties": {
+          "subnet": {
+            "nullable": true,
+            "description": "Create the default subnet. Pass `{}` to create it and omit this field (or pass `null`) to skip it.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SubnetCreateDefaults"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "VpcCreateDefaultsSelection": {
+        "description": "Default resources to create in a VPC",
+        "oneOf": [
+          {
+            "description": "Create all default resources",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "all"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "description": "Create only the default resources listed in `defaults`. Pass `{}` as `defaults` to skip them all.",
+            "type": "object",
+            "properties": {
+              "defaults": {
+                "$ref": "#/components/schemas/VpcCreateDefaults"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "explicit"
+                ]
+              }
+            },
+            "required": [
+              "defaults",
+              "type"
+            ],
+            "additionalProperties": false
+          }
         ]
       },
       "VpcFirewallIcmpFilter": {

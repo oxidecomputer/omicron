@@ -29,6 +29,7 @@ use gateway_messages::ROT_PAGE_SIZE;
 use gateway_messages::SpComponent;
 use gateway_types::rot::RotImageError;
 use gateway_types::rot::RotState;
+use iddqd::IdOrdMap;
 use installinator_common::InstallinatorCompletionMetadata;
 use installinator_common::WriteOutput;
 use lpc55_areas::CMPAPage;
@@ -89,6 +90,7 @@ use wicket_common::update_events::SpComponentUpdateSpec;
 use wicket_common::update_events::SpComponentUpdateStage;
 use wicket_common::update_events::SpComponentUpdateStepId;
 use wicket_common::update_events::SpComponentUpdateTerminalError;
+use wicket_common::update_events::SpEventReport;
 use wicket_common::update_events::StepContext;
 use wicket_common::update_events::StepHandle;
 use wicket_common::update_events::StepProgress;
@@ -436,9 +438,7 @@ impl UpdateTracker {
         self.sp_update_data.lock().await.artifact_store.system_version()
     }
 
-    pub(crate) async fn event_reports(
-        &self,
-    ) -> BTreeMap<SpType, BTreeMap<u16, EventReport>> {
+    pub(crate) async fn event_reports(&self) -> IdOrdMap<SpEventReport> {
         self.sp_update_data.lock().await.event_reports()
     }
 
@@ -719,17 +719,14 @@ impl UpdateTrackerData {
         Self { artifact_store, sp_update_data: BTreeMap::new() }
     }
 
-    // TODO: once rkdeploy is on the published API, change the return type here
-    // and elsewhere to be an `IdOrdMap<SpEventReport>` where `SpEventReport`'s
-    // key is an `SpIdentifier`.
-    fn event_reports(&self) -> BTreeMap<SpType, BTreeMap<u16, EventReport>> {
-        let mut event_reports = BTreeMap::new();
+    fn event_reports(&self) -> IdOrdMap<SpEventReport> {
+        let mut event_reports = IdOrdMap::new();
         for (sp, update_data) in &self.sp_update_data {
             let event_report =
                 update_data.event_buffer.lock().unwrap().generate_report();
-            let inner: &mut BTreeMap<_, _> =
-                event_reports.entry(sp.typ).or_default();
-            inner.insert(sp.slot, event_report);
+            event_reports
+                .insert_unique(SpEventReport { sp: *sp, event_report })
+                .expect("sp_update_data is keyed by SpIdentifier");
         }
         event_reports
     }

@@ -3,6 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use gateway_client::types::PowerState;
+use iddqd::IdOrdItem;
+use iddqd::id_upcast;
 use oxide_update_engine_types::errors::NestedEngineError;
 use oxide_update_engine_types::spec::EngineSpec;
 use schemars::JsonSchema;
@@ -14,6 +16,7 @@ use thiserror::Error;
 use tufaceous_artifact::DisplayTags;
 
 use crate::artifact::ArtifactId;
+use crate::inventory::SpIdentifier;
 
 #[derive(JsonSchema)]
 pub enum WicketdEngineSpec {}
@@ -76,6 +79,23 @@ oxide_update_engine_types::define_update_engine_types!(pub WicketdEngineSpec);
 
 pub type StepStatus<S = WicketdEngineSpec> =
     oxide_update_engine_types::buffer::StepStatus<S>;
+
+/// An event report for a single SP.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct SpEventReport {
+    pub sp: SpIdentifier,
+    pub event_report: EventReport,
+}
+
+impl IdOrdItem for SpEventReport {
+    type Key<'a> = SpIdentifier;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.sp
+    }
+
+    id_upcast!();
+}
 
 #[derive(JsonSchema)]
 pub enum TestStepSpec {}

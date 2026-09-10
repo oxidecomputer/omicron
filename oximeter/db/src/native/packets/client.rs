@@ -113,10 +113,19 @@ pub struct Query {
 
 impl Query {
     pub fn new(id: Uuid, address: SocketAddr, query: &str) -> Self {
+        Self::new_with_settings(id, address, query, Settings::new())
+    }
+
+    pub fn new_with_settings(
+        id: Uuid,
+        address: SocketAddr,
+        query: &str,
+        settings: Settings,
+    ) -> Self {
         Self {
             id: id.to_string().into(),
             client_info: ClientInfo::new(id.to_string(), address),
-            settings: Settings::new(),
+            settings,
             secret: "".into(),
             stage: Stage::Complete,
             compression: 0,

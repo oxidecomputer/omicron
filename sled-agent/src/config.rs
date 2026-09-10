@@ -132,11 +132,12 @@ pub struct Config {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SushConfig {
-    /// PEM files holding the trusted root certificates for job requests,
-    /// one certificate per file. A job whose signature does not chain to
-    /// one of these is refused, so an empty list means no job could ever
-    /// run, and config parsing rejects it. To run a sled with no Support
-    /// Shell server, omit the `[sush]` section instead.
+    /// One or more PEM files holding the trusted root certificates for job
+    /// requests, one certificate per file. Job signatures must have one of
+    /// these certificates as their root cert to be accepted.
+    ///
+    /// This list must not be empty, as at least one root cert is required in
+    /// order to be able to run sush jobs.
     #[serde(deserialize_with = "SushConfig::nonempty_roots")]
     pub roots: Vec<Utf8PathBuf>,
 
@@ -158,9 +159,11 @@ pub struct SushConfig {
 }
 
 impl SushConfig {
-    // TODO: check that this is the right default. `/var/run/oxide` is tmpfs
-    // and is created during bootstrap, but it exists to hold ZFS key files
-    // (see `illumos_utils::zfs::KEYPATH_ROOT`), not bulk job output.
+    /// We must never store job output unencrypted, so default
+    /// to a directory on the ramdisk. `/var/run` is a tmpfs
+    /// mounted by the `filesystem/minimal` service, and the
+    /// `oxide` subdirectory is created during bootstrap for
+    /// ZFS key files (see `illumos_utils::zfs::KEYPATH_ROOT`).
     fn default_ramdisk_dir() -> Utf8PathBuf {
         "/var/run/oxide/sush".into()
     }
