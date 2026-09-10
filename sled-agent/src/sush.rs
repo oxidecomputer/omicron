@@ -375,15 +375,22 @@ async fn promote_output_dir(
     }
 }
 
-/// Periodically ask MGS which baseboard sits in each cubby,
-/// and publish the map. (A job may name its target sled by cubby;
-/// this map resolves it.) MGS answers at a fixed address within its
-/// host sled's subnet, so in each round we try that address in every
-/// subnet ddmd knows about, and take answers from any that respond.
-/// To avoid stale entries (e.g., if a sled moves slots), any non-trivial
-/// response overwrites the map, and we merge multiple responses.
-/// If no responses are received, we leave the map alone, since
-/// we have no newer data to replace it with.
+/// Discovers the baseboard identity in each cubby in the rack and publishes the
+/// map over the provided watch channel.
+///
+/// This map is used to resolve the sled identity when a job specifies its 
+/// target sled cubby number. 
+///
+/// This function may start while one or more MGS services are not available,
+/// and must handle failures of both the MGS service or the entire scrimlet
+/// gracefully. Therefore, on every poll, this function will attempt to use the
+/// fixed MGS address on every subnet curretly known to `ddmd`, and accepts any
+/// responses it receives. If a response that contains at least one sled is
+/// received, the previously-discovered map is overwritten to avoid leaving
+/// behind stale entries for sleds that are no longer present. Multiple
+/// responses received within the same poll are merged to produce a single map.
+/// If we cannot contact any MGS instance during a poll, the map does not change
+/// until a subsequent poll receives a response.
 async fn poll_mgs_for_cubbies(log: Logger, cubbies: watch::Sender<Cubbies>) {
     let ddm = match DdmClient::localhost(&log) {
         Ok(ddm) => ddm,
