@@ -64,13 +64,13 @@ futures-core = { version = "0.3.32" }
 futures-sink = { version = "0.3.32" }
 futures-task = { version = "0.3.32", default-features = false, features = ["std"] }
 futures-util = { version = "0.3.32", features = ["channel", "io", "sink"] }
-gateway-ereport-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "6c0aca2545a73fd75536e149d29faa7108be5862", default-features = false, features = ["debug-impls", "serde"] }
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "6c0aca2545a73fd75536e149d29faa7108be5862", features = ["std"] }
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "01f06089a97bd084bec2595d4d62e0f91338cf57", features = ["std"] }
 generic-array = { version = "0.14.7", default-features = false, features = ["more_lengths", "zeroize"] }
 getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.17", default-features = false, features = ["js", "rdrand", "std"] }
 getrandom-9fbad63c4bcf4a8f = { package = "getrandom", version = "0.4.3", default-features = false, features = ["std", "sys_rng", "wasm_js"] }
 group = { version = "0.13.0", default-features = false, features = ["alloc"] }
 hashbrown-3575ec1268b04181 = { package = "hashbrown", version = "0.15.5" }
+hashbrown-9067fe90e8c1f593 = { package = "hashbrown", version = "0.17.0", default-features = false, features = ["default-hasher"] }
 hashbrown-986da7b5efc2b80e = { package = "hashbrown", version = "0.16.1" }
 hex = { version = "0.4.3", features = ["serde"] }
 hickory-proto = { version = "0.25.2", features = ["serde", "text-parsing"] }
@@ -167,7 +167,7 @@ x509-cert = { version = "0.2.5" }
 zerocopy = { version = "0.8.55", default-features = false, features = ["derive", "simd"] }
 zeroize = { version = "1.9.0", features = ["aarch64", "serde", "std", "zeroize_derive"] }
 zip-164d15cefe24d7eb = { package = "zip", version = "4.6.1", default-features = false, features = ["bzip2", "deflate", "jiff-02", "zstd"] }
-zip-3b31131e45eafb45 = { package = "zip", version = "0.6.6", default-features = false, features = ["bzip2", "deflate"] }
+zip-181b0d20215bb231 = { package = "zip", version = "8.6.0", default-features = false, features = ["bzip2", "deflate"] }
 
 [build-dependencies]
 ahash = { version = "0.8.12" }
@@ -218,13 +218,13 @@ futures-core = { version = "0.3.32" }
 futures-sink = { version = "0.3.32" }
 futures-task = { version = "0.3.32", default-features = false, features = ["std"] }
 futures-util = { version = "0.3.32", features = ["channel", "io", "sink"] }
-gateway-ereport-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "6c0aca2545a73fd75536e149d29faa7108be5862", default-features = false, features = ["debug-impls", "serde"] }
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "6c0aca2545a73fd75536e149d29faa7108be5862", features = ["std"] }
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "01f06089a97bd084bec2595d4d62e0f91338cf57", features = ["std"] }
 generic-array = { version = "0.14.7", default-features = false, features = ["more_lengths", "zeroize"] }
 getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.17", default-features = false, features = ["js", "rdrand", "std"] }
 getrandom-9fbad63c4bcf4a8f = { package = "getrandom", version = "0.4.3", default-features = false, features = ["std", "sys_rng", "wasm_js"] }
 group = { version = "0.13.0", default-features = false, features = ["alloc"] }
 hashbrown-3575ec1268b04181 = { package = "hashbrown", version = "0.15.5" }
+hashbrown-9067fe90e8c1f593 = { package = "hashbrown", version = "0.17.0", default-features = false, features = ["default-hasher"] }
 hashbrown-986da7b5efc2b80e = { package = "hashbrown", version = "0.16.1" }
 heck = { version = "0.4.1", features = ["unicode"] }
 hex = { version = "0.4.3", features = ["serde"] }
@@ -327,7 +327,7 @@ x509-cert = { version = "0.2.5" }
 zerocopy = { version = "0.8.55", default-features = false, features = ["derive", "simd"] }
 zeroize = { version = "1.9.0", features = ["aarch64", "serde", "std", "zeroize_derive"] }
 zip-164d15cefe24d7eb = { package = "zip", version = "4.6.1", default-features = false, features = ["bzip2", "deflate", "jiff-02", "zstd"] }
-zip-3b31131e45eafb45 = { package = "zip", version = "0.6.6", default-features = false, features = ["bzip2", "deflate"] }
+zip-181b0d20215bb231 = { package = "zip", version = "8.6.0", default-features = false, features = ["bzip2", "deflate"] }
 
 [target.x86_64-unknown-linux-gnu.dependencies]
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
