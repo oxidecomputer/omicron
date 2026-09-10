@@ -447,8 +447,9 @@ async fn poll_mgs_for_cubbies(log: Logger, cubbies: watch::Sender<Cubbies>) {
                         }
                     }
                 }
-                // A truthful response is never empty, since the sled
-                // running this poll must be in a cubby.
+                // If this code is running, there must be at least one sled in
+                // the rack, so we reject any response that does not have at
+                // least one sled.
                 if !map.is_empty() {
                     cubbies.send_replace(map);
                 }
