@@ -109,8 +109,11 @@ blueprint-plan latest latest
 blueprint-diff latest
 
 # We repeat the same process with the RoT, but now expecting to see a single
-# blocked SP update due to serial0 containing an unsafe zone. We also see a
-# pending SP update on serial1 which has no unsafe zones.
+# blocked SP update due to serial0 containing an unsafe zone. The unsafe zone
+# check happens before the planner considers evacuating a sled for a
+# reboot-requiring update, so serial0 is _not_ marked as evacuating. The planner
+# moves on to serial1, which has no unsafe zones; serial1 should be marked as
+# evacuating (because it's otherwise eligible for an SP update).
 sled-update-rot serial0 --slot-b 1.0.0 --active-slot b --persistent-boot-preference b
 sled-update-rot serial1 --slot-b 1.0.0 --active-slot b --persistent-boot-preference b
 sled-update-rot serial2 --slot-b 1.0.0 --active-slot b --persistent-boot-preference b
@@ -118,10 +121,21 @@ inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest
 
-# Since there was a blocked update on serial0, the planner has moved on to
-# serial1. This sled has no unsafe zones, so we forcibly update it along with
-# the SPs to see the errors with the Host OS on serial2 and serial0, and plan no
-# pending updates
+# Have serial1 pick up its new config and report that it has evacuated. We
+# should now see the pending SP update on serial1 (and serial0 still blocked).
+#
+# Note that this also lets inventory see that the internal DNS zone we expunged
+# above is gone, so the planner re-adds an internal DNS zone on serial1. That
+# new zone is not reported as synchronized, so serial0 and serial2 (which host
+# the other two) remain unsafe to shut down for the rest of this test.
+sled-set serial1 omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# We forcibly update serial1 along with all the SPs to see the errors with the
+# Host OS on serial2 and serial0, and plan no pending updates. serial1's updates
+# are all complete, so it should be restored to `available`.
 sled-update-sp serial0 --active 1.0.0
 sled-update-sp serial1 --active 1.0.0
 sled-update-sp serial2 --active 1.0.0
