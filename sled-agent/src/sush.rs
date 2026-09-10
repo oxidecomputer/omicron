@@ -38,22 +38,15 @@
 //! the sled restarting.
 //!
 //! The bookmark, like every record sush must trust across reboots, lives
-//! in the [sush locker]. When we write a record to the locker, we actually
-//! write two copies, one to each M.2. When we load a record, it only
-//! succeeds if both copies are exact matches, or if one of them is
-//! entirely missing (the latter to handle the case of M.2 hardware
-//! replacement in the field). A load fails on mismatched copies, so that
-//! a torn write or corruption on one drive cannot induce the reader to
-//! load stale or invalid information from the other drive. This turns the
-//! pair of M.2 drives into a single mirrored storage container that fails
-//! closed on any disagreement. We accept this because an M.2 failure is
-//! considered a non-user-replaceable part failure, for which the solution
-//! is an RMA. If this occurs in the field, sush may refuse to run jobs on
-//! the sled containing the failed M.2; we report this error to the user,
-//! who should replace the sled.
+//! in the [sush locker], described in the [storage section of RFD 620].
+//! This is similar to the [`omicron_ledger::Ledger`], which also holds
+//! records across both M.2s, but handles disagreements between the two
+//! drives differently.
 //!
 //! [sush locker]:
 //!   https://github.com/oxidecomputer/sush/blob/main/server/src/locker.rs
+//! [storage section of RFD 620]:
+//!   https://rfd.shared.oxide.computer/rfd/0620#_storage
 
 use crate::config::SushConfig;
 use anyhow::Context;
