@@ -80,6 +80,7 @@ pub async fn create_test_setup_with_range(
         },
         ipv6_prefix: None,
         dns_name: format!("{}-vpc", project_name).parse().unwrap(),
+        defaults: None,
     };
 
     let vpc = IncompleteVpc::new(

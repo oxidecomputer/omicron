@@ -39,6 +39,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (52, TYPED_ARTIFACT_CONFIG_GENERATION),
     (51, MULTIPLE_ZONE_EXTERNAL_IPS),
     (50, TYPED_SLED_CONFIG_GENERATION),
     (49, ADD_UPDATE_DISPOSITION),
@@ -747,15 +748,31 @@ pub trait SledAgentApi {
 
     #[endpoint {
         method = GET,
-        path = "/artifacts-config"
+        path = "/artifacts-config",
+        versions = VERSION_TYPED_ARTIFACT_CONFIG_GENERATION..,
     }]
     async fn artifact_config_get(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<latest::artifact::ArtifactConfig>, HttpError>;
 
     #[endpoint {
+        operation_id = "artifact_config_get",
+        method = GET,
+        path = "/artifacts-config",
+        versions = ..VERSION_TYPED_ARTIFACT_CONFIG_GENERATION,
+    }]
+    async fn artifact_config_get_v1(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v1::artifact::ArtifactConfig>, HttpError> {
+        Self::artifact_config_get(rqctx)
+            .await
+            .map(|response| response.map(v1::artifact::ArtifactConfig::from))
+    }
+
+    #[endpoint {
         method = PUT,
-        path = "/artifacts-config"
+        path = "/artifacts-config",
+        versions = VERSION_TYPED_ARTIFACT_CONFIG_GENERATION..,
     }]
     async fn artifact_config_put(
         rqctx: RequestContext<Self::Context>,
@@ -763,16 +780,46 @@ pub trait SledAgentApi {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     #[endpoint {
+        operation_id = "artifact_config_put",
+        method = PUT,
+        path = "/artifacts-config",
+        versions = ..VERSION_TYPED_ARTIFACT_CONFIG_GENERATION,
+    }]
+    async fn artifact_config_put_v1(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v1::artifact::ArtifactConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::artifact_config_put(rqctx, body.map(Into::into)).await
+    }
+
+    #[endpoint {
         method = GET,
-        path = "/artifacts"
+        path = "/artifacts",
+        versions = VERSION_TYPED_ARTIFACT_CONFIG_GENERATION..,
     }]
     async fn artifact_list(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<latest::artifact::ArtifactListResponse>, HttpError>;
 
     #[endpoint {
+        operation_id = "artifact_list",
+        method = GET,
+        path = "/artifacts",
+        versions = ..VERSION_TYPED_ARTIFACT_CONFIG_GENERATION,
+    }]
+    async fn artifact_list_v1(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v1::artifact::ArtifactListResponse>, HttpError>
+    {
+        Self::artifact_list(rqctx).await.map(|response| {
+            response.map(v1::artifact::ArtifactListResponse::from)
+        })
+    }
+
+    #[endpoint {
         method = POST,
-        path = "/artifacts/{sha256}/copy-from-depot"
+        path = "/artifacts/{sha256}/copy-from-depot",
+        versions = VERSION_TYPED_ARTIFACT_CONFIG_GENERATION..,
     }]
     async fn artifact_copy_from_depot(
         rqctx: RequestContext<Self::Context>,
@@ -785,9 +832,34 @@ pub trait SledAgentApi {
     >;
 
     #[endpoint {
+        operation_id = "artifact_copy_from_depot",
+        method = POST,
+        path = "/artifacts/{sha256}/copy-from-depot",
+        versions = ..VERSION_TYPED_ARTIFACT_CONFIG_GENERATION,
+    }]
+    async fn artifact_copy_from_depot_v1(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v1::artifact::ArtifactPathParam>,
+        query_params: Query<v1::artifact::ArtifactQueryParam>,
+        body: TypedBody<v1::artifact::ArtifactCopyFromDepotBody>,
+    ) -> Result<
+        HttpResponseAccepted<v1::artifact::ArtifactCopyFromDepotResponse>,
+        HttpError,
+    > {
+        Self::artifact_copy_from_depot(
+            rqctx,
+            path_params,
+            query_params.map(Into::into),
+            body,
+        )
+        .await
+    }
+
+    #[endpoint {
         method = PUT,
         path = "/artifacts/{sha256}",
         request_body_max_bytes = UPDATE_ARTIFACT_MAX_BYTES,
+        versions = VERSION_TYPED_ARTIFACT_CONFIG_GENERATION..,
     }]
     async fn artifact_put(
         rqctx: RequestContext<Self::Context>,
@@ -795,6 +867,29 @@ pub trait SledAgentApi {
         query_params: Query<latest::artifact::ArtifactQueryParam>,
         body: StreamingBody,
     ) -> Result<HttpResponseOk<latest::artifact::ArtifactPutResponse>, HttpError>;
+
+    #[endpoint {
+        operation_id = "artifact_put",
+        method = PUT,
+        path = "/artifacts/{sha256}",
+        request_body_max_bytes = UPDATE_ARTIFACT_MAX_BYTES,
+        versions = ..VERSION_TYPED_ARTIFACT_CONFIG_GENERATION,
+    }]
+    async fn artifact_put_v1(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v1::artifact::ArtifactPathParam>,
+        query_params: Query<v1::artifact::ArtifactQueryParam>,
+        body: StreamingBody,
+    ) -> Result<HttpResponseOk<v1::artifact::ArtifactPutResponse>, HttpError>
+    {
+        Self::artifact_put(
+            rqctx,
+            path_params,
+            query_params.map(Into::into),
+            body,
+        )
+        .await
+    }
 
     /// Take a snapshot of a disk that is attached to an instance
     #[endpoint {

@@ -29,31 +29,24 @@
 //! related messages is called a _universe_: peers in the same universe
 //! can gossip and converge on its contents; peers in different
 //! universes cannot gossip at all. Every identity in a universe
-//! descends from a single seed. When sleds meet, a deterministic rule
-//! picks whose seed wins, and the others bootstrap from it, each
-//! taking a slice of the winner's identity space. A restarted sled
+//! descends from a single seed. On the first gossip sync, a deterministic
+//! rule decides whose universe wins; the loser joins the winner's
+//! universe and adopts a slice of its identity space. A restarted sled
 //! therefore rejoins the rack's universe and replays what it missed
-//! without re-executing it. Each sled stores its identity in a
-//! _bookmark_, so that a restart resumes it rather than growing a new
-//! one on every boot.
+//! without re-executing previously run jobs. Each sled stores its identity in
+//! a record called a _bookmark_, which is persisted to disk in order to survive
+//! the sled restarting.
 //!
 //! The bookmark, like every record sush must trust across reboots, lives
-//! in the [sush locker]. When we write a record to the locker, we actually
-//! write two copies, one to each M.2. When we load a record, it only
-//! succeeds if both copies are exact matches, or if one of them is
-//! entirely missing (the latter to handle the case of M.2 hardware
-//! replacement in the field). A load fails on mismatched copies, so that
-//! a torn write or corruption on one drive cannot induce the reader to
-//! load stale or invalid information from the other drive. This turns the
-//! pair of M.2 drives into a single mirrored storage container that fails
-//! closed on any disagreement. We accept this because an M.2 failure is
-//! considered a non-user-replaceable part failure, for which the solution
-//! is an RMA. If this occurs in the field, sush may refuse to run jobs on
-//! the sled containing the failed M.2; we report this error to the user,
-//! who should replace the sled.
+//! in the [sush locker], described in the [storage section of RFD 620].
+//! This is similar to the [`omicron_ledger::Ledger`], which also holds
+//! records across both M.2s, but handles disagreements between the two
+//! drives differently.
 //!
 //! [sush locker]:
 //!   https://github.com/oxidecomputer/sush/blob/main/server/src/locker.rs
+//! [storage section of RFD 620]:
+//!   https://rfd.shared.oxide.computer/rfd/0620#_storage
 
 use crate::config::SushConfig;
 use anyhow::Context;
@@ -161,8 +154,9 @@ impl SushHandles {
         .config(ConfigDropshot {
             bind_address,
             default_request_body_max_bytes: REQUEST_MAX_BODY_BYTES,
-            // An interactive job holds a websocket open for as long as it runs,
-            // so a handler must outlive the request that created it.
+            // While an interactive job is running, the corresponding websocket
+            // connection must remain open, so HTTP request handlers must
+            // outlive the requests that created them.
             default_handler_task_mode: HandlerTaskMode::Detached,
             log_headers: vec![],
             compression: Default::default(),
@@ -202,9 +196,9 @@ pub async fn spawn_sush_tasks(
 ) -> Option<SushHandles> {
     let log = log.new(o!("component" => "sush"));
 
-    // Job output starts on the ramdisk, because an encrypted dataset cannot be
-    // mounted until trust quorum is established, and sush must be useful
-    // before then.
+    // Job output starts on the ramdisk, because an encrypted dataset cannot
+    // be mounted until trust quorum is established, and sush must be useful
+    // before then; see `promote_output_dir`.
     if let Err(err) = create_dir_all(&config.ramdisk_dir).await {
         error!(
             log,
@@ -234,7 +228,16 @@ pub async fn spawn_sush_tasks(
             );
         }
     }
-    let locker = Locker::new(&log, slots);
+    let locker = match Locker::new(&log, slots) {
+        Ok(locker) => locker,
+        Err(err) => {
+            error!(
+                log, "locker is locked, not starting sush server";
+                "error" => InlineErrorChain::new(&err),
+            );
+            return None;
+        }
+    };
 
     let GossipInputs { sprockets, measurements, bootstrap_ip, peers } = gossip;
 
@@ -354,7 +357,8 @@ pub async fn spawn_sush_tasks(
 
 /// Start recording new job output on an encrypted debug dataset as soon
 /// as one is mounted, with a raised size limit. Output already recorded
-/// on the ramdisk stays there, readable until reboot.
+/// on the ramdisk currently stays there, but should be migrated to the
+/// encrypted storage; see sush#69.
 async fn promote_output_dir(
     log: Logger,
     mut available_datasets_rx: AvailableDatasetsReceiver,
@@ -387,33 +391,52 @@ async fn promote_output_dir(
                 ),
             }
         }
-        available_datasets_rx.changed(&log).await;
+        if available_datasets_rx.changed().await.is_err() {
+            warn!(
+                log,
+                "no new datasets will appear, so job output will stay \
+                 on the ramdisk",
+            );
+            return;
+        }
     }
 }
 
-/// Periodically ask MGS which baseboard sits in each cubby, and
-/// publish the map. A job may name its target sled by cubby;
-/// this map resolves it. MGS answers at a fixed address within its
-/// switch zone's subnet, so each round we ask at that address in every
-/// /64 ddmd has learned, and take answers from any that respond. The
-/// answers merge into the map, so a round that goes unanswered never
-/// erases it.
+/// Discovers the baseboard identity in each cubby in the rack and publishes the
+/// map over the provided watch channel.
+///
+/// This map is used to resolve the sled identity when a job specifies its
+/// target sled cubby number.
+///
+/// This function may start while one or more MGS services are not available,
+/// and must handle failures of both the MGS service or the entire scrimlet
+/// gracefully. Therefore, on every poll, this function will attempt to use the
+/// fixed MGS address on every subnet currently known to `ddmd`, and accepts any
+/// responses it receives. If a response that contains at least one sled is
+/// received, the previously-discovered map is overwritten to avoid leaving
+/// behind stale entries for sleds that are no longer present. Multiple
+/// responses received within the same poll are merged to produce a single map.
+/// If we cannot contact any MGS instance during a poll, the map does not change
+/// until a subsequent poll receives a response.
 async fn poll_mgs_for_cubbies(log: Logger, cubbies: watch::Sender<Cubbies>) {
-    let ddm = match DdmClient::localhost(&log) {
-        Ok(ddm) => ddm,
-        Err(err) => {
+    let clients = || -> anyhow::Result<(DdmClient, reqwest::Client)> {
+        let ddm = DdmClient::localhost(&log)?;
+        let client = reqwest::ClientBuilder::new()
+            .connect_timeout(MGS_PROBE_TIMEOUT)
+            .timeout(MGS_PROBE_TIMEOUT)
+            .build()?;
+        Ok((ddm, client))
+    };
+    let (ddm, client) = match clients() {
+        Ok(clients) => clients,
+        Err(error) => {
             error!(
                 log, "not polling MGS, cubby-targeted jobs will not run here";
-                "error" => InlineErrorChain::new(&err),
+                "error" => #%error,
             );
             return;
         }
     };
-    let client = reqwest::ClientBuilder::new()
-        .connect_timeout(MGS_PROBE_TIMEOUT)
-        .timeout(MGS_PROBE_TIMEOUT)
-        .build()
-        .expect("failed to build an HTTP client");
     loop {
         match ddm.derive_underlay_subnets_from_prefixes().await {
             Ok(subnets) => {
@@ -454,7 +477,12 @@ async fn poll_mgs_for_cubbies(log: Logger, cubbies: watch::Sender<Cubbies>) {
                         }
                     }
                 }
-                cubbies.send_modify(|current| current.extend(map));
+                // If this code is running, there must be at least one sled in
+                // the rack, so we reject any response that does not have at
+                // least one sled.
+                if !map.is_empty() {
+                    cubbies.send_replace(map);
+                }
             }
             Err(err) => {
                 warn!(
