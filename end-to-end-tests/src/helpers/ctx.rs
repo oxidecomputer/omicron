@@ -47,6 +47,7 @@ impl Context {
             .body(ProjectCreate {
                 name: generate_name("proj")?,
                 description: String::new(),
+                defaults: None,
             })
             .send()
             .await?
