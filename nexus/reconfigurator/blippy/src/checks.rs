@@ -162,36 +162,40 @@ fn check_external_networking(blippy: &mut Blippy<'_>) {
     let mut used_nic_ips = BTreeMap::new();
     let mut used_nic_macs = BTreeMap::new();
 
-    for (sled_id, zone, external_ip, nic) in
+    for (sled_id, zone, external_ips, nic) in
         blippy.blueprint().in_service_zones().filter_map(|(sled_id, zone)| {
             zone.zone_type
                 .external_networking()
-                .map(|(external_ip, nic)| (sled_id, zone, external_ip, nic))
+                .map(|(external_ips, nic)| (sled_id, zone, external_ips, nic))
         })
     {
-        // There should be no duplicate external IPs.
-        if let Some(prev_zone) = used_external_ips.insert(external_ip, zone) {
-            blippy.push_sled_note(
-                sled_id,
-                Severity::Fatal,
-                SledKind::DuplicateExternalIp {
-                    zone1: prev_zone.clone(),
-                    zone2: zone.clone(),
-                    ip: external_ip.ip(),
-                },
-            );
-        }
-
-        // See the loop below; we build up separate maps to check for
-        // Floating/SNAT overlap that wouldn't be caught by the exact
-        // `used_external_ips` map above.
-        match external_ip {
-            OmicronZoneExternalIp::Floating(floating) => {
-                used_external_floating_ips.insert(floating.ip, zone);
+        // A zone may have more than one external IP; check each of them.
+        for external_ip in external_ips {
+            // There should be no duplicate external IPs.
+            if let Some(prev_zone) = used_external_ips.insert(external_ip, zone)
+            {
+                blippy.push_sled_note(
+                    sled_id,
+                    Severity::Fatal,
+                    SledKind::DuplicateExternalIp {
+                        zone1: prev_zone.clone(),
+                        zone2: zone.clone(),
+                        ip: external_ip.ip(),
+                    },
+                );
             }
-            OmicronZoneExternalIp::Snat(snat) => {
-                used_external_snat_ips
-                    .insert(snat.snat_cfg.ip, (sled_id, zone));
+
+            // See the loop below; we build up separate maps to check for
+            // Floating/SNAT overlap that wouldn't be caught by the exact
+            // `used_external_ips` map above.
+            match external_ip {
+                OmicronZoneExternalIp::Floating(floating) => {
+                    used_external_floating_ips.insert(floating.ip, zone);
+                }
+                OmicronZoneExternalIp::Snat(snat) => {
+                    used_external_snat_ips
+                        .insert(snat.snat_cfg.ip, (sled_id, zone));
+                }
             }
         }
 
@@ -776,6 +780,7 @@ mod tests {
     use nexus_reconfigurator_planning::example::example;
     use nexus_types::deployment::BlueprintArtifactVersion;
     use nexus_types::deployment::BlueprintZoneType;
+    use nexus_types::deployment::OmicronZoneExternalFloatingIps;
     use nexus_types::deployment::blueprint_zone_type;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::MupdateOverrideUuid;
@@ -1089,6 +1094,9 @@ mod tests {
             .external_networking()
             .expect("Nexus has external networking")
             .0
+            .into_iter()
+            .next()
+            .expect("Nexus has an external IP")
         {
             OmicronZoneExternalIp::Floating(ip) => ip,
             OmicronZoneExternalIp::Snat(_) => {
@@ -1097,10 +1105,11 @@ mod tests {
         };
         match &mut nexus1.zone_type {
             BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
-                external_ip,
+                external_ips,
                 ..
             }) => {
-                *external_ip = dup_ip;
+                *external_ips =
+                    OmicronZoneExternalFloatingIps::from_single(dup_ip);
             }
             _ => unreachable!("this is a Nexus zone"),
         };
@@ -2267,10 +2276,12 @@ fn check_planning_input_network_records_appear_in_blueprint(
             _ => (),
         }
 
-        if let Some((external_ip, nic)) = zone_type.external_networking() {
-            // Ignore localhost (used by the test suite).
-            if !external_ip.ip().is_loopback() {
-                all_external_ips.insert(external_ip);
+        if let Some((external_ips, nic)) = zone_type.external_networking() {
+            for external_ip in external_ips {
+                // Ignore localhost (used by the test suite).
+                if !external_ip.ip().is_loopback() {
+                    all_external_ips.insert(external_ip);
+                }
             }
             all_macs.insert(nic.mac);
         }
@@ -2359,9 +2370,15 @@ fn check_external_networking_generation(
     )> {
         blueprint
             .in_service_zones()
-            .filter_map(|(sled_id, zone_config)| {
-                let (ip, nic) = zone_config.zone_type.external_networking()?;
-                Some((sled_id, zone_config.id, ip, nic))
+            .flat_map(|(sled_id, zone_config)| {
+                zone_config
+                    .zone_type
+                    .external_networking()
+                    .into_iter()
+                    .flat_map(move |(ips, nic)| {
+                        ips.into_iter()
+                            .map(move |ip| (sled_id, zone_config.id, ip, nic))
+                    })
             })
             .collect()
     }

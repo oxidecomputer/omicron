@@ -157,12 +157,14 @@ impl ReconfiguratorSim {
 
         // Handle zone networking setup first
         for (_, zone) in parent_blueprint.in_service_zones() {
-            if let Some((external_ip, nic)) =
+            if let Some((external_ips, nic)) =
                 zone.zone_type.external_networking()
             {
-                builder
-                    .add_omicron_zone_external_ip(zone.id, external_ip)
-                    .context("adding omicron zone external IP")?;
+                for external_ip in external_ips {
+                    builder
+                        .add_omicron_zone_external_ip(zone.id, external_ip)
+                        .context("adding omicron zone external IP")?;
+                }
                 let nic = OmicronZoneNic {
                     // TODO-cleanup use `TypedUuid` everywhere
                     id: VnicUuid::from_untyped_uuid(nic.id),

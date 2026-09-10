@@ -554,10 +554,13 @@ impl DataStore {
 
         let service_ip_nic = match zone_type {
             BlueprintZoneType::ExternalDns(
-                blueprint_zone_type::ExternalDns { nic, dns_address, .. },
+                blueprint_zone_type::ExternalDns { nic, dns_addresses, .. },
             ) => {
-                let external_ip =
-                    OmicronZoneExternalIp::Floating(dns_address.into_ip());
+                let external_ips = dns_addresses
+                    .iter()
+                    .copied()
+                    .map(|a| OmicronZoneExternalIp::Floating(a.into_ip()))
+                    .collect::<Vec<_>>();
                 let ip_config = extract_ip_config(nic);
                 let db_nic = IncompleteNetworkInterface::new_service(
                     nic.id,
@@ -575,14 +578,18 @@ impl DataStore {
                     nic.slot,
                 )
                 .map_err(|e| RackInitError::AddingNic(e))?;
-                Some((external_ip, db_nic))
+                Some((external_ips, db_nic))
             }
             BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                 nic,
-                external_ip,
+                external_ips,
                 ..
             }) => {
-                let external_ip = OmicronZoneExternalIp::Floating(*external_ip);
+                let external_ips = external_ips
+                    .iter()
+                    .copied()
+                    .map(OmicronZoneExternalIp::Floating)
+                    .collect::<Vec<_>>();
                 let ip_config = extract_ip_config(nic);
                 let db_nic = IncompleteNetworkInterface::new_service(
                     nic.id,
@@ -600,12 +607,15 @@ impl DataStore {
                     nic.slot,
                 )
                 .map_err(|e| RackInitError::AddingNic(e))?;
-                Some((external_ip, db_nic))
+                Some((external_ips, db_nic))
             }
             BlueprintZoneType::BoundaryNtp(
                 blueprint_zone_type::BoundaryNtp { external_ip, nic, .. },
             ) => {
-                let external_ip = OmicronZoneExternalIp::Snat(*external_ip);
+                let external_ips = external_ip
+                    .iter()
+                    .map(OmicronZoneExternalIp::Snat)
+                    .collect::<Vec<_>>();
                 let ip_config = extract_ip_config(nic);
                 let db_nic = IncompleteNetworkInterface::new_service(
                     nic.id,
@@ -623,7 +633,7 @@ impl DataStore {
                     nic.slot,
                 )
                 .map_err(|e| RackInitError::AddingNic(e))?;
-                Some((external_ip, db_nic))
+                Some((external_ips, db_nic))
             }
             BlueprintZoneType::InternalNtp(_)
             | BlueprintZoneType::Clickhouse(_)
@@ -635,49 +645,51 @@ impl DataStore {
             | BlueprintZoneType::InternalDns(_)
             | BlueprintZoneType::Oximeter(_) => None,
         };
-        let Some((external_ip, db_nic)) = service_ip_nic else {
+        let Some((external_ips, db_nic)) = service_ip_nic else {
             info!(
                 log,
                 "No networking records needed for {} service", zone_report_str,
             );
             return Ok(());
         };
-        let (_authz_pool, db_pool) = self
-            .ip_pool_fetch_containing_address_for_services_on_connection(
-                opctx,
+        for external_ip in external_ips {
+            let (_authz_pool, db_pool) = self
+                .ip_pool_fetch_containing_address_for_services_on_connection(
+                    opctx,
+                    conn,
+                    external_ip.ip(),
+                )
+                .await
+                .map_err(|e| {
+                    RackInitError::AddingIp(Error::internal_error(&format!(
+                        "no system services pool for external IP '{}': {}",
+                        external_ip.ip(),
+                        e,
+                    )))
+                })?;
+            let db_ip = IncompleteExternalIp::for_omicron_zone(
+                db_pool.id(),
+                external_ip,
+                zone_config.id,
+                zone_config.zone_type.kind(),
+            );
+            Self::allocate_external_ip_on_connection(
                 conn,
-                external_ip.ip(),
+                db_ip,
+                LookupType::ById(db_pool.id()),
             )
             .await
-            .map_err(|e| {
-                RackInitError::AddingIp(Error::internal_error(&format!(
-                    "no system services pool for external IP '{}': {}",
-                    external_ip.ip(),
-                    e,
-                )))
+            .map_err(|err| {
+                error!(
+                    log,
+                    "Initializing Rack: Failed to allocate \
+                     IP address for {}",
+                     zone_report_str;
+                    "err" => %err,
+                );
+                RackInitError::AddingIp(err.into_public_ignore_retries())
             })?;
-        let db_ip = IncompleteExternalIp::for_omicron_zone(
-            db_pool.id(),
-            external_ip,
-            zone_config.id,
-            zone_config.zone_type.kind(),
-        );
-        Self::allocate_external_ip_on_connection(
-            conn,
-            db_ip,
-            LookupType::ById(db_pool.id()),
-        )
-        .await
-        .map_err(|err| {
-            error!(
-                log,
-                "Initializing Rack: Failed to allocate \
-                 IP address for {}",
-                 zone_report_str;
-                "err" => %err,
-            );
-            RackInitError::AddingIp(err.into_public_ignore_retries())
-        })?;
+        }
 
         self.create_network_interface_raw_conn(conn, db_nic)
             .await
@@ -1832,11 +1844,11 @@ mod test {
                 .ip
                 .ip(),
             if let BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
-                external_ip,
+                external_ips,
                 ..
             }) = &blueprint.in_service_zones().next().unwrap().1.zone_type
             {
-                external_ip.ip
+                external_ips.iter().next().unwrap().ip
             } else {
                 panic!("Unexpected zone type")
             }
@@ -1846,11 +1858,11 @@ mod test {
                 .ip
                 .ip(),
             if let BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
-                external_ip,
+                external_ips,
                 ..
             }) = &blueprint.in_service_zones().nth(1).unwrap().1.zone_type
             {
-                external_ip.ip
+                external_ips.iter().next().unwrap().ip
             } else {
                 panic!("Unexpected service kind")
             }
@@ -2162,11 +2174,11 @@ mod test {
         assert_eq!(
             actual_ip,
             if let BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
-                external_ip,
+                external_ips,
                 ..
             }) = &blueprint.in_service_zones().next().unwrap().1.zone_type
             {
-                external_ip.ip
+                external_ips.iter().next().unwrap().ip
             } else {
                 panic!("Unexpected zone type")
             }

@@ -1134,6 +1134,26 @@ impl SourceNatConfigGeneric {
     }
 }
 
+impl From<SourceNatConfigV4> for SourceNatConfigGeneric {
+    fn from(c: SourceNatConfigV4) -> Self {
+        SourceNatConfig {
+            ip: IpAddr::V4(c.ip),
+            first_port: c.first_port,
+            last_port: c.last_port,
+        }
+    }
+}
+
+impl From<SourceNatConfigV6> for SourceNatConfigGeneric {
+    fn from(c: SourceNatConfigV6) -> Self {
+        SourceNatConfig {
+            ip: IpAddr::V6(c.ip),
+            first_port: c.first_port,
+            last_port: c.last_port,
+        }
+    }
+}
+
 #[cfg(any(test, feature = "testing"))]
 impl<T> proptest::arbitrary::Arbitrary for SourceNatConfig<T>
 where
@@ -1208,18 +1228,6 @@ impl NexusExternalIps {
     /// Iterate over the external IPs.
     pub fn iter(&self) -> impl Iterator<Item = &IpAddr> {
         self.0.iter()
-    }
-
-    /// Return the "primary" address, either IPv4 or IPv6 in that order.
-    ///
-    /// NOTE: This is a temporary method used while we don't fully support
-    /// multiple IP addresses. It should be removed when that support is done.
-    pub fn temporary_primary_address(&self) -> IpAddr {
-        self.iter()
-            .find(|ip| ip.is_ipv4())
-            .or_else(|| self.iter().next())
-            .copied()
-            .expect("NexusExternalIps is non-empty by construction")
     }
 }
 
