@@ -36,8 +36,8 @@ impl LiveTestContext {
     ) -> Result<LiveTestContext, anyhow::Error> {
         let logctx = omicron_test_utils::dev::test_setup_log(test_name);
         let log = &logctx.log;
-        let resolver = create_resolver(log)?;
-        check_execution_environment(&resolver).await?;
+        check_execution_environment()?;
+        let resolver = create_resolver(log).await?;
         let datastore = create_datastore(&log, &resolver).await?;
         let opctx = OpContext::for_tests(log.clone(), datastore.clone());
         check_hardware_environment(&opctx, &datastore).await?;
@@ -95,21 +95,92 @@ impl LiveTestContext {
     }
 }
 
-fn create_resolver(log: &slog::Logger) -> Result<Resolver, anyhow::Error> {
-    // In principle, we should look at /etc/resolv.conf to find the DNS servers.
-    // In practice, this usually isn't populated today.  See
-    // oxidecomputer/omicron#2122.
-    //
-    // However, the address selected below should work for most existing Omicron
-    // deployments today.  That's because while the base subnet is in principle
-    // configurable in config-rss.toml, it's very uncommon to change it from the
-    // default value used here.
-    let subnet = Ipv6Subnet::new("fd00:1122:3344:0100::".parse().unwrap());
-    eprintln!("note: using DNS server for subnet {}", subnet.net());
-    internal_dns_resolver::Resolver::new_from_subnet(log.clone(), subnet)
-        .with_context(|| {
-            format!("creating DNS resolver for subnet {}", subnet.net())
+/// AZ subnets (/48) of the environments where live tests may be run
+///
+/// The base subnet is configurable in config-rss.toml, and each racklette's ULA
+/// prefix was randomized at RSS time.  These are the test rigs allowed by
+/// `ALLOWED_GIMLET_SERIALS`; read a rack's prefix from `/etc/resolv.conf` on
+/// any of its sleds.
+const CANDIDATE_AZ_SUBNETS: &[(&str, &str)] = &[
+    ("default", "fd00:1122:3344::"),
+    ("berlin", "fd85:375e:4c4d::"),
+    ("dublin", "fd1d:b310:936f::"),
+    ("london", "fd8b:57a9:e7cb::"),
+    ("madrid", "fd16:1925:797b::"),
+];
+
+/// Creates a resolver for the internal DNS servers of the rack we're on
+///
+/// We would rather read /etc/resolv.conf, but it usually isn't populated today.
+/// See oxidecomputer/omicron#2122.  Instead, probe every candidate subnet
+/// concurrently and take the first that answers; at most one is reachable.
+async fn create_resolver(
+    log: &slog::Logger,
+) -> Result<Resolver, anyhow::Error> {
+    let probes = CANDIDATE_AZ_SUBNETS
+        .iter()
+        .map(|(rig_name, prefix)| {
+            let addr = prefix
+                .parse()
+                .expect("CANDIDATE_AZ_SUBNETS entries are IPv6 addresses");
+            let subnet = Ipv6Subnet::new(addr);
+            let log = log.clone();
+            // Boxed: `select_ok()` requires a uniform future type.
+            Box::pin(async move {
+                let resolver =
+                    internal_dns_resolver::Resolver::new_from_subnet(
+                        log, subnet,
+                    )
+                    .with_context(|| {
+                        format!(
+                            "creating DNS resolver for subnet {}",
+                            subnet.net()
+                        )
+                    })?;
+                resolver
+                    .lookup_srv(ServiceName::InternalDns)
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "looking up internal DNS in subnet {}",
+                            subnet.net()
+                        )
+                    })?;
+                Ok::<_, anyhow::Error>((*rig_name, subnet, resolver))
+            })
         })
+        .collect::<Vec<_>>();
+
+    match futures::future::select_ok(probes).await {
+        Ok(((rig_name, subnet, resolver), _)) => {
+            eprintln!(
+                "note: using internal DNS servers for subnet {} (test rig {:?})",
+                subnet.net(),
+                rig_name
+            );
+            Ok(resolver)
+        }
+        Err(error) => {
+            let candidates = CANDIDATE_AZ_SUBNETS
+                .iter()
+                .map(|(rig_name, prefix)| format!("{} ({})", prefix, rig_name))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let text = format!(
+                "create_resolver(): none of the known internal DNS servers \
+                 responded.\n\n \
+                 Are you trying to run this in a development environment?  \
+                 This test can only be run on deployed systems and only from a \
+                 context with connectivity to the underlay network.\n\n \
+                 If you are on a rack that isn't listed here, add its AZ \
+                 subnet to CANDIDATE_AZ_SUBNETS.  Subnets tried: {}\n\n \
+                 last raw error: {}",
+                candidates,
+                slog_error_chain::InlineErrorChain::new(&*error),
+            );
+            Err(anyhow!("{}", textwrap::wrap(&text, 80).join("\n")))
+        }
+    }
 }
 
 /// Creates a DataStore pointing at the CockroachDB cluster that's in DNS
@@ -147,29 +218,14 @@ async fn create_datastore(
 ///
 /// This isn't perfect but seeks to fail fast in obviously bogus environments
 /// that someone might accidentally try to run this in.
-async fn check_execution_environment(
-    resolver: &Resolver,
-) -> Result<(), anyhow::Error> {
+fn check_execution_environment() -> Result<(), anyhow::Error> {
     ensure!(
         cfg!(target_os = "illumos"),
         "live tests can only be run on deployed systems, which run illumos"
     );
 
-    // The only real requirement for these tests is that they're run from a
-    // place with connectivity to the underlay network of a deployed control
-    // plane.  The easiest way to tell is to look up something in internal DNS.
-    resolver.lookup_srv(ServiceName::InternalDns).await.map_err(|e| {
-        let text = format!(
-            "check_execution_environment(): failed to look up internal DNS \
-                 in the internal DNS servers.\n\n \
-                 Are you trying to run this in a development environment?  \
-                 This test can only be run on deployed systems and only from a \
-                 context with connectivity to the underlay network.\n\n \
-                 raw error: {}",
-            slog_error_chain::InlineErrorChain::new(&e)
-        );
-        anyhow!("{}", textwrap::wrap(&text, 80).join("\n"))
-    })?;
+    // The other requirement -- connectivity to a deployed control plane's
+    // underlay -- is checked by create_resolver().
 
     // Warn the user if the temporary directory is /tmp.  This check is
     // heuristic.  There are other ways they may have specified a tmpfs
