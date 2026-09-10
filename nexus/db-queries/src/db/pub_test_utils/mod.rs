@@ -42,7 +42,7 @@ fn new_pool(log: &Logger, db: &CockroachInstance) -> Arc<db::Pool> {
     Arc::new(db::Pool::new_single_host(
         log,
         &cfg,
-        db::DbClaimBacktraceSetting::Capture,
+        db::ClaimBacktraceSetting::Capture,
     ))
 }
 
@@ -333,7 +333,7 @@ async fn datastore_test(
     let pool = Arc::new(db::Pool::new_single_host(
         &log,
         &cfg,
-        db::DbClaimBacktraceSetting::Capture,
+        db::ClaimBacktraceSetting::Capture,
     ));
     let datastore = Arc::new(
         DataStore::new(&log, pool, None, IdentityCheckPolicy::DontCare)

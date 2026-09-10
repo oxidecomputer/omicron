@@ -104,7 +104,7 @@ impl ReconfiguratorExec {
         let pool = Arc::new(db::Pool::new(
             &log,
             &qorb_resolver,
-            db::DbClaimBacktraceSetting::Capture,
+            db::ClaimBacktraceSetting::Capture,
         ));
         let datastore = Arc::new(
             DataStore::new_failfast(&log, pool)

@@ -138,7 +138,7 @@ async fn create_datastore(
     let pool = Arc::new(nexus_db_queries::db::Pool::new_single_host(
         log,
         &db_config,
-        db::DbClaimBacktraceSetting::Capture,
+        db::ClaimBacktraceSetting::Capture,
     ));
     DataStore::new_failfast(log, pool)
         .await

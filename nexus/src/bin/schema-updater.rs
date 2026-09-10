@@ -83,7 +83,7 @@ async fn main_impl() -> anyhow::Result<()> {
     let pool = Arc::new(db::Pool::new_single_host(
         &log,
         &crdb_cfg,
-        db::DbClaimBacktraceSetting::Capture,
+        db::ClaimBacktraceSetting::Capture,
     ));
 
     // We use the unchecked constructor of the datastore because we

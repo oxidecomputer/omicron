@@ -274,7 +274,7 @@ impl ServerContext {
             }
         };
 
-        let backtrace_setting = db::DbClaimBacktraceSetting::from_config_flag(
+        let backtrace_setting = db::ClaimBacktraceSetting::from_config_flag(
             config.deployment.record_db_claim_backtraces,
         );
 

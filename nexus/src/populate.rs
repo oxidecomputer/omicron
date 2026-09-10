@@ -370,7 +370,7 @@ mod test {
         let pool = Arc::new(db::Pool::new_single_host(
             &logctx.log,
             &cfg,
-            db::DbClaimBacktraceSetting::Capture,
+            db::ClaimBacktraceSetting::Capture,
         ));
         let datastore = Arc::new(
             db::DataStore::new(
