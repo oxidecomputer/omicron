@@ -173,9 +173,9 @@ pub async fn spawn_sush_tasks(
 ) -> Option<SushHandles> {
     let log = log.new(o!("component" => "sush"));
 
-    // Job output starts on the ramdisk, because an encrypted dataset cannot be
-    // mounted until trust quorum is established, and sush must be useful
-    // before then.
+    // Job output starts on the ramdisk, because an encrypted dataset cannot
+    // be mounted until trust quorum is established, and sush must be useful
+    // before then; see `promote_output_dir`.
     if let Err(err) = create_dir_all(&config.ramdisk_dir).await {
         error!(
             log,
@@ -325,7 +325,8 @@ pub async fn spawn_sush_tasks(
 
 /// Start recording new job output on an encrypted debug dataset as soon
 /// as one is mounted, with a raised size limit. Output already recorded
-/// on the ramdisk stays there, readable until reboot.
+/// on the ramdisk currently stays there, but should be migrated to the
+/// encrypted storage; see sush#69.
 async fn promote_output_dir(
     log: Logger,
     mut available_datasets_rx: AvailableDatasetsReceiver,
