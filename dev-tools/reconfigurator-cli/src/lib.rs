@@ -619,6 +619,15 @@ enum SledSetCommand {
     Visibility(SledSetVisibilityCommand),
     /// set the mupdate override for this sled
     MupdateOverride(SledSetMupdateOverrideArgs),
+    /// set the number of VMMs this sled's instance manager reports as
+    /// registered (relevant when the sled is being evacuated)
+    RegisteredVmms(SledSetRegisteredVmmsArgs),
+}
+
+#[derive(Debug, Args)]
+struct SledSetRegisteredVmmsArgs {
+    /// the number of registered VMMs to report
+    count: usize,
 }
 
 #[derive(Debug, Args)]
@@ -2139,6 +2148,23 @@ fn cmd_sled_set(
             Ok(Some(format!(
                 "set sled {} mupdate override: {} -> {}",
                 sled_id, prev_desc, desc,
+            )))
+        }
+        SledSetCommand::RegisteredVmms(SledSetRegisteredVmmsArgs { count }) => {
+            let description = system.description_mut();
+            let prev = description
+                .sled_instance_manager_status(sled_id)?
+                .num_registered_vmms;
+            description.sled_set_num_registered_vmms(sled_id, count)?;
+            sim.commit_and_bump(
+                format!(
+                    "reconfigurator-cli sled-set registered-vmms: \
+                     {sled_id}: {prev} -> {count}",
+                ),
+                state,
+            );
+            Ok(Some(format!(
+                "set sled {sled_id} registered VMMs: {prev} -> {count}",
             )))
         }
     }

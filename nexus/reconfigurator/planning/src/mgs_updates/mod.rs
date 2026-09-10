@@ -47,8 +47,9 @@ pub(crate) use host_phase_1::PendingHostPhase2Changes;
 pub(crate) use sled_evacuation::EvacuatingSleds;
 pub(crate) use sled_evacuation::PendingUpdateDispositionChanges;
 
-// TODO-john What policy do we use for evacuating sleds? This should come from
-// the PlanningInput's policy.
+// TODO: This should come from `ReconfiguratorConfig::disruption_policy`, which
+// is not yet plumbed through the `PlanningInput`. Until then, we this default
+// when marking a sled for evacuation.
 const DEFAULT_EVAC_POLICY: ReconfiguratorDisruptionPolicy =
     ReconfiguratorDisruptionPolicy::Terminate;
 
@@ -897,6 +898,8 @@ mod test {
     use crate::mgs_updates::UpdateableBoard;
     use crate::planner::ZoneSafetyChecks;
 
+    use super::DEFAULT_EVAC_POLICY;
+    use super::EvacuatingSleds;
     use super::ImpossibleUpdatePolicy;
     use super::PlannedMgsUpdates;
     use super::test_helpers::ARTIFACT_HASH_COSMO_HOST_PHASE_1;
@@ -912,7 +915,9 @@ mod test {
     use dropshot::ConfigLogging;
     use dropshot::ConfigLoggingLevel;
     use iddqd::IdOrdMap;
+    use nexus_types::deployment::BlueprintSledUpdateDispositionKind;
     use nexus_types::deployment::ExpectedVersion;
+    use nexus_types::deployment::MgsUpdateComponent;
     use nexus_types::deployment::PendingMgsUpdateDetails;
     use nexus_types::deployment::PendingMgsUpdateSpDetails;
     use nexus_types::deployment::PendingMgsUpdates;
@@ -923,11 +928,17 @@ mod test {
     use nexus_types::deployment::planning_report::FailedRotBootloaderUpdateReason;
     use nexus_types::deployment::planning_report::FailedRotUpdateReason;
     use nexus_types::deployment::planning_report::FailedSpUpdateReason;
+    use nexus_types::deployment::planning_report::WaitingOnSledEvacuationDetails;
+    use nexus_types::deployment::planning_report::ZoneUnsafeToShutdown;
     use nexus_types::inventory::CabooseWhich;
     use nexus_types::inventory::SpType;
+    use omicron_generation_kinds::SledConfigGeneration;
     use omicron_test_utils::dev::LogContext;
+    use omicron_uuid_kinds::OmicronZoneUuid;
+    use omicron_uuid_kinds::SledUuid;
     use sled_hardware_types::BaseboardId;
     use sled_hardware_types::OxideSled;
+    use std::collections::BTreeMap;
     use std::collections::BTreeSet;
     use std::sync::Arc;
     use strum::IntoEnumIterator;
@@ -979,6 +990,7 @@ mod test {
             inventory: &collection,
             current_boards: &fake_boards,
             zone_safety_checks: &ZoneSafetyChecks::empty(),
+            evacuating_sleds: &EvacuatingSleds::empty(),
             current_updates: &current_updates,
             current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
@@ -1025,6 +1037,7 @@ mod test {
             inventory: &collection,
             current_boards: &UpdateableBoard::all_from_collection(&collection),
             zone_safety_checks: &ZoneSafetyChecks::empty(),
+            evacuating_sleds: &EvacuatingSleds::empty(),
             current_updates: &current_updates,
             current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
@@ -1072,6 +1085,7 @@ mod test {
             inventory: &collection,
             current_boards: &UpdateableBoard::all_from_collection(&collection),
             zone_safety_checks: &ZoneSafetyChecks::empty(),
+            evacuating_sleds: &EvacuatingSleds::empty(),
             current_updates: &current_updates,
             current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
@@ -1121,6 +1135,7 @@ mod test {
             inventory: &collection,
             current_boards: &current_boards,
             zone_safety_checks: &ZoneSafetyChecks::empty(),
+            evacuating_sleds: &EvacuatingSleds::empty(),
             current_updates: &current_updates,
             current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
@@ -1155,10 +1170,15 @@ mod test {
         );
         let log = &logctx.log;
         let test_boards = TestBoards::new(test_name);
+        let sled_0_evacuating = EvacuatingSleds::new_for_test([(
+            test_boards.sled_id(0).expect("have sled 0"),
+            SledConfigGeneration::new(),
+        )]);
 
         // Initial setup: sled 0 has active version 1 and inactive version 1.5.
         let collection = test_boards
             .collection_builder()
+            .sled_evacuated(0, SledConfigGeneration::new())
             .sp_versions(
                 ARTIFACT_VERSION_2,
                 ExpectedVersion::Version(ARTIFACT_VERSION_1_5),
@@ -1192,6 +1212,7 @@ mod test {
                     inventory: &collection,
                     current_boards,
                     zone_safety_checks: &ZoneSafetyChecks::empty(),
+                    evacuating_sleds: &sled_0_evacuating,
                     current_updates: &initial_updates,
                     current_artifacts: &TargetReleaseDescription::TufRepo(
                         repo.clone(),
@@ -1230,6 +1251,7 @@ mod test {
         // no caboose to read.
         let collection = test_boards
             .collection_builder()
+            .sled_evacuated(0, SledConfigGeneration::new())
             .rot_versions(
                 ARTIFACT_VERSION_2,
                 ExpectedVersion::Version(ARTIFACT_VERSION_1_5),
@@ -1246,6 +1268,7 @@ mod test {
                 inventory: &collection,
                 current_boards,
                 zone_safety_checks: &ZoneSafetyChecks::empty(),
+                evacuating_sleds: &sled_0_evacuating,
                 current_updates: &updates,
                 current_artifacts: &TargetReleaseDescription::TufRepo(
                     repo.clone(),
@@ -1264,6 +1287,7 @@ mod test {
                 inventory: &collection,
                 current_boards,
                 zone_safety_checks: &ZoneSafetyChecks::empty(),
+                evacuating_sleds: &sled_0_evacuating,
                 current_updates: &initial_updates,
                 current_artifacts: &TargetReleaseDescription::TufRepo(
                     repo.clone(),
@@ -1294,7 +1318,8 @@ mod test {
         logctx.cleanup_successful();
     }
 
-    // Updates a whole system's SPs one at a time
+    // Updates a whole system one MGS-driven update at a time, including
+    // evacuating each sled (exactly once) before its SP and host OS updates.
     #[test]
     fn test_whole_system_sequential() {
         let test_name = "planning_mgs_updates_whole_system_sequential";
@@ -1310,9 +1335,25 @@ mod test {
         let impossible_update_policy = ImpossibleUpdatePolicy::Reevaluate;
 
         // We do not control the order of updates.  But we expect to update each
-        // of the SPs in this map.  When we do, we expect to find the given
+        // of the boards in this map.  When we do, we expect to find the given
         // artifact.
         let mut expected_updates = test_boards.expected_updates();
+
+        // Simulated blueprint state that the real planner would carry between
+        // passes: which sleds are marked `Evacuating` (and the sled config
+        // generation that marked them), and each sled's current sled config
+        // generation.
+        let mut evacuating: BTreeMap<SledUuid, SledConfigGeneration> =
+            BTreeMap::new();
+        let mut sled_generations: BTreeMap<SledUuid, SledConfigGeneration> =
+            test_boards
+                .sled_ids()
+                .map(|sled_id| (sled_id, SledConfigGeneration::new()))
+                .collect();
+
+        // Every sled needs both an SP and a host OS update; each should be
+        // evacuated exactly once for the pair.
+        let mut evacuation_counts: BTreeMap<SledUuid, usize> = BTreeMap::new();
 
         // Start with collections that record everything at version 1. We'll add
         // exceptions as we step through updates below.
@@ -1336,26 +1377,37 @@ mod test {
                 ARTIFACT_VERSION_1,
                 ExpectedVersion::NoValidVersion,
             );
-        for _ in 0..expected_updates.len() {
+
+        // Each iteration of this loop is one planning pass. We expect to see
+        // one pass for each expected update, plus one pass to evacuate each
+        // sled (before updating its SP/host OS), plus one final pass to mark
+        // the last sled updated as available. (The other sleds' "mark
+        // available" step happens in the same planning pass as the next
+        // update.)
+        let expected_n_passes =
+            expected_updates.len() + test_boards.sled_ids().count() + 1;
+        for _ in 0..expected_n_passes {
             let collection = builder.clone().build();
 
             // For this test, all systems that are found in inventory are part
             // of the control plane.
             let current_boards =
                 UpdateableBoard::all_from_collection(&collection);
-            let current_boards = &current_boards;
+            let evacuating_sleds = EvacuatingSleds::new_for_test(
+                evacuating.iter().map(|(id, generation)| (*id, *generation)),
+            );
 
-            // Run the planner and verify that we got one of our expected
-            // updates.
             let PlannedMgsUpdates {
                 pending_updates: new_updates,
                 mut pending_host_phase_2_changes,
-                ..
+                pending_update_disposition_changes,
+                blocked_mgs_updates,
             } = MgsUpdatePlanner {
                 log,
                 inventory: &collection,
-                current_boards,
+                current_boards: &current_boards,
                 zone_safety_checks: &ZoneSafetyChecks::empty(),
+                evacuating_sleds: &evacuating_sleds,
                 current_updates: &latest_updates,
                 current_artifacts: &TargetReleaseDescription::TufRepo(
                     repo.clone(),
@@ -1364,95 +1416,284 @@ mod test {
                 impossible_update_policy,
             }
             .plan();
-            assert_eq!(new_updates.len(), 1);
-            let update =
-                new_updates.iter().next().expect("at least one update");
-            expected_updates
-                .verify_one(update, &mut pending_host_phase_2_changes);
-            assert!(pending_host_phase_2_changes.is_empty());
+            assert!(
+                blocked_mgs_updates.is_empty(),
+                "unexpected blocked updates: {blocked_mgs_updates:?}"
+            );
 
-            // Update our builder with an addition exception for the update we
-            // just planned for the next iteration.
-            let sp_type = update.sp_type;
-            let sp_slot = update.slot_id;
-            let sled_type =
-                OxideSled::try_from_model(&update.baseboard_id.part_number);
+            let disposition_changes = pending_update_disposition_changes
+                .iter()
+                .map(|(sled_id, kind)| (*sled_id, *kind))
+                .collect::<BTreeMap<_, _>>();
 
-            match update.details {
-                PendingMgsUpdateDetails::Rot { .. } => {
+            // A pass may make up to two kinds of progress: disposition changes
+            // (restoring a sled whose updates are done and/or marking the next
+            // sled for evacuation) and scheduling one update. Restoring a sled
+            // frees the update slot, so it can coincide with either of the
+            // others; marking a sled for evacuation takes the slot, so it never
+            // coincides with an update.
+            //
+            // Confirm here we made at least one change; we'll check that if we
+            // marked a sled for evacuation we _didn't_ also schedule an update
+            // below.
+            assert!(
+                !new_updates.is_empty() || !disposition_changes.is_empty(),
+                "planner made no progress (expected updates remaining: {},
+                 evacuating: {evacuating:?})",
+                expected_updates.len()
+            );
+
+            // Apply disposition changes first, so that the "who may be updated"
+            // check below sees the post-change evacuation state.
+            let mut started_evacuating = None;
+            for (sled_id, kind) in disposition_changes {
+                let sp_slot = test_boards
+                    .sled_sp_slot(sled_id)
+                    .expect("sleds should have a slot in test_boards");
+
+                // A disposition change bumps the sled's config generation.
+                let old_generation = sled_generations[&sled_id];
+                let new_generation = old_generation.next();
+                sled_generations.insert(sled_id, new_generation);
+
+                match kind {
+                    BlueprintSledUpdateDispositionKind::Evacuating {
+                        // TODO: confirm we respect the policy specified by the
+                        // planning input, once we thread that through.
+                        policy: _,
+                    } => {
+                        assert!(
+                            started_evacuating
+                                .replace((
+                                    sled_id,
+                                    sp_slot,
+                                    old_generation,
+                                    new_generation
+                                ))
+                                .is_none(),
+                            "two sleds marked for evacuation in one pass"
+                        );
+                        assert!(
+                            evacuating
+                                .insert(sled_id, new_generation)
+                                .is_none()
+                        );
+                        *evacuation_counts.entry(sled_id).or_default() += 1;
+
+                        // We should only evacuate a sled that still needs a
+                        // reboot-requiring update.
+                        assert!(
+                            expected_updates.contains(
+                                SpType::Sled,
+                                sp_slot,
+                                MgsUpdateComponent::Sp
+                            ) || expected_updates.contains(
+                                SpType::Sled,
+                                sp_slot,
+                                MgsUpdateComponent::HostOs
+                            ),
+                            "evacuated sled {sled_id} needs no reboot"
+                        );
+                    }
+                    BlueprintSledUpdateDispositionKind::Available => {
+                        assert!(evacuating.remove(&sled_id).is_some());
+
+                        // We should only restore a sled once nothing
+                        // reboot-requiring remains for it.
+                        assert!(
+                            !expected_updates.contains(
+                                SpType::Sled,
+                                sp_slot,
+                                MgsUpdateComponent::Sp
+                            ) && !expected_updates.contains(
+                                SpType::Sled,
+                                sp_slot,
+                                MgsUpdateComponent::HostOs
+                            ),
+                            "restored sled {sled_id} still needs a reboot"
+                        );
+                        builder =
+                            builder.sled_available(sp_slot, new_generation);
+                    }
+                }
+            }
+
+            if let Some((sled_id, sp_slot, old_generation, new_generation)) =
+                started_evacuating
+            {
+                assert!(
+                    new_updates.is_empty(),
+                    "update scheduled in the same pass sled {sled_id} was \
+                     marked for evacuation"
+                );
+
+                // Until the sled reports that it has evacuated, the planner
+                // should wait (and hold the update slot): plan again with the
+                // new blueprint state but the same (stale) inventory.
+                let evacuating_sleds = EvacuatingSleds::new_for_test(
+                    evacuating
+                        .iter()
+                        .map(|(id, generation)| (*id, *generation)),
+                );
+                let waiting = MgsUpdatePlanner {
+                    log,
+                    inventory: &collection,
+                    current_boards: &current_boards,
+                    zone_safety_checks: &ZoneSafetyChecks::empty(),
+                    evacuating_sleds: &evacuating_sleds,
+                    current_updates: &new_updates,
+                    current_artifacts: &TargetReleaseDescription::TufRepo(
+                        repo.clone(),
+                    ),
+                    nmax_updates,
+                    impossible_update_policy,
+                }
+                .plan();
+                assert!(waiting.pending_updates.is_empty());
+                assert!(waiting.pending_update_disposition_changes.is_empty());
+                assert_eq!(waiting.blocked_mgs_updates.len(), 1);
+                let blocked = &waiting.blocked_mgs_updates[0];
+                assert_eq!(
+                    blocked.baseboard_id.serial_number,
+                    test_boards.sled_serial_number(sled_id).unwrap()
+                );
+                match &blocked.reason {
+                    FailedMgsUpdateReason::WaitingOnSledEvacuation {
+                        component,
+                        details:
+                            WaitingOnSledEvacuationDetails::WaitingForSledConfigGeneration {
+                                desired,
+                                current,
+                            },
+                    } => {
+                        assert!(component.update_requires_sled_reboot());
+                        assert_eq!(*desired, new_generation);
+                        assert_eq!(*current, old_generation);
+                    }
+                    other => panic!("unexpected blocked reason: {other:?}"),
+                }
+
+                // Now have the sled report that it has evacuated.
+                builder = builder.sled_evacuated(sp_slot, new_generation);
+            }
+
+            if let Some(update) = new_updates.iter().next() {
+                assert_eq!(new_updates.len(), 1);
+
+                // While a sled is evacuating, it holds the single update slot:
+                // the only board that may be updated is that sled.
+                if !evacuating.is_empty() {
+                    let sled_id = current_boards
+                        .iter()
+                        .find(|b| b.baseboard_id() == &update.baseboard_id)
+                        .and_then(|b| b.sled_id())
+                        .expect("update while evacuating must be for a sled");
                     assert!(
-                        !builder
-                            .has_rot_active_version_exception(sp_type, sp_slot)
-                    );
-                    builder = builder.rot_active_version_exception(
-                        sp_type,
-                        sp_slot,
-                        ARTIFACT_VERSION_2,
+                        evacuating.contains_key(&sled_id),
+                        "update for non-evacuating sled {sled_id} while \
+                         {evacuating:?} are evacuating"
                     );
                 }
-                PendingMgsUpdateDetails::Sp { .. } => {
-                    assert!(
-                        !builder
-                            .has_sp_active_version_exception(sp_type, sp_slot)
-                    );
-                    builder = builder.sp_active_version_exception(
-                        sp_type,
-                        sp_slot,
-                        ARTIFACT_VERSION_2,
-                    );
-                }
-                PendingMgsUpdateDetails::RotBootloader { .. } => {
-                    assert!(
-                        !builder.has_stage0_version_exception(sp_type, sp_slot)
-                    );
-                    builder = builder.stage0_version_exception(
-                        sp_type,
-                        sp_slot,
-                        ARTIFACT_VERSION_2,
-                    );
-                }
-                PendingMgsUpdateDetails::HostPhase1(_) => {
-                    assert_eq!(sp_type, SpType::Sled);
-                    assert!(!builder.has_host_active_exception(sp_slot));
-                    builder = builder.host_active_exception(
-                        sp_slot,
-                        match sled_type {
-                            Some(OxideSled::Gimlet) => {
-                                ARTIFACT_HASH_GIMLET_HOST_PHASE_1
-                            }
-                            Some(OxideSled::Cosmo) => {
-                                ARTIFACT_HASH_COSMO_HOST_PHASE_1
-                            }
-                            None => panic!("expected a sled"),
-                        },
-                        ARTIFACT_HASH_HOST_PHASE_2,
-                    );
+
+                expected_updates
+                    .verify_one(update, &mut pending_host_phase_2_changes);
+                assert!(pending_host_phase_2_changes.is_empty());
+
+                // Update our builder with an addition exception for the update
+                // we just planned for the next iteration.
+                let sp_type = update.sp_type;
+                let sp_slot = update.slot_id;
+                let sled_type =
+                    OxideSled::try_from_model(&update.baseboard_id.part_number);
+                match update.details {
+                    PendingMgsUpdateDetails::Rot { .. } => {
+                        assert!(!builder.has_rot_active_version_exception(
+                            sp_type, sp_slot
+                        ));
+                        builder = builder.rot_active_version_exception(
+                            sp_type,
+                            sp_slot,
+                            ARTIFACT_VERSION_2,
+                        );
+                    }
+                    PendingMgsUpdateDetails::Sp { .. } => {
+                        assert!(
+                            !builder.has_sp_active_version_exception(
+                                sp_type, sp_slot
+                            )
+                        );
+                        builder = builder.sp_active_version_exception(
+                            sp_type,
+                            sp_slot,
+                            ARTIFACT_VERSION_2,
+                        );
+                    }
+                    PendingMgsUpdateDetails::RotBootloader { .. } => {
+                        assert!(
+                            !builder
+                                .has_stage0_version_exception(sp_type, sp_slot)
+                        );
+                        builder = builder.stage0_version_exception(
+                            sp_type,
+                            sp_slot,
+                            ARTIFACT_VERSION_2,
+                        );
+                    }
+                    PendingMgsUpdateDetails::HostPhase1(_) => {
+                        assert_eq!(sp_type, SpType::Sled);
+                        assert!(!builder.has_host_active_exception(sp_slot));
+                        builder = builder.host_active_exception(
+                            sp_slot,
+                            match sled_type {
+                                Some(OxideSled::Gimlet) => {
+                                    ARTIFACT_HASH_GIMLET_HOST_PHASE_1
+                                }
+                                Some(OxideSled::Cosmo) => {
+                                    ARTIFACT_HASH_COSMO_HOST_PHASE_1
+                                }
+                                None => panic!("expected a sled"),
+                            },
+                            ARTIFACT_HASH_HOST_PHASE_2,
+                        );
+                    }
                 }
             }
 
             latest_updates = new_updates;
         }
         assert!(expected_updates.is_empty());
+        assert!(evacuating.is_empty());
+        for sled_id in test_boards.sled_ids() {
+            assert_eq!(
+                evacuation_counts.get(&sled_id),
+                Some(&1),
+                "sled {sled_id} should have been evacuated exactly once"
+            );
+        }
 
-        // Take one more lap.  It should reflect zero updates.
+        // Take one more lap.  It should reflect zero updates and no
+        // disposition changes.
         let collection = builder.build();
-        let PlannedMgsUpdates { pending_updates: last_updates, .. } =
-            MgsUpdatePlanner {
-                log,
-                inventory: &collection,
-                current_boards: &UpdateableBoard::all_from_collection(
-                    &collection,
-                ),
-                zone_safety_checks: &ZoneSafetyChecks::empty(),
-                current_updates: &latest_updates,
-                current_artifacts: &TargetReleaseDescription::TufRepo(
-                    repo.clone(),
-                ),
-                nmax_updates,
-                impossible_update_policy,
-            }
-            .plan();
+        let PlannedMgsUpdates {
+            pending_updates: last_updates,
+            pending_update_disposition_changes,
+            blocked_mgs_updates,
+            ..
+        } = MgsUpdatePlanner {
+            log,
+            inventory: &collection,
+            current_boards: &UpdateableBoard::all_from_collection(&collection),
+            zone_safety_checks: &ZoneSafetyChecks::empty(),
+            evacuating_sleds: &EvacuatingSleds::empty(),
+            current_updates: &latest_updates,
+            current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates,
+            impossible_update_policy,
+        }
+        .plan();
         assert!(last_updates.is_empty());
+        assert!(pending_update_disposition_changes.iter().next().is_none());
+        assert!(blocked_mgs_updates.is_empty());
 
         logctx.cleanup_successful();
     }
@@ -1469,6 +1710,7 @@ mod test {
         let log = &logctx.log;
         let test_boards = TestBoards::new(test_name);
         let repo = test_boards.tuf_repo();
+        let all_sleds_evacuating = test_boards.all_sleds_evacuating();
         let impossible_update_policy = ImpossibleUpdatePolicy::Reevaluate;
 
         let mut expected_updates = test_boards.expected_updates();
@@ -1510,6 +1752,7 @@ mod test {
             inventory: &collection,
             current_boards: &UpdateableBoard::all_from_collection(&collection),
             zone_safety_checks: &ZoneSafetyChecks::empty(),
+            evacuating_sleds: &EvacuatingSleds::empty(),
             current_updates: &PendingMgsUpdates::new(),
             current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates: usize::MAX,
@@ -1561,6 +1804,7 @@ mod test {
             inventory: &collection,
             current_boards: &UpdateableBoard::all_from_collection(&collection),
             zone_safety_checks: &ZoneSafetyChecks::empty(),
+            evacuating_sleds: &EvacuatingSleds::empty(),
             current_updates: &PendingMgsUpdates::new(),
             current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates: usize::MAX,
@@ -1583,10 +1827,79 @@ mod test {
         assert!(pending_host_phase_2_changes.is_empty());
 
         // Update the whole system at once again, but note the RoT bootloaders
-        // and RoTs have all been updated already; this should attempt to update
-        // all of the SPs.
+        // and RoTs have all been updated already; this should attempt to
+        // update all non-sled SPs and evacuate all the sleds in preparation for
+        // their SP updates.
         let collection = test_boards
             .collection_builder()
+            .sp_versions(ARTIFACT_VERSION_1, ExpectedVersion::NoValidVersion)
+            .gimlet_host_phase_1_artifacts(
+                ARTIFACT_HASH_HOST_PHASE_1_V1,
+                ARTIFACT_HASH_HOST_PHASE_1_V1,
+            )
+            .cosmo_host_phase_1_artifacts(
+                ARTIFACT_HASH_HOST_PHASE_1_V1,
+                ARTIFACT_HASH_HOST_PHASE_1_V1,
+            )
+            .host_phase_2_artifacts(
+                ARTIFACT_HASH_HOST_PHASE_2_V1,
+                ARTIFACT_HASH_HOST_PHASE_2_V1,
+            )
+            .build();
+        let PlannedMgsUpdates {
+            pending_updates: all_updates,
+            pending_host_phase_2_changes,
+            pending_update_disposition_changes,
+            ..
+        } = MgsUpdatePlanner {
+            log,
+            inventory: &collection,
+            current_boards: &UpdateableBoard::all_from_collection(&collection),
+            zone_safety_checks: &ZoneSafetyChecks::empty(),
+            evacuating_sleds: &EvacuatingSleds::empty(),
+            current_updates: &PendingMgsUpdates::new(),
+            current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates: usize::MAX,
+            impossible_update_policy,
+        }
+        .plan();
+        for update in &all_updates {
+            // Confirm all our updates are to non-sled SPs.
+            match &update.details {
+                PendingMgsUpdateDetails::Sp { .. } => match update.sp_type {
+                    SpType::Power | SpType::Switch => (),
+                    SpType::Sled => {
+                        panic!("unexpectedly scheduled sled SP update")
+                    }
+                },
+                PendingMgsUpdateDetails::Rot { .. }
+                | PendingMgsUpdateDetails::RotBootloader { .. }
+                | PendingMgsUpdateDetails::HostPhase1(..) => {
+                    panic!("unexpected update type: {update:?}")
+                }
+            }
+            // Don't verify the updates here; we're going to "roll back" the
+            // non-sled SPs in the next check below, so we want to keep the
+            // update details in `expected_update`.
+        }
+        assert!(pending_host_phase_2_changes.is_empty());
+        // Confirm we want to set every sled to an evacuating disposition.
+        assert_eq!(
+            pending_update_disposition_changes.len(),
+            test_boards.sled_ids().count()
+        );
+        assert!(
+            pending_update_disposition_changes
+                .iter()
+                .all(|(_, &kind)| !kind.is_available_for_provisioning())
+        );
+
+        // Update the whole system at once again, but note the RoT bootloaders
+        // and RoTs have all been updated already and all sleds are evacuated;
+        // this should attempt to update all of the SPs.
+        let collection = test_boards
+            .collection_builder()
+            .all_sleds_evacuated()
             .sp_versions(ARTIFACT_VERSION_1, ExpectedVersion::NoValidVersion)
             .gimlet_host_phase_1_artifacts(
                 ARTIFACT_HASH_HOST_PHASE_1_V1,
@@ -1610,6 +1923,7 @@ mod test {
             inventory: &collection,
             current_boards: &UpdateableBoard::all_from_collection(&collection),
             zone_safety_checks: &ZoneSafetyChecks::empty(),
+            evacuating_sleds: &all_sleds_evacuating,
             current_updates: &PendingMgsUpdates::new(),
             current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates: usize::MAX,
@@ -1636,6 +1950,7 @@ mod test {
         // update all the host OSs.
         let collection = test_boards
             .collection_builder()
+            .all_sleds_evacuated()
             .gimlet_host_phase_1_artifacts(
                 ARTIFACT_HASH_HOST_PHASE_1_V1,
                 ARTIFACT_HASH_HOST_PHASE_1_V1,
@@ -1658,6 +1973,7 @@ mod test {
             inventory: &collection,
             current_boards: &UpdateableBoard::all_from_collection(&collection),
             zone_safety_checks: &ZoneSafetyChecks::empty(),
+            evacuating_sleds: &all_sleds_evacuating,
             current_updates: &PendingMgsUpdates::new(),
             current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates: usize::MAX,
@@ -1683,17 +1999,20 @@ mod test {
         assert!(expected_updates.is_empty());
 
         // Now, notice when they've all been updated, even if the limit is only
-        // one.
-        let collection = test_boards.collection_builder().build();
+        // one...
+        let collection =
+            test_boards.collection_builder().all_sleds_evacuated().build();
         let PlannedMgsUpdates {
             pending_updates: all_updates_done,
             pending_host_phase_2_changes,
+            pending_update_disposition_changes,
             ..
         } = MgsUpdatePlanner {
             log,
             inventory: &collection,
             current_boards: &UpdateableBoard::all_from_collection(&collection),
             zone_safety_checks: &ZoneSafetyChecks::empty(),
+            evacuating_sleds: &all_sleds_evacuating,
             current_updates: &all_updates,
             current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates: 1,
@@ -1702,6 +2021,22 @@ mod test {
         .plan();
         assert!(all_updates_done.is_empty());
         assert!(pending_host_phase_2_changes.is_empty());
+
+        // ... and, with nothing left to do, every sled's disposition should be
+        // set back to `Available`.
+        assert_eq!(
+            pending_update_disposition_changes
+                .iter()
+                .map(|(sled_id, kind)| (*sled_id, *kind))
+                .collect::<BTreeMap<_, _>>(),
+            test_boards
+                .sled_ids()
+                .map(|sled_id| (
+                    sled_id,
+                    BlueprintSledUpdateDispositionKind::Available
+                ))
+                .collect::<BTreeMap<_, _>>()
+        );
 
         logctx.cleanup_successful();
     }
@@ -1735,6 +2070,7 @@ mod test {
                     &collection,
                 ),
                 zone_safety_checks: &ZoneSafetyChecks::empty(),
+                evacuating_sleds: &EvacuatingSleds::empty(),
                 current_updates: &PendingMgsUpdates::new(),
                 current_artifacts: &TargetReleaseDescription::TufRepo(
                     repo.clone(),
@@ -1765,6 +2101,7 @@ mod test {
                     &collection,
                 ),
                 zone_safety_checks: &ZoneSafetyChecks::empty(),
+                evacuating_sleds: &EvacuatingSleds::empty(),
                 current_updates: &updates,
                 current_artifacts: &TargetReleaseDescription::TufRepo(
                     repo.clone(),
@@ -1782,6 +2119,336 @@ mod test {
         assert_eq!(new_update.artifact_hash, update.artifact_hash);
         assert_eq!(new_update.artifact_version, update.artifact_version);
         assert_eq!(new_update.details, update.details);
+
+        logctx.cleanup_successful();
+    }
+
+    // Test that a sled marked is evaluated even though it counts against one of
+    // the `nmax_updates` cap.
+    #[test]
+    fn test_evacuating_sled_is_evaluated() {
+        let test_name = "planning_mgs_updates_evacuating_sled_is_evaluated";
+        let logctx = LogContext::new(
+            test_name,
+            &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
+        );
+        let log = &logctx.log;
+        let test_boards = TestBoards::new(test_name);
+        let repo = test_boards.tuf_repo();
+        let sled_0_id = test_boards.sled_id(0).expect("have sled 0");
+
+        // Sled 0 needs an SP update and is marked for evacuation, but its
+        // inventory (the default) still reports an `Available` instance
+        // manager, so it has not yet evacuated.
+        let collection = test_boards
+            .collection_builder()
+            .sp_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
+            .build();
+        let current_boards = UpdateableBoard::all_from_collection(&collection);
+        let evacuating_sleds = EvacuatingSleds::new_for_test([(
+            sled_0_id,
+            SledConfigGeneration::new(),
+        )]);
+        let planned = MgsUpdatePlanner {
+            log,
+            inventory: &collection,
+            current_boards: &current_boards,
+            zone_safety_checks: &ZoneSafetyChecks::empty(),
+            evacuating_sleds: &evacuating_sleds,
+            current_updates: &PendingMgsUpdates::new(),
+            current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates: 1,
+            impossible_update_policy: ImpossibleUpdatePolicy::Reevaluate,
+        }
+        .plan();
+
+        // The sled was evaluated: the planner reports it is waiting on the
+        // evacuation, rather than silently doing nothing.
+        assert!(planned.pending_updates.is_empty());
+        assert!(planned.pending_update_disposition_changes.is_empty());
+        assert_eq!(planned.blocked_mgs_updates.len(), 1);
+        let blocked = &planned.blocked_mgs_updates[0];
+        assert_eq!(blocked.baseboard_id.serial_number, "sled_0");
+        assert_eq!(
+            blocked.reason,
+            FailedMgsUpdateReason::WaitingOnSledEvacuation {
+                component: MgsUpdateComponent::Sp,
+                details:
+                    WaitingOnSledEvacuationDetails::InstanceManagerAvailable,
+            }
+        );
+
+        // Once the sled reports it has evacuated, the update proceeds.
+        let collection = test_boards
+            .collection_builder()
+            .sp_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
+            .sled_evacuated(0, SledConfigGeneration::new())
+            .build();
+        let planned = MgsUpdatePlanner {
+            log,
+            inventory: &collection,
+            current_boards: &current_boards,
+            zone_safety_checks: &ZoneSafetyChecks::empty(),
+            evacuating_sleds: &evacuating_sleds,
+            current_updates: &PendingMgsUpdates::new(),
+            current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates: 1,
+            impossible_update_policy: ImpossibleUpdatePolicy::Reevaluate,
+        }
+        .plan();
+        assert!(planned.blocked_mgs_updates.is_empty());
+        assert!(planned.pending_update_disposition_changes.is_empty());
+        assert_eq!(planned.pending_updates.len(), 1);
+        let update = planned.pending_updates.iter().next().unwrap();
+        assert_eq!(update.baseboard_id.serial_number, "sled_0");
+        assert!(matches!(update.details, PendingMgsUpdateDetails::Sp(_)));
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_new_evacuations_count_against_nmax_updates() {
+        let test_name =
+            "planning_mgs_updates_new_evacuations_count_against_nmax_updates";
+        let logctx = LogContext::new(
+            test_name,
+            &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
+        );
+        let log = &logctx.log;
+        let test_boards = TestBoards::new(test_name);
+        let repo = test_boards.tuf_repo();
+        let sled_0_id = test_boards.sled_id(0).expect("have sled 0");
+        let sled_1_id = test_boards.sled_id(1).expect("have sled 1");
+
+        // Sleds 0 and 1 both need SP updates; nothing is evacuating yet.
+        let collection = test_boards
+            .collection_builder()
+            .sp_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
+            .sp_active_version_exception(SpType::Sled, 1, ARTIFACT_VERSION_1)
+            .build();
+        let current_boards = UpdateableBoard::all_from_collection(&collection);
+
+        let plan = |nmax_updates: usize| {
+            MgsUpdatePlanner {
+                log,
+                inventory: &collection,
+                current_boards: &current_boards,
+                zone_safety_checks: &ZoneSafetyChecks::empty(),
+                evacuating_sleds: &EvacuatingSleds::empty(),
+                current_updates: &PendingMgsUpdates::new(),
+                current_artifacts: &TargetReleaseDescription::TufRepo(
+                    repo.clone(),
+                ),
+                nmax_updates,
+                impossible_update_policy: ImpossibleUpdatePolicy::Reevaluate,
+            }
+            .plan()
+        };
+        let expected_kind = BlueprintSledUpdateDispositionKind::Evacuating {
+            policy: DEFAULT_EVAC_POLICY,
+        };
+
+        // With one slot, exactly one sled is marked for evacuation.
+        let planned = plan(1);
+        assert!(planned.pending_updates.is_empty());
+        assert!(planned.blocked_mgs_updates.is_empty());
+        assert_eq!(planned.pending_update_disposition_changes.len(), 1);
+        let (sled_id, kind) =
+            planned.pending_update_disposition_changes.iter().next().unwrap();
+        assert!(*sled_id == sled_0_id || *sled_id == sled_1_id);
+        assert_eq!(*kind, expected_kind);
+
+        // With two slots, both are.
+        let planned = plan(2);
+        assert!(planned.pending_updates.is_empty());
+        assert!(planned.blocked_mgs_updates.is_empty());
+        assert_eq!(
+            planned.pending_update_disposition_changes.clone().into_map(),
+            BTreeMap::from([
+                (sled_0_id, expected_kind),
+                (sled_1_id, expected_kind)
+            ])
+        );
+
+        logctx.cleanup_successful();
+    }
+
+    // A sled hosting a zone that is unsafe to shut down is reported as blocked
+    // and is never evacuated, whether or not it was already marked
+    // `Evacuating`.
+    #[test]
+    fn test_unsafe_zone_blocks_sled_evacuation() {
+        let test_name =
+            "planning_mgs_updates_unsafe_zone_blocks_sled_evacuation";
+        let logctx = LogContext::new(
+            test_name,
+            &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
+        );
+        let log = &logctx.log;
+        let test_boards = TestBoards::new(test_name);
+        let repo = test_boards.tuf_repo();
+        let sled_0_id = test_boards.sled_id(0).expect("have sled 0");
+        let sled_0_serial =
+            test_boards.sled_serial_number(sled_0_id).expect("have sled 0");
+
+        let unsafe_reason = ZoneUnsafeToShutdown::InternalDns {
+            total_internal_dns_zones: 3,
+            synchronized_count: 2,
+        };
+        let zone_safety_checks = ZoneSafetyChecks::new_for_test([(
+            sled_0_id,
+            OmicronZoneUuid::new_v4(),
+            unsafe_reason.clone(),
+        )]);
+        let assert_blocked_by_unsafe_zone = |planned: &PlannedMgsUpdates| {
+            assert!(planned.pending_updates.is_empty());
+            assert!(planned.pending_update_disposition_changes.is_empty());
+            assert_eq!(planned.blocked_mgs_updates.len(), 1);
+            let blocked = &planned.blocked_mgs_updates[0];
+            assert_eq!(blocked.baseboard_id.serial_number, sled_0_serial);
+            match &blocked.reason {
+                FailedMgsUpdateReason::Sp(
+                    FailedSpUpdateReason::UnsafeZoneFound(reason),
+                ) => {
+                    assert!(
+                        reason.contains(&unsafe_reason.to_string()),
+                        "unexpected reason: {reason}"
+                    );
+                }
+                other => panic!("unexpected blocked reason: {other:?}"),
+            }
+        };
+
+        // Sled 0 needs an SP update but is not marked for evacuation because
+        // it's blocked by the zone safety check.
+        let collection = test_boards
+            .collection_builder()
+            .sp_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
+            .build();
+        let current_boards = UpdateableBoard::all_from_collection(&collection);
+        let planned = MgsUpdatePlanner {
+            log,
+            inventory: &collection,
+            current_boards: &current_boards,
+            zone_safety_checks: &zone_safety_checks,
+            evacuating_sleds: &EvacuatingSleds::empty(),
+            current_updates: &PendingMgsUpdates::new(),
+            current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates: 1,
+            impossible_update_policy: ImpossibleUpdatePolicy::Reevaluate,
+        }
+        .plan();
+        assert_blocked_by_unsafe_zone(&planned);
+
+        // It's still blocked from updating even if a previous planning run
+        // marked it for evacuation (e.g., before a zone safety check kicked
+        // in) and inventory reports it as fully evacuated.
+        let collection = test_boards
+            .collection_builder()
+            .sp_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
+            .sled_evacuated(0, SledConfigGeneration::new())
+            .build();
+        let planned = MgsUpdatePlanner {
+            log,
+            inventory: &collection,
+            current_boards: &current_boards,
+            zone_safety_checks: &zone_safety_checks,
+            evacuating_sleds: &EvacuatingSleds::new_for_test([(
+                sled_0_id,
+                SledConfigGeneration::new(),
+            )]),
+            current_updates: &PendingMgsUpdates::new(),
+            current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates: 1,
+            impossible_update_policy: ImpossibleUpdatePolicy::Reevaluate,
+        }
+        .plan();
+        assert_blocked_by_unsafe_zone(&planned);
+
+        logctx.cleanup_successful();
+    }
+
+    // An evacuating sled that still needs a non-reboot (RoT) update gets that
+    // update and keeps its `Evacuating` disposition; once it needs nothing, it
+    // is restored to `Available`.
+    #[test]
+    fn test_evacuating_sled_restored_only_when_idle() {
+        let test_name =
+            "planning_mgs_updates_evacuating_sled_restored_only_when_idle";
+        let logctx = LogContext::new(
+            test_name,
+            &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
+        );
+        let log = &logctx.log;
+        let test_boards = TestBoards::new(test_name);
+        let repo = test_boards.tuf_repo();
+        let sled_0_id = test_boards.sled_id(0).expect("have sled 0");
+        let evacuating_sleds = EvacuatingSleds::new_for_test([(
+            sled_0_id,
+            SledConfigGeneration::new(),
+        )]);
+
+        // Sled 0 is evacuating and needs only a RoT update.
+        let collection = test_boards
+            .collection_builder()
+            .rot_active_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
+            .sled_evacuated(0, SledConfigGeneration::new())
+            .build();
+        let current_boards = UpdateableBoard::all_from_collection(&collection);
+        let planned = MgsUpdatePlanner {
+            log,
+            inventory: &collection,
+            current_boards: &current_boards,
+            zone_safety_checks: &ZoneSafetyChecks::empty(),
+            evacuating_sleds: &evacuating_sleds,
+            current_updates: &PendingMgsUpdates::new(),
+            current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates: 1,
+            impossible_update_policy: ImpossibleUpdatePolicy::Reevaluate,
+        }
+        .plan();
+        assert!(planned.blocked_mgs_updates.is_empty());
+        assert!(planned.pending_update_disposition_changes.is_empty());
+        assert_eq!(planned.pending_updates.len(), 1);
+        let update = planned.pending_updates.iter().next().unwrap();
+        assert_eq!(update.baseboard_id.serial_number, "sled_0");
+        assert!(matches!(update.details, PendingMgsUpdateDetails::Rot(_)));
+
+        // Sled 0 is evacuating and fully up to date: restore it to available.
+        // Check that this happens whether or not inventory reports it as
+        // evacuated; once all updates are done, the sled no longer needs to be
+        // set to `Evacuating`.
+        for evacuated in [false, true] {
+            let mut builder = test_boards.collection_builder();
+            if evacuated {
+                builder =
+                    builder.sled_evacuated(0, SledConfigGeneration::new());
+            }
+            let collection = builder.build();
+            let planned = MgsUpdatePlanner {
+                log,
+                inventory: &collection,
+                current_boards: &current_boards,
+                zone_safety_checks: &ZoneSafetyChecks::empty(),
+                evacuating_sleds: &evacuating_sleds,
+                current_updates: &PendingMgsUpdates::new(),
+                current_artifacts: &TargetReleaseDescription::TufRepo(
+                    repo.clone(),
+                ),
+                nmax_updates: 1,
+                impossible_update_policy: ImpossibleUpdatePolicy::Reevaluate,
+            }
+            .plan();
+            assert!(planned.blocked_mgs_updates.is_empty());
+            assert!(planned.pending_updates.is_empty());
+            assert_eq!(
+                planned.pending_update_disposition_changes.clone().into_map(),
+                BTreeMap::from([(
+                    sled_0_id,
+                    BlueprintSledUpdateDispositionKind::Available
+                )])
+            );
+        }
 
         logctx.cleanup_successful();
     }

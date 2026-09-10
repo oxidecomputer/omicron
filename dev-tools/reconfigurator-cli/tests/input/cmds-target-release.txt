@@ -95,18 +95,43 @@ blueprint-diff latest
 # After the RoT bootloader update has completed, we update the simulated RoT to
 # reflect that update has completed as well. Like before, collect inventory from
 # it and use that collection for the next step. This should report that the
-# update completed, remove that update, and add one for another sled.
+# update completed and remove that update. The next step for this sled is to
+# evacuate it to prepare for an SP update.
 sled-update-rot 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --slot-b 1.0.0 --active-slot b --persistent-boot-preference b
 inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest
 
-# We repeat the same procedure with the SP
+# Until the sled picks up its new config (and its instance manager reports that
+# it has evacuated), planning should report that the SP update is blocked
+# waiting on evacuation and make no changes.
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Give the sled a nonzero number of registered VMMs and have it pick up the new
+# config. Inventory will now reflect that the sled is in the evacuating
+# disposition, but not yet fully evacuated: the planner should continue to note
+# that the SP update is blocked.
+sled-set serial0 registered-vmms 5
+sled-set serial0 omicron-config latest
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Evacuate the sled and regenerate inventory. The planner should now schedule
+# the SP update.
+sled-set serial0 registered-vmms 0
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# We repeat the same procedure as the RoT above with the SP
 sled-update-sp 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --active 1.0.0
 
 # Collect inventory from it and use that collection for another planning step.
 # This should report that the update completed, remove that update, and add a
-# host OS update for this same sled.
+# host OS update for this same sled. The sled is still evacuated from the SP
+# update, so it does not need to be evacuated again.
 inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest
@@ -138,10 +163,15 @@ blueprint-diff latest
 sled-update-host-phase2 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --boot-disk B
 inventory-generate
 
-# Planning should now remove the host OS update and plan the next RoT bootloader
-# update.
+# Planning should now remove the host OS update, restore this sled's update
+# disposition to `available` (all of its reboot-requiring updates are done), and
+# plan the next RoT bootloader update.
 blueprint-plan latest latest
 blueprint-diff latest
+
+# Have the sled pick up its restored `available` disposition.
+sled-set 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron-config latest
+inventory-generate
 
 # This time, make it more interesting.  Change the inactive slot contents of
 # the simulated RoT bootloader.  This should make the configured update
@@ -170,8 +200,16 @@ blueprint-plan latest latest
 blueprint-diff latest
 
 # Now simulate the update completing successfully.
-# Like before, we should see a pending SP update for this sled.
+# Like before, the planner should mark this sled as evacuating in preparation
+# for its SP update.
 sled-update-rot 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --slot-b 1.0.0 --active-slot b --persistent-boot-preference b
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Have the sled pick up the new config and report that it has evacuated. We
+# should then see a pending SP update for this sled.
+sled-set 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c omicron-config latest
 inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest
@@ -196,6 +234,7 @@ blueprint-diff latest
 # sled's phase 1. The planner should realize the update is impossible and
 # replace it. As with the impossible SP update test above, we have to bump the
 # "ignore impossible MGS updates" timestamp.)
+sled-set 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c omicron-config latest
 set ignore-impossible-mgs-updates-since now
 sled-update-host-phase1 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --slot-b ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
 inventory-generate
@@ -207,10 +246,14 @@ sled-update-host-phase2 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --boot-disk B --slo
 sled-update-host-phase1 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --active B --slot-b 2902cb5932fa703ed62fc6a0a330898fe6fd4bde68c74f6398a6aa916cb7e79c
 inventory-generate
 
-# Another planning step should try to update the last sled, starting with the
-# RoT bootloader.
+# Another planning step should restore this sled to `available` and try to
+# update the last sled, starting with the RoT bootloader.
 blueprint-plan latest latest
 blueprint-diff latest
+
+# Have the sled pick up its restored `available` disposition.
+sled-set 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c omicron-config latest
+inventory-generate
 
 # Update the RoT bootloader on the last sled.
 # There should be a pending RoT update.
@@ -248,9 +291,16 @@ blueprint-plan latest latest
 blueprint-diff latest
 
 # Update the RoT on the last sled. Note that we need to set the
-# transient-boot-preference back to None
-# There should be one last pending SP update.
+# transient-boot-preference back to None. The planner should mark this sled as
+# evacuating in preparation for its SP update.
 sled-update-rot d81c6a84-79b8-4958-ae41-ea46c9b19763 --slot-b 1.0.0 --active-slot b --persistent-boot-preference b --transient-boot-preference
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Have the sled pick up the new config and report that it has evacuated. There
+# should be one last pending SP update.
+sled-set d81c6a84-79b8-4958-ae41-ea46c9b19763 omicron-config latest
 inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest
@@ -267,7 +317,19 @@ sled-update-host-phase2 d81c6a84-79b8-4958-ae41-ea46c9b19763 --boot-disk B --slo
 sled-update-host-phase1 d81c6a84-79b8-4958-ae41-ea46c9b19763 --active B --slot-b 2902cb5932fa703ed62fc6a0a330898fe6fd4bde68c74f6398a6aa916cb7e79c
 inventory-generate
 
-# Do another planning run. This should start updating zones (one at a time).
+# Do another planning run. This should remove the host OS update and restore the
+# last sled to `available`. Zone updates wait for that disposition change, so
+# there should be no zone updates yet.
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Have the sled pick up its `available` disposition. (This isn't needed to
+# proceed to zone updates, but failing to do so causes logs that note that
+# the config generation on this sled is out of date.)
+sled-set d81c6a84-79b8-4958-ae41-ea46c9b19763 omicron-config latest
+
+# The next planning run should start updating zones (one at a time).
+inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest
 
