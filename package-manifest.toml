@@ -667,10 +667,10 @@ service_name = "propolis-server"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "propolis"
-source.commit = "4fb9bd57d51d961815b846e1563c579f20cb5c6b"
+source.commit = "61c15bcd268e404c44f005a19d9643b734afebbd"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/propolis/image/<commit>/propolis-server.sha256.txt
-source.sha256 = "ebb1a1e3178e5a9ca9cc13ce4c017c27793b2cea5e84721bf8e1095c1028a8bb"
+source.sha256 = "7ed72b400947eedf3d9137bb2f32ee295858ff0ae574206e385bc2079a1ccd07"
 output.type = "zone"
 
 [package.mg-ddm-gz]
@@ -765,8 +765,8 @@ only_for_targets.image = "standard"
 # the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "447aa04f5dc86a3492eb6ea5139845e3331dcded"
-source.sha256 = "059bfc42c21a6c8d76dc0d31e5295f321ca53c64e59e155d355097c1e160a4b2"
+source.commit = "bd56a7466dde92efd6c90161ea0b15790b4150eb"
+source.sha256 = "dd486fbc8836994b53b6f156b3306073bd2a561ebe3e29f85fc3d03a1c872f97"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -792,8 +792,8 @@ only_for_targets.image = "standard"
 # the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "447aa04f5dc86a3492eb6ea5139845e3331dcded"
-source.sha256 = "8b262718c31ef224ad714e309e76b739c70250be2283871fc30cad3167a32bda"
+source.commit = "bd56a7466dde92efd6c90161ea0b15790b4150eb"
+source.sha256 = "39d4d161f28de71847a99d23c0e406cbf4182175cba54928b08c2285ec81450b"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -812,8 +812,8 @@ only_for_targets.image = "standard"
 # the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "447aa04f5dc86a3492eb6ea5139845e3331dcded"
-source.sha256 = "b288cf60dfc2ef4a81ff371905182ea3a7100c9100d5eb01595d0832a21e192a"
+source.commit = "bd56a7466dde92efd6c90161ea0b15790b4150eb"
+source.sha256 = "ea61bc3e7db9c0fd825e345684a30f192daf73d117c518f640d22d294f64c3fe"
 output.type = "zone"
 output.intermediate_only = true
 
