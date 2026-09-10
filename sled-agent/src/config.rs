@@ -132,11 +132,12 @@ pub struct Config {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SushConfig {
-    /// PEM files holding the trusted root certificates for job requests,
-    /// one certificate per file. A job whose signature does not chain to
-    /// one of these is refused, so an empty list means no job could ever
-    /// run, and config parsing rejects it. To run a sled with no Support
-    /// Shell server, omit the `[sush]` section instead.
+    /// One or more PEM files holding the trusted root certificates for job
+    /// requests, one certificate per file. Job signatures must have one of
+    /// these certificates as their root cert to be accepted.
+    ///
+    /// This list must not be empty, as at least one root cert is required in
+    /// order to be able to run sush jobs.
     #[serde(deserialize_with = "SushConfig::nonempty_roots")]
     pub roots: Vec<Utf8PathBuf>,
 
