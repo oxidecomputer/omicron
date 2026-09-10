@@ -379,7 +379,7 @@ async fn promote_output_dir(
 /// This function may start while one or more MGS services are not available,
 /// and must handle failures of both the MGS service or the entire scrimlet
 /// gracefully. Therefore, on every poll, this function will attempt to use the
-/// fixed MGS address on every subnet curretly known to `ddmd`, and accepts any
+/// fixed MGS address on every subnet currently known to `ddmd`, and accepts any
 /// responses it receives. If a response that contains at least one sled is
 /// received, the previously-discovered map is overwritten to avoid leaving
 /// behind stale entries for sleds that are no longer present. Multiple
@@ -387,21 +387,24 @@ async fn promote_output_dir(
 /// If we cannot contact any MGS instance during a poll, the map does not change
 /// until a subsequent poll receives a response.
 async fn poll_mgs_for_cubbies(log: Logger, cubbies: watch::Sender<Cubbies>) {
-    let ddm = match DdmClient::localhost(&log) {
-        Ok(ddm) => ddm,
-        Err(err) => {
+    let clients = || -> anyhow::Result<(DdmClient, reqwest::Client)> {
+        let ddm = DdmClient::localhost(&log)?;
+        let client = reqwest::ClientBuilder::new()
+            .connect_timeout(MGS_PROBE_TIMEOUT)
+            .timeout(MGS_PROBE_TIMEOUT)
+            .build()?;
+        Ok((ddm, client))
+    };
+    let (ddm, client) = match clients() {
+        Ok(clients) => clients,
+        Err(error) => {
             error!(
                 log, "not polling MGS, cubby-targeted jobs will not run here";
-                "error" => InlineErrorChain::new(&err),
+                "error" => #%error,
             );
             return;
         }
     };
-    let client = reqwest::ClientBuilder::new()
-        .connect_timeout(MGS_PROBE_TIMEOUT)
-        .timeout(MGS_PROBE_TIMEOUT)
-        .build()
-        .expect("failed to build an HTTP client");
     loop {
         match ddm.derive_underlay_subnets_from_prefixes().await {
             Ok(subnets) => {
