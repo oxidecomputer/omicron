@@ -132,7 +132,7 @@ impl SushHandles {
             bind_address,
             default_request_body_max_bytes: REQUEST_MAX_BODY_BYTES,
             // While an interactive job is running, the corresponding websocket
-            // connection must remain open, so HTTP request handlers must 
+            // connection must remain open, so HTTP request handlers must
             // outlive the requests that created them.
             default_handler_task_mode: HandlerTaskMode::Detached,
             log_headers: vec![],
@@ -373,8 +373,8 @@ async fn promote_output_dir(
 /// Discovers the baseboard identity in each cubby in the rack and publishes the
 /// map over the provided watch channel.
 ///
-/// This map is used to resolve the sled identity when a job specifies its 
-/// target sled cubby number. 
+/// This map is used to resolve the sled identity when a job specifies its
+/// target sled cubby number.
 ///
 /// This function may start while one or more MGS services are not available,
 /// and must handle failures of both the MGS service or the entire scrimlet
