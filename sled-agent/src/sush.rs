@@ -29,9 +29,9 @@
 //! related messages is called a _universe_: peers in the same universe
 //! can gossip and converge on its contents; peers in different
 //! universes cannot gossip at all. Every identity in a universe
-//! descends from a single seed. When sleds meet, a deterministic rule
-//! picks whose seed wins, and the others bootstrap from it, each
-//! taking a slice of the winner's identity space. A restarted sled
+//! descends from a single seed. On the first gossip sync, a deterministic
+//! rule decides whose universe wins; the loser joins the winner's
+//! universe and adopts a slice of its identity space. A restarted sled
 //! therefore rejoins the rack's universe and replays what it missed
 //! without re-executing previously run jobs. Each sled stores its identity in
 //! a record called a _bookmark_, which is persisted to disk in order to survive
