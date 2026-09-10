@@ -35,7 +35,7 @@ use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::CockroachDbSettings;
 use nexus_types::deployment::OmicronZoneExternalSnat;
-use nexus_types::deployment::OmicronZoneExternalSnatIpV6;
+use nexus_types::deployment::OmicronZoneExternalSnatIpv6;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::SledDisk;
@@ -4115,7 +4115,7 @@ fn test_update_boundary_ntp() {
                         slot: 0,
                     },
                     external_ip: OmicronZoneExternalSnat::Ipv6Only(
-                        OmicronZoneExternalSnatIpV6 {
+                        OmicronZoneExternalSnatIpv6 {
                             id: ExternalIpUuid::new_v4(),
                             snat_cfg: SourceNatConfigV6::new(
                                 Ipv6Addr::LOCALHOST,

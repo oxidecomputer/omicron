@@ -316,9 +316,7 @@ impl From<BlueprintZoneType> for OmicronZoneType {
             BlueprintZoneType::ExternalDns(zone) => Self::ExternalDns {
                 dataset: zone.dataset,
                 http_address: zone.http_address,
-                dns_addresses: zone
-                    .dns_addresses
-                    .into_external_dns_addrs_or_panic(),
+                dns_addresses: zone.dns_addresses.into(),
                 nic: zone.nic,
             },
             BlueprintZoneType::InternalDns(zone) => Self::InternalDns {
@@ -334,9 +332,7 @@ impl From<BlueprintZoneType> for OmicronZoneType {
             BlueprintZoneType::Nexus(zone) => Self::Nexus {
                 internal_address: zone.internal_address,
                 lockstep_port: zone.lockstep_port,
-                external_ips: zone
-                    .external_ips
-                    .into_nexus_external_ips_or_panic(),
+                external_ips: zone.external_ips.into(),
                 nic: zone.nic,
                 external_tls: zone.external_tls,
                 external_dns_servers: zone.external_dns_servers,
@@ -402,7 +398,7 @@ pub mod blueprint_zone_type {
         pub domain: Option<String>,
         /// The service vNIC providing outbound connectivity using OPTE.
         pub nic: NetworkInterface,
-        /// The source NAT configuration (one address per IP family).
+        /// The source NAT configuration.
         pub external_ip: OmicronZoneExternalSnat,
     }
 

@@ -3736,6 +3736,7 @@ mod tests {
         // Give a Nexus zone a second external IP by hand.
         let second_ip = "192.0.2.222".parse::<std::net::IpAddr>().unwrap();
         let second_id = ExternalIpUuid::new_v4();
+        let mut expected_ips = BTreeSet::new();
         let mut nexus_zone_id = None;
         'outer: for sled in blueprint.sleds.values_mut() {
             for mut zone in sled.zones.iter_mut() {
@@ -3746,6 +3747,7 @@ mod tests {
                         id: second_id,
                         ip: second_ip,
                     });
+                    expected_ips = BTreeSet::from_iter(ips.iter().copied());
                     let ips = iddqd::IdOrdMap::from_iter_unique(ips)
                         .expect("external IPs are distinct");
                     nexus.external_ips =
@@ -3779,12 +3781,17 @@ mod tests {
         let BlueprintZoneType::Nexus(nexus) = &zone.zone_type else {
             panic!("expected a Nexus zone");
         };
-        let ips: Vec<_> = nexus.external_ips.iter().map(|e| e.ip).collect();
-        assert!(
-            ips.contains(&second_ip),
-            "second external IP survived the round trip: {ips:?}",
+        let actual_ips: BTreeSet<_> =
+            nexus.external_ips.iter().copied().collect();
+        assert_eq!(
+            actual_ips, expected_ips,
+            "all external IPs should survive the round trip",
         );
-        assert_eq!(ips.len(), 2, "expected two external IPs, got {ips:?}");
+        assert_eq!(
+            actual_ips.len(),
+            2,
+            "expected two external IPs, got {actual_ips:?}"
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();

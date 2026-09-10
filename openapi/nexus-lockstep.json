@@ -3134,7 +3134,7 @@
                 "type": "string"
               },
               "external_ip": {
-                "description": "The source NAT configuration (one address per IP family).",
+                "description": "The source NAT configuration.",
                 "allOf": [
                   {
                     "$ref": "#/components/schemas/OmicronZoneExternalSnat"
@@ -6670,7 +6670,7 @@
         "uniqueItems": true
       },
       "OmicronZoneExternalFloatingIp": {
-        "description": "Floating external IP allocated to an Omicron-managed zone.\n\nThis is a slimmer `nexus_db_model::ExternalIp` that only stores the fields necessary for blueprint planning, and requires that the zone have a single IP.",
+        "description": "Floating external IP allocated to an Omicron-managed zone.\n\nThis is a slimmer `nexus_db_model::ExternalIp` that only stores the fields necessary for blueprint planning.",
         "type": "object",
         "properties": {
           "id": {
@@ -6760,10 +6760,10 @@
             "type": "object",
             "properties": {
               "ipv4": {
-                "$ref": "#/components/schemas/OmicronZoneExternalSnatIpV4"
+                "$ref": "#/components/schemas/OmicronZoneExternalSnatIpv4"
               },
               "ipv6": {
-                "$ref": "#/components/schemas/OmicronZoneExternalSnatIpV6"
+                "$ref": "#/components/schemas/OmicronZoneExternalSnatIpv6"
               },
               "type": {
                 "type": "string",
@@ -6780,7 +6780,7 @@
           }
         ]
       },
-      "OmicronZoneExternalSnatIpV4": {
+      "OmicronZoneExternalSnatIpv4": {
         "description": "An IPv4 SNAT external IP allocated to an Omicron-managed zone.\n\nThe family-typed analog of [`OmicronZoneExternalSnatIp`], used in the variants of [`OmicronZoneExternalSnat`] so the enum can't hold an address of the wrong family.",
         "type": "object",
         "properties": {
@@ -6796,7 +6796,7 @@
           "snat_cfg"
         ]
       },
-      "OmicronZoneExternalSnatIpV6": {
+      "OmicronZoneExternalSnatIpv6": {
         "description": "An IPv6 SNAT external IP allocated to an Omicron-managed zone.\n\nThe family-typed analog of [`OmicronZoneExternalSnatIp`], used in the variants of [`OmicronZoneExternalSnat`] so the enum can't hold an address of the wrong family.",
         "type": "object",
         "properties": {

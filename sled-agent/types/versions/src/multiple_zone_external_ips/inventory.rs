@@ -13,6 +13,7 @@ use omicron_generation_kinds::SledConfigGeneration;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
@@ -151,6 +152,8 @@ pub enum ZoneExternalAddrsError {
     TooMany { count: usize },
     #[error("external IP addresses must all be unique, but {ip} is duplicated")]
     DuplicateIp { ip: IpAddr },
+    #[error("external IP UUIDs must all be unique, but {id} is duplicated")]
+    DuplicateIds { id: Uuid },
 }
 
 /// Source NAT configuration for a boundary NTP zone.

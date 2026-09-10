@@ -363,57 +363,36 @@ impl DataStore {
             )
             .await?;
 
-        // We expect to find either 0 or exactly 1 IP for any given zone. If 0,
-        // we know the IP isn't allocated; if 1, we'll check that it matches
-        // below.
-        let existing_ip = match allocated_ips.as_slice() {
-            [] => {
-                info!(log, "external IP allocation required for zone");
-
-                return Ok(false);
+        // There can be any number of IPs for a given zone. We'll search all
+        // currently-allocated IPs to find a match for the candidate
+        // `external_ip`. Note that it's not an error for there to be zero EIPs
+        // or other EIPs that do _not_ match the candidate.
+        for allocated_ip in allocated_ips.iter() {
+            // We expect this to always succeed; a failure here means we've
+            // stored an Omicron zone IP in the database that can't be converted
+            // back to an Omicron zone IP!
+            let existing_ip =
+                match OmicronZoneExternalIp::try_from(allocated_ip) {
+                    Ok(existing_ip) => existing_ip,
+                    Err(err) => {
+                        error!(log, "invalid IP in database for zone"; &err);
+                        return Err(Error::invalid_request(format!(
+                            "zone {zone_id} has invalid IP database record: {}",
+                            InlineErrorChain::new(&err)
+                        ))
+                        .into());
+                    }
+                };
+            if existing_ip == external_ip {
+                info!(log, "found already-allocated external IP");
+                return Ok(true);
             }
-            [ip] => ip,
-            _ => {
-                warn!(
-                    log, "zone has multiple IPs allocated";
-                    "allocated_ips" => ?allocated_ips,
-                );
-                return Err(Error::invalid_request(format!(
-                    "zone {zone_id} already has {} IPs allocated (expected 1)",
-                    allocated_ips.len()
-                ))
-                .into());
-            }
-        };
-
-        // We expect this to always succeed; a failure here means we've stored
-        // an Omicron zone IP in the database that can't be converted back to an
-        // Omicron zone IP!
-        let existing_ip = match OmicronZoneExternalIp::try_from(existing_ip) {
-            Ok(existing_ip) => existing_ip,
-            Err(err) => {
-                error!(log, "invalid IP in database for zone"; &err);
-                return Err(Error::invalid_request(format!(
-                    "zone {zone_id} has invalid IP database record: {}",
-                    InlineErrorChain::new(&err)
-                ))
-                .into());
-            }
-        };
-
-        if existing_ip == external_ip {
-            info!(log, "found already-allocated external IP");
-            Ok(true)
-        } else {
-            warn!(
-                log, "zone has unexpected IP allocated";
-                "allocated_ip" => ?existing_ip,
-            );
-            return Err(Error::invalid_request(format!(
-                "zone {zone_id} has a different IP allocated ({existing_ip:?})",
-            ))
-            .into());
         }
+
+        // Getting here means that there are either zero IPs for the zone, or
+        // that the candidate isn't already allocated for it. Both are fine.
+        info!(log, "external IP allocation required for zone");
+        return Ok(false);
     }
 
     // Helper function to determine whether a given NIC is already allocated to

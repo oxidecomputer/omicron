@@ -983,7 +983,7 @@ impl BpOmicronZone {
 
         // NOTE: this is the *internal* DNS underlay address, held in
         // `second_service_ip` / `second_service_port`. External DNS's external
-        // address comes from `external_ip` above.
+        // address comes from `external_ip_rows` above.
         let dns_address =
             omicron_zone_config::secondary_ip_and_port_to_dns_address(
                 self.second_service_ip,

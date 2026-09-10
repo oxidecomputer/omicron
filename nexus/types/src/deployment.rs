@@ -110,8 +110,8 @@ pub use network_resources::OmicronZoneExternalIpEntry;
 pub use network_resources::OmicronZoneExternalIpKey;
 pub use network_resources::OmicronZoneExternalSnat;
 pub use network_resources::OmicronZoneExternalSnatIp;
-pub use network_resources::OmicronZoneExternalSnatIpV4;
-pub use network_resources::OmicronZoneExternalSnatIpV6;
+pub use network_resources::OmicronZoneExternalSnatIpv4;
+pub use network_resources::OmicronZoneExternalSnatIpv6;
 pub use network_resources::OmicronZoneNetworkResources;
 pub use network_resources::OmicronZoneNic;
 pub use network_resources::OmicronZoneNicEntry;
@@ -409,16 +409,14 @@ impl Blueprint {
                     .subnet;
 
                 // Return a list of entries for all IPs in the zone.
-                let entries = kinds
-                    .into_iter()
-                    .map(|kind| ServiceZoneNatEntry {
+                let entries =
+                    kinds.into_iter().map(move |kind| ServiceZoneNatEntry {
                         zone_id: zone_config.id,
                         sled_underlay_ip: *get_sled_address(sled_subnet).ip(),
                         nic_mac,
                         vni,
                         kind,
-                    })
-                    .collect::<Vec<_>>();
+                    });
                 Some(entries)
             })
             .flatten()

@@ -13,6 +13,7 @@ use omicron_common::api::external::IpVersion;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_uuid_kinds::ExternalIpUuid;
+use omicron_uuid_kinds::GenericUuid as _;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::VnicUuid;
 use schemars::JsonSchema;
@@ -26,11 +27,13 @@ use sled_agent_types::inventory::SourceNatConfigV6;
 use sled_agent_types::inventory::ZoneExternalAddrsError;
 use sled_agent_types::inventory::ZoneSnatConfig;
 use sled_agent_types::inventory::check_external_ip_count;
+use std::collections::HashSet;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use thiserror::Error;
+use uuid::Uuid;
 
 /// Tracker and validator for network resources allocated to Omicron-managed
 /// zones.
@@ -284,11 +287,7 @@ pub enum OmicronZoneExternalIpKey {
 /// Floating external IP allocated to an Omicron-managed zone.
 ///
 /// This is a slimmer `nexus_db_model::ExternalIp` that only stores the fields
-/// necessary for blueprint planning, and requires that the zone have a single
-/// IP.
-//
-// NOTE: It's important that we continue to derive Ord and Eq. They're used in
-// those trait implementations for the newtype `OmicronZoneExternalFloatingIps`.
+/// necessary for blueprint planning.
 #[derive(
     Debug,
     Clone,
@@ -318,10 +317,6 @@ impl IdOrdItem for OmicronZoneExternalFloatingIp {
 }
 
 /// Floating external address with port allocated to an Omicron-managed zone.
-//
-// NOTE: It's important that we continue to derive Ord and Eq. They're used in
-// those trait implementations for the newtype
-// `OmicronZoneExternalFloatingAddrs`.
 #[derive(
     Debug,
     Clone,
@@ -359,8 +354,7 @@ impl OmicronZoneExternalFloatingAddr {
 /// SNAT (outbound) external IP allocated to an Omicron-managed zone.
 ///
 /// This is a slimmer `nexus_db_model::ExternalIp` that only stores the fields
-/// necessary for blueprint planning, and requires that the zone have a single
-/// IP.
+/// necessary for blueprint planning.
 #[derive(
     Debug,
     Clone,
@@ -399,17 +393,16 @@ pub struct OmicronZoneExternalSnatIp {
     Deserialize,
     Diffable,
 )]
-pub struct OmicronZoneExternalSnatIpV4 {
+pub struct OmicronZoneExternalSnatIpv4 {
     pub id: ExternalIpUuid,
     pub snat_cfg: SourceNatConfigV4,
 }
 
-impl OmicronZoneExternalSnatIpV4 {
-    /// Widen to a family-agnostic [`OmicronZoneExternalSnatIp`].
-    pub fn to_generic(self) -> OmicronZoneExternalSnatIp {
+impl From<OmicronZoneExternalSnatIpv4> for OmicronZoneExternalSnatIp {
+    fn from(value: OmicronZoneExternalSnatIpv4) -> Self {
         OmicronZoneExternalSnatIp {
-            id: self.id,
-            snat_cfg: self.snat_cfg.into(),
+            id: value.id,
+            snat_cfg: value.snat_cfg.into(),
         }
     }
 }
@@ -433,17 +426,16 @@ impl OmicronZoneExternalSnatIpV4 {
     Deserialize,
     Diffable,
 )]
-pub struct OmicronZoneExternalSnatIpV6 {
+pub struct OmicronZoneExternalSnatIpv6 {
     pub id: ExternalIpUuid,
     pub snat_cfg: SourceNatConfigV6,
 }
 
-impl OmicronZoneExternalSnatIpV6 {
-    /// Widen to a family-agnostic [`OmicronZoneExternalSnatIp`].
-    pub fn to_generic(self) -> OmicronZoneExternalSnatIp {
+impl From<OmicronZoneExternalSnatIpv6> for OmicronZoneExternalSnatIp {
+    fn from(value: OmicronZoneExternalSnatIpv6) -> Self {
         OmicronZoneExternalSnatIp {
-            id: self.id,
-            snat_cfg: self.snat_cfg.into(),
+            id: value.id,
+            snat_cfg: value.snat_cfg.into(),
         }
     }
 }
@@ -483,16 +475,26 @@ impl std::cmp::Ord for OmicronZoneExternalFloatingIps {
     }
 }
 
+fn check_external_ip_ids<'a>(
+    ids: impl Iterator<Item = &'a Uuid>,
+) -> Result<(), ZoneExternalAddrsError> {
+    let mut seen_ids = HashSet::new();
+    for id in ids {
+        if !seen_ids.insert(id) {
+            return Err(ZoneExternalAddrsError::DuplicateIds { id: *id });
+        }
+    }
+    Ok(())
+}
+
 impl OmicronZoneExternalFloatingIps {
-    /// Construct from a set of external IPs, validating the count.
-    ///
-    /// Uniqueness of the IP addresses is guaranteed by the `IdOrdMap` key, so
-    /// the only remaining invariant to check is that the number of addresses is
-    /// in `[1, MAX_ZONE_EXTERNAL_IPS]`.
+    /// Construct from a set of external IPs, validating the count and that all
+    /// IPs and IDs are unique.
     pub fn new(
         ips: IdOrdMap<OmicronZoneExternalFloatingIp>,
     ) -> Result<Self, ZoneExternalAddrsError> {
         check_external_ip_count(ips.len())?;
+        check_external_ip_ids(ips.iter().map(|ip| ip.id.as_untyped_uuid()))?;
         Ok(Self(ips))
     }
 
@@ -505,23 +507,20 @@ impl OmicronZoneExternalFloatingIps {
     pub fn iter(&self) -> impl Iterator<Item = &OmicronZoneExternalFloatingIp> {
         self.0.iter()
     }
+}
 
-    /// Convert self into the inventory-specific `NexusExternalIps` type.
-    ///
-    /// # Panics
-    ///
-    /// This panics if the conversion can't be made. That should be impossible.
-    /// Both types have the same invariants:
-    ///
-    /// - There's at least one IP
-    /// - There are no more than `MAX_ZONE_EXTERNAL_IPS` IPs
-    /// - All the IP addresses are unique.
-    ///
-    /// The only difference between this type and `NexusExternalIps` is that
-    /// this one carries the UUID for each IP address as well.
-    pub(crate) fn into_nexus_external_ips_or_panic(self) -> NexusExternalIps {
-        NexusExternalIps::new(self.0.into_iter().map(|ip| ip.ip).collect())
-            .unwrap()
+impl From<OmicronZoneExternalFloatingIps> for NexusExternalIps {
+    fn from(value: OmicronZoneExternalFloatingIps) -> Self {
+        // Failing should be impossible. Both types share invariants:
+        //
+        // - There's at least one IP
+        // - There are no more than `MAX_ZONE_EXTERNAL_IPS` IPs
+        // - All the IP addresses are unique.
+        //
+        // The only difference is between this type and `NexusExternalIps` is
+        // that this one carries the UUId for each IP address as well.
+        NexusExternalIps::new(value.0.into_iter().map(|ip| ip.ip).collect())
+            .expect("both types enforce the same invariants")
     }
 }
 
@@ -581,15 +580,15 @@ impl std::cmp::Ord for OmicronZoneExternalFloatingAddrs {
 }
 
 impl OmicronZoneExternalFloatingAddrs {
-    /// Construct from a set of external addresses, validating the count.
-    ///
-    /// Uniqueness of the IP addresses (ignoring port) is guaranteed by the
-    /// `IdOrdMap` key, so the only remaining invariant to check is that the
-    /// number of addresses is in `[1, MAX_ZONE_EXTERNAL_IPS]`.
+    /// Construct from a set of external addresses, validating the count and
+    /// that all IPs and IDs are unique.
     pub fn new(
         addrs: IdOrdMap<OmicronZoneExternalFloatingAddr>,
     ) -> Result<Self, ZoneExternalAddrsError> {
         check_external_ip_count(addrs.len())?;
+        check_external_ip_ids(
+            addrs.iter().map(|addr| addr.id.as_untyped_uuid()),
+        )?;
         Ok(Self(addrs))
     }
 
@@ -604,25 +603,22 @@ impl OmicronZoneExternalFloatingAddrs {
     ) -> impl Iterator<Item = &OmicronZoneExternalFloatingAddr> {
         self.0.iter()
     }
+}
 
-    /// Convert self into the inventory-specific `ExternalDnsAddrs` type.
-    ///
-    /// # Panics
-    ///
-    /// This panics if the conversion can't be made. That should be impossible.
-    /// Both types have the same invariants:
-    ///
-    /// - There's at least one IP
-    /// - There are no more than `MAX_ZONE_EXTERNAL_IPS` IPs
-    /// - All the IP addresses are unique, ignoring the port numbers.
-    ///
-    /// The only difference between this type and `ExternalDnsAddrs` is that
-    /// this one carries the UUID for each IP address as well.
-    pub(crate) fn into_external_dns_addrs_or_panic(self) -> ExternalDnsAddrs {
+impl From<OmicronZoneExternalFloatingAddrs> for ExternalDnsAddrs {
+    fn from(value: OmicronZoneExternalFloatingAddrs) -> Self {
+        // Failing should be impossible. Both types share invariants:
+        //
+        // - There's at least one IP
+        // - There are no more than `MAX_ZONE_EXTERNAL_IPS` IPs
+        // - All the IP addresses are unique, ignoring the port numbers.
+        //
+        // The only difference between this type and `ExternalDnsAddrs` is that
+        // this one carries the UUID for each IP address as well.
         ExternalDnsAddrs::new(
-            self.0.into_iter().map(|addr| addr.addr).collect(),
+            value.0.into_iter().map(|addr| addr.addr).collect(),
         )
-        .unwrap()
+        .expect("both types enforce the same invariants")
     }
 }
 
@@ -668,11 +664,11 @@ impl From<OmicronZoneExternalFloatingAddrs>
 )]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum OmicronZoneExternalSnat {
-    Ipv4Only(OmicronZoneExternalSnatIpV4),
-    Ipv6Only(OmicronZoneExternalSnatIpV6),
+    Ipv4Only(OmicronZoneExternalSnatIpv4),
+    Ipv6Only(OmicronZoneExternalSnatIpv6),
     DualStack {
-        ipv4: OmicronZoneExternalSnatIpV4,
-        ipv6: OmicronZoneExternalSnatIpV6,
+        ipv4: OmicronZoneExternalSnatIpv4,
+        ipv6: OmicronZoneExternalSnatIpv6,
     },
 }
 
@@ -685,7 +681,7 @@ impl OmicronZoneExternalSnat {
                     .snat_cfg
                     .try_as_ipv4()
                     .expect("just matched an IPv4 address");
-                OmicronZoneExternalSnat::Ipv4Only(OmicronZoneExternalSnatIpV4 {
+                OmicronZoneExternalSnat::Ipv4Only(OmicronZoneExternalSnatIpv4 {
                     id: snat.id,
                     snat_cfg,
                 })
@@ -695,7 +691,7 @@ impl OmicronZoneExternalSnat {
                     .snat_cfg
                     .try_as_ipv6()
                     .expect("just matched an IPv6 address");
-                OmicronZoneExternalSnat::Ipv6Only(OmicronZoneExternalSnatIpV6 {
+                OmicronZoneExternalSnat::Ipv6Only(OmicronZoneExternalSnatIpv6 {
                     id: snat.id,
                     snat_cfg,
                 })
@@ -708,8 +704,8 @@ impl OmicronZoneExternalSnat {
     pub fn from_ips(
         ips: impl IntoIterator<Item = OmicronZoneExternalSnatIp>,
     ) -> Result<Self, ZoneExternalSnatError> {
-        let mut v4: Option<OmicronZoneExternalSnatIpV4> = None;
-        let mut v6: Option<OmicronZoneExternalSnatIpV6> = None;
+        let mut v4: Option<OmicronZoneExternalSnatIpv4> = None;
+        let mut v6: Option<OmicronZoneExternalSnatIpv6> = None;
         for ip in ips {
             match ip.snat_cfg.ip {
                 IpAddr::V4(_) => {
@@ -718,7 +714,7 @@ impl OmicronZoneExternalSnat {
                         .try_as_ipv4()
                         .expect("just matched an IPv4 address");
                     let entry =
-                        OmicronZoneExternalSnatIpV4 { id: ip.id, snat_cfg };
+                        OmicronZoneExternalSnatIpv4 { id: ip.id, snat_cfg };
                     if v4.replace(entry).is_some() {
                         return Err(ZoneExternalSnatError::DuplicateIpv4);
                     }
@@ -729,7 +725,7 @@ impl OmicronZoneExternalSnat {
                         .try_as_ipv6()
                         .expect("just matched an IPv6 address");
                     let entry =
-                        OmicronZoneExternalSnatIpV6 { id: ip.id, snat_cfg };
+                        OmicronZoneExternalSnatIpv6 { id: ip.id, snat_cfg };
                     if v6.replace(entry).is_some() {
                         return Err(ZoneExternalSnatError::DuplicateIpv6);
                     }
@@ -750,10 +746,10 @@ impl OmicronZoneExternalSnat {
     /// family-agnostic [`OmicronZoneExternalSnatIp`].
     pub fn iter(&self) -> impl Iterator<Item = OmicronZoneExternalSnatIp> {
         let (first, second) = match *self {
-            OmicronZoneExternalSnat::Ipv4Only(v4) => (v4.to_generic(), None),
-            OmicronZoneExternalSnat::Ipv6Only(v6) => (v6.to_generic(), None),
+            OmicronZoneExternalSnat::Ipv4Only(v4) => (v4.into(), None),
+            OmicronZoneExternalSnat::Ipv6Only(v6) => (v6.into(), None),
             OmicronZoneExternalSnat::DualStack { ipv4, ipv6 } => {
-                (ipv4.to_generic(), Some(ipv6.to_generic()))
+                (ipv4.into(), Some(ipv6.into()))
             }
         };
         std::iter::once(first).chain(second)
@@ -980,6 +976,7 @@ mod tests {
     use omicron_common::api::internal::shared::PrivateIpv4Config;
     use omicron_common::api::internal::shared::PrivateIpv6Config;
     use proptest::prelude::*;
+    use sled_agent_types::inventory::MAX_ZONE_EXTERNAL_IPS;
 
     fn v4_config() -> PrivateIpv4Config {
         PrivateIpv4Config::new(
@@ -1232,30 +1229,20 @@ mod tests {
             "got {empty:?}",
         );
 
-        let too_many = IdOrdMap::from_iter_unique(
-            (0..=sled_agent_types::inventory::MAX_ZONE_EXTERNAL_IPS).map(|i| {
+        let too_many =
+            IdOrdMap::from_iter_unique((0..=MAX_ZONE_EXTERNAL_IPS).map(|i| {
                 OmicronZoneExternalFloatingIp {
                     id: ExternalIpUuid::new_v4(),
                     ip: IpAddr::V4(Ipv4Addr::new(192, 0, 2, i as u8)),
                 }
-            }),
-        )
-        .expect("distinct IPs build a valid map");
+            }))
+            .expect("distinct IPs build a valid map");
         let err = OmicronZoneExternalFloatingIps::new(too_many).unwrap_err();
         assert!(
             matches!(err, ZoneExternalAddrsError::TooMany { .. }),
             "got {err:?}",
         );
     }
-
-    // The size of the pool of IP addresses we draw from in the proptests below.
-    //
-    // This is large enough so that we get up to and beyond the limit of
-    // `MAX_ZONE_EXTERNAL_IPS`, but also small enough that randomly drawing IPs
-    // generates collisions pretty frequently. That tests the duplicate IP
-    // rejection code.
-    const IP_POOL_SIZE: usize =
-        sled_agent_types::inventory::MAX_ZONE_EXTERNAL_IPS + 4;
 
     // Get an IP address from the pool, my mapping the index to an IP. We have
     // both IPv4 and IPv6.
@@ -1278,24 +1265,26 @@ mod tests {
 
     fn arbitrary_floating_ips()
     -> impl Strategy<Value = Vec<OmicronZoneExternalFloatingIp>> {
-        let element = (any::<ExternalIpUuid>(), 0..IP_POOL_SIZE).prop_map(
-            |(id, index)| OmicronZoneExternalFloatingIp {
+        let element = (any::<ExternalIpUuid>(), 0..MAX_ZONE_EXTERNAL_IPS)
+            .prop_map(|(id, index)| OmicronZoneExternalFloatingIp {
                 id,
                 ip: pool_ip(index),
-            },
-        );
-        proptest::collection::vec(element, 0..=IP_POOL_SIZE)
+            });
+        proptest::collection::vec(element, 0..MAX_ZONE_EXTERNAL_IPS)
     }
 
     fn arbitrary_floating_addrs()
     -> impl Strategy<Value = Vec<OmicronZoneExternalFloatingAddr>> {
         // Ports are irrelevant to the constructors, so just draw randomly.
-        let element = (any::<ExternalIpUuid>(), 0..IP_POOL_SIZE, any::<u16>())
-            .prop_map(|(id, index, port)| OmicronZoneExternalFloatingAddr {
-                id,
-                addr: SocketAddr::new(pool_ip(index), port),
-            });
-        proptest::collection::vec(element, 0..=IP_POOL_SIZE)
+        let element =
+            (any::<ExternalIpUuid>(), 0..MAX_ZONE_EXTERNAL_IPS, any::<u16>())
+                .prop_map(|(id, index, port)| {
+                    OmicronZoneExternalFloatingAddr {
+                        id,
+                        addr: SocketAddr::new(pool_ip(index), port),
+                    }
+                });
+        proptest::collection::vec(element, 0..MAX_ZONE_EXTERNAL_IPS)
     }
 
     proptest! {
@@ -1308,19 +1297,15 @@ mod tests {
         fn floating_ips_always_convert_to_inventory(
             ips in arbitrary_floating_ips(),
         ) {
-            if let Ok(map) = IdOrdMap::from_iter_unique(ips) {
-                let blueprint = OmicronZoneExternalFloatingIps::new(map.clone());
-                let inventory =
-                    NexusExternalIps::new(map.iter().map(|ip| ip.ip).collect());
+            let map = IdOrdMap::from_iter(ips);
+            let blueprint = OmicronZoneExternalFloatingIps::new(map.clone());
+            let inventory =
+                NexusExternalIps::new(map.iter().map(|ip| ip.ip).collect());
 
-                prop_assert_eq!(blueprint.is_ok(), inventory.is_ok());
+            prop_assert_eq!(blueprint.is_ok(), inventory.is_ok());
 
-                if let (Ok(blueprint), Ok(inventory)) = (blueprint, inventory) {
-                    prop_assert_eq!(
-                        blueprint.into_nexus_external_ips_or_panic(),
-                        inventory,
-                    );
-                }
+            if let (Ok(blueprint), Ok(inventory)) = (blueprint, inventory) {
+                prop_assert_eq!(inventory, blueprint.into());
             }
         }
 
@@ -1330,21 +1315,17 @@ mod tests {
         fn floating_addrs_always_convert_to_inventory(
             addrs in arbitrary_floating_addrs(),
         ) {
-            if let Ok(map) = IdOrdMap::from_iter_unique(addrs) {
-                let blueprint =
-                    OmicronZoneExternalFloatingAddrs::new(map.clone());
-                let inventory = ExternalDnsAddrs::new(
-                    map.iter().map(|addr| addr.addr).collect(),
-                );
+            let map = IdOrdMap::from_iter(addrs);
+            let blueprint =
+                OmicronZoneExternalFloatingAddrs::new(map.clone());
+            let inventory = ExternalDnsAddrs::new(
+                map.iter().map(|addr| addr.addr).collect(),
+            );
 
-                prop_assert_eq!(blueprint.is_ok(), inventory.is_ok());
+            prop_assert_eq!(blueprint.is_ok(), inventory.is_ok());
 
-                if let (Ok(blueprint), Ok(inventory)) = (blueprint, inventory) {
-                    prop_assert_eq!(
-                        blueprint.into_external_dns_addrs_or_panic(),
-                        inventory,
-                    );
-                }
+            if let (Ok(blueprint), Ok(inventory)) = (blueprint, inventory) {
+                prop_assert_eq!(inventory, blueprint.into());
             }
         }
     }
