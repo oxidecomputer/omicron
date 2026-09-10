@@ -7418,6 +7418,7 @@ dependencies = [
  "hyper-rustls",
  "iddqd",
  "illumos-utils",
+ "indexmap 2.14.0",
  "internal-dns-resolver",
  "internal-dns-types",
  "ipnetwork",

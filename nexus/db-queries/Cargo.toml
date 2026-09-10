@@ -104,6 +104,7 @@ hyper-rustls.workspace = true
 gateway-client.workspace = true
 gateway-types.workspace = true
 illumos-utils.workspace = true
+indexmap.workspace = true
 internal-dns-resolver.workspace = true
 itertools.workspace = true
 nexus-fm-slippy.workspace = true

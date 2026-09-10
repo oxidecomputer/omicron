@@ -1377,19 +1377,20 @@ impl ExternalIpPolicy {
         }
     }
 
-    /// Consume this `ExternalIpPolicy`, returning an iterator over the IPs
-    /// available to Nexus (i.e., all of its assigned pools, excluding any
-    /// addresses reserved for external DNS).
-    //
-    // NOTE: This chains all of Nexus's pools together. Allocating one address
-    // per pool (#8949) is a separate change; today Nexus is handed a
-    // single address as before.
-    pub fn into_nexus_ips(self) -> impl Iterator<Item = IpAddr> {
+    /// Consume this `ExternalIpPolicy`, returning iterators over all IPs in
+    /// each IP Pool assigned to Nexus.
+    pub fn into_nexus_pool_ips(self) -> Vec<Box<dyn Iterator<Item = IpAddr>>> {
         let Self { nexus_pools, external_dns_ips, .. } = self;
         nexus_pools
             .into_iter()
-            .flat_map(ServiceIpPool::into_ips)
-            .filter(move |ip| !external_dns_ips.contains(ip))
+            .map(|pool| {
+                let to_exclude = external_dns_ips.clone();
+                let it: Box<dyn Iterator<Item = _>> = Box::new(
+                    pool.into_ips().filter(move |ip| !to_exclude.contains(ip)),
+                );
+                it
+            })
+            .collect()
     }
 
     /// Consume this `ExternalIpPolicy`, returning an iterator over the IPs

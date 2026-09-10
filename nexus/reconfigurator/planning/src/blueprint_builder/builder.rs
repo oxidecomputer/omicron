@@ -83,6 +83,7 @@ use sled_agent_types::inventory::MupdateOverrideBootInventory;
 use sled_agent_types::inventory::NetworkInterface;
 use sled_agent_types::inventory::NetworkInterfaceKind;
 use sled_agent_types::inventory::OmicronZoneDataset;
+use sled_agent_types::inventory::ZoneExternalAddrsError;
 use sled_agent_types::inventory::ZoneKind;
 use sled_hardware_types::BaseboardId;
 use slog::Logger;
@@ -137,6 +138,16 @@ pub enum Error {
     NoAvailableDnsSubnets,
     #[error("error allocating external networking resources")]
     AllocateExternalNetworking(#[from] ExternalNetworkingError),
+    #[error("error constructing external IPs for zone")]
+    ZoneAddrError(#[from] ZoneExternalAddrsError),
+    // TODO-remove: This is a temporary error condition while we implement
+    // multiple external IPs for Omicron zones. It should be removed when
+    // External DNS zones support multiple IPs. See #8949.
+    #[error(
+        "external DNS zones should have exactly one \
+        external IP, but found {count}"
+    )]
+    InvalidExternalDnsExternalIpCount { count: usize },
     #[error("zone is already up-to-date and should not be updated")]
     ZoneAlreadyUpToDate,
     #[error(
@@ -1577,8 +1588,21 @@ impl<'a> BlueprintBuilder<'a> {
         external_ip: ExternalNetworkingChoice,
     ) -> Result<(), Error> {
         let id = self.rng.sled_rng(sled_id).next_zone();
-        let ExternalNetworkingChoice { external_ip, nic_ip_config, nic_mac } =
+        let ExternalNetworkingChoice { external_ips, nic_ip_config, nic_mac } =
             external_ip;
+
+        // TODO-remove
+        //
+        // At this point, External DNS can only have one external IP (see
+        // `ExternalNetworkingAllocator::for_new_external_dns()`.) Supporting
+        // multiple IPs for that zone is part of #8949, and we'll fail for now.
+        if external_ips.len() != 1 {
+            return Err(Error::InvalidExternalDnsExternalIpCount {
+                count: external_ips.len(),
+            });
+        }
+        let external_ip = external_ips.into_iter().next().unwrap();
+
         let nic = NetworkInterface {
             id: self.rng.sled_rng(sled_id).next_network_interface(),
             kind: NetworkInterfaceKind::Service { id: id.into_untyped_uuid() },
@@ -1732,12 +1756,17 @@ impl<'a> BlueprintBuilder<'a> {
         config: &OperatorNexusConfig<'_>,
     ) -> Result<(), Error> {
         let nexus_id = self.rng.sled_rng(sled_id).next_zone();
-        let ExternalNetworkingChoice { external_ip, nic_ip_config, nic_mac } =
+        let ExternalNetworkingChoice { external_ips, nic_ip_config, nic_mac } =
             external_ip;
-        let external_ip = OmicronZoneExternalFloatingIp {
-            id: self.rng.sled_rng(sled_id).next_external_ip(),
-            ip: external_ip,
-        };
+        let external_ips = OmicronZoneExternalFloatingIps::new(
+            IdOrdMap::from_iter_unique(external_ips.into_iter().map(|ip| {
+                OmicronZoneExternalFloatingIp {
+                    id: self.rng.sled_rng(sled_id).next_external_ip(),
+                    ip,
+                }
+            }))
+            .expect("external_ips is a set, so all unique"),
+        )?;
 
         let nic = NetworkInterface {
             id: self.rng.sled_rng(sled_id).next_network_interface(),
@@ -1758,9 +1787,7 @@ impl<'a> BlueprintBuilder<'a> {
         let zone_type = BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
             internal_address,
             lockstep_port: omicron_common::address::NEXUS_LOCKSTEP_PORT,
-            external_ips: OmicronZoneExternalFloatingIps::from_single(
-                external_ip,
-            ),
+            external_ips,
             nic,
             external_tls: config.external_tls,
             external_dns_servers: config.external_dns_servers.to_vec(),
@@ -2817,6 +2844,7 @@ pub mod test {
     use nexus_types::deployment::SledFilter;
     use nexus_types::external_api::sled::SledPolicy;
     use omicron_common::address::IpRange;
+    use omicron_common::address::Ipv6Range;
     use omicron_test_utils::dev::test_setup_log;
     use std::collections::BTreeSet;
     use std::mem;
@@ -3405,6 +3433,104 @@ pub mod test {
     }
 
     #[test]
+    fn test_add_dual_stack_nexus_without_existing_nexus_zones() {
+        static TEST_NAME: &str =
+            "test_add_dual_stack_nexus_without_existing_nexus_zones";
+        let logctx = test_setup_log(TEST_NAME);
+        let mut rng = SimRngState::from_seed(TEST_NAME);
+
+        // Start with an empty system (sleds with no zones), so there are
+        // no existing Nexus zones in the parent blueprint. The Nexus config
+        // we supply comes from `PlanningInput`, not from a parent zone.
+        let (example, parent) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
+                .create_zones(false)
+                .build();
+        let collection = example.collection;
+        let input = example.input;
+
+        let mut builder = BlueprintBuilder::new_based_on(
+            &logctx.log,
+            &parent,
+            "test",
+            rng.next_planner_rng(),
+        )
+        .expect("failed to create builder");
+
+        let nexus_config =
+            input.external_service_networking_policy().operator_nexus_config();
+
+        // Add a second service IP Pool to the EIP policy. In the future, this
+        // will come from the database itself, but that's part of #10574.
+        let external_ip_policy = {
+            let mut builder = input.external_ip_policy().clone().into_builder();
+            builder
+                .push_service_pool_ipv6_range(
+                    Ipv6Range::new(
+                        "2001:db8::1".parse().unwrap(),
+                        "2001:db8::ff".parse().unwrap(),
+                    )
+                    .unwrap(),
+                )
+                .unwrap();
+            builder.build()
+        };
+        let mut external_networking_alloc =
+            ExternalNetworkingAllocator::from_current_zones(
+                &builder,
+                &external_ip_policy,
+            )
+            .expect("created external networking allocator");
+
+        let sled_id = collection
+            .sled_agents
+            .iter()
+            .next()
+            .map(|sa| sa.sled_id)
+            .expect("no sleds present");
+        builder
+            .sled_add_zone_nexus(
+                sled_id,
+                BlueprintZoneImageSource::InstallDataset,
+                external_networking_alloc
+                    .for_new_nexus()
+                    .expect("have IP for Nexus"),
+                parent.nexus_generation,
+                &nexus_config,
+            )
+            .expect("added Nexus zone with operator config from PlanningInput");
+
+        // Check that the zone is indeed dual-stack.
+        let nexus_zone = builder
+            .sled_editors
+            .get(&sled_id)
+            .expect("just placed on this sled")
+            .in_service_zones()
+            .next()
+            .expect("just added nexus zone");
+        let BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
+            external_ips,
+            nic,
+            ..
+        }) = &nexus_zone.zone_type
+        else {
+            unreachable!("just added nexus zone");
+        };
+        assert!(
+            nic.ip_config.is_dual_stack(),
+            "Should have planned a dual-stack NIC"
+        );
+        let mut eips = external_ips.iter();
+        let mut nexus_ip_pools = external_ip_policy.into_nexus_pool_ips();
+        assert_eq!(nexus_ip_pools.len(), 2);
+        assert_eq!(eips.next().unwrap().ip, nexus_ip_pools[0].next().unwrap());
+        assert_eq!(eips.next().unwrap().ip, nexus_ip_pools[1].next().unwrap());
+        assert!(eips.next().is_none(), "Should have exactly 2 EIPs");
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
     fn test_add_nexus_error_cases() {
         static TEST_NAME: &str = "blueprint_builder_test_add_nexus_error_cases";
         let logctx = test_setup_log(TEST_NAME);
@@ -3597,7 +3723,7 @@ pub mod test {
             assert!(
                 matches!(
                     err,
-                    ExternalNetworkingError::NoExternalServiceIpAvailable
+                    ExternalNetworkingError::NotEnoughExternalServiceIpsAvailable
                 ),
                 "unexpected error {err}"
             );

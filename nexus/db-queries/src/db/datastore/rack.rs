@@ -1079,6 +1079,7 @@ mod test {
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::pub_test_utils::helpers::SledUpdateBuilder;
     use async_bb8_diesel::AsyncSimpleConnection;
+    use indexmap::IndexSet;
     use internal_dns_types::names::DNS_ZONE;
     use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
     use nexus_db_model::{DnsGroup, Generation, InitialDnsGroup, IpVersion};
@@ -1478,12 +1479,23 @@ mod test {
         let external_dns_networking = external_networking_alloc
             .for_new_external_dns()
             .expect("got IP for external DNS");
-        let external_dns_ip = external_dns_networking.external_ip;
+        assert_eq!(
+            external_dns_networking.external_ips.len(),
+            1,
+            "Expected exactly one external IP for external DNS"
+        );
+        let external_dns_ip =
+            *external_dns_networking.external_ips.first().unwrap();
 
         let nexus_networking = external_networking_alloc
             .for_new_nexus()
             .expect("got IP for Nexus");
-        let nexus_ip = nexus_networking.external_ip;
+        assert_eq!(
+            nexus_networking.external_ips.len(),
+            1,
+            "Expected exactly one external IP for Nexus"
+        );
+        let nexus_ip = *nexus_networking.external_ips.first().unwrap();
 
         let ntp1_networking = external_networking_alloc
             .for_new_boundary_ntp()
@@ -1972,7 +1984,7 @@ mod test {
                 sled.id(),
                 BlueprintZoneImageSource::InstallDataset,
                 ExternalNetworkingChoice {
-                    external_ip: nexus_external_ip,
+                    external_ips: IndexSet::from([nexus_external_ip]),
                     nic_ip_config: nexus_nic_ip_config,
                     nic_mac: macs.next().unwrap(),
                 },
@@ -2270,7 +2282,7 @@ mod test {
                 sled.id(),
                 BlueprintZoneImageSource::InstallDataset,
                 ExternalNetworkingChoice {
-                    external_ip: nexus_ip,
+                    external_ips: IndexSet::from([nexus_ip]),
                     nic_ip_config: nexus_pip_config,
                     nic_mac: macs.next().unwrap(),
                 },

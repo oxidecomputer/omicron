@@ -4,6 +4,7 @@
 
 use anyhow::bail;
 use debug_ignore::DebugIgnore;
+use indexmap::IndexSet;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneType;
@@ -19,6 +20,8 @@ use omicron_common::address::NUM_SOURCE_NAT_PORTS;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_common::api::internal::shared::PrivateIpConfigError;
+use omicron_common::api::internal::shared::PrivateIpv4Config;
+use omicron_common::api::internal::shared::PrivateIpv6Config;
 use sled_agent_types::inventory::SourceNatConfigError;
 use sled_agent_types::inventory::SourceNatConfigGeneric;
 use sled_agent_types::inventory::ZoneKind;
@@ -38,8 +41,8 @@ use crate::blueprint_builder::BlueprintBuilder;
 pub enum ExternalNetworkingError {
     #[error("no external DNS IP addresses are available")]
     NoExternalDnsIpAvailable,
-    #[error("no external service IP addresses are available")]
-    NoExternalServiceIpAvailable,
+    #[error("not enough external service IP addresses are available")]
+    NotEnoughExternalServiceIpsAvailable,
     #[error("no system MAC addresses are available")]
     NoSystemMacAddressAvailable,
     #[error("exhausted available OPTE IP addresses for service {kind:?}")]
@@ -64,13 +67,18 @@ pub struct ExternalNetworkingAllocator {
     // see https://github.com/oxidecomputer/omicron/issues/3732
     available_external_dns_ips: BTreeSet<IpAddr>,
 
-    // The external IP pools for Nexus and boundary NTP, and an account of which
-    // of those IPs are already in use. The pools are separated by service, but
-    // today they're all seeded from "all the service IP Pools". Filling them in
-    // from the real per-service assignments is tracked by
+    // The external IPs for each IP Pool for Nexus.
+    nexus_external_ips_by_pool:
+        DebugIgnore<Vec<Box<dyn Iterator<Item = IpAddr>>>>,
+
+    // The external IPs for boundary NTP. These are seeded from "all the IP
+    // Pools for services" today, but will eventually come from the pools
+    // specifically assigned to NTP. See both
+    // https://github.com/oxidecomputer/omicron/issues/8949 and
     // https://github.com/oxidecomputer/omicron/issues/10574.
-    nexus_external_ips: DebugIgnore<Box<dyn Iterator<Item = IpAddr>>>,
     boundary_ntp_external_ips: DebugIgnore<Box<dyn Iterator<Item = IpAddr>>>,
+
+    // The set of external IPs that have been used, from any pool / service.
     used_external_ips: UsedExternalIps,
 
     // Iterator of available MAC addresses in the system address range
@@ -152,7 +160,8 @@ impl ExternalNetworkingAllocator {
             HashSet::new();
         let mut existing_external_dns_v6_ips: HashSet<Ipv6Addr> =
             HashSet::new();
-        let nexus_external_ips = external_ip_policy.clone().into_nexus_ips();
+        let nexus_external_ips_by_pool =
+            external_ip_policy.clone().into_nexus_pool_ips();
         let boundary_ntp_external_ips =
             external_ip_policy.clone().into_boundary_ntp_ips();
         let mut used_external_ips = UsedExternalIps::new();
@@ -305,7 +314,7 @@ impl ExternalNetworkingAllocator {
             external_dns_v4_ips,
             external_dns_v6_ips,
             available_external_dns_ips,
-            nexus_external_ips: DebugIgnore(Box::new(nexus_external_ips)),
+            nexus_external_ips_by_pool: DebugIgnore(nexus_external_ips_by_pool),
             boundary_ntp_external_ips: DebugIgnore(Box::new(
                 boundary_ntp_external_ips,
             )),
@@ -317,38 +326,80 @@ impl ExternalNetworkingAllocator {
     pub fn for_new_nexus(
         &mut self,
     ) -> Result<ExternalNetworkingChoice, ExternalNetworkingError> {
-        // TODO(#8949): We need to consider how the IP Pools are assigned
-        // to services in order to generate the right public IP(s). Then we
-        // can generate the private IP configuration that's required to
-        // support that. See also
-        // https://github.com/oxidecomputer/omicron/issues/9313.
-        let external_ip = self
-            .used_external_ips
-            .claim_next_exclusive_ip(&mut *self.nexus_external_ips)?;
-        let nic_ip_config = match external_ip {
-            IpAddr::V4(_) => {
-                let ip = self.nexus_v4_ips.next().ok_or(
-                    ExternalNetworkingError::ExhaustedOpteIps {
-                        kind: ZoneKind::Nexus,
-                    },
-                )?;
-                PrivateIpConfig::new_ipv4(ip, *NEXUS_OPTE_IPV4_SUBNET)?
+        // Take one external IP for Nexus from _each_ IP Pool assigned to it.
+        //
+        // TODO-robustness TODO-correctness TODO-multirack
+        //
+        // This is the easiest way to achieve two goals:
+        //
+        // - Nexus _MUST_ listen on an IP from the pools an operator selects
+        // - All the Nexus zones should be fungible.
+        //
+        // That last goal is mostly for simplicity, so that we don't have to
+        // worry about striping IPs across the zones in some way, or handling
+        // situations where some Nexus instances are reachable and others are
+        // not. It does mean, however, that every IP Pool has to be "big enough"
+        // for our replication factor, and that we treat all racks as the same
+        // today.
+        let mut maybe_ipv4_config = None;
+        let mut maybe_ipv6_config = None;
+        let external_ips = self
+            .nexus_external_ips_by_pool
+            .iter_mut()
+            .map(|pool| {
+                // Collect the EIP if possible.
+                let eip = self
+                    .used_external_ips
+                    .claim_next_exclusive_ip(&mut *pool)?;
+
+                // Build a private IPv4 config if we need to.
+                if eip.is_ipv4() && maybe_ipv4_config.is_none() {
+                    let private_ip = self.nexus_v4_ips.next().ok_or(
+                        ExternalNetworkingError::ExhaustedOpteIps {
+                            kind: ZoneKind::Nexus,
+                        },
+                    )?;
+                    let _ = maybe_ipv4_config.insert(PrivateIpv4Config::new(
+                        private_ip,
+                        *NEXUS_OPTE_IPV4_SUBNET,
+                    )?);
+                }
+
+                // Build a private IPv6 config if we need to.
+                if eip.is_ipv6() && maybe_ipv6_config.is_none() {
+                    let private_ip = self.nexus_v6_ips.next().ok_or(
+                        ExternalNetworkingError::ExhaustedOpteIps {
+                            kind: ZoneKind::Nexus,
+                        },
+                    )?;
+                    let _ = maybe_ipv6_config.insert(PrivateIpv6Config::new(
+                        private_ip,
+                        *NEXUS_OPTE_IPV6_SUBNET,
+                    )?);
+                }
+                Ok(eip)
+            })
+            .collect::<Result<_, ExternalNetworkingError>>()?;
+
+        let nic_ip_config = match (maybe_ipv4_config, maybe_ipv6_config) {
+            (None, None) => {
+                // This should be impossible, because we've caught pool
+                // exhaustion in the iterator above, and there is always at
+                // least one pool.
+                return
+                    Err(ExternalNetworkingError::NotEnoughExternalServiceIpsAvailable);
             }
-            IpAddr::V6(_) => {
-                let ip = self.nexus_v6_ips.next().ok_or(
-                    ExternalNetworkingError::ExhaustedOpteIps {
-                        kind: ZoneKind::Nexus,
-                    },
-                )?;
-                PrivateIpConfig::new_ipv6(ip, *NEXUS_OPTE_IPV6_SUBNET)?
-            }
+            (None, Some(v6)) => PrivateIpConfig::V6(v6),
+            (Some(v4), None) => PrivateIpConfig::V4(v4),
+            (Some(v4), Some(v6)) => PrivateIpConfig::DualStack { v4, v6 },
         };
+
         let nic_mac = self
             .available_system_macs
             .next()
             .ok_or(ExternalNetworkingError::NoSystemMacAddressAvailable)?;
 
-        Ok(ExternalNetworkingChoice { external_ip, nic_ip_config, nic_mac })
+        Ok(ExternalNetworkingChoice { external_ips, nic_ip_config, nic_mac })
     }
 
     pub fn for_new_boundary_ntp(
@@ -424,13 +475,16 @@ impl ExternalNetworkingAllocator {
             .next()
             .ok_or(ExternalNetworkingError::NoSystemMacAddressAvailable)?;
 
-        Ok(ExternalNetworkingChoice { external_ip, nic_ip_config, nic_mac })
+        let external_ips = IndexSet::from([external_ip]);
+        Ok(ExternalNetworkingChoice { external_ips, nic_ip_config, nic_mac })
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct ExternalNetworkingChoice {
-    pub external_ip: IpAddr,
+    // NOTE: Use an IndexSet here to get both uniqueness, but also stable
+    // ordering that matches the IP Pool iteration order.
+    pub external_ips: IndexSet<IpAddr>,
     pub nic_ip_config: PrivateIpConfig,
     pub nic_mac: MacAddr,
 }
@@ -589,7 +643,7 @@ impl UsedExternalIps {
             }
         }
 
-        Err(ExternalNetworkingError::NoExternalServiceIpAvailable)
+        Err(ExternalNetworkingError::NotEnoughExternalServiceIpsAvailable)
     }
 
     // Return the next available SNAT IP + port range.
@@ -626,7 +680,7 @@ impl UsedExternalIps {
             }
         }
 
-        Err(ExternalNetworkingError::NoExternalServiceIpAvailable)
+        Err(ExternalNetworkingError::NotEnoughExternalServiceIpsAvailable)
     }
 }
 
@@ -751,6 +805,23 @@ pub mod test {
         );
     }
 
+    // The API for `UsedExternalIps` is in terms of
+    // `OmicronZoneExternalIp`, but it doesn't actually care about the IDs;
+    // we'll generate random ones as needed.
+    fn as_floating(ip: IpAddr) -> OmicronZoneExternalIp {
+        OmicronZoneExternalIp::Floating(OmicronZoneExternalFloatingIp {
+            id: ExternalIpUuid::new_v4(),
+            ip,
+        })
+    }
+
+    fn as_snat(ip: IpAddr, snat: &SnatPortRange) -> OmicronZoneExternalIp {
+        OmicronZoneExternalIp::Snat(OmicronZoneExternalSnatIp {
+            id: ExternalIpUuid::new_v4(),
+            snat_cfg: snat.into_source_nat_config(ip),
+        })
+    }
+
     #[proptest]
     fn test_external_ip_allocator(
         items: BTreeMap<IpAddr, (bool, BTreeSet<SnatPortRange>)>,
@@ -785,22 +856,6 @@ pub mod test {
             }
         }
 
-        // The API for `UsedExternalIps` is in terms of
-        // `OmicronZoneExternalIp`, but it doesn't actually care about the IDs;
-        // we'll generate random ones as needed.
-        let as_floating = |ip| {
-            OmicronZoneExternalIp::Floating(OmicronZoneExternalFloatingIp {
-                id: ExternalIpUuid::new_v4(),
-                ip,
-            })
-        };
-        let as_snat = |ip, snat: &SnatPortRange| {
-            OmicronZoneExternalIp::Snat(OmicronZoneExternalSnatIp {
-                id: ExternalIpUuid::new_v4(),
-                snat_cfg: snat.into_source_nat_config(ip),
-            })
-        };
-
         // Build up the used-IP tracker and mark all used IPs. Both service
         // pools are identical today, so we allocate from a single shared pool.
         let policy = {
@@ -810,7 +865,8 @@ pub mod test {
             }
             builder.build()
         };
-        let mut pool = policy.clone().into_nexus_ips();
+        let mut pool =
+            policy.clone().into_nexus_pool_ips().into_iter().flatten();
         let mut used_external_ips = UsedExternalIps::new();
         for &ip in &used_exclusive {
             used_external_ips
@@ -997,11 +1053,13 @@ pub mod test {
         .expect("constructed builder");
 
         // Test external DNS
+        let eips = builder
+            .for_new_external_dns()
+            .expect("got external DNS IP")
+            .external_ips;
+        assert_eq!(eips.len(), 1, "Expected exactly one DNS external IP");
         assert_eq!(
-            builder
-                .for_new_external_dns()
-                .expect("got external DNS IP")
-                .external_ip,
+            eips.into_iter().next().unwrap(),
             service_ip_pool.iter().nth(1).unwrap()
         );
         let err = builder.for_new_external_dns().expect_err("no DNS IPs left");
@@ -1012,15 +1070,17 @@ pub mod test {
         );
 
         // Test Nexus
+        let eips = builder.for_new_nexus().expect("got Nexus IP").external_ips;
+        assert_eq!(eips.len(), 1, "Expected exactly one Nexus external IP");
         assert_eq!(
-            builder.for_new_nexus().expect("got Nexus IP").external_ip,
+            eips.into_iter().next().unwrap(),
             service_ip_pool.iter().nth(2).unwrap()
         );
         let err = builder.for_new_nexus().expect_err("no Nexus IPs left");
         assert!(
             matches!(
                 err,
-                ExternalNetworkingError::NoExternalServiceIpAvailable
+                ExternalNetworkingError::NotEnoughExternalServiceIpsAvailable
             ),
             "unexpected error: {}",
             InlineErrorChain::new(&err),
@@ -1036,26 +1096,34 @@ pub mod test {
         .expect("constructed builder");
 
         // Test Nexus
+        let eips = builder.for_new_nexus().expect("got Nexus IP").external_ips;
+        assert_eq!(eips.len(), 1, "Expected exactly one Nexus external IP");
         assert_eq!(
-            builder.for_new_nexus().expect("got Nexus IP").external_ip,
+            eips.into_iter().next().unwrap(),
             service_ip_pool.iter().nth(2).unwrap()
         );
         let err = builder.for_new_nexus().expect_err("no Nexus IPs left");
         assert!(
             matches!(
                 err,
-                ExternalNetworkingError::NoExternalServiceIpAvailable
+                ExternalNetworkingError::NotEnoughExternalServiceIpsAvailable
             ),
             "unexpected error: {}",
             InlineErrorChain::new(&err),
         );
 
         // Text external DNS
+        let eips = builder
+            .for_new_external_dns()
+            .expect("got external DNS IP")
+            .external_ips;
         assert_eq!(
-            builder
-                .for_new_external_dns()
-                .expect("got external DNS IP")
-                .external_ip,
+            eips.len(),
+            1,
+            "Expected exactly one External DNS external IP"
+        );
+        assert_eq!(
+            eips.into_iter().next().unwrap(),
             service_ip_pool.iter().nth(1).unwrap()
         );
         let err = builder.for_new_external_dns().expect_err("no DNS IPs left");
@@ -1096,7 +1164,15 @@ pub mod test {
 
         // External DNS gets the reserved v6 address (::1) on the v6 OPTE subnet.
         let dns = builder.for_new_external_dns().expect("got external DNS IP");
-        assert_eq!(dns.external_ip, external_dns_ip);
+        assert_eq!(
+            dns.external_ips.len(),
+            1,
+            "Expected exactly one DNS external IP"
+        );
+        assert_eq!(
+            dns.external_ips.into_iter().next().unwrap(),
+            external_dns_ip
+        );
         assert!(dns.nic_ip_config.is_ipv6_only());
         assert_eq!(
             dns.nic_ip_config.ipv6_subnet(),
@@ -1106,7 +1182,12 @@ pub mod test {
         // Nexus gets the next non-DNS v6 address (::2) on the v6 OPTE subnet.
         let nexus = builder.for_new_nexus().expect("got Nexus IP");
         assert_eq!(
-            nexus.external_ip,
+            nexus.external_ips.len(),
+            1,
+            "Expected exactly one Nexus external IP"
+        );
+        assert_eq!(
+            nexus.external_ips.into_iter().next().unwrap(),
             IpAddr::from(service_ip_pool.iter().nth(1).unwrap()),
         );
         assert!(nexus.nic_ip_config.is_ipv6_only());
@@ -1126,5 +1207,173 @@ pub mod test {
             ntp.nic_ip_config.ipv6_subnet(),
             Some(&*NTP_OPTE_IPV6_SUBNET),
         );
+    }
+
+    #[test]
+    fn allocate_multi_pool_nexus_choice() {
+        // IPv4 service pool.
+        let service_ipv4_pool = Ipv4Range::new(
+            "1.1.1.1".parse::<Ipv4Addr>().unwrap(),
+            "1.1.1.10".parse::<Ipv4Addr>().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(service_ipv4_pool.len(), 10);
+
+        // IPv6 service pool next.
+        //
+        // Four v6 addresses, with the first reserved for external DNS.
+        let service_ipv6_pool = Ipv6Range::new(
+            "2001:db8::1".parse::<Ipv6Addr>().unwrap(),
+            "2001:db8::4".parse::<Ipv6Addr>().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(service_ipv6_pool.len(), 4);
+
+        let external_dns_ip: IpAddr = "2001:db8::1".parse().unwrap();
+        let external_ip_policy = {
+            let mut builder = ExternalIpPolicy::builder();
+            builder.push_service_pool_ipv4_range(service_ipv4_pool).unwrap();
+            builder.push_service_pool_ipv6_range(service_ipv6_pool).unwrap();
+            builder.add_external_dns_ip(external_dns_ip).unwrap();
+            builder.build()
+        };
+
+        // No running zones, so every address is available.
+        let mut builder = ExternalNetworkingAllocator::new(
+            std::iter::empty(),
+            &external_ip_policy,
+        )
+        .expect("constructed allocator");
+
+        // External DNS gets the reserved v6 address (::1) and is in the OPTE v6
+        // subnet.
+        let dns = builder.for_new_external_dns().expect("got external DNS IP");
+        assert_eq!(
+            dns.external_ips.len(),
+            1,
+            "Expected exactly one DNS external IP"
+        );
+        assert_eq!(
+            dns.external_ips.into_iter().next().unwrap(),
+            external_dns_ip
+        );
+        assert!(dns.nic_ip_config.is_ipv6_only());
+        assert_eq!(
+            dns.nic_ip_config.ipv6_subnet(),
+            Some(&*DNS_OPTE_IPV6_SUBNET)
+        );
+
+        // Nexus gets two addresses:
+        //
+        // - the next non-DNS v6 address (::2) in the v6 pool.
+        // - the first IPv4 address in the v4 pool.
+        let nexus = builder.for_new_nexus().expect("got Nexus IP");
+        assert_eq!(
+            nexus.external_ips.len(),
+            2,
+            "Expected exactly 2 Nexus external IPs"
+        );
+        let expected_nexus_ips = IndexSet::from([
+            IpAddr::from(service_ipv6_pool.iter().nth(1).unwrap()),
+            IpAddr::from(service_ipv4_pool.iter().next().unwrap()),
+        ]);
+        assert_eq!(nexus.external_ips, expected_nexus_ips);
+        assert!(nexus.nic_ip_config.is_dual_stack());
+        assert_eq!(
+            nexus.nic_ip_config.ipv6_subnet(),
+            Some(&*NEXUS_OPTE_IPV6_SUBNET),
+        );
+        assert_eq!(
+            nexus.nic_ip_config.ipv4_subnet(),
+            Some(&*NEXUS_OPTE_IPV4_SUBNET),
+        );
+
+        // Boundary NTP gets the next IPv4 address, because we currently squash
+        // all pools together for NTP address selection, starting with IPv4.
+        let ntp = builder.for_new_boundary_ntp().expect("got boundary NTP IP");
+        assert_eq!(
+            ntp.snat_cfg.ip,
+            IpAddr::from(service_ipv4_pool.iter().nth(1).unwrap()),
+        );
+        assert!(ntp.nic_ip_config.is_ipv4_only());
+        assert_eq!(
+            ntp.nic_ip_config.ipv4_subnet(),
+            Some(&*NTP_OPTE_IPV4_SUBNET),
+        );
+    }
+
+    #[test]
+    fn fail_nexus_allocation_if_any_pool_is_exhausted() {
+        // IPv4 service pool.
+        let service_ipv4_pool = Ipv4Range::new(
+            "1.1.1.1".parse::<Ipv4Addr>().unwrap(),
+            "1.1.1.10".parse::<Ipv4Addr>().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(service_ipv4_pool.len(), 10);
+
+        // IPv6 service pool next.
+        //
+        // This has only the one DNS address. When we try to allocate a Nexus
+        // choice, we'll succeed on the first pool, but fail because this one
+        // has been exhausted.
+        let service_ipv6_pool = Ipv6Range::new(
+            "2001:db8::1".parse::<Ipv6Addr>().unwrap(),
+            "2001:db8::1".parse::<Ipv6Addr>().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(service_ipv6_pool.len(), 1);
+
+        let external_dns_ip: IpAddr = "2001:db8::1".parse().unwrap();
+        let external_ip_policy = {
+            let mut builder = ExternalIpPolicy::builder();
+            builder.push_service_pool_ipv4_range(service_ipv4_pool).unwrap();
+            builder.push_service_pool_ipv6_range(service_ipv6_pool).unwrap();
+            builder.add_external_dns_ip(external_dns_ip).unwrap();
+            builder.build()
+        };
+
+        // No running zones, so every address is available.
+        let mut builder = ExternalNetworkingAllocator::new(
+            std::iter::empty(),
+            &external_ip_policy,
+        )
+        .expect("constructed allocator");
+
+        // External DNS gets the reserved v6 address (::1).
+        let dns = builder.for_new_external_dns().expect("got external DNS IP");
+        assert_eq!(
+            dns.external_ips.len(),
+            1,
+            "Expected exactly one DNS external IP"
+        );
+        assert_eq!(
+            dns.external_ips.into_iter().next().unwrap(),
+            external_dns_ip
+        );
+        assert!(dns.nic_ip_config.is_ipv6_only());
+        assert_eq!(
+            dns.nic_ip_config.ipv6_subnet(),
+            Some(&*DNS_OPTE_IPV6_SUBNET)
+        );
+
+        let err =
+            builder.for_new_nexus().expect_err("error getting Nexus choice");
+        assert!(matches!(
+            err,
+            ExternalNetworkingError::NotEnoughExternalServiceIpsAvailable
+        ));
+
+        // TODO-correctness: It's not clear if we should hand back the first IPs
+        // we get if we fail to allocate a later one, but right now planning
+        // will simply unwind in any case. So assert that the first IP _is_ in
+        // the set.
+        let contains = builder
+            .used_external_ips
+            .contains(&as_floating(
+                service_ipv4_pool.iter().next().unwrap().into(),
+            ))
+            .expect("should contain IPv4 pool's first IP");
+        assert!(contains, "should contain IPv4 pool's first IP");
     }
 }
