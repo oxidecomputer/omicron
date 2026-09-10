@@ -138,8 +138,9 @@ impl SushHandles {
         .config(ConfigDropshot {
             bind_address,
             default_request_body_max_bytes: REQUEST_MAX_BODY_BYTES,
-            // An interactive job holds a websocket open for as long as it runs,
-            // so a handler must outlive the request that created it.
+            // While an interactive job is running, the corresponding websocket
+            // connection must remain open, so HTTP request handlers must 
+            // outlive the requests that created them.
             default_handler_task_mode: HandlerTaskMode::Detached,
             log_headers: vec![],
             compression: Default::default(),
