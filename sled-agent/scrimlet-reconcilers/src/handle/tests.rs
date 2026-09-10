@@ -107,7 +107,7 @@ impl<T: MgsFlavor> Harness<T> {
                 mgs_addr: self.mgs.address(),
                 dpd_addr: dummy_addr,
                 mgd_addr: dummy_addr,
-                bgp_dispatcher_addr: dummy_addr,
+                bgp_socket_config: BgpSocketConfig::for_test(dummy_addr),
             },
         }
     }

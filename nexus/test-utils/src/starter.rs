@@ -97,6 +97,7 @@ use omicron_uuid_kinds::ZpoolUuid;
 use oximeter_collector::Oximeter;
 use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
+use sled_agent_scrimlet_reconcilers::BgpSocketConfig;
 use sled_agent_scrimlet_reconcilers::ScrimletReconcilersMode;
 use sled_agent_types::disk::CompressionAlgorithm;
 use sled_agent_types::disk::DiskIdentity;
@@ -993,15 +994,11 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                 .into();
             let mgd_addr: SocketAddr =
                 self.mgd.get(&slot).unwrap().address().into();
-            // Our test mgd uses --no-bgp-dispatcher, so pass the mgd admin
-            // address as a dummy bgp_dispatcher_addr. As long as tests don't
-            // configure BGP, the reconciler won't use this address.
-            let bgp_dispatcher_addr = mgd_addr;
             let mode = ScrimletReconcilersMode::Test {
                 mgs_addr,
                 dpd_addr,
                 mgd_addr,
-                bgp_dispatcher_addr,
+                bgp_socket_config: BgpSocketConfig::for_test(mgd_addr),
             };
             sled_agent.sled_agent.start_scrimlet_reconcilers(mode);
         }

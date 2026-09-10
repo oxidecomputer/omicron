@@ -6,13 +6,13 @@
 //! zone.
 
 use crate::ScrimletReconcilersMode;
+use crate::handle::BgpSocketConfig;
 use crate::reconciler_task::Reconciler;
 use crate::switch_zone_slot::ThisSledSwitchSlot;
 use bootstrap_agent_lockstep_types::scrimlet_reconcilers::mgd::MgdReconcilerStatus;
 use mg_admin_client::Client;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use slog::Logger;
-use std::net::SocketAddr;
 use std::time::Duration;
 
 mod bfd_reconciler;
@@ -23,10 +23,7 @@ mod static_route_reconciler;
 pub(crate) struct MgdReconciler {
     client: Client,
     switch_slot: ThisSledSwitchSlot,
-    /// The address the mgd bgp-dispatcher is listening on, used to set the
-    /// correct BGP port when creating routers and numbered neighbors. `None`
-    /// means use the standard BGP port 179.
-    bgp_dispatcher_addr: Option<SocketAddr>,
+    bgp_socket_config: BgpSocketConfig,
 }
 
 impl Reconciler for MgdReconciler {
@@ -40,16 +37,18 @@ impl Reconciler for MgdReconciler {
         switch_slot: ThisSledSwitchSlot,
         parent_log: &Logger,
     ) -> Self {
-        let bgp_dispatcher_addr = match mode {
-            ScrimletReconcilersMode::SwitchZone(_) => None,
-            ScrimletReconcilersMode::Test { bgp_dispatcher_addr, .. } => {
-                Some(bgp_dispatcher_addr)
+        let bgp_socket_config = match mode {
+            ScrimletReconcilersMode::SwitchZone(_) => {
+                BgpSocketConfig::default()
+            }
+            ScrimletReconcilersMode::Test { bgp_socket_config, .. } => {
+                bgp_socket_config
             }
         };
         Self {
             client: mode.mgd_client(parent_log),
             switch_slot,
-            bgp_dispatcher_addr,
+            bgp_socket_config,
         }
     }
 
@@ -70,7 +69,7 @@ impl Reconciler for MgdReconciler {
             &self.client,
             &system_networking_config.rack_network_config,
             self.switch_slot,
-            self.bgp_dispatcher_addr,
+            self.bgp_socket_config,
             log,
         )
         .await;

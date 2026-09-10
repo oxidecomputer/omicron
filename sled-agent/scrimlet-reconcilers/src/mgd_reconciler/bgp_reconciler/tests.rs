@@ -195,7 +195,7 @@ fn proptest_valid_input(input: TestInput) {
     match DiffableBgpConfig::from_desired_config(
         &input.rack_network_config(),
         ThisSledSwitchSlot::TEST_FAKE,
-        None,
+        BgpSocketConfig::default(),
         &logctx.log,
     ) {
         Ok(_) => (),
@@ -486,7 +486,7 @@ async fn run_one_proptest_input(
         &client,
         &rack_network_config,
         ThisSledSwitchSlot::TEST_FAKE,
-        None,
+        BgpSocketConfig::default(),
         &log,
     )
     .await
@@ -580,7 +580,7 @@ async fn run_one_proptest_input(
     let desired_config = DiffableBgpConfig::from_desired_config(
         &rack_network_config,
         ThisSledSwitchSlot::TEST_FAKE,
-        None,
+        BgpSocketConfig::default(),
         log,
     )
     .unwrap();
