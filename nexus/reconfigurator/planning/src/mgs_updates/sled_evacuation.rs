@@ -19,6 +19,7 @@ use std::num::NonZeroUsize;
 
 use crate::mgs_updates::UpdateableBoard;
 
+#[derive(Debug, PartialEq, Eq)]
 pub(super) enum EvacuationStatus {
     Evacuated,
     NeedsEvacuatingUpdateDisposition,
@@ -47,6 +48,18 @@ impl EvacuatingSleds {
                 })
                 .collect(),
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_for_test(
+        sleds: impl IntoIterator<Item = (SledUuid, SledConfigGeneration)>,
+    ) -> Self {
+        Self { evacuating_sleds: sleds.into_iter().collect() }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn empty() -> Self {
+        Self { evacuating_sleds: BTreeMap::new() }
     }
 
     pub(super) fn contains(&self, sled_id: &SledUuid) -> bool {
@@ -150,6 +163,16 @@ impl PendingUpdateDispositionChanges {
         Self { by_sled: BTreeMap::new() }
     }
 
+    #[cfg(test)]
+    pub(super) fn len(&self) -> usize {
+        self.by_sled.len()
+    }
+
+    #[cfg(test)]
+    pub(super) fn is_empty(&self) -> bool {
+        self.by_sled.is_empty()
+    }
+
     pub(super) fn insert(
         &mut self,
         sled_id: SledUuid,
@@ -173,5 +196,150 @@ impl PendingUpdateDispositionChanges {
         self,
     ) -> BTreeMap<SledUuid, BlueprintSledUpdateDispositionKind> {
         self.by_sled
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mgs_updates::test_helpers::TestBoards;
+    use iddqd::IdOrdMap;
+
+    #[test]
+    fn test_evacuation_status() {
+        let test_boards =
+            TestBoards::new("planning_mgs_updates_evacuation_status");
+        let sled_0_id = test_boards.sled_id(0).expect("have sled 0");
+        let gen1 = SledConfigGeneration::new();
+        let gen2 = gen1.next();
+        let evacuating_at_gen1 =
+            EvacuatingSleds::new_for_test([(sled_0_id, gen1)]);
+        let evacuating_at_gen2 =
+            EvacuatingSleds::new_for_test([(sled_0_id, gen2)]);
+
+        // A sled that isn't marked for evacuation needs to be.
+        let collection = test_boards.collection_builder().build();
+        assert_eq!(
+            EvacuatingSleds::empty().evacuation_status(sled_0_id, &collection),
+            EvacuationStatus::NeedsEvacuatingUpdateDisposition,
+        );
+
+        // Sled missing from inventory entirely (e.g., mid-reboot).
+        let mut collection = test_boards.collection_builder().build();
+        collection.sled_agents = IdOrdMap::new();
+        assert_eq!(
+            evacuating_at_gen1.evacuation_status(sled_0_id, &collection),
+            EvacuationStatus::WaitingOnEvacuation(
+                WaitingOnSledEvacuationDetails::MissingFromInventory
+            ),
+        );
+
+        // Sled present but hasn't ledgered a config yet.
+        let mut collection = test_boards.collection_builder().build();
+        collection
+            .sled_agents
+            .get_mut(&sled_0_id)
+            .expect("sled 0 in inventory")
+            .ledgered_sled_config = None;
+        assert_eq!(
+            evacuating_at_gen1.evacuation_status(sled_0_id, &collection),
+            EvacuationStatus::WaitingOnEvacuation(
+                WaitingOnSledEvacuationDetails::MissingLedgeredSledConfig
+            ),
+        );
+
+        // Ledgered config is behind the generation that marked the sled
+        // `Evacuating`.
+        let collection =
+            test_boards.collection_builder().sled_evacuated(0, gen1).build();
+        assert_eq!(
+            evacuating_at_gen2.evacuation_status(sled_0_id, &collection),
+            EvacuationStatus::WaitingOnEvacuation(
+                WaitingOnSledEvacuationDetails::WaitingForSledConfigGeneration {
+                    desired: gen2,
+                    current: gen1,
+                }
+            ),
+        );
+
+        // Ledgered config is current, but the instance manager hasn't
+        // received any config at all (e.g., it's still starting up).
+        let collection = test_boards
+            .collection_builder()
+            .instance_manager_status_exception(
+                0,
+                InstanceManagerStatus {
+                    update_disposition:
+                        CurrentUpdateDisposition::ConfigNotAvailable,
+                    num_registered_vmms: 0,
+                },
+            )
+            .build();
+        assert_eq!(
+            evacuating_at_gen1.evacuation_status(sled_0_id, &collection),
+            EvacuationStatus::WaitingOnEvacuation(
+                WaitingOnSledEvacuationDetails::InstanceManagerNoConfig
+            ),
+        );
+
+        // Instance manager still reports `Available`.
+        let collection = test_boards
+            .collection_builder()
+            .instance_manager_status_exception(
+                0,
+                InstanceManagerStatus {
+                    update_disposition: CurrentUpdateDisposition::Known(
+                        OmicronSledUpdateDisposition::Available,
+                    ),
+                    num_registered_vmms: 2,
+                },
+            )
+            .build();
+        assert_eq!(
+            evacuating_at_gen1.evacuation_status(sled_0_id, &collection),
+            EvacuationStatus::WaitingOnEvacuation(
+                WaitingOnSledEvacuationDetails::InstanceManagerAvailable
+            ),
+        );
+
+        // Instance manager is evacuating but still has VMMs registered.
+        let collection = test_boards
+            .collection_builder()
+            .instance_manager_status_exception(
+                0,
+                InstanceManagerStatus {
+                    update_disposition: CurrentUpdateDisposition::Known(
+                        OmicronSledUpdateDisposition::Evacuating,
+                    ),
+                    num_registered_vmms: 2,
+                },
+            )
+            .build();
+        assert_eq!(
+            evacuating_at_gen1.evacuation_status(sled_0_id, &collection),
+            EvacuationStatus::WaitingOnEvacuation(
+                WaitingOnSledEvacuationDetails::InstanceManagerRegisteredVmms {
+                    num_registered_vmms: NonZeroUsize::new(2).unwrap(),
+                }
+            ),
+        );
+
+        // Fully evacuated.
+        let collection =
+            test_boards.collection_builder().sled_evacuated(0, gen1).build();
+        assert_eq!(
+            evacuating_at_gen1.evacuation_status(sled_0_id, &collection),
+            EvacuationStatus::Evacuated,
+        );
+
+        // A ledgered config _newer_ than the one that marked the sled
+        // `Evacuating` is also fine: it can only have been produced by a later
+        // blueprint.
+        let collection =
+            test_boards.collection_builder().sled_evacuated(0, gen2).build();
+        assert_eq!(
+            evacuating_at_gen1.evacuation_status(sled_0_id, &collection),
+            EvacuationStatus::Evacuated,
+        );
     }
 }
