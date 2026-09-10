@@ -29,9 +29,15 @@ use gateway_messages::DumpError;
 use gateway_messages::DumpSegment;
 use gateway_messages::DumpTask;
 use gateway_messages::Header;
+use gateway_messages::HostBootfailPayloadData;
+use gateway_messages::HostInfoRequest;
+use gateway_messages::HostPanicPayloadData;
 use gateway_messages::MgsRequest;
 use gateway_messages::MgsResponse;
+use gateway_messages::PmbusStatus;
+use gateway_messages::PowerRailName;
 use gateway_messages::PowerStateTransition;
+use gateway_messages::PowerStateWithReason;
 use gateway_messages::RotBootInfo;
 use gateway_messages::RotRequest;
 use gateway_messages::RotResponse;
@@ -40,6 +46,7 @@ use gateway_messages::SpError;
 use gateway_messages::SpPort;
 use gateway_messages::SpRequest;
 use gateway_messages::SpStateV2;
+use gateway_messages::StateChangeReason;
 use gateway_messages::ignition::{self, LinkEvents};
 use gateway_messages::sp_impl::Sender;
 use gateway_messages::sp_impl::SpHandler;
@@ -1287,6 +1294,23 @@ impl SpHandler for Handler {
         Ok(power_state.into())
     }
 
+    fn power_state_with_reason(
+        &mut self,
+    ) -> Result<PowerStateWithReason, SpError> {
+        let power_state = self.power_state()?;
+
+        debug!(
+            &self.log, "received power state with reason";
+            "power_state" => ?power_state,
+        );
+
+        Ok(PowerStateWithReason {
+            state: power_state,
+            reason: StateChangeReason::Other,
+            since: 1,
+        })
+    }
+
     fn set_power_state(
         &mut self,
         sender: Sender<Self::VLanId>,
@@ -1726,6 +1750,31 @@ impl SpHandler for Handler {
 
     fn get_host_flash_hash(&mut self, slot: u16) -> Result<[u8; 32], SpError> {
         self.update_state.get_host_flash_hash(slot)
+    }
+
+    fn get_pmbus_status(
+        &mut self,
+        _rail: &PowerRailName,
+    ) -> Result<PmbusStatus, SpError> {
+        Err(SpError::RequestUnsupportedForSp)
+    }
+
+    fn get_host_panic_payload(
+        &mut self,
+        _request: Option<HostInfoRequest>,
+        _len: u32,
+        _trailing_tx_buf: &mut [u8],
+    ) -> Result<HostPanicPayloadData, SpError> {
+        Err(SpError::RequestUnsupportedForSp)
+    }
+
+    fn get_host_bootfail_payload(
+        &mut self,
+        _request: Option<HostInfoRequest>,
+        _len: u32,
+        _trailing_tx_buf: &mut [u8],
+    ) -> Result<HostBootfailPayloadData, SpError> {
+        Err(SpError::RequestUnsupportedForSp)
     }
 }
 

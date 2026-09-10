@@ -5,13 +5,14 @@
 //! Re-exports of the latest versions of all types.
 
 pub mod artifact {
-    pub use crate::v1::artifact::ArtifactConfig;
     pub use crate::v1::artifact::ArtifactCopyFromDepotBody;
     pub use crate::v1::artifact::ArtifactCopyFromDepotResponse;
-    pub use crate::v1::artifact::ArtifactListResponse;
     pub use crate::v1::artifact::ArtifactPathParam;
     pub use crate::v1::artifact::ArtifactPutResponse;
-    pub use crate::v1::artifact::ArtifactQueryParam;
+
+    pub use crate::v52::artifact::ArtifactConfig;
+    pub use crate::v52::artifact::ArtifactListResponse;
+    pub use crate::v52::artifact::ArtifactQueryParam;
 }
 
 pub mod attached_subnet {
@@ -210,9 +211,9 @@ pub mod inventory {
     pub use crate::v51::inventory::OmicronZonesConfig;
     pub use crate::v51::inventory::ZoneSnatConfig;
 
-    pub use crate::v52::inventory::CurrentUpdateDisposition;
-    pub use crate::v52::inventory::InstanceManagerStatus;
-    pub use crate::v52::inventory::Inventory;
+    pub use crate::v53::inventory::CurrentUpdateDisposition;
+    pub use crate::v53::inventory::InstanceManagerStatus;
+    pub use crate::v53::inventory::Inventory;
 
     pub use crate::impls::inventory::FmdHostCaseDisplay;
     pub use crate::impls::inventory::FmdInventoryDisplay;

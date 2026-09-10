@@ -234,14 +234,11 @@ impl Server {
             ..config.deployment.dropshot_external.dropshot.clone()
         };
 
-        let http_server_external = {
-            dropshot::ServerBuilder::new(
-                external_api(),
-                apictx.for_external(),
-                log.new(o!("component" => "dropshot_external")),
-            )
-            .config(config.deployment.dropshot_external.dropshot.clone())
-            .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
+        // The external, techport, and (optional) second external servers all
+        // serve the same API with the same version policy; build it here rather
+        // than repeat it for each server.
+        let external_version_policy = || {
+            dropshot::VersionPolicy::Dynamic(Box::new(
                 dropshot::ClientSpecifiesVersionInHeader::new(
                     omicron_common::api::VERSION_HEADER,
                     nexus_external_api::latest_version(),
@@ -252,13 +249,67 @@ impl Server {
                 // clients that *are* under our control should specify the
                 // api-version header.
                 .on_missing(nexus_external_api::latest_version()),
-            )))
+            ))
+        };
+
+        // Construct each external API server. There's always at least 1, with
+        // an additional server for each extra address.
+        let mut http_servers_external = Vec::with_capacity(
+            1 + config.deployment.dropshot_external_additional_addresses.len(),
+        );
+        let http_server_external = {
+            dropshot::ServerBuilder::new(
+                external_api(),
+                apictx.for_external(),
+                log.new(o!(
+                    "component" => "dropshot_external",
+                    "bind_address" => config
+                        .deployment
+                        .dropshot_external
+                        .dropshot
+                        .bind_address
+                        .ip()
+                        .to_string(),
+                )),
+            )
+            .config(config.deployment.dropshot_external.dropshot.clone())
+            .version_policy(external_version_policy())
             .tls(tls_config.clone().map(dropshot::ConfigTls::Dynamic))
             .start()
             .map_err(|error| {
                 format!("initializing external server: {}", error)
             })?
         };
+        http_servers_external.push(http_server_external);
+
+        // Serve the external API on any additional addresses (e.g. a second
+        // address family for dual stack), reusing the primary external server's
+        // Dropshot configuration with only the bind addresses changed.
+        for bind_address in
+            config.deployment.dropshot_external_additional_addresses.into_iter()
+        {
+            let dropshot_config = ConfigDropshot {
+                bind_address,
+                ..config.deployment.dropshot_external.dropshot.clone()
+            };
+            let server = dropshot::ServerBuilder::new(
+                external_api(),
+                apictx.for_external(),
+                log.new(o!(
+                    "component" => "dropshot_external",
+                    "bind_address" => bind_address.ip().to_string(),
+                )),
+            )
+            .config(dropshot_config)
+            .version_policy(external_version_policy())
+            .tls(tls_config.clone().map(dropshot::ConfigTls::Dynamic))
+            .start()
+            .map_err(|error| {
+                format!("initializing additional external server: {}", error)
+            })?;
+            http_servers_external.push(server);
+        }
+
         let http_server_techport_external = {
             dropshot::ServerBuilder::new(
                 external_api(),
@@ -266,18 +317,7 @@ impl Server {
                 log.new(o!("component" => "dropshot_external_techport")),
             )
             .config(techport_server_config)
-            .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
-                dropshot::ClientSpecifiesVersionInHeader::new(
-                    omicron_common::api::VERSION_HEADER,
-                    nexus_external_api::latest_version(),
-                )
-                // Since we don't have control over all clients to the external
-                // API, we allow the api-version header to not be specified
-                // (picking the latest version in that case). However, all
-                // clients that *are* under our control should specify the
-                // api-version header.
-                .on_missing(nexus_external_api::latest_version()),
-            )))
+            .version_policy(external_version_policy())
             .tls(tls_config.map(dropshot::ConfigTls::Dynamic))
             .start()
             .map_err(|error| {
@@ -297,7 +337,7 @@ impl Server {
             .context
             .nexus
             .set_servers(
-                http_server_external,
+                http_servers_external,
                 http_server_techport_external,
                 http_server_internal,
                 http_server_lockstep,
@@ -578,8 +618,11 @@ impl nexus_test_interface::NexusServer for Server {
         self.apictx.context.nexus.inventory_load_rx()
     }
 
-    fn get_http_server_external_address(&self) -> SocketAddr {
-        self.apictx.context.nexus.get_external_server_address().unwrap()
+    /// Return all the external server addresses.
+    ///
+    /// This is always non-empty.
+    fn get_all_http_server_external_addresses(&self) -> Vec<SocketAddr> {
+        self.apictx.context.nexus.get_all_external_server_addresses().unwrap()
     }
 
     fn get_http_server_techport_address(&self) -> SocketAddr {
