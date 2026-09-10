@@ -534,8 +534,8 @@ filetime = "0.2.26"
 flate2 = "1.1.2"
 float-ord = "0.3.2"
 flume = "0.11.1"
-fmd-adm = { git = "https://github.com/oxidecomputer/fmd-adm", rev = "846361bf0a698a8c7efefd97b2828b9aa74858c4" }
-fmd-adm-sys = { git = "https://github.com/oxidecomputer/fmd-adm", rev = "846361bf0a698a8c7efefd97b2828b9aa74858c4" }
+fmd-adm = { git = "https://github.com/oxidecomputer/fmd-adm", rev = "5b57d8dd36f96778d0c067ec9647ddde9b58ace7" }
+fmd-adm-sys = { git = "https://github.com/oxidecomputer/fmd-adm", rev = "5b57d8dd36f96778d0c067ec9647ddde9b58ace7" }
 foreign-types = "0.3.2"
 fs-err = "3.1.1"
 futures = "0.3.31"
@@ -589,7 +589,7 @@ hyper-util = "0.1.16"
 hyper-rustls = "0.27.7"
 hyper-staticfile = "0.10.1"
 iddqd = { version = "0.4.2", features = ["daft", "serde", "schemars08"] }
-illumos-nvpair = "0.3.0"
+illumos-nvpair = "0.4.0"
 illumos-nvpair-sys = "0.2.0"
 illumos-utils = { path = "illumos-utils" }
 iana-time-zone = "0.1.63"
@@ -619,6 +619,7 @@ libc = "0.2.174"
 linkme = "0.3"
 libipcc = { git = "https://github.com/oxidecomputer/ipcc-rs", rev = "524eb8f125003dff50b9703900c6b323f00f9e1b" }
 libnvme = { git = "https://github.com/oxidecomputer/libnvme", rev = "dd5bb221d327a1bc9287961718c3c10d6bd37da0" }
+libtopo = "0.1.0"
 linear-map = "1.2.0"
 live-tests-macros = { path = "live-tests/macros" }
 lldpd_client = { git = "https://github.com/oxidecomputer/lldp", rev = "54b266174d4de9628bca9c97b0db176e16f12154", package = "lldpd-client" }
