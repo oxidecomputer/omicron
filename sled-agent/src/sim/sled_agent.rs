@@ -44,6 +44,9 @@ use propolis_client::{
 };
 use range_requests::PotentialRange;
 use sled_agent_health_monitor::HealthMonitorHandle;
+use sled_agent_scrimlet_reconcilers::{
+    ScrimletReconcilersMode, ScrimletStatus, SledAgentNetworkingInfo,
+};
 use sled_agent_types::attached_subnet::{AttachedSubnet, AttachedSubnets};
 use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
 use sled_agent_types::disk::DiskIdentity;
@@ -63,7 +66,7 @@ use sled_agent_types::inventory::{
     ConfigReconcilerInventoryStatus, FmdInventory, Inventory, InventoryDataset,
     InventoryDisk, InventoryZpool, OmicronFileSourceResolverInventory,
     OmicronSledConfig, OmicronSledUpdateDisposition,
-    SingleMeasurementInventory, SledRole, ZpoolHealth,
+    SingleMeasurementInventory, ZpoolHealth,
 };
 use sled_agent_types::support_bundle::SupportBundleMetadata;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
@@ -114,10 +117,20 @@ pub struct SledAgent {
     /// When > 0, local storage ensure/delete operations decrement this
     /// counter and return 503 Service Unavailable.
     local_storage_error_count: AtomicU32,
-    pub bootstore_network_config: Mutex<bootstore::NetworkConfig>,
+    pub bootstore_network_config:
+        tokio::sync::watch::Sender<bootstore::NetworkConfig>,
     pub repo_depot: dropshot::HttpServer<ArtifactStore<SimArtifactStorage>>,
     pub log: Logger,
     health_monitor: HealthMonitorHandle,
+    /// Watch channel that sends the deserialized [`SystemNetworkingConfig`]
+    /// whenever Nexus writes a new bootstore config. Present on all sim sleds;
+    /// only scrimlet sleds subscribe to it via [`Self::start_scrimlet_reconcilers`].
+    network_config_tx: tokio::sync::watch::Sender<
+        sled_agent_types::system_networking::SystemNetworkingConfig,
+    >,
+    /// Keeps the scrimlet reconcilers alive.
+    scrimlet_reconcilers:
+        std::sync::Arc<sled_agent_scrimlet_reconcilers::ScrimletReconcilers>,
 }
 
 impl SledAgent {
@@ -138,29 +151,32 @@ impl SledAgent {
         let instance_log = log.new(o!("kind" => "instances"));
         let storage_log = log.new(o!("kind" => "storage"));
 
-        let bootstore_network_config = Mutex::new(
-            EarlyNetworkConfigEnvelope::from(&SystemNetworkingConfig {
-                rack_network_config: RackNetworkConfig {
-                    rack_subnet: Ipv6Net::new(Ipv6Addr::UNSPECIFIED, 56)
-                        .unwrap(),
-                    infra_ip_first: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-                    infra_ip_last: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-                    // The simulated sled-agent doesn't do real uplink setup,
-                    // but `UplinkPorts` must be non-empty, so use a single
-                    // placeholder port.
-                    ports: UplinkPorts::new(vec![PortConfig::empty_for_tests(
-                        "qsfp0",
-                    )])
-                    .expect("placeholder port list is non-empty"),
-                    bgp: Vec::new(),
-                    bfd: Vec::new(),
-                },
-                // TODO-correctness Can we fill this in for the simulated
-                // sled-agent?
-                blueprint_external_networking_config: None,
-            })
-            .serialize_to_bootstore_with_generation(0),
-        );
+        let sys_net_config = SystemNetworkingConfig {
+            rack_network_config: RackNetworkConfig {
+                rack_subnet: Ipv6Net::new(Ipv6Addr::UNSPECIFIED, 56).unwrap(),
+                infra_ip_first: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                infra_ip_last: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                // The simulated sled-agent doesn't do real uplink setup,
+                // but `UplinkPorts` must be non-empty, so use a single
+                // placeholder port.
+                ports: UplinkPorts::new(vec![PortConfig::empty_for_tests(
+                    "qsfp0",
+                )])
+                .expect("placeholder port list is non-empty"),
+                bgp: Vec::new(),
+                bfd: Vec::new(),
+            },
+            // TODO-correctness Can we fill this in for the simulated
+            // sled-agent?
+            blueprint_external_networking_config: None,
+        };
+
+        let initial_bootstore =
+            EarlyNetworkConfigEnvelope::from(&sys_net_config)
+                .serialize_to_bootstore_with_generation(0);
+
+        let (bootstore_network_config, _) =
+            tokio::sync::watch::channel(initial_bootstore);
 
         let storage = Storage::new(
             id.into_untyped_uuid(),
@@ -177,6 +193,56 @@ impl SledAgent {
                 .start(&log, &config.dropshot);
 
         let health_monitor = HealthMonitorHandle::stub();
+
+        let (network_config_tx, _) =
+            tokio::sync::watch::channel(sys_net_config);
+
+        // Spawn a bridge task that watches bootstore changes and publishes
+        // deserialized SystemNetworkingConfig values to network_config_tx.
+        // Only scrimlet sleds subscribe, but the task runs on all sim sleds,
+        // consistent with real sled-agent.
+        let mut bootstore_rx = bootstore_network_config.subscribe();
+        let bridge_tx = network_config_tx.clone();
+        let bridge_log = log.clone();
+        tokio::spawn(async move {
+            loop {
+                if bootstore_rx.changed().await.is_err() {
+                    slog::error!(
+                        bridge_log,
+                        "bootstore_network_config sender dropped - \
+                         bridge task exiting",
+                    );
+                    return;
+                }
+                let config = bootstore_rx.borrow_and_update().clone();
+                match EarlyNetworkConfigEnvelope::deserialize_from_bootstore(
+                    &config,
+                )
+                .and_then(|e| e.deserialize_body())
+                {
+                    Ok(system_config) => {
+                        slog::info!(
+                            bridge_log,
+                            "received new network config from bootstore";
+                            "generation" => %config.generation,
+                        );
+                        bridge_tx.send_modify(|c| *c = system_config);
+                    }
+                    Err(e) => {
+                        slog::error!(
+                            bridge_log,
+                            "failed to deserialize bootstore config; \
+                             will wait for new config then try again";
+                            "error" => %e,
+                        );
+                    }
+                }
+            }
+        });
+
+        let scrimlet_reconcilers = std::sync::Arc::new(
+            sled_agent_scrimlet_reconcilers::ScrimletReconcilers::new(&log),
+        );
 
         Arc::new(SledAgent {
             id,
@@ -202,7 +268,31 @@ impl SledAgent {
             log,
             bootstore_network_config,
             health_monitor,
+            network_config_tx,
+            scrimlet_reconcilers,
         })
+    }
+
+    /// Start the scrimlet reconcilers pointing at the given switch zone service
+    /// addresses. Must only be called once and only on scrimlet sleds.
+    pub fn start_scrimlet_reconcilers(&self, mode: ScrimletReconcilersMode) {
+        // Reconcilers already exist; just provide networking info and mark as
+        // scrimlet.
+        self.scrimlet_reconcilers.set_sled_agent_networking_info_once(
+            SledAgentNetworkingInfo {
+                system_networking_config_rx: self.network_config_tx.subscribe(),
+                mode,
+            },
+        );
+        self.scrimlet_reconcilers.set_scrimlet_status(ScrimletStatus::Scrimlet);
+    }
+
+    /// Returns the current status of the scrimlet reconcilers.
+    pub fn scrimlet_reconcilers_status(
+        &self,
+    ) -> bootstrap_agent_lockstep_types::scrimlet_reconcilers::ScrimletReconcilersStatus
+    {
+        self.scrimlet_reconcilers.status()
     }
 
     pub async fn instance_register(
@@ -927,7 +1017,7 @@ impl SledAgent {
         Ok(Inventory {
             sled_id: self.id,
             sled_agent_address,
-            sled_role: SledRole::Scrimlet,
+            sled_role: self.config.sled_role,
             baseboard_id: self.config.hardware.baseboard.clone().into(),
             usable_hardware_threads: self.config.hardware.hardware_threads,
             usable_physical_ram: ByteCount::try_from(
