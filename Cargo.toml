@@ -756,11 +756,11 @@ progenitor-extras = "0.2.0"
 # NOTE: if you change the pinned revision of the `bhyve_api` and propolis
 # dependencies, you must also update the references in package-manifest.toml to
 # match the new revision.
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", branch = "zl/multicast" }
-propolis-api-types-versions = { git = "https://github.com/oxidecomputer/propolis", branch = "zl/multicast" }
-propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", branch = "zl/multicast" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", branch = "zl/multicast" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", branch = "zl/multicast" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", branch = "zl/voxel" }
+propolis-api-types-versions = { git = "https://github.com/oxidecomputer/propolis", branch = "zl/voxel" }
+propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", branch = "zl/voxel" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", branch = "zl/voxel" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", branch = "zl/voxel" }
 # NOTE: see above!
 proptest = "1.11.0"
 qorb = "0.4.1"
