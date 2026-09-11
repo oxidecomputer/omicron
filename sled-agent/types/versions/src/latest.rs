@@ -146,7 +146,6 @@ pub mod inventory {
     pub use crate::v1::inventory::HostPhase2DesiredContents;
     pub use crate::v1::inventory::HostPhase2DesiredSlots;
     pub use crate::v1::inventory::InventoryDataset;
-    pub use crate::v1::inventory::InventoryDisk;
     pub use crate::v1::inventory::ManifestBootInventory;
     pub use crate::v1::inventory::ManifestInventory;
     pub use crate::v1::inventory::ManifestNonBootInventory;
@@ -213,7 +212,9 @@ pub mod inventory {
 
     pub use crate::v53::inventory::CurrentUpdateDisposition;
     pub use crate::v53::inventory::InstanceManagerStatus;
-    pub use crate::v53::inventory::Inventory;
+
+    pub use crate::v54::inventory::Inventory;
+    pub use crate::v54::inventory::InventoryDisk;
 
     pub use crate::impls::inventory::FmdHostCaseDisplay;
     pub use crate::impls::inventory::FmdInventoryDisplay;

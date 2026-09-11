@@ -970,7 +970,8 @@ impl SledAgent {
                 .map(|info| InventoryDisk {
                     identity: info.identity.clone(),
                     variant: info.variant,
-                    slot: info.slot,
+                    pcie_slot: info.slot,
+                    location: None,
                     active_firmware_slot: 1,
                     next_active_firmware_slot: None,
                     number_of_firmware_slots: 1,

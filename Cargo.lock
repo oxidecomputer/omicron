@@ -3999,7 +3999,7 @@ dependencies = [
 [[package]]
 name = "fmd-adm"
 version = "0.3.0"
-source = "git+https://github.com/oxidecomputer/fmd-adm?rev=846361bf0a698a8c7efefd97b2828b9aa74858c4#846361bf0a698a8c7efefd97b2828b9aa74858c4"
+source = "git+https://github.com/oxidecomputer/fmd-adm?rev=5b57d8dd36f96778d0c067ec9647ddde9b58ace7#5b57d8dd36f96778d0c067ec9647ddde9b58ace7"
 dependencies = [
  "fmd-adm-sys",
  "illumos-nvpair",
@@ -4011,7 +4011,7 @@ dependencies = [
 [[package]]
 name = "fmd-adm-sys"
 version = "0.4.1"
-source = "git+https://github.com/oxidecomputer/fmd-adm?rev=846361bf0a698a8c7efefd97b2828b9aa74858c4#846361bf0a698a8c7efefd97b2828b9aa74858c4"
+source = "git+https://github.com/oxidecomputer/fmd-adm?rev=5b57d8dd36f96778d0c067ec9647ddde9b58ace7#5b57d8dd36f96778d0c067ec9647ddde9b58ace7"
 
 [[package]]
 name = "fnv"
@@ -5560,9 +5560,9 @@ dependencies = [
 
 [[package]]
 name = "illumos-nvpair"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "66fe4718e52c3654c4e6c6501ce8387d334acd0910b7b7bb3a554aad0262d09f"
+checksum = "bde3bf36c186fe406f2ecdc3c9c7fdc7b4ab56babb098006b058bd2d822a5aec"
 dependencies = [
  "illumos-nvpair-sys",
 ]
@@ -6577,6 +6577,24 @@ dependencies = [
  "clap",
  "escape8259",
 ]
+
+[[package]]
+name = "libtopo"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "08099e1e02473bb103f1ad4bfa9c81c04ebf7a638573c72959817a0347040022"
+dependencies = [
+ "illumos-nvpair",
+ "illumos-nvpair-sys",
+ "libtopo-sys",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "libtopo-sys"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e9c1776be01e57714dfe8247395585d69479444508dad3f4e35270801152001"
 
 [[package]]
 name = "libxml"
@@ -14718,6 +14736,7 @@ dependencies = [
  "libc",
  "libefi-illumos",
  "libnvme",
+ "libtopo",
  "macaddr",
  "omicron-common",
  "omicron-test-utils",

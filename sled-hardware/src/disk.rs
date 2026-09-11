@@ -212,18 +212,21 @@ impl DiskFirmware {
 )]
 pub struct UnparsedDisk {
     paths: DiskPaths,
-    slot: i64,
+    pcie_slot: i64,
     variant: DiskVariant,
     identity: DiskIdentity,
     is_boot_disk: bool,
     firmware: DiskFirmware,
+    /// See [`Self::location`].
+    #[serde(default)]
+    location: Option<String>,
 }
 
 impl UnparsedDisk {
     pub fn new(
         devfs_path: Utf8PathBuf,
         dev_path: Option<Utf8PathBuf>,
-        slot: i64,
+        pcie_slot: i64,
         variant: DiskVariant,
         identity: DiskIdentity,
         is_boot_disk: bool,
@@ -231,12 +234,19 @@ impl UnparsedDisk {
     ) -> Self {
         Self {
             paths: DiskPaths { devfs_path, dev_path },
-            slot,
+            pcie_slot,
             variant,
             identity,
             is_boot_disk,
             firmware,
+            location: None,
         }
+    }
+
+    /// Records where this disk sits in the chassis. See [`Self::location`].
+    pub fn with_location(mut self, location: Option<String>) -> Self {
+        self.location = location;
+        self
     }
 
     pub fn paths(&self) -> &DiskPaths {
@@ -259,8 +269,31 @@ impl UnparsedDisk {
         self.is_boot_disk
     }
 
-    pub fn slot(&self) -> i64 {
-        self.slot
+    /// The PCIe physical slot number of the bridge above this disk.
+    ///
+    /// This is the `physical-slot#` property of the parent `pcieb` device.
+    /// It identifies the disk's position in the board's PCIe topology and is
+    /// board-specific: the same U.2 bay has a different number on Gimlet and
+    /// Cosmo. It is not the location label printed on the chassis.
+    pub fn pcie_slot(&self) -> i64 {
+        self.pcie_slot
+    }
+
+    /// Where this disk sits in the chassis, as labelled by the platform's
+    /// hardware topology: "N5" for a U.2 bay, "M.2 East" for a boot device.
+    ///
+    /// This is the operator-facing position, matching what is printed on the
+    /// sled, and is the value to show someone who has to find the drive. It
+    /// comes from libtopo and is best-effort: `None` means the topology had
+    /// no label for the disk or could not be read. A missing location never
+    /// prevents the disk from being used.
+    pub fn location(&self) -> Option<&str> {
+        self.location.as_deref()
+    }
+
+    #[cfg(target_os = "illumos")]
+    pub(crate) fn set_location(&mut self, location: Option<String>) {
+        self.location = location;
     }
 
     pub fn firmware(&self) -> &DiskFirmware {
@@ -285,7 +318,8 @@ impl UnparsedDisk {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PooledDisk {
     pub paths: DiskPaths,
-    pub slot: i64,
+    /// See [`UnparsedDisk::pcie_slot`].
+    pub pcie_slot: i64,
     pub identity: DiskIdentity,
     pub is_boot_disk: bool,
     pub partitions: Vec<Partition>,
@@ -293,6 +327,8 @@ pub struct PooledDisk {
     // disk.
     pub zpool_name: ZpoolName,
     pub firmware: DiskFirmware,
+    /// See [`UnparsedDisk::location`].
+    pub location: Option<String>,
 }
 
 impl PooledDisk {
@@ -328,12 +364,13 @@ impl PooledDisk {
 
         Ok(Self {
             paths: unparsed_disk.paths,
-            slot: unparsed_disk.slot,
+            pcie_slot: unparsed_disk.pcie_slot,
             identity: unparsed_disk.identity,
             is_boot_disk: unparsed_disk.is_boot_disk,
             partitions,
             zpool_name,
             firmware: unparsed_disk.firmware,
+            location: unparsed_disk.location,
         })
     }
 }
