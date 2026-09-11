@@ -42,6 +42,7 @@ use trust_quorum_types::messages::ReconfigureMsg as TqReconfigureMsg;
 use trust_quorum_types::status::CoordinatorStatus;
 use trust_quorum_types::types::Epoch;
 use trust_quorum_types::types::Threshold;
+pub use wicketd_commission_types::rack_setup::MultirackJoinRequest;
 pub use wicketd_commission_types::rack_setup::ServiceIpPoolConfig;
 pub use wicketd_commission_types::rack_setup::ServiceIpPoolError;
 
@@ -246,19 +247,6 @@ fn validate_external_dns(
     }
 
     Ok(())
-}
-
-#[derive(Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
-pub struct MultirackJoinRequest {
-    /// The set of peers required to initialize trust quorum
-    ///
-    /// Unlike RSS, this is not optional for multirack setups. Bootstrap
-    /// addresses are discovered by the bootstrap agent and mapped to the
-    /// `BaseboardId`s.
-    pub trust_quorum_peers: BTreeSet<BaseboardId>,
-
-    /// The rack network configuration for this joining rack
-    pub rack_network_config: RackNetworkConfig,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
