@@ -218,6 +218,74 @@ pub(crate) async fn call_pantry_detach(
     .map(|_response| ())
 }
 
+/// Detach the volume from the Pantry, and it's ok if the Pantry bounced and
+/// lost the attachment.
+pub(crate) async fn call_pantry_detach_ok_if_gone(
+    nexus: &Nexus,
+    log: &slog::Logger,
+    attach_id: Uuid,
+    pantry_address: SocketAddrV6,
+) -> Result<(), IndefiniteRetryOperationWhileError<CruciblePantryClientError>> {
+    let endpoint = format!("http://{}", pantry_address);
+
+    info!(
+        log,
+        "sending detach (ok if gone) for {attach_id} to endpoint {endpoint}",
+    );
+
+    let client = crucible_pantry_client::Client::new(&endpoint);
+
+    let detach_operation = || async {
+        match client.volume_status(&attach_id.to_string()).await {
+            Err(e) => match e {
+                crucible_pantry_client::Error::ErrorResponse(ref rv) => {
+                    if rv.status() == http::StatusCode::NOT_FOUND {
+                        return Ok(());
+                    }
+
+                    return Err(e);
+                }
+
+                _ => {
+                    return Err(e);
+                }
+            },
+
+            Ok(_) => {
+                // volume still attached, proceed
+            }
+        }
+
+        client.detach(&attach_id.to_string()).await.map(|_| ())
+    };
+
+    let gone_check = || async {
+        let result = match is_pantry_gone(nexus, pantry_address, log).await {
+            true => GoneCheckResult::Gone,
+            false => GoneCheckResult::StillAvailable,
+        };
+
+        Ok(result)
+    };
+
+    retry_operation_while_indefinitely(
+        backon_retry_policy_internal_service(),
+        detach_operation,
+        gone_check,
+        |notification| {
+            slog::warn!(
+                log,
+                "failed to detach (ok if gone) {attach_id} from pantry \
+                {pantry_address}, retrying in {:?}",
+                notification.delay;
+                InlineErrorChain::new(&notification.error),
+            );
+        },
+    )
+    .await
+    .map(|_response| ())
+}
+
 pub(crate) fn find_only_new_region(
     log: &Logger,
     existing_datasets_and_regions: Vec<(

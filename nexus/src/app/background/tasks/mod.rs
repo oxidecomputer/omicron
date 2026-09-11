@@ -56,6 +56,7 @@ pub mod sync_switch_configuration;
 pub mod trust_quorum;
 pub mod tuf_artifact_replication;
 pub mod tuf_repo_pruner;
+pub mod user_data_export_coordinator;
 pub mod v2p_mappings;
 pub mod vpc_routes;
 pub mod webhook_deliverator;
