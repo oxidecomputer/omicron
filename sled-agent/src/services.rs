@@ -96,6 +96,7 @@ use sled_hardware::underlay;
 use sled_hardware_types::Baseboard;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
+use std::borrow::Cow;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
@@ -1849,25 +1850,26 @@ impl ServiceManager {
                     Self::opte_interface_set_up_install(&installed_zone)?;
 
                 // We need to tell external_dns to listen on its OPTE port IP
-                // address, which comes from `nic`. Attach the port from its
-                // true external DNS address (`dns_address`).
-                //
-                // Make sure we take the VPC-private IP address with the same
-                // version as the external address.
-                //
-                // TODO(#11008): external DNS should listen on the private IP
-                // address for *all* of its external addresses. For now we bind
-                // a single address, preferring the IPv4 one (else IPv6) to
-                // match `opte_interface_set_up_install`.
-                let dns_address = dns_addresses.temporary_primary_address();
+                // addresses, which come from `nic`. It can have 1 or 2,
+                // depending on how the zone was configured.
+                let dns_port = dns_addresses
+                    .iter()
+                    .next()
+                    .expect("type guarantees this is non-empty")
+                    .port();
                 let private_ips = Self::private_ips_for_external_addresses(
-                    std::iter::once(&dns_address.ip()),
+                    dns_addresses.iter().map(|addr| Cow::Owned(addr.ip())),
                     &nic.ip_config,
                     config.zone_type.kind(),
                 )?;
-                let private_ip = private_ips[0];
-                let private_dns_address =
-                    SocketAddr::new(private_ip, dns_address.port()).to_string();
+
+                // The DNS SMF service accepts one or more socket addresses for
+                // it to listen on as a comma-separated string.
+                let private_dns_addresses = private_ips
+                    .iter()
+                    .map(|ip| SocketAddr::new(*ip, dns_port).to_string())
+                    .collect::<Vec<_>>()
+                    .join(",");
 
                 let external_dns_config = PropertyGroupBuilder::new("config")
                     .add_property(
@@ -1878,7 +1880,7 @@ impl ServiceManager {
                     .add_property(
                         "dns_address",
                         "astring",
-                        private_dns_address,
+                        private_dns_addresses,
                     );
                 let external_dns_service =
                     ServiceBuilder::new("oxide/external_dns").add_instance(
@@ -2222,7 +2224,7 @@ impl ServiceManager {
                 // then collect any additional addresses into a list.
                 let nexus_port = if *external_tls { 443 } else { 80 };
                 let mut private_ips = Self::private_ips_for_external_addresses(
-                    external_ips.iter(),
+                    external_ips.iter().map(Cow::Borrowed),
                     &nic.ip_config,
                     config.zone_type.kind(),
                 )?
@@ -3805,7 +3807,7 @@ impl ServiceManager {
     // those external addresses, i.e., at least one address and as many as one
     // per family.
     fn private_ips_for_external_addresses<'a>(
-        external_ips: impl Iterator<Item = &'a IpAddr> + 'a,
+        external_ips: impl Iterator<Item = Cow<'a, IpAddr>> + 'a,
         ip_config: &'a PrivateIpConfig,
         kind: ZoneKind,
     ) -> Result<Vec<IpAddr>, Error> {
