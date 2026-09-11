@@ -49,7 +49,7 @@
 //!   https://rfd.shared.oxide.computer/rfd/0620#_storage
 
 use crate::config::SushConfig;
-use anyhow::Context;
+use anyhow::{Context, ensure};
 use camino::{Utf8Path, Utf8PathBuf};
 use dropshot::{ConfigDropshot, HandlerTaskMode, HttpServer, ServerBuilder};
 use gateway_client::Client as MgsClient;
@@ -59,7 +59,6 @@ use omicron_common::address::{
 };
 use omicron_common::api::external::ByteCount;
 use omicron_ddm_admin_client::Client as DdmClient;
-use sha3::{Digest as _, Sha3_256};
 use sled_agent_config_reconciler::AvailableDatasetsReceiver;
 use sled_agent_measurements::MeasurementsHandle;
 use sled_hardware_types::BaseboardId;
@@ -81,9 +80,7 @@ use tokio::task::spawn_blocking;
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 use x509_cert::Certificate;
-use x509_cert::der::oid::db::rfc8410::ID_ED_25519;
 use x509_cert::der::{Decode as _, Reader as _, SliceReader};
-use x509_cert::spki::AlgorithmIdentifierOwned;
 use x509_cert::time::Validity;
 
 use sush_common::keys::{EphemeralKey, KeyType, pem_cert_chain};
@@ -495,15 +492,15 @@ async fn poll_mgs_for_cubbies(log: Logger, cubbies: watch::Sender<Cubbies>) {
     }
 }
 
-/// Generate the switch zone proxy's TLS identity: an ephemeral key whose
-/// certificate the RoT signs once, in its signing convention (Ed25519
-/// over the SHA3-256 digest of the TBS certificate). The key and chain
-/// are written as PEM under `zone_root` for the proxy to serve with.
+/// Generate the switch zone proxy's TLS identity. This is an ephemeral,
+/// self-signed certificate carrying the RoT's voucher for its key
+/// (a Trust Quorum signature over the tagged SPKI digest; see RFD 620
+/// §4.6.2.1). The key and chain are written as PEM under `zone_root`
+/// for the proxy to serve with.
 pub async fn generate_proxy_identity(
     log: &Logger,
     zone_root: &Utf8Path,
 ) -> anyhow::Result<()> {
-    // IPCC requests are ioctls, i.e., blocking I/O.
     let (key_pem, chain_pem) = spawn_blocking(generate_proxy_pems).await??;
     let key_path = format!("{zone_root}{SUSH_PROXY_KEY_PATH}");
     let chain_path = format!("{zone_root}{SUSH_PROXY_CERT_CHAIN_PATH}");
@@ -519,31 +516,29 @@ pub async fn generate_proxy_identity(
     Ok(())
 }
 
-/// The proxy's private key and certificate chain, PEM-encoded.
+/// Produce the proxy's private key and certificate chain, both PEM
+/// encoded. The chain is leaf first, the way the client expects it.
+/// Uses IPCC, so performs blocking I/O.
 fn generate_proxy_pems() -> anyhow::Result<(String, String)> {
     let ipcc = Ipcc::new().context("opening IPCC")?;
     let chain_der =
         ipcc.rot_get_tq_cert_chain().context("fetching the TQ cert chain")?;
-    // The RoT returns the chain leaf first, as sprockets assumes too.
     let platform = der_cert_chain(&chain_der)?;
-    let issuer = platform
-        .first()
-        .context("the TQ cert chain is empty")?
-        .tbs_certificate
-        .subject
-        .clone();
-    let leaf = EphemeralKey::new_delegated(
+    ensure!(!platform.is_empty(), "the TQ cert chain is empty");
+    let vouched = EphemeralKey::new_vouched(
         KeyType::Ed25519,
-        "CN=sush-proxy".parse().context("parsing the subject")?,
-        issuer,
+        "CN=sush-proxy,O=Oxide Computer Company,C=US"
+            .parse()
+            .context("parsing the proxy cert subject")?,
         Validity::from_now(SUSH_PROXY_CERT_VALIDITY)
             .context("computing validity")?,
-        AlgorithmIdentifierOwned { oid: ID_ED_25519, parameters: None },
-        |tbs| ipcc.rot_tq_sign(&Sha3_256::digest(tbs)),
+        |digest| ipcc.rot_tq_sign(digest),
     )
     .context("generating the proxy key")?;
-    let key_pem = leaf.private_key_pem().context("encoding the proxy key")?;
-    let chain = once(leaf.cert().clone()).chain(platform).collect::<Vec<_>>();
+    let key_pem =
+        vouched.private_key_pem().context("encoding the proxy key")?;
+    let chain =
+        once(vouched.cert().clone()).chain(platform).collect::<Vec<_>>();
     let chain_pem = pem_cert_chain(chain).context("encoding the chain")?;
     Ok((key_pem, chain_pem))
 }

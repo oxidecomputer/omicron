@@ -472,8 +472,8 @@ enum SwitchService {
 /// How the sush proxy authenticates itself to clients.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum SushProxyTls {
-    /// An ephemeral key with a certificate signed by the RoT at zone startup.
-    Platform,
+    /// An ephemeral key the RoT vouches for at zone startup.
+    Vouched,
     /// No authentication. For development images only, which have no RoT.
     Insecure,
 }
@@ -481,7 +481,7 @@ enum SushProxyTls {
 impl SushProxyTls {
     fn as_str(&self) -> &'static str {
         match self {
-            SushProxyTls::Platform => "platform",
+            SushProxyTls::Vouched => "vouched",
             SushProxyTls::Insecure => "insecure",
         }
     }
@@ -2509,7 +2509,7 @@ impl ServiceManager {
                 }
                 SwitchService::SushProxy { tls, baseboard } => {
                     info!(self.inner.log, "Setting up sush-proxy service");
-                    if let SushProxyTls::Platform = tls {
+                    if let SushProxyTls::Vouched = tls {
                         if let Err(err) = generate_proxy_identity(
                             &self.inner.log,
                             &installed_zone.root(),
@@ -3212,7 +3212,7 @@ impl ServiceManager {
                     SwitchService::Mgd,
                     SwitchService::MgDdm { mode: "transit".to_string() },
                     SwitchService::SushProxy {
-                        tls: SushProxyTls::Platform,
+                        tls: SushProxyTls::Vouched,
                         baseboard: baseboard.clone(),
                     },
                 ]

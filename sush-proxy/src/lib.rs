@@ -26,7 +26,6 @@ use omicron_ddm_admin_client::Client as DdmClient;
 use sled_hardware_types::BaseboardId;
 use sled_hardware_types::underlay::BootstrapInterface;
 use slog::{Logger, debug, warn};
-use sprockets_tls::keys::ResolveSetting;
 use sush_common::targets::{Cubbies, MAX_CUBBY};
 use sush_server::ProxyServer;
 use sush_server::proxy::{Targets, platform_tls};
@@ -40,9 +39,10 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 /// How the proxy authenticates itself to clients.
 #[derive(Clone, Debug)]
 pub enum Tls {
-    /// The sled's platform identity: an ephemeral key that sled-agent
-    /// generates and the RoT signs once, served from local files.
-    Platform { priv_key: Utf8PathBuf, cert_chain: Utf8PathBuf },
+    /// A vouched proxy identity: an ephemeral key that sled-agent
+    /// generates and the RoT vouches for, served from local files
+    /// along with the platform identity chain that validates it.
+    Vouched { priv_key: Utf8PathBuf, cert_chain: Utf8PathBuf },
     /// None. For development images, which have no RoT to sign an
     /// identity with.
     Insecure,
@@ -59,8 +59,8 @@ pub struct Config {
 /// failure returns.
 pub async fn run(log: &Logger, config: Config) -> Result<()> {
     let tls = match config.tls {
-        Tls::Platform { priv_key, cert_chain } => Some(
-            platform_tls(log, ResolveSetting::Local { priv_key, cert_chain })
+        Tls::Vouched { priv_key, cert_chain } => Some(
+            platform_tls(&priv_key, &cert_chain)
                 .context("loading the TLS identity")?,
         ),
         Tls::Insecure => None,

@@ -22,7 +22,6 @@ slog.workspace = true
 slog-async.workspace = true
 slog-dtrace.workspace = true
 slog-term.workspace = true
-sprockets-tls.workspace = true
 sush-common.workspace = true
 sush-server.workspace = true
 tokio.workspace = true

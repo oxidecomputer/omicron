@@ -15757,7 +15757,7 @@ checksum = "b7401a30af6cb5818bb64852270bb722533397edcfc7344954a38f420819ece2"
 [[package]]
 name = "sush-api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sush?rev=4254c920049959270864c5c97ef4b23d79ea46e1#4254c920049959270864c5c97ef4b23d79ea46e1"
+source = "git+https://github.com/oxidecomputer/sush?rev=c2a70e3b579046c3d15cbdbf385c4f3aa9267577#c2a70e3b579046c3d15cbdbf385c4f3aa9267577"
 dependencies = [
  "chrono",
  "dropshot",
@@ -15773,7 +15773,7 @@ dependencies = [
 [[package]]
 name = "sush-common"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sush?rev=4254c920049959270864c5c97ef4b23d79ea46e1#4254c920049959270864c5c97ef4b23d79ea46e1"
+source = "git+https://github.com/oxidecomputer/sush?rev=c2a70e3b579046c3d15cbdbf385c4f3aa9267577#c2a70e3b579046c3d15cbdbf385c4f3aa9267577"
 dependencies = [
  "bytes",
  "bytesize",
@@ -15825,7 +15825,6 @@ dependencies = [
  "slog-async",
  "slog-dtrace",
  "slog-term",
- "sprockets-tls",
  "sush-common",
  "sush-server",
  "tokio",
@@ -15835,7 +15834,7 @@ dependencies = [
 [[package]]
 name = "sush-server"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sush?rev=4254c920049959270864c5c97ef4b23d79ea46e1#4254c920049959270864c5c97ef4b23d79ea46e1"
+source = "git+https://github.com/oxidecomputer/sush?rev=c2a70e3b579046c3d15cbdbf385c4f3aa9267577#c2a70e3b579046c3d15cbdbf385c4f3aa9267577"
 dependencies = [
  "async-trait",
  "atomicwrites",

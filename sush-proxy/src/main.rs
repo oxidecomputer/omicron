@@ -27,12 +27,12 @@ struct Args {
     #[clap(long, value_enum)]
     tls: TlsArg,
 
-    /// The TLS private key (PEM), for `--tls platform`
-    #[clap(long, required_if_eq("tls", "platform"))]
+    /// The TLS private key (PEM), for `--tls vouched`
+    #[clap(long, required_if_eq("tls", "vouched"))]
     priv_key: Option<Utf8PathBuf>,
 
-    /// The TLS certificate chain (PEM), for `--tls platform`
-    #[clap(long, required_if_eq("tls", "platform"))]
+    /// The TLS certificate chain (PEM), for `--tls vouched`
+    #[clap(long, required_if_eq("tls", "vouched"))]
     cert_chain: Option<Utf8PathBuf>,
 
     /// The baseboard (part:serial) of the sled hosting the proxy,
@@ -44,8 +44,8 @@ struct Args {
 /// How the proxy authenticates itself to clients.
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
 enum TlsArg {
-    /// The sled's platform identity, from a local key and chain
-    Platform,
+    /// A vouched proxy identity, from a local key and chain
+    Vouched,
     /// None. For development images only
     Insecure,
 }
@@ -64,7 +64,7 @@ async fn run_proxy() -> anyhow::Result<()> {
         })
         .transpose()?;
     let tls = match tls {
-        TlsArg::Platform => Tls::Platform {
+        TlsArg::Vouched => Tls::Vouched {
             priv_key: priv_key.unwrap(),
             cert_chain: cert_chain.unwrap(),
         },
