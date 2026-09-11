@@ -217,7 +217,6 @@ pub struct UnparsedDisk {
     identity: DiskIdentity,
     is_boot_disk: bool,
     firmware: DiskFirmware,
-    /// See [`Self::location`].
     #[serde(default)]
     location: Option<String>,
 }
