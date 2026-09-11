@@ -3084,7 +3084,11 @@ impl ServiceManager {
 
                     let mut mg_ddm_config = PropertyGroupBuilder::new("config")
                         .add_property("mode", "astring", mode)
-                        .add_property("dendrite", "astring", "true");
+                        .add_property("dendrite", "astring", "true")
+                        // We must bind to "::" so the ddmd scrimlet reconciler
+                        // in the global zone can reach the ddm-admin port in
+                        // the switch zone via the underlay network.
+                        .add_property("admin_host", "astring", "::");
 
                     if let Some(i) = info {
                         mg_ddm_config = mg_ddm_config
