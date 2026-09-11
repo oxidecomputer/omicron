@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "51.0.0"
+    "version": "52.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -51,7 +51,7 @@
             "name": "generation",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/Generation"
+              "$ref": "#/components/schemas/ArtifactConfigGeneration"
             }
           }
         ],
@@ -104,7 +104,7 @@
             "name": "generation",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/Generation"
+              "$ref": "#/components/schemas/ArtifactConfigGeneration"
             }
           }
         ],
@@ -2966,19 +2966,37 @@
           "artifacts": {
             "type": "array",
             "items": {
+              "x-rust-type": {
+                "crate": "byte-wrapper",
+                "path": "byte_wrapper::HexArray::<32>",
+                "version": "0.1.0"
+              },
               "type": "string",
-              "format": "hex string (32 bytes)"
+              "pattern": "^[0-9a-fA-F]{64}$",
+              "minLength": 64,
+              "maxLength": 64
             },
             "uniqueItems": true
           },
           "generation": {
-            "$ref": "#/components/schemas/Generation"
+            "$ref": "#/components/schemas/ArtifactConfigGeneration"
           }
         },
         "required": [
           "artifacts",
           "generation"
         ]
+      },
+      "ArtifactConfigGeneration": {
+        "description": "Generation numbers stored in the database, used for optimistic concurrency control",
+        "x-rust-type": {
+          "crate": "omicron-generation-kinds",
+          "path": "omicron_generation_kinds::ArtifactConfigGeneration",
+          "version": "*"
+        },
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0
       },
       "ArtifactCopyFromDepotBody": {
         "description": "Request body for copying artifacts from a depot.",
@@ -3001,7 +3019,7 @@
         "type": "object",
         "properties": {
           "generation": {
-            "$ref": "#/components/schemas/Generation"
+            "$ref": "#/components/schemas/ArtifactConfigGeneration"
           },
           "list": {
             "type": "object",

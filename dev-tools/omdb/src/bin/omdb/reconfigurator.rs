@@ -422,6 +422,8 @@ async fn cmd_reconfigurator_config_history(
         planner_enabled: String,
         tuf_repo_pruner_enabled: String,
         disruption_policy: String,
+        blueprint_pruner_enabled: String,
+        blueprint_pruner_nkeep: String,
         time_modified: String,
     }
 
@@ -436,6 +438,8 @@ async fn cmd_reconfigurator_config_history(
                         planner_config: PlannerConfig {},
                         tuf_repo_pruner_enabled,
                         disruption_policy,
+                        blueprint_pruner_enabled,
+                        blueprint_pruner_nkeep,
                     },
                 time_modified,
             } = s;
@@ -444,6 +448,8 @@ async fn cmd_reconfigurator_config_history(
                 planner_enabled: planner_enabled.to_string(),
                 tuf_repo_pruner_enabled: tuf_repo_pruner_enabled.to_string(),
                 disruption_policy: disruption_policy.to_string(),
+                blueprint_pruner_enabled: blueprint_pruner_enabled.to_string(),
+                blueprint_pruner_nkeep: blueprint_pruner_nkeep.to_string(),
                 time_modified: time_modified.to_string(),
             }
         })

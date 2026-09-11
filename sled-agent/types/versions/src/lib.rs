@@ -107,6 +107,8 @@ pub mod v49;
 pub mod v50;
 #[path = "multiple_zone_external_ips/mod.rs"]
 pub mod v51;
+#[path = "typed_artifact_config_generation/mod.rs"]
+pub mod v52;
 #[path = "add_probe_put_endpoint/mod.rs"]
 pub mod v6;
 #[path = "multicast_support/mod.rs"]

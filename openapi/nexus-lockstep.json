@@ -9061,6 +9061,14 @@
       "ReconfiguratorConfig": {
         "type": "object",
         "properties": {
+          "blueprint_pruner_enabled": {
+            "type": "boolean"
+          },
+          "blueprint_pruner_nkeep": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
           "disruption_policy": {
             "$ref": "#/components/schemas/ReconfiguratorDisruptionPolicy"
           },
@@ -9080,6 +9088,8 @@
           }
         },
         "required": [
+          "blueprint_pruner_enabled",
+          "blueprint_pruner_nkeep",
           "disruption_policy",
           "planner_enabled",
           "tuf_repo_pruner_enabled"
