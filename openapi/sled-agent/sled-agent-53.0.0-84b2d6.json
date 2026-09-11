@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "51.0.0"
+    "version": "53.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -51,7 +51,7 @@
             "name": "generation",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/Generation"
+              "$ref": "#/components/schemas/ArtifactConfigGeneration"
             }
           }
         ],
@@ -104,7 +104,7 @@
             "name": "generation",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/Generation"
+              "$ref": "#/components/schemas/ArtifactConfigGeneration"
             }
           }
         ],
@@ -2966,19 +2966,37 @@
           "artifacts": {
             "type": "array",
             "items": {
+              "x-rust-type": {
+                "crate": "byte-wrapper",
+                "path": "byte_wrapper::HexArray::<32>",
+                "version": "0.1.0"
+              },
               "type": "string",
-              "format": "hex string (32 bytes)"
+              "pattern": "^[0-9a-fA-F]{64}$",
+              "minLength": 64,
+              "maxLength": 64
             },
             "uniqueItems": true
           },
           "generation": {
-            "$ref": "#/components/schemas/Generation"
+            "$ref": "#/components/schemas/ArtifactConfigGeneration"
           }
         },
         "required": [
           "artifacts",
           "generation"
         ]
+      },
+      "ArtifactConfigGeneration": {
+        "description": "Generation numbers stored in the database, used for optimistic concurrency control",
+        "x-rust-type": {
+          "crate": "omicron-generation-kinds",
+          "path": "omicron_generation_kinds::ArtifactConfigGeneration",
+          "version": "*"
+        },
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0
       },
       "ArtifactCopyFromDepotBody": {
         "description": "Request body for copying artifacts from a depot.",
@@ -3001,7 +3019,7 @@
         "type": "object",
         "properties": {
           "generation": {
-            "$ref": "#/components/schemas/Generation"
+            "$ref": "#/components/schemas/ArtifactConfigGeneration"
           },
           "list": {
             "type": "object",
@@ -4857,6 +4875,42 @@
         ],
         "additionalProperties": false
       },
+      "CurrentUpdateDisposition": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "disposition": {
+                "type": "string",
+                "enum": [
+                  "config_not_available"
+                ]
+              }
+            },
+            "required": [
+              "disposition"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "disposition": {
+                "type": "string",
+                "enum": [
+                  "known"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/OmicronSledUpdateDisposition"
+              }
+            },
+            "required": [
+              "disposition",
+              "value"
+            ]
+          }
+        ]
+      },
       "DatasetConfig": {
         "description": "Configuration information necessary to request a single dataset.\n\nThese datasets are tracked directly by Nexus.",
         "type": "object",
@@ -5907,6 +5961,23 @@
           }
         ]
       },
+      "InstanceManagerStatus": {
+        "type": "object",
+        "properties": {
+          "num_registered_vmms": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "update_disposition": {
+            "$ref": "#/components/schemas/CurrentUpdateDisposition"
+          }
+        },
+        "required": [
+          "num_registered_vmms",
+          "update_disposition"
+        ]
+      },
       "InstanceMetadata": {
         "description": "Metadata used to track statistics about an instance.",
         "type": "object",
@@ -6205,6 +6276,9 @@
               }
             ]
           },
+          "instance_manager_status": {
+            "$ref": "#/components/schemas/InstanceManagerStatus"
+          },
           "last_reconciliation": {
             "nullable": true,
             "allOf": [
@@ -6279,6 +6353,7 @@
           "disks",
           "file_source_resolver",
           "fmd",
+          "instance_manager_status",
           "reconciler_status",
           "reference_measurements",
           "reservoir_size",

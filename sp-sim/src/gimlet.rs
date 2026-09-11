@@ -29,9 +29,15 @@ use gateway_messages::DumpError;
 use gateway_messages::DumpSegment;
 use gateway_messages::DumpTask;
 use gateway_messages::Header;
+use gateway_messages::HostBootfailPayloadData;
+use gateway_messages::HostInfoRequest;
+use gateway_messages::HostPanicPayloadData;
 use gateway_messages::MgsRequest;
 use gateway_messages::MgsResponse;
+use gateway_messages::PmbusStatus;
+use gateway_messages::PowerRailName;
 use gateway_messages::PowerStateTransition;
+use gateway_messages::PowerStateWithReason;
 use gateway_messages::RotBootInfo;
 use gateway_messages::RotRequest;
 use gateway_messages::RotResponse;
@@ -40,6 +46,7 @@ use gateway_messages::SpError;
 use gateway_messages::SpPort;
 use gateway_messages::SpRequest;
 use gateway_messages::SpStateV2;
+use gateway_messages::StateChangeReason;
 use gateway_messages::ignition::{self, LinkEvents};
 use gateway_messages::sp_impl::Sender;
 use gateway_messages::sp_impl::SpHandler;
@@ -1289,8 +1296,19 @@ impl SpHandler for Handler {
 
     fn power_state_with_reason(
         &mut self,
-    ) -> Result<gateway_messages::PowerStateWithReason, SpError> {
-        Err(SpError::RequestUnsupportedForSp)
+    ) -> Result<PowerStateWithReason, SpError> {
+        let power_state = self.power_state()?;
+
+        debug!(
+            &self.log, "received power state with reason";
+            "power_state" => ?power_state,
+        );
+
+        Ok(PowerStateWithReason {
+            state: power_state,
+            reason: StateChangeReason::Other,
+            since: 1,
+        })
     }
 
     fn set_power_state(
@@ -1752,34 +1770,26 @@ impl SpHandler for Handler {
 
     fn get_pmbus_status(
         &mut self,
-        rail: &gateway_messages::PowerRailName,
-    ) -> Result<gateway_messages::PmbusStatus, SpError> {
-        // TODO(eliza): we're gonna want a way to configure fake PMBus statuses
-        // in the config file...
-        warn!(
-            &self.log,
-            "asked to read PMBus status, which the simulator doesn't
-             implement yet";
-            "rail" => ?rail,
-        );
+        rail: &PowerRailName,
+    ) -> Result<PmbusStatus, SpError> {
         Err(SpError::RequestUnsupportedForSp)
     }
 
     fn get_host_panic_payload(
         &mut self,
-        _request: Option<gateway_messages::HostInfoRequest>,
+        _request: Option<HostInfoRequest>,
         _len: u32,
         _trailing_tx_buf: &mut [u8],
-    ) -> Result<gateway_messages::HostPanicPayloadData, SpError> {
+    ) -> Result<HostPanicPayloadData, SpError> {
         Err(SpError::RequestUnsupportedForSp)
     }
 
     fn get_host_bootfail_payload(
         &mut self,
-        _request: Option<gateway_messages::HostInfoRequest>,
+        _request: Option<HostInfoRequest>,
         _len: u32,
         _trailing_tx_buf: &mut [u8],
-    ) -> Result<gateway_messages::HostBootfailPayloadData, SpError> {
+    ) -> Result<HostBootfailPayloadData, SpError> {
         Err(SpError::RequestUnsupportedForSp)
     }
 }

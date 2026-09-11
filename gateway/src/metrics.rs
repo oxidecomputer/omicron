@@ -1282,7 +1282,7 @@ fn comms_error_str(error: CommunicationError) -> &'static str {
             "host_panic_data_changed"
         }
         CommunicationError::HostBootfailDataChanged { .. } => {
-            "host_bootfail_data_changed"
+            "host_boot_fail_data_changed"
         }
     }
 }

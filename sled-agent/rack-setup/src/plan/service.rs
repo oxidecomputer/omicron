@@ -1396,6 +1396,7 @@ mod tests {
     use sled_agent_types::early_networking::UplinkPorts;
     use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
     use sled_agent_types::inventory::FmdInventory;
+    use sled_agent_types::inventory::InstanceManagerStatus;
     use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
     use sled_agent_types::inventory::SledCpuFamily;
     use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
@@ -1615,6 +1616,7 @@ mod tests {
                 ledgered_sled_config: None,
                 reconciler_status: ConfigReconcilerInventoryStatus::NotYetRun,
                 last_reconciliation: None,
+                instance_manager_status: InstanceManagerStatus::available(0),
                 file_source_resolver:
                     OmicronFileSourceResolverInventory::new_fake(),
                 smf_services_enabled_not_online:

@@ -58,6 +58,7 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
             name: "my-proj".parse().unwrap(),
             description: "a project".to_string(),
         },
+        defaults: None,
     };
 
     // hitting auth-gated API endpoint without session cookie 401s
