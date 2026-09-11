@@ -34,16 +34,16 @@ impl<'a> BlippyReport<'a> {
         match key {
             BlippyReportSortKey::Kind => {
                 self.notes.sort_unstable_by(|a, b| {
-                    let a = (&a.kind, &a.severity);
-                    let b = (&b.kind, &b.severity);
-                    a.cmp(&b)
+                    a.kind
+                        .compare_to(&b.kind)
+                        .then_with(|| a.severity.cmp(&b.severity))
                 });
             }
             BlippyReportSortKey::Severity => {
                 self.notes.sort_unstable_by(|a, b| {
-                    let a = (&a.severity, &a.kind);
-                    let b = (&b.severity, &b.kind);
-                    a.cmp(&b)
+                    a.severity
+                        .cmp(&b.severity)
+                        .then_with(|| a.kind.compare_to(&b.kind))
                 });
             }
         }
