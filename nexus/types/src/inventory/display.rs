@@ -666,14 +666,10 @@ fn display_sleds(
             writeln!(indented, "physical disks:")?;
         }
         for disk in disks {
-            let PhysicalDisk { identity, variant, pcie_slot, location, .. } =
-                disk;
+            let PhysicalDisk { identity, variant, location, .. } = disk;
+            let loc = location.as_deref().unwrap_or("unknown location");
             let mut indent2 = IndentWriter::new("  ", &mut indented);
-            write!(indent2, "{variant:?}: {identity:?} in {pcie_slot}")?;
-            if let Some(location) = location {
-                write!(indent2, " ({location})")?;
-            }
-            writeln!(indent2)?;
+            writeln!(indent2, "{variant:?}: {identity:?} in {loc}")?;
         }
 
         if !zpools.is_empty() {
