@@ -1917,16 +1917,7 @@ fn zone_sort_key<T: ZoneSortKey>(z: &T) -> impl Ord + use<T> {
 ///
 /// Part of [`BlueprintSledConfig`].
 #[derive(
-    Debug,
-    Clone,
-    Eq,
-    PartialEq,
-    Ord,
-    PartialOrd,
-    JsonSchema,
-    Deserialize,
-    Serialize,
-    Diffable,
+    Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
 )]
 pub struct BlueprintZoneConfig {
     /// The disposition (desired state) of this zone recorded in the blueprint.
@@ -2001,8 +1992,6 @@ impl From<BlueprintZoneConfig> for OmicronZoneConfig {
     PartialEq,
     Eq,
     Hash,
-    PartialOrd,
-    Ord,
     JsonSchema,
     Deserialize,
     Serialize,
@@ -2107,8 +2096,6 @@ impl fmt::Display for BlueprintZoneDisposition {
     PartialEq,
     Eq,
     Hash,
-    PartialOrd,
-    Ord,
     JsonSchema,
     Deserialize,
     Serialize,

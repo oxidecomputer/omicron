@@ -7909,6 +7909,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "sled-agent-types",
+ "strum 0.27.2",
  "tufaceous-artifact 0.2.0",
 ]
 
