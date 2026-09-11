@@ -393,6 +393,10 @@ task: "inventory_loader"
     loads the latest inventory collection from the DB
 
 
+task: "local_storage_delete"
+    delete resources for disks backed by local storage
+
+
 task: "lookup_region_port"
     fill in missing ports for region records
 
@@ -873,6 +877,14 @@ task: "inventory_loader"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     loaded latest inventory collection as of <REDACTED_TIMESTAMP>:
         collection ..........<REDACTED_UUID>..........., taken at <REDACTED_TIMESTAMP>
+
+task: "local_storage_delete"
+  configured period: every <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    result of deleting local storage:
+    result of deallocating local storage:
+    errors: 0
 
 task: "lookup_region_port"
   configured period: every <REDACTED_DURATION>m
@@ -1601,6 +1613,14 @@ task: "inventory_loader"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     loaded latest inventory collection as of <REDACTED_TIMESTAMP>:
         collection ..........<REDACTED_UUID>..........., taken at <REDACTED_TIMESTAMP>
+
+task: "local_storage_delete"
+  configured period: every <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    result of deleting local storage:
+    result of deallocating local storage:
+    errors: 0
 
 task: "lookup_region_port"
   configured period: every <REDACTED_DURATION>m

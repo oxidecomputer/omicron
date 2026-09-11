@@ -418,12 +418,22 @@ impl super::Nexus {
         let saga_params = sagas::disk_delete::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             project_id: project.id(),
-            disk,
+            disk: disk.clone(),
         };
 
         self.sagas
             .saga_execute::<sagas::disk_delete::SagaDiskDelete>(saga_params)
             .await?;
+
+        match disk {
+            datastore::Disk::Crucible(_) => {
+                // For now, do nothing. Stay tuned!
+            }
+
+            datastore::Disk::LocalStorage(_) => {
+                self.background_tasks.task_local_storage_delete.activate();
+            }
+        }
 
         Ok(())
     }
