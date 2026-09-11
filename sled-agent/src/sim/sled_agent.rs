@@ -26,7 +26,6 @@ use dropshot::HttpError;
 use futures::Stream;
 use iddqd::IdOrdMap;
 use omicron_common::api::external::{ByteCount, Error, ResourceType};
-use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::shared::{
     ResolvedVpcRoute, ResolvedVpcRouteSet, ResolvedVpcRouteState, RouterId,
     RouterKind, RouterVersion, VirtualNetworkInterfaceHost,
@@ -47,7 +46,6 @@ use sled_agent_health_monitor::HealthMonitorHandle;
 use sled_agent_types::attached_subnet::{AttachedSubnet, AttachedSubnets};
 use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
 use sled_agent_types::disk::DiskIdentity;
-use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::disk::DiskVariant;
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::early_networking::PortConfig;
@@ -568,15 +566,6 @@ impl SledAgent {
             ));
         }
         Ok(())
-    }
-
-    pub async fn disk_ensure(
-        self: &Arc<Self>,
-        _disk_id: Uuid,
-        _initial_state: DiskRuntimeState,
-        _target: DiskStateRequested,
-    ) -> Result<DiskRuntimeState, Error> {
-        unimplemented!("Disk attachment not yet implemented");
     }
 
     pub fn artifact_store(&self) -> &ArtifactStore<SimArtifactStorage> {

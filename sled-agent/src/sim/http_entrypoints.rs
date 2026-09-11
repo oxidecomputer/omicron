@@ -24,7 +24,6 @@ use dropshot::RequestContext;
 use dropshot::StreamingBody;
 use dropshot::TypedBody;
 use dropshot::endpoint;
-use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::shared::ExternalIpGatewayMap;
 use omicron_common::api::internal::shared::SledIdentifiers;
 use omicron_common::api::internal::shared::VirtualNetworkInterfaceHost;
@@ -51,7 +50,6 @@ use sled_agent_types::debug::OperatorSwitchZonePolicy;
 use sled_agent_types::diagnostics::{
     SledDiagnosticsLogsDownloadPathParam, SledDiagnosticsLogsDownloadQueryParam,
 };
-use sled_agent_types::disk::{DiskEnsureBody, DiskPathParam};
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::firewall_rules::VpcFirewallRulesEnsureBody;
 use sled_agent_types::instance::SledVmmState;
@@ -80,9 +78,6 @@ use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupContextUpdate, CleanupCount,
     ZoneBundleFilter, ZoneBundleId, ZoneBundleMetadata, ZonePathParam,
 };
-use sled_hardware_types::BaseboardId;
-// Fixed identifiers for prior versions only
-use sled_agent_types_versions::v1;
 use sled_agent_types_versions::v20;
 use sled_agent_types_versions::v25;
 use sled_agent_types_versions::v26;
@@ -93,7 +88,7 @@ use sled_agent_types_versions::v42;
 use sled_agent_types_versions::v47;
 use sled_agent_types_versions::v48;
 use sled_diagnostics::SledDiagnosticsQueryOutput;
-use slog_error_chain::InlineErrorChain;
+use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use trust_quorum_types::messages::{
@@ -243,24 +238,6 @@ impl SledAgentApi for SledAgentSimImpl {
         Ok(HttpResponseUpdatedNoContent())
     }
 
-    async fn disk_put(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<DiskPathParam>,
-        body: TypedBody<DiskEnsureBody>,
-    ) -> Result<HttpResponseOk<DiskRuntimeState>, HttpError> {
-        let sa = rqctx.context();
-        let disk_id = path_params.into_inner().disk_id;
-        let body_args = body.into_inner();
-        Ok(HttpResponseOk(
-            sa.disk_ensure(
-                disk_id,
-                body_args.initial_runtime.clone(),
-                body_args.target.clone(),
-            )
-            .await?,
-        ))
-    }
-
     async fn artifact_config_get(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<ArtifactConfig>, HttpError> {
@@ -393,60 +370,6 @@ impl SledAgentApi for SledAgentSimImpl {
         Ok(HttpResponseOk(vnics))
     }
 
-    async fn read_network_bootstore_config_cache(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<
-        HttpResponseOk<v20::early_networking::EarlyNetworkConfig>,
-        HttpError,
-    > {
-        // Read the current envelope, then convert it back down to the version
-        // we have to report for this (now-removed!) API endpoint.
-        use v20::early_networking::EarlyNetworkConfigBody as BodyV20;
-        use v26::early_networking::EarlyNetworkConfigBody as BodyV26;
-        use v30::early_networking::EarlyNetworkConfigBody as BodyV30;
-        use v33::system_networking::SystemNetworkingConfig as BodyV33;
-        use v39::system_networking::SystemNetworkingConfig as BodyV39;
-        use v42::system_networking::SystemNetworkingConfig as BodyV42;
-        use v47::system_networking::SystemNetworkingConfig as BodyV47;
-
-        let config =
-            rqctx.context().bootstore_network_config.lock().unwrap().clone();
-
-        let envelope =
-            EarlyNetworkConfigEnvelope::deserialize_from_bootstore(&config)
-                .map_err(|err| {
-                    HttpError::for_internal_error(format!(
-                        "could not deserialize bootstore contents: {}",
-                        InlineErrorChain::new(&err)
-                    ))
-                })?;
-        let latest_version_body =
-            envelope.deserialize_body().map_err(|err| {
-                HttpError::for_internal_error(format!(
-                    "could not deserialize early network config body: {}",
-                    InlineErrorChain::new(&err)
-                ))
-            })?;
-
-        // Downconvert from the current version to the v20 version we have to
-        // return from this endpoint.
-        let body_v42 = BodyV42::try_from(BodyV47::from(latest_version_body))
-            .map_err(|err| {
-                HttpError::for_internal_error(format!(
-                    "failed to downconvert early network config: {err:#}"
-                ))
-            })?;
-        let body = BodyV20::from(BodyV26::from(BodyV30::from(BodyV33::from(
-            BodyV39::from(body_v42),
-        ))));
-
-        Ok(HttpResponseOk(v20::early_networking::EarlyNetworkConfig {
-            generation: config.generation,
-            schema_version: BodyV20::SCHEMA_VERSION,
-            body,
-        }))
-    }
-
     async fn write_network_bootstore_config_v48(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<v48::system_networking::WriteNetworkConfigRequest>,
@@ -554,19 +477,6 @@ impl SledAgentApi for SledAgentSimImpl {
     async fn write_network_bootstore_config_v20(
         _rqctx: RequestContext<Self::Context>,
         _body: TypedBody<v20::early_networking::EarlyNetworkConfig>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        // Real sled-agent has to support this endpoint for backwards
-        // compatibility during an update; sim-sled-agent doesn't.
-        Err(HttpError::for_bad_request(
-            None,
-            "old bootstore APIs not supported in simulated sled-agent"
-                .to_string(),
-        ))
-    }
-
-    async fn write_network_bootstore_config_v1(
-        _rqctx: RequestContext<Self::Context>,
-        _body: TypedBody<v1::early_networking::EarlyNetworkConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         // Real sled-agent has to support this endpoint for backwards
         // compatibility during an update; sim-sled-agent doesn't.
@@ -971,12 +881,6 @@ impl SledAgentApi for SledAgentSimImpl {
         method_unimplemented()
     }
 
-    async fn sled_role_get_v1(
-        _rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<v1::inventory::SledRole>, HttpError> {
-        method_unimplemented()
-    }
-
     async fn sled_identifiers(
         _rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<SledIdentifiers>, HttpError> {
@@ -1067,22 +971,6 @@ impl SledAgentApi for SledAgentSimImpl {
         _path_params: Path<SledDiagnosticsLogsDownloadPathParam>,
         _query_params: Query<SledDiagnosticsLogsDownloadQueryParam>,
     ) -> Result<http::Response<dropshot::Body>, HttpError> {
-        method_unimplemented()
-    }
-
-    async fn chicken_switch_destroy_orphaned_datasets_get_v1(
-        _request_context: RequestContext<Self::Context>,
-    ) -> Result<
-        HttpResponseOk<v1::debug::ChickenSwitchDestroyOrphanedDatasets>,
-        HttpError,
-    > {
-        method_unimplemented()
-    }
-
-    async fn chicken_switch_destroy_orphaned_datasets_put_v1(
-        _request_context: RequestContext<Self::Context>,
-        _body: TypedBody<v1::debug::ChickenSwitchDestroyOrphanedDatasets>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         method_unimplemented()
     }
 

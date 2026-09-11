@@ -17,7 +17,6 @@ use dropshot::{
     Query, RequestContext, StreamingBody, TypedBody,
 };
 use omicron_common::api::external::Error;
-use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::shared::{
     ExternalIpGatewayMap, ResolvedVpcRouteSet, ResolvedVpcRouteState,
     SledIdentifiers, VirtualNetworkInterfaceHost,
@@ -40,7 +39,6 @@ use sled_agent_types::debug::OperatorSwitchZonePolicy;
 use sled_agent_types::diagnostics::{
     SledDiagnosticsLogsDownloadPathParam, SledDiagnosticsLogsDownloadQueryParam,
 };
-use sled_agent_types::disk::{DiskEnsureBody, DiskPathParam};
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::firewall_rules::VpcFirewallRulesEnsureBody;
 use sled_agent_types::instance::SledVmmState;
@@ -78,9 +76,7 @@ use trust_quorum_types::messages::{
 use trust_quorum_types::status::{CommitStatus, CoordinatorStatus, NodeStatus};
 
 // Fixed identifiers for prior versions only
-use sled_agent_types_versions::{
-    v1, v20, v25, v26, v30, v33, v39, v42, v47, v48,
-};
+use sled_agent_types_versions::{v20, v25, v26, v30, v33, v39, v42, v47, v48};
 use sled_diagnostics::{
     SledDiagnosticsCommandHttpOutput, SledDiagnosticsQueryOutput,
 };
@@ -604,17 +600,6 @@ impl SledAgentApi for SledAgentImpl {
             .await
     }
 
-    async fn sled_role_get_v1(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<v1::inventory::SledRole>, HttpError> {
-        let sa = rqctx.context();
-        sa.latencies()
-            .instrument_dropshot_handler(&rqctx, async {
-                Ok(HttpResponseOk(sa.get_role()))
-            })
-            .await
-    }
-
     async fn vmm_register(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VmmPathParam>,
@@ -736,29 +721,6 @@ impl SledAgentApi for SledAgentImpl {
             .instrument_dropshot_handler(&rqctx, async {
                 sa.instance_leave_multicast_group(id, &body_args).await?;
                 Ok(HttpResponseUpdatedNoContent())
-            })
-            .await
-    }
-
-    async fn disk_put(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<DiskPathParam>,
-        body: TypedBody<DiskEnsureBody>,
-    ) -> Result<HttpResponseOk<DiskRuntimeState>, HttpError> {
-        let sa = rqctx.context();
-        let disk_id = path_params.into_inner().disk_id;
-        let body_args = body.into_inner();
-        sa.latencies()
-            .instrument_dropshot_handler(&rqctx, async {
-                Ok(HttpResponseOk(
-                    sa.disk_ensure(
-                        disk_id,
-                        body_args.initial_runtime.clone(),
-                        body_args.target.clone(),
-                    )
-                    .await
-                    .map_err(|e| Error::from(e))?,
-                ))
             })
             .await
     }
@@ -929,83 +891,6 @@ impl SledAgentApi for SledAgentImpl {
                 let vnics =
                     sa.list_virtual_nics().await.map_err(Error::from)?;
                 Ok(HttpResponseOk(vnics))
-            })
-            .await
-    }
-
-    async fn read_network_bootstore_config_cache(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<
-        HttpResponseOk<v20::early_networking::EarlyNetworkConfig>,
-        HttpError,
-    > {
-        // This endpoint has been removed, so we're forever pinned to returning
-        // a `v20::early_networking::EarlyNetworkConfigBody`. If a new version
-        // of that type is added, we'll need to update this code to convert from
-        // the version we get back from `deserialize_from_bootstore()` into the
-        // v20 version we need.
-        //
-        // Use shorter names so rustfmt doesn't give up on this function.
-        use v20::early_networking::EarlyNetworkConfigBody as BodyV20;
-        use v26::early_networking::EarlyNetworkConfigBody as BodyV26;
-        use v30::early_networking::EarlyNetworkConfigBody as BodyV30;
-        use v33::system_networking::SystemNetworkingConfig as BodyV33;
-        use v39::system_networking::SystemNetworkingConfig as BodyV39;
-        use v42::system_networking::SystemNetworkingConfig as BodyV42;
-        use v47::system_networking::SystemNetworkingConfig as BodyV47;
-        type LatestEnvelope = EarlyNetworkConfigEnvelope;
-
-        let sa = rqctx.context();
-        sa.latencies()
-            .instrument_dropshot_handler(&rqctx, async {
-                let bs = sa.bootstore();
-
-                // It's a little awkward to create a new subscription
-                // (i.e., a new `watch::Receiver`) any time we receive this
-                // dropshot request, but this request is deprecated anyway so we
-                // don't expect it to be called in practice.
-                let config = bs.network_config_subscribe().borrow().clone();
-                let config = match config {
-                    Some(config) => {
-                        let latest_version_body =
-                            LatestEnvelope::deserialize_from_bootstore(&config)
-                                .and_then(|envelope| {
-                                    envelope.deserialize_body()
-                                })
-                                .map_err(|err| {
-                                    HttpError::for_internal_error(format!(
-                                        "failed to deserialize \
-                                         early network config: {}",
-                                        InlineErrorChain::new(&err),
-                                    ))
-                                })?;
-                        let body_v42 = BodyV42::try_from(BodyV47::from(
-                            latest_version_body,
-                        ))
-                        .map_err(|err| {
-                            HttpError::for_internal_error(format!(
-                                "failed to downconvert early network \
-                                         config: {err:#}"
-                            ))
-                        })?;
-                        let body = BodyV20::from(BodyV26::from(BodyV30::from(
-                            BodyV33::from(BodyV39::from(body_v42)),
-                        )));
-                        v20::early_networking::EarlyNetworkConfig {
-                            generation: config.generation,
-                            schema_version: BodyV20::SCHEMA_VERSION,
-                            body,
-                        }
-                    }
-                    None => {
-                        return Err(HttpError::for_unavail(
-                            None,
-                            "early network config does not exist yet".into(),
-                        ));
-                    }
-                };
-
-                Ok(HttpResponseOk(config))
             })
             .await
     }
@@ -1190,31 +1075,6 @@ impl SledAgentApi for SledAgentImpl {
         )?;
 
         Ok(HttpResponseUpdatedNoContent())
-    }
-
-    // As explained in `sled-agent-api`, we must faithfully implement old
-    // versions of `write_network_bootstore_config()` _without_ upconverting the
-    // request into the latest bootstore `NetworkConfig` we understand.
-    async fn write_network_bootstore_config_v1(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<v1::early_networking::EarlyNetworkConfig>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let sa = rqctx.context();
-        let config = body.into_inner();
-        sa.latencies()
-            .instrument_dropshot_handler(&rqctx, async {
-                let bs = sa.bootstore();
-                bs.update_network_config(NetworkConfig::from(config))
-                    .await
-                    .map_err(|e| {
-                        HttpError::for_internal_error(format!(
-                            "failed to write updated config to boot store: {}",
-                            InlineErrorChain::new(&e)
-                        ))
-                    })?;
-                Ok(HttpResponseUpdatedNoContent())
-            })
-            .await
     }
 
     async fn sled_add(
@@ -1518,59 +1378,6 @@ impl SledAgentApi for SledAgentImpl {
                     .get_logs_for_zone(zone, max_rotated)
                     .await
                     .map_err(HttpError::from)
-            })
-            .await
-    }
-
-    async fn chicken_switch_destroy_orphaned_datasets_get_v1(
-        request_context: RequestContext<Self::Context>,
-    ) -> Result<
-        HttpResponseOk<v1::debug::ChickenSwitchDestroyOrphanedDatasets>,
-        HttpError,
-    > {
-        let sa = request_context.context();
-        sa.latencies()
-            .instrument_dropshot_handler(&request_context, async {
-                // This API has been removed, but we still provide an endpoint for
-                // backwards compatibility. Only `omdb` ever called this endpoint, so we
-                // could probably just always return an error, but we can at least
-                // attempt to do something reasonable. We've removed this chicken switch
-                // and always attempt to destroy orphans, so we can just claim the
-                // chicken switch is always in that state.
-                let destroy_orphans = true;
-                Ok(HttpResponseOk(
-                    v1::debug::ChickenSwitchDestroyOrphanedDatasets {
-                        destroy_orphans,
-                    },
-                ))
-            })
-            .await
-    }
-
-    async fn chicken_switch_destroy_orphaned_datasets_put_v1(
-        request_context: RequestContext<Self::Context>,
-        body: TypedBody<v1::debug::ChickenSwitchDestroyOrphanedDatasets>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let sa = request_context.context();
-        let v1::debug::ChickenSwitchDestroyOrphanedDatasets { destroy_orphans } =
-            body.into_inner();
-        sa.latencies()
-            .instrument_dropshot_handler(&request_context, async {
-                // This API has been removed, but we still provide an endpoint for
-                // backwards compatibility. Only `omdb` ever called this endpoint, so we
-                // could probably just always return an error, but we can at least
-                // attempt to do something reasonable. We've removed this chicken switch
-                // and always attempt to destroy orphans, so we can treat requests to
-                // destroy orphans as successful and attempts to disable it as an error.
-                if destroy_orphans {
-                    Ok(HttpResponseUpdatedNoContent())
-                } else {
-                    Err(HttpError::for_bad_request(
-                    None,
-                    "orphaned dataset destruction can no longer be disabled"
-                        .to_string(),
-                ))
-                }
             })
             .await
     }
