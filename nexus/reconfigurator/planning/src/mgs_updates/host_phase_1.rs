@@ -74,6 +74,7 @@ impl PendingHostPhase2Changes {
         );
     }
 
+    #[cfg(test)]
     pub(super) fn is_empty(&self) -> bool {
         self.by_sled.is_empty()
     }
