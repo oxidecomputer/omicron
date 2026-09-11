@@ -28,7 +28,11 @@ impl From<deployment::ReconfiguratorConfigView> for ReconfiguratorConfig {
             planner_enabled: value.config.planner_enabled,
             time_modified: value.time_modified,
             tuf_repo_pruner_enabled: value.config.tuf_repo_pruner_enabled,
-            disruption_policy: value.config.disruption_policy.into(),
+            disruption_policy: value
+                .config
+                .planner_config
+                .disruption_policy
+                .into(),
             blueprint_pruner_enabled: value.config.blueprint_pruner_enabled,
             blueprint_pruner_nkeep: value.config.blueprint_pruner_nkeep.into(),
         }
@@ -41,9 +45,10 @@ impl From<ReconfiguratorConfig> for deployment::ReconfiguratorConfigView {
             version: value.version.into(),
             config: deployment::ReconfiguratorConfig {
                 planner_enabled: value.planner_enabled,
-                planner_config: deployment::PlannerConfig::default(),
+                planner_config: deployment::PlannerConfig {
+                    disruption_policy: value.disruption_policy.into(),
+                },
                 tuf_repo_pruner_enabled: value.tuf_repo_pruner_enabled,
-                disruption_policy: value.disruption_policy.into(),
                 blueprint_pruner_enabled: value.blueprint_pruner_enabled,
                 blueprint_pruner_nkeep: value.blueprint_pruner_nkeep.into(),
             },

@@ -25,7 +25,7 @@ cockroachdb settings:
     version::::::::::::   (none)
     preserve downgrade:   (not set)
 planner config:
-    (no current planner configs)
+    disruption policy: terminate
 
 
 
