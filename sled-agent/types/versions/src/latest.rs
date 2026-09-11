@@ -204,7 +204,6 @@ pub mod inventory {
     pub use crate::v51::inventory::ConfigReconcilerInventory;
     pub use crate::v51::inventory::ConfigReconcilerInventoryStatus;
     pub use crate::v51::inventory::ExternalDnsAddrs;
-    pub use crate::v51::inventory::Inventory;
     pub use crate::v51::inventory::MAX_ZONE_EXTERNAL_IPS;
     pub use crate::v51::inventory::NexusExternalIps;
     pub use crate::v51::inventory::OmicronSledConfig;
@@ -214,6 +213,10 @@ pub mod inventory {
     pub use crate::v51::inventory::ZoneExternalAddrsError;
     pub use crate::v51::inventory::ZoneSnatConfig;
     pub use crate::v51::inventory::check_external_ip_count;
+
+    pub use crate::v53::inventory::CurrentUpdateDisposition;
+    pub use crate::v53::inventory::InstanceManagerStatus;
+    pub use crate::v53::inventory::Inventory;
 
     pub use crate::impls::inventory::FmdHostCaseDisplay;
     pub use crate::impls::inventory::FmdInventoryDisplay;

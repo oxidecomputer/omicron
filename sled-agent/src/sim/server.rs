@@ -459,7 +459,7 @@ pub async fn run_standalone_server(
                 blueprint_zone_type::InternalDns {
                     dataset: OmicronZoneDataset { pool_name },
                     http_address: http_bound,
-                    dns_address: match dns.dns_server.local_address() {
+                    dns_address: match dns.dns_server.sole_local_address()? {
                         SocketAddr::V4(_) => {
                             panic!("did not expect v4 address")
                         }
@@ -654,7 +654,8 @@ pub async fn run_standalone_server(
                 .expect("no zones are included in the plan"),
         );
 
-        let inventory = server.sled_agent.inventory(underlay_address.into())?;
+        let inventory =
+            server.sled_agent.inventory(underlay_address.into()).await?;
         let mut all_sleds = IdOrdMap::new();
         all_sleds.insert_overwrite(PlannedSledDescription {
             underlay_address,

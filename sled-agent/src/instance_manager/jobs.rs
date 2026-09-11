@@ -7,26 +7,21 @@
 use crate::instance::Instance;
 use crate::instance_manager::VmmRegistrationDisallowedReason;
 use omicron_uuid_kinds::PropolisUuid;
-use sled_agent_config_reconciler::CurrentUpdateDisposition;
+use sled_agent_types::inventory::CurrentUpdateDisposition;
+use sled_agent_types::inventory::InstanceManagerStatus;
 use sled_agent_types::inventory::OmicronSledUpdateDisposition;
 use std::collections::BTreeMap;
 use std::collections::btree_map;
 use std::sync::Arc;
 use std::sync::RwLock;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct InstanceManagerJobsStatus {
-    pub update_disposition: CurrentUpdateDisposition,
-    pub num_registered_vmms: usize,
-}
-
 #[derive(Debug)]
 pub struct InstanceManagerJobsStatusReceiver {
-    status: Arc<RwLock<InstanceManagerJobsStatus>>,
+    status: Arc<RwLock<InstanceManagerStatus>>,
 }
 
 impl InstanceManagerJobsStatusReceiver {
-    pub fn read(&self) -> InstanceManagerJobsStatus {
+    pub fn read(&self) -> InstanceManagerStatus {
         *self.status.read().unwrap()
     }
 }
@@ -66,12 +61,12 @@ pub(super) struct Jobs<T = Instance> {
     // `RegisterNewVmm::insert()` below, which always update `status` when
     // modifying the contents of `jobs`.
     jobs: BTreeMap<PropolisUuid, T>,
-    status: Arc<RwLock<InstanceManagerJobsStatus>>,
+    status: Arc<RwLock<InstanceManagerStatus>>,
 }
 
 impl<T> Jobs<T> {
     pub(super) fn new(update_disposition: CurrentUpdateDisposition) -> Self {
-        let status = Arc::new(RwLock::new(InstanceManagerJobsStatus {
+        let status = Arc::new(RwLock::new(InstanceManagerStatus {
             update_disposition,
             num_registered_vmms: 0,
         }));
@@ -144,7 +139,7 @@ impl<T> Jobs<T> {
 #[derive(Debug)]
 pub(super) struct RegisterNewVmm<'a, T> {
     entry: btree_map::VacantEntry<'a, PropolisUuid, T>,
-    status: &'a RwLock<InstanceManagerJobsStatus>,
+    status: &'a RwLock<InstanceManagerStatus>,
 }
 
 impl<'a, T> RegisterNewVmm<'a, T> {

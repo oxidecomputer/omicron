@@ -23,14 +23,14 @@ use crate::latest::disk::M2Slot;
 use crate::latest::inventory::{
     BootImageHeader, BootPartitionContents, BootPartitionDetails,
     ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
-    ExternalDnsAddrs, FmdHostCase, FmdInventory, FmdInventoryError,
-    FmdResource, HostPhase2DesiredContents, HostPhase2DesiredSlots,
-    ManifestBootInventory, ManifestInventory, ManifestNonBootInventory,
-    MupdateOverrideBootInventory, MupdateOverrideInventory,
-    MupdateOverrideNonBootInventory, NetworkInterface, NexusExternalIps,
-    OmicronFileSourceResolverInventory, OmicronSledConfig,
-    OmicronSledUpdateDisposition, OmicronZoneConfig, OmicronZoneImageSource,
-    OmicronZoneType, OmicronZonesConfig,
+    CurrentUpdateDisposition, ExternalDnsAddrs, FmdHostCase, FmdInventory,
+    FmdInventoryError, FmdResource, HostPhase2DesiredContents,
+    HostPhase2DesiredSlots, InstanceManagerStatus, ManifestBootInventory,
+    ManifestInventory, ManifestNonBootInventory, MupdateOverrideBootInventory,
+    MupdateOverrideInventory, MupdateOverrideNonBootInventory,
+    NetworkInterface, NexusExternalIps, OmicronFileSourceResolverInventory,
+    OmicronSledConfig, OmicronSledUpdateDisposition, OmicronZoneConfig,
+    OmicronZoneImageSource, OmicronZoneType, OmicronZonesConfig,
     RemoveMupdateOverrideBootSuccessInventory, RemoveMupdateOverrideInventory,
     SingleMeasurementInventory, SourceNatConfig, SourceNatConfigGeneric,
     SourceNatConfigV4, SourceNatConfigV6, SvcEnabledNotOnlineState, SvcState,
@@ -1340,6 +1340,21 @@ impl ExternalDnsAddrs {
                     .map(|(ip, port)| SocketAddr::new(*ip, *port))
             })
             .expect("ExternalDnsAddrs is non-empty by construction")
+    }
+}
+
+impl InstanceManagerStatus {
+    /// Helper (primarily for tests) that constructs an
+    /// [`InstanceManagerStatus`] with the
+    /// [`OmicronSledUpdateDisposition::Available`] disposition and the given
+    /// number of registered VMMs.
+    pub fn available(num_registered_vmms: usize) -> Self {
+        Self {
+            update_disposition: CurrentUpdateDisposition::Known(
+                OmicronSledUpdateDisposition::Available,
+            ),
+            num_registered_vmms,
+        }
     }
 }
 

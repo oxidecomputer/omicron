@@ -30,6 +30,7 @@ progenitor::generate_api!(
         UplinkConfig = { derives = [PartialEq, Eq, PartialOrd, Ord] },
     },
     crates = {
+        "iddqd" = "*",
         "omicron-uuid-kinds" = "*",
         "oxide-update-engine-types" = "*",
     },
@@ -71,6 +72,7 @@ progenitor::generate_api!(
         RssStep = bootstrap_agent_lockstep_types::RssStep,
         SpComponentCaboose = wicket_common::inventory::SpComponentCaboose,
         SpComponentInfo = wicket_common::inventory::SpComponentInfo,
+        SpEventReport = wicket_common::update_events::SpEventReport,
         SpIdentifier = wicket_common::inventory::SpIdentifier,
         SpIgnition = wicket_common::inventory::SpIgnition,
         SpIgnitionSystemType = wicket_common::inventory::SpIgnitionSystemType,

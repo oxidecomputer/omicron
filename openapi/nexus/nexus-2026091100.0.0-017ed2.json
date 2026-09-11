@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026090800.0.0"
+    "version": "2026091100.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -16243,9 +16243,6 @@
         "description": "An alert.\n\nAlerts provide notifications about events that occurred in the system at a point in time. See the guide-level documentation on alerts for details.",
         "type": "object",
         "properties": {
-          "alert": {
-            "description": "The alert's data payload.\n\nThe schema for this object depends on the alert class and version."
-          },
           "class": {
             "description": "The alert's class.\n\nSee the guide-level documentation on alerts for details on alert classes.",
             "type": "string"
@@ -16254,6 +16251,9 @@
             "description": "Unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
+          },
+          "payload": {
+            "description": "The alert's data payload.\n\nThe schema for this object depends on the alert class and version."
           },
           "time_created": {
             "description": "Timestamp when this resource was created",
@@ -16273,9 +16273,9 @@
           }
         },
         "required": [
-          "alert",
           "class",
           "id",
+          "payload",
           "time_created",
           "time_modified",
           "version"

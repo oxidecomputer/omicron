@@ -38,6 +38,7 @@ use nexus_types_versions::v2026_02_13_01;
 use nexus_types_versions::v2026_04_16_00;
 use nexus_types_versions::v2026_05_07_00;
 use nexus_types_versions::v2026_06_05_00;
+use nexus_types_versions::v2026_08_14_00;
 use omicron_common::address::IpRange;
 use omicron_common::api::external::{
     http_pagination::{
@@ -87,6 +88,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_09_11_00, ALERT_PAYLOAD),
     (2026_09_08_00, PROJECT_AND_VPC_CREATE_DEFAULTS),
     (2026_08_28_00, SILO_USER_DOCS),
     (2026_08_19_01, BGP_PEER_SRC_ADDR),
@@ -9375,24 +9377,69 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/alerts",
         tags = ["system/alerts"],
-        versions = VERSION_ALERT_LIST..
+        versions = VERSION_ALERT_PAYLOAD..
     }]
     async fn alert_list(
         rqctx: RequestContext<Self::Context>,
         pagination: Query<PaginatedByTimeAndId<latest::alert::AlertListParams>>,
     ) -> Result<HttpResponseOk<ResultsPage<latest::alert::Alert>>, HttpError>;
 
+    /// List alerts
+    ///
+    /// Alerts may be filtered by alert class or alert class glob and by an
+    /// inclusive creation time range.
+    #[endpoint {
+        operation_id = "alert_list",
+        method = GET,
+        path = "/v1/alerts",
+        tags = ["system/alerts"],
+        versions = VERSION_ALERT_LIST..VERSION_ALERT_PAYLOAD
+    }]
+    async fn alert_list_v2026_08_14_00(
+        rqctx: RequestContext<Self::Context>,
+        pagination: Query<
+            PaginatedByTimeAndId<v2026_08_14_00::alert::AlertListParams>,
+        >,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2026_08_14_00::alert::Alert>>,
+        HttpError,
+    > {
+        Self::alert_list(rqctx, pagination).await.map(|HttpResponseOk(page)| {
+            HttpResponseOk(ResultsPage {
+                items: page.items.into_iter().map(Into::into).collect(),
+                next_page: page.next_page,
+            })
+        })
+    }
+
     /// Fetch alert
     #[endpoint {
         method = GET,
         path = "/v1/alerts/{alert_id}",
         tags = ["system/alerts"],
-        versions = VERSION_ALERT_LIST..
+        versions = VERSION_ALERT_PAYLOAD..
     }]
     async fn alert_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::alert::AlertSelector>,
     ) -> Result<HttpResponseOk<latest::alert::Alert>, HttpError>;
+
+    /// Fetch alert
+    #[endpoint {
+        operation_id = "alert_view",
+        method = GET,
+        path = "/v1/alerts/{alert_id}",
+        tags = ["system/alerts"],
+        versions = VERSION_ALERT_LIST..VERSION_ALERT_PAYLOAD
+    }]
+    async fn alert_view_v2026_08_14_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::alert::AlertSelector>,
+    ) -> Result<HttpResponseOk<v2026_08_14_00::alert::Alert>, HttpError> {
+        Self::alert_view(rqctx, path_params)
+            .await
+            .map(|HttpResponseOk(alert)| HttpResponseOk(alert.into()))
+    }
 
     /// List alert classes
     #[endpoint {
