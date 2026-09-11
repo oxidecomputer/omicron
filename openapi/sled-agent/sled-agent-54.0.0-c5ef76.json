@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "53.0.0"
+    "version": "54.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -6441,6 +6441,11 @@
           "identity": {
             "$ref": "#/components/schemas/DiskIdentity"
           },
+          "location": {
+            "nullable": true,
+            "description": "Where this disk sits in the chassis, as labelled by the platform's hardware topology: \"N5\" for a U.2 bay, \"M.2 East\" for a boot device.\n\nThis is the operator-facing position, matching what is printed on the sled. It is best-effort: `None` means the topology had no label for the disk or could not be read.",
+            "type": "string"
+          },
           "next_active_firmware_slot": {
             "nullable": true,
             "type": "integer",
@@ -6452,7 +6457,8 @@
             "format": "uint8",
             "minimum": 0
           },
-          "slot": {
+          "pcie_slot": {
+            "description": "PCIe physical slot number of the bridge above this disk.\n\nThis is the `physical-slot#` of the parent `pcieb` device. It is internal to the board's PCIe topology and board-specific: the same U.2 bay is numbered differently on Gimlet and Cosmo. It is not the location label printed on the chassis; see `location` for that.",
             "type": "integer",
             "format": "int64"
           },
@@ -6474,7 +6480,7 @@
           "active_firmware_slot",
           "identity",
           "number_of_firmware_slots",
-          "slot",
+          "pcie_slot",
           "slot1_is_read_only",
           "slot_firmware_versions",
           "variant"

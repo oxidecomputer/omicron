@@ -3092,14 +3092,15 @@ impl DataStore {
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
-                paginator =
-                    p.found_batch(&batch, &|row| (row.sled_id(), row.slot()));
+                paginator = p.found_batch(&batch, &|row| {
+                    (row.sled_id(), row.pcie_slot())
+                });
                 for firmware in batch {
                     disk_firmware
                         .entry(firmware.sled_id().into())
                         .or_default()
                         .insert(
-                            firmware.slot(),
+                            firmware.pcie_slot(),
                             nexus_types::inventory::PhysicalDiskFirmware::from(
                                 firmware,
                             ),
@@ -3138,12 +3139,12 @@ impl DataStore {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
                 paginator =
-                    p.found_batch(&batch, &|row| (row.sled_id, row.slot));
+                    p.found_batch(&batch, &|row| (row.sled_id, row.pcie_slot));
                 for disk in batch {
                     let sled_id = disk.sled_id.into();
                     let firmware = disk_firmware
                         .get(&sled_id)
-                        .and_then(|lookup| lookup.get(&disk.slot))
+                        .and_then(|lookup| lookup.get(&disk.pcie_slot))
                         .unwrap_or(&nexus_types::inventory::PhysicalDiskFirmware::Unknown);
 
                     disks.entry(sled_id).or_default().push(
@@ -3154,7 +3155,8 @@ impl DataStore {
                                 serial: disk.serial,
                             },
                             variant: disk.variant.into(),
-                            pcie_slot: disk.slot,
+                            pcie_slot: disk.pcie_slot,
+                            location: disk.location,
                             firmware: firmware.clone(),
                         },
                     );

@@ -7581,7 +7581,9 @@ async fn cmd_db_inventory_physical_disks(
     struct DiskRow {
         inv_collection_id: Uuid,
         sled_id: Uuid,
-        slot: i64,
+        pcie_slot: i64,
+        #[tabled(display_with = "display_option_blank")]
+        location: Option<String>,
         vendor: String,
         model: String,
         serial: String,
@@ -7634,7 +7636,8 @@ async fn cmd_db_inventory_physical_disks(
         DiskRow {
             inv_collection_id: disk.inv_collection_id.into_untyped_uuid(),
             sled_id: disk.sled_id.into_untyped_uuid(),
-            slot: disk.slot,
+            pcie_slot: disk.pcie_slot,
+            location: disk.location.clone(),
             vendor: disk.vendor,
             model: disk.model.clone(),
             serial: disk.serial.clone(),

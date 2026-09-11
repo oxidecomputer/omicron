@@ -2359,11 +2359,17 @@ impl From<InvSvcEnabledNotOnlineState> for SvcEnabledNotOnlineState {
 pub struct InvPhysicalDisk {
     pub inv_collection_id: DbTypedUuid<CollectionKind>,
     pub sled_id: DbTypedUuid<SledKind>,
-    pub slot: i64,
+    /// See [`nexus_types::inventory::PhysicalDisk::pcie_slot`]. The column
+    /// keeps its original name because columns cannot be renamed
+    /// idempotently.
+    #[diesel(column_name = slot)]
+    pub pcie_slot: i64,
     pub vendor: String,
     pub model: String,
     pub serial: String,
     pub variant: PhysicalDiskKind,
+    /// See [`nexus_types::inventory::PhysicalDisk::location`].
+    pub location: Option<String>,
 }
 
 impl InvPhysicalDisk {
@@ -2375,11 +2381,12 @@ impl InvPhysicalDisk {
         Self {
             inv_collection_id: inv_collection_id.into(),
             sled_id: sled_id.into(),
-            slot: disk.pcie_slot,
+            pcie_slot: disk.pcie_slot,
             vendor: disk.identity.vendor,
             model: disk.identity.model,
             serial: disk.identity.serial,
             variant: disk.variant.into(),
+            location: disk.location,
         }
     }
 }
@@ -2410,7 +2417,9 @@ pub enum InvNvmeDiskFirmwareError {
 pub struct InvNvmeDiskFirmware {
     inv_collection_id: DbTypedUuid<CollectionKind>,
     sled_id: DbTypedUuid<SledKind>,
-    slot: i64,
+    /// See [`InvPhysicalDisk::pcie_slot`].
+    #[diesel(column_name = slot)]
+    pcie_slot: i64,
     active_slot: SqlU8,
     next_active_slot: Option<SqlU8>,
     number_of_slots: SqlU8,
@@ -2496,7 +2505,7 @@ impl InvNvmeDiskFirmware {
         Ok(Self {
             inv_collection_id: inv_collection_id.into(),
             sled_id: sled_id.into(),
-            slot: sled_slot,
+            pcie_slot: sled_slot,
             active_slot: firmware.active_slot.into(),
             next_active_slot: firmware.next_active_slot.map(|nas| nas.into()),
             number_of_slots: firmware.number_of_slots.into(),
@@ -2538,8 +2547,8 @@ impl InvNvmeDiskFirmware {
         self.sled_id
     }
 
-    pub fn slot(&self) -> i64 {
-        self.slot
+    pub fn pcie_slot(&self) -> i64 {
+        self.pcie_slot
     }
 
     pub fn number_of_slots(&self) -> SqlU8 {

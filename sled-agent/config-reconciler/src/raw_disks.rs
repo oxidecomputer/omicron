@@ -111,7 +111,8 @@ impl RawDisksSender {
                 InventoryDisk {
                     identity: disk.identity().clone(),
                     variant: disk.variant(),
-                    slot: disk.pcie_slot(),
+                    pcie_slot: disk.pcie_slot(),
+                    location: disk.location().map(str::to_string),
                     active_firmware_slot: firmware.active_slot(),
                     next_active_firmware_slot: firmware.next_active_slot(),
                     number_of_firmware_slots: firmware.number_of_slots(),
