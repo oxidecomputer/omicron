@@ -59,3 +59,16 @@ binary_allow_list = [
   "sled-agent",
   "sled-agent-sim",
 ]
+
+# libtopo is the illumos hardware topology library, used by sled-hardware to
+# find each disk's chassis location. Like libnvme, it is only needed by
+# programs that inspect a sled's hardware from the global zone.
+[libraries."libtopo.so.1"]
+binary_allow_list = [
+  "installinator",
+  "omicron-dev",
+  "omicron-package",
+  "services-ledger-check-migrate",
+  "sled-agent",
+  "sled-agent-sim",
+]
