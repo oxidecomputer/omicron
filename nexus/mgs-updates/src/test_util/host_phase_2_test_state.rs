@@ -245,6 +245,7 @@ mod api_impl {
     use sled_agent_types::inventory::FmdInventory;
     use sled_agent_types::inventory::HostPhase2DesiredContents;
     use sled_agent_types::inventory::HostPhase2DesiredSlots;
+    use sled_agent_types::inventory::InstanceManagerStatus;
     use sled_agent_types::inventory::Inventory;
     use sled_agent_types::inventory::ManifestInventory;
     use sled_agent_types::inventory::MupdateOverrideInventory;
@@ -385,6 +386,7 @@ mod api_impl {
                     remove_mupdate_override: None,
                     boot_partitions,
                 }),
+                instance_manager_status: InstanceManagerStatus::available(0),
                 fmd: Ok(FmdInventory::default()),
                 file_source_resolver: OmicronFileSourceResolverInventory {
                     zone_manifest: ManifestInventory {
