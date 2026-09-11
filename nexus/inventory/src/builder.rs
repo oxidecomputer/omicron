@@ -1174,9 +1174,14 @@ mod test {
         assert_eq!(sled1_bb.part_number, "model1");
         assert_eq!(sled1_bb.serial_number, "s1");
         assert_eq!(sled1_agent.disks.len(), 4);
-        assert_eq!(sled1_agent.disks[0].identity.vendor, "macrohard");
-        assert_eq!(sled1_agent.disks[0].identity.model, "box");
-        assert_eq!(sled1_agent.disks[0].identity.serial, "XXIV");
+        assert_eq!(sled1_agent.disks[0].identity.vendor, "memetendo");
+        assert_eq!(sled1_agent.disks[0].pcie_slot, 0);
+        assert_eq!(sled1_agent.disks[0].location.as_deref(), Some("N0"));
+        assert_eq!(sled1_agent.disks[3].identity.vendor, "macrohard");
+        assert_eq!(sled1_agent.disks[3].identity.model, "box");
+        assert_eq!(sled1_agent.disks[3].identity.serial, "XXIV");
+        assert_eq!(sled1_agent.disks[3].pcie_slot, 18);
+        assert_eq!(sled1_agent.disks[3].location.as_deref(), Some("M.2 West"));
 
         let sled4_agent =
             collection.sled_agents.get(&sled_agent_id_extra).unwrap();
