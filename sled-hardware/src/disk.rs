@@ -217,6 +217,9 @@ pub struct UnparsedDisk {
     identity: DiskIdentity,
     is_boot_disk: bool,
     firmware: DiskFirmware,
+    /// See [`Self::location`].
+    #[serde(default)]
+    location: Option<String>,
 }
 
 impl UnparsedDisk {
@@ -236,7 +239,14 @@ impl UnparsedDisk {
             identity,
             is_boot_disk,
             firmware,
+            location: None,
         }
+    }
+
+    /// Records where this disk sits in the chassis. See [`Self::location`].
+    pub fn with_location(mut self, location: Option<String>) -> Self {
+        self.location = location;
+        self
     }
 
     pub fn paths(&self) -> &DiskPaths {
@@ -267,6 +277,23 @@ impl UnparsedDisk {
     /// Cosmo. It is not the location label printed on the chassis.
     pub fn pcie_slot(&self) -> i64 {
         self.pcie_slot
+    }
+
+    /// Where this disk sits in the chassis, as labelled by the platform's
+    /// hardware topology: "N5" for a U.2 bay, "M.2 East" for a boot device.
+    ///
+    /// This is the operator-facing position, matching what is printed on the
+    /// sled, and is the value to show someone who has to find the drive. It
+    /// comes from libtopo and is best-effort: `None` means the topology had
+    /// no label for the disk or could not be read. A missing location never
+    /// prevents the disk from being used.
+    pub fn location(&self) -> Option<&str> {
+        self.location.as_deref()
+    }
+
+    #[cfg(target_os = "illumos")]
+    pub(crate) fn set_location(&mut self, location: Option<String>) {
+        self.location = location;
     }
 
     pub fn firmware(&self) -> &DiskFirmware {
@@ -300,6 +327,8 @@ pub struct PooledDisk {
     // disk.
     pub zpool_name: ZpoolName,
     pub firmware: DiskFirmware,
+    /// See [`UnparsedDisk::location`].
+    pub location: Option<String>,
 }
 
 impl PooledDisk {
@@ -341,6 +370,7 @@ impl PooledDisk {
             partitions,
             zpool_name,
             firmware: unparsed_disk.firmware,
+            location: unparsed_disk.location,
         })
     }
 }

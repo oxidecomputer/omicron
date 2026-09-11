@@ -237,6 +237,14 @@ impl RawDisk {
         }
     }
 
+    /// See [`UnparsedDisk::location`].
+    pub fn location(&self) -> Option<&str> {
+        match self {
+            Self::Real(disk) => disk.location(),
+            Self::Synthetic(_) => None,
+        }
+    }
+
     pub fn firmware(&self) -> &DiskFirmware {
         match self {
             RawDisk::Real(unparsed) => unparsed.firmware(),
@@ -383,6 +391,14 @@ impl Disk {
         }
     }
 
+    /// See [`UnparsedDisk::location`].
+    pub fn location(&self) -> Option<&str> {
+        match self {
+            Self::Real(disk) => disk.location.as_deref(),
+            Self::Synthetic(_) => None,
+        }
+    }
+
     pub fn update_firmware_metadata(&mut self, raw_disk: &RawDisk) {
         match self {
             Disk::Real(pooled_disk) => {
@@ -405,15 +421,18 @@ impl Disk {
 impl From<Disk> for RawDisk {
     fn from(disk: Disk) -> RawDisk {
         match disk {
-            Disk::Real(pooled_disk) => RawDisk::Real(UnparsedDisk::new(
-                pooled_disk.paths.devfs_path,
-                pooled_disk.paths.dev_path,
-                pooled_disk.pcie_slot,
-                pooled_disk.zpool_name.kind().into(),
-                pooled_disk.identity,
-                pooled_disk.is_boot_disk,
-                pooled_disk.firmware,
-            )),
+            Disk::Real(pooled_disk) => RawDisk::Real(
+                UnparsedDisk::new(
+                    pooled_disk.paths.devfs_path,
+                    pooled_disk.paths.dev_path,
+                    pooled_disk.pcie_slot,
+                    pooled_disk.zpool_name.kind().into(),
+                    pooled_disk.identity,
+                    pooled_disk.is_boot_disk,
+                    pooled_disk.firmware,
+                )
+                .with_location(pooled_disk.location),
+            ),
             Disk::Synthetic(synthetic_disk) => {
                 RawDisk::Synthetic(synthetic_disk.raw)
             }

@@ -996,6 +996,7 @@ mod tests {
                 pcie_slot: raw_disk.pcie_slot(),
                 identity: raw_disk.identity().clone(),
                 is_boot_disk: raw_disk.is_boot_disk(),
+                location: raw_disk.location().map(str::to_string),
                 partitions: vec![],
                 zpool_name: ZpoolName::Internal(InternalZpoolUuid::new_v4()),
                 firmware: raw_disk.firmware().clone(),
