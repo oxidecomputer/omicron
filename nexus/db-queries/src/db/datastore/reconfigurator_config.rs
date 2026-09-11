@@ -156,9 +156,8 @@ impl DataStore {
             config:
                 ReconfiguratorConfig {
                     planner_enabled,
-                    planner_config: PlannerConfig {},
+                    planner_config: PlannerConfig { disruption_policy },
                     tuf_repo_pruner_enabled,
-                    disruption_policy,
                     blueprint_pruner_enabled,
                     blueprint_pruner_nkeep,
                 },
@@ -196,7 +195,6 @@ mod tests {
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_types::deployment::{
         DEFAULT_BLUEPRINT_PRUNER_NKEEP, PlannerConfig, ReconfiguratorConfig,
-        ReconfiguratorDisruptionPolicy,
     };
     use omicron_test_utils::dev;
 
@@ -223,7 +221,6 @@ mod tests {
                 planner_enabled: false,
                 planner_config: PlannerConfig::default(),
                 tuf_repo_pruner_enabled: true,
-                disruption_policy: ReconfiguratorDisruptionPolicy::default(),
                 blueprint_pruner_enabled: true,
                 blueprint_pruner_nkeep: DEFAULT_BLUEPRINT_PRUNER_NKEEP,
             },

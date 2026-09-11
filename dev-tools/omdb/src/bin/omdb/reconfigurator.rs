@@ -435,9 +435,8 @@ async fn cmd_reconfigurator_config_history(
                 config:
                     ReconfiguratorConfig {
                         planner_enabled,
-                        planner_config: PlannerConfig {},
+                        planner_config: PlannerConfig { disruption_policy },
                         tuf_repo_pruner_enabled,
-                        disruption_policy,
                         blueprint_pruner_enabled,
                         blueprint_pruner_nkeep,
                     },
