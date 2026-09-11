@@ -2125,10 +2125,11 @@
         ]
       },
       "MultirackJoinRequest": {
+        "description": "A request to join this rack into an existing multirack cluster.",
         "type": "object",
         "properties": {
           "rack_network_config": {
-            "description": "The rack network configuration for this joining rack",
+            "description": "The network configuration for this joining rack.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/RackNetworkConfig"
@@ -2136,7 +2137,7 @@
             ]
           },
           "trust_quorum_peers": {
-            "description": "The set of peers required to initialize trust quorum\n\nUnlike RSS, this is not optional for multirack setups. Bootstrap addresses are discovered by the bootstrap agent and mapped to the `BaseboardId`s.",
+            "description": "The peers required to initialize this rack's trust quorum.\n\nUnlike RSS, this is not optional: the bootstrap agent discovers bootstrap addresses and maps them to these `BaseboardId`s.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/BaseboardId"
@@ -2342,6 +2343,20 @@
           {
             "type": "object",
             "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "configure_networking"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
               "sleds": {
                 "title": "BiHashMap",
                 "x-rust-type": {
@@ -2369,20 +2384,6 @@
             },
             "required": [
               "sleds",
-              "state"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "state": {
-                "type": "string",
-                "enum": [
-                  "configure_networking"
-                ]
-              }
-            },
-            "required": [
               "state"
             ]
           },
