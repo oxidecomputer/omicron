@@ -1118,7 +1118,7 @@ mod tests {
                     devfs_path: "/fake-disk".into(),
                     dev_path: None,
                 },
-                slot: raw_disk.slot(),
+                pcie_slot: raw_disk.pcie_slot(),
                 identity: raw_disk.identity().clone(),
                 is_boot_disk: raw_disk.is_boot_disk(),
                 partitions: vec![],

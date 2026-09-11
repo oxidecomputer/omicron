@@ -42,7 +42,7 @@ pub struct SyntheticDisk {
 // This shouldn't happen in prod, and is an unlikely test-only scenario, but
 // we'd still like to protect against it, since it could confuse the inventory
 // system.
-const SYNTHETIC_SLOT_OFFSET: i64 = 1024;
+const SYNTHETIC_PCIE_SLOT_OFFSET: i64 = 1024;
 
 // A generic name for the firmware in slot1 of an NVMe device.
 //
@@ -100,7 +100,9 @@ pub struct RawSyntheticDisk {
     pub path: Utf8PathBuf,
     pub identity: DiskIdentity,
     pub variant: DiskVariant,
-    pub slot: i64,
+    /// A fake PCIe physical slot number, offset so it cannot collide with a
+    /// real disk. See [`UnparsedDisk::pcie_slot`].
+    pub pcie_slot: i64,
     pub firmware: DiskFirmware,
 }
 
@@ -110,18 +112,18 @@ impl RawSyntheticDisk {
     pub fn new_with_length<P: AsRef<Utf8Path>>(
         vdev: P,
         length: u64,
-        slot: i64,
+        pcie_slot: i64,
     ) -> Result<Self, anyhow::Error> {
         let file = std::fs::File::create(vdev.as_ref())?;
         file.set_len(length)?;
-        Self::load(vdev, slot)
+        Self::load(vdev, pcie_slot)
     }
 
     /// Treats a file at path `vdev` as a synthetic disk. The file
     /// should already exist, and have the desired length.
     pub fn load<P: AsRef<Utf8Path>>(
         vdev: P,
-        slot: i64,
+        pcie_slot: i64,
     ) -> Result<Self, anyhow::Error> {
         let path = vdev.as_ref();
         let Some(file) = path.file_name() else {
@@ -158,7 +160,7 @@ impl RawSyntheticDisk {
             path: path.into(),
             identity,
             variant,
-            slot: slot + SYNTHETIC_SLOT_OFFSET,
+            pcie_slot: pcie_slot + SYNTHETIC_PCIE_SLOT_OFFSET,
             firmware,
         })
     }
@@ -228,10 +230,10 @@ impl RawDisk {
         }
     }
 
-    pub fn slot(&self) -> i64 {
+    pub fn pcie_slot(&self) -> i64 {
         match self {
-            Self::Real(disk) => disk.slot(),
-            Self::Synthetic(disk) => disk.slot,
+            Self::Real(disk) => disk.pcie_slot(),
+            Self::Synthetic(disk) => disk.pcie_slot,
         }
     }
 
@@ -374,10 +376,10 @@ impl Disk {
         }
     }
 
-    pub fn slot(&self) -> i64 {
+    pub fn pcie_slot(&self) -> i64 {
         match self {
-            Self::Real(disk) => disk.slot,
-            Self::Synthetic(disk) => disk.raw.slot,
+            Self::Real(disk) => disk.pcie_slot,
+            Self::Synthetic(disk) => disk.raw.pcie_slot,
         }
     }
 
@@ -406,7 +408,7 @@ impl From<Disk> for RawDisk {
             Disk::Real(pooled_disk) => RawDisk::Real(UnparsedDisk::new(
                 pooled_disk.paths.devfs_path,
                 pooled_disk.paths.dev_path,
-                pooled_disk.slot,
+                pooled_disk.pcie_slot,
                 pooled_disk.zpool_name.kind().into(),
                 pooled_disk.identity,
                 pooled_disk.is_boot_disk,

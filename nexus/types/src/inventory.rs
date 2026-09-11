@@ -607,7 +607,14 @@ pub struct PhysicalDisk {
     // always show up in the inventory.
     pub identity: DiskIdentity,
     pub variant: PhysicalDiskKind,
-    pub slot: i64,
+    /// PCIe physical slot number of the bridge above this disk, as reported
+    /// by sled-agent.
+    ///
+    /// This is the `physical-slot#` of the parent `pcieb` device. It is
+    /// internal to the board's PCIe topology and board-specific: the same
+    /// U.2 bay is numbered differently on Gimlet and Cosmo. It is not the
+    /// location label printed on the chassis.
+    pub pcie_slot: i64,
     pub firmware: PhysicalDiskFirmware,
 }
 
@@ -616,7 +623,7 @@ impl From<InventoryDisk> for PhysicalDisk {
         PhysicalDisk {
             identity: disk.identity,
             variant: disk.variant.into(),
-            slot: disk.slot,
+            pcie_slot: disk.slot,
             firmware: PhysicalDiskFirmware::Nvme(NvmeFirmware {
                 active_slot: disk.active_firmware_slot,
                 next_active_slot: disk.next_active_firmware_slot,

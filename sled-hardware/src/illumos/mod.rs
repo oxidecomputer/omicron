@@ -50,8 +50,8 @@ enum Error {
     #[error("Invalid value for boot-storage-unit property: {0}")]
     InvalidBootStorageUnitValue(i64),
 
-    #[error("Unrecognized slot for device {slot}")]
-    UnrecognizedSlot { slot: i64 },
+    #[error("Unrecognized PCIe physical slot for device {pcie_slot}")]
+    UnrecognizedPcieSlot { pcie_slot: i64 },
 
     #[error("Expected property {name} to have type {ty}")]
     UnexpectedPropertyType { name: String, ty: String },
@@ -208,27 +208,30 @@ impl HardwareView {
     }
 }
 
-fn slot_to_disk_variant(sled: OxideSled, slot: i64) -> Option<DiskVariant> {
-    let u2_slots = sled.u2_disk_slots();
-    let m2_slots = sled.m2_disk_slots();
-    if u2_slots.contains(&slot) {
+fn pcie_slot_to_disk_variant(
+    sled: OxideSled,
+    pcie_slot: i64,
+) -> Option<DiskVariant> {
+    let u2_slots = sled.u2_pcie_slots();
+    let m2_slots = sled.m2_pcie_slots();
+    if u2_slots.contains(&pcie_slot) {
         Some(DiskVariant::U2)
-    } else if m2_slots.contains(&slot) {
+    } else if m2_slots.contains(&pcie_slot) {
         Some(DiskVariant::M2)
     } else {
         None
     }
 }
 
-fn slot_is_boot_disk(
+fn pcie_slot_is_boot_disk(
     sled: OxideSled,
-    slot: i64,
+    pcie_slot: i64,
     boot_storage_unit: BootStorageUnit,
 ) -> bool {
-    let slots = sled.bootdisk_slots();
+    let slots = sled.bootdisk_pcie_slots();
     match boot_storage_unit {
-        BootStorageUnit::A => slots[0] == slot,
-        BootStorageUnit::B => slots[1] == slot,
+        BootStorageUnit::A => slots[0] == pcie_slot,
+        BootStorageUnit::B => slots[1] == pcie_slot,
     }
 }
 
@@ -450,14 +453,20 @@ fn poll_blkdev_node(
     // We expect that the parent of the "nvme" device is a "pcieb" driver.
     let pcieb_node = get_parent_node(&nvme_node, "pcieb")?;
 
-    // The "pcieb" device needs to have a physical slot for us to understand
-    // what type of disk it is.
-    let slot = i64_from_property(
+    // The "pcieb" device's PCIe physical slot number tells us which bay or
+    // M.2 socket the disk is in, and therefore what type of disk it is. The
+    // numbering is board-specific and internal to the PCIe topology; it is
+    // not the location label printed on the chassis.
+    let pcie_slot = i64_from_property(
         &find_properties(&pcieb_node, ["physical-slot#"])?[0],
     )?;
-    let Some(variant) = slot_to_disk_variant(sled, slot) else {
-        warn!(log, "Slot# {slot} is not recognized as a disk: {devfs_path}");
-        return Err(Error::UnrecognizedSlot { slot });
+    let Some(variant) = pcie_slot_to_disk_variant(sled, pcie_slot) else {
+        warn!(
+            log,
+            "PCIe physical slot {pcie_slot} is not recognized as a disk: \
+             {devfs_path}"
+        );
+        return Err(Error::UnrecognizedPcieSlot { pcie_slot });
     };
 
     let nvme = Nvme::new()?;
@@ -490,10 +499,10 @@ fn poll_blkdev_node(
     let disk = UnparsedDisk::new(
         Utf8PathBuf::from(&devfs_path),
         dev_path,
-        slot,
+        pcie_slot,
         variant,
         device_id.clone(),
-        slot_is_boot_disk(sled, slot, boot_storage_unit),
+        pcie_slot_is_boot_disk(sled, pcie_slot, boot_storage_unit),
         firmware.clone(),
     );
     disks.insert(device_id, disk);

@@ -210,7 +210,7 @@ impl DataStore {
                             InvNvmeDiskFirmware::new(
                                 collection_id,
                                 sled_agent.sled_id,
-                                disk.slot,
+                                disk.pcie_slot,
                                 firmware,
                             )
                             .map_err(|e| {
@@ -3154,7 +3154,7 @@ impl DataStore {
                                 serial: disk.serial,
                             },
                             variant: disk.variant.into(),
-                            slot: disk.slot,
+                            pcie_slot: disk.slot,
                             firmware: firmware.clone(),
                         },
                     );

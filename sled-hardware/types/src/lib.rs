@@ -44,20 +44,32 @@ impl OxideSled {
         }
     }
 
-    pub fn m2_disk_slots(&self) -> RangeInclusive<i64> {
+    /// PCIe physical slot numbers of the M.2 boot devices.
+    ///
+    /// These are the `physical-slot#` values reported by the `pcieb` bridge
+    /// above each device. They are internal to the board's PCIe topology
+    /// and are not the labels printed on the chassis.
+    pub fn m2_pcie_slots(&self) -> RangeInclusive<i64> {
         match self {
             Self::Gimlet | Self::Cosmo => 0x11..=0x12,
         }
     }
 
-    pub fn u2_disk_slots(&self) -> RangeInclusive<i64> {
+    /// PCIe physical slot numbers of the U.2 bays.
+    ///
+    /// Same caveat as [`Self::m2_pcie_slots`]: these are board-internal PCIe
+    /// slot numbers, not chassis positions. Gimlet numbers its U.2 bays 0x00
+    /// through 0x09 and Cosmo numbers the same ten bays 0x20 through 0x29.
+    pub fn u2_pcie_slots(&self) -> RangeInclusive<i64> {
         match self {
             Self::Gimlet => 0x00..=0x09,
             Self::Cosmo => 0x20..=0x29,
         }
     }
 
-    pub fn bootdisk_slots(&self) -> [i64; 2] {
+    /// PCIe physical slot numbers of boot storage units A and B, in that
+    /// order.
+    pub fn bootdisk_pcie_slots(&self) -> [i64; 2] {
         match self {
             Self::Gimlet | Self::Cosmo => [0x11, 0x12],
         }

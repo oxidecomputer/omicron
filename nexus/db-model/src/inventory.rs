@@ -2375,7 +2375,7 @@ impl InvPhysicalDisk {
         Self {
             inv_collection_id: inv_collection_id.into(),
             sled_id: sled_id.into(),
-            slot: disk.slot,
+            slot: disk.pcie_slot,
             vendor: disk.identity.vendor,
             model: disk.identity.model,
             serial: disk.identity.serial,

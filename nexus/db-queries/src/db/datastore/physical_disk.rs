@@ -1183,7 +1183,7 @@ mod test {
                 serial: inv_phys_disk.serial.clone(),
             },
             variant: inv_phys_disk.variant.into(),
-            slot: inv_phys_disk.slot,
+            pcie_slot: inv_phys_disk.slot,
             firmware: PhysicalDiskFirmware::Nvme(NvmeFirmware {
                 active_slot: inv_disk.active_firmware_slot,
                 next_active_slot: inv_disk.next_active_firmware_slot,

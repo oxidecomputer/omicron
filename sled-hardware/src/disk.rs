@@ -212,7 +212,7 @@ impl DiskFirmware {
 )]
 pub struct UnparsedDisk {
     paths: DiskPaths,
-    slot: i64,
+    pcie_slot: i64,
     variant: DiskVariant,
     identity: DiskIdentity,
     is_boot_disk: bool,
@@ -223,7 +223,7 @@ impl UnparsedDisk {
     pub fn new(
         devfs_path: Utf8PathBuf,
         dev_path: Option<Utf8PathBuf>,
-        slot: i64,
+        pcie_slot: i64,
         variant: DiskVariant,
         identity: DiskIdentity,
         is_boot_disk: bool,
@@ -231,7 +231,7 @@ impl UnparsedDisk {
     ) -> Self {
         Self {
             paths: DiskPaths { devfs_path, dev_path },
-            slot,
+            pcie_slot,
             variant,
             identity,
             is_boot_disk,
@@ -259,8 +259,14 @@ impl UnparsedDisk {
         self.is_boot_disk
     }
 
-    pub fn slot(&self) -> i64 {
-        self.slot
+    /// The PCIe physical slot number of the bridge above this disk.
+    ///
+    /// This is the `physical-slot#` property of the parent `pcieb` device.
+    /// It identifies the disk's position in the board's PCIe topology and is
+    /// board-specific: the same U.2 bay has a different number on Gimlet and
+    /// Cosmo. It is not the location label printed on the chassis.
+    pub fn pcie_slot(&self) -> i64 {
+        self.pcie_slot
     }
 
     pub fn firmware(&self) -> &DiskFirmware {
@@ -285,7 +291,8 @@ impl UnparsedDisk {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PooledDisk {
     pub paths: DiskPaths,
-    pub slot: i64,
+    /// See [`UnparsedDisk::pcie_slot`].
+    pub pcie_slot: i64,
     pub identity: DiskIdentity,
     pub is_boot_disk: bool,
     pub partitions: Vec<Partition>,
@@ -328,7 +335,7 @@ impl PooledDisk {
 
         Ok(Self {
             paths: unparsed_disk.paths,
-            slot: unparsed_disk.slot,
+            pcie_slot: unparsed_disk.pcie_slot,
             identity: unparsed_disk.identity,
             is_boot_disk: unparsed_disk.is_boot_disk,
             partitions,
