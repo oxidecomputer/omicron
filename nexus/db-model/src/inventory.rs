@@ -1438,8 +1438,8 @@ impl InvSledAgent {
         }
     }
 
-    /// Reassemble the internal DB columns that comprise an
-    /// [`InstanceManagerStatus`].
+    /// Reassemble an [`InstanceManagerStatus`] from the database
+    /// representation held by `self`.
     pub fn instance_manager_status(&self) -> InstanceManagerStatus {
         InvInstanceManagerStatusCols {
             update_disposition: self.instance_manager_update_disposition,
