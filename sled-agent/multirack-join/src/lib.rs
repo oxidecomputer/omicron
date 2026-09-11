@@ -252,8 +252,6 @@ impl MultirackJoinServiceTask {
             *state = MultirackJoinServiceState::ConfigureNetworking
         });
 
-        // Only RSS places services, so a joining rack has no service zone NAT
-        // entries to publish and stays at the initial generation.
         let config = SystemNetworkingConfig {
             rack_network_config,
             blueprint_external_networking_config: None,
