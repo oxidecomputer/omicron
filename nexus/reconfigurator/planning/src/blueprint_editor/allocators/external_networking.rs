@@ -64,8 +64,14 @@ pub struct ExternalNetworkingAllocator {
     // see https://github.com/oxidecomputer/omicron/issues/3732
     available_external_dns_ips: BTreeSet<IpAddr>,
 
-    // Allocator for external IPs for Nexus and Boundary NTP zones.
-    external_ip_alloc: ExternalIpAllocator,
+    // The external IP pools for Nexus and boundary NTP, and an account of which
+    // of those IPs are already in use. The pools are separated by service, but
+    // today they're all seeded from "all the service IP Pools". Filling them in
+    // from the real per-service assignments is tracked by
+    // https://github.com/oxidecomputer/omicron/issues/10574.
+    nexus_external_ips: DebugIgnore<Box<dyn Iterator<Item = IpAddr>>>,
+    boundary_ntp_external_ips: DebugIgnore<Box<dyn Iterator<Item = IpAddr>>>,
+    used_external_ips: UsedExternalIps,
 
     // Iterator of available MAC addresses in the system address range
     available_system_macs: AvailableIterator<'static, MacAddr>,
@@ -146,8 +152,10 @@ impl ExternalNetworkingAllocator {
             HashSet::new();
         let mut existing_external_dns_v6_ips: HashSet<Ipv6Addr> =
             HashSet::new();
-        let mut external_ip_alloc =
-            ExternalIpAllocator::new(external_ip_policy);
+        let nexus_external_ips = external_ip_policy.clone().into_nexus_ips();
+        let boundary_ntp_external_ips =
+            external_ip_policy.clone().into_boundary_ntp_ips();
+        let mut used_external_ips = UsedExternalIps::new();
         let mut used_macs: HashSet<MacAddr> = HashSet::new();
         let mut used_external_dns_ips: BTreeSet<IpAddr> = BTreeSet::new();
 
@@ -205,7 +213,7 @@ impl ExternalNetworkingAllocator {
                 // times and that's okay.  We don't expect to see localhost
                 // outside the test suite.
                 if !external_ip.ip().is_loopback() {
-                    external_ip_alloc.mark_ip_used(&external_ip)?;
+                    used_external_ips.mark_ip_used(&external_ip)?;
                 }
 
                 if !used_macs.insert(nic.mac) {
@@ -293,7 +301,11 @@ impl ExternalNetworkingAllocator {
             external_dns_v4_ips,
             external_dns_v6_ips,
             available_external_dns_ips,
-            external_ip_alloc,
+            nexus_external_ips: DebugIgnore(Box::new(nexus_external_ips)),
+            boundary_ntp_external_ips: DebugIgnore(Box::new(
+                boundary_ntp_external_ips,
+            )),
+            used_external_ips,
             available_system_macs,
         })
     }
@@ -306,7 +318,9 @@ impl ExternalNetworkingAllocator {
         // can generate the private IP configuration that's required to
         // support that. See also
         // https://github.com/oxidecomputer/omicron/issues/9313.
-        let external_ip = self.external_ip_alloc.claim_next_exclusive_ip()?;
+        let external_ip = self
+            .used_external_ips
+            .claim_next_exclusive_ip(&mut *self.nexus_external_ips)?;
         let nic_ip_config = match external_ip {
             IpAddr::V4(_) => {
                 let ip = self.nexus_v4_ips.next().ok_or(
@@ -341,7 +355,9 @@ impl ExternalNetworkingAllocator {
         // can generate the private IP configuration that's required to
         // support that. See also
         // https://github.com/oxidecomputer/omicron/issues/9313.
-        let snat_cfg = self.external_ip_alloc.claim_next_snat_ip()?;
+        let snat_cfg = self
+            .used_external_ips
+            .claim_next_snat_ip(&mut *self.boundary_ntp_external_ips)?;
         let nic_ip_config = match snat_cfg.ip {
             IpAddr::V4(_) => {
                 let ip = self.boundary_ntp_v4_ips.next().ok_or(
@@ -456,47 +472,43 @@ impl<T: Hash + Eq> Iterator for AvailableIterator<'_, T> {
     }
 }
 
+// The set of all external IPs already used during planning.
+//
 // External IPs come in two flavors, from an allocation point of view: IPs that
 // require exclusive use, and SNAT IPs that can be shared amongst up to four
 // services, because the port range is broken up into four 16384-sized chunks.
 // This struct keeps track of both kinds of IPs used by blueprints, allowing
 // allocation of either kind.
-#[derive(Debug)]
-struct ExternalIpAllocator {
-    service_ip_pool_ips: DebugIgnore<Box<dyn Iterator<Item = IpAddr>>>,
+#[derive(Debug, Default)]
+struct UsedExternalIps {
     used_exclusive_ips: BTreeSet<IpAddr>,
     used_snat_ips: BTreeMap<IpAddr, BTreeSet<SnatPortRange>>,
 }
 
 #[derive(Debug, thiserror::Error)]
-enum ExternalIpAllocatorError {
+enum UsedExternalIpsError {
     #[error("duplicate external IP: {0:?}")]
     DuplicateExternalIp(OmicronZoneExternalIp),
     #[error("invalid SNAT port range")]
     InvalidSnatPortRange(#[source] anyhow::Error),
 }
 
-impl ExternalIpAllocator {
-    fn new(policy: &ExternalIpPolicy) -> Self {
-        let service_ip_pool_ips = policy.clone().into_non_external_dns_ips();
-        Self {
-            service_ip_pool_ips: DebugIgnore(Box::new(service_ip_pool_ips)),
-            used_exclusive_ips: BTreeSet::new(),
-            used_snat_ips: BTreeMap::new(),
-        }
+impl UsedExternalIps {
+    fn new() -> Self {
+        Self::default()
     }
 
     fn mark_ip_used(
         &mut self,
         external_ip: &OmicronZoneExternalIp,
-    ) -> Result<(), ExternalIpAllocatorError> {
+    ) -> Result<(), UsedExternalIpsError> {
         match external_ip {
             OmicronZoneExternalIp::Floating(ip) => {
                 let ip = ip.ip;
                 if self.used_snat_ips.contains_key(&ip)
                     || !self.used_exclusive_ips.insert(ip)
                 {
-                    return Err(ExternalIpAllocatorError::DuplicateExternalIp(
+                    return Err(UsedExternalIpsError::DuplicateExternalIp(
                         *external_ip,
                     ));
                 }
@@ -505,9 +517,7 @@ impl ExternalIpAllocator {
                 let ip = snat.snat_cfg.ip;
                 let port_range =
                     SnatPortRange::try_from(snat.snat_cfg.port_range_raw())
-                        .map_err(
-                            ExternalIpAllocatorError::InvalidSnatPortRange,
-                        )?;
+                        .map_err(UsedExternalIpsError::InvalidSnatPortRange)?;
                 if self.used_exclusive_ips.contains(&ip)
                     || !self
                         .used_snat_ips
@@ -515,7 +525,7 @@ impl ExternalIpAllocator {
                         .or_default()
                         .insert(port_range)
                 {
-                    return Err(ExternalIpAllocatorError::DuplicateExternalIp(
+                    return Err(UsedExternalIpsError::DuplicateExternalIp(
                         *external_ip,
                     ));
                 }
@@ -562,10 +572,12 @@ impl ExternalIpAllocator {
         }
     }
 
+    // Return the next exclusive IP from `pool` that isn't already in use.
     fn claim_next_exclusive_ip(
         &mut self,
+        pool: &mut dyn Iterator<Item = IpAddr>,
     ) -> Result<IpAddr, ExternalNetworkingError> {
-        for ip in &mut *self.service_ip_pool_ips {
+        for ip in pool {
             if !self.used_snat_ips.contains_key(&ip)
                 && self.used_exclusive_ips.insert(ip)
             {
@@ -576,8 +588,13 @@ impl ExternalIpAllocator {
         Err(ExternalNetworkingError::NoExternalServiceIpAvailable)
     }
 
+    // Return the next available SNAT IP + port range.
+    //
+    // This can be either an unused port range on an IP already used for SNAT,
+    // or the next IP from `pool` that isn't used at all.
     fn claim_next_snat_ip(
         &mut self,
+        pool: &mut dyn Iterator<Item = IpAddr>,
     ) -> Result<SourceNatConfigGeneric, ExternalNetworkingError> {
         // Prefer reusing an existing SNAT IP, if we still have port ranges
         // available on that ip.
@@ -590,7 +607,7 @@ impl ExternalIpAllocator {
         }
 
         // No available port ranges left; allocate a new IP.
-        for ip in &mut *self.service_ip_pool_ips {
+        for ip in pool {
             if self.used_exclusive_ips.contains(&ip) {
                 continue;
             }
@@ -763,7 +780,7 @@ pub mod test {
             }
         }
 
-        // The API for ExternalIpAllocator is in terms of
+        // The API for `UsedExternalIps` is in terms of
         // `OmicronZoneExternalIp`, but it doesn't actually care about the IDs;
         // we'll generate random ones as needed.
         let as_floating = |ip| {
@@ -779,7 +796,8 @@ pub mod test {
             })
         };
 
-        // Build up the allocator and mark all used IPs.
+        // Build up the used-IP tracker and mark all used IPs. Both service
+        // pools are identical today, so we allocate from a single shared pool.
         let policy = {
             let mut builder = ExternalIpPolicy::builder();
             for r in ip_pool_ranges {
@@ -787,32 +805,33 @@ pub mod test {
             }
             builder.build()
         };
-        let mut allocator = ExternalIpAllocator::new(&policy);
+        let mut pool = policy.clone().into_nexus_ips();
+        let mut used_external_ips = UsedExternalIps::new();
         for &ip in &used_exclusive {
-            allocator
+            used_external_ips
                 .mark_ip_used(&as_floating(ip))
                 .expect("failed to mark floating ip as used");
         }
         for (&ip, snat_ranges) in &used_snat {
             for snat_range in snat_ranges {
-                allocator
+                used_external_ips
                     .mark_ip_used(&as_snat(ip, snat_range))
                     .expect("failed to mark floating ip as used");
             }
         }
 
-        // Check that all used IPs return the expected value when the allocator
+        // Check that all used IPs return the expected value when the tracker
         // is asked if it already contains them: Ok(true) for exact matches, and
         // an error if we ask for containment of an IP with the wrong
         // exclusive/snat type.
         for &ip in &used_exclusive {
             assert!(
-                allocator.contains(&as_floating(ip)).unwrap(),
+                used_external_ips.contains(&as_floating(ip)).unwrap(),
                 "missing ip {ip}"
             );
             for snat in SnatPortRange::iter() {
                 assert!(
-                    allocator.contains(&as_snat(ip, &snat)).is_err(),
+                    used_external_ips.contains(&as_snat(ip, &snat)).is_err(),
                     "unexpected success for {ip}"
                 );
             }
@@ -820,12 +839,14 @@ pub mod test {
         for (&ip, snat_ranges) in &used_snat {
             for snat_range in snat_ranges {
                 assert!(
-                    allocator.contains(&as_snat(ip, snat_range)).unwrap(),
+                    used_external_ips
+                        .contains(&as_snat(ip, snat_range))
+                        .unwrap(),
                     "missing ip {ip}/{snat_range:?}"
                 );
             }
             assert!(
-                allocator.contains(&as_floating(ip)).is_err(),
+                used_external_ips.contains(&as_floating(ip)).is_err(),
                 "unexpected success for {ip}"
             );
         }
@@ -834,8 +855,8 @@ pub mod test {
         // IPs that have unused ranges; we'll confirm this by allocating new
         // SNAT IPs until all the existing SNAT IP ranges are exhausted.
         while !expected_available_snat_ranges.is_empty() {
-            let snat = allocator
-                .claim_next_snat_ip()
+            let snat = used_external_ips
+                .claim_next_snat_ip(&mut pool)
                 .expect("failed to get SNAT IPs with ranges still available");
             let port_range = SnatPortRange::try_from(snat.port_range_raw())
                 .expect("illegal snat port range");
@@ -851,17 +872,18 @@ pub mod test {
         let mut claim_exclusive = true;
         while !expected_available_ips.is_empty() {
             if claim_exclusive {
-                let ip = allocator
-                    .claim_next_exclusive_ip()
+                let ip = used_external_ips
+                    .claim_next_exclusive_ip(&mut pool)
                     .expect("failed to get exclusive IP");
                 assert!(
                     expected_available_ips.remove(&ip),
                     "unexpected exclusive ip {ip}"
                 );
             } else {
-                let snat = allocator.claim_next_snat_ip().expect(
-                    "failed to get SNAT IPs with ranges still available",
-                );
+                let snat =
+                    used_external_ips.claim_next_snat_ip(&mut pool).expect(
+                        "failed to get SNAT IPs with ranges still available",
+                    );
                 assert!(
                     expected_available_ips.remove(&snat.ip),
                     "unexpected SNAT ip {snat:?}"
@@ -875,9 +897,10 @@ pub mod test {
                 // port ranges for this same IP address, in order.
                 let ip = snat.ip;
                 for port_range in SnatPortRange::iter().skip(1) {
-                    let snat = allocator.claim_next_snat_ip().expect(
-                        "failed to get SNAT IPs with ranges still available",
-                    );
+                    let snat =
+                        used_external_ips.claim_next_snat_ip(&mut pool).expect(
+                            "failed to get SNAT IPs with ranges still available",
+                        );
                     assert_eq!(snat, port_range.into_source_nat_config(ip));
                 }
             }
