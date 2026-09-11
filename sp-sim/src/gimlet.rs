@@ -1770,7 +1770,7 @@ impl SpHandler for Handler {
 
     fn get_pmbus_status(
         &mut self,
-        rail: &PowerRailName,
+        _rail: &PowerRailName,
     ) -> Result<PmbusStatus, SpError> {
         Err(SpError::RequestUnsupportedForSp)
     }
