@@ -3563,10 +3563,8 @@ pub mod test {
             // Nexus with no remaining external IPs should fail.
             let mut used_ip_ranges = Vec::new();
             for (_, z) in parent.in_service_zones() {
-                if let Some((external_ips, _)) =
-                    z.zone_type.external_networking()
-                {
-                    for external_ip in external_ips {
+                if let Some(networking) = z.zone_type.external_networking() {
+                    for external_ip in networking.external_ips() {
                         used_ip_ranges.push(IpRange::from(external_ip.ip()));
                     }
                 }

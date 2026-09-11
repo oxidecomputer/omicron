@@ -5563,7 +5563,9 @@ mod tests {
             .in_service_zones()
             .find_map(|(_, zone_config)| {
                 zone_config.zone_type.external_networking().and_then(
-                    |(ips, _nic)| ips.into_iter().next().map(|ip| ip.ip()),
+                    |networking| {
+                        networking.external_ips().next().map(|ip| ip.ip())
+                    },
                 )
             })
             .expect("found external IP");
