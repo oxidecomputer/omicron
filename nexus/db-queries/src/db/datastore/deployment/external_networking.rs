@@ -200,8 +200,7 @@ impl DataStore {
         zones_to_allocate: impl Iterator<Item = &BlueprintZoneConfig>,
     ) -> Result<(), TransactionError<Error>> {
         for z in zones_to_allocate {
-            let Some((external_ips, nic)) = z.zone_type.external_networking()
-            else {
+            let Some(networking) = z.zone_type.external_networking() else {
                 continue;
             };
 
@@ -210,11 +209,11 @@ impl DataStore {
                 "action" => "allocate-external-networking",
                 "zone_kind" => kind.report_str(),
                 "zone_id" => z.id.to_string(),
-                "nic" => format!("{nic:?}"),
+                "nic" => format!("{:?}", networking.nic()),
             ));
 
             // Ensure each external IP of the zone.
-            for external_ip in external_ips {
+            for external_ip in networking.external_ips() {
                 // Look up the system-service pool containing this address, if
                 // any.
                 let (_authz_pool, db_pool) = self
@@ -242,7 +241,8 @@ impl DataStore {
                 )
                 .await?;
             }
-            self.ensure_service_nic(conn, kind, z.id, nic, &log).await?;
+            self.ensure_service_nic(conn, kind, z.id, networking.nic(), &log)
+                .await?;
         }
 
         Ok(())
@@ -255,8 +255,7 @@ impl DataStore {
         zones_to_deallocate: impl Iterator<Item = &BlueprintZoneConfig>,
     ) -> Result<(), TransactionError<Error>> {
         for z in zones_to_deallocate {
-            let Some((external_ips, nic)) = z.zone_type.external_networking()
-            else {
+            let Some(networking) = z.zone_type.external_networking() else {
                 continue;
             };
 
@@ -265,10 +264,10 @@ impl DataStore {
                 "action" => "deallocate-external-networking",
                 "zone_kind" => kind.report_str(),
                 "zone_id" => z.id.to_string(),
-                "nic" => format!("{nic:?}"),
+                "nic" => format!("{:?}", networking.nic()),
             ));
 
-            for external_ip in external_ips {
+            for external_ip in networking.external_ips() {
                 let deleted_ip = self
                     .deallocate_external_ip_on_connection(
                         conn,
@@ -305,7 +304,7 @@ impl DataStore {
                 .service_delete_network_interface_on_connection(
                     conn,
                     z.id.into_untyped_uuid(),
-                    nic.id,
+                    networking.nic().id,
                 )
                 .await
                 .map_err(|txn_err| txn_err.map(|err| err.into_external()))?;

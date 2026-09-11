@@ -1565,10 +1565,10 @@ impl BpOmicronZoneNic {
         blueprint_id: BlueprintUuid,
         zone: &BlueprintZoneConfig,
     ) -> Result<Option<BpOmicronZoneNic>, anyhow::Error> {
-        let Some((_, nic)) = zone.zone_type.external_networking() else {
+        let Some(networking) = zone.zone_type.external_networking() else {
             return Ok(None);
         };
-        let nic = OmicronZoneNic::new(zone.id, nic)?;
+        let nic = OmicronZoneNic::new(zone.id, networking.nic())?;
         Ok(Some(Self {
             blueprint_id: blueprint_id.into(),
             id: nic.id,

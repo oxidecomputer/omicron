@@ -162,15 +162,13 @@ fn check_external_networking(blippy: &mut Blippy<'_>) {
     let mut used_nic_ips = BTreeMap::new();
     let mut used_nic_macs = BTreeMap::new();
 
-    for (sled_id, zone, external_ips, nic) in
+    for (sled_id, zone, networking) in
         blippy.blueprint().in_service_zones().filter_map(|(sled_id, zone)| {
-            zone.zone_type
-                .external_networking()
-                .map(|(external_ips, nic)| (sled_id, zone, external_ips, nic))
+            zone.zone_type.external_networking().map(|net| (sled_id, zone, net))
         })
     {
         // A zone may have more than one external IP; check each of them.
-        for external_ip in external_ips {
+        for external_ip in networking.external_ips() {
             // There should be no duplicate external IPs.
             if let Some(prev_zone) = used_external_ips.insert(external_ip, zone)
             {
@@ -200,6 +198,7 @@ fn check_external_networking(blippy: &mut Blippy<'_>) {
         }
 
         // There should be no duplicate NIC IPs (of either version) or MACs.
+        let nic = networking.nic();
         if let Some(ipv4) = nic.ip_config.ipv4_addr() {
             let ip = std::net::IpAddr::V4(*ipv4);
             if let Some(prev_zone) = used_nic_ips.insert(ip, zone) {
@@ -1093,8 +1092,7 @@ mod tests {
             .zone_type
             .external_networking()
             .expect("Nexus has external networking")
-            .0
-            .into_iter()
+            .external_ips()
             .next()
             .expect("Nexus has an external IP")
         {
@@ -1169,7 +1167,7 @@ mod tests {
             .zone_type
             .external_networking()
             .expect("Nexus has external networking")
-            .1
+            .nic()
             .ip_config;
         match &mut nexus1.zone_type {
             BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
@@ -1240,7 +1238,7 @@ mod tests {
             .zone_type
             .external_networking()
             .expect("Nexus has external networking")
-            .1
+            .nic()
             .mac;
         match &mut nexus1.zone_type {
             BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
@@ -2276,14 +2274,14 @@ fn check_planning_input_network_records_appear_in_blueprint(
             _ => (),
         }
 
-        if let Some((external_ips, nic)) = zone_type.external_networking() {
-            for external_ip in external_ips {
+        if let Some(networking) = zone_type.external_networking() {
+            for external_ip in networking.external_ips() {
                 // Ignore localhost (used by the test suite).
                 if !external_ip.ip().is_loopback() {
                     all_external_ips.insert(external_ip);
                 }
             }
-            all_macs.insert(nic.mac);
+            all_macs.insert(networking.nic().mac);
         }
     }
     for external_ip_entry in
@@ -2375,7 +2373,12 @@ fn check_external_networking_generation(
                     .zone_type
                     .external_networking()
                     .into_iter()
-                    .flat_map(move |(ips, nic)| {
+                    .flat_map(move |networking| {
+                        // NOTE: We really do need to collect here, because the
+                        // returned iterator borrows a lifetime from
+                        // `networking`, even though the data is copied.
+                        let nic = networking.nic();
+                        let ips = networking.external_ips().collect::<Vec<_>>();
                         ips.into_iter()
                             .map(move |ip| (sled_id, zone_config.id, ip, nic))
                     })

@@ -202,8 +202,8 @@ impl ExternalNetworkingAllocator {
                 _ => (),
             }
 
-            if let Some((external_ips, nic)) = zone_type.external_networking() {
-                for external_ip in external_ips {
+            if let Some(networking) = zone_type.external_networking() {
+                for external_ip in networking.external_ips() {
                     // For the test suite, ignore localhost.  It gets reused
                     // many times and that's okay.  We don't expect to see
                     // localhost outside the test suite.
@@ -212,8 +212,11 @@ impl ExternalNetworkingAllocator {
                     }
                 }
 
-                if !used_macs.insert(nic.mac) {
-                    bail!("duplicate service vNIC MAC: {}", nic.mac);
+                if !used_macs.insert(networking.nic().mac) {
+                    bail!(
+                        "duplicate service vNIC MAC: {}",
+                        networking.nic().mac
+                    );
                 }
             }
         }

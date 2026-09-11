@@ -686,19 +686,23 @@ fn test_reuse_external_ips_from_expunged_zones() {
     println!("2 -> 3 (maximum Nexus):\n{}", diff.display());
 
     // Planning succeeded, but let's prove that we reused the IP address!
-    let expunged_ip = zone.zone_type.external_networking().unwrap().0[0].ip();
+    let expunged_ip = zone
+        .zone_type
+        .external_networking()
+        .unwrap()
+        .external_ips()
+        .next()
+        .unwrap()
+        .ip();
     let new_zone = blueprint3
         .sleds
         .values()
         .flat_map(|c| c.zones.iter())
         .find(|zone| {
             zone.disposition == BlueprintZoneDisposition::InService
-                && zone
-                    .zone_type
-                    .external_networking()
-                    .map_or(false, |(ips, _)| {
-                        ips.iter().any(|ip| expunged_ip == ip.ip())
-                    })
+                && zone.zone_type.external_networking().map_or(false, |net| {
+                    net.external_ips().any(|ip| expunged_ip == ip.ip())
+                })
         })
         .expect("couldn't find that the external IP was reused");
     println!(
@@ -891,7 +895,13 @@ fn test_reuse_external_dns_ips_from_expunged_zones() {
         .in_service_zones()
         .filter_map(|(_id, zone)| {
             zone.zone_type.is_external_dns().then(|| {
-                zone.zone_type.external_networking().unwrap().0[0].ip()
+                zone.zone_type
+                    .external_networking()
+                    .unwrap()
+                    .external_ips()
+                    .next()
+                    .unwrap()
+                    .ip()
             })
         })
         .collect::<Vec<IpAddr>>();

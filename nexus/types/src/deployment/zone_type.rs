@@ -10,6 +10,7 @@
 
 use super::OmicronZoneExternalIp;
 use daft::Diffable;
+use iddqd::IdOrdMap;
 use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::disk::DatasetName;
 use schemars::JsonSchema;
@@ -122,35 +123,37 @@ impl BlueprintZoneType {
     /// A zone has at most one service vNIC but may have multiple external IPs
     /// (Nexus, external DNS) or a source-NAT address per IP family (boundary
     /// NTP), so the external IPs are returned as a (small) collection.
-    pub fn external_networking(
-        &self,
-    ) -> Option<(Vec<OmicronZoneExternalIp>, &NetworkInterface)> {
+    pub fn external_networking(&self) -> Option<ZoneExternalNetworking<'_>> {
         match self {
             BlueprintZoneType::Nexus(nexus) => {
-                let ips = nexus
-                    .external_ips
-                    .iter()
-                    .copied()
-                    .map(OmicronZoneExternalIp::Floating)
-                    .collect();
-                Some((ips, &nexus.nic))
+                let external_ips = IdOrdMap::from_iter_unique(
+                    nexus
+                        .external_ips
+                        .iter()
+                        .copied()
+                        .map(OmicronZoneExternalIp::Floating),
+                )
+                .expect("Nexus IPs are guaranteed unique here");
+                let nic = &nexus.nic;
+                Some(ZoneExternalNetworking { external_ips, nic })
             }
             BlueprintZoneType::ExternalDns(dns) => {
-                let ips = dns
-                    .dns_addresses
-                    .iter()
-                    .copied()
-                    .map(|addr| OmicronZoneExternalIp::Floating(addr.into_ip()))
-                    .collect();
-                Some((ips, &dns.nic))
+                let external_ips = IdOrdMap::from_iter_unique(
+                    dns.dns_addresses.iter().copied().map(|addr| {
+                        OmicronZoneExternalIp::Floating(addr.into_ip())
+                    }),
+                )
+                .expect("DNS IPs are guaranteed unique here");
+                let nic = &dns.nic;
+                Some(ZoneExternalNetworking { external_ips, nic })
             }
             BlueprintZoneType::BoundaryNtp(ntp) => {
-                let ips = ntp
-                    .external_ip
-                    .iter()
-                    .map(OmicronZoneExternalIp::Snat)
-                    .collect();
-                Some((ips, &ntp.nic))
+                let external_ips = IdOrdMap::from_iter_unique(
+                    ntp.external_ip.iter().map(OmicronZoneExternalIp::Snat),
+                )
+                .expect("NTP IPs are guaranteed unique here");
+                let nic = &ntp.nic;
+                Some(ZoneExternalNetworking { external_ips, nic })
             }
             BlueprintZoneType::Clickhouse(_)
             | BlueprintZoneType::ClickhouseKeeper(_)
@@ -262,6 +265,31 @@ impl BlueprintZoneType {
         };
 
         Some(DurableDataset { dataset, kind })
+    }
+}
+
+/// The external networking components for an Omicron Zone.
+pub struct ZoneExternalNetworking<'a> {
+    // The zone's external IPs, guaranteed to be:
+    //
+    // - non-empty
+    // - have no duplicate IPs
+    external_ips: IdOrdMap<OmicronZoneExternalIp>,
+    nic: &'a NetworkInterface,
+}
+
+impl<'a> ZoneExternalNetworking<'a> {
+    /// Return the external IPs.
+    ///
+    /// This is guaranteed to yield at least one item.
+    pub fn external_ips(
+        &self,
+    ) -> impl Iterator<Item = OmicronZoneExternalIp> + '_ {
+        self.external_ips.iter().copied()
+    }
+
+    pub fn nic(&self) -> &'a NetworkInterface {
+        self.nic
     }
 }
 

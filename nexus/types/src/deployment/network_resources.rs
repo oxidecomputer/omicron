@@ -48,8 +48,8 @@ use uuid::Uuid;
 /// 1. A 1:1 "bijective map" providing a mapping between external IP UUIDs and
 ///    the IPs themselves. There can be multiple such entries in the same zone.
 /// 2. A 1:1:1 "trijective map" providing a unique map for Omicron zone IDs,
-///    vNIC IDs, and vNICs. Each of these is unique, because all zones, even
-///    those with multiple external IPs, have exactly 1 vNIC.
+///    vNIC IDs, and MAC addresses. Each of these is unique, because all zones,
+///    even those with multiple external IPs, have exactly 1 vNIC.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OmicronZoneNetworkResources {
     /// external IPs allocated to Omicron zones
@@ -110,9 +110,6 @@ impl OmicronZoneNetworkResources {
         zone_id: &OmicronZoneUuid,
         nic: &OmicronZoneNic,
     ) -> Result<(), AddNetworkResourceError> {
-        // TODO-scalability: This is a linear scan over all the external IPs,
-        // which isn't great. But we don't expect that many zones, or that many
-        // EIPs in each zone either, so for now it's manageable.
         self.omicron_zone_external_ips
             .iter()
             .filter(|entry| &entry.zone_id == zone_id)
@@ -192,6 +189,16 @@ pub enum OmicronZoneExternalIp {
     // ephemeral?), but for now we only have Floating and Snat uses.
 }
 
+impl IdOrdItem for OmicronZoneExternalIp {
+    type Key<'a> = OmicronZoneExternalIpKey;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.ip_key()
+    }
+
+    iddqd::id_upcast!();
+}
+
 impl OmicronZoneExternalIp {
     pub fn id(&self) -> ExternalIpUuid {
         match self {
@@ -232,7 +239,7 @@ impl OmicronZoneExternalIp {
 ///
 /// We can't use the IP itself to uniquely identify an external IP because SNAT
 /// IPs can have overlapping addresses.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum OmicronZoneExternalIpKey {
     Floating(IpAddr),
     Snat(SourceNatConfigGeneric),
@@ -472,7 +479,7 @@ impl From<OmicronZoneExternalFloatingIps> for NexusExternalIps {
         // - All the IP addresses are unique.
         //
         // The only difference is between this type and `NexusExternalIps` is
-        // that this one carries the UUId for each IP address as well.
+        // that this one carries the UUID for each IP address as well.
         NexusExternalIps::new(value.0.into_iter().map(|ip| ip.ip).collect())
             .expect("both types enforce the same invariants")
     }

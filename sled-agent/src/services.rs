@@ -96,7 +96,6 @@ use sled_hardware::underlay;
 use sled_hardware_types::Baseboard;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
-use std::borrow::Cow;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
@@ -1858,7 +1857,7 @@ impl ServiceManager {
                     .expect("type guarantees this is non-empty")
                     .port();
                 let private_ips = Self::private_ips_for_external_addresses(
-                    dns_addresses.iter().map(|addr| Cow::Owned(addr.ip())),
+                    dns_addresses.iter().map(|addr| addr.ip()),
                     &nic.ip_config,
                     config.zone_type.kind(),
                 )?;
@@ -2224,7 +2223,7 @@ impl ServiceManager {
                 // then collect any additional addresses into a list.
                 let nexus_port = if *external_tls { 443 } else { 80 };
                 let mut private_ips = Self::private_ips_for_external_addresses(
-                    external_ips.iter().map(Cow::Borrowed),
+                    external_ips.iter().copied(),
                     &nic.ip_config,
                     config.zone_type.kind(),
                 )?
@@ -3807,7 +3806,7 @@ impl ServiceManager {
     // those external addresses, i.e., at least one address and as many as one
     // per family.
     fn private_ips_for_external_addresses<'a>(
-        external_ips: impl Iterator<Item = Cow<'a, IpAddr>> + 'a,
+        external_ips: impl Iterator<Item = IpAddr> + 'a,
         ip_config: &'a PrivateIpConfig,
         kind: ZoneKind,
     ) -> Result<Vec<IpAddr>, Error> {

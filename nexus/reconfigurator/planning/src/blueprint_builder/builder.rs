@@ -2786,7 +2786,12 @@ fn is_external_networking_config_different(
                     .zone_type
                     .external_networking()
                     .into_iter()
-                    .flat_map(move |(ips, nic)| {
+                    .flat_map(move |networking| {
+                        // NOTE: We really do need to collect here, because the
+                        // returned iterator borrows from `networking`, even
+                        // though the data is owned.
+                        let nic = networking.nic();
+                        let ips = networking.external_ips().collect::<Vec<_>>();
                         ips.into_iter()
                             .map(move |ip| (sled_id, zone_config.id, ip, nic))
                     })
