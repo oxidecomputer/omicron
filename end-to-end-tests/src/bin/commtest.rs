@@ -129,8 +129,8 @@ struct RunArgs {
     /// test).
     ///
     /// Same `GROUP@SRC,...` syntax as `--mcast-group`, but the supplied sources
-    /// are the permitted `(S, G)` set and must deliberately exclude whatever
-    /// sends the verification pings. The run enrolls every probe as a member,
+    /// are the permitted `(S, G)` set and must exclude whatever sends the
+    /// verification pings. The run enrolls every probe as a member,
     /// pings the group, and asserts that no member receives any reply, proving
     /// the data plane drops traffic from a non-permitted source. Sources are
     /// required, meaning an any-source join would deliver and there would be
@@ -149,8 +149,8 @@ struct RunArgs {
 /// is source-filtered `(S, G)` membership permitting only those sources.
 ///
 /// `deny` marks a negative test where the group is still enrolled and pinged,
-/// but the permitted sources deliberately exclude this sender, so the run
-/// asserts that the dataplane drops the packets and no member replies.
+/// but the permitted sources exclude this sender. The run asserts that the
+/// dataplane drops the packets and no member replies.
 #[derive(Debug, Clone)]
 struct McastGroup {
     addr: IpAddr,
@@ -1258,15 +1258,22 @@ fn verify_mcast<T: std::fmt::Display + PartialEq>(
 /// 4) the sender receiving a copy of its own request stream back from the
 ///    wire (sender echo).
 ///
-/// The over-delivery check exploits an echo invariant: one request yields at
-/// most one reply, so `rx_count` can never exceed `tx_count` under single-copy
-/// delivery. If both switches admit the external stream (duplicate ingress),
-/// a member receives one copy per switch and echoes twice per request, pushing
-/// `rx_count` past `tx_count`. Designated-forwarder election gates the
-/// external ingress entry to a single switch, so steady state is exactly one
-/// delivered copy per request. Under-delivery reuses the unicast loss
-/// tolerance because the reply returns over the unicast path, while
-/// over-delivery has no tolerance: any excess is a replication fault.
+/// The over-delivery check relies on the echo invariant: one request, at
+/// most one reply. With single-copy delivery, `rx_count` stays at or below
+/// `tx_count`. Every extra delivery path is another copy per member and
+/// another echo. Both uplinks equates to double.
+///
+/// Path count is the upstream network's call. Ingress is active-active
+/// (every switch carries every group's external entry) and delivering
+/// toward both uplinks is a valid setup that could yield two copies.
+///
+/// The check here assumes single-copy delivery. The caller arranges that
+/// upstream, however. Under-delivery gets the unicast loss window (replies come
+/// back unicast). Over-delivery gets none. With one path, excess replies are a
+/// replication fault.
+///
+/// TODO: let the caller pass the expected delivery count for multi-path
+/// runs.
 fn verify_mcast_report<T: std::fmt::Display + PartialEq>(
     report: &McastReport<T>,
     expected_members: &[T],

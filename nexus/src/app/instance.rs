@@ -382,8 +382,8 @@ struct MulticastGroupChangePlan {
 impl MulticastGroupChangePlan {
     /// Build a change plan from the current memberships and resolved request.
     ///
-    /// This is deliberately pure: it performs only set and source-filter
-    /// transformations, making the membership diff independently testable.
+    /// Only set and source-filter transformations here, allowing membership diff
+    /// to stay testable (independently).
     fn from_memberships(
         current_memberships: &[MulticastGroupMember],
         resolved: ResolvedMulticastGroups,
@@ -494,7 +494,7 @@ impl super::Nexus {
     /// Look up an instance by name or UUID.
     ///
     /// The `project` parameter is required for name-based lookup (provides scope)
-    /// and must NOT be specified for UUID-based lookup.
+    /// and must not be specified for UUID-based lookup.
     pub fn instance_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,

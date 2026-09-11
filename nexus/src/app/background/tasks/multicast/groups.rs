@@ -85,10 +85,13 @@ use std::net::IpAddr;
 use anyhow::{Context, anyhow};
 use futures::future::try_join_all;
 use futures::stream::{self, StreamExt};
+use oxnet::MulticastMac;
 use slog::{debug, error, info, trace, warn};
 
-use dpd_client::types::IpSrc;
-use nexus_db_model::{MulticastGroup, MulticastGroupState, SqlU8};
+use dpd_client::types::{IpSrc, MacAddr, NatTarget, Vni};
+use nexus_db_model::{
+    MulticastGroup, MulticastGroupState, SqlU8, UnderlayMulticastGroup,
+};
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::multicast::EnsureUnderlayResult;
 use nexus_db_queries::db::datastore::multicast::members::SourceFilterState;
@@ -112,6 +115,12 @@ use crate::app::sagas;
 /// Check if DPD tag matches the database group's tag.
 ///
 /// Tags use format `{uuid}:{ip}` to prevent collision when group names are reused.
+///
+/// No Nexus-managed path produces a mismatch: every switch entry is written
+/// with the database tag, and teardown removes the entries before the row is
+/// deleted. A mismatch therefore implies direct DPD API mutation or a
+/// Dendrite defect, and the reconciler cannot repair it in-band because DPD
+/// authorizes updates and deletes against the tag already on the switch.
 fn dpd_state_matches_tag(
     dpd_group: &dpd_client::types::MulticastGroupExternalResponse,
     db_group: &MulticastGroup,
@@ -181,6 +190,31 @@ fn dpd_state_matches_sources(
             }
         }
     }
+}
+
+/// Check if DPD forwarding configuration matches what Nexus programs.
+///
+/// The expected NAT target is rebuilt from the underlay group's IPv6
+/// address, its derived multicast MAC, and the group VNI, matching the
+/// dataplane create and update paths. Egress VLAN tagging is not yet
+/// supported. `vlan_id` is expected to be `None`.
+fn dpd_state_matches_forwarding(
+    dpd_group: &dpd_client::types::MulticastGroupExternalResponse,
+    db_group: &MulticastGroup,
+    underlay_group: &UnderlayMulticastGroup,
+) -> bool {
+    let IpAddr::V6(underlay_ipv6) = underlay_group.multicast_ip.ip() else {
+        return false;
+    };
+
+    let expected = NatTarget {
+        internal_ip: underlay_ipv6,
+        inner_mac: MacAddr { a: underlay_ipv6.derive_multicast_mac() },
+        vni: Vni::from(u32::from(db_group.vni.0)),
+    };
+
+    dpd_group.internal_forwarding.nat_target.as_ref() == Some(&expected)
+        && dpd_group.external_forwarding.vlan_id.is_none()
 }
 
 /// Switch-side clients threaded through group state processors.
@@ -737,7 +771,8 @@ impl MulticastGroupReconciler {
     /// External group handler for groups in "Active" state.
     ///
     /// Checks if the group's DPD state matches the database state. If not,
-    /// we make dataplane calls to sync. This self-corrects any DPD drift.
+    /// we make dataplane calls to sync. This self-corrects DPD drift, with
+    /// the exception of tag drift (see [`dpd_state_matches_tag`]).
     async fn handle_active_external_group(
         &self,
         opctx: &OpContext,
@@ -761,20 +796,40 @@ impl MulticastGroupReconciler {
         let source_filter =
             filter_state_map.get(&group.id()).cloned().unwrap_or_default();
 
-        // Check if DPD state matches DB state (read-before-write for drift detection)
-        let needs_update = match dataplane_client
-            .fetch_external_group_for_drift_check(group.multicast_ip.ip())
+        // Fetch the underlay group up front. The drift check verifies its
+        // replication entry on every switch, and the update path below reuses
+        // the same record.
+        let underlay_group = self
+            .datastore
+            .underlay_multicast_group_fetch(opctx, underlay_group_id)
             .await
-        {
-            Ok(Some(dpd_group)) => {
-                let tag_matches = dpd_state_matches_tag(&dpd_group, group);
-                let sources_match = dpd_state_matches_sources(
-                    &dpd_group,
-                    &source_filter,
+            .context("failed to fetch underlay group for drift check")?;
+
+        // Check if DPD state matches DB state (read-before-write for drift
+        // detection). The check expects the entry on every switch, and a
+        // fetch failure skips this group's pass, retried on the next
+        // activation.
+        let check = dataplane_client
+            .fetch_external_group_for_drift_check(
+                group.multicast_ip.ip(),
+                underlay_group.multicast_ip.ip(),
+            )
+            .await
+            .context("failed to fetch active group from DPD for drift check")?;
+
+        let needs_update = match &check.external_config {
+            Some(dpd_group) => {
+                let tag_matches = dpd_state_matches_tag(dpd_group, group);
+                let sources_match =
+                    dpd_state_matches_sources(dpd_group, &source_filter, group);
+                let forwarding_matches = dpd_state_matches_forwarding(
+                    dpd_group,
                     group,
+                    &underlay_group,
                 );
 
-                let needs_update = !tag_matches || !sources_match;
+                let needs_update =
+                    !tag_matches || !sources_match || !forwarding_matches;
 
                 if needs_update {
                     debug!(
@@ -782,30 +837,19 @@ impl MulticastGroupReconciler {
                         "detected DPD state mismatch for active group";
                         "group_id" => %group.id(),
                         "tag_matches" => tag_matches,
-                        "sources_match" => sources_match
+                        "sources_match" => sources_match,
+                        "forwarding_matches" => forwarding_matches
                     );
                 }
 
                 needs_update
             }
-            Ok(None) => {
-                // Either no switch has the group, or the switches do not agree
-                // on it. Both cases are resolved by rewriting the group on
-                // every switch.
+            None => {
+                // Absent somewhere in DPD, so re-issue the update.
                 debug!(
                     opctx.log,
-                    "active group absent from DPD or inconsistent across switches, will update";
+                    "active group missing on a switch in DPD, will update";
                     "group_id" => %group.id()
-                );
-                true
-            }
-            Err(e) => {
-                // Error fetching from DPD -> log and retry
-                warn!(
-                    opctx.log,
-                    "error fetching active group from DPD, will retry update";
-                    "group_id" => %group.id(),
-                    "error" => %e
                 );
                 true
             }
@@ -826,27 +870,17 @@ impl MulticastGroupReconciler {
                 "multicast_ip" => %group.multicast_ip
             );
 
-            // Fetch underlay group for the update
-            let underlay_group = self
-                .datastore
-                .underlay_multicast_group_fetch(opctx, underlay_group_id)
-                .await
-                .context(
-                    "failed to fetch underlay group for drift correction",
-                )?;
-
             // Direct dataplane call for drift correction
             // If update fails, we leave existing state and retry on next RPW cycle.
             match dataplane_client
                 .update_groups(GroupUpdateParams {
                     external_group: group,
                     underlay_group: &underlay_group,
-                    new_name: group.name().as_str(),
                     source_filter: &source_filter,
                 })
                 .await
             {
-                Ok(_) => {
+                Ok(()) => {
                     info!(
                         opctx.log,
                         "drift correction completed for active group";
@@ -880,7 +914,7 @@ impl MulticastGroupReconciler {
                         "group_id" => %group.id(),
                         "error" => %e
                     );
-                    // Return NoChange so RPW retries on next activation
+                    // Return NoChange so RPW retries on next activation.
                     Ok(StateTransition::NoChange)
                 }
             }
@@ -1180,7 +1214,7 @@ mod tests {
             has_any_source_member: false,
         };
 
-        let group = create_group("232.1.1.1"); // SSM address
+        let group = create_group("232.1.1.1");
 
         // DPD has matching sources
         let dpd_group = create_dpd_group(Some(vec![
@@ -1210,10 +1244,10 @@ mod tests {
 
     #[test]
     fn test_dpd_state_matches_sources_ssm_ignores_has_any_source_member() {
-        // SSM address with has_any_source_member=true should still use specific_sources
-        // per RFC 4607: SSM MUST have source specification. The has_any_source_member
-        // flag is ignored for SSM because API validation prevents SSM joins without
-        // sources. This is defense-in-depth.
+        // SSM address with has_any_source_member=true should still use
+        // specific_sources, since RFC 4607 requires a source specification for
+        // SSM. The has_any_source_member flag is ignored for SSM because API
+        // validation prevents SSM joins without sources.
         let source_filter = SourceFilterState {
             specific_sources: BTreeSet::from([
                 "10.0.0.1".parse::<IpAddr>().unwrap(),
@@ -1222,7 +1256,7 @@ mod tests {
             has_any_source_member: true, // Ignored for SSM
         };
 
-        let group = create_group("232.1.1.1"); // SSM address
+        let group = create_group("232.1.1.1");
 
         // DPD should have specific sources (RFC 4607 compliance)
         let dpd_group = create_dpd_group(Some(vec![
@@ -1246,7 +1280,7 @@ mod tests {
             has_any_source_member: false,
         };
 
-        let group = create_group("224.1.1.1"); // ASM address
+        let group = create_group("224.1.1.1");
 
         // DPD has matching specific sources
         let dpd_group = create_dpd_group(Some(vec![IpSrc::Exact(
@@ -1272,7 +1306,7 @@ mod tests {
             has_any_source_member: true,
         };
 
-        let group = create_group("224.1.1.1"); // ASM address
+        let group = create_group("224.1.1.1");
 
         // DPD has None (correct: any-source canonicalizes to None)
         let dpd_group = create_dpd_group(None);
@@ -1293,7 +1327,7 @@ mod tests {
             has_any_source_member: false,
         };
 
-        let group = create_group("224.1.1.1"); // ASM address
+        let group = create_group("224.1.1.1");
 
         // DPD has None (correct: no sources configured)
         let dpd_group = create_dpd_group(None);
