@@ -242,6 +242,7 @@ mod tests {
     use nexus_types::deployment::PendingMgsUpdateDetails;
     use nexus_types::deployment::PendingMgsUpdateRotDetails;
     use nexus_types::deployment::PendingMgsUpdates;
+    use nexus_types::deployment::PlannerConfig;
     use nexus_types::deployment::TargetReleaseDescription;
     use nexus_types::inventory::SpType;
     use std::collections::BTreeSet;
@@ -257,6 +258,7 @@ mod tests {
         );
         let log = &logctx.log;
         let test_boards = TestBoards::new(test_name);
+        let planner_config = PlannerConfig::default();
 
         // Test that with no updates pending and no TUF repo specified, there
         // will remain no updates pending.
@@ -272,6 +274,7 @@ mod tests {
         let PlannedMgsUpdates { pending_updates: updates, .. } =
             MgsUpdatePlanner {
                 log,
+                planner_config: &planner_config,
                 inventory: &collection,
                 current_boards,
                 zone_safety_checks: &ZoneSafetyChecks::empty(),
@@ -290,6 +293,7 @@ mod tests {
         let PlannedMgsUpdates { pending_updates: updates, .. } =
             MgsUpdatePlanner {
                 log,
+                planner_config: &planner_config,
                 inventory: &collection,
                 current_boards,
                 zone_safety_checks: &ZoneSafetyChecks::empty(),
@@ -316,6 +320,7 @@ mod tests {
         let PlannedMgsUpdates { pending_updates: later_updates, .. } =
             MgsUpdatePlanner {
                 log,
+                planner_config: &planner_config,
                 inventory: &collection,
                 current_boards,
                 zone_safety_checks: &ZoneSafetyChecks::empty(),
@@ -341,6 +346,7 @@ mod tests {
         let PlannedMgsUpdates { pending_updates: later_updates, .. } =
             MgsUpdatePlanner {
                 log,
+                planner_config: &planner_config,
                 inventory: &later_collection,
                 current_boards,
                 zone_safety_checks: &ZoneSafetyChecks::empty(),
@@ -376,6 +382,7 @@ mod tests {
         let PlannedMgsUpdates { pending_updates: later_updates, .. } =
             MgsUpdatePlanner {
                 log,
+                planner_config: &planner_config,
                 inventory: &later_collection,
                 current_boards,
                 zone_safety_checks: &ZoneSafetyChecks::empty(),
@@ -404,6 +411,7 @@ mod tests {
         let PlannedMgsUpdates { pending_updates: later_updates, .. } =
             MgsUpdatePlanner {
                 log,
+                planner_config: &planner_config,
                 inventory: &updated_collection,
                 current_boards,
                 zone_safety_checks: &ZoneSafetyChecks::empty(),
@@ -427,6 +435,7 @@ mod tests {
         let PlannedMgsUpdates { pending_updates: updates, .. } =
             MgsUpdatePlanner {
                 log,
+                planner_config: &planner_config,
                 inventory: &collection,
                 current_boards: &BTreeSet::new(),
                 zone_safety_checks: &ZoneSafetyChecks::empty(),
@@ -443,6 +452,7 @@ mod tests {
         let PlannedMgsUpdates { pending_updates: updates, .. } =
             MgsUpdatePlanner {
                 log,
+                planner_config: &planner_config,
                 inventory: &collection,
                 current_boards: &UpdateableBoard::all_from_collection(
                     &collection,
@@ -500,6 +510,7 @@ mod tests {
         let PlannedMgsUpdates { pending_updates: new_updates, .. } =
             MgsUpdatePlanner {
                 log,
+                planner_config: &planner_config,
                 inventory: &collection,
                 current_boards: &UpdateableBoard::all_from_collection(
                     &collection,
@@ -547,6 +558,7 @@ mod tests {
         let PlannedMgsUpdates { pending_updates: new_updates, .. } =
             MgsUpdatePlanner {
                 log,
+                planner_config: &planner_config,
                 inventory: &collection,
                 current_boards: &UpdateableBoard::all_from_collection(
                     &collection,
