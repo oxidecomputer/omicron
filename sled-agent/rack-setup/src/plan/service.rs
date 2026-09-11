@@ -1395,11 +1395,9 @@ mod tests {
     use sled_agent_types::early_networking::RackNetworkConfig;
     use sled_agent_types::early_networking::UplinkPorts;
     use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
-    use sled_agent_types::inventory::CurrentUpdateDisposition;
     use sled_agent_types::inventory::FmdInventory;
     use sled_agent_types::inventory::InstanceManagerStatus;
     use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
-    use sled_agent_types::inventory::OmicronSledUpdateDisposition;
     use sled_agent_types::inventory::SledCpuFamily;
     use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
     use sled_hardware_types::BaseboardId;

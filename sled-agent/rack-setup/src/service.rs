@@ -1644,7 +1644,6 @@ mod test {
     use oxnet::Ipv6Net;
     use sled_agent_types::disk::DiskIdentity;
     use sled_agent_types::disk::DiskVariant;
-    use sled_agent_types::inventory::CurrentUpdateDisposition;
     use sled_agent_types::inventory::InstanceManagerStatus;
     use sled_agent_types::{
         early_networking::{PortConfig, RackNetworkConfig, UplinkPorts},

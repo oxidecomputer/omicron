@@ -774,9 +774,8 @@ mod test {
     use sled_agent_types::disk::DiskIdentity;
     use sled_agent_types::disk::DiskVariant;
     use sled_agent_types::inventory::{
-        ConfigReconcilerInventoryStatus, CurrentUpdateDisposition,
-        FmdInventory, InstanceManagerStatus, Inventory, InventoryDisk,
-        OmicronFileSourceResolverInventory, OmicronSledUpdateDisposition,
+        ConfigReconcilerInventoryStatus, FmdInventory, InstanceManagerStatus,
+        Inventory, InventoryDisk, OmicronFileSourceResolverInventory,
         SledCpuFamily, SledRole, SvcsEnabledNotOnlineResult,
     };
     use sled_hardware_types::BaseboardId;
