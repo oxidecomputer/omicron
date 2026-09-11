@@ -909,13 +909,11 @@ fn display_sleds(
             }
         }
 
-        writeln!(indented, "instance manager status:")?;
         {
             let InstanceManagerStatus {
                 update_disposition,
                 num_registered_vmms,
             } = instance_manager_status;
-            let mut indent2 = IndentWriter::new("    ", &mut indented);
             let disposition = match update_disposition {
                 CurrentUpdateDisposition::ConfigNotAvailable => {
                     "unknown (no config loaded)"
@@ -927,8 +925,12 @@ fn display_sleds(
                     OmicronSledUpdateDisposition::Evacuating,
                 ) => "evacuating",
             };
-            writeln!(indent2, "update disposition: {disposition}")?;
-            writeln!(indent2, "VMMs registered: {num_registered_vmms}")?;
+            let s = if *num_registered_vmms == 1 { "" } else { "s" };
+            writeln!(
+                indented,
+                "instance manager status: {disposition} \
+                 ({num_registered_vmms} registered VMM{s})"
+            )?;
         }
 
         writeln!(indented, "reference measurements:")?;
