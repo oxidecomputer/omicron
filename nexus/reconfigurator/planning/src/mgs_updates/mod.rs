@@ -25,7 +25,7 @@ use nexus_types::deployment::PendingMgsUpdateRotBootloaderDetails;
 use nexus_types::deployment::PendingMgsUpdateRotDetails;
 use nexus_types::deployment::PendingMgsUpdateSpDetails;
 use nexus_types::deployment::PendingMgsUpdates;
-use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
+use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::TargetReleaseDescription;
 use nexus_types::deployment::planning_report::BlockedMgsUpdate;
 use nexus_types::deployment::planning_report::FailedMgsUpdateReason;
@@ -46,12 +46,6 @@ use tufaceous_artifact::ArtifactVersionError;
 pub(crate) use host_phase_1::PendingHostPhase2Changes;
 pub(crate) use sled_evacuation::EvacuatingSleds;
 pub(crate) use sled_evacuation::PendingUpdateDispositionChanges;
-
-// TODO: This should come from `ReconfiguratorConfig::disruption_policy`, which
-// is not yet plumbed through the `PlanningInput`. Until then, we this default
-// when marking a sled for evacuation.
-const DEFAULT_EVAC_POLICY: ReconfiguratorDisruptionPolicy =
-    ReconfiguratorDisruptionPolicy::Terminate;
 
 /// How to handle an MGS-driven update that has become impossible due to
 /// unsatisfied preconditions.
@@ -155,6 +149,8 @@ impl UpdateableBoard {
 #[derive(Debug)]
 pub(crate) struct MgsUpdatePlanner<'a> {
     pub(crate) log: &'a slog::Logger,
+    /// the current planner config
+    pub(crate) planner_config: &'a PlannerConfig,
     /// the latest inventory
     pub(crate) inventory: &'a Collection,
     /// a set of baseboards to consider updating (it is possible to have
@@ -195,6 +191,7 @@ impl<'a> MgsUpdatePlanner<'a> {
         let mut blocked_mgs_updates = Vec::new();
         let MgsUpdatePlanner {
             log,
+            planner_config,
             inventory,
             current_boards,
             evacuating_sleds,
@@ -402,7 +399,7 @@ impl<'a> MgsUpdatePlanner<'a> {
                     pending_update_disposition_changes.insert(
                         sled_id,
                         BlueprintSledUpdateDispositionKind::Evacuating {
-                            policy: DEFAULT_EVAC_POLICY,
+                            policy: planner_config.disruption_policy,
                         },
                     );
                     boards_being_updated
@@ -898,7 +895,6 @@ mod test {
     use crate::mgs_updates::UpdateableBoard;
     use crate::planner::ZoneSafetyChecks;
 
-    use super::DEFAULT_EVAC_POLICY;
     use super::EvacuatingSleds;
     use super::ImpossibleUpdatePolicy;
     use super::PlannedMgsUpdates;
@@ -921,6 +917,8 @@ mod test {
     use nexus_types::deployment::PendingMgsUpdateDetails;
     use nexus_types::deployment::PendingMgsUpdateSpDetails;
     use nexus_types::deployment::PendingMgsUpdates;
+    use nexus_types::deployment::PlannerConfig;
+    use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
     use nexus_types::deployment::TargetReleaseDescription;
     use nexus_types::deployment::planning_report::BlockedMgsUpdate;
     use nexus_types::deployment::planning_report::FailedHostOsUpdateReason;
@@ -953,6 +951,7 @@ mod test {
         );
         let log = &logctx.log;
         let test_boards = TestBoards::new(test_name);
+        let planner_config = PlannerConfig::default();
 
         // Initial setup: One of every possible SP component will need to be
         // updated
@@ -987,6 +986,7 @@ mod test {
             ..
         } = MgsUpdatePlanner {
             log,
+            planner_config: &planner_config,
             inventory: &collection,
             current_boards: &fake_boards,
             zone_safety_checks: &ZoneSafetyChecks::empty(),
@@ -1034,6 +1034,7 @@ mod test {
             ..
         } = MgsUpdatePlanner {
             log,
+            planner_config: &planner_config,
             inventory: &collection,
             current_boards: &UpdateableBoard::all_from_collection(&collection),
             zone_safety_checks: &ZoneSafetyChecks::empty(),
@@ -1082,6 +1083,7 @@ mod test {
             ..
         } = MgsUpdatePlanner {
             log,
+            planner_config: &planner_config,
             inventory: &collection,
             current_boards: &UpdateableBoard::all_from_collection(&collection),
             zone_safety_checks: &ZoneSafetyChecks::empty(),
@@ -1132,6 +1134,7 @@ mod test {
             ..
         } = MgsUpdatePlanner {
             log,
+            planner_config: &planner_config,
             inventory: &collection,
             current_boards: &current_boards,
             zone_safety_checks: &ZoneSafetyChecks::empty(),
@@ -1174,6 +1177,7 @@ mod test {
             test_boards.sled_id(0).expect("have sled 0"),
             SledConfigGeneration::new(),
         )]);
+        let planner_config = PlannerConfig::default();
 
         // Initial setup: sled 0 has active version 1 and inactive version 1.5.
         let collection = test_boards
@@ -1209,6 +1213,7 @@ mod test {
             let PlannedMgsUpdates { pending_updates: planned_updates, .. } =
                 MgsUpdatePlanner {
                     log,
+                    planner_config: &planner_config,
                     inventory: &collection,
                     current_boards,
                     zone_safety_checks: &ZoneSafetyChecks::empty(),
@@ -1265,6 +1270,7 @@ mod test {
         let PlannedMgsUpdates { pending_updates: keep_updates, .. } =
             MgsUpdatePlanner {
                 log,
+                planner_config: &planner_config,
                 inventory: &collection,
                 current_boards,
                 zone_safety_checks: &ZoneSafetyChecks::empty(),
@@ -1284,6 +1290,7 @@ mod test {
         let PlannedMgsUpdates { pending_updates: reeval_updates, .. } =
             MgsUpdatePlanner {
                 log,
+                planner_config: &planner_config,
                 inventory: &collection,
                 current_boards,
                 zone_safety_checks: &ZoneSafetyChecks::empty(),
@@ -1333,6 +1340,7 @@ mod test {
         let repo = test_boards.tuf_repo();
         let nmax_updates = 1;
         let impossible_update_policy = ImpossibleUpdatePolicy::Reevaluate;
+        let planner_config = PlannerConfig::default();
 
         // We do not control the order of updates.  But we expect to update each
         // of the boards in this map.  When we do, we expect to find the given
@@ -1404,6 +1412,7 @@ mod test {
                 blocked_mgs_updates,
             } = MgsUpdatePlanner {
                 log,
+                planner_config: &planner_config,
                 inventory: &collection,
                 current_boards: &current_boards,
                 zone_safety_checks: &ZoneSafetyChecks::empty(),
@@ -1537,6 +1546,7 @@ mod test {
                 );
                 let waiting = MgsUpdatePlanner {
                     log,
+                    planner_config: &planner_config,
                     inventory: &collection,
                     current_boards: &current_boards,
                     zone_safety_checks: &ZoneSafetyChecks::empty(),
@@ -1681,6 +1691,7 @@ mod test {
             ..
         } = MgsUpdatePlanner {
             log,
+            planner_config: &planner_config,
             inventory: &collection,
             current_boards: &UpdateableBoard::all_from_collection(&collection),
             zone_safety_checks: &ZoneSafetyChecks::empty(),
@@ -1712,6 +1723,7 @@ mod test {
         let repo = test_boards.tuf_repo();
         let all_sleds_evacuating = test_boards.all_sleds_evacuating();
         let impossible_update_policy = ImpossibleUpdatePolicy::Reevaluate;
+        let planner_config = PlannerConfig::default();
 
         let mut expected_updates = test_boards.expected_updates();
 
@@ -1749,6 +1761,7 @@ mod test {
             ..
         } = MgsUpdatePlanner {
             log,
+            planner_config: &planner_config,
             inventory: &collection,
             current_boards: &UpdateableBoard::all_from_collection(&collection),
             zone_safety_checks: &ZoneSafetyChecks::empty(),
@@ -1801,6 +1814,7 @@ mod test {
             ..
         } = MgsUpdatePlanner {
             log,
+            planner_config: &planner_config,
             inventory: &collection,
             current_boards: &UpdateableBoard::all_from_collection(&collection),
             zone_safety_checks: &ZoneSafetyChecks::empty(),
@@ -1853,6 +1867,7 @@ mod test {
             ..
         } = MgsUpdatePlanner {
             log,
+            planner_config: &planner_config,
             inventory: &collection,
             current_boards: &UpdateableBoard::all_from_collection(&collection),
             zone_safety_checks: &ZoneSafetyChecks::empty(),
@@ -1920,6 +1935,7 @@ mod test {
             ..
         } = MgsUpdatePlanner {
             log,
+            planner_config: &planner_config,
             inventory: &collection,
             current_boards: &UpdateableBoard::all_from_collection(&collection),
             zone_safety_checks: &ZoneSafetyChecks::empty(),
@@ -1970,6 +1986,7 @@ mod test {
             ..
         } = MgsUpdatePlanner {
             log,
+            planner_config: &planner_config,
             inventory: &collection,
             current_boards: &UpdateableBoard::all_from_collection(&collection),
             zone_safety_checks: &ZoneSafetyChecks::empty(),
@@ -2009,6 +2026,7 @@ mod test {
             ..
         } = MgsUpdatePlanner {
             log,
+            planner_config: &planner_config,
             inventory: &collection,
             current_boards: &UpdateableBoard::all_from_collection(&collection),
             zone_safety_checks: &ZoneSafetyChecks::empty(),
@@ -2050,6 +2068,7 @@ mod test {
             &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
         );
         let test_boards = TestBoards::new(test_name);
+        let planner_config = PlannerConfig::default();
 
         // Configure an update for one SP.
         let log = &logctx.log;
@@ -2065,6 +2084,7 @@ mod test {
         let PlannedMgsUpdates { pending_updates: updates, .. } =
             MgsUpdatePlanner {
                 log,
+                planner_config: &planner_config,
                 inventory: &collection,
                 current_boards: &UpdateableBoard::all_from_collection(
                     &collection,
@@ -2096,6 +2116,7 @@ mod test {
         let PlannedMgsUpdates { pending_updates: new_updates, .. } =
             MgsUpdatePlanner {
                 log,
+                planner_config: &planner_config,
                 inventory: &collection,
                 current_boards: &UpdateableBoard::all_from_collection(
                     &collection,
@@ -2136,6 +2157,7 @@ mod test {
         let test_boards = TestBoards::new(test_name);
         let repo = test_boards.tuf_repo();
         let sled_0_id = test_boards.sled_id(0).expect("have sled 0");
+        let planner_config = PlannerConfig::default();
 
         // Sled 0 needs an SP update and is marked for evacuation, but its
         // inventory (the default) still reports an `Available` instance
@@ -2151,6 +2173,7 @@ mod test {
         )]);
         let planned = MgsUpdatePlanner {
             log,
+            planner_config: &planner_config,
             inventory: &collection,
             current_boards: &current_boards,
             zone_safety_checks: &ZoneSafetyChecks::empty(),
@@ -2186,6 +2209,7 @@ mod test {
             .build();
         let planned = MgsUpdatePlanner {
             log,
+            planner_config: &planner_config,
             inventory: &collection,
             current_boards: &current_boards,
             zone_safety_checks: &ZoneSafetyChecks::empty(),
@@ -2219,6 +2243,7 @@ mod test {
         let repo = test_boards.tuf_repo();
         let sled_0_id = test_boards.sled_id(0).expect("have sled 0");
         let sled_1_id = test_boards.sled_id(1).expect("have sled 1");
+        let planner_config = PlannerConfig::default();
 
         // Sleds 0 and 1 both need SP updates; nothing is evacuating yet.
         let collection = test_boards
@@ -2231,6 +2256,7 @@ mod test {
         let plan = |nmax_updates: usize| {
             MgsUpdatePlanner {
                 log,
+                planner_config: &planner_config,
                 inventory: &collection,
                 current_boards: &current_boards,
                 zone_safety_checks: &ZoneSafetyChecks::empty(),
@@ -2245,7 +2271,7 @@ mod test {
             .plan()
         };
         let expected_kind = BlueprintSledUpdateDispositionKind::Evacuating {
-            policy: DEFAULT_EVAC_POLICY,
+            policy: ReconfiguratorDisruptionPolicy::default(),
         };
 
         // With one slot, exactly one sled is marked for evacuation.
@@ -2290,6 +2316,7 @@ mod test {
         let sled_0_id = test_boards.sled_id(0).expect("have sled 0");
         let sled_0_serial =
             test_boards.sled_serial_number(sled_0_id).expect("have sled 0");
+        let planner_config = PlannerConfig::default();
 
         let unsafe_reason = ZoneUnsafeToShutdown::InternalDns {
             total_internal_dns_zones: 3,
@@ -2328,6 +2355,7 @@ mod test {
         let current_boards = UpdateableBoard::all_from_collection(&collection);
         let planned = MgsUpdatePlanner {
             log,
+            planner_config: &planner_config,
             inventory: &collection,
             current_boards: &current_boards,
             zone_safety_checks: &zone_safety_checks,
@@ -2350,6 +2378,7 @@ mod test {
             .build();
         let planned = MgsUpdatePlanner {
             log,
+            planner_config: &planner_config,
             inventory: &collection,
             current_boards: &current_boards,
             zone_safety_checks: &zone_safety_checks,
@@ -2387,6 +2416,7 @@ mod test {
             sled_0_id,
             SledConfigGeneration::new(),
         )]);
+        let planner_config = PlannerConfig::default();
 
         // Sled 0 is evacuating and needs only a RoT update.
         let collection = test_boards
@@ -2397,6 +2427,7 @@ mod test {
         let current_boards = UpdateableBoard::all_from_collection(&collection);
         let planned = MgsUpdatePlanner {
             log,
+            planner_config: &planner_config,
             inventory: &collection,
             current_boards: &current_boards,
             zone_safety_checks: &ZoneSafetyChecks::empty(),
@@ -2427,6 +2458,7 @@ mod test {
             let collection = builder.build();
             let planned = MgsUpdatePlanner {
                 log,
+                planner_config: &planner_config,
                 inventory: &collection,
                 current_boards: &current_boards,
                 zone_safety_checks: &ZoneSafetyChecks::empty(),

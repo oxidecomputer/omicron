@@ -1648,6 +1648,7 @@ impl<'a> Planner<'a> {
             blocked_mgs_updates,
         } = MgsUpdatePlanner {
             log: &self.log,
+            planner_config: self.input.planner_config(),
             inventory: &self.inventory,
             current_boards: &included_baseboards,
             evacuating_sleds: &evacuating_sleds,
