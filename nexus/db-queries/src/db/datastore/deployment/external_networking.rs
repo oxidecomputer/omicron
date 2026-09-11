@@ -383,9 +383,25 @@ impl DataStore {
                         .into());
                     }
                 };
+
+            // If the ID doesn't match, we assume it's a separate record
+            // entirely. We'll let the database constraints catch things like
+            // duplicate IPs.
+            if existing_ip.id() != external_ip.id() {
+                continue;
+            }
+
+            // Now if the rest of the record _also_ matches, then we're
+            // really reallocating the same thing and we can return safely.
             if existing_ip == external_ip {
                 info!(log, "found already-allocated external IP");
                 return Ok(true);
+            } else {
+                return Err(Error::invalid_request(format!(
+                    "zone {zone_id} has a different IP \
+                    allocated: {existing_ip:?}"
+                ))
+                .into());
             }
         }
 

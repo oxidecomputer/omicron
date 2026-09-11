@@ -4,10 +4,13 @@
 
 use anyhow::anyhow;
 use daft::Diffable;
+use iddqd::BiHashItem;
+use iddqd::BiHashMap;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::TriHashItem;
 use iddqd::TriHashMap;
+use iddqd::bi_upcast;
 use iddqd::tri_upcast;
 use omicron_common::api::external::IpVersion;
 use omicron_common::api::external::MacAddr;
@@ -40,30 +43,17 @@ use uuid::Uuid;
 ///
 /// ## Implementation notes
 ///
-/// `OmicronZoneNetworkResources` consists of two 1:1:1 "trijective" maps:
+/// `OmicronZoneNetworkResources` consists of two maps:
 ///
-/// 1. Providing a unique map for Omicron zone IDs, external IP IDs, and
-///    external IPs.
-/// 2. Providing a unique map for Omicron zone IDs, vNIC IDs, and vNICs.
-///
-/// One question that arises: should there instead be a single 1:1:1:1:1 map?
-/// In other words, is there a 1:1 mapping between external IPs and vNICs as
-/// well? The answer is "generally yes", but:
-///
-/// - They're not stored in the database that way, and it's possible that
-///   there's some divergence.
-/// - We currently don't plan to get any utility out of asserting the 1:1:1:1:1
-///   map. The main planned use of this is for expunged zone garbage collection
-///   -- while that benefits from trijective maps tremendously, there's no
-///   additional value in asserting a unique mapping between external IPs and
-///   vNICs.
-///
-/// So we use two separate maps for now. But a single map is always a
-/// possibility in the future, if required.
+/// 1. A 1:1 "bijective map" providing a mapping between external IP UUIDs and
+///    the IPs themselves. There can be multiple such entries in the same zone.
+/// 2. A 1:1:1 "trijective map" providing a unique map for Omicron zone IDs,
+///    vNIC IDs, and vNICs. Each of these is unique, because all zones, even
+///    those with multiple external IPs, have exactly 1 vNIC.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OmicronZoneNetworkResources {
     /// external IPs allocated to Omicron zones
-    omicron_zone_external_ips: TriHashMap<OmicronZoneExternalIpEntry>,
+    omicron_zone_external_ips: BiHashMap<OmicronZoneExternalIpEntry>,
 
     /// vNICs allocated to Omicron zones
     omicron_zone_nics: TriHashMap<OmicronZoneNicEntry>,
@@ -72,7 +62,7 @@ pub struct OmicronZoneNetworkResources {
 impl OmicronZoneNetworkResources {
     pub fn new() -> Self {
         Self {
-            omicron_zone_external_ips: TriHashMap::new(),
+            omicron_zone_external_ips: BiHashMap::new(),
             omicron_zone_nics: TriHashMap::new(),
         }
     }
@@ -120,16 +110,19 @@ impl OmicronZoneNetworkResources {
         zone_id: &OmicronZoneUuid,
         nic: &OmicronZoneNic,
     ) -> Result<(), AddNetworkResourceError> {
-        if let Some(OmicronZoneExternalIpEntry { ip, .. }) =
-            self.omicron_zone_external_ips.get1(zone_id)
-        {
-            return self.check_external_and_private_ips_are_consistent(
-                zone_id,
-                ip.ip(),
-                nic,
-            );
-        }
-        Ok(())
+        // TODO-scalability: This is a linear scan over all the external IPs,
+        // which isn't great. But we don't expect that many zones, or that many
+        // EIPs in each zone either, so for now it's manageable.
+        self.omicron_zone_external_ips
+            .iter()
+            .filter(|entry| &entry.zone_id == zone_id)
+            .try_for_each(|entry| {
+                self.check_external_and_private_ips_are_consistent(
+                    zone_id,
+                    entry.ip.ip(),
+                    nic,
+                )
+            })
     }
 
     fn check_external_and_private_ips_are_consistent(
@@ -185,45 +178,6 @@ impl OmicronZoneNetworkResources {
                 err: anyhow!(err.into_owned()),
             }
         })
-    }
-
-    pub fn get_external_ip_by_zone_id(
-        &self,
-        zone_id: OmicronZoneUuid,
-    ) -> Option<&OmicronZoneExternalIpEntry> {
-        self.omicron_zone_external_ips.get1(&zone_id)
-    }
-
-    pub fn get_external_ip_by_external_ip_id(
-        &self,
-        ip: ExternalIpUuid,
-    ) -> Option<&OmicronZoneExternalIpEntry> {
-        self.omicron_zone_external_ips.get2(&ip)
-    }
-
-    pub fn get_external_ip_by_ip(
-        &self,
-        ip: OmicronZoneExternalIpKey,
-    ) -> Option<&OmicronZoneExternalIpEntry> {
-        self.omicron_zone_external_ips.get3(&ip)
-    }
-
-    pub fn get_nic_by_zone_id(
-        &self,
-        zone_id: OmicronZoneUuid,
-    ) -> Option<&OmicronZoneNicEntry> {
-        self.omicron_zone_nics.get1(&zone_id)
-    }
-
-    pub fn get_nic_by_vnic_id(
-        &self,
-        vnic_id: VnicUuid,
-    ) -> Option<&OmicronZoneNicEntry> {
-        self.omicron_zone_nics.get2(&vnic_id)
-    }
-
-    pub fn get_nic_by_mac(&self, mac: MacAddr) -> Option<&OmicronZoneNicEntry> {
-        self.omicron_zone_nics.get3(&mac)
     }
 }
 
@@ -884,28 +838,23 @@ pub struct OmicronZoneExternalIpEntry {
     pub ip: OmicronZoneExternalIp,
 }
 
-/// Specification for the tri-map of Omicron zone external IPs.
-impl TriHashItem for OmicronZoneExternalIpEntry {
-    type K1<'a> = OmicronZoneUuid;
-    type K2<'a> = ExternalIpUuid;
+/// Specification for the bi-map of Omicron zone external IPs.
+impl BiHashItem for OmicronZoneExternalIpEntry {
+    type K1<'a> = ExternalIpUuid;
 
     // Note: cannot use IpAddr here, because SNAT IPs can overlap as long as
     // their port blocks are disjoint.
-    type K3<'a> = OmicronZoneExternalIpKey;
+    type K2<'a> = OmicronZoneExternalIpKey;
 
     fn key1(&self) -> Self::K1<'_> {
-        self.zone_id
-    }
-
-    fn key2(&self) -> Self::K2<'_> {
         self.ip.id()
     }
 
-    fn key3(&self) -> Self::K3<'_> {
+    fn key2(&self) -> Self::K2<'_> {
         self.ip.ip_key()
     }
 
-    tri_upcast!();
+    bi_upcast!();
 }
 
 /// A pair of an Omicron zone ID and a network interface.
@@ -1328,5 +1277,57 @@ mod tests {
                 prop_assert_eq!(inventory, blueprint.into());
             }
         }
+    }
+
+    #[test]
+    fn omicron_zone_network_resources_allows_multiple_ips_per_zone() {
+        let mut resources = OmicronZoneNetworkResources::new();
+        let zone_id = OmicronZoneUuid::new_v4();
+        let eip1 = "192.168.1.1".parse().unwrap();
+        let eip1_id = ExternalIpUuid::new_v4();
+        let eip2 = "192.168.1.2".parse().unwrap();
+        let eip2_id = ExternalIpUuid::new_v4();
+        resources
+            .add_external_ip(
+                zone_id,
+                OmicronZoneExternalIp::Floating(
+                    OmicronZoneExternalFloatingIp { id: eip1_id, ip: eip1 },
+                ),
+            )
+            .expect("able to add first EIP for a zone");
+        resources
+            .add_external_ip(
+                zone_id,
+                OmicronZoneExternalIp::Floating(
+                    OmicronZoneExternalFloatingIp { id: eip2_id, ip: eip2 },
+                ),
+            )
+            .expect("able to add second EIP for a zone");
+
+        // Cannot add new IP with same ID
+        resources
+            .add_external_ip(
+                zone_id,
+                OmicronZoneExternalIp::Floating(
+                    OmicronZoneExternalFloatingIp {
+                        id: eip2_id,
+                        ip: "1.1.1.1".parse().unwrap(),
+                    },
+                ),
+            )
+            .expect_err("error adding new IP with same ID");
+
+        // Cannot add new ID with same IP
+        resources
+            .add_external_ip(
+                zone_id,
+                OmicronZoneExternalIp::Floating(
+                    OmicronZoneExternalFloatingIp {
+                        id: ExternalIpUuid::new_v4(),
+                        ip: eip2,
+                    },
+                ),
+            )
+            .expect_err("error adding new IP with same ID");
     }
 }
