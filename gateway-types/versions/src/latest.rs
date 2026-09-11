@@ -46,6 +46,22 @@ pub mod component_details {
     pub use crate::v1::component_details::UnsupportedComponentDetails;
 }
 
+pub mod component_vpd {
+    pub use crate::v4::component_vpd::Barcode;
+    pub use crate::v4::component_vpd::ComponentVpd;
+    pub use crate::v4::component_vpd::Mpn1Barcode;
+    pub use crate::v4::component_vpd::OxideBarcode;
+    pub use crate::v4::component_vpd::PmbusDevice;
+    pub use crate::v4::component_vpd::SledFanTray;
+    pub use crate::v4::component_vpd::Tmp11x;
+
+    // These error types are not part of the actual API, and are therefore not
+    // versioned. They are returned by `TryFrom` and similar.
+    pub use crate::impls::component_vpd::InvalidAssemblyBarcode;
+    pub use crate::impls::component_vpd::InvalidComponentVpd;
+    pub use crate::impls::component_vpd::ParseBarcodeError;
+}
+
 pub mod host {
     pub use crate::v1::host::ComponentFirmwareHashStatus;
     pub use crate::v1::host::HostStartupOptions;
