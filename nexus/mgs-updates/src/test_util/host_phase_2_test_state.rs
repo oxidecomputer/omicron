@@ -387,12 +387,7 @@ mod api_impl {
                     remove_mupdate_override: None,
                     boot_partitions,
                 }),
-                instance_manager_status: InstanceManagerStatus {
-                    update_disposition: CurrentUpdateDisposition::Known(
-                        OmicronSledUpdateDisposition::Available,
-                    ),
-                    num_registered_vmms: 0,
-                },
+                instance_manager_status: InstanceManagerStatus::available(0),
                 fmd: Ok(FmdInventory::default()),
                 file_source_resolver: OmicronFileSourceResolverInventory {
                     zone_manifest: ManifestInventory {

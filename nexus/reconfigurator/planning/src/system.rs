@@ -1566,12 +1566,7 @@ impl Sled {
                         sled_config,
                     ),
                 ),
-                instance_manager_status: InstanceManagerStatus {
-                    update_disposition: CurrentUpdateDisposition::Known(
-                        OmicronSledUpdateDisposition::Available,
-                    ),
-                    num_registered_vmms: 0,
-                },
+                instance_manager_status: InstanceManagerStatus::available(0),
                 // XXX: return something more reasonable here?
                 file_source_resolver:
                     OmicronFileSourceResolverInventory::new_fake(),
@@ -1758,12 +1753,7 @@ impl Sled {
             ledgered_sled_config: inv_sled_agent.ledgered_sled_config.clone(),
             reconciler_status: inv_sled_agent.reconciler_status.clone(),
             last_reconciliation: inv_sled_agent.last_reconciliation.clone(),
-            instance_manager_status: InstanceManagerStatus {
-                update_disposition: CurrentUpdateDisposition::Known(
-                    OmicronSledUpdateDisposition::Available,
-                ),
-                num_registered_vmms: 0,
-            },
+            instance_manager_status: InstanceManagerStatus::available(0),
             file_source_resolver: inv_sled_agent.file_source_resolver.clone(),
             smf_services_enabled_not_online: inv_sled_agent
                 .smf_services_enabled_not_online
