@@ -10,6 +10,7 @@ use crate::sensors;
 use dropshot::ConfigLogging;
 use gateway_messages::DeviceCapabilities;
 use gateway_messages::DevicePresence;
+use gateway_messages::vpd as gw_vpd;
 use nexus_types::inventory::Caboose;
 use serde::Deserialize;
 use serde::Serialize;
@@ -142,8 +143,102 @@ pub struct SpComponentConfig {
     /// Only supported for components inside a [`GimletConfig`].
     pub serial_console: Option<SocketAddrV6>,
 
+    /// Simulated vital product data returned for this component.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub vpd: Option<ComponentVpdConfig>,
+
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub sensors: Vec<SensorConfig>,
+}
+
+impl SpComponentConfig {
+    /// Determine the capabilities to advertise for this component based on the
+    /// config.
+    ///
+    /// This combines the capabilities bits specified directly in the config
+    /// file with additional capabilities that are implied by behaviors this
+    /// component is configured to simulate. For example, if the component is
+    /// configured to simulate sensors, we add `HAS_MEASUREMENT_CHANNELS`.
+    pub(crate) fn configured_capabilities(&self) -> DeviceCapabilities {
+        let mut capabilities = self.capabilities;
+
+        // If this component is configured to report VPD, add the capability.
+        if let Some(ref vpd) = self.vpd {
+            capabilities |= DeviceCapabilities::HAS_VPD;
+
+            if let ComponentVpdConfig::Pmbus(_) = vpd {
+                capabilities |= DeviceCapabilities::IS_PMBUS;
+            }
+        }
+
+        // If this component has sensors, add the corresponding capability.
+        if !self.sensors.is_empty() {
+            capabilities |= DeviceCapabilities::HAS_MEASUREMENT_CHANNELS;
+        }
+
+        // If this component has a simulated serial console, well, you know the
+        // drill.
+        if self.serial_console.is_some() {
+            capabilities |= DeviceCapabilities::HAS_SERIAL_CONSOLE;
+        }
+
+        // TODO(eliza): when we add support for configuring simulated PMBus
+        // status responses, add the IS_PMBUS bit here too.
+
+        capabilities
+    }
+}
+
+/// Vital product data returned for a simulated component.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ComponentVpdConfig {
+    Pmbus(Box<PmbusVpdConfig>),
+    Barcode(gw_vpd::Barcode),
+    SledFanTray(Box<gw_vpd::SledFanTrayVpd>),
+    Tmp11x(gw_vpd::Tmp11xVpd),
+}
+
+/// One PMBus block-read response for a simulated PMBus device's VPD.
+///
+/// This can be configured either as a  string or a byte array, to make it
+/// easier to configure simulated VPD for devices which are expected to respond
+/// to VPD commands with strings.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(untagged)]
+pub enum PmbusBlockConfig {
+    String(String),
+    Bytes(Vec<u8>),
+}
+
+impl PmbusBlockConfig {
+    pub(crate) fn as_bytes(&self) -> &[u8] {
+        match self {
+            Self::String(value) => value.as_bytes(),
+            Self::Bytes(value) => value,
+        }
+    }
+}
+
+/// PMBus vital product data returned for a simulated component.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+pub struct PmbusVpdConfig {
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub mfr_id: Option<PmbusBlockConfig>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub mfr_model: Option<PmbusBlockConfig>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub mfr_revision: Option<PmbusBlockConfig>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub mfr_location: Option<PmbusBlockConfig>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub mfr_date: Option<PmbusBlockConfig>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub mfr_serial: Option<PmbusBlockConfig>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub ic_device_id: Option<PmbusBlockConfig>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub ic_device_rev: Option<PmbusBlockConfig>,
 }
 
 /// Configuration of a simulated sidecar SP
