@@ -36,6 +36,10 @@ binary_allow_list = [
   "omicron-dev",
   "sled-agent",
   "sled-agent-sim",
+  # sush-proxy does not actually depend directly on ipcc, but because
+  # it and sled-agent both depend on `sprockets-tls`, feature unification
+  # results in sled-agent enabling that crate's ipcc feature for both builds.
+  "sush-proxy",
 ]
 
 # libnvme is a global zone only library and therefore we must be sure that only

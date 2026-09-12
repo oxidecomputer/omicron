@@ -35,7 +35,8 @@ bytes = { version = "1.11.1", features = ["serde"] }
 camino = { version = "1.2.5", default-features = false, features = ["serde1"] }
 chacha20 = { version = "0.10.0", default-features = false, features = ["legacy", "rng", "zeroize"] }
 chrono = { version = "0.4.45", features = ["serde"] }
-cipher = { version = "0.5.2", default-features = false, features = ["block-padding", "rand_core", "stream-wrapper"] }
+cipher-9fbad63c4bcf4a8f = { package = "cipher", version = "0.4.4", default-features = false, features = ["zeroize"] }
+cipher-d8f496e17d97b5cb = { package = "cipher", version = "0.5.2", default-features = false, features = ["block-padding", "rand_core", "stream-wrapper"] }
 clap = { version = "4.6.1", features = ["cargo", "derive", "env", "wrap_help"] }
 clap_builder = { version = "4.6.0", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
 const-oid = { version = "0.9.6", default-features = false, features = ["db", "std"] }
@@ -115,11 +116,10 @@ postgres-types = { version = "0.2.14", default-features = false, features = ["wi
 ppv-lite86 = { version = "0.2.21", default-features = false, features = ["simd", "std"] }
 predicates = { version = "3.1.4" }
 proc-macro2 = { version = "1.0.106" }
+qorb = { version = "0.4.1" }
 quote = { version = "1.0.45" }
-rand-274715c4dabd11b0 = { package = "rand", version = "0.9.2" }
-rand-c38e5c1d305a1b54 = { package = "rand", version = "0.8.6" }
-rand_chacha-274715c4dabd11b0 = { package = "rand_chacha", version = "0.9.0", default-features = false, features = ["std"] }
-rand_chacha-468e82937335b1c9 = { package = "rand_chacha", version = "0.3.1", default-features = false, features = ["std"] }
+rand = { version = "0.9.2" }
+rand_chacha = { version = "0.9.0", default-features = false, features = ["std"] }
 regex = { version = "1.12.3" }
 regex-automata = { version = "0.4.14", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "std", "unicode"] }
 regex-syntax = { version = "0.8.10" }
@@ -195,7 +195,8 @@ camino = { version = "1.2.5", default-features = false, features = ["serde1"] }
 cc = { version = "1.2.56", default-features = false, features = ["parallel"] }
 chacha20 = { version = "0.10.0", default-features = false, features = ["legacy", "rng", "zeroize"] }
 chrono = { version = "0.4.45", features = ["serde"] }
-cipher = { version = "0.5.2", default-features = false, features = ["block-padding", "rand_core", "stream-wrapper"] }
+cipher-9fbad63c4bcf4a8f = { package = "cipher", version = "0.4.4", default-features = false, features = ["zeroize"] }
+cipher-d8f496e17d97b5cb = { package = "cipher", version = "0.5.2", default-features = false, features = ["block-padding", "rand_core", "stream-wrapper"] }
 clap = { version = "4.6.1", features = ["cargo", "derive", "env", "wrap_help"] }
 clap_builder = { version = "4.6.0", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
 const-oid = { version = "0.9.6", default-features = false, features = ["db", "std"] }
@@ -277,11 +278,10 @@ postgres-types = { version = "0.2.14", default-features = false, features = ["wi
 ppv-lite86 = { version = "0.2.21", default-features = false, features = ["simd", "std"] }
 predicates = { version = "3.1.4" }
 proc-macro2 = { version = "1.0.106" }
+qorb = { version = "0.4.1" }
 quote = { version = "1.0.45" }
-rand-274715c4dabd11b0 = { package = "rand", version = "0.9.2" }
-rand-c38e5c1d305a1b54 = { package = "rand", version = "0.8.6" }
-rand_chacha-274715c4dabd11b0 = { package = "rand_chacha", version = "0.9.0", default-features = false, features = ["std"] }
-rand_chacha-468e82937335b1c9 = { package = "rand_chacha", version = "0.3.1", default-features = false, features = ["std"] }
+rand = { version = "0.9.2" }
+rand_chacha = { version = "0.9.0", default-features = false, features = ["std"] }
 regex = { version = "1.12.3" }
 regex-automata = { version = "0.4.14", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "std", "unicode"] }
 regex-syntax = { version = "0.8.10" }
