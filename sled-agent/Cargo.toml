@@ -179,6 +179,3 @@ doc = false
 
 [features]
 image-trampoline = []
-switch-asic = []
-switch-stub = []
-switch-softnpu = []
