@@ -61,9 +61,9 @@ use sled_agent_rack_setup::{
 use sled_agent_types::disk::DiskIdentity;
 use sled_agent_types::early_networking::PortConfig;
 use sled_agent_types::early_networking::UplinkPorts;
+use sled_agent_types::inventory::NetworkInterface;
 use sled_agent_types::inventory::NetworkInterfaceKind;
 use sled_agent_types::inventory::OmicronZoneDataset;
-use sled_agent_types::inventory::{NetworkInterface, SledRole};
 use slog::{Drain, Logger, info};
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
@@ -186,14 +186,7 @@ impl Server {
                         &NexusTypes::SledAgentInfo {
                             sa_address: sa_address.to_string(),
                             repo_depot_port,
-                            role: match config.sled_role {
-                                SledRole::Gimlet => {
-                                    NexusTypes::SledRole::Gimlet
-                                }
-                                SledRole::Scrimlet => {
-                                    NexusTypes::SledRole::Scrimlet
-                                }
-                            },
+                            role: config.sled_role,
                             baseboard: NexusTypes::Baseboard {
                                 serial: config
                                     .hardware
