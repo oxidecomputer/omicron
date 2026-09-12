@@ -7,9 +7,7 @@ use crate::ExternalDisks;
 use crate::HardwareView;
 use crate::TofinoSnapshot;
 use crate::TofinoView;
-use crate::{
-    DendriteAsic, SledMode, SwitchDetectError, SwitchHardware, UnparsedDisk,
-};
+use crate::{DendriteAsic, SledMode, UnparsedDisk};
 use camino::Utf8PathBuf;
 use gethostname::gethostname;
 use illumos_devinfo::{DevInfo, DevLinkType, DevLinks, Node, Property};
@@ -33,24 +31,9 @@ mod softnpu;
 mod sysconf;
 
 pub use partitions::{NvmeFormattingError, ensure_partition_layout};
+pub use softnpu::find_softnpu_device;
 
 const TOFINO_MONITOR: &'static str = "/opt/oxide/sled-agent/tofino-monitor";
-
-/// Detect attached switch hardware, checking each backend in the priority
-/// order of [`SwitchHardware`]. Tofino presence uses the same snapshot the
-/// hardware monitor polls, so startup detection and `is_scrimlet` agree.
-pub fn detect_switch_hardware(
-    log: &Logger,
-) -> Result<Option<SwitchHardware>, SwitchDetectError> {
-    let mut devinfo =
-        DevInfo::new_force_load().map_err(SwitchDetectError::DevInfo)?;
-    if get_tofino_snapshot(log, &mut devinfo).exists {
-        info!(log, "found tofino asic");
-        return Ok(Some(SwitchHardware::Tofino));
-    }
-    Ok(softnpu::find_softnpu_device(log, &mut devinfo)?
-        .map(|path| SwitchHardware::SoftNpuPropolis { path }))
-}
 
 #[derive(thiserror::Error, Debug)]
 enum Error {
