@@ -60,8 +60,8 @@ impl BgpSocketConfig {
     }
 
     /// Returns the router listen address string for mgd configuration.
-    pub(crate) fn router_listen_addr(&self) -> String {
-        self.listen_addr.to_string()
+    pub(crate) fn router_listen_addr(&self) -> SocketAddr {
+        self.listen_addr
     }
 
     /// Returns the port to use for BGP peers.

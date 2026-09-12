@@ -1335,7 +1335,7 @@ impl DiffableBgpConfig {
                 entry.insert(DiffableBgpRouterConfig {
                     id: *asn,
                     graceful_shutdown: false,
-                    listen: bgp_socket_config.router_listen_addr(),
+                    listen: bgp_socket_config.router_listen_addr().to_string(),
                 });
 
                 originate4.insert(
