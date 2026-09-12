@@ -203,7 +203,12 @@ async fn cubbies(
                     );
                 }
                 Err(err) => {
-                    debug!(log, "no SP state for cubby"; "cubby" => cubby, "error" => %err);
+                    debug!(
+                        log,
+                        "no SP state for cubby";
+                        "cubby" => cubby,
+                        "error" => %err,
+                    );
                 }
             }
         }
