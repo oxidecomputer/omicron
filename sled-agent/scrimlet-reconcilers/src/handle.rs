@@ -35,7 +35,7 @@ pub(crate) const BGP_PORT: u16 = 179;
 
 /// Configures how mgd's BGP socket is set up.
 ///
-/// In production mgd listens on `[::]:179` and peers connect on
+/// In production mgd listens on `[::]:179` and connects to peers on
 /// port 179. In test environments a different address/port is
 /// used to avoid requiring elevated privileges.
 #[derive(Debug, Clone, Copy)]
