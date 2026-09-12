@@ -9,6 +9,7 @@ use gateway_messages::SpPort;
 use gateway_test_utils::current_simulator_state;
 use gateway_test_utils::setup;
 use gateway_types::component::SpType;
+use pretty_assertions::assert_eq;
 
 #[tokio::test]
 async fn component_list() {
