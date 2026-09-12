@@ -40,7 +40,7 @@ use omicron_common::api::external::{
 };
 use omicron_uuid_kinds::{
     BgpAnnounceSetKind, BgpAnnounceSetUuid, GenericUuid,
-    RouterConfigurationUuid,
+    RouterConfigurationKind, RouterConfigurationUuid,
 };
 use ref_cast::RefCast;
 use sled_agent_types::early_networking::MaxPathConfig;
@@ -395,37 +395,15 @@ impl DataStore {
     ) -> ListResultVec<RouterConfigurationBgpPeer> {
         use nexus_db_schema::schema::router_configuration_bgp_peer::dsl;
 
-        // Complete state for internal consumers (the bootstore renderer and
-        // the parent views), read in bounded name-keyset pages per
-        // configuration over the (router_configuration_id, name) primary
-        // key rather than as one unbounded query.
-        let conn = self.pool_connection_authorized(opctx).await?;
-        let mut rows = Vec::new();
-        for id in ids {
-            let id = to_db_typed_uuid(*id);
-            let mut paginator = Paginator::new(
-                SQL_BATCH_SIZE,
-                dropshot::PaginationOrder::Ascending,
-            );
-            while let Some(p) = paginator.next() {
-                let batch = paginated(
-                    dsl::router_configuration_bgp_peer,
-                    dsl::name,
-                    &p.current_pagparams(),
-                )
-                .filter(dsl::router_configuration_id.eq(id))
-                .select(RouterConfigurationBgpPeer::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
-                paginator =
-                    p.found_batch(&batch, &|row: &RouterConfigurationBgpPeer| row.name.clone());
-                rows.extend(batch);
-            }
-        }
-        Ok(rows)
+        let ids: Vec<DbTypedUuid<RouterConfigurationKind>> =
+            ids.iter().map(|id| to_db_typed_uuid(*id)).collect();
+        dsl::router_configuration_bgp_peer
+            .filter(dsl::router_configuration_id.eq_any(ids))
+            .order_by((dsl::router_configuration_id.asc(), dsl::name.asc()))
+            .select(RouterConfigurationBgpPeer::as_select())
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Fetch the static routes of several router configurations at once.
@@ -436,37 +414,15 @@ impl DataStore {
     ) -> ListResultVec<RouterConfigurationStaticRoute> {
         use nexus_db_schema::schema::router_configuration_static_route::dsl;
 
-        // Complete state for internal consumers (the bootstore renderer and
-        // the parent views), read in bounded name-keyset pages per
-        // configuration over the (router_configuration_id, name) primary
-        // key rather than as one unbounded query.
-        let conn = self.pool_connection_authorized(opctx).await?;
-        let mut rows = Vec::new();
-        for id in ids {
-            let id = to_db_typed_uuid(*id);
-            let mut paginator = Paginator::new(
-                SQL_BATCH_SIZE,
-                dropshot::PaginationOrder::Ascending,
-            );
-            while let Some(p) = paginator.next() {
-                let batch = paginated(
-                    dsl::router_configuration_static_route,
-                    dsl::name,
-                    &p.current_pagparams(),
-                )
-                .filter(dsl::router_configuration_id.eq(id))
-                .select(RouterConfigurationStaticRoute::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
-                paginator =
-                    p.found_batch(&batch, &|row: &RouterConfigurationStaticRoute| row.name.clone());
-                rows.extend(batch);
-            }
-        }
-        Ok(rows)
+        let ids: Vec<DbTypedUuid<RouterConfigurationKind>> =
+            ids.iter().map(|id| to_db_typed_uuid(*id)).collect();
+        dsl::router_configuration_static_route
+            .filter(dsl::router_configuration_id.eq_any(ids))
+            .order_by((dsl::router_configuration_id.asc(), dsl::name.asc()))
+            .select(RouterConfigurationStaticRoute::as_select())
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Fetch the BFD peers of several router configurations at once.
@@ -477,37 +433,15 @@ impl DataStore {
     ) -> ListResultVec<RouterConfigurationBfdPeer> {
         use nexus_db_schema::schema::router_configuration_bfd_peer::dsl;
 
-        // Complete state for internal consumers (the bootstore renderer and
-        // the parent views), read in bounded name-keyset pages per
-        // configuration over the (router_configuration_id, name) primary
-        // key rather than as one unbounded query.
-        let conn = self.pool_connection_authorized(opctx).await?;
-        let mut rows = Vec::new();
-        for id in ids {
-            let id = to_db_typed_uuid(*id);
-            let mut paginator = Paginator::new(
-                SQL_BATCH_SIZE,
-                dropshot::PaginationOrder::Ascending,
-            );
-            while let Some(p) = paginator.next() {
-                let batch = paginated(
-                    dsl::router_configuration_bfd_peer,
-                    dsl::name,
-                    &p.current_pagparams(),
-                )
-                .filter(dsl::router_configuration_id.eq(id))
-                .select(RouterConfigurationBfdPeer::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
-                paginator =
-                    p.found_batch(&batch, &|row: &RouterConfigurationBfdPeer| row.name.clone());
-                rows.extend(batch);
-            }
-        }
-        Ok(rows)
+        let ids: Vec<DbTypedUuid<RouterConfigurationKind>> =
+            ids.iter().map(|id| to_db_typed_uuid(*id)).collect();
+        dsl::router_configuration_bfd_peer
+            .filter(dsl::router_configuration_id.eq_any(ids))
+            .order_by((dsl::router_configuration_id.asc(), dsl::name.asc()))
+            .select(RouterConfigurationBfdPeer::as_select())
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// One page of a router configuration's entries, keyed by name over the
@@ -766,38 +700,40 @@ impl DataStore {
         let conn = self.pool_connection_authorized(opctx).await?;
         let err = OptionalError::new();
         let name = route.name.to_string();
-        self.transaction_retry_wrapper("router_configuration_static_route_create")
-            .transaction(&conn, |conn| {
-                let err = err.clone();
-                let route = route.clone();
-                async move {
-                    Self::ensure_router_configuration_live(
-                        &conn,
-                        authz_configuration,
-                        &err,
-                    )
-                    .await?;
-                    diesel::insert_into(dsl::router_configuration_static_route)
-                        .values(route)
-                        .returning(RouterConfigurationStaticRoute::as_returning())
-                        .get_result_async(&conn)
-                        .await
-                }
-            })
-            .await
-            .map_err(|e| {
-                if let Some(err) = err.take() {
-                    err
-                } else {
-                    public_error_from_diesel(
-                        e,
-                        ErrorHandler::Conflict(
-                            ResourceType::RouterConfigurationStaticRoute,
-                            &name,
-                        ),
-                    )
-                }
-            })
+        self.transaction_retry_wrapper(
+            "router_configuration_static_route_create",
+        )
+        .transaction(&conn, |conn| {
+            let err = err.clone();
+            let route = route.clone();
+            async move {
+                Self::ensure_router_configuration_live(
+                    &conn,
+                    authz_configuration,
+                    &err,
+                )
+                .await?;
+                diesel::insert_into(dsl::router_configuration_static_route)
+                    .values(route)
+                    .returning(RouterConfigurationStaticRoute::as_returning())
+                    .get_result_async(&conn)
+                    .await
+            }
+        })
+        .await
+        .map_err(|e| {
+            if let Some(err) = err.take() {
+                err
+            } else {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::Conflict(
+                        ResourceType::RouterConfigurationStaticRoute,
+                        &name,
+                    ),
+                )
+            }
+        })
     }
 
     pub async fn router_configuration_static_route_view(
@@ -1566,17 +1502,14 @@ mod test {
     /// leave no orphaned rows behind.
     #[tokio::test]
     async fn child_mutations_after_parent_delete_are_not_found() {
-        let logctx =
-            dev::test_setup_log("child_mutations_after_parent_delete");
+        let logctx = dev::test_setup_log("child_mutations_after_parent_delete");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let (cfg, authz_cfg) = create(datastore, opctx, "parent").await;
-        let r1 = RouterConfigurationStaticRoute::new(
-            cfg.id(),
-            static_route("r1"),
-        )
-        .unwrap();
+        let r1 =
+            RouterConfigurationStaticRoute::new(cfg.id(), static_route("r1"))
+                .unwrap();
         datastore
             .router_configuration_static_route_create(
                 opctx,
@@ -1590,11 +1523,9 @@ mod test {
             .await
             .expect("delete parent");
 
-        let r2 = RouterConfigurationStaticRoute::new(
-            cfg.id(),
-            static_route("r2"),
-        )
-        .unwrap();
+        let r2 =
+            RouterConfigurationStaticRoute::new(cfg.id(), static_route("r2"))
+                .unwrap();
         let err = datastore
             .router_configuration_static_route_create(opctx, &authz_cfg, r2)
             .await
@@ -1648,9 +1579,7 @@ mod test {
             .unwrap();
             let (created, deleted) = tokio::join!(
                 datastore.router_configuration_static_route_create(
-                    opctx,
-                    &authz_cfg,
-                    route,
+                    opctx, &authz_cfg, route,
                 ),
                 datastore.router_configuration_delete(opctx, &authz_cfg),
             );
@@ -1695,10 +1624,7 @@ mod test {
         let forbidden = |r: Result<(), Error>| {
             let err = r.expect_err("unauthenticated access must be refused");
             assert!(
-                matches!(
-                    err,
-                    Error::Forbidden | Error::Unauthenticated { .. }
-                ),
+                matches!(err, Error::Forbidden | Error::Unauthenticated { .. }),
                 "{err}"
             );
         };
