@@ -457,6 +457,25 @@ dependencies = [
 [[package]]
 name = "attest-data"
 version = "0.5.0"
+source = "git+https://github.com/oxidecomputer/dice-util?rev=f78329e44a3fdaca0f711e7c7a949e8bf3d785cb#f78329e44a3fdaca0f711e7c7a949e8bf3d785cb"
+dependencies = [
+ "const-oid 0.9.6",
+ "der 0.7.10",
+ "getrandom 0.4.3",
+ "hex",
+ "hubpack",
+ "rats-corim 0.1.0 (git+https://github.com/oxidecomputer/rats-corim)",
+ "salty",
+ "serde",
+ "serde_with 3.21.0",
+ "sha3 0.10.8",
+ "static_assertions",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "attest-data"
+version = "0.5.0"
 source = "git+https://github.com/oxidecomputer/dice-util?rev=ff9f27aa0d6ef6fb64c349890b6e3c242ea3d8fc#ff9f27aa0d6ef6fb64c349890b6e3c242ea3d8fc"
 dependencies = [
  "const-oid 0.9.6",
@@ -476,10 +495,10 @@ dependencies = [
 [[package]]
 name = "attest-mock"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dice-util?rev=4a39ef08d81e5177edee0bddb1146032aa21074d#4a39ef08d81e5177edee0bddb1146032aa21074d"
+source = "git+https://github.com/oxidecomputer/dice-util?rev=f78329e44a3fdaca0f711e7c7a949e8bf3d785cb#f78329e44a3fdaca0f711e7c7a949e8bf3d785cb"
 dependencies = [
  "anyhow",
- "attest-data 0.5.0 (git+https://github.com/oxidecomputer/dice-util?rev=4a39ef08d81e5177edee0bddb1146032aa21074d)",
+ "attest-data 0.5.0 (git+https://github.com/oxidecomputer/dice-util?rev=f78329e44a3fdaca0f711e7c7a949e8bf3d785cb)",
  "clap",
  "hex",
  "hubpack",
