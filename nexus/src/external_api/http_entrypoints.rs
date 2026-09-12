@@ -4955,20 +4955,26 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_router_configuration_bgp_peer_list(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<networking::RouterConfigurationSelector>,
-    ) -> Result<
-        HttpResponseOk<Vec<networking::RouterConfigurationBgpPeer>>,
-        HttpError,
-    > {
+        query_params: Query<PaginatedByName>,
+    ) -> Result<HttpResponseOk<ResultsPage<networking::RouterConfigurationBgpPeer>>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
             let sel = path_params.into_inner();
+            let query = query_params.into_inner();
+            let pagparams = data_page_params_for(&rqctx, &query)?;
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
-            let result = nexus
-                .router_configuration_bgp_peer_list(&opctx, sel.configuration)
+            let items = nexus
+                .router_configuration_bgp_peer_list(&opctx, sel.configuration, &pagparams)
                 .await?;
-            Ok(HttpResponseOk(result))
+            // The entries are named but carry no identity metadata, so the
+            // page marker is the bare name.
+            Ok(HttpResponseOk(ScanByName::results_page(
+                &query,
+                items,
+                &|_, item: &networking::RouterConfigurationBgpPeer| item.name.clone(),
+            )?))
         };
         apictx
             .context
@@ -5070,20 +5076,26 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_router_configuration_static_route_list(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<networking::RouterConfigurationSelector>,
-    ) -> Result<HttpResponseOk<Vec<networking::StaticRoute>>, HttpError> {
+        query_params: Query<PaginatedByName>,
+    ) -> Result<HttpResponseOk<ResultsPage<networking::StaticRoute>>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
             let sel = path_params.into_inner();
+            let query = query_params.into_inner();
+            let pagparams = data_page_params_for(&rqctx, &query)?;
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
-            let result = nexus
-                .router_configuration_static_route_list(
-                    &opctx,
-                    sel.configuration,
-                )
+            let items = nexus
+                .router_configuration_static_route_list(&opctx, sel.configuration, &pagparams)
                 .await?;
-            Ok(HttpResponseOk(result))
+            // The entries are named but carry no identity metadata, so the
+            // page marker is the bare name.
+            Ok(HttpResponseOk(ScanByName::results_page(
+                &query,
+                items,
+                &|_, item: &networking::StaticRoute| item.name.clone(),
+            )?))
         };
         apictx
             .context
@@ -5180,17 +5192,26 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_router_configuration_bfd_peer_list(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<networking::RouterConfigurationSelector>,
-    ) -> Result<HttpResponseOk<Vec<networking::BfdPeer>>, HttpError> {
+        query_params: Query<PaginatedByName>,
+    ) -> Result<HttpResponseOk<ResultsPage<networking::BfdPeer>>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
             let sel = path_params.into_inner();
+            let query = query_params.into_inner();
+            let pagparams = data_page_params_for(&rqctx, &query)?;
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
-            let result = nexus
-                .router_configuration_bfd_peer_list(&opctx, sel.configuration)
+            let items = nexus
+                .router_configuration_bfd_peer_list(&opctx, sel.configuration, &pagparams)
                 .await?;
-            Ok(HttpResponseOk(result))
+            // The entries are named but carry no identity metadata, so the
+            // page marker is the bare name.
+            Ok(HttpResponseOk(ScanByName::results_page(
+                &query,
+                items,
+                &|_, item: &networking::BfdPeer| item.name.clone(),
+            )?))
         };
         apictx
             .context

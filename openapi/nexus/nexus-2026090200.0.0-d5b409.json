@@ -11245,6 +11245,33 @@
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameSortMode"
+            }
           }
         ],
         "responses": {
@@ -11253,11 +11280,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "Array_of_BfdPeer",
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/BfdPeer"
-                  }
+                  "$ref": "#/components/schemas/BfdPeerResultsPage"
                 }
               }
             }
@@ -11268,6 +11291,9 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
+        },
+        "x-dropshot-pagination": {
+          "required": []
         }
       },
       "post": {
@@ -11586,6 +11612,33 @@
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameSortMode"
+            }
           }
         ],
         "responses": {
@@ -11594,11 +11647,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "Array_of_RouterConfigurationBgpPeer",
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/RouterConfigurationBgpPeer"
-                  }
+                  "$ref": "#/components/schemas/RouterConfigurationBgpPeerResultsPage"
                 }
               }
             }
@@ -11609,6 +11658,9 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
+        },
+        "x-dropshot-pagination": {
+          "required": []
         }
       },
       "post": {
@@ -11814,6 +11866,33 @@
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameSortMode"
+            }
           }
         ],
         "responses": {
@@ -11822,11 +11901,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "Array_of_StaticRoute",
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/StaticRoute"
-                  }
+                  "$ref": "#/components/schemas/StaticRouteResultsPage"
                 }
               }
             }
@@ -11837,6 +11912,9 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
+        },
+        "x-dropshot-pagination": {
+          "required": []
         }
       },
       "post": {
@@ -18515,6 +18593,27 @@
           "name",
           "remote",
           "required_rx"
+        ]
+      },
+      "BfdPeerResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BfdPeer"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
         ]
       },
       "BfdSessionDisable": {
@@ -28734,6 +28833,27 @@
           "peer"
         ]
       },
+      "RouterConfigurationBgpPeerResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouterConfigurationBgpPeer"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
       "RouterConfigurationCreate": {
         "description": "Parameters for creating a router configuration",
         "type": "object",
@@ -30531,6 +30651,27 @@
           "dst",
           "gw",
           "name"
+        ]
+      },
+      "StaticRouteResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StaticRoute"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
         ]
       },
       "SubnetPool": {
@@ -34031,6 +34172,18 @@
           "descending"
         ]
       },
+      "NameSortMode": {
+        "description": "Supported set of sort modes for scanning by name only\n\nCurrently, we only support scanning in ascending order.",
+        "oneOf": [
+          {
+            "description": "Sort in increasing order of \"name\"",
+            "type": "string",
+            "enum": [
+              "name_ascending"
+            ]
+          }
+        ]
+      },
       "VersionSortMode": {
         "description": "Supported sort modes when scanning by semantic version",
         "oneOf": [
@@ -34046,18 +34199,6 @@
             "type": "string",
             "enum": [
               "version_descending"
-            ]
-          }
-        ]
-      },
-      "NameSortMode": {
-        "description": "Supported set of sort modes for scanning by name only\n\nCurrently, we only support scanning in ascending order.",
-        "oneOf": [
-          {
-            "description": "Sort in increasing order of \"name\"",
-            "type": "string",
-            "enum": [
-              "name_ascending"
             ]
           }
         ]

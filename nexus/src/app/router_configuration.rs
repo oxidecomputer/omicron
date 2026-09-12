@@ -15,6 +15,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_types::external_api::networking;
 use nexus_types::identity::Resource;
 use nexus_types::router_configuration::is_builtin_router_configuration_id;
+use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
     CreateResult, DeleteResult, Error, ListResultVec, LookupResult, Name,
@@ -67,23 +68,26 @@ impl super::Nexus {
     ) -> Result<networking::RouterConfiguration, Error> {
         let mut view: networking::RouterConfiguration =
             db_configuration.try_into()?;
+        // The view carries the complete entry sets; the external per-entry
+        // list endpoints are paginated separately.
+        let ids = [authz_configuration.id()];
         view.bgp_peers = self
             .db_datastore
-            .router_configuration_bgp_peer_list(opctx, authz_configuration)
+            .router_configuration_bgp_peer_list_batch(opctx, &ids)
             .await?
             .into_iter()
             .map(TryInto::try_into)
             .collect::<Result<_, _>>()?;
         view.routes = self
             .db_datastore
-            .router_configuration_static_route_list(opctx, authz_configuration)
+            .router_configuration_static_route_list_batch(opctx, &ids)
             .await?
             .into_iter()
             .map(Into::into)
             .collect();
         view.bfd_peers = self
             .db_datastore
-            .router_configuration_bfd_peer_list(opctx, authz_configuration)
+            .router_configuration_bfd_peer_list_batch(opctx, &ids)
             .await?
             .into_iter()
             .map(TryInto::try_into)
@@ -371,6 +375,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         name_or_id: NameOrId,
+        pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<networking::RouterConfigurationBgpPeer> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let (.., authz_configuration) = self
@@ -378,7 +383,11 @@ impl super::Nexus {
             .lookup_for(authz::Action::Read)
             .await?;
         self.db_datastore
-            .router_configuration_bgp_peer_list(opctx, &authz_configuration)
+            .router_configuration_bgp_peer_list(
+                opctx,
+                &authz_configuration,
+                pagparams,
+            )
             .await?
             .into_iter()
             .map(TryInto::try_into)
@@ -400,6 +409,7 @@ impl super::Nexus {
             .db_datastore
             .router_configuration_bgp_peer_create(
                 opctx,
+                &authz_configuration,
                 RouterConfigurationBgpPeer::new(
                     authz_configuration.id(),
                     peer,
@@ -485,6 +495,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         name_or_id: NameOrId,
+        pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<networking::StaticRoute> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let (.., authz_configuration) = self
@@ -493,7 +504,11 @@ impl super::Nexus {
             .await?;
         Ok(self
             .db_datastore
-            .router_configuration_static_route_list(opctx, &authz_configuration)
+            .router_configuration_static_route_list(
+                opctx,
+                &authz_configuration,
+                pagparams,
+            )
             .await?
             .into_iter()
             .map(Into::into)
@@ -515,6 +530,7 @@ impl super::Nexus {
             .db_datastore
             .router_configuration_static_route_create(
                 opctx,
+                &authz_configuration,
                 RouterConfigurationStaticRoute::new(
                     authz_configuration.id(),
                     route,
@@ -601,6 +617,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         name_or_id: NameOrId,
+        pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<networking::BfdPeer> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let (.., authz_configuration) = self
@@ -609,7 +626,11 @@ impl super::Nexus {
             .await?;
         Ok(self
             .db_datastore
-            .router_configuration_bfd_peer_list(opctx, &authz_configuration)
+            .router_configuration_bfd_peer_list(
+                opctx,
+                &authz_configuration,
+                pagparams,
+            )
             .await?
             .into_iter()
             .map(TryInto::try_into)
@@ -631,6 +652,7 @@ impl super::Nexus {
             .db_datastore
             .router_configuration_bfd_peer_create(
                 opctx,
+                &authz_configuration,
                 RouterConfigurationBfdPeer::new(authz_configuration.id(), peer)?,
             )
             .await?;
