@@ -104,6 +104,7 @@ mod snapshot;
 mod ssh_key;
 mod subnet_pool;
 pub(crate) mod support_bundles;
+mod support_shell;
 mod switch;
 mod switch_interface;
 mod switch_port;

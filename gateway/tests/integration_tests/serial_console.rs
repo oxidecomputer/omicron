@@ -45,7 +45,7 @@ async fn serial_console_communication() {
 
         // confirm messages sent to the websocket are received on the console
         // TCP connection
-        ws.send(Message::Binary(msg_from_mgs.clone())).await.unwrap();
+        ws.send(Message::Binary(msg_from_mgs.clone().into())).await.unwrap();
         assert_eq!(console_read.recv().await.unwrap(), msg_from_mgs);
 
         // confirm messages sent to the console TCP connection are received by
@@ -53,7 +53,7 @@ async fn serial_console_communication() {
         console_write.send(msg_from_sp.clone()).await.unwrap();
         assert_eq!(
             ws.next().await.unwrap().unwrap(),
-            Message::Binary(msg_from_sp)
+            Message::Binary(msg_from_sp.into())
         );
     }
 
@@ -98,12 +98,12 @@ async fn serial_console_detach() {
     assert!(err.message.contains("serial console already attached"));
 
     // the original websocket should still work
-    ws.send(Message::Binary(b"hello".to_vec())).await.unwrap();
+    ws.send(Message::Binary(b"hello".to_vec().into())).await.unwrap();
     assert_eq!(console_read.recv().await.unwrap(), b"hello");
     console_write.send(b"world".to_vec()).await.unwrap();
     assert_eq!(
         ws.next().await.unwrap().unwrap(),
-        Message::Binary(b"world".to_vec())
+        Message::Binary(b"world".to_vec().into())
     );
 
     // hit the detach endpoint, which should disconnect `ws`
@@ -126,12 +126,12 @@ async fn serial_console_detach() {
         .into_inner();
     let mut ws =
         WebSocketStream::from_raw_socket(upgraded, Role::Client, None).await;
-    ws.send(Message::Binary(b"hello".to_vec())).await.unwrap();
+    ws.send(Message::Binary(b"hello".to_vec().into())).await.unwrap();
     assert_eq!(console_read.recv().await.unwrap(), b"hello");
     console_write.send(b"world".to_vec()).await.unwrap();
     assert_eq!(
         ws.next().await.unwrap().unwrap(),
-        Message::Binary(b"world".to_vec())
+        Message::Binary(b"world".to_vec().into())
     );
 
     testctx.teardown().await;

@@ -129,6 +129,7 @@ steno.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tokio-postgres = { workspace = true, features = ["with-serde_json-1"] }
+tokio-tungstenite.workspace = true
 tokio-util = { workspace = true, features = ["codec", "rt"] }
 trust-quorum-types.workspace = true
 tufaceous.workspace = true

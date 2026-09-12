@@ -12,7 +12,8 @@ use dropshot::{
     HttpResponseFound, HttpResponseHeaders, HttpResponseOk,
     HttpResponseSeeOther, HttpResponseUpdatedNoContent, PaginationParams, Path,
     Query, RequestContext, ResultsPage, StreamingBody, TypedBody,
-    WebsocketChannelResult, WebsocketConnection,
+    WebsocketChannelResult, WebsocketConnection, WebsocketEndpointResult,
+    WebsocketUpgrade,
 };
 use dropshot_api_manager_types::{ValidationContext, api_versions};
 use http::Response;
@@ -7582,6 +7583,24 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::path_params::RackPath>,
     ) -> Result<HttpResponseOk<latest::rack::Rack>, HttpError>;
+
+    /// Tunnel to a Support Shell proxy in a switch zone
+    // Use #[endpoint] rather than #[channel] so this handler can
+    // authorize the request and connect to the proxy before upgrading
+    // to WebSocket. With #[channel], Dropshot upgrades the connection
+    // before calling the handler, making it too late to return HTTP
+    // errors.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/hardware/racks/{rack_id}/support-shell/tunnel",
+        tags = ["system/hardware"],
+        unpublished = true,
+    }]
+    async fn rack_support_shell_tunnel(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::RackPath>,
+        upgrade: WebsocketUpgrade,
+    ) -> WebsocketEndpointResult;
 
     /// List uninitialized sleds
     #[endpoint {
