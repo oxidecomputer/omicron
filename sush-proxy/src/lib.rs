@@ -141,15 +141,26 @@ async fn sleds(log: &Logger, ddm: DdmClient, targets: &watch::Sender<Targets>) {
 }
 
 /// Probe candidate addresses concurrently and record the sleds that
-/// answer.
+/// answer. The `/target` endpoint just returns the sled's baseboard ID.
 async fn discover(
     log: &Logger,
     probe: &reqwest::Client,
     addrs: impl Iterator<Item = SocketAddrV6>,
     sleds: &mut BTreeMap<BaseboardId, SocketAddr>,
 ) {
-    let probes =
-        addrs.map(|addr| async move { (addr, target(probe, addr).await) });
+    let probes = addrs.map(|addr| async move {
+        let probe_result = async {
+            probe
+                .get(format!("http://{addr}/target"))
+                .send()
+                .await?
+                .error_for_status()?
+                .json()
+                .await
+        }
+        .await;
+        (addr, probe_result)
+    });
     for (addr, result) in join_all(probes).await {
         match result {
             Ok(baseboard) => {
@@ -160,20 +171,6 @@ async fn discover(
             }
         }
     }
-}
-
-/// Ask a sush server which baseboard it serves.
-async fn target(
-    probe: &reqwest::Client,
-    addr: SocketAddrV6,
-) -> Result<BaseboardId, reqwest::Error> {
-    probe
-        .get(format!("http://{addr}/target"))
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await
 }
 
 /// Keep `Targets::cubbies` current from MGS's view of the SPs. Each
