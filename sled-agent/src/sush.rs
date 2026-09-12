@@ -71,7 +71,7 @@ use std::io;
 use std::iter::once;
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 use tokio::fs::{OpenOptions, create_dir_all};
 use tokio::io::AsyncWriteExt as _;
 use tokio::spawn;
@@ -81,7 +81,7 @@ use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 use x509_cert::Certificate;
 use x509_cert::der::{Decode as _, Reader as _, SliceReader};
-use x509_cert::time::Validity;
+use x509_cert::time::{Time, Validity};
 
 use sush_common::keys::{EphemeralKey, KeyType, pem_cert_chain};
 use sush_common::targets::{Cubbies, MAX_CUBBY};
@@ -104,11 +104,6 @@ pub const SUSH_PROXY_KEY_PATH: &str = "/etc/sush-proxy/key.pem";
 
 /// Path inside the switch zone to the sush proxy's TLS certificate chain.
 pub const SUSH_PROXY_CERT_CHAIN_PATH: &str = "/etc/sush-proxy/chain.pem";
-
-/// How long a generated proxy identity claims to be valid. Nothing checks
-/// expiry today, and every zone startup generates a fresh identity.
-const SUSH_PROXY_CERT_VALIDITY: Duration =
-    Duration::from_secs(365 * 24 * 60 * 60);
 
 /// How often to refresh the cubby map from MGS.
 const MGS_POLL_INTERVAL: Duration = Duration::from_secs(30);
@@ -519,7 +514,10 @@ pub async fn generate_proxy_identity(
 
 /// Produce the proxy's private key and certificate chain, both PEM
 /// encoded. The chain is leaf first, the way the client expects it.
-/// Uses IPCC, so performs blocking I/O.
+/// Uses IPCC, so performs blocking I/O. The vouched certificate never
+/// expires, because (a) we probably don't know what time it actually is
+/// when we generate it, and (b) it's ephemeral and regenerated at every
+/// switch zone startup.
 fn generate_proxy_pems() -> anyhow::Result<(String, String)> {
     let ipcc = Ipcc::new().context("opening IPCC")?;
     let chain_der =
@@ -531,8 +529,11 @@ fn generate_proxy_pems() -> anyhow::Result<(String, String)> {
         "CN=sush-proxy,O=Oxide Computer Company,C=US"
             .parse()
             .context("parsing the proxy cert subject")?,
-        Validity::from_now(SUSH_PROXY_CERT_VALIDITY)
-            .context("computing validity")?,
+        Validity {
+            not_before: Time::try_from(SystemTime::now())
+                .context("computing validity")?,
+            not_after: Time::INFINITY,
+        },
         |digest| ipcc.rot_tq_sign(digest),
     )
     .context("generating the proxy key")?;
