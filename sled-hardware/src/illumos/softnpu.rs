@@ -131,19 +131,18 @@ fn ninep_minor_path(
 /// consumer such as scadm or a 9p mount currently holds the device.
 fn probe_version(path: &str) -> Result<Probe, SwitchDetectError> {
     for attempt in 1..=OPEN_ATTEMPTS {
-        match OpenOptions::new()
+        let mut file = match OpenOptions::new()
             .read(true)
             .write(true)
             .custom_flags(libc::O_EXCL)
             .open(path)
         {
-            Ok(file) => {
-                return exchange_version(path, file).map(Probe::Version);
-            }
+            Ok(file) => file,
             Err(e) if e.raw_os_error() == Some(libc::EBUSY) => {
                 if attempt < OPEN_ATTEMPTS {
                     std::thread::sleep(OPEN_RETRY_DELAY);
                 }
+                continue;
             }
             Err(err) => {
                 return Err(SwitchDetectError::Io {
@@ -151,21 +150,18 @@ fn probe_version(path: &str) -> Result<Probe, SwitchDetectError> {
                     err,
                 });
             }
-        }
+        };
+        let io_err = |err| SwitchDetectError::Io { path: path.to_string(), err };
+        file.write_all(&encode_tversion(SOFTNPU_9P_VERSION)).map_err(io_err)?;
+        let mut buf = vec![0u8; REPLY_BUF_LEN];
+        let n = file.read(&mut buf).map_err(io_err)?;
+        return decode_rversion(&buf[..n])
+            .map(Probe::Version)
+            .map_err(|reason| SwitchDetectError::Protocol {
+                path: path.to_string(),
+                reason,
+            });
     }
+    
     Ok(Probe::Busy)
-}
-
-fn exchange_version(
-    path: &str,
-    mut file: File,
-) -> Result<String, SwitchDetectError> {
-    let io = |err| SwitchDetectError::Io { path: path.to_string(), err };
-    file.write_all(&encode_tversion(SOFTNPU_9P_VERSION)).map_err(io)?;
-    let mut buf = vec![0u8; REPLY_BUF_LEN];
-    let n = file.read(&mut buf).map_err(io)?;
-    decode_rversion(&buf[..n]).map_err(|reason| SwitchDetectError::Protocol {
-        path: path.to_string(),
-        reason,
-    })
 }

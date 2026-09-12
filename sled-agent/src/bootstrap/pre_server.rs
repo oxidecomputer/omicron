@@ -295,8 +295,7 @@ async fn ensure_zfs_ramdisk_dataset() -> Result<(), StartError> {
 }
 
 // Combine the `sled_mode` and `switch_backend` config with switch hardware to
-// determine the actual sled mode. Detection touches devinfo and device nodes,
-// so the whole decision runs on a blocking thread.
+// determine the actual sled mode.
 async fn sled_mode_from_config(
     config: &Config,
     log: &Logger,
@@ -305,6 +304,8 @@ async fn sled_mode_from_config(
     let switch_backend = config.switch_backend.clone();
     let sidecar_revision = config.sidecar_revision.clone();
     let log = log.clone();
+    // Because detection touches devinfo and device nodes, it
+    // may block, so spawn it on the blocking runtime.
     tokio::task::spawn_blocking(move || {
         resolve_sled_mode(
             &sled_mode,

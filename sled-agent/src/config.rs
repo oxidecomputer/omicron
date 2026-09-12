@@ -78,9 +78,12 @@ pub struct Config {
     pub sled_mode: SledMode,
     // TODO: Remove once this can be auto-detected.
     pub sidecar_revision: SidecarRevision,
-    /// Which switch backend to run when acting as a scrimlet. Defaults to
-    /// hardware detection; the stub and zone backends must be requested
-    /// explicitly and require `sled_mode = "scrimlet"`.
+    /// Which switch backend to run when acting as a scrimlet. 
+    ///
+    /// If this is not provided, it defaults to [`SwitchBackend::Detect`],
+    /// which will probe for switch hardware at runtime. The Tofino stub
+    /// and SoftNPU zone modes must be explicitly requested, and require 
+    /// `sled_mode = "scrimlet"`.
     #[serde(default)]
     pub switch_backend: SwitchBackend,
     /// Optional percentage of otherwise-unbudgeted DRAM to reserve for guest
