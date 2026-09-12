@@ -40,7 +40,7 @@ pub(crate) const BGP_PORT: u16 = 179;
 /// used to avoid requiring elevated privileges.
 #[derive(Debug, Clone, Copy)]
 pub struct BgpSocketConfig {
-    /// Address mgd's BGP dispatcher listens on. `None` → `[::]:179`.
+    /// Address mgd's BGP dispatcher listens on.
     listen_addr: SocketAddr,
 }
 
