@@ -42,7 +42,7 @@ pub enum Tls {
     /// A vouched proxy identity: an ephemeral key that sled-agent
     /// generates and the RoT vouches for, served from local files
     /// along with the platform identity chain that validates it.
-    Vouched { priv_key: Utf8PathBuf, cert_chain: Utf8PathBuf },
+    RotVouched { priv_key: Utf8PathBuf, cert_chain: Utf8PathBuf },
     /// None. For development images, which have no RoT to sign an
     /// identity with.
     Insecure,
@@ -59,7 +59,7 @@ pub struct Config {
 /// only returns if the proxy cannot be started.
 pub async fn run(log: &Logger, config: Config) -> Result<()> {
     let tls = match config.tls {
-        Tls::Vouched { priv_key, cert_chain } => Some(
+        Tls::RotVouched { priv_key, cert_chain } => Some(
             platform_tls(&priv_key, &cert_chain)
                 .context("loading the TLS identity")?,
         ),
