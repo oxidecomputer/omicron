@@ -10,6 +10,7 @@ mod sensors;
 mod server;
 mod sidecar;
 mod update;
+mod vpd;
 
 pub use anyhow::Result;
 use async_trait::async_trait;

@@ -59,6 +59,7 @@ omicron-test-utils.workspace = true
 serde_json.workspace = true
 sp-sim.workspace = true
 subprocess.workspace = true
+pretty_assertions.workspace = true
 
 [[bin]]
 name = "mgs"

@@ -9,6 +9,7 @@ use gateway_messages::SpPort;
 use gateway_test_utils::current_simulator_state;
 use gateway_test_utils::setup;
 use gateway_types::component::SpType;
+use pretty_assertions::assert_eq;
 
 #[tokio::test]
 async fn component_list() {
@@ -41,7 +42,7 @@ async fn component_list() {
                 device: SpComponent::SP3_HOST_CPU.const_as_str().to_string(),
                 serial_number: None,
                 description: "FAKE host cpu".to_string(),
-                capabilities: 0,
+                capabilities: 4,
                 presence: SpComponentPresence::Present,
             },
             SpComponentInfo {
@@ -58,7 +59,8 @@ async fn component_list() {
                 device: "tmp117".to_string(),
                 serial_number: None,
                 description: "FAKE temperature sensor".to_string(),
-                capabilities: DeviceCapabilities::HAS_MEASUREMENT_CHANNELS
+                capabilities: (DeviceCapabilities::HAS_MEASUREMENT_CHANNELS
+                    | DeviceCapabilities::HAS_VPD)
                     .bits(),
                 presence: SpComponentPresence::Present,
             },
@@ -67,7 +69,8 @@ async fn component_list() {
                 device: "tmp117".to_string(),
                 serial_number: None,
                 description: "FAKE Southeast temperature sensor".to_string(),
-                capabilities: DeviceCapabilities::HAS_MEASUREMENT_CHANNELS
+                capabilities: (DeviceCapabilities::HAS_MEASUREMENT_CHANNELS
+                    | DeviceCapabilities::HAS_VPD)
                     .bits(),
                 presence: SpComponentPresence::Present,
             },
@@ -76,7 +79,7 @@ async fn component_list() {
                 device: "at24csw080".to_string(),
                 serial_number: None,
                 description: "FAKE U.2 Sharkfin A VPD".to_string(),
-                capabilities: 0,
+                capabilities: DeviceCapabilities::HAS_VPD.bits(),
                 presence: SpComponentPresence::Present,
             },
             SpComponentInfo {
@@ -123,6 +126,24 @@ async fn component_list() {
                 serial_number: None,
                 description: "FAKE Fan controller".to_string(),
                 capabilities: DeviceCapabilities::HAS_MEASUREMENT_CHANNELS
+                    .bits(),
+                presence: SpComponentPresence::Present,
+            },
+            SpComponentInfo {
+                component: "fan-tray-vpd".to_string(),
+                device: "at24csw080".to_string(),
+                serial_number: None,
+                description: "FAKE Fan tray VPD".to_string(),
+                capabilities: DeviceCapabilities::HAS_VPD.bits(),
+                presence: SpComponentPresence::Present,
+            },
+            SpComponentInfo {
+                component: "ibc".to_string(),
+                device: "bmr491".to_string(),
+                serial_number: None,
+                description: "FAKE intermediate bus converter".to_string(),
+                capabilities: (DeviceCapabilities::IS_PMBUS
+                    | DeviceCapabilities::HAS_VPD)
                     .bits(),
                 presence: SpComponentPresence::Present,
             },
@@ -141,7 +162,7 @@ async fn component_list() {
                 device: SpComponent::SP3_HOST_CPU.const_as_str().to_string(),
                 serial_number: None,
                 description: "FAKE host cpu".to_string(),
-                capabilities: 0,
+                capabilities: 4,
                 presence: SpComponentPresence::Present,
             },
             SpComponentInfo {
@@ -149,7 +170,8 @@ async fn component_list() {
                 device: "tmp117".to_string(),
                 serial_number: None,
                 description: "FAKE temperature sensor".to_string(),
-                capabilities: DeviceCapabilities::HAS_MEASUREMENT_CHANNELS
+                capabilities: (DeviceCapabilities::HAS_MEASUREMENT_CHANNELS
+                    | DeviceCapabilities::HAS_VPD)
                     .bits(),
                 presence: SpComponentPresence::Present,
             },
@@ -158,7 +180,8 @@ async fn component_list() {
                 device: "tmp117".to_string(),
                 serial_number: None,
                 description: "FAKE temperature sensor".to_string(),
-                capabilities: DeviceCapabilities::HAS_MEASUREMENT_CHANNELS
+                capabilities: (DeviceCapabilities::HAS_MEASUREMENT_CHANNELS
+                    | DeviceCapabilities::HAS_VPD)
                     .bits(),
                 presence: SpComponentPresence::Present,
             },
@@ -167,7 +190,8 @@ async fn component_list() {
                 device: "tmp117".to_string(),
                 serial_number: None,
                 description: "FAKE Southeast temperature sensor".to_string(),
-                capabilities: DeviceCapabilities::HAS_MEASUREMENT_CHANNELS
+                capabilities: (DeviceCapabilities::HAS_MEASUREMENT_CHANNELS
+                    | DeviceCapabilities::HAS_VPD)
                     .bits(),
                 presence: SpComponentPresence::Present,
             },
@@ -176,7 +200,7 @@ async fn component_list() {
                 device: "at24csw080".to_string(),
                 serial_number: None,
                 description: "FAKE U.2 Sharkfin A VPD".to_string(),
-                capabilities: 0,
+                capabilities: DeviceCapabilities::HAS_VPD.bits(),
                 presence: SpComponentPresence::Present,
             },
             SpComponentInfo {
@@ -223,6 +247,16 @@ async fn component_list() {
                 serial_number: None,
                 description: "FAKE Fan controller".to_string(),
                 capabilities: DeviceCapabilities::HAS_MEASUREMENT_CHANNELS
+                    .bits(),
+                presence: SpComponentPresence::Present,
+            },
+            SpComponentInfo {
+                component: "ibc".to_string(),
+                device: "bmr491".to_string(),
+                serial_number: None,
+                description: "FAKE intermediate bus converter".to_string(),
+                capabilities: (DeviceCapabilities::IS_PMBUS
+                    | DeviceCapabilities::HAS_VPD)
                     .bits(),
                 presence: SpComponentPresence::Present,
             },
@@ -256,6 +290,16 @@ async fn component_list() {
                 capabilities: DeviceCapabilities::HAS_MEASUREMENT_CHANNELS
                     .bits(),
                 presence: SpComponentPresence::Failed,
+            },
+            SpComponentInfo {
+                component: "ibc".to_string(),
+                device: "bmr491".to_string(),
+                serial_number: None,
+                description: "FAKE intermediate bus converter".to_string(),
+                capabilities: (DeviceCapabilities::IS_PMBUS
+                    | DeviceCapabilities::HAS_VPD)
+                    .bits(),
+                presence: SpComponentPresence::Present,
             },
         ]
     );

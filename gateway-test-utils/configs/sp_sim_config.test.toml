@@ -48,6 +48,21 @@ sensors = [
     { name = "South", kind = "Temperature", last_error.value = "DeviceError", last_error.timestamp = 1234 },
 ]
 
+[[simulated_sps.sidecar.components]]
+id = "ibc"
+device = "bmr491"
+description = "FAKE intermediate bus converter"
+capabilities = 0x20
+presence = "Present"
+
+[simulated_sps.sidecar.components.vpd.pmbus]
+mfr_id = "Flex"
+mfr_model = "BMR4913203851"
+mfr_revision = "R1C A"
+mfr_location = "CB6"
+mfr_date = "2023-02-25"
+mfr_serial = "FP1C481050"
+
 [simulated_sps.sidecar.ereport_config]
 restart_id = "0d3e464a-666e-4687-976f-90e31238be8b"
 
@@ -79,6 +94,21 @@ bind_addr = "[::1]:0"
 [[simulated_sps.sidecar.ereport_network_config]]
 [simulated_sps.sidecar.ereport_network_config.simulated]
 bind_addr = "[::1]:0"
+
+[[simulated_sps.sidecar.components]]
+id = "ibc"
+device = "bmr491"
+description = "FAKE intermediate bus converter"
+capabilities = 0x20
+presence = "Present"
+
+[simulated_sps.sidecar.components.vpd.pmbus]
+mfr_id = "Flex"
+mfr_model = "BMR4913203851"
+mfr_revision = "R1C A"
+mfr_location = "CB6"
+mfr_date = "2023-02-26"
+mfr_serial = "FP1C481051"
 
 [[simulated_sps.gimlet]]
 serial_number = "SimGimlet00"
@@ -124,6 +154,7 @@ device = "tmp117"
 description = "FAKE temperature sensor"
 capabilities = 0x2
 presence = "Present"
+vpd = { tmp11x = { id = 0x0117, eeprom1 = 0x0101, eeprom2 = 0x0102, eeprom3 = 0x0103 } }
 sensors = [
     { name = "South", kind = "Temperature", last_data.value = 42.5625, last_data.timestamp = 1234 },
 ]
@@ -134,6 +165,7 @@ device = "tmp117"
 description = "FAKE Southeast temperature sensor"
 capabilities = 0x2
 presence = "Present"
+vpd = { tmp11x = { id = 0x0117, eeprom1 = 0x0201, eeprom2 = 0x0202, eeprom3 = 0x0203 } }
 sensors = [
     { name = "Southeast", kind = "Temperature", last_data.value = 41.570313, last_data.timestamp = 1234 },
 ]
@@ -144,6 +176,7 @@ device = "at24csw080"
 description = "FAKE U.2 Sharkfin A VPD"
 capabilities = 0x0
 presence = "Present"
+vpd = { barcode = "0XV2:913-0000028:001:2SHRKFN1" }
 
 [[simulated_sps.gimlet.components]]
 id = "dev-7"
@@ -201,6 +234,37 @@ sensors = [
     { name = "Southwest", kind = "Speed", last_data.value = 2649.0, last_data.timestamp = 1234 },
     { name = "Northwest", kind = "Speed", last_data.value = 2275.0, last_data.timestamp = 1234 },
 ]
+
+[[simulated_sps.gimlet.components]]
+id = "fan-tray-vpd"
+device = "at24csw080"
+description = "FAKE Fan tray VPD"
+capabilities = 0x0
+presence = "Present"
+
+[simulated_sps.gimlet.components.vpd.sled_fan_tray]
+identity = "0XV2:991-0000151:001:TST01234567"
+vpd_board_identity = "0XV2:913-0000027:001:TST01234568"
+fans = [
+    "MPN1:SYD:9CRA0848P8G012:C:WWYY1SSS",
+    "0XV1:1250000456:002:FAN01234569",
+    "MPN1:ABC:ASDF-1000:032:123456789",
+]
+
+[[simulated_sps.gimlet.components]]
+id = "ibc"
+device = "bmr491"
+description = "FAKE intermediate bus converter"
+capabilities = 0x20
+presence = "Present"
+
+[simulated_sps.gimlet.components.vpd.pmbus]
+mfr_id = "Flex"
+mfr_model = "BMR4913203851"
+mfr_revision = "R1C A"
+mfr_location = "CB6"
+mfr_date = "2023-02-27"
+mfr_serial = "FP1C481052"
 
 [simulated_sps.gimlet.ereport_config]
 restart_id = "af1ebf85-36ba-4c31-bbec-b9825d6d9d8b"
@@ -279,6 +343,7 @@ device = "tmp117"
 description = "FAKE temperature sensor"
 capabilities = 0x2
 presence = "Present"
+vpd = { tmp11x = { id = 0x0117, eeprom1 = 0x1001, eeprom2 = 0x1002, eeprom3 = 0x1003 } }
 sensors = [
     { name = "Southwest", kind = "Temperature", last_data.value = 41.3629, last_data.timestamp = 1234 },
 ]
@@ -288,6 +353,7 @@ device = "tmp117"
 description = "FAKE temperature sensor"
 capabilities = 0x2
 presence = "Present"
+vpd = { tmp11x = { id = 0x0117, eeprom1 = 0x1101, eeprom2 = 0x1102, eeprom3 = 0x1103 } }
 sensors = [
     { name = "South", kind = "Temperature", last_data.value = 42.5625, last_data.timestamp = 1234 },
 ]
@@ -298,6 +364,7 @@ device = "tmp117"
 description = "FAKE Southeast temperature sensor"
 capabilities = 0x2
 presence = "Present"
+vpd = { tmp11x = { id = 0x0117, eeprom1 = 0x1201, eeprom2 = 0x1202, eeprom3 = 0x1203 } }
 sensors = [
     { name = "Southeast", kind = "Temperature", last_data.value = 41.570313, last_data.timestamp = 1234 },
 ]
@@ -308,6 +375,7 @@ device = "at24csw080"
 description = "FAKE U.2 Sharkfin A VPD"
 capabilities = 0x0
 presence = "Present"
+vpd = { barcode = "0XV2:913-0000028:001:2SHRKFN2" }
 
 [[simulated_sps.gimlet.components]]
 id = "dev-7"
@@ -365,6 +433,21 @@ sensors = [
     { name = "Southwest", kind = "Speed", last_data.value = 2680.0, last_data.timestamp = 1234 },
     { name = "Northwest", kind = "Speed", last_data.value = 2212.0, last_data.timestamp = 1234 },
 ]
+
+[[simulated_sps.gimlet.components]]
+id = "ibc"
+device = "bmr491"
+description = "FAKE intermediate bus converter"
+capabilities = 0x20
+presence = "Present"
+
+[simulated_sps.gimlet.components.vpd.pmbus]
+mfr_id = "Flex"
+mfr_model = "BMR4913203851"
+mfr_revision = "R1C A"
+mfr_location = "CB6"
+mfr_date = "2023-02-28"
+mfr_serial = "FP1C481053"
 
 [simulated_sps.gimlet.ereport_config]
 restart_id = "55e30cc7-a109-492f-aca9-735ed725df3c"
