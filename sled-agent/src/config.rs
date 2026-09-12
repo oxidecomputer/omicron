@@ -120,6 +120,73 @@ pub struct Config {
     /// root certificates and whether to use local certificate chain or
     /// one over IPCC
     pub sprockets: SprocketsConfig,
+
+    /// Settings for the Support Shell server (RFD 620). If this is absent, no
+    /// Support Shell server runs on this sled.
+    #[serde(default)]
+    pub sush: Option<SushConfig>,
+}
+
+/// Configuration for the Support Shell (`sush`) server that runs in the global
+/// zone. See RFD 620.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SushConfig {
+    /// One or more PEM files holding the trusted root certificates for job
+    /// requests, one certificate per file. Job signatures must have one of
+    /// these certificates as their root cert to be accepted.
+    ///
+    /// This list must not be empty, as at least one root cert is required in
+    /// order to be able to run sush jobs.
+    #[serde(deserialize_with = "SushConfig::nonempty_roots")]
+    pub roots: Vec<Utf8PathBuf>,
+
+    /// Where to record job output before an encrypted dataset is available.
+    /// Must be on a ramdisk so that it is never persisted unencrypted.
+    #[serde(default = "SushConfig::default_ramdisk_dir")]
+    pub ramdisk_dir: Utf8PathBuf,
+
+    /// Maximum output a single job may record before an encrypted dataset is
+    /// available. The default is small because the ramdisk is global zone
+    /// memory.
+    #[serde(default = "SushConfig::default_ramdisk_max_output_mb")]
+    pub ramdisk_max_output_mb: u32,
+
+    /// Maximum output a single job may record once an encrypted dataset is
+    /// available.
+    #[serde(default = "SushConfig::default_max_output_mb")]
+    pub max_output_mb: u32,
+}
+
+impl SushConfig {
+    /// We must never store job output unencrypted, so default
+    /// to a directory on the ramdisk. `/var/run` is a tmpfs
+    /// mounted by the `filesystem/minimal` service, and the
+    /// `oxide` subdirectory is created during bootstrap for
+    /// ZFS key files (see `illumos_utils::zfs::KEYPATH_ROOT`).
+    fn default_ramdisk_dir() -> Utf8PathBuf {
+        "/var/run/oxide/sush".into()
+    }
+
+    fn default_ramdisk_max_output_mb() -> u32 {
+        64
+    }
+
+    fn default_max_output_mb() -> u32 {
+        10 * 1024
+    }
+
+    fn nonempty_roots<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Vec<Utf8PathBuf>, D::Error> {
+        let roots = Vec::deserialize(deserializer)?;
+        if roots.is_empty() {
+            return Err(serde::de::Error::custom(
+                "sush needs at least one root certificate to run",
+            ));
+        }
+        Ok(roots)
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -209,5 +276,38 @@ mod test {
             }
         }
         assert!(configs_seen > 0, "No sled-agent configs found");
+    }
+
+    #[test]
+    fn test_sush_config() {
+        // Only `roots` is required. The rest have defaults.
+        let sush: SushConfig =
+            toml::from_str(r#"roots = ["/pkg/sush-root.pem"]"#).unwrap();
+        assert_eq!(sush.roots, vec![Utf8PathBuf::from("/pkg/sush-root.pem")]);
+        assert_eq!(sush.ramdisk_dir, SushConfig::default_ramdisk_dir());
+        assert_eq!(
+            sush.ramdisk_max_output_mb,
+            SushConfig::default_ramdisk_max_output_mb()
+        );
+        assert_eq!(sush.max_output_mb, SushConfig::default_max_output_mb());
+
+        let sush: SushConfig = toml::from_str(
+            r#"
+            roots = ["/pkg/sush-root.pem"]
+            ramdisk_dir = "/var/run/sush"
+            ramdisk_max_output_mb = 8
+            max_output_mb = 128
+            "#,
+        )
+        .unwrap();
+        assert_eq!(sush.ramdisk_dir, "/var/run/sush");
+        assert_eq!(sush.ramdisk_max_output_mb, 8);
+        assert_eq!(sush.max_output_mb, 128);
+
+        // No roots would mean no jobs can ever run, so reject at parse time.
+        let err = toml::from_str::<SushConfig>("roots = []").unwrap_err();
+        assert!(
+            err.to_string().contains("needs at least one root certificate")
+        );
     }
 }
