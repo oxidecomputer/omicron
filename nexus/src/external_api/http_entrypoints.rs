@@ -4956,7 +4956,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         path_params: Path<networking::RouterConfigurationSelector>,
         query_params: Query<PaginatedByName>,
-    ) -> Result<HttpResponseOk<ResultsPage<networking::RouterConfigurationBgpPeer>>, HttpError> {
+    ) -> Result<
+        HttpResponseOk<ResultsPage<networking::RouterConfigurationBgpPeer>>,
+        HttpError,
+    > {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -4966,14 +4969,20 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let items = nexus
-                .router_configuration_bgp_peer_list(&opctx, sel.configuration, &pagparams)
+                .router_configuration_bgp_peer_list(
+                    &opctx,
+                    sel.configuration,
+                    &pagparams,
+                )
                 .await?;
             // The entries are named but carry no identity metadata, so the
             // page marker is the bare name.
             Ok(HttpResponseOk(ScanByName::results_page(
                 &query,
                 items,
-                &|_, item: &networking::RouterConfigurationBgpPeer| item.name.clone(),
+                &|_, item: &networking::RouterConfigurationBgpPeer| {
+                    item.name.clone()
+                },
             )?))
         };
         apictx
@@ -5077,7 +5086,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         path_params: Path<networking::RouterConfigurationSelector>,
         query_params: Query<PaginatedByName>,
-    ) -> Result<HttpResponseOk<ResultsPage<networking::StaticRoute>>, HttpError> {
+    ) -> Result<HttpResponseOk<ResultsPage<networking::StaticRoute>>, HttpError>
+    {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -5087,7 +5097,11 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let items = nexus
-                .router_configuration_static_route_list(&opctx, sel.configuration, &pagparams)
+                .router_configuration_static_route_list(
+                    &opctx,
+                    sel.configuration,
+                    &pagparams,
+                )
                 .await?;
             // The entries are named but carry no identity metadata, so the
             // page marker is the bare name.
@@ -5193,7 +5207,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         path_params: Path<networking::RouterConfigurationSelector>,
         query_params: Query<PaginatedByName>,
-    ) -> Result<HttpResponseOk<ResultsPage<networking::BfdPeer>>, HttpError> {
+    ) -> Result<HttpResponseOk<ResultsPage<networking::BfdPeer>>, HttpError>
+    {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -5203,7 +5218,11 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let items = nexus
-                .router_configuration_bfd_peer_list(&opctx, sel.configuration, &pagparams)
+                .router_configuration_bfd_peer_list(
+                    &opctx,
+                    sel.configuration,
+                    &pagparams,
+                )
                 .await?;
             // The entries are named but carry no identity metadata, so the
             // page marker is the bare name.

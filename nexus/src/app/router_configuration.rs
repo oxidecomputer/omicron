@@ -653,7 +653,10 @@ impl super::Nexus {
             .router_configuration_bfd_peer_create(
                 opctx,
                 &authz_configuration,
-                RouterConfigurationBfdPeer::new(authz_configuration.id(), peer)?,
+                RouterConfigurationBfdPeer::new(
+                    authz_configuration.id(),
+                    peer,
+                )?,
             )
             .await?;
         self.activate_router_configuration_propagation();
@@ -700,7 +703,10 @@ impl super::Nexus {
                 opctx,
                 &authz_configuration,
                 peer_name,
-                RouterConfigurationBfdPeer::new(authz_configuration.id(), peer)?,
+                RouterConfigurationBfdPeer::new(
+                    authz_configuration.id(),
+                    peer,
+                )?,
             )
             .await?;
         self.activate_router_configuration_propagation();

@@ -4,8 +4,12 @@
 
 //! Integration tests for router configurations
 
+use dropshot::ResultsPage;
 use http::StatusCode;
 use http::method::Method;
+use nexus_db_queries::authn;
+use nexus_db_queries::authz;
+use nexus_db_queries::context::OpContext;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::create_silo;
 use nexus_test_utils_macros::nexus_test;
@@ -18,19 +22,15 @@ use nexus_types::external_api::networking::{
     SiloRouterConfigurationEntry, SiloRouterConfigurations,
     SiloRouterConfigurationsUpdate, StaticRoute,
 };
-use dropshot::ResultsPage;
-use nexus_db_queries::authn;
-use nexus_db_queries::authz;
-use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::{
     IdentityMetadataCreateParams, IdentityMetadataUpdateParams, NameOrId,
 };
-use std::sync::Arc;
 use sled_agent_types::early_networking::BfdMode;
 use sled_agent_types::early_networking::ImportExportPolicy;
 use sled_agent_types::early_networking::MaxPathConfig;
 use sled_agent_types::early_networking::SwitchSlot;
 use std::num::NonZeroU8;
+use std::sync::Arc;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -1009,11 +1009,15 @@ async fn create_configuration(ctx: &ControlPlaneTestContext, name: &str) {
         },
         switch: SwitchSlot::Switch0,
     };
-    NexusRequest::objects_post(&ctx.external_client, CONFIGURATIONS_URL, &params)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .unwrap();
+    NexusRequest::objects_post(
+        &ctx.external_client,
+        CONFIGURATIONS_URL,
+        &params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
 }
 
 /// POST/PUT a raw JSON body and expect 400; return the error message.
@@ -1056,10 +1060,15 @@ async fn list_all<T: Clone + serde::de::DeserializeOwned>(
     ctx: &ControlPlaneTestContext,
     url: &str,
 ) -> Vec<T> {
-    NexusRequest::iter_collection_authn::<T>(&ctx.external_client, url, "", None)
-        .await
-        .unwrap()
-        .all_items
+    NexusRequest::iter_collection_authn::<T>(
+        &ctx.external_client,
+        url,
+        "",
+        None,
+    )
+    .await
+    .unwrap()
+    .all_items
 }
 
 fn names_of(items: &[serde_json::Value]) -> Vec<String> {
@@ -1209,8 +1218,10 @@ async fn test_router_configuration_bfd_peer_validation(
     assert!(peers.iter().all(|p| p.name.as_str() != "bad"));
 
     // Rejected updates leave the previous configuration in place.
-    let too_wide_update = too_wide.replace(r#""name":"bad""#, &format!(r#""name":"rx-{}""#, u32::MAX));
-    let mixed_update = mixed_a.replace(r#""name":"bad""#, &format!(r#""name":"rx-{}""#, u32::MAX));
+    let too_wide_update = too_wide
+        .replace(r#""name":"bad""#, &format!(r#""name":"rx-{}""#, u32::MAX));
+    let mixed_update = mixed_a
+        .replace(r#""name":"bad""#, &format!(r#""name":"rx-{}""#, u32::MAX));
     for body in [&too_wide_update, &mixed_update] {
         expect_bad_request(ctx, Method::PUT, &max_url, body).await;
         let after: BfdPeer = get_json(ctx, &max_url).await;
@@ -1421,7 +1432,8 @@ async fn test_router_configuration_child_pagination(
 
         // The default page size returns what is left, in name order, and a
         // cursor walk agrees with it.
-        let one_page: ResultsPage<serde_json::Value> = get_json(ctx, &url).await;
+        let one_page: ResultsPage<serde_json::Value> =
+            get_json(ctx, &url).await;
         assert_eq!(names_of(&one_page.items), ["p1", "p2", "p4", "p5"]);
         let walked: Vec<serde_json::Value> = list_all(ctx, &url).await;
         assert_eq!(names_of(&walked), ["p1", "p2", "p4", "p5"]);
@@ -1487,9 +1499,13 @@ async fn test_router_configuration_deleted_parent_is_not_found(
         ("bfd-peers", serde_json::to_value(demo_bfd_peer()).unwrap()),
     ] {
         NexusRequest::new(
-            RequestBuilder::new(client, Method::POST, &format!("{by_id}/{sub}"))
-                .body(Some(&body))
-                .expect_status(Some(StatusCode::NOT_FOUND)),
+            RequestBuilder::new(
+                client,
+                Method::POST,
+                &format!("{by_id}/{sub}"),
+            )
+            .body(Some(&body))
+            .expect_status(Some(StatusCode::NOT_FOUND)),
         )
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
