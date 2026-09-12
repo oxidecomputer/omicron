@@ -66,6 +66,10 @@ progenitor::generate_api!(
         NetworkInterface = sled_agent_types::inventory::NetworkInterface,
         NetworkInterfaceKind = sled_agent_types::inventory::NetworkInterfaceKind,
         NewPasswordHash = omicron_passwords::NewPasswordHash,
+        OmicronZoneExternalFloatingAddr =
+            nexus_types::deployment::OmicronZoneExternalFloatingAddr,
+        OmicronZoneExternalFloatingIp =
+            nexus_types::deployment::OmicronZoneExternalFloatingIp,
         OximeterReadMode = nexus_types::deployment::OximeterReadMode,
         OximeterReadPolicy = nexus_types::deployment::OximeterReadPolicy,
         PendingMgsUpdate = nexus_types::deployment::PendingMgsUpdate,
@@ -148,15 +152,6 @@ impl From<omicron_common::address::Ipv4Range> for types::Ipv4Range {
 impl From<omicron_common::address::Ipv6Range> for types::Ipv6Range {
     fn from(r: omicron_common::address::Ipv6Range) -> Self {
         Self { first: r.first, last: r.last }
-    }
-}
-
-impl From<&sled_agent_types::inventory::SourceNatConfigGeneric>
-    for types::SourceNatConfigGeneric
-{
-    fn from(r: &sled_agent_types::inventory::SourceNatConfigGeneric) -> Self {
-        let (first_port, last_port) = r.port_range_raw();
-        Self { ip: r.ip, first_port, last_port }
     }
 }
 
