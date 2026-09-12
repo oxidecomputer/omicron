@@ -55,8 +55,8 @@ pub struct Config {
     pub home: Option<BaseboardId>,
 }
 
-/// Start the proxy and run its discovery loops; only a startup
-/// failure returns.
+/// Start the proxy and run its discovery loops. This function
+/// only returns if the proxy cannot be started.
 pub async fn run(log: &Logger, config: Config) -> Result<()> {
     let tls = match config.tls {
         Tls::Vouched { priv_key, cert_chain } => Some(
