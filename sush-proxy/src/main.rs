@@ -35,8 +35,9 @@ struct Args {
     #[clap(long, required_if_eq("tls", "rot-vouched"))]
     cert_chain: Option<Utf8PathBuf>,
 
-    /// The baseboard (part:serial) of the sled hosting the proxy,
-    /// preferred for requests that name no target
+    /// The baseboard (part:serial) of the sled hosting the proxy.
+    /// This will be the default for requests that don't specify an
+    /// explicit target.
     #[clap(long)]
     home: Option<String>,
 }
