@@ -9,7 +9,7 @@ use crate::softnpu::{SOFTNPU_9P_VERSION, decode_rversion, encode_tversion};
 use illumos_devinfo::{DevInfo, Node};
 use slog::{Logger, debug, info, warn};
 use slog_error_chain::InlineErrorChain;
-use std::fs::{File, OpenOptions};
+use std::fs::OpenOptions;
 use std::io::{Read, Write};
 use std::os::unix::fs::OpenOptionsExt;
 use std::time::Duration;
@@ -151,17 +151,18 @@ fn probe_version(path: &str) -> Result<Probe, SwitchDetectError> {
                 });
             }
         };
-        let io_err = |err| SwitchDetectError::Io { path: path.to_string(), err };
+        let io_err =
+            |err| SwitchDetectError::Io { path: path.to_string(), err };
         file.write_all(&encode_tversion(SOFTNPU_9P_VERSION)).map_err(io_err)?;
         let mut buf = vec![0u8; REPLY_BUF_LEN];
         let n = file.read(&mut buf).map_err(io_err)?;
-        return decode_rversion(&buf[..n])
-            .map(Probe::Version)
-            .map_err(|reason| SwitchDetectError::Protocol {
+        return decode_rversion(&buf[..n]).map(Probe::Version).map_err(
+            |reason| SwitchDetectError::Protocol {
                 path: path.to_string(),
                 reason,
-            });
+            },
+        );
     }
-    
+
     Ok(Probe::Busy)
 }

@@ -29,7 +29,7 @@ pub enum SledMode {
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SwitchBackend {
-    /// Probe for switch hardware: a SoftNPU 9p device, else the Tofino ASIC
+    /// Probe for switch hardware: the Tofino ASIC first, then a SoftNPU 9p device
     #[default]
     Detect,
     /// Run the stub Dendrite; no switch hardware
@@ -78,11 +78,11 @@ pub struct Config {
     pub sled_mode: SledMode,
     // TODO: Remove once this can be auto-detected.
     pub sidecar_revision: SidecarRevision,
-    /// Which switch backend to run when acting as a scrimlet. 
+    /// Which switch backend to run when acting as a scrimlet.
     ///
     /// If this is not provided, it defaults to [`SwitchBackend::Detect`],
     /// which will probe for switch hardware at runtime. The Tofino stub
-    /// and SoftNPU zone modes must be explicitly requested, and require 
+    /// and SoftNPU zone modes must be explicitly requested, and require
     /// `sled_mode = "scrimlet"`.
     #[serde(default)]
     pub switch_backend: SwitchBackend,
