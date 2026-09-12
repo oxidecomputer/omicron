@@ -4,7 +4,7 @@
 
 //! Detection of the propolis SoftNPU 9p device.
 
-use crate::SwitchDetectError;
+use crate::SoftNpuDetectError;
 use crate::softnpu::{SOFTNPU_9P_VERSION, decode_rversion, encode_tversion};
 use illumos_devinfo::{DevInfo, Node};
 use slog::{Logger, debug, info, warn};
@@ -27,33 +27,32 @@ enum Probe {
     Busy,
 }
 
-/// Returns the devfs path of the SoftNPU 9p device when one is attached.
+/// Returns whether the propolis SoftNPU 9p device is attached.
 ///
 /// Every virtio 9p node with an attached driver is opened exclusively and
 /// asked for its 9P version. Only the propolis SoftNPU handler answers with
 /// `9P2000.P4`. A device that stays busy across retries, fails to open, or
 /// answers with anything other than an Rversion is logged and skipped. Only
 /// device tree failures are fatal.
-pub(super) fn find_softnpu_device(
-    log: &Logger,
-    devinfo: &mut DevInfo,
-) -> Result<Option<String>, SwitchDetectError> {
+pub fn find_softnpu_device(log: &Logger) -> Result<bool, SoftNpuDetectError> {
+    let mut devinfo =
+        DevInfo::new_force_load().map_err(SoftNpuDetectError::DevInfo)?;
     for node in devinfo.walk_node() {
-        let node = node.map_err(SwitchDetectError::DevInfo)?;
-        if let Some(path) = probe_node(log, &node)? {
-            return Ok(Some(path));
+        let node = node.map_err(SoftNpuDetectError::DevInfo)?;
+        if probe_node(log, &node)? {
+            return Ok(true);
         }
     }
-    Ok(None)
+    Ok(false)
 }
 
-/// Returns the devfs path when `node` is the SoftNPU 9p device.
+/// Returns whether `node` is the SoftNPU 9p device.
 fn probe_node(
     log: &Logger,
     node: &Node<'_>,
-) -> Result<Option<String>, SwitchDetectError> {
+) -> Result<bool, SoftNpuDetectError> {
     if !is_virtio_9p(node)? {
-        return Ok(None);
+        return Ok(false);
     }
     let Some(path) = ninep_minor_path(node)? else {
         debug!(
@@ -61,12 +60,12 @@ fn probe_node(
             "virtio 9p node has no {NINEP_MINOR} minor";
             "node" => node.node_name(),
         );
-        return Ok(None);
+        return Ok(false);
     };
     match probe_version(&path) {
         Ok(Probe::Version(version)) if version == SOFTNPU_9P_VERSION => {
-            info!(log, "found SoftNPU 9p device"; "path" => &path);
-            Ok(Some(path))
+            info!(log, "found SoftNPU 9p device"; "path" => path);
+            Ok(true)
         }
         Ok(Probe::Version(version)) => {
             debug!(
@@ -75,32 +74,32 @@ fn probe_node(
                 "path" => path,
                 "version" => version,
             );
-            Ok(None)
+            Ok(false)
         }
         Ok(Probe::Busy) => {
             warn!(log, "virtio 9p device busy; skipping"; "path" => path);
-            Ok(None)
+            Ok(false)
         }
         Err(
-            e @ (SwitchDetectError::Io { .. }
-            | SwitchDetectError::Protocol { .. }),
+            e @ (SoftNpuDetectError::Io { .. }
+            | SoftNpuDetectError::Protocol { .. }),
         ) => {
             warn!(
                 log,
                 "virtio 9p device probe failed; skipping";
                 "error" => InlineErrorChain::new(&e),
             );
-            Ok(None)
+            Ok(false)
         }
         Err(e) => Err(e),
     }
 }
 
-fn is_virtio_9p(node: &Node<'_>) -> Result<bool, SwitchDetectError> {
+fn is_virtio_9p(node: &Node<'_>) -> Result<bool, SoftNpuDetectError> {
     let mut vendor = None;
     let mut device = None;
     for prop in node.props() {
-        let prop = prop.map_err(SwitchDetectError::DevInfo)?;
+        let prop = prop.map_err(SoftNpuDetectError::DevInfo)?;
         match prop.name().as_str() {
             "vendor-id" => vendor = prop.as_i32(),
             "device-id" => device = prop.as_i32(),
@@ -113,12 +112,12 @@ fn is_virtio_9p(node: &Node<'_>) -> Result<bool, SwitchDetectError> {
 
 fn ninep_minor_path(
     node: &Node<'_>,
-) -> Result<Option<String>, SwitchDetectError> {
+) -> Result<Option<String>, SoftNpuDetectError> {
     for minor in node.minors() {
-        let minor = minor.map_err(SwitchDetectError::DevInfo)?;
+        let minor = minor.map_err(SoftNpuDetectError::DevInfo)?;
         if minor.name() == NINEP_MINOR {
             let path =
-                minor.devfs_path().map_err(SwitchDetectError::DevInfo)?;
+                minor.devfs_path().map_err(SoftNpuDetectError::DevInfo)?;
             return Ok(Some(format!("/devices{path}")));
         }
     }
@@ -129,7 +128,7 @@ fn ninep_minor_path(
 ///
 /// The driver permits a single exclusive open, so EBUSY means another
 /// consumer such as scadm or a 9p mount currently holds the device.
-fn probe_version(path: &str) -> Result<Probe, SwitchDetectError> {
+fn probe_version(path: &str) -> Result<Probe, SoftNpuDetectError> {
     for attempt in 1..=OPEN_ATTEMPTS {
         let mut file = match OpenOptions::new()
             .read(true)
@@ -145,24 +144,22 @@ fn probe_version(path: &str) -> Result<Probe, SwitchDetectError> {
                 continue;
             }
             Err(err) => {
-                return Err(SwitchDetectError::Io {
+                return Err(SoftNpuDetectError::Io {
                     path: path.to_string(),
                     err,
                 });
             }
         };
-        let io_err =
-            |err| SwitchDetectError::Io { path: path.to_string(), err };
-        file.write_all(&encode_tversion(SOFTNPU_9P_VERSION)).map_err(io_err)?;
+        let io = |err| SoftNpuDetectError::Io { path: path.to_string(), err };
+        file.write_all(&encode_tversion(SOFTNPU_9P_VERSION)).map_err(io)?;
         let mut buf = vec![0u8; REPLY_BUF_LEN];
-        let n = file.read(&mut buf).map_err(io_err)?;
+        let n = file.read(&mut buf).map_err(io)?;
         return decode_rversion(&buf[..n]).map(Probe::Version).map_err(
-            |reason| SwitchDetectError::Protocol {
+            |reason| SoftNpuDetectError::Protocol {
                 path: path.to_string(),
                 reason,
             },
         );
     }
-
     Ok(Probe::Busy)
 }

@@ -14,10 +14,11 @@ use illumos_utils::dladm::PhysicalLink;
 use omicron_common::vlan::VlanID;
 use serde::Deserialize;
 use sled_hardware::DataLinks;
+use sled_hardware::DendriteAsic;
 use sled_hardware::ExternalDisks;
 use sprockets_tls::keys::SprocketsConfig;
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum SledMode {
     Auto,
@@ -26,20 +27,154 @@ pub enum SledMode {
     Scrimlet,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum SwitchBackend {
-    /// Probe for switch hardware: the Tofino ASIC first, then a SoftNPU 9p device
-    #[default]
-    Detect,
-    /// Run the stub Dendrite; no switch hardware
-    TofinoStub,
-    /// Run Dendrite against a SoftNPU zone on this host
-    SoftNpuZone,
+/// Switch backend of a `custom` deployment, with the parameters it needs.
+/// Flattened into the deployment table: `switch` names the backend and its
+/// parameters sit beside it.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "switch")]
+pub enum Switch {
+    TofinoAsic {
+        #[serde(default = "default_sidecar_revision")]
+        sidecar_revision: String,
+    },
+    TofinoStub {
+        #[serde(default = "default_sidecar_revision")]
+        sidecar_revision: String,
+    },
+    SoftNpuPropolisDevice {
+        front_port_count: u8,
+        rear_port_count: u8,
+    },
+    SoftNpuZone {
+        front_port_count: u8,
+        rear_port_count: u8,
+    },
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "snake_case")]
+impl Switch {
+    pub fn asic(&self) -> DendriteAsic {
+        match self {
+            Switch::TofinoAsic { .. } => DendriteAsic::TofinoAsic,
+            Switch::TofinoStub { .. } => DendriteAsic::TofinoStub,
+            Switch::SoftNpuPropolisDevice { .. } => {
+                DendriteAsic::SoftNpuPropolisDevice
+            }
+            Switch::SoftNpuZone { .. } => DendriteAsic::SoftNpuZone,
+        }
+    }
+
+    fn sidecar_revision(&self) -> SidecarRevision {
+        match self {
+            Switch::TofinoAsic { sidecar_revision }
+            | Switch::TofinoStub { sidecar_revision } => {
+                SidecarRevision::Physical(sidecar_revision.clone())
+            }
+            Switch::SoftNpuPropolisDevice {
+                front_port_count,
+                rear_port_count,
+            } => SidecarRevision::SoftPropolis(SoftPortConfig {
+                front_port_count: *front_port_count,
+                rear_port_count: *rear_port_count,
+            }),
+            Switch::SoftNpuZone { front_port_count, rear_port_count } => {
+                SidecarRevision::SoftZone(SoftPortConfig {
+                    front_port_count: *front_port_count,
+                    rear_port_count: *rear_port_count,
+                })
+            }
+        }
+    }
+}
+
+/// How this sled is deployed. Selects the switch backend and whether the
+/// sled is a scrimlet, which is detected where the backend allows it.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum Deployment {
+    /// Oxide rack. The hardware monitor detects the Tofino ASIC.
+    Production {
+        /// Sidecar board revision
+        #[serde(default = "default_sidecar_revision")]
+        sidecar_revision: String,
+    },
+    /// Propolis-hosted lab. A SoftNPU device makes the sled a scrimlet.
+    Virtual { front_port_count: u8, rear_port_count: u8 },
+    /// One host running a SoftNPU zone. Always a scrimlet.
+    Standalone { front_port_count: u8, rear_port_count: u8 },
+    /// Explicit sled mode and switch backend.
+    Custom {
+        sled_mode: SledMode,
+        #[serde(flatten)]
+        switch: Switch,
+    },
+}
+
+fn default_sidecar_revision() -> String {
+    "b".to_string()
+}
+
+impl Deployment {
+    /// Reject custom combinations that cannot be resolved at startup.
+    pub fn validate(&self) -> Result<(), String> {
+        match self {
+            Deployment::Custom {
+                sled_mode: SledMode::Auto,
+                switch:
+                    switch
+                    @ (Switch::TofinoStub { .. } | Switch::SoftNpuZone { .. }),
+            } => Err(format!(
+                "switch {:?} has no hardware to detect; sled_mode must be \
+                 \"sled\" or \"scrimlet\"",
+                switch.asic()
+            )),
+            _ => Ok(()),
+        }
+    }
+
+    pub fn sled_mode(&self) -> SledMode {
+        match self {
+            Deployment::Production { .. } | Deployment::Virtual { .. } => {
+                SledMode::Auto
+            }
+            Deployment::Standalone { .. } => SledMode::Scrimlet,
+            Deployment::Custom { sled_mode, .. } => *sled_mode,
+        }
+    }
+
+    pub fn switch(&self) -> DendriteAsic {
+        match self {
+            Deployment::Production { .. } => DendriteAsic::TofinoAsic,
+            Deployment::Virtual { .. } => DendriteAsic::SoftNpuPropolisDevice,
+            Deployment::Standalone { .. } => DendriteAsic::SoftNpuZone,
+            Deployment::Custom { switch, .. } => switch.asic(),
+        }
+    }
+
+    /// Sidecar parameters for the switch zone services.
+    pub fn sidecar_revision(&self) -> SidecarRevision {
+        match self {
+            Deployment::Production { sidecar_revision } => {
+                SidecarRevision::Physical(sidecar_revision.clone())
+            }
+            Deployment::Virtual { front_port_count, rear_port_count } => {
+                SidecarRevision::SoftPropolis(SoftPortConfig {
+                    front_port_count: *front_port_count,
+                    rear_port_count: *rear_port_count,
+                })
+            }
+            Deployment::Standalone { front_port_count, rear_port_count } => {
+                SidecarRevision::SoftZone(SoftPortConfig {
+                    front_port_count: *front_port_count,
+                    rear_port_count: *rear_port_count,
+                })
+            }
+            Deployment::Custom { switch, .. } => switch.sidecar_revision(),
+        }
+    }
+}
+
+/// Sidecar parameters derived from the deployment.
+#[derive(Debug, Clone)]
 pub enum SidecarRevision {
     Physical(String),
     SoftZone(SoftPortConfig),
@@ -55,7 +190,7 @@ impl SidecarRevision {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct SoftPortConfig {
     /// Number of front ports
     pub front_port_count: u8,
@@ -74,18 +209,8 @@ pub struct Config {
     pub dropshot: ConfigDropshot,
     /// Configuration for the sled agent debug log
     pub log: ConfigLogging,
-    /// The sled's mode of operation (auto detect or force gimlet/scrimlet).
-    pub sled_mode: SledMode,
-    // TODO: Remove once this can be auto-detected.
-    pub sidecar_revision: SidecarRevision,
-    /// Which switch backend to run when acting as a scrimlet.
-    ///
-    /// If this is not provided, it defaults to [`SwitchBackend::Detect`],
-    /// which will probe for switch hardware at runtime. The Tofino stub
-    /// and SoftNPU zone modes must be explicitly requested, and require
-    /// `sled_mode = "scrimlet"`.
-    #[serde(default)]
-    pub switch_backend: SwitchBackend,
+    /// How this sled is deployed, which selects the switch backend.
+    pub deployment: Deployment,
     /// Optional percentage of otherwise-unbudgeted DRAM to reserve for guest
     /// memory, after accounting for expected host OS memory consumption and, if
     /// set, `vmm_reservoir_size_mb`.
@@ -156,6 +281,8 @@ pub enum ConfigError {
         #[source]
         err: anyhow::Error,
     },
+    #[error("Invalid deployment in {path}: {reason}")]
+    InvalidDeployment { path: Utf8PathBuf, reason: String },
     #[error("Loading certificate")]
     Certificate(#[source] anyhow::Error),
     #[error("Could not determine if host is an Oxide sled")]
@@ -169,8 +296,11 @@ impl Config {
         let path = path.as_ref();
         let contents = std::fs::read_to_string(&path)
             .map_err(|err| ConfigError::Io { path: path.into(), err })?;
-        let config = toml::from_str(&contents).map_err(|err| {
+        let config: Self = toml::from_str(&contents).map_err(|err| {
             ConfigError::Parse { path: path.into(), err: err.into() }
+        })?;
+        config.deployment.validate().map_err(|reason| {
+            ConfigError::InvalidDeployment { path: path.into(), reason }
         })?;
         Ok(config)
     }
