@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 use std::net::{SocketAddr, SocketAddrV6};
 use std::time::Duration;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use camino::Utf8PathBuf;
 use futures::future::join_all;
 use gateway_client::Client as MgsClient;
@@ -28,7 +28,8 @@ use sled_hardware_types::underlay::BootstrapInterface;
 use slog::{Logger, debug, warn};
 use sush_common::targets::{Cubbies, MAX_CUBBY};
 use sush_server::ProxyServer;
-use sush_server::proxy::{Targets, platform_tls};
+use sush_server::proxy::{Sleds, Targets, platform_tls};
+use tokio::spawn;
 use tokio::sync::watch;
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
@@ -55,7 +56,8 @@ pub struct Config {
 }
 
 /// Start the proxy and run its discovery loops. This function
-/// only returns if the proxy cannot be started.
+/// only returns if the proxy cannot be started or a discovery
+/// loop dies.
 pub async fn run(log: &Logger, config: Config) -> Result<()> {
     let tls = match config.tls {
         Tls::RotVouched { priv_key, cert_chain } => Some(
@@ -64,12 +66,12 @@ pub async fn run(log: &Logger, config: Config) -> Result<()> {
         ),
         Tls::Insecure => None,
     };
-    let (tx_targets, rx_targets) = watch::channel(Targets::default());
+    let (tx_sleds, tx_cubbies, targets) = Targets::channel();
     let _proxy = ProxyServer::start(
         log,
         config.address,
         tls,
-        rx_targets,
+        targets,
         config.home,
         CancellationToken::new(),
     )
@@ -78,8 +80,12 @@ pub async fn run(log: &Logger, config: Config) -> Result<()> {
 
     let ddm = DdmClient::localhost(log).context("reaching ddmd")?;
     let mgs = mgs_client(log, config.mgs_address);
-    tokio::join!(sleds(log, ddm, &tx_targets), cubbies(log, mgs, &tx_targets),);
-    unreachable!("discovery loops never return");
+    let sleds = spawn(sleds(log.clone(), ddm, tx_sleds));
+    let cubbies = spawn(cubbies(log.clone(), mgs, tx_cubbies));
+    tokio::select! {
+        result = sleds => bail!("sled discovery loop died: {result:?}"),
+        result = cubbies => bail!("cubby discovery loop died: {result:?}"),
+    }
 }
 
 fn mgs_client(log: &Logger, address: SocketAddrV6) -> MgsClient {
@@ -101,7 +107,7 @@ fn mgs_client(log: &Logger, address: SocketAddrV6) -> MgsClient {
 /// assigns them. We probe both, and underlay wins. Each round's
 /// answers merge into the existing map, so a missed probe never
 /// evicts a sled; a stale address fails at forwarding time instead.
-async fn sleds(log: &Logger, ddm: DdmClient, targets: &watch::Sender<Targets>) {
+async fn sleds(log: Logger, ddm: DdmClient, targets: watch::Sender<Sleds>) {
     let probe = reqwest::ClientBuilder::new()
         .connect_timeout(PROBE_TIMEOUT)
         .timeout(PROBE_TIMEOUT)
@@ -118,7 +124,7 @@ async fn sleds(log: &Logger, ddm: DdmClient, targets: &watch::Sender<Targets>) {
             Ok(addrs) => {
                 let addrs =
                     addrs.map(|ip| SocketAddrV6::new(ip, SUSH_API_PORT, 0, 0));
-                discover(log, &probe, addrs, &mut sleds).await;
+                discover(&log, &probe, addrs, &mut sleds).await;
             }
             Err(err) => {
                 warn!(log, "unable to fetch bootstrap prefixes"; "error" => %err)
@@ -128,13 +134,13 @@ async fn sleds(log: &Logger, ddm: DdmClient, targets: &watch::Sender<Targets>) {
             Ok(addrs) => {
                 let addrs = addrs
                     .map(|a| SocketAddrV6::new(*a.ip(), SUSH_API_PORT, 0, 0));
-                discover(log, &probe, addrs, &mut sleds).await;
+                discover(&log, &probe, addrs, &mut sleds).await;
             }
             Err(err) => {
                 warn!(log, "unable to fetch underlay prefixes"; "error" => %err)
             }
         }
-        targets.send_modify(|t| t.sleds.extend(sleds));
+        targets.send_modify(|t| t.extend(sleds));
         sleep(POLL_INTERVAL).await;
     }
 }
@@ -175,11 +181,7 @@ async fn discover(
 /// Keep `Targets::cubbies` current from MGS's view of the SPs. Each
 /// round's answers merge into the existing map, so a probe outage
 /// never erases it.
-async fn cubbies(
-    log: &Logger,
-    mgs: MgsClient,
-    targets: &watch::Sender<Targets>,
-) {
+async fn cubbies(log: Logger, mgs: MgsClient, targets: watch::Sender<Cubbies>) {
     loop {
         let polls = (0..=MAX_CUBBY).map(|cubby| {
             let mgs = &mgs;
@@ -211,7 +213,7 @@ async fn cubbies(
                 }
             }
         }
-        targets.send_modify(|t| t.cubbies.extend(cubbies));
+        targets.send_modify(|t| t.extend(cubbies));
         sleep(POLL_INTERVAL).await;
     }
 }
