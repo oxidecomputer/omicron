@@ -17,6 +17,23 @@ versions = [
         "component_kind",
         "component_id",
         "description",
+    ]},
+    { version = 2,  fields = [
+        "rack_id",
+        "slot",
+        "chassis_kind",
+        "chassis_serial",
+        "chassis_model",
+        "chassis_revision",
+        "hubris_archive_id",
+        "gateway_id",
+        "component_kind",
+        "component_id",
+        "description",
+        "component_manufacturer",
+        "component_model",
+        "component_revision",
+        "component_serial",
     ]}
 ]
 
@@ -96,6 +113,52 @@ This will be one of 'temperature', 'current', 'power', 'voltage', \
 'input_power', 'output_energy', or 'input_energy' (the same \
 names as the metrics emitted by these sensors when they are read \
 successfully)."""
+
+[fields.component_manufacturer]
+type = "string"
+description = """
+A string identifying the manufacturer of this hardware component, if this is \
+necessary to interpret the component's  identity.
+
+This field is included if and only if the manufacturer identity is necessary \
+in order to interpret the component's `component_model`, `component_revision`, \
+and `component_serial` fields. If the component does not have those fields, or \
+if the component's serial number is assigned by Oxide, this field will be the \
+empty string."""
+
+[fields.component_model]
+type = "string"
+description = """
+A string representation of a model number or similar identifier for this \
+hardware component, if it has one.
+
+If this field is present and the `component_manufacturer` field is the empty \
+string, this field contains the Oxide part number (CPN) for this component. \
+Otherwise, if  `component_manufacturer` is present, this is a \
+manufacturer-provided part or model number (MPN) for this hardware component."""
+
+[fields.component_revision]
+type = "string"
+description = """
+A string representation of a revision number or string for this hardware \
+component, if it is known.
+
+If this field is present and the `component_manufacturer` field is the empty \
+string, this field contains the Oxide revision number for this component, \
+which is a non-negative integer.  Otherwise, if `component_manufacturer` is \
+non-empty, this is a revision identifier assigned by the component's \
+manufacturer, and may be any string."""
+
+[fields.component_serial]
+type = "string"
+description = """
+A string representation of this hardware component's serial number, if it is \
+known.
+
+If this field is present and the `component_manufacturer` field is the empty \
+string, this field contains the Oxide serial number for this component. \
+Otherwise, if `component_manufacturer` is non-empty, this is a serial number \
+assigned by the component's manufacturer."""
 
 [[metrics]]
 name = "temperature"
