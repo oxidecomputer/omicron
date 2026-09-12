@@ -18,9 +18,14 @@ use nexus_types::external_api::networking::{
     SiloRouterConfigurationEntry, SiloRouterConfigurations,
     SiloRouterConfigurationsUpdate, StaticRoute,
 };
+use dropshot::ResultsPage;
+use nexus_db_queries::authn;
+use nexus_db_queries::authz;
+use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::{
     IdentityMetadataCreateParams, IdentityMetadataUpdateParams, NameOrId,
 };
+use std::sync::Arc;
 use sled_agent_types::early_networking::BfdMode;
 use sled_agent_types::early_networking::ImportExportPolicy;
 use sled_agent_types::early_networking::MaxPathConfig;
@@ -366,6 +371,48 @@ async fn test_builtin_router_configurations(ctx: &ControlPlaneTestContext) {
         .await
         .unwrap();
     }
+
+    // A-13: the built-in populator is idempotent. Running it again (as the
+    // database-init identity Nexus uses at startup) leaves exactly the two
+    // built-ins, unchanged.
+    let before: Vec<RouterConfiguration> =
+        list_all(ctx, CONFIGURATIONS_URL).await;
+    let builtins = |cfgs: &[RouterConfiguration]| {
+        let mut b: Vec<_> = cfgs
+            .iter()
+            .filter(|c| {
+                nexus_types::router_configuration::is_builtin_router_configuration_id(
+                    &c.identity.id,
+                )
+            })
+            .map(|c| {
+                (
+                    c.identity.id,
+                    c.identity.name.to_string(),
+                    c.identity.description.clone(),
+                    c.switch,
+                )
+            })
+            .collect();
+        b.sort_by(|a, b| a.0.cmp(&b.0));
+        b
+    };
+    assert_eq!(builtins(&before).len(), 2);
+    let nexus = &ctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+    let opctx = OpContext::for_background(
+        ctx.logctx.log.new(slog::o!()),
+        Arc::new(authz::Authz::new(&ctx.logctx.log)),
+        authn::Context::internal_db_init(),
+        Arc::clone(datastore) as Arc<dyn nexus_auth::storage::Storage>,
+    );
+    for _ in 0..2 {
+        datastore.load_builtin_router_configuration(&opctx).await.unwrap();
+    }
+    let after: Vec<RouterConfiguration> =
+        list_all(ctx, CONFIGURATIONS_URL).await;
+    assert_eq!(builtins(&after), builtins(&before));
+    assert_eq!(after.len(), before.len());
 }
 
 #[nexus_test]
@@ -571,13 +618,7 @@ async fn test_router_configuration_sub_resources(
 
     // All entry collections start out empty.
     let bgp_peers: Vec<RouterConfigurationBgpPeer> =
-        NexusRequest::object_get(client, &bgp_peers_url)
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .unwrap()
-            .parsed_body()
-            .unwrap();
+        list_all(ctx, &bgp_peers_url).await;
     assert!(bgp_peers.is_empty());
 
     // Create one entry of each kind.
@@ -1009,6 +1050,22 @@ async fn get_json<T: serde::de::DeserializeOwned>(
         .unwrap()
 }
 
+/// Walk a paginated collection to completion (A-19: the router configuration
+/// entry collections are pages, not bare arrays).
+async fn list_all<T: Clone + serde::de::DeserializeOwned>(
+    ctx: &ControlPlaneTestContext,
+    url: &str,
+) -> Vec<T> {
+    NexusRequest::iter_collection_authn::<T>(&ctx.external_client, url, "", None)
+        .await
+        .unwrap()
+        .all_items
+}
+
+fn names_of(items: &[serde_json::Value]) -> Vec<String> {
+    items.iter().map(|v| v["name"].as_str().unwrap().to_string()).collect()
+}
+
 /// A-16: a static route's destination and gateway must share an address
 /// family; mismatches are rejected before anything is stored or changed.
 #[nexus_test]
@@ -1043,7 +1100,7 @@ async fn test_router_configuration_static_route_family_mismatch(
         .await;
         assert!(msg.contains("same address family"), "{msg}");
     }
-    let routes: Vec<StaticRoute> = get_json(ctx, &routes_url).await;
+    let routes: Vec<StaticRoute> = list_all(ctx, &routes_url).await;
     assert!(routes.is_empty(), "rejected routes were stored: {routes:?}");
 
     // A valid route is accepted; a mismatched update leaves it untouched.
@@ -1147,7 +1204,7 @@ async fn test_router_configuration_bfd_peer_validation(
         let msg = expect_bad_request(ctx, Method::POST, &peers_url, body).await;
         assert!(msg.contains(needle), "expected {needle:?} in {msg:?}");
     }
-    let peers: Vec<BfdPeer> = get_json(ctx, &peers_url).await;
+    let peers: Vec<BfdPeer> = list_all(ctx, &peers_url).await;
     assert_eq!(peers.len(), 3, "a rejected peer was stored: {peers:?}");
     assert!(peers.iter().all(|p| p.name.as_str() != "bad"));
 
@@ -1196,7 +1253,7 @@ async fn test_router_configuration_bgp_source_address(
             .await;
     }
     let peers: Vec<RouterConfigurationBgpPeer> =
-        get_json(ctx, &peers_url).await;
+        list_all(ctx, &peers_url).await;
     assert!(peers.is_empty(), "rejected peers were persisted: {peers:?}");
 
     for (name, target, first, second) in [
@@ -1283,6 +1340,246 @@ async fn test_router_configuration_bgp_source_address(
         .await
         .unwrap();
     let peers: Vec<RouterConfigurationBgpPeer> =
-        get_json(ctx, &peers_url).await;
+        list_all(ctx, &peers_url).await;
     assert_eq!(peers.len(), 3);
+}
+
+/// A-19: the per-entry collections of a router configuration are paginated
+/// by name over the (configuration, name) primary key: stable order,
+/// working cursors, cursors that survive a deletion in the middle, bounded
+/// pages, and a complete parent view.
+#[nexus_test]
+async fn test_router_configuration_child_pagination(
+    ctx: &ControlPlaneTestContext,
+) {
+    let client = &ctx.external_client;
+    create_configuration(ctx, "pager").await;
+    let base = format!("{CONFIGURATIONS_URL}/pager");
+
+    // Five entries of each kind, created out of name order.
+    let names = ["p3", "p1", "p5", "p2", "p4"];
+    for (i, name) in names.iter().enumerate() {
+        let mut peer = demo_bgp_peer();
+        peer.name = name.parse().unwrap();
+        peer.peer = BgpPeerKind::Numbered {
+            addr: format!("203.0.113.{}", 20 + i).parse().unwrap(),
+            src_addr: None,
+        };
+        NexusRequest::objects_post(client, &format!("{base}/bgp-peers"), &peer)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap();
+        let mut route = demo_static_route();
+        route.name = name.parse().unwrap();
+        route.dst = format!("10.{i}.0.0/16").parse().unwrap();
+        NexusRequest::objects_post(client, &format!("{base}/routes"), &route)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap();
+        let mut bfd = demo_bfd_peer();
+        bfd.name = name.parse().unwrap();
+        bfd.remote = format!("203.0.113.{}", 30 + i).parse().unwrap();
+        NexusRequest::objects_post(client, &format!("{base}/bfd-peers"), &bfd)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap();
+    }
+
+    for sub in ["bgp-peers", "routes", "bfd-peers"] {
+        let url = format!("{base}/{sub}");
+
+        let page1: ResultsPage<serde_json::Value> =
+            get_json(ctx, &format!("{url}?limit=2")).await;
+        assert_eq!(names_of(&page1.items), ["p1", "p2"], "{sub} page 1");
+        let token1 = page1.next_page.expect("more pages");
+
+        let page2: ResultsPage<serde_json::Value> =
+            get_json(ctx, &format!("{url}?limit=2&page_token={token1}")).await;
+        assert_eq!(names_of(&page2.items), ["p3", "p4"], "{sub} page 2");
+        let token2 = page2.next_page.expect("more pages");
+
+        // Deleting an entry in the middle does not disturb an outstanding
+        // cursor: the keyset continues after the last name seen.
+        NexusRequest::object_delete(client, &format!("{url}/p3"))
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap();
+        let page3: ResultsPage<serde_json::Value> =
+            get_json(ctx, &format!("{url}?limit=2&page_token={token2}")).await;
+        assert_eq!(names_of(&page3.items), ["p5"], "{sub} page 3");
+
+        // Dropshot hands back a cursor for every non-empty page, so the end of
+        // a collection is an empty page, not a missing cursor.
+        let token3 = page3.next_page.expect("a cursor for the last page");
+        let page4: ResultsPage<serde_json::Value> =
+            get_json(ctx, &format!("{url}?limit=2&page_token={token3}")).await;
+        assert!(page4.items.is_empty(), "{sub} page 4: {:?}", page4.items);
+
+        // The default page size returns what is left, in name order, and a
+        // cursor walk agrees with it.
+        let one_page: ResultsPage<serde_json::Value> = get_json(ctx, &url).await;
+        assert_eq!(names_of(&one_page.items), ["p1", "p2", "p4", "p5"]);
+        let walked: Vec<serde_json::Value> = list_all(ctx, &url).await;
+        assert_eq!(names_of(&walked), ["p1", "p2", "p4", "p5"]);
+
+        // A limit of zero and a bogus cursor are client errors.
+        for bad in ["limit=0", "page_token=not-a-token"] {
+            NexusRequest::expect_failure(
+                client,
+                StatusCode::BAD_REQUEST,
+                Method::GET,
+                &format!("{url}?{bad}"),
+            )
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap();
+        }
+    }
+
+    // The parent view still carries the complete entry sets.
+    let cfg: RouterConfiguration = get_json(ctx, &base).await;
+    assert_eq!(cfg.bgp_peers.len(), 4);
+    assert_eq!(cfg.routes.len(), 4);
+    assert_eq!(cfg.bfd_peers.len(), 4);
+}
+
+/// A-18 at the API boundary: a second delete of a router configuration and
+/// any entry mutation against a deleted configuration report not-found and
+/// change nothing.
+#[nexus_test]
+async fn test_router_configuration_deleted_parent_is_not_found(
+    ctx: &ControlPlaneTestContext,
+) {
+    let client = &ctx.external_client;
+    create_configuration(ctx, "gone").await;
+    let base = format!("{CONFIGURATIONS_URL}/gone");
+    let cfg: RouterConfiguration = get_json(ctx, &base).await;
+    let by_id = format!("{CONFIGURATIONS_URL}/{}", cfg.identity.id);
+
+    NexusRequest::object_delete(client, &base)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+    for url in [&base, &by_id] {
+        NexusRequest::expect_failure(
+            client,
+            StatusCode::NOT_FOUND,
+            Method::DELETE,
+            url,
+        )
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+    }
+
+    // Entry creation against the deleted parent (by its id, which still
+    // resolves nothing live) is not-found, not a silent orphan.
+    for (sub, body) in [
+        ("bgp-peers", serde_json::to_value(demo_bgp_peer()).unwrap()),
+        ("routes", serde_json::to_value(demo_static_route()).unwrap()),
+        ("bfd-peers", serde_json::to_value(demo_bfd_peer()).unwrap()),
+    ] {
+        NexusRequest::new(
+            RequestBuilder::new(client, Method::POST, &format!("{by_id}/{sub}"))
+                .body(Some(&body))
+                .expect_status(Some(StatusCode::NOT_FOUND)),
+        )
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+    }
+
+    // A new configuration under the same name starts empty.
+    create_configuration(ctx, "gone").await;
+    let cfg: RouterConfiguration = get_json(ctx, &base).await;
+    assert!(cfg.bgp_peers.is_empty());
+    assert!(cfg.routes.is_empty());
+    assert!(cfg.bfd_peers.is_empty());
+}
+
+/// A-15: an announce set referenced by a router configuration's BGP
+/// configuration cannot be deleted while the reference exists; once the
+/// reference is removed it can. Referencing a deleted set is not-found and
+/// stores nothing.
+#[nexus_test]
+async fn test_router_configuration_protects_announce_set(
+    ctx: &ControlPlaneTestContext,
+) {
+    let client = &ctx.external_client;
+    create_announce_set(ctx).await;
+    create_configuration(ctx, "refs").await;
+    let bgp_config_url = format!("{CONFIGURATIONS_URL}/refs/bgp-config");
+    let announce_set_url = "/v1/system/networking/bgp-announce-set/instances";
+    let announcements_url = format!("{announce_set_url}/announcement");
+
+    let set = RouterConfigurationBgpConfigSet {
+        asn: 47,
+        max_paths: Default::default(),
+        bgp_announce_set: NameOrId::Name("instances".parse().unwrap()),
+    };
+    NexusRequest::object_put(client, &bgp_config_url, Some(&set))
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+
+    // Deleting the referenced set is refused, and both sides stay intact.
+    NexusRequest::expect_failure(
+        client,
+        StatusCode::CONFLICT,
+        Method::DELETE,
+        announce_set_url,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+    NexusRequest::object_get(client, &announcements_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("announce set still exists");
+    let _still: RouterConfigurationBgpConfig =
+        get_json(ctx, &bgp_config_url).await;
+
+    // Dropping the reference frees the set.
+    NexusRequest::object_delete(client, &bgp_config_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+    NexusRequest::object_delete(client, announce_set_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+
+    // Referencing the deleted set is not-found and nothing is stored.
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::PUT, &bgp_config_url)
+            .body(Some(&set))
+            .expect_status(Some(StatusCode::NOT_FOUND)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+    NexusRequest::expect_failure(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::GET,
+        &bgp_config_url,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
 }

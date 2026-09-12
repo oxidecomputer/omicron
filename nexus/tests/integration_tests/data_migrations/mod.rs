@@ -40,6 +40,7 @@ mod normalize_service_external_ips;
 mod prune_service_nat_entries;
 mod rename_default_igw_ip_pool;
 mod router_configuration_bgp_src_addr;
+mod router_configurations;
 mod sled_resource_vmm_state;
 mod tufaceous_v2;
 
@@ -84,6 +85,7 @@ pub(crate) fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     register!(inventory_zone_multiple_external_ips);
     register!(blueprint_zone_multiple_external_ips);
 
+    register!(router_configurations);
     register!(router_configuration_bgp_src_addr);
 
     map
