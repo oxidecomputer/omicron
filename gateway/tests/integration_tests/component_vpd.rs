@@ -9,6 +9,7 @@ use gateway_types::component_vpd::{
     Barcode, ComponentVpd, Mpn1Barcode, OxideBarcode, PmbusDevice, SledFanTray,
     Tmp11x,
 };
+use pretty_assertions::assert_eq;
 
 #[tokio::test]
 async fn pmbus_vpd() {
