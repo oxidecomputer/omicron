@@ -29,7 +29,9 @@ use omicron_common::api::external::{
     CreateResult, DeleteResult, Error, ListResultVec, LookupResult, NameOrId,
     ResourceType, UpdateResult,
 };
-use omicron_uuid_kinds::{BgpConfigUuid, GenericUuid, SwitchPortSettingsUuid};
+use omicron_uuid_kinds::{
+    BgpAnnounceSetUuid, BgpConfigUuid, GenericUuid, SwitchPortSettingsUuid,
+};
 use ref_cast::RefCast;
 use sled_agent_types::early_networking::RouterPeerType;
 use uuid::Uuid;
@@ -676,6 +678,7 @@ impl DataStore {
 
         use nexus_db_schema::schema::bgp_config;
         use nexus_db_schema::schema::bgp_config::dsl as bgp_config_dsl;
+        use nexus_db_schema::schema::router_configuration::dsl as rc_dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
         let name_or_id = sel.announce_set.clone();
@@ -746,7 +749,28 @@ impl DataStore {
                     .get_result_async::<bool>(&conn)
                     .await?;
 
-                    if in_use {
+                    // Router configurations (RFD 662) reference announce
+                    // sets too; a dangling reference would poison the
+                    // complete-snapshot render for every router on the
+                    // switch. `router_configuration_bgp_config_set` checks
+                    // set liveness in its own transaction, so the two
+                    // cannot race into a dangling reference.
+                    let in_use_by_router_configuration =
+                        diesel::dsl::select(diesel::dsl::exists(
+                            rc_dsl::router_configuration
+                                .filter(rc_dsl::bgp_announce_set_id.eq(Some(
+                                    to_db_typed_uuid(
+                                        BgpAnnounceSetUuid::from_untyped_uuid(
+                                            id,
+                                        ),
+                                    ),
+                                )))
+                                .filter(rc_dsl::time_deleted.is_null()),
+                        ))
+                        .get_result_async::<bool>(&conn)
+                        .await?;
+
+                    if in_use || in_use_by_router_configuration {
                         return Err(
                             err.bail(Error::conflict("announce set in use"))
                         );
