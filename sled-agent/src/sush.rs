@@ -99,6 +99,7 @@ use sush_server::{JobManager, seed_gossip};
 const SUSH_OUTPUT_SUBDIR: &str = "sush";
 
 /// Path inside the switch zone to the sush proxy's TLS private key.
+/// `write_private` makes it readable by the owner (root) only.
 pub const SUSH_PROXY_KEY_PATH: &str = "/etc/sush-proxy/key.pem";
 
 /// Path inside the switch zone to the sush proxy's TLS certificate chain.
