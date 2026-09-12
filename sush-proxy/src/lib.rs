@@ -184,7 +184,10 @@ async fn cubbies(
     loop {
         let polls = (0..=MAX_CUBBY).map(|cubby| {
             let mgs = &mgs;
-            async move { (cubby, mgs.sp_get(&SpType::Sled, cubby.into()).await) }
+            async move {
+                let state = mgs.sp_get(&SpType::Sled, cubby.into()).await;
+                (cubby, state)
+            }
         });
         let mut cubbies = Cubbies::new();
         for (cubby, result) in join_all(polls).await {
