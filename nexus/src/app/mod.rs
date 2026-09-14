@@ -918,20 +918,6 @@ impl Nexus {
         Ok(())
     }
 
-    /// Returns the primary server's external address.
-    ///
-    /// There is always at least one address (once the API servers have been
-    /// started), and there may be additional addresses.
-    pub(crate) fn get_external_server_primary_address(
-        &self,
-    ) -> Option<std::net::SocketAddr> {
-        self.external_servers
-            .lock()
-            .unwrap()
-            .first()
-            .map(|server| server.local_addr())
-    }
-
     /// This returns all addresses for the external API servers.
     ///
     /// If the servers have not been started yet, then `None` is returned. If

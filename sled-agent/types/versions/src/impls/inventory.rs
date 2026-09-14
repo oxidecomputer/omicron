@@ -23,14 +23,14 @@ use crate::latest::disk::M2Slot;
 use crate::latest::inventory::{
     BootImageHeader, BootPartitionContents, BootPartitionDetails,
     ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
-    ExternalDnsAddrs, FmdHostCase, FmdInventory, FmdInventoryError,
-    FmdResource, HostPhase2DesiredContents, HostPhase2DesiredSlots,
-    ManifestBootInventory, ManifestInventory, ManifestNonBootInventory,
-    MupdateOverrideBootInventory, MupdateOverrideInventory,
-    MupdateOverrideNonBootInventory, NetworkInterface, NexusExternalIps,
-    OmicronFileSourceResolverInventory, OmicronSledConfig,
-    OmicronSledUpdateDisposition, OmicronZoneConfig, OmicronZoneImageSource,
-    OmicronZoneType, OmicronZonesConfig,
+    CurrentUpdateDisposition, ExternalDnsAddrs, FmdHostCase, FmdInventory,
+    FmdInventoryError, FmdResource, HostPhase2DesiredContents,
+    HostPhase2DesiredSlots, InstanceManagerStatus, ManifestBootInventory,
+    ManifestInventory, ManifestNonBootInventory, MupdateOverrideBootInventory,
+    MupdateOverrideInventory, MupdateOverrideNonBootInventory,
+    NetworkInterface, NexusExternalIps, OmicronFileSourceResolverInventory,
+    OmicronSledConfig, OmicronSledUpdateDisposition, OmicronZoneConfig,
+    OmicronZoneImageSource, OmicronZoneType, OmicronZonesConfig,
     RemoveMupdateOverrideBootSuccessInventory, RemoveMupdateOverrideInventory,
     SingleMeasurementInventory, SourceNatConfig, SourceNatConfigGeneric,
     SourceNatConfigV4, SourceNatConfigV6, SvcEnabledNotOnlineState, SvcState,
@@ -1134,6 +1134,26 @@ impl SourceNatConfigGeneric {
     }
 }
 
+impl From<SourceNatConfigV4> for SourceNatConfigGeneric {
+    fn from(c: SourceNatConfigV4) -> Self {
+        SourceNatConfig {
+            ip: IpAddr::V4(c.ip),
+            first_port: c.first_port,
+            last_port: c.last_port,
+        }
+    }
+}
+
+impl From<SourceNatConfigV6> for SourceNatConfigGeneric {
+    fn from(c: SourceNatConfigV6) -> Self {
+        SourceNatConfig {
+            ip: IpAddr::V6(c.ip),
+            first_port: c.first_port,
+            last_port: c.last_port,
+        }
+    }
+}
+
 #[cfg(any(test, feature = "testing"))]
 impl<T> proptest::arbitrary::Arbitrary for SourceNatConfig<T>
 where
@@ -1208,18 +1228,6 @@ impl NexusExternalIps {
     /// Iterate over the external IPs.
     pub fn iter(&self) -> impl Iterator<Item = &IpAddr> {
         self.0.iter()
-    }
-
-    /// Return the "primary" address, either IPv4 or IPv6 in that order.
-    ///
-    /// NOTE: This is a temporary method used while we don't fully support
-    /// multiple IP addresses. It should be removed when that support is done.
-    pub fn temporary_primary_address(&self) -> IpAddr {
-        self.iter()
-            .find(|ip| ip.is_ipv4())
-            .or_else(|| self.iter().next())
-            .copied()
-            .expect("NexusExternalIps is non-empty by construction")
     }
 }
 
@@ -1332,6 +1340,21 @@ impl ExternalDnsAddrs {
                     .map(|(ip, port)| SocketAddr::new(*ip, *port))
             })
             .expect("ExternalDnsAddrs is non-empty by construction")
+    }
+}
+
+impl InstanceManagerStatus {
+    /// Helper (primarily for tests) that constructs an
+    /// [`InstanceManagerStatus`] with the
+    /// [`OmicronSledUpdateDisposition::Available`] disposition and the given
+    /// number of registered VMMs.
+    pub fn available(num_registered_vmms: usize) -> Self {
+        Self {
+            update_disposition: CurrentUpdateDisposition::Known(
+                OmicronSledUpdateDisposition::Available,
+            ),
+            num_registered_vmms,
+        }
     }
 }
 

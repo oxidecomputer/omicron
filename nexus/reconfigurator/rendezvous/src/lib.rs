@@ -8,15 +8,13 @@
 //! Rendezvous tables reflect resources that are in service and available for
 //! other parts of Nexus to use. See RFD 541 for more background.
 
-use iddqd::IdOrdMap;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use nexus_db_queries::db::model::SledBlueprintAvailabilityInput;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::internal_api::background::BlueprintRendezvousStats;
 use nexus_types::inventory::Collection;
-
-use crate::sled_blueprint_availability::SledBlueprintAvailabilityInput;
 
 mod crucible_dataset;
 mod debug_dataset;
@@ -81,12 +79,8 @@ pub async fn reconcile_blueprint_rendezvous_tables(
         )
         .await?;
 
-    let sled_inputs = IdOrdMap::from_iter_unique(blueprint.sleds.iter().map(
-        |(&sled_id, config)| {
-            SledBlueprintAvailabilityInput::from_blueprint(sled_id, config)
-        },
-    ))
-    .expect("blueprint.sleds is keyed by sled ID, so inputs are unique");
+    let sled_inputs =
+        SledBlueprintAvailabilityInput::all_from_blueprint(blueprint);
     let sled_blueprint_availability =
         sled_blueprint_availability::reconcile_sled_blueprint_availability(
             opctx,

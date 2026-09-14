@@ -16,33 +16,38 @@ use anyhow::Context;
 use anyhow::Result;
 use nexus_db_model::Sled;
 use nexus_db_model::SledReservationConstraintBuilder;
-use nexus_db_model::SledUpdate;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::sled::SledReservationReason;
-use nexus_db_queries::db::pub_test_utils::helpers::SledUpdateBuilder;
 use nexus_db_queries::db::pub_test_utils::helpers::small_resource_request;
+use nexus_db_queries::db::pub_test_utils::simulated_sleds::test_sled_resources;
+use nexus_db_queries::db::pub_test_utils::simulated_sleds::upsert_sleds_from_system;
+use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
+use nexus_reconfigurator_planning::system::SimulatedSledResources;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
+use slog::Logger;
 
 const USABLE_HARDWARE_THREADS: u32 = 32;
 
-pub fn test_new_sled_update() -> SledUpdate {
-    let mut sled = SledUpdateBuilder::new();
-    sled.rack_id(nexus_test_utils::RACK_UUID)
-        .hardware()
-        .usable_hardware_threads(USABLE_HARDWARE_THREADS);
-    sled.build()
-}
-
-pub async fn create_sleds(datastore: &DataStore, count: usize) -> Vec<Sled> {
-    let mut sleds = vec![];
-    for _ in 0..count {
-        let (sled, _) =
-            datastore.sled_upsert(test_new_sled_update()).await.unwrap();
-        sleds.push(sled);
-    }
-    sleds
+pub(crate) async fn create_sleds(
+    log: &Logger,
+    datastore: &DataStore,
+    count: usize,
+) -> Vec<Sled> {
+    let (example, _) = ExampleSystemBuilder::new(log, "sled_reservation_bench")
+        .nsleds(count)
+        .sled_resources(SimulatedSledResources {
+            usable_hardware_threads: USABLE_HARDWARE_THREADS,
+            ..test_sled_resources()
+        })
+        .build();
+    upsert_sleds_from_system(
+        datastore,
+        &example.system,
+        nexus_test_utils::RACK_UUID,
+    )
+    .await
 }
 
 /// Given a `sled_count`, returns the number of times a call to
