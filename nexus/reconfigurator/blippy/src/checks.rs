@@ -74,8 +74,8 @@ fn check_underlay_ips(blippy: &mut Blippy<'_>) {
                 sled_id,
                 Severity::Fatal,
                 SledKind::DuplicateUnderlayIp {
-                    zone1: previous.clone(),
-                    zone2: zone.clone(),
+                    zone1: previous.into(),
+                    zone2: zone.into(),
                 },
             );
         }
@@ -94,7 +94,7 @@ fn check_underlay_ips(blippy: &mut Blippy<'_>) {
                     sled_id,
                     Severity::Fatal,
                     SledKind::InternalDnsZoneBadSubnet {
-                        zone: zone.clone(),
+                        zone: zone.into(),
                         rack_dns_subnets: rack_dns_subnets.clone(),
                     },
                 );
@@ -130,7 +130,7 @@ fn check_underlay_ips(blippy: &mut Blippy<'_>) {
                     sled_id,
                     Severity::Fatal,
                     SledKind::UnderlayIpOnWrongSubnet {
-                        zone: zone.clone(),
+                        zone: zone.into(),
                         subnet,
                     },
                 );
@@ -145,7 +145,7 @@ fn check_underlay_ips(blippy: &mut Blippy<'_>) {
                     sled_id,
                     Severity::Fatal,
                     SledKind::UnderlayIpAboveLastAllocatedIp {
-                        zone: zone.clone(),
+                        zone: zone.into(),
                         last_allocated_ip,
                     },
                 );
@@ -176,8 +176,8 @@ fn check_external_networking(blippy: &mut Blippy<'_>) {
                     sled_id,
                     Severity::Fatal,
                     SledKind::DuplicateExternalIp {
-                        zone1: prev_zone.clone(),
-                        zone2: zone.clone(),
+                        zone1: prev_zone.into(),
+                        zone2: zone.into(),
                         ip: external_ip.ip(),
                     },
                 );
@@ -206,8 +206,8 @@ fn check_external_networking(blippy: &mut Blippy<'_>) {
                     sled_id,
                     Severity::Fatal,
                     SledKind::DuplicateNicIp {
-                        zone1: prev_zone.clone(),
-                        zone2: zone.clone(),
+                        zone1: prev_zone.into(),
+                        zone2: zone.into(),
                         ip,
                     },
                 );
@@ -220,8 +220,8 @@ fn check_external_networking(blippy: &mut Blippy<'_>) {
                     sled_id,
                     Severity::Fatal,
                     SledKind::DuplicateNicIp {
-                        zone1: prev_zone.clone(),
-                        zone2: zone.clone(),
+                        zone1: prev_zone.into(),
+                        zone2: zone.into(),
                         ip,
                     },
                 );
@@ -232,8 +232,8 @@ fn check_external_networking(blippy: &mut Blippy<'_>) {
                 sled_id,
                 Severity::Fatal,
                 SledKind::DuplicateNicMac {
-                    zone1: prev_zone.clone(),
-                    zone2: zone.clone(),
+                    zone1: prev_zone.into(),
+                    zone2: zone.into(),
                     mac: nic.mac,
                 },
             );
@@ -249,8 +249,8 @@ fn check_external_networking(blippy: &mut Blippy<'_>) {
                 sled_id,
                 Severity::Fatal,
                 SledKind::DuplicateExternalIp {
-                    zone1: zone1.clone(),
-                    zone2: zone2.clone(),
+                    zone1: zone1.into(),
+                    zone2: zone2.into(),
                     ip,
                 },
             );
@@ -281,8 +281,8 @@ fn check_dataset_zpool_uniqueness(blippy: &mut Blippy<'_>) {
                 sled_id,
                 Severity::Fatal,
                 SledKind::ZoneFilesystemDatasetCollision {
-                    zone1: previous.clone(),
-                    zone2: zone.clone(),
+                    zone1: previous.into(),
+                    zone2: zone.into(),
                     zpool: *filesystem_dataset.pool(),
                 },
             );
@@ -301,8 +301,8 @@ fn check_dataset_zpool_uniqueness(blippy: &mut Blippy<'_>) {
                     sled_id,
                     Severity::Fatal,
                     SledKind::ZoneDurableDatasetCollision {
-                        zone1: previous.clone(),
-                        zone2: zone.clone(),
+                        zone1: previous.into(),
+                        zone2: zone.into(),
                         zpool: durable_dataset.dataset.pool_name,
                     },
                 );
@@ -315,7 +315,7 @@ fn check_dataset_zpool_uniqueness(blippy: &mut Blippy<'_>) {
                     sled_id,
                     Severity::Fatal,
                     SledKind::ZoneWithDatasetsOnDifferentZpools {
-                        zone: zone.clone(),
+                        zone: zone.into(),
                         durable_zpool: durable_dataset.dataset.pool_name,
                         transient_zpool: *filesystem_dataset.pool(),
                     },
@@ -487,7 +487,7 @@ fn check_datasets(blippy: &mut Blippy<'_>) {
                         sled_id,
                         Severity::Fatal,
                         SledKind::ZoneMissingFilesystemDataset {
-                            zone: zone_config.clone(),
+                            zone: zone_config.into(),
                         },
                     );
                 }
@@ -506,7 +506,7 @@ fn check_datasets(blippy: &mut Blippy<'_>) {
                             sled_id,
                             Severity::Fatal,
                             SledKind::ZoneMissingDurableDataset {
-                                zone: zone_config.clone(),
+                                zone: zone_config.into(),
                             },
                         );
                     }
@@ -641,7 +641,7 @@ fn check_mupdate_override(blippy: &mut Blippy<'_>) {
                                 Severity::Fatal,
                                 SledKind::MupdateOverrideWithArtifactZone {
                                     mupdate_override_id,
-                                    zone: zone.clone(),
+                                    zone: zone.into(),
                                     version: version.clone(),
                                     hash: *hash,
                                 },
@@ -758,8 +758,8 @@ fn check_nexus_generation_consistency(blippy: &mut Blippy<'_>) {
                     *ref_sled_id,
                     Severity::Fatal,
                     SledKind::NexusZoneGenerationImageSourceMismatch {
-                        zone1: (*ref_zone).clone(),
-                        zone2: (*zone).clone(),
+                        zone1: (*ref_zone).into(),
+                        zone2: (*zone).into(),
                         generation: *generation,
                     },
                 );
@@ -853,8 +853,8 @@ mod tests {
                 kind: Kind::Sled {
                     sled_id: nexus1_sled_id,
                     kind: Box::new(SledKind::DuplicateUnderlayIp {
-                        zone1: nexus0.clone(),
-                        zone2: nexus1.clone(),
+                        zone1: nexus0.into(),
+                        zone2: nexus1.clone().into(),
                     }),
                 },
             },
@@ -863,7 +863,7 @@ mod tests {
                 kind: Kind::Sled {
                     sled_id: nexus1_sled_id,
                     kind: Box::new(SledKind::UnderlayIpOnWrongSubnet {
-                        zone: nexus1.clone(),
+                        zone: nexus1.into(),
                         subnet: Ipv6Subnet::new(correct_nexus_ip),
                     }),
                 },
@@ -920,7 +920,7 @@ mod tests {
             kind: Kind::Sled {
                 sled_id: *sled_id,
                 kind: Box::new(SledKind::UnderlayIpAboveLastAllocatedIp {
-                    zone: nexus_config,
+                    zone: nexus_config.into(),
                     last_allocated_ip,
                 }),
             },
@@ -1042,7 +1042,7 @@ mod tests {
             kind: Kind::Sled {
                 sled_id: dns1_sled_id,
                 kind: Box::new(SledKind::InternalDnsZoneBadSubnet {
-                    zone: dns1.clone(),
+                    zone: dns1.clone().into(),
                     rack_dns_subnets: rack_subnet
                         .get_dns_subnets()
                         .into_iter()
@@ -1117,8 +1117,8 @@ mod tests {
             kind: Kind::Sled {
                 sled_id: nexus1_sled_id,
                 kind: Box::new(SledKind::DuplicateExternalIp {
-                    zone1: nexus0.clone(),
-                    zone2: nexus1.clone(),
+                    zone1: nexus0.clone().into(),
+                    zone2: nexus1.clone().into(),
                     ip: dup_ip.ip,
                 }),
             },
@@ -1184,8 +1184,8 @@ mod tests {
             kind: Kind::Sled {
                 sled_id: nexus1_sled_id,
                 kind: Box::new(SledKind::DuplicateNicIp {
-                    zone1: nexus0.clone(),
-                    zone2: nexus1.clone(),
+                    zone1: nexus0.clone().into(),
+                    zone2: nexus1.clone().into(),
                     ip: dup_ip
                         .ipv4_addr()
                         .copied()
@@ -1255,8 +1255,8 @@ mod tests {
             kind: Kind::Sled {
                 sled_id: nexus1_sled_id,
                 kind: Box::new(SledKind::DuplicateNicMac {
-                    zone1: nexus0.clone(),
-                    zone2: nexus1.clone(),
+                    zone1: nexus0.clone().into(),
+                    zone2: nexus1.clone().into(),
                     mac: dup_mac,
                 }),
             },
@@ -1327,8 +1327,8 @@ mod tests {
                 kind: Kind::Sled {
                     sled_id: dns1_sled_id,
                     kind: Box::new(SledKind::ZoneDurableDatasetCollision {
-                        zone1: dns0.clone(),
-                        zone2: dns1.clone(),
+                        zone1: dns0.into(),
+                        zone2: dns1.clone().into(),
                         zpool: dup_zpool,
                     }),
                 },
@@ -1339,7 +1339,7 @@ mod tests {
                     sled_id: dns1_sled_id,
                     kind: Box::new(
                         SledKind::ZoneWithDatasetsOnDifferentZpools {
-                            zone: dns1.clone(),
+                            zone: dns1.clone().into(),
                             durable_zpool: dup_zpool,
                             transient_zpool: dns1.filesystem_pool,
                         },
@@ -1399,8 +1399,8 @@ mod tests {
                 kind: Kind::Sled {
                     sled_id: dns1_sled_id,
                     kind: Box::new(SledKind::ZoneFilesystemDatasetCollision {
-                        zone1: dns0.clone(),
-                        zone2: dns1.clone(),
+                        zone1: dns0.into(),
+                        zone2: dns1.clone().into(),
                         zpool: dup_zpool,
                     }),
                 },
@@ -1411,7 +1411,7 @@ mod tests {
                     sled_id: dns1_sled_id,
                     kind: Box::new(
                         SledKind::ZoneWithDatasetsOnDifferentZpools {
-                            zone: dns1.clone(),
+                            zone: dns1.clone().into(),
                             durable_zpool: *dns1
                                 .zone_type
                                 .durable_zpool()
@@ -1671,7 +1671,7 @@ mod tests {
                 kind: Kind::Sled {
                     sled_id: *sled_id,
                     kind: Box::new(SledKind::ZoneMissingFilesystemDataset {
-                        zone: root_zone.clone(),
+                        zone: root_zone.into(),
                     }),
                 },
             },
@@ -1680,7 +1680,7 @@ mod tests {
                 kind: Kind::Sled {
                     sled_id: *sled_id,
                     kind: Box::new(SledKind::ZoneMissingDurableDataset {
-                        zone: durable_zone,
+                        zone: durable_zone.into(),
                     }),
                 },
             },
@@ -1983,7 +1983,7 @@ mod tests {
 
             SledKind::MupdateOverrideWithArtifactZone {
                 mupdate_override_id,
-                zone: zone.clone(),
+                zone: zone.clone().into(),
                 version,
                 hash,
             }
@@ -2170,8 +2170,8 @@ mod tests {
                 sled_id: sled1,
                 kind: Box::new(
                     SledKind::NexusZoneGenerationImageSourceMismatch {
-                        zone1,
-                        zone2,
+                        zone1: zone1.into(),
+                        zone2: zone2.into(),
                         generation,
                     },
                 ),
