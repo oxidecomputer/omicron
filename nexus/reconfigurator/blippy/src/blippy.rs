@@ -25,10 +25,12 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use sled_agent_types::disk::M2Slot;
+use std::cmp::Ordering;
 use std::collections::BTreeSet;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
+use strum::EnumDiscriminants;
 use tufaceous_artifact::ArtifactHash;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,7 +57,8 @@ impl fmt::Display for Severity {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, EnumDiscriminants)]
+#[strum_discriminants(derive(Ord, PartialOrd))]
 pub enum Kind {
     Blueprint(BlueprintKind),
     Sled { sled_id: SledUuid, kind: Box<SledKind> },
@@ -110,12 +113,42 @@ impl Kind {
             Kind::PlanningInput(kind) => Subkind::PlanningInput(kind),
         }
     }
+
+    // For sorting notes by kind, we want to provide an ordering, similar to
+    // `Ord` and `PartialOrd`.  However, the variants here include data that
+    // does not itself impl `Ord`/`PartialOrd`.  We could impl our own
+    // `Ord`/`PartialOrd` that ignores these, but we'd have to ignore them for
+    // `Eq`/`PartialEq`, too.  That's not right.  These fields do matter, just
+    // not for sorting notes.  So we impl our own little pattern for comparing
+    // these for the purpose of sorting them.
+    pub fn compare_to(&self, other: &Kind) -> Ordering {
+        match (self, other) {
+            (Kind::Blueprint(l), Kind::Blueprint(r)) => l.compare_to(r),
+            (
+                Kind::Sled { sled_id: left_sled_id, kind: left_kind },
+                Kind::Sled { sled_id: right_sled_id, kind: right_kind },
+            ) => left_sled_id
+                .cmp(right_sled_id)
+                .then_with(|| left_kind.compare_to(right_kind)),
+            (Kind::PlanningInput(l), Kind::PlanningInput(r)) => l.compare_to(r),
+            _ => KindDiscriminants::from(self)
+                .cmp(&KindDiscriminants::from(other)),
+        }
+    }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, EnumDiscriminants)]
+#[strum_discriminants(derive(Ord, PartialOrd))]
 pub enum BlueprintKind {
     /// No zones exist in the blueprint using the active Nexus generation
     NoZonesWithActiveNexusGeneration(NexusGeneration),
+}
+
+impl BlueprintKind {
+    pub fn compare_to(&self, other: &BlueprintKind) -> Ordering {
+        BlueprintKindDiscriminants::from(self)
+            .cmp(&BlueprintKindDiscriminants::from(other))
+    }
 }
 
 impl fmt::Display for BlueprintKind {
@@ -128,7 +161,8 @@ impl fmt::Display for BlueprintKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, EnumDiscriminants, Eq, PartialEq)]
+#[strum_discriminants(derive(Ord, PartialOrd))]
 pub enum SledKind {
     /// Two running zones have the same underlay IP address.
     DuplicateUnderlayIp {
@@ -252,6 +286,13 @@ pub enum SledKind {
         zone2: BlueprintZoneConfig,
         generation: NexusGeneration,
     },
+}
+
+impl SledKind {
+    pub fn compare_to(&self, other: &SledKind) -> Ordering {
+        SledKindDiscriminants::from(self)
+            .cmp(&SledKindDiscriminants::from(other))
+    }
 }
 
 impl fmt::Display for SledKind {
@@ -527,7 +568,8 @@ impl fmt::Display for SledKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, EnumDiscriminants)]
+#[strum_discriminants(derive(Ord, PartialOrd))]
 pub enum PlanningInputKind {
     IpNotInBlueprint(OmicronZoneExternalIp),
     NicMacNotInBluperint(OmicronZoneNicEntry),
@@ -545,6 +587,13 @@ pub enum PlanningInputKind {
         expected_child_generation: Generation,
         actual_child_generation: Generation,
     },
+}
+
+impl PlanningInputKind {
+    pub fn compare_to(&self, other: &PlanningInputKind) -> Ordering {
+        PlanningInputKindDiscriminants::from(self)
+            .cmp(&PlanningInputKindDiscriminants::from(other))
+    }
 }
 
 impl fmt::Display for PlanningInputKind {
