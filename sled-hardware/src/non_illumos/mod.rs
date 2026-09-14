@@ -87,9 +87,10 @@ pub fn is_oxide_sled() -> anyhow::Result<bool> {
     Ok(false)
 }
 
-/// Returns whether the propolis SoftNPU 9p device is attached.
-pub fn find_softnpu_device(
+/// Probe for switch hardware. Nothing is attached off illumos.
+pub fn detect_switch_hardware(
     _log: &Logger,
-) -> Result<bool, crate::SoftNpuDetectError> {
-    Ok(false)
+    _probe: crate::SwitchProbe,
+) -> Result<Option<crate::DendriteAsic>, crate::SwitchDetectError> {
+    Ok(None)
 }

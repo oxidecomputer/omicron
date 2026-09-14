@@ -26,9 +26,9 @@ pub use disk::*;
 pub mod softnpu;
 pub mod underlay;
 
-/// Failure while probing for the propolis SoftNPU device.
+/// Failure while probing for switch hardware at startup.
 #[derive(Debug, thiserror::Error)]
-pub enum SoftNpuDetectError {
+pub enum SwitchDetectError {
     #[error("failed to walk device tree: {0}")]
     DevInfo(anyhow::Error),
 
@@ -41,6 +41,15 @@ pub enum SoftNpuDetectError {
 
     #[error("{path}: malformed Rversion: {reason}")]
     Protocol { path: String, reason: String },
+}
+
+/// What startup switch detection should look for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SwitchProbe {
+    /// A physical sidecar ASIC, whichever kind is attached.
+    PhysicalAsic,
+    /// The propolis SoftNPU virtio 9p device.
+    SoftNpu,
 }
 
 // The type of networking 'ASIC' the Dendrite service is expected to manage

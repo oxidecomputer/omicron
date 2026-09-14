@@ -135,7 +135,7 @@ pub enum StartError {
     SledModeConfig(&'static str),
 
     #[error("Failed to detect switch hardware")]
-    DetectSwitch(#[source] sled_hardware::SoftNpuDetectError),
+    DetectSwitch(#[source] sled_hardware::SwitchDetectError),
 
     #[error("Failed to start HardwareManager: {0}")]
     StartHardwareManager(String),
