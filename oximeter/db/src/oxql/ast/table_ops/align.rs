@@ -1103,6 +1103,202 @@ mod tests {
         );
     }
 
+    // Build a single-timeseries delta table from `(start, end, value)` rows.
+    fn delta_table(fixture: &[(&str, &str, i64)]) -> Table {
+        let start_times: Vec<DateTime<Utc>> =
+            fixture.iter().map(|r| r.0.parse().unwrap()).collect();
+        let timestamps: Vec<DateTime<Utc>> =
+            fixture.iter().map(|r| r.1.parse().unwrap()).collect();
+        let values = ValueArray::Integer(
+            fixture.iter().map(|r| Some(r.2)).collect::<Vec<_>>(),
+        );
+
+        let mut timeseries = Timeseries::new(
+            std::iter::once((
+                String::from("link"),
+                oximeter::FieldValue::String("cxgbe0".into()),
+            )),
+            DataType::Integer,
+            MetricType::Delta,
+        )
+        .unwrap();
+        timeseries.points = Points::new(
+            Some(start_times),
+            timestamps,
+            vec![Values { values, metric_type: MetricType::Delta }],
+        );
+
+        let mut table = Table::new("test:bytes_sent");
+        table.insert(timeseries).unwrap();
+        table
+    }
+
+    // Pull the output of a single-timeseries table out as doubles.
+    fn only_values(table: &Table) -> Vec<Option<f64>> {
+        let timeseries = table.iter().next().expect("one timeseries");
+        match timeseries.points.values(0).unwrap() {
+            ValueArray::Double(values) => values.clone(),
+            ValueArray::Integer(values) => {
+                values.iter().map(|v| v.map(|v| v as f64)).collect()
+            }
+            other => panic!("Unexpected output type: {:?}", other.data_type()),
+        }
+    }
+
+    #[test]
+    fn test_align_rate_then_max() {
+        // Two minutes of a link pushing 1000 bytes every 10s, except for one
+        // 10s burst of 5000 in the second minute.
+        let mut fixture = Vec::new();
+        for step in 0..12 {
+            let start = format!(
+                "2025-08-12T19:1{}:{:02}.0000Z",
+                7 + step / 6,
+                (step % 6) * 10
+            );
+            let end = format!(
+                "2025-08-12T19:1{}:{:02}.0000Z",
+                7 + (step + 1) / 6,
+                ((step + 1) % 6) * 10
+            );
+            let value = if step == 8 { 5000 } else { 1000 };
+            fixture.push((start, end, value));
+        }
+        let borrowed: Vec<_> = fixture
+            .iter()
+            .map(|(s, e, v)| (s.as_str(), e.as_str(), *v))
+            .collect();
+        let table = delta_table(&borrowed);
+        let query_end: DateTime<Utc> =
+            "2025-08-12T19:19:00.0000Z".parse().unwrap();
+
+        // Peak 10s rate within each minute. This is the composition the
+        // min/max error message recommends, and the only way to ask for an
+        // extremum of a counter.
+        let rated = Align {
+            method: AlignmentMethod::Rate,
+            period: Duration::from_secs(10),
+        }
+        .apply(&[table], &query_end)
+        .expect("rate over a delta should align");
+
+        let peaked = Align {
+            method: AlignmentMethod::Max,
+            period: Duration::from_secs(60),
+        }
+        .apply(&rated, &query_end)
+        .expect(
+            "The output of an alignment is a gauge, so a second alignment by \
+            max must accept it",
+        );
+
+        assert_eq!(peaked.len(), 1);
+        let values = only_values(&peaked[0]);
+        assert_eq!(values.len(), 2, "Two minutes in, two minutes out");
+        assert_eq!(
+            values[0],
+            Some(100.0),
+            "The first minute is a steady 1000 bytes per 10s",
+        );
+        assert_eq!(
+            values[1],
+            Some(500.0),
+            "The second minute contains the burst, and max must surface it \
+            rather than averaging it away",
+        );
+    }
+
+    #[test]
+    fn test_align_max_rejects_a_delta() {
+        let table = delta_table(&[(
+            "2025-08-12T19:17:00.0000Z",
+            "2025-08-12T19:17:10.0000Z",
+            1000,
+        )]);
+        let query_end: DateTime<Utc> =
+            "2025-08-12T19:18:00.0000Z".parse().unwrap();
+
+        let err = Align {
+            method: AlignmentMethod::Max,
+            period: Duration::from_secs(60),
+        }
+        .apply(&[table], &query_end)
+        .expect_err(
+            "Align::apply is reachable without the planner, so it must reject \
+            a delta on its own rather than trusting the caller",
+        );
+        assert!(
+            err.to_string().contains("max alignment requires a gauge metric"),
+            "Unexpected error: {err}",
+        );
+    }
+
+    #[test]
+    fn test_rate_in_window_partial_overlap() {
+        // The same steady 100 bytes/sec, but with a window covering half of
+        // the first interval and half of the last. The prorated halves add up
+        // to one whole interval, so the rate is unchanged -- an aggregator
+        // that counted whole points, or dropped the partial ones, would not
+        // get this right.
+        let mut window = parse_example_data(&[
+            ("2025-08-12T19:17:00.0000Z", "2025-08-12T19:17:10.0000Z", 1000f64),
+            ("2025-08-12T19:17:10.0000Z", "2025-08-12T19:17:20.0000Z", 1000f64),
+            ("2025-08-12T19:17:20.0000Z", "2025-08-12T19:17:30.0000Z", 1000f64),
+        ]);
+        window.start = "2025-08-12T19:17:05.0000Z".parse().unwrap();
+        window.end = "2025-08-12T19:17:25.0000Z".parse().unwrap();
+
+        let rate = rate_in_window(&MetricType::Delta, &window.metric_window())
+            .expect("The window overlaps every interval");
+        assert!(
+            (rate - 100.0).abs() < 1e-6,
+            "A window straddling interval boundaries should still see the \
+            steady rate, got {rate}",
+        );
+    }
+
+    #[test]
+    fn test_rate_ignores_missing_values() {
+        let mut window = parse_example_data(&[
+            ("2025-08-12T19:17:00.0000Z", "2025-08-12T19:17:10.0000Z", 1000f64),
+            ("2025-08-12T19:17:10.0000Z", "2025-08-12T19:17:20.0000Z", 1000f64),
+        ]);
+        window.input_points[1] = None;
+
+        let rate = rate_in_window(&MetricType::Delta, &window.metric_window())
+            .expect("One point still has a value");
+        assert!(
+            (rate - 50.0).abs() < 1e-6,
+            "The missing point must contribute nothing to the sum while the \
+            window keeps its full duration, so 1000 bytes over 20s is 50/s, \
+            got {rate}",
+        );
+
+        // A window of nothing but missing values has no rate at all, rather
+        // than a rate of zero.
+        window.input_points = vec![None, None];
+        assert!(
+            rate_in_window(&MetricType::Delta, &window.metric_window())
+                .is_none(),
+        );
+    }
+
+    #[test]
+    fn test_rate_requires_start_times() {
+        let mut window = parse_example_data(&[(
+            "2025-08-12T19:17:00.0000Z",
+            "2025-08-12T19:17:10.0000Z",
+            1000f64,
+        )]);
+        window.start_times = None;
+        assert!(
+            rate_in_window(&MetricType::Delta, &window.metric_window())
+                .is_none(),
+            "Rate needs the intervals that only a delta carries. The planner \
+            rejects a gauge before it reaches here, so this is a backstop.",
+        );
+    }
+
     fn parse_example_data(fixture: &[(&str, &str, f64)]) -> OwnedMetricWindow {
         let start_times: Vec<DateTime<Utc>> =
             fixture.into_iter().map(|r| r.0.parse().unwrap()).collect();
