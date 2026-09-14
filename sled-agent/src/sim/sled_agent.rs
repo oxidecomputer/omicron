@@ -45,7 +45,8 @@ use propolis_client::{
 use range_requests::PotentialRange;
 use sled_agent_health_monitor::HealthMonitorHandle;
 use sled_agent_scrimlet_reconcilers::{
-    ScrimletReconcilersMode, ScrimletStatus, SledAgentNetworkingInfo,
+    ScrimletReconcilers, ScrimletReconcilersMode, ScrimletStatus,
+    SledAgentNetworkingInfo,
 };
 use sled_agent_types::attached_subnet::{AttachedSubnet, AttachedSubnets};
 use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
@@ -129,8 +130,7 @@ pub struct SledAgent {
         sled_agent_types::system_networking::SystemNetworkingConfig,
     >,
     /// Keeps the scrimlet reconcilers alive.
-    scrimlet_reconcilers:
-        std::sync::Arc<sled_agent_scrimlet_reconcilers::ScrimletReconcilers>,
+    scrimlet_reconcilers: ScrimletReconcilers,
 }
 
 impl SledAgent {
@@ -197,52 +197,13 @@ impl SledAgent {
         let (network_config_tx, _) =
             tokio::sync::watch::channel(sys_net_config);
 
-        // Spawn a bridge task that watches bootstore changes and publishes
-        // deserialized SystemNetworkingConfig values to network_config_tx.
-        // Only scrimlet sleds subscribe, but the task runs on all sim sleds,
-        // consistent with real sled-agent.
-        let mut bootstore_rx = bootstore_network_config.subscribe();
-        let bridge_tx = network_config_tx.clone();
-        let bridge_log = log.clone();
-        tokio::spawn(async move {
-            loop {
-                if bootstore_rx.changed().await.is_err() {
-                    slog::error!(
-                        bridge_log,
-                        "bootstore_network_config sender dropped - \
-                         bridge task exiting",
-                    );
-                    return;
-                }
-                let config = bootstore_rx.borrow_and_update().clone();
-                match EarlyNetworkConfigEnvelope::deserialize_from_bootstore(
-                    &config,
-                )
-                .and_then(|e| e.deserialize_body())
-                {
-                    Ok(system_config) => {
-                        slog::info!(
-                            bridge_log,
-                            "received new network config from bootstore";
-                            "generation" => %config.generation,
-                        );
-                        bridge_tx.send_modify(|c| *c = system_config);
-                    }
-                    Err(e) => {
-                        slog::error!(
-                            bridge_log,
-                            "failed to deserialize bootstore config; \
-                             will wait for new config then try again";
-                            "error" => %e,
-                        );
-                    }
-                }
-            }
-        });
+        tokio::spawn(forward_network_config_to_reconcilers(
+            bootstore_network_config.subscribe(),
+            network_config_tx.clone(),
+            log.clone(),
+        ));
 
-        let scrimlet_reconcilers = std::sync::Arc::new(
-            sled_agent_scrimlet_reconcilers::ScrimletReconcilers::new(&log),
-        );
+        let scrimlet_reconcilers = ScrimletReconcilers::new(&log);
 
         Arc::new(SledAgent {
             id,
@@ -1287,6 +1248,46 @@ impl SledAgent {
             request.dataset_id,
             request,
         );
+    }
+}
+
+/// Watches `bootstore_rx` for changes and forwards deserialized
+/// [`SystemNetworkingConfig`] values to `network_config_tx`.
+async fn forward_network_config_to_reconcilers(
+    mut bootstore_rx: tokio::sync::watch::Receiver<bootstore::NetworkConfig>,
+    network_config_tx: tokio::sync::watch::Sender<SystemNetworkingConfig>,
+    log: slog::Logger,
+) {
+    loop {
+        if bootstore_rx.changed().await.is_err() {
+            slog::error!(
+                log,
+                "bootstore_network_config sender dropped - \
+                 bridge task exiting",
+            );
+            return;
+        }
+        let config = bootstore_rx.borrow_and_update().clone();
+        match EarlyNetworkConfigEnvelope::deserialize_from_bootstore(&config)
+            .and_then(|e| e.deserialize_body())
+        {
+            Ok(system_config) => {
+                slog::info!(
+                    log,
+                    "received new network config from bootstore";
+                    "generation" => %config.generation,
+                );
+                network_config_tx.send_modify(|c| *c = system_config);
+            }
+            Err(e) => {
+                slog::error!(
+                    log,
+                    "failed to deserialize bootstore config; \
+                     will wait for new config then try again";
+                    "error" => %e,
+                );
+            }
+        }
     }
 }
 
