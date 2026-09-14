@@ -2431,7 +2431,7 @@ impl InvNvmeDiskFirmware {
     pub fn new(
         inv_collection_id: CollectionUuid,
         sled_id: SledUuid,
-        sled_slot: i64,
+        pcie_slot: i64,
         firmware: &NvmeFirmware,
     ) -> Result<Self, InvNvmeDiskFirmwareError> {
         // NB: We first validate that the data given to us from an NVMe disk
@@ -2505,7 +2505,7 @@ impl InvNvmeDiskFirmware {
         Ok(Self {
             inv_collection_id: inv_collection_id.into(),
             sled_id: sled_id.into(),
-            pcie_slot: sled_slot,
+            pcie_slot,
             active_slot: firmware.active_slot.into(),
             next_active_slot: firmware.next_active_slot.map(|nas| nas.into()),
             number_of_slots: firmware.number_of_slots.into(),

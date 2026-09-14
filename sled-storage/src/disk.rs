@@ -399,10 +399,13 @@ impl Disk {
         }
     }
 
-    pub fn update_firmware_metadata(&mut self, raw_disk: &RawDisk) {
+    /// Copies the properties that may legitimately change over a disk's
+    /// lifetime (firmware metadata and chassis location) from `raw_disk`.
+    pub fn update_mutable_properties(&mut self, raw_disk: &RawDisk) {
         match self {
             Disk::Real(pooled_disk) => {
                 pooled_disk.firmware = raw_disk.firmware().clone();
+                pooled_disk.location = raw_disk.location().map(str::to_string);
             }
             Disk::Synthetic(synthetic_disk) => {
                 synthetic_disk.raw.firmware = raw_disk.firmware().clone();

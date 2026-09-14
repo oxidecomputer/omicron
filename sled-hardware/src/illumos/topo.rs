@@ -46,54 +46,10 @@ pub(super) fn read_disk_locations(
         if node.name() != NVME {
             return Ok(WalkAction::Continue);
         }
-
-        let value = match node.property(TOPO_PGROUP_IO, TOPO_IO_INSTANCE) {
-            Ok(PropValue::UInt32(value)) => value,
-            Ok(other) => {
-                warn!(
-                    log,
-                    "ignoring nvme topology node whose io/instance is not a \
-                     uint32";
-                    "value" => ?other,
-                );
-                return Ok(WalkAction::Continue);
-            }
-            Err(_) => {
-                debug!(
-                    log,
-                    "nvme topology node has no io/instance property";
-                    "node_instance" => node.instance(),
-                );
-                return Ok(WalkAction::Continue);
-            }
+        let Some(instance) = nvme_instance_of(log, &node) else {
+            return Ok(WalkAction::Continue);
         };
-        let instance = match NvmeInstance::try_from(value) {
-            Ok(instance) => instance,
-            Err(err) => {
-                warn!(
-                    log,
-                    "ignoring nvme topology node with unusable instance";
-                    "err" => %err,
-                );
-                return Ok(WalkAction::Continue);
-            }
-        };
-
-        // On Oxide platforms the label is carried by the enclosing `bay` (a
-        // U.2 bay) or `slot` (an M.2 socket) node rather than by the nvme
-        // node itself, so fall back to the parent. Only those two node types
-        // count: a label further up the tree would describe something
-        // unrelated to this disk. This is the same rule nvmeadm(8) applies
-        // for `-L`.
-        let label = label_of(&node).or_else(|| {
-            node.parent()
-                .filter(|parent| {
-                    let name = parent.name();
-                    name == BAY || name == SLOT
-                })
-                .and_then(|parent| label_of(&parent))
-        });
-        match label {
+        match location_label_of(&node) {
             Some(label) => match labels.entry(instance) {
                 Entry::Vacant(entry) => {
                     entry.insert(label);
@@ -123,6 +79,60 @@ pub(super) fn read_disk_locations(
         "elapsed" => ?start.elapsed(),
     );
     Ok(labels)
+}
+
+/// The driver instance of an `nvme` node, from its `io/instance` property.
+/// `None`, with a log line, if the node has no such property or it is not the
+/// uint32 topo documents it as.
+fn nvme_instance_of(log: &Logger, node: &Node<'_>) -> Option<NvmeInstance> {
+    let value = match node.property(TOPO_PGROUP_IO, TOPO_IO_INSTANCE) {
+        Ok(PropValue::UInt32(value)) => value,
+        Ok(other) => {
+            warn!(
+                log,
+                "ignoring nvme topology node whose io/instance is not a uint32";
+                "value" => ?other,
+            );
+            return None;
+        }
+        Err(_) => {
+            debug!(
+                log,
+                "nvme topology node has no io/instance property";
+                "node_instance" => node.instance(),
+            );
+            return None;
+        }
+    };
+    match NvmeInstance::try_from(value) {
+        Ok(instance) => Some(instance),
+        Err(err) => {
+            warn!(
+                log,
+                "ignoring nvme topology node with unusable instance";
+                "err" => %err,
+            );
+            None
+        }
+    }
+}
+
+/// The chassis location label for an `nvme` node.
+///
+/// On Oxide platforms the label is carried by the enclosing `bay` (a U.2 bay)
+/// or `slot` (an M.2 socket) node rather than by the nvme node itself, so fall
+/// back to the parent. Only those two node types count: a label further up the
+/// tree would describe something unrelated to this disk. This is the same rule
+/// nvmeadm(8) applies for `-L`.
+fn location_label_of(node: &Node<'_>) -> Option<String> {
+    label_of(node).or_else(|| {
+        node.parent()
+            .filter(|parent| {
+                let name = parent.name();
+                name == BAY || name == SLOT
+            })
+            .and_then(|parent| label_of(&parent))
+    })
 }
 
 /// A node's label, treating "no label" and an empty label alike.

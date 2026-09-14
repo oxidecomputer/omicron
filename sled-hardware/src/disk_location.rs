@@ -11,8 +11,9 @@
 //! joins devinfo's view of a controller to topo's, and a cache that decides
 //! when topo needs to be consulted at all.
 
-use slog::{Logger, debug, warn};
+use slog::{Logger, warn};
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::fmt;
 use std::time::{Duration, Instant};
 
@@ -104,7 +105,9 @@ impl DiskLocationCache {
     /// never touches topo.
     ///
     /// `read_labels` returns the label of every controller topo has one for.
-    /// On success it replaces the cache wholesale. On failure the labels
+    /// On success its labels are merged into the cache: a new or changed
+    /// label is adopted, but a controller the cache has already labelled is
+    /// never forgotten because a later read omitted it. On failure the labels
     /// already known are kept and the failure is logged.
     pub fn refresh_if_needed<F, E>(
         &mut self,
@@ -122,14 +125,47 @@ impl DiskLocationCache {
         self.last_attempt = Some(now);
 
         let read_ok = match read_labels() {
-            Ok(labels) => {
-                debug!(
-                    log,
-                    "read disk locations from hardware topology";
-                    "count" => labels.len(),
-                );
-                self.labels =
-                    labels.into_iter().map(|(i, l)| (i, Some(l))).collect();
+            Ok(read) => {
+                // A present controller we already labelled should be in every
+                // successful read. If it is not, keep its label: the omission
+                // could be a transient enumeration failure or a topo bug, and
+                // a controller's location cannot change while the system is
+                // up.
+                for instance in present {
+                    if let Some(Some(kept)) = self.labels.get(instance)
+                        && !read.contains_key(instance)
+                    {
+                        warn!(
+                            log,
+                            "hardware topology omitted a disk controller it \
+                             previously labelled; keeping the label";
+                            "nvme_instance" => %instance,
+                            "label" => kept,
+                        );
+                    }
+                }
+
+                for (instance, label) in read {
+                    match self.labels.entry(instance) {
+                        Entry::Occupied(mut entry) => {
+                            if let Some(old) = entry.get()
+                                && *old != label
+                            {
+                                warn!(
+                                    log,
+                                    "disk controller location label changed";
+                                    "nvme_instance" => %instance,
+                                    "old" => old,
+                                    "new" => &label,
+                                );
+                            }
+                            entry.insert(Some(label));
+                        }
+                        Entry::Vacant(entry) => {
+                            entry.insert(Some(label));
+                        }
+                    }
+                }
                 true
             }
             Err(err) => {
@@ -332,6 +368,67 @@ mod tests {
             Ok::<_, String>(labels(&[(0, "N0"), (1, "N1")]))
         });
         assert_eq!(calls.get(), 3);
+        assert_eq!(cache.location(inst(1)), Some("N1"));
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn omitted_controller_keeps_its_label() {
+        let logctx = test_setup_log("omitted_controller_keeps_its_label");
+        let mut cache = DiskLocationCache::new();
+        let calls = Cell::new(0);
+        let t0 = Instant::now();
+
+        cache.refresh_if_needed(&logctx.log, &[inst(0)], t0, || {
+            calls.set(calls.get() + 1);
+            Ok::<_, String>(labels(&[(0, "N0")]))
+        });
+        assert_eq!(calls.get(), 1);
+        assert_eq!(cache.location(inst(0)), Some("N0"));
+
+        // A new controller forces a refresh, and this read leaves out the
+        // controller we already know about.
+        let t1 = t0 + Duration::from_secs(1);
+        let present = [inst(0), inst(1)];
+        cache.refresh_if_needed(&logctx.log, &present, t1, || {
+            calls.set(calls.get() + 1);
+            Ok::<_, String>(labels(&[(1, "N1")]))
+        });
+        assert_eq!(calls.get(), 2);
+        assert_eq!(cache.location(inst(0)), Some("N0"));
+        assert_eq!(cache.location(inst(1)), Some("N1"));
+
+        // Both controllers are resolved, so nothing prompts another read.
+        let later = t1 + Duration::from_secs(3600);
+        cache.refresh_if_needed(&logctx.log, &present, later, || {
+            calls.set(calls.get() + 1);
+            Ok::<_, String>(HashMap::new())
+        });
+        assert_eq!(calls.get(), 2);
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn changed_label_is_adopted() {
+        let logctx = test_setup_log("changed_label_is_adopted");
+        let mut cache = DiskLocationCache::new();
+        let t0 = Instant::now();
+
+        cache.refresh_if_needed(&logctx.log, &[inst(0)], t0, || {
+            Ok::<_, String>(labels(&[(0, "N0")]))
+        });
+        assert_eq!(cache.location(inst(0)), Some("N0"));
+
+        // A new controller forces a refresh, and topo now reports a different
+        // label for the controller we already know about.
+        let present = [inst(0), inst(1)];
+        cache.refresh_if_needed(
+            &logctx.log,
+            &present,
+            t0 + Duration::from_secs(1),
+            || Ok::<_, String>(labels(&[(0, "N9"), (1, "N1")])),
+        );
+        assert_eq!(cache.location(inst(0)), Some("N9"));
         assert_eq!(cache.location(inst(1)), Some("N1"));
         logctx.cleanup_successful();
     }

@@ -614,6 +614,12 @@ pub struct PhysicalDisk {
     /// internal to the board's PCIe topology and board-specific: the same
     /// U.2 bay is numbered differently on Gimlet and Cosmo. It is not the
     /// location label printed on the chassis; see `location` for that.
+    //
+    // Older serialized state (support bundles, `omdb` exports) called this
+    // field `slot`. Accept that name too so those files still load. The
+    // format is documented as unstable, so this isn't strictly necessary, but
+    // it is cheap and fail-safe.
+    #[serde(alias = "slot")]
     pub pcie_slot: i64,
     /// Where this disk sits in the chassis, as labelled by the platform's
     /// hardware topology: "N5" for a U.2 bay, "M.2 East" for a boot device.
@@ -621,6 +627,10 @@ pub struct PhysicalDisk {
     /// This is the operator-facing position, matching what is printed on the
     /// sled. It is best-effort: `None` means the sled's topology had no label
     /// for the disk or could not be read.
+    //
+    // Older serialized state had no such field; treating its absence as
+    // `None` is exactly right, since nothing recorded a location then.
+    #[serde(default)]
     pub location: Option<String>,
     pub firmware: PhysicalDiskFirmware,
 }
@@ -787,4 +797,45 @@ impl IdOrdItem for InternalDnsGenerationStatus {
         self.zone_id
     }
     id_upcast!();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Reconfigurator state files written before `PhysicalDisk` gained
+    // `location` (and renamed `slot` to `pcie_slot`) must still deserialize.
+    #[test]
+    fn physical_disk_loads_older_serialized_form() {
+        let disk = PhysicalDisk {
+            identity: DiskIdentity {
+                vendor: "vendor".to_string(),
+                model: "model".to_string(),
+                serial: "serial".to_string(),
+            },
+            variant: PhysicalDiskKind::U2,
+            pcie_slot: 5,
+            location: Some("N5".to_string()),
+            firmware: PhysicalDiskFirmware::Unknown,
+        };
+
+        // The current form round-trips and uses the new field name.
+        let mut current = serde_json::to_value(&disk).unwrap();
+        assert_eq!(current["pcie_slot"], 5);
+        assert_eq!(current["location"], "N5");
+        assert_eq!(
+            serde_json::from_value::<PhysicalDisk>(current.clone()).unwrap(),
+            disk
+        );
+
+        // Rewrite it into the older form: `slot` instead of `pcie_slot`, and
+        // no `location` at all.
+        let object = current.as_object_mut().unwrap();
+        let slot = object.remove("pcie_slot").unwrap();
+        object.insert("slot".to_string(), slot);
+        object.remove("location").unwrap();
+
+        let loaded: PhysicalDisk = serde_json::from_value(current).unwrap();
+        assert_eq!(loaded, PhysicalDisk { location: None, ..disk });
+    }
 }

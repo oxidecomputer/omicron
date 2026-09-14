@@ -290,11 +290,6 @@ impl UnparsedDisk {
         self.location.as_deref()
     }
 
-    #[cfg(target_os = "illumos")]
-    pub(crate) fn set_location(&mut self, location: Option<String>) {
-        self.location = location;
-    }
-
     pub fn firmware(&self) -> &DiskFirmware {
         &self.firmware
     }

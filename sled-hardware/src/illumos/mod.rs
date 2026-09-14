@@ -172,40 +172,39 @@ impl HardwareSnapshot {
         let mut disks = HashMap::new();
         match external_disks {
             ExternalDisks::DetectPhysical => {
-                let mut nvme_instances = HashMap::new();
+                let mut found = Vec::new();
                 let mut node_walker = device_info.walk_driver("blkdev");
                 while let Some(node) =
                     node_walker.next().transpose().map_err(Error::DevInfo)?
                 {
-                    poll_blkdev_node(
+                    if let Some(found_disk) = poll_blkdev_node(
                         &log,
                         sled_type,
-                        &mut disks,
-                        &mut nvme_instances,
                         node,
                         boot_storage_unit,
-                    )?;
+                    )? {
+                        found.push(found_disk);
+                    }
                 }
 
                 // Now that we know which controllers are present, ask the
                 // hardware topology where they are. The cache decides whether
                 // topo actually needs to be consulted this time around.
                 let present: Vec<NvmeInstance> =
-                    nvme_instances.values().copied().collect();
+                    found.iter().map(|(_, instance)| *instance).collect();
                 location_cache.refresh_if_needed(
                     log,
                     &present,
                     Instant::now(),
                     || topo::read_disk_locations(log),
                 );
-                for (identity, instance) in &nvme_instances {
-                    if let Some(disk) = disks.get_mut(identity) {
-                        disk.set_location(
-                            location_cache
-                                .location(*instance)
-                                .map(str::to_string),
-                        );
-                    }
+                for (disk, instance) in found {
+                    let location =
+                        location_cache.location(instance).map(str::to_string);
+                    disks.insert(
+                        disk.identity().clone(),
+                        disk.with_location(location),
+                    );
                 }
             }
 
@@ -420,20 +419,21 @@ fn find_properties<'a, const N: usize>(
     Ok(output.try_into().map_err(|_| "Unexpected output size").unwrap())
 }
 
+// Describes the disk behind a "blkdev" devinfo node, along with the instance
+// of the "nvme" controller above it. The disk's chassis location is not yet
+// known here; the caller fills it in once every controller has been found.
 fn poll_blkdev_node(
     log: &Logger,
     sled: OxideSled,
-    disks: &mut HashMap<DiskIdentity, UnparsedDisk>,
-    nvme_instances: &mut HashMap<DiskIdentity, NvmeInstance>,
     node: Node<'_>,
     boot_storage_unit: BootStorageUnit,
-) -> Result<(), Error> {
+) -> Result<Option<(UnparsedDisk, NvmeInstance)>, Error> {
     let Some(driver_name) = node.driver_name() else {
-        return Ok(());
+        return Ok(None);
     };
 
     if driver_name != "blkdev" {
-        return Ok(());
+        return Ok(None);
     }
 
     let devfs_path = node.devfs_path().map_err(Error::DevInfo)?;
@@ -542,15 +542,11 @@ fn poll_blkdev_node(
         dev_path,
         pcie_slot,
         variant,
-        device_id.clone(),
+        device_id,
         pcie_slot_is_boot_disk(sled, pcie_slot, boot_storage_unit),
-        firmware.clone(),
+        firmware,
     );
-    // The location is filled in once every controller has been found; see
-    // `HardwareSnapshot::new`.
-    nvme_instances.insert(device_id.clone(), nvme_instance);
-    disks.insert(device_id, disk);
-    Ok(())
+    Ok(Some((disk, nvme_instance)))
 }
 
 // Poll just enough of the device info tree to get the Baseboard. We really
