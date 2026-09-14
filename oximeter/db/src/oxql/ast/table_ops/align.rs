@@ -151,7 +151,13 @@ impl Align {
         tables
             .iter()
             .map(|table| {
-                align_and_aggregate(table, query_end, &self.period, aggregator)
+                align_and_aggregate(
+                    table,
+                    query_end,
+                    &self.period,
+                    self.method,
+                    aggregator,
+                )
             })
             .collect()
     }
@@ -213,6 +219,70 @@ impl AlignmentMethod {
         }
     }
 
+    /// Check that this method can be applied to a metric of the given type.
+    ///
+    /// This lives next to the implementations, and is called from both the
+    /// query planner and the table operation itself, so that the two cannot
+    /// drift apart. The planner is what users actually hit; the check in
+    /// `align_and_aggregate()` keeps `Align::apply()` honest on its own.
+    pub(crate) fn check_metric_type(
+        &self,
+        metric_type: MetricType,
+        table_name: &str,
+    ) -> Result<(), Error> {
+        anyhow::ensure!(
+            metric_type != MetricType::Cumulative,
+            "Only gauge or delta metric types may be aligned, \
+            but table '{table_name}' has cumulative metric type",
+        );
+        match self {
+            // A mean is defined over either. Gauges average their levels,
+            // deltas average their amounts weighted by overlap.
+            AlignmentMethod::MeanWithin => Ok(()),
+            AlignmentMethod::Rate => {
+                // Rate over a gauge is meaningful -- the rate a disk fills, or
+                // a temperature climbs -- but it is a different computation
+                // from the one implemented here, which sums the amounts in
+                // each delta. Applied to a gauge it would sum *levels*, which
+                // is not an approximation but a category error, and it scales
+                // with how large the gauge happens to be.
+                anyhow::ensure!(
+                    metric_type != MetricType::Gauge,
+                    "rate alignment does not yet support gauge metrics, \
+                    but table '{table_name}' has gauge metric type",
+                );
+                Ok(())
+            }
+            AlignmentMethod::Min | AlignmentMethod::Max => {
+                // Producers choose their own sample intervals, so a run of
+                // deltas holds amounts accrued over spans of differing length.
+                // The largest of them is whichever covered the longest span,
+                // not whichever was busiest. Worse, the first delta of each
+                // epoch carries the whole cumulative value rather than an
+                // increment -- see `Points::from_cumulative()` -- so an
+                // extremum would reliably pick that one out.
+                //
+                // Rate normalizes all of that away, which is why the remedy
+                // below composes. If a future method emits deltas already
+                // bucketed onto the alignment grid, as PromQL's `increase()`
+                // does, its intervals are uniform and extrema over *those*
+                // would be meaningful. `TableOpData::alignment` is how the
+                // planner could tell the two apart.
+                anyhow::ensure!(
+                    metric_type != MetricType::Delta,
+                    "min and max alignment require a gauge metric, but table \
+                    '{table_name}' has delta metric type. Delta values depend \
+                    on the length of their interval, so extrema over them are \
+                    not meaningful; align a rate first, e.g. \
+                    `align rate(10s) | align max(1m)`",
+                );
+                Ok(())
+            }
+            // Unimplemented, and rejected before we get here.
+            AlignmentMethod::Interpolate => Ok(()),
+        }
+    }
+
     /// The data type this method produces, given the data type it is applied
     /// to.
     ///
@@ -254,6 +324,7 @@ fn align_and_aggregate(
     table: &Table,
     query_end: &DateTime<Utc>,
     period: &Duration,
+    method: AlignmentMethod,
     aggregator: Aggregator,
 ) -> Result<Table, Error> {
     let mut output_table = Table::new(table.name());
@@ -270,12 +341,7 @@ fn align_and_aggregate(
             data_type
         );
         let metric_type = points.metric_type().unwrap();
-
-        anyhow::ensure!(
-            matches!(metric_type, MetricType::Gauge | MetricType::Delta),
-            "Alignment requires a gauge or delta metric, not {}",
-            metric_type,
-        );
+        method.check_metric_type(metric_type, table.name())?;
         verify_max_upsampling_ratio(points.timestamps(), &period)?;
 
         // The output is always a gauge, so we do not need the start times of

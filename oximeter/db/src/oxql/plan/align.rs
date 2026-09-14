@@ -4,8 +4,6 @@
 
 //! OxQL query plan node for aligning tables.
 
-use oxql_types::point::MetricType;
-
 use crate::oxql::ast::table_ops::align;
 use crate::oxql::plan::plan::TableOpData;
 use crate::oxql::plan::plan::TableOpInput;
@@ -52,13 +50,11 @@ fn align_input_schema(
     schema: TableSchema,
     method: align::AlignmentMethod,
 ) -> anyhow::Result<TableSchema> {
+    // Not every method accepts every metric type. The check lives on the
+    // method itself, so that this and `align_and_aggregate()` cannot disagree
+    // about what is allowed.
     for metric_type in schema.metric_types.iter() {
-        anyhow::ensure!(
-            metric_type != &MetricType::Cumulative,
-            "Only gauge or delta metric types may be aligned, \
-            but table '{}' has cumulative metric type",
-            schema.name,
-        );
+        method.check_metric_type(*metric_type, &schema.name)?;
     }
     // Check the data type and the method separately, rather than matching on
     // the pair of them. A combined match needs a `(_, _)` arm to cover the
@@ -166,12 +162,20 @@ mod test {
 
     #[test]
     fn test_aggregates_widen_to_a_double() {
-        for method in
-            [align::AlignmentMethod::MeanWithin, align::AlignmentMethod::Rate]
-        {
+        // Each method is paired with a metric type it accepts: rate is
+        // defined only over deltas.
+        let cases = [
+            (align::AlignmentMethod::MeanWithin, MetricType::Gauge),
+            (align::AlignmentMethod::MeanWithin, MetricType::Delta),
+            (align::AlignmentMethod::Rate, MetricType::Delta),
+        ];
+        for (method, metric_type) in cases {
             for input in [DataType::Integer, DataType::Double] {
-                let out =
-                    align_input_schema(gauge_schema(input), method).unwrap();
+                let schema = TableSchema {
+                    data_types: vec![input],
+                    ..schema_with_metric_type(metric_type)
+                };
+                let out = align_input_schema(schema, method).unwrap();
                 assert_eq!(
                     out.data_types,
                     vec![DataType::Double],
@@ -198,6 +202,109 @@ mod test {
             assert!(
                 err.to_string().contains("cannot be aligned"),
                 "Unexpected error for data type {data_type}: {err}",
+            );
+        }
+    }
+
+    // A table with the provided metric type, and a numeric data type that
+    // every alignment method accepts.
+    fn schema_with_metric_type(metric_type: MetricType) -> TableSchema {
+        TableSchema {
+            name: String::from("foo:bar"),
+            fields: BTreeMap::from([(String::from("a"), FieldType::Bool)]),
+            metric_types: vec![metric_type],
+            data_types: vec![DataType::Integer],
+        }
+    }
+
+    #[test]
+    fn test_rate_rejects_a_gauge() {
+        let err = align_input_schema(
+            schema_with_metric_type(MetricType::Gauge),
+            align::AlignmentMethod::Rate,
+        )
+        .expect_err(
+            "`align rate(..)` sums the amounts in each delta. Applied to a \
+            gauge it would sum levels instead, which is not an approximation \
+            but a category error, so it must be refused rather than silently \
+            producing a number that scales with the size of the gauge.",
+        );
+        assert!(
+            err.to_string()
+                .contains("rate alignment does not yet support gauge metrics"),
+            "Unexpected error: {err}",
+        );
+    }
+
+    #[test]
+    fn test_rate_accepts_a_delta() {
+        let out = align_input_schema(
+            schema_with_metric_type(MetricType::Delta),
+            align::AlignmentMethod::Rate,
+        )
+        .expect("A delta is what `align rate(..)` is defined over");
+        assert_eq!(out.metric_types, vec![MetricType::Gauge]);
+        assert_eq!(out.data_types, vec![DataType::Double]);
+    }
+
+    #[test]
+    fn test_min_and_max_reject_a_delta() {
+        for method in [align::AlignmentMethod::Min, align::AlignmentMethod::Max]
+        {
+            let err = align_input_schema(
+                schema_with_metric_type(MetricType::Delta),
+                method,
+            )
+            .expect_err(
+                "Producers pick their own sample intervals, so the largest of \
+                a run of deltas is whichever covered the longest span rather \
+                than whichever was busiest. The first delta of each epoch is \
+                worse still: it carries a whole cumulative value rather than \
+                an increment, so an extremum would reliably select it.",
+            );
+            let err = err.to_string();
+            assert!(
+                err.contains("min and max alignment require a gauge metric"),
+                "Unexpected error: {err}",
+            );
+            assert!(
+                err.contains("align rate(10s) | align max(1m)"),
+                "The error must point at the spelling that does work, since \
+                nearly every counter in the system reaches alignment as a \
+                delta and would otherwise look arbitrarily forbidden: {err}",
+            );
+        }
+    }
+
+    #[test]
+    fn test_min_and_max_accept_a_gauge() {
+        for method in [align::AlignmentMethod::Min, align::AlignmentMethod::Max]
+        {
+            let out = align_input_schema(
+                schema_with_metric_type(MetricType::Gauge),
+                method,
+            )
+            .expect("A gauge is what the selectors are defined over");
+            assert_eq!(out.metric_types, vec![MetricType::Gauge]);
+        }
+    }
+
+    #[test]
+    fn test_every_method_rejects_a_cumulative() {
+        for method in [
+            align::AlignmentMethod::MeanWithin,
+            align::AlignmentMethod::Rate,
+            align::AlignmentMethod::Min,
+            align::AlignmentMethod::Max,
+        ] {
+            let err = align_input_schema(
+                schema_with_metric_type(MetricType::Cumulative),
+                method,
+            )
+            .expect_err("Cumulative metrics must be converted to deltas first");
+            assert!(
+                err.to_string().contains("cumulative metric type"),
+                "Unexpected error for {method}: {err}",
             );
         }
     }
