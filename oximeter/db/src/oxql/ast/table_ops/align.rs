@@ -58,11 +58,27 @@ fn verify_max_upsampling_ratio(
     Ok(())
 }
 
+/// One output period, and the input it is computed from.
+///
+/// Note that the three arrays are the _entire_ input timeseries, not a slice
+/// limited to the window: `start` and `end` are the only things that bound it.
+/// Aggregators locate the points they want themselves, which is what lets one
+/// reach outside the window when it needs to -- a delta whose interval
+/// straddles `start` still contributes part of its amount.
 struct MetricWindow<'a> {
+    /// The start of each input point's interval, for a delta. `None` for a
+    /// gauge, whose values are levels at an instant rather than amounts
+    /// accrued over a span.
     start_times: Option<&'a [DateTime<Utc>]>,
+    /// The timestamp of each input point.
     timestamps: &'a [DateTime<Utc>],
+    /// The value of each input point, converted to a double up front so the
+    /// aggregators do not each repeat the matching.
     input_points: &'a [Option<f64>],
+    /// The start of this output period, exclusive.
     start: DateTime<Utc>,
+    /// The end of this output period, inclusive. This is also the timestamp
+    /// the output point is given.
     end: DateTime<Utc>,
 }
 
@@ -79,7 +95,7 @@ enum Aggregator {
     ///
     /// The result is a quantity that was not in the input -- a mean, a rate --
     /// so it is always a double, whatever the input data type was.
-    Compute(fn(&MetricType, &MetricWindow) -> Option<f64>),
+    Compute(fn(&MetricWindow) -> Option<f64>),
     /// Select one of the points in the window, returning its index.
     ///
     /// The result is one of the input values, so it keeps the input's data
@@ -168,18 +184,35 @@ impl Align {
 pub enum AlignmentMethod {
     /// Alignment is done by interpolating the output data at the specified
     /// period.
+    ///
+    /// Not yet implemented.
     Interpolate,
     /// Alignment is done by computing the mean of the output data within the
     /// specified period.
+    ///
+    /// Requires a gauge metric. Averaging a run of deltas would weight each
+    /// one equally despite their covering spans of differing length, giving an
+    /// average per sample rather than per unit time. Use [`Self::Rate`] for a
+    /// delta.
     MeanWithin,
     /// Alignment is done by computing the per second rate of the output data
     /// within the specified period.
+    ///
+    /// Requires a delta metric, whose values are amounts accrued over an
+    /// interval. A rate over a gauge is a meaningful thing to ask for -- the
+    /// rate a disk fills, or a temperature climbs -- but it is the derivative
+    /// of a level rather than this computation, and is not yet implemented.
     Rate,
     /// Alignment is done by computing the max of the output data within the
     /// specified period.
+    ///
+    /// Requires a gauge metric. See [`Self::MeanWithin`] for why, and
+    /// `align rate(..) | align max(..)` for the peak rate of a delta.
     Max,
     /// Alignment is done by computing the min of the output data within the
     /// specified period.
+    ///
+    /// Requires a gauge metric, as [`Self::Max`] does.
     Min,
 }
 
@@ -340,8 +373,8 @@ impl fmt::Display for AlignmentMethod {
     }
 }
 
-// Align the timeseries in a table by computing a value within each output period.
-
+// Align the timeseries in a table by reducing the points within each output
+// period to a single point, using the provided aggregator.
 fn align_and_aggregate(
     table: &Table,
     query_end: &DateTime<Utc>,
@@ -405,7 +438,7 @@ fn align_and_aggregate(
         // - Create the output timestamp from the current step.
         // - Find all points in the input array that are within the alignment
         // period.
-        // - Compute the mean of those.
+        // - Reduce those to a single output point.
         let period_ =
             TimeDelta::from_std(*period).context("time delta out of range")?;
         let first_timestamp = points.timestamps()[0];
@@ -439,7 +472,7 @@ fn align_and_aggregate(
             // Reduce all values within this time window to a single output.
             match aggregator {
                 Aggregator::Compute(compute) => {
-                    computed_values.push(compute(&metric_type, &window))
+                    computed_values.push(compute(&window))
                 }
                 Aggregator::Select(select) => {
                     selected_indices.push(select(&window))
@@ -517,46 +550,6 @@ fn select_input_values(
     }
 }
 
-fn mean_value_in_window(
-    metric_type: &MetricType,
-    window: &MetricWindow,
-) -> Option<f64> {
-    // Aggregate all values within this time window.
-    //
-    // This works a bit differently for gauge timeseries and deltas.
-    // Gauges are simpler, so let's consider them first. A point is
-    // "within" the window if the timestamp is within the window. Every
-    // point is either completely within or completely without the
-    // window, so we just add the values.
-    //
-    // Deltas have a start time, which makes things a bit more
-    // complicated. In that case, a point can overlap _partially_ with
-    // the output time window, and we'd like to take that partial
-    // overlap into account. To do that, we find relevant values which
-    // have either a start time or timestamp within the output window.
-    // We compute the fraction of overlap with the window, which is in
-    // [0.0, 1.0], and multiply the value by that fraction. One can
-    // think of this as a dot-product between the interval-overlap array
-    // and the value array, divided by the 1-norm, or number of nonzero
-    // entries.
-    if matches!(metric_type, MetricType::Gauge) {
-        mean_gauge_value_in_window(
-            window.timestamps,
-            window.input_points,
-            window.start,
-            window.end,
-        )
-    } else {
-        mean_delta_value_in_window(
-            window.start_times?,
-            window.timestamps,
-            window.input_points,
-            window.start,
-            window.end,
-        )
-    }
-}
-
 // Given an interval start and end, and a window start and end, compute the
 // fraction of the _interval_ that the time window represents.
 fn fraction_overlap_with_window(
@@ -581,12 +574,13 @@ fn fraction_overlap_with_window(
     fraction
 }
 
-// For a delta metric, compute the mean of points falling within the provided
-// window.
+// For a delta metric, sum the points falling within the provided window,
+// weighting each by how much of its interval the window covers.
 //
-// This uses both the start and end times when considering each point. Each
-// point's value is weighted by the faction of overlap with the window.
-fn mean_delta_value_in_window(
+// This uses both the start and end times when considering each point, so that
+// a point overlapping the window only partially contributes only that part.
+// Returns `None` if no overlapping point has a value.
+fn overlap_weighted_sum(
     start_times: &[DateTime<Utc>],
     timestamps: &[DateTime<Utc>],
     input_points: &[Option<f64>],
@@ -615,9 +609,7 @@ fn mean_delta_value_in_window(
         if t < window_start || s > window_end {
             return None;
         }
-        let Some(val) = input_points[first_timestamp] else {
-            return None;
-        };
+        let val = input_points[first_timestamp]?;
         let fraction = fraction_overlap_with_window(
             start_times[first_start_time],
             timestamps[first_timestamp],
@@ -632,23 +624,34 @@ fn mean_delta_value_in_window(
     let times = &timestamps[first_index..last_index];
     let vals = &input_points[first_index..last_index];
     let iter = starts
-        .into_iter()
+        .iter()
         .copied()
-        .zip(times.into_iter().copied())
-        .zip(vals.into_iter().copied());
-    let count = (last_timestamp - first_timestamp).max(1) as f64;
+        .zip(times.iter().copied())
+        .zip(vals.iter().copied());
     let mut maybe_sum = None;
     for it in iter.filter_map(|((start, time), maybe_val)| {
-        let Some(val) = maybe_val else {
-            return None;
-        };
+        let val = maybe_val?;
         let fraction =
             fraction_overlap_with_window(start, time, window_start, window_end);
         Some(fraction * val)
     }) {
         *maybe_sum.get_or_insert(0.0) += it;
     }
-    maybe_sum.map(|sum| sum / count)
+    maybe_sum
+}
+
+// Compute the mean of the points falling within the provided window.
+//
+// Only gauges reach here, so every point is either wholly inside the window or
+// wholly outside it -- a gauge value is a level at an instant, with no interval
+// to partially overlap. That is what lets this just average the values.
+fn mean_value_in_window(window: &MetricWindow) -> Option<f64> {
+    mean_gauge_value_in_window(
+        window.timestamps,
+        window.input_points,
+        window.start,
+        window.end,
+    )
 }
 
 // For a gauge metric, compute the mean of points falling within the provided
@@ -701,27 +704,10 @@ fn mean_gauge_value_in_window(
 //
 // This uses both the start and end times when considering each point. Each
 // point's value is weighted by the faction of overlap with the window.
-fn rate_in_window(
-    _metric_type: &MetricType,
-    window: &MetricWindow,
-) -> Option<f64> {
-    // We can find the indices where the timestamp and start times separately
-    // overlap the window of interest. Then any interval is potentially of
-    // interest if _either_ its start time or timestamp is within the window.
-    //
-    // Since the start times are <= the timestamps, we can take the min of those
-    // two to get the first point that overlaps at all, and the max to get the
-    // last.
-
+fn rate_in_window(window: &MetricWindow) -> Option<f64> {
+    // Rate needs the intervals that only a delta carries. The planner rejects
+    // a gauge before it reaches here, so this is a backstop.
     let start_times = window.start_times?;
-    let first_timestamp =
-        window.timestamps.partition_point(|t| t <= &window.start);
-    let last_timestamp =
-        window.timestamps.partition_point(|t| t <= &window.end);
-    let first_start_time = start_times.partition_point(|t| t <= &window.start);
-    let last_start_time = start_times.partition_point(|t| t <= &window.end);
-    let first_index = first_timestamp.min(first_start_time);
-    let last_index = last_timestamp.max(last_start_time);
 
     let window_secs = (window.end - window.start)
         .to_std()
@@ -732,48 +718,17 @@ fn rate_in_window(
         return None;
     }
 
-    // Detect the possible case where the interval is entirely before or
-    // entirely after the window.
-    if first_index == last_index {
-        let t = *window.timestamps.get(first_timestamp)?;
-        let s = *start_times.get(first_timestamp)?;
-        if t < window.start || s > window.end {
-            return None;
-        }
-        let Some(val) = window.input_points[first_timestamp] else {
-            return None;
-        };
-        let fraction = fraction_overlap_with_window(
-            start_times[first_start_time],
-            window.timestamps[first_timestamp],
-            window.start,
-            window.end,
-        );
-        return Some((fraction * val) / window_secs);
-    }
-
-    // Compute the overlap for all points which have some overlap.
-    let starts = &start_times[first_index..last_index];
-    let times = &window.timestamps[first_index..last_index];
-    let vals = &window.input_points[first_index..last_index];
-    let iter = starts
-        .into_iter()
-        .copied()
-        .zip(times.into_iter().copied())
-        .zip(vals.into_iter().copied());
-
-    let mut maybe_sum = None;
-    for it in iter.filter_map(|((start, time), maybe_val)| {
-        let Some(val) = maybe_val else {
-            return None;
-        };
-        let fraction =
-            fraction_overlap_with_window(start, time, window.start, window.end);
-        Some(fraction * val)
-    }) {
-        *maybe_sum.get_or_insert(0.0) += it;
-    }
-    maybe_sum.map(|sum| sum / window_secs)
+    // Dividing the amount attributable to this window by the window's own
+    // duration is what makes a rate independent of how often the producer
+    // sampled.
+    let sum = overlap_weighted_sum(
+        start_times,
+        window.timestamps,
+        window.input_points,
+        window.start,
+        window.end,
+    )?;
+    Some(sum / window_secs)
 }
 
 // Select the index of the largest point falling within the provided window.
@@ -983,7 +938,7 @@ mod tests {
     }
 
     #[test]
-    fn test_mean_delta_value_in_window() {
+    fn test_overlap_weighted_sum() {
         let now = Utc::now();
         let start_times = &[
             now - Duration::from_secs(4),
@@ -1001,7 +956,7 @@ mod tests {
 
         let window_start = now - Duration::from_secs_f64(0.5);
         let window_end = now;
-        let mean = mean_delta_value_in_window(
+        let sum = overlap_weighted_sum(
             start_times,
             timestamps,
             input_points,
@@ -1010,9 +965,10 @@ mod tests {
         )
         .expect("This should overlap the last interval");
         assert_eq!(
-            mean,
+            sum,
             input_points.last().unwrap().unwrap() / 2.0,
-            "This overlaps the last interval by half",
+            "This overlaps the last interval by half, so only half of that \
+            interval's amount is attributable to the window",
         );
     }
 
@@ -1248,7 +1204,7 @@ mod tests {
         window.start = "2025-08-12T19:17:05.0000Z".parse().unwrap();
         window.end = "2025-08-12T19:17:25.0000Z".parse().unwrap();
 
-        let rate = rate_in_window(&MetricType::Delta, &window.metric_window())
+        let rate = rate_in_window(&window.metric_window())
             .expect("The window overlaps every interval");
         assert!(
             (rate - 100.0).abs() < 1e-6,
@@ -1265,7 +1221,7 @@ mod tests {
         ]);
         window.input_points[1] = None;
 
-        let rate = rate_in_window(&MetricType::Delta, &window.metric_window())
+        let rate = rate_in_window(&window.metric_window())
             .expect("One point still has a value");
         assert!(
             (rate - 50.0).abs() < 1e-6,
@@ -1277,10 +1233,7 @@ mod tests {
         // A window of nothing but missing values has no rate at all, rather
         // than a rate of zero.
         window.input_points = vec![None, None];
-        assert!(
-            rate_in_window(&MetricType::Delta, &window.metric_window())
-                .is_none(),
-        );
+        assert!(rate_in_window(&window.metric_window()).is_none(),);
     }
 
     #[test]
@@ -1292,8 +1245,7 @@ mod tests {
         )]);
         window.start_times = None;
         assert!(
-            rate_in_window(&MetricType::Delta, &window.metric_window())
-                .is_none(),
+            rate_in_window(&window.metric_window()).is_none(),
             "Rate needs the intervals that only a delta carries. The planner \
             rejects a gauge before it reaches here, so this is a backstop.",
         );
@@ -1356,8 +1308,7 @@ mod tests {
             ("2025-08-12T19:17:50.0000Z", "2025-08-12T19:18:00.0000Z", 1000f64),
         ]);
 
-        let mean = rate_in_window(&MetricType::Delta, &window.metric_window())
-            .unwrap();
+        let mean = rate_in_window(&window.metric_window()).unwrap();
         let expected = 100.0;
         assert!(
             (mean - expected).abs() < 1e-6,
@@ -1489,7 +1440,7 @@ mod tests {
     }
 
     #[test]
-    fn test_mean_delta_does_not_modify_missing_values() {
+    fn test_overlap_weighted_sum_does_not_modify_missing_values() {
         let now = Utc::now();
         let start_times =
             &[now - Duration::from_secs(2), now - Duration::from_secs(1)];
@@ -1497,7 +1448,7 @@ mod tests {
         let input_points = &[Some(1.0), None];
         let window_start = now - Duration::from_secs(1);
         let window_end = now;
-        let mean = mean_delta_value_in_window(
+        let sum = overlap_weighted_sum(
             start_times,
             timestamps,
             input_points,
@@ -1505,7 +1456,7 @@ mod tests {
             window_end,
         );
         assert!(
-            mean.is_none(),
+            sum.is_none(),
             "This time window contains only a None value, which should not be \
             included in the sum"
         );
