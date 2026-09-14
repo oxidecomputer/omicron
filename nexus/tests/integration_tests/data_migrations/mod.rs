@@ -27,6 +27,7 @@ use std::collections::HashMap;
 mod add_rendezvous_sled_bp_availability;
 mod add_sled_update_disposition;
 mod bgp_unnumbered_peer_cleanup;
+mod blueprint_zone_multiple_external_ips;
 mod delete_nexus_default_allow_firewall_rule;
 mod drop_uninitialized_svc_enabled_not_online_state;
 mod ereport_everyone_gets_a_slot;
@@ -80,6 +81,7 @@ pub(crate) fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     register!(normalize_service_external_ips);
     register!(add_rendezvous_sled_bp_availability);
     register!(inventory_zone_multiple_external_ips);
+    register!(blueprint_zone_multiple_external_ips);
 
     map
 }

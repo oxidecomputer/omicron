@@ -10,6 +10,7 @@
 
 use super::OmicronZoneExternalIp;
 use daft::Diffable;
+use iddqd::IdOrdMap;
 use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::disk::DatasetName;
 use schemars::JsonSchema;
@@ -116,20 +117,43 @@ impl BlueprintZoneType {
         self.durable_dataset().map(|dataset| &dataset.dataset.pool_name)
     }
 
-    pub fn external_networking(
-        &self,
-    ) -> Option<(OmicronZoneExternalIp, &NetworkInterface)> {
+    /// Return this zone's external IPs (one or more) and its OPTE service vNIC,
+    /// if it has external networking.
+    ///
+    /// A zone has at most one service vNIC but may have multiple external IPs
+    /// (Nexus, external DNS) or a source-NAT address per IP family (boundary
+    /// NTP), so the external IPs are returned as a (small) collection.
+    pub fn external_networking(&self) -> Option<ZoneExternalNetworking<'_>> {
         match self {
-            BlueprintZoneType::Nexus(nexus) => Some((
-                OmicronZoneExternalIp::Floating(nexus.external_ip),
-                &nexus.nic,
-            )),
-            BlueprintZoneType::ExternalDns(dns) => Some((
-                OmicronZoneExternalIp::Floating(dns.dns_address.into_ip()),
-                &dns.nic,
-            )),
+            BlueprintZoneType::Nexus(nexus) => {
+                let external_ips = IdOrdMap::from_iter_unique(
+                    nexus
+                        .external_ips
+                        .iter()
+                        .copied()
+                        .map(OmicronZoneExternalIp::Floating),
+                )
+                .expect("Nexus IPs are guaranteed unique here");
+                let nic = &nexus.nic;
+                Some(ZoneExternalNetworking { external_ips, nic })
+            }
+            BlueprintZoneType::ExternalDns(dns) => {
+                let external_ips = IdOrdMap::from_iter_unique(
+                    dns.dns_addresses.iter().copied().map(|addr| {
+                        OmicronZoneExternalIp::Floating(addr.into_ip())
+                    }),
+                )
+                .expect("DNS IPs are guaranteed unique here");
+                let nic = &dns.nic;
+                Some(ZoneExternalNetworking { external_ips, nic })
+            }
             BlueprintZoneType::BoundaryNtp(ntp) => {
-                Some((OmicronZoneExternalIp::Snat(ntp.external_ip), &ntp.nic))
+                let external_ips = IdOrdMap::from_iter_unique(
+                    ntp.external_ip.iter().map(OmicronZoneExternalIp::Snat),
+                )
+                .expect("NTP IPs are guaranteed unique here");
+                let nic = &ntp.nic;
+                Some(ZoneExternalNetworking { external_ips, nic })
             }
             BlueprintZoneType::Clickhouse(_)
             | BlueprintZoneType::ClickhouseKeeper(_)
@@ -244,6 +268,31 @@ impl BlueprintZoneType {
     }
 }
 
+/// The external networking components for an Omicron Zone.
+pub struct ZoneExternalNetworking<'a> {
+    // The zone's external IPs, guaranteed to be:
+    //
+    // - non-empty
+    // - have no duplicate IPs
+    external_ips: IdOrdMap<OmicronZoneExternalIp>,
+    nic: &'a NetworkInterface,
+}
+
+impl<'a> ZoneExternalNetworking<'a> {
+    /// Return the external IPs.
+    ///
+    /// This is guaranteed to yield at least one item.
+    pub fn external_ips(
+        &self,
+    ) -> impl Iterator<Item = OmicronZoneExternalIp> + '_ {
+        self.external_ips.iter().copied()
+    }
+
+    pub fn nic(&self) -> &'a NetworkInterface {
+        self.nic
+    }
+}
+
 pub struct DurableDataset<'a> {
     pub dataset: &'a OmicronZoneDataset,
     pub kind: DatasetKind,
@@ -264,7 +313,7 @@ impl From<BlueprintZoneType> for OmicronZoneType {
                 dns_servers: zone.dns_servers,
                 domain: zone.domain,
                 nic: zone.nic,
-                snat_cfg: zone.external_ip.snat_cfg,
+                snat: zone.external_ip.into(),
             },
             BlueprintZoneType::Clickhouse(zone) => Self::Clickhouse {
                 address: zone.address,
@@ -295,7 +344,7 @@ impl From<BlueprintZoneType> for OmicronZoneType {
             BlueprintZoneType::ExternalDns(zone) => Self::ExternalDns {
                 dataset: zone.dataset,
                 http_address: zone.http_address,
-                dns_address: zone.dns_address.addr,
+                dns_addresses: zone.dns_addresses.into(),
                 nic: zone.nic,
             },
             BlueprintZoneType::InternalDns(zone) => Self::InternalDns {
@@ -311,7 +360,7 @@ impl From<BlueprintZoneType> for OmicronZoneType {
             BlueprintZoneType::Nexus(zone) => Self::Nexus {
                 internal_address: zone.internal_address,
                 lockstep_port: zone.lockstep_port,
-                external_ip: zone.external_ip.ip,
+                external_ips: zone.external_ips.into(),
                 nic: zone.nic,
                 external_tls: zone.external_tls,
                 external_dns_servers: zone.external_dns_servers,
@@ -344,9 +393,9 @@ impl BlueprintZoneType {
 }
 
 pub mod blueprint_zone_type {
-    use crate::deployment::OmicronZoneExternalFloatingAddr;
-    use crate::deployment::OmicronZoneExternalFloatingIp;
-    use crate::deployment::OmicronZoneExternalSnatIp;
+    use crate::deployment::OmicronZoneExternalFloatingAddrs;
+    use crate::deployment::OmicronZoneExternalFloatingIps;
+    use crate::deployment::OmicronZoneExternalSnat;
     use daft::Diffable;
     use omicron_generation_kinds::NexusGeneration;
     use schemars::JsonSchema;
@@ -377,7 +426,8 @@ pub mod blueprint_zone_type {
         pub domain: Option<String>,
         /// The service vNIC providing outbound connectivity using OPTE.
         pub nic: NetworkInterface,
-        pub external_ip: OmicronZoneExternalSnatIp,
+        /// The source NAT configuration.
+        pub external_ip: OmicronZoneExternalSnat,
     }
 
     /// Used in single-node clickhouse setups
@@ -499,8 +549,8 @@ pub mod blueprint_zone_type {
         pub dataset: OmicronZoneDataset,
         /// The address at which the external DNS server API is reachable.
         pub http_address: SocketAddrV6,
-        /// The address at which the external DNS server is reachable.
-        pub dns_address: OmicronZoneExternalFloatingAddr,
+        /// The addresses at which the external DNS server is reachable.
+        pub dns_addresses: OmicronZoneExternalFloatingAddrs,
         /// The service vNIC providing external connectivity using OPTE.
         pub nic: NetworkInterface,
     }
@@ -568,8 +618,8 @@ pub mod blueprint_zone_type {
         /// The port at which the lockstep server is reachable. This shares the
         /// same IP address with `internal_address`.
         pub lockstep_port: u16,
-        /// The address at which the external nexus server is reachable.
-        pub external_ip: OmicronZoneExternalFloatingIp,
+        /// The addresses at which the external nexus server is reachable.
+        pub external_ips: OmicronZoneExternalFloatingIps,
         /// The service vNIC providing external connectivity using OPTE.
         pub nic: NetworkInterface,
         /// Whether Nexus's external endpoint should use TLS

@@ -4464,6 +4464,19 @@ CREATE TYPE IF NOT EXISTS omicron.public.inv_zone_manifest_source AS ENUM (
     'sled-agent'
 );
 
+-- A sled's update disposition in inventory.
+--
+-- This is analogous to the `sled_update_availability` enum used as a part of
+-- storing update disposition in blueprints. We use a separate enum (despite
+-- currently having identical variants) because there are separate Rust
+-- types, and it allows the two to evolve independently.
+CREATE TYPE IF NOT EXISTS omicron.public.inv_sled_update_disposition AS ENUM (
+    -- Available for use for all provisions.
+    'available',
+    -- Disallowed for all use + migratable instances are being evacuated.
+    'evacuating'
+);
+
 -- observations from and about sled agents
 CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     -- where this observation came from
@@ -4547,19 +4560,34 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     --
     -- The path to the boot disk file
     measurement_manifest_boot_disk_path TEXT NOT NULL,
-    -- The source of the measurement manifest on the boot disk: from installinator or
-    -- sled-agent (synthetic). NULL means there is an error reading the measurement manifest.
+    -- The source of the measurement manifest on the boot disk: from
+    -- installinator or sled-agent (synthetic). NULL means there is an error
+    -- reading the measurement manifest.
     measurement_manifest_source omicron.public.inv_zone_manifest_source,
-    -- The mupdate ID that created the measurement manifest if this is from installinator. If
-    -- this is NULL, then either the measurement manifest is synthetic or there was an
-    -- error reading the measurement manifest.
+    -- The mupdate ID that created the measurement manifest if this is from
+    -- installinator. If this is NULL, then either the measurement manifest is
+    -- synthetic or there was an error reading the measurement manifest.
     measurement_manifest_mupdate_id UUID,
-    -- Message describing the status of the measurement manifest on the boot disk. If
-    -- this is NULL, then the measurement manifest was successfully read, and the
-    -- inv_zone_manifest_measurement table has entries corresponding to the zone
-    -- manifest.
+    -- Message describing the status of the measurement manifest on the boot
+    -- disk. If this is NULL, then the measurement manifest was successfully
+    -- read, and the inv_zone_manifest_measurement table has entries
+    -- corresponding to the zone manifest.
     measurement_manifest_boot_disk_error TEXT,
 
+    -- Columns making up the instance manager status on this sled
+    --
+    -- The update disposition as observed (and acted upon) by the instance
+    -- manager. This should usually match the update disposition in the
+    -- most-recently-ledgered config, but there can be a lag between the
+    -- ledgered config updating and the instance manager being aware of it if
+    -- the instance manager is busy.
+    --
+    -- NULL in this column maps to
+    -- `CurrentUpdateDisposition::ConfigNotAvailable`. A non-`NULL` value maps
+    -- to `CurrentUpdateDisposition::Known(the_disposition)`.
+    instance_manager_update_disposition omicron.public.inv_sled_update_disposition,
+    -- Number of VMMs currently registered with the instance manager.
+    instance_manager_num_registered_vmms INT8 NOT NULL CHECK (instance_manager_num_registered_vmms >= 0),
 
     CONSTRAINT reconciler_status_sled_config_present_if_running CHECK (
         (reconciler_status_kind = 'running'
@@ -4861,19 +4889,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_dataset (
     -- - The sled reporting the disk
     -- - The name of this dataset
     PRIMARY KEY (inv_collection_id, sled_id, name)
-);
-
--- A sled's update disposition in inventory.
---
--- This is analogous to the `sled_update_availability` enum used as a part of
--- storing update disposition in blueprints. We use a separate enum (despite
--- currently having identical variants) because there are separate Rust
--- types, and it allows the two to evolve independently.
-CREATE TYPE IF NOT EXISTS omicron.public.inv_sled_update_disposition AS ENUM (
-    -- Available for use for all provisions.
-    'available',
-    -- Disallowed for all use + migratable instances are being evacuated.
-    'evacuating'
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config (
@@ -5569,7 +5584,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.reconfigurator_config (
     tuf_repo_pruner_enabled BOOL NOT NULL,
 
     -- How to disrupt instances during updates.
-    disruption_policy omicron.public.reconfigurator_disruption_policy NOT NULL
+    disruption_policy omicron.public.reconfigurator_disruption_policy NOT NULL,
+
+    -- Enable the blueprint pruner background task
+    blueprint_pruner_enabled BOOL NOT NULL,
+
+    -- Number of recent target blueprints that the blueprint pruner keeps
+    blueprint_pruner_nkeep INT8 NOT NULL
 );
 
 /*
@@ -5881,7 +5902,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone (
     -- worthwhile.
 
     -- Some zones have a second service.  Like the primary one, the meaning of
-    -- this is zone-type-dependent.
+    -- this is zone-type-dependent.  This should be used for additional underlay
+    -- IPs, _not_ external IP addresses.  Those are stored in the child table
+    -- `bp_omicron_zone_external_ip` with a reference to this row.
     second_service_ip INET,
     second_service_port INT4
         CHECK (second_service_port IS NULL
@@ -5910,22 +5933,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone (
     -- Properties specific to Nexus zones
     nexus_external_tls BOOLEAN,
     nexus_external_dns_servers INET ARRAY,
-
-    -- Source NAT configuration (currently used for boundary NTP only)
-    snat_ip INET,
-    snat_first_port INT4
-        CHECK (snat_first_port IS NULL OR snat_first_port BETWEEN 0 AND 65535),
-    snat_last_port INT4
-        CHECK (snat_last_port IS NULL OR snat_last_port BETWEEN 0 AND 65535),
-
-    -- For some zones, either primary_service_ip or second_service_ip (but not
-    -- both!) is an external IP address. For such zones, this is the ID of that
-    -- external IP. In general this is a foreign key into
-    -- omicron.public.external_ip, though the row many not exist: if this
-    -- blueprint is old, it's possible the IP has been deleted, and if this
-    -- blueprint has not yet been realized, it's possible the IP hasn't been
-    -- created yet.
-    external_ip_id UUID,
 
     filesystem_pool UUID NOT NULL,
 
@@ -6007,6 +6014,56 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone_nic (
         (ip IS NULL) = (subnet IS NULL) AND
         (ipv6 IS NULL) = (ipv6_subnet IS NULL)
     )
+);
+
+-- The external IP addresses of a zone in a `bp_omicron_zone`.
+--
+-- Zones with external networking have one or more external IPs. There is one
+-- row here per external IP. Each blueprint external IP is an *allocated* IP, so it
+-- carries its `external_ip_id` (an FK into `omicron.public.external_ip`,
+-- though the row may not exist: if this blueprint is old, the IP may have been
+-- deleted, and if it has not yet been realized, the IP may not exist yet). The
+-- kind of external IP is inferred from the owning zone's `zone_type` together
+-- with which port columns are set:
+--
+--  - Nexus:        a floating IP (`ip` only).
+--  - External DNS: a floating IP with a port (`ip` + `port`).
+--  - Boundary NTP: a source-NAT IP (`ip` + `snat_first_port`/`snat_last_port`).
+CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone_external_ip (
+    -- foreign key into the `blueprint` table
+    blueprint_id UUID NOT NULL,
+
+    -- foreign key into the `bp_omicron_zone` table
+    zone_id UUID NOT NULL,
+
+    -- ID of the external IP allocation (foreign key into
+    -- `omicron.public.external_ip`)
+    external_ip_id UUID NOT NULL,
+
+    -- the external IP address itself
+    ip INET NOT NULL,
+
+    -- the port for a floating IP with an address (external DNS); NULL otherwise
+    port INT4
+        CHECK (port IS NULL OR port BETWEEN 0 AND 65535),
+
+    -- the source-NAT port range (boundary NTP); NULL otherwise
+    snat_first_port INT4
+        CHECK (snat_first_port IS NULL OR snat_first_port BETWEEN 0 AND 65535),
+    snat_last_port INT4
+        CHECK (snat_last_port IS NULL OR snat_last_port BETWEEN 0 AND 65535),
+
+    -- must provide both SNAT ports
+    CONSTRAINT both_snat_ports CHECK (
+        (snat_first_port IS NULL) = (snat_last_port IS NULL)
+    ),
+
+    -- may not provide _both_ `port` and any SNAT port
+    CONSTRAINT only_port_or_snat_ports CHECK (
+        NOT ((port IS NOT NULL) AND (snat_first_port IS NOT NULL))
+    ),
+
+    PRIMARY KEY (blueprint_id, external_ip_id)
 );
 
 -- Blueprint information related to clickhouse cluster management
@@ -9464,7 +9521,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '297.0.0', NULL)
+    (TRUE, NOW(), NOW(), '300.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

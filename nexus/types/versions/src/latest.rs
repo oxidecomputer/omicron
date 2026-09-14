@@ -57,8 +57,9 @@ pub mod alert {
     pub use crate::v2025_11_20_00::alert::WebhookSecretSelector;
     pub use crate::v2025_11_20_00::alert::WebhookSecrets;
 
-    pub use crate::v2026_08_14_00::alert::Alert;
     pub use crate::v2026_08_14_00::alert::AlertListParams;
+
+    pub use crate::v2026_09_11_00::alert::Alert;
 }
 
 pub mod audit {
@@ -370,9 +371,11 @@ pub mod probe {
 pub mod project {
     pub use crate::v2025_11_20_00::project::OptionalProjectSelector;
     pub use crate::v2025_11_20_00::project::Project;
-    pub use crate::v2025_11_20_00::project::ProjectCreate;
     pub use crate::v2025_11_20_00::project::ProjectSelector;
     pub use crate::v2025_11_20_00::project::ProjectUpdate;
+
+    pub use crate::v2026_09_08_00::project::ProjectCreate;
+    pub use crate::v2026_09_08_00::project::ProjectCreateDefaults;
 }
 
 pub mod saml {
@@ -466,7 +469,6 @@ pub mod vpc {
     pub use crate::v2025_11_20_00::vpc::RouterSelector;
     pub use crate::v2025_11_20_00::vpc::SubnetSelector;
     pub use crate::v2025_11_20_00::vpc::Vpc;
-    pub use crate::v2025_11_20_00::vpc::VpcCreate;
     pub use crate::v2025_11_20_00::vpc::VpcRouter;
     pub use crate::v2025_11_20_00::vpc::VpcRouterCreate;
     pub use crate::v2025_11_20_00::vpc::VpcRouterKind;
@@ -476,6 +478,11 @@ pub mod vpc {
     pub use crate::v2025_11_20_00::vpc::VpcSubnetCreate;
     pub use crate::v2025_11_20_00::vpc::VpcSubnetUpdate;
     pub use crate::v2025_11_20_00::vpc::VpcUpdate;
+
+    pub use crate::v2026_09_08_00::vpc::SubnetCreateDefaults;
+    pub use crate::v2026_09_08_00::vpc::VpcCreate;
+    pub use crate::v2026_09_08_00::vpc::VpcCreateDefaults;
+    pub use crate::v2026_09_08_00::vpc::VpcCreateDefaultsSelection;
 }
 
 pub mod asset {

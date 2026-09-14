@@ -332,7 +332,10 @@ mod test {
     use nexus_types::deployment::ExternalIpPolicy;
     use nexus_types::deployment::LastAllocatedSubnetIpOffset;
     pub use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
+    pub use nexus_types::deployment::OmicronZoneExternalFloatingAddrs;
     pub use nexus_types::deployment::OmicronZoneExternalFloatingIp;
+    pub use nexus_types::deployment::OmicronZoneExternalFloatingIps;
+    pub use nexus_types::deployment::OmicronZoneExternalSnat;
     pub use nexus_types::deployment::OmicronZoneExternalSnatIp;
     use nexus_types::deployment::OximeterReadMode;
     use nexus_types::deployment::PendingMgsUpdates;
@@ -412,6 +415,10 @@ mod test {
     pub enum InvalidOmicronZoneType {
         #[allow(unused)]
         ExternalIpIdRequired { kind: ZoneKind },
+        #[allow(unused)]
+        MultipleExternalIps { kind: ZoneKind },
+        #[allow(unused)]
+        DualStackSnat { kind: ZoneKind },
     }
 
     /// **********************************************************************
@@ -470,11 +477,14 @@ mod test {
                 domain,
                 nic,
                 ntp_servers,
-                snat_cfg,
+                snat,
             } => {
                 let external_ip_id = external_ip_id.ok_or(
                     InvalidOmicronZoneType::ExternalIpIdRequired { kind },
                 )?;
+                let snat_cfg = snat.try_into().map_err(|_| {
+                    InvalidOmicronZoneType::DualStackSnat { kind }
+                })?;
                 BlueprintZoneType::BoundaryNtp(
                     blueprint_zone_type::BoundaryNtp {
                         address,
@@ -482,10 +492,12 @@ mod test {
                         dns_servers,
                         domain,
                         nic,
-                        external_ip: OmicronZoneExternalSnatIp {
-                            id: external_ip_id,
-                            snat_cfg,
-                        },
+                        external_ip: OmicronZoneExternalSnat::from_single(
+                            OmicronZoneExternalSnatIp {
+                                id: external_ip_id,
+                                snat_cfg,
+                            },
+                        ),
                     },
                 )
             }
@@ -523,21 +535,27 @@ mod test {
             }
             OmicronZoneType::ExternalDns {
                 dataset,
-                dns_address,
+                dns_addresses,
                 http_address,
                 nic,
             } => {
                 let external_ip_id = external_ip_id.ok_or(
                     InvalidOmicronZoneType::ExternalIpIdRequired { kind },
                 )?;
+                let addr = dns_addresses.into_single().ok_or(
+                    InvalidOmicronZoneType::MultipleExternalIps { kind },
+                )?;
                 BlueprintZoneType::ExternalDns(
                     blueprint_zone_type::ExternalDns {
                         dataset,
                         http_address,
-                        dns_address: OmicronZoneExternalFloatingAddr {
-                            id: external_ip_id,
-                            addr: dns_address,
-                        },
+                        dns_addresses:
+                            OmicronZoneExternalFloatingAddrs::from_single(
+                                OmicronZoneExternalFloatingAddr {
+                                    id: external_ip_id,
+                                    addr,
+                                },
+                            ),
                         nic,
                     },
                 )
@@ -565,7 +583,7 @@ mod test {
             OmicronZoneType::Nexus {
                 lockstep_port,
                 external_dns_servers,
-                external_ip,
+                external_ips,
                 external_tls,
                 internal_address,
                 nic,
@@ -573,13 +591,18 @@ mod test {
                 let external_ip_id = external_ip_id.ok_or(
                     InvalidOmicronZoneType::ExternalIpIdRequired { kind },
                 )?;
+                let ip = external_ips.into_single().ok_or(
+                    InvalidOmicronZoneType::MultipleExternalIps { kind },
+                )?;
                 BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                     internal_address,
                     lockstep_port,
-                    external_ip: OmicronZoneExternalFloatingIp {
-                        id: external_ip_id,
-                        ip: external_ip,
-                    },
+                    external_ips: OmicronZoneExternalFloatingIps::from_single(
+                        OmicronZoneExternalFloatingIp {
+                            id: external_ip_id,
+                            ip,
+                        },
+                    ),
                     nic,
                     external_tls,
                     external_dns_servers,

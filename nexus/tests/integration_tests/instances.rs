@@ -6722,7 +6722,7 @@ async fn test_boot_disk_must_be_attached(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
 
-    assert_eq!(error.message, format!("boot disk must be attached"));
+    assert_eq!(error.message, "boot disk must be attached");
 
     // Now attach the disk.
     let url_instance_detach_disk =
@@ -8752,6 +8752,7 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
                 name: PROJECT_NAME.parse().unwrap(),
                 description: String::new(),
             },
+            defaults: None,
         },
     )
     .authn_as(AuthnMode::SiloUser(user_id))
