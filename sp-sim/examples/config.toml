@@ -27,7 +27,6 @@ bind_addr = "[::1]:44401"
 id = "ibc"
 device = "bmr491"
 description = "FAKE intermediate bus converter"
-capabilities = 0x20
 presence = "Present"
 
 [simulated_sps.sidecar.components.vpd.pmbus]
@@ -63,7 +62,6 @@ bind_addr = "[::1]:44411"
 id = "sp3-host-cpu"
 device = "sp3-host-cpu"
 description = "FAKE host cpu"
-capabilities = 0
 presence = "Present"
 serial_console = "[::1]:33312"
 
@@ -71,7 +69,6 @@ serial_console = "[::1]:33312"
 id = "dev-0"
 device = "tmp117"
 description = "FAKE Southwest temperature sensor"
-capabilities = 2
 presence = "Present"
 vpd = { tmp11x = { id = 0x0117, eeprom1 = 0x1111, eeprom2 = 0x2222, eeprom3 = 0x3333 } }
 sensors = [
@@ -82,7 +79,6 @@ sensors = [
 id = "dev-46"
 device = "sbtsi"
 description = "CPU temperature sensor"
-capabilities = 2
 presence = "Present"
 sensors = [
     { name = "CPU", kind = "Temperature", last_data.value = 64.5, last_data.timestamp = 1234 },
@@ -92,7 +88,6 @@ sensors = [
 id = "sharkfin-vpd"
 device = "at24csw080"
 description = "FAKE U.2 Sharkfin A VPD"
-capabilities = 0
 presence = "Present"
 vpd = { barcode = "0XV2:913-0000028:001:2SHRKFN" }
 
@@ -100,7 +95,6 @@ vpd = { barcode = "0XV2:913-0000028:001:2SHRKFN" }
 id = "ibc"
 device = "bmr491"
 description = "FAKE intermediate bus converter"
-capabilities = 0x20
 presence = "Present"
 
 [simulated_sps.gimlet.components.vpd.pmbus]
@@ -115,7 +109,6 @@ mfr_serial = "FP1C481052"
 id = "fan-tray-vpd"
 device = "at24csw080"
 description = "FAKE Fan tray VPD"
-capabilities = 0
 presence = "Present"
 
 [simulated_sps.gimlet.components.vpd.sled_fan_tray]
@@ -193,7 +186,6 @@ bind_addr = "[::1]:44421"
 id = "sp3-host-cpu"
 device = "sp3-host-cpu"
 description = "FAKE host cpu"
-capabilities = 0
 presence = "Present"
 serial_console = "[::1]:33322"
 
@@ -201,7 +193,6 @@ serial_console = "[::1]:33322"
 id = "dev-0"
 device = "tmp117"
 description = "FAKE Southwest temperature sensor"
-capabilities = 2
 presence = "Present"
 vpd = { tmp11x = { id = 0x0117, eeprom1 = 0x1001, eeprom2 = 0x1002, eeprom3 = 0x1003 } }
 sensors = [
@@ -212,7 +203,6 @@ sensors = [
 id = "dev-46"
 device = "sbtsi"
 description = "CPU temperature sensor"
-capabilities = 2
 presence = "Present"
 sensors = [
     { name = "CPU", kind = "Temperature", last_data.value = 63.1, last_data.timestamp = 1234 },
@@ -222,7 +212,6 @@ sensors = [
 id = "ibc"
 device = "bmr491"
 description = "FAKE intermediate bus converter"
-capabilities = 0x20
 presence = "Present"
 
 [simulated_sps.gimlet.components.vpd.pmbus]

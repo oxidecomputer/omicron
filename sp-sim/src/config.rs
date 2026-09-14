@@ -136,7 +136,6 @@ pub struct SpComponentConfig {
     pub id: String,
     pub device: String,
     pub description: String,
-    pub capabilities: DeviceCapabilities,
     pub presence: DevicePresence,
     /// Socket address to emulate a serial console.
     ///
@@ -152,15 +151,13 @@ pub struct SpComponentConfig {
 }
 
 impl SpComponentConfig {
-    /// Determine the capabilities to advertise for this component based on the
-    /// config.
+    /// Determines the capabilities to advertise from the behaviors this
+    /// component is configured to simulate.
     ///
-    /// This combines the capabilities bits specified directly in the config
-    /// file with additional capabilities that are implied by behaviors this
-    /// component is configured to simulate. For example, if the component is
-    /// configured to simulate sensors, we add `HAS_MEASUREMENT_CHANNELS`.
-    pub(crate) fn configured_capabilities(&self) -> DeviceCapabilities {
-        let mut capabilities = self.capabilities;
+    /// For example, if the component is configured to simulate sensors, we add
+    /// `HAS_MEASUREMENT_CHANNELS`.
+    pub(crate) fn capabilities(&self) -> DeviceCapabilities {
+        let mut capabilities = DeviceCapabilities::empty();
 
         // If this component is configured to report VPD, add the capability.
         if let Some(ref vpd) = self.vpd {

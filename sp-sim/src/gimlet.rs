@@ -1403,7 +1403,7 @@ impl SpHandler for Handler {
             component: SpComponent::try_from(c.id.as_str()).unwrap(),
             device: self.leaked_component_device_strings[index],
             description: self.leaked_component_description_strings[index],
-            capabilities: c.configured_capabilities(),
+            capabilities: c.capabilities(),
             presence: c.presence,
         }
     }
