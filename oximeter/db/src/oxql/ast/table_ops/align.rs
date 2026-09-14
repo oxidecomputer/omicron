@@ -964,6 +964,90 @@ mod tests {
     }
 
     #[test]
+    fn test_rate_in_window_measures_from_a_restart_not_across_it() {
+        // Three samples of a steady 10/s, then a producer restart with just
+        // over a minute of downtime. The restart begins a new epoch, so its
+        // first point carries the increase since the restart rather than a
+        // difference, and its start time is the restart rather than the
+        // timestamp of the sample before it.
+        let mut window = parse_example_data(&[
+            ("2025-08-12T19:17:00.0000Z", "2025-08-12T19:17:01.0000Z", 10f64),
+            ("2025-08-12T19:17:01.0000Z", "2025-08-12T19:17:02.0000Z", 10f64),
+            ("2025-08-12T19:17:02.0000Z", "2025-08-12T19:17:03.0000Z", 10f64),
+            ("2025-08-12T19:18:05.0000Z", "2025-08-12T19:18:06.0000Z", 10f64),
+        ]);
+
+        // A window holding only the first post-restart point.
+        window.start = "2025-08-12T19:18:04.0000Z".parse().unwrap();
+        window.end = "2025-08-12T19:18:06.0000Z".parse().unwrap();
+        let rate = rate_in_window(&window.metric_window())
+            .expect("The window holds the first sample after the restart");
+        assert!(
+            (rate - 10.0).abs() < 1e-9,
+            "The span must be measured from the restart at 19:18:05, giving \
+            10 over 1s. Anchoring it on the previous sample's timestamp \
+            instead would stretch it across the 63s of downtime and report \
+            roughly 0.16/s. Got {rate}",
+        );
+
+        // Widening the window back over the whole outage must not change it:
+        // nothing was observed during the downtime, so it is not part of the
+        // span.
+        window.start = "2025-08-12T19:17:03.0000Z".parse().unwrap();
+        let rate = rate_in_window(&window.metric_window())
+            .expect("The window still holds the post-restart sample");
+        assert!(
+            (rate - 10.0).abs() < 1e-9,
+            "Dead time while the producer was down must not dilute the rate, \
+            got {rate}",
+        );
+    }
+
+    #[test]
+    fn test_rate_in_window_skips_the_series_baseline() {
+        // `Points::from_cumulative()` gives the first point of a series the
+        // producer's whole accumulated count, over an interval reaching back
+        // to whenever counting started -- here an hour before the data.
+        let mut window = parse_example_data(&[
+            (
+                "2025-08-12T18:17:00.0000Z",
+                "2025-08-12T19:17:01.0000Z",
+                36000f64,
+            ),
+            ("2025-08-12T19:17:01.0000Z", "2025-08-12T19:17:02.0000Z", 10f64),
+            ("2025-08-12T19:17:02.0000Z", "2025-08-12T19:17:03.0000Z", 10f64),
+        ]);
+
+        window.start = "2025-08-12T19:17:00.0000Z".parse().unwrap();
+        window.end = "2025-08-12T19:17:03.0000Z".parse().unwrap();
+        let rate = rate_in_window(&window.metric_window())
+            .expect("Two real samples fall in the window");
+        assert!(
+            (rate - 10.0).abs() < 1e-9,
+            "The baseline point starts before the window, so its hour of \
+            accumulation belongs to time we were not asked about. Counting it \
+            would report the producer's lifetime average as though it were \
+            measured here. Got {rate}",
+        );
+
+        // But a producer that started inside the window really did count from
+        // zero in view, so there the first point is a measurement.
+        let mut window = parse_example_data(&[
+            ("2025-08-12T19:17:00.5000Z", "2025-08-12T19:17:01.0000Z", 5f64),
+            ("2025-08-12T19:17:01.0000Z", "2025-08-12T19:17:02.0000Z", 10f64),
+        ]);
+        window.start = "2025-08-12T19:17:00.0000Z".parse().unwrap();
+        window.end = "2025-08-12T19:17:02.0000Z".parse().unwrap();
+        let rate = rate_in_window(&window.metric_window())
+            .expect("Both points fall in the window");
+        assert!(
+            (rate - 10.0).abs() < 1e-9,
+            "15 counted over the 1.5s since the producer started, all of it \
+            inside the window. Got {rate}",
+        );
+    }
+
+    #[test]
     fn test_rate_in_window_partial_overlap() {
         // The same steady 100 bytes/sec, but with a window covering half of
         // the first interval and half of the last. The prorated halves add up

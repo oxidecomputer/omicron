@@ -1961,4 +1961,77 @@ mod tests {
         }
         ctx.cleanup_successful().await;
     }
+
+    // A producer restart begins a new epoch: the counter resets and its
+    // samples carry a new start time. The rate should be unchanged across it,
+    // and in particular the dead time while the producer was down must not
+    // dilute it -- the span is measured from the restart, not from the last
+    // sample before it.
+    #[tokio::test]
+    async fn test_align_rate_across_a_producer_restart() {
+        let ctx =
+            setup_oxql_test("test_align_rate_across_a_producer_restart").await;
+
+        // A counter advancing by 10 every second, interrupted by a restart
+        // with a minute of downtime -- the shape of a sled reboot.
+        let target = SomeTarget { name: String::from("restart"), index: 9 };
+        let first = ctx.test_data.first_timestamp;
+        let mut samples = Vec::new();
+        for (epoch_start, offsets) in
+            [(first, 1..=5u32), (first + Duration::from_secs(65), 66..=70u32)]
+        {
+            for (i, offset) in offsets.enumerate() {
+                let datum = Cumulative::with_start_time(
+                    epoch_start,
+                    (i as u64 + 1) * 10,
+                );
+                let metric = SomeMetric { foo: 7, datum };
+                samples.push(
+                    Sample::new_with_timestamp(
+                        first + Duration::from_secs(offset.into()),
+                        &target,
+                        &metric,
+                    )
+                    .unwrap(),
+                );
+            }
+        }
+        ctx.client.insert_samples(&samples).await.expect("inserted");
+
+        let query = format!(
+            "get some_target:some_metric | filter {} | align rate(5s)",
+            exact_filter_for(&target, 7),
+        );
+        let result = ctx
+            .client
+            .oxql_query(&query, QueryAuthzScope::Fleet)
+            .await
+            .unwrap_or_else(|e| panic!("`{query}` failed: {e}"));
+
+        let table = result.tables.first().expect("one table");
+        let timeseries =
+            find_timeseries_in_table(table, &target, &7).expect("found");
+        let rates: Vec<f64> = timeseries
+            .points
+            .values(0)
+            .unwrap()
+            .as_double()
+            .expect("rate emits doubles")
+            .iter()
+            .flatten()
+            .copied()
+            .collect();
+
+        assert!(!rates.is_empty(), "`{query}` produced no aligned points");
+        for rate in rates.iter() {
+            assert!(
+                (rate - 10.0).abs() < 1e-9,
+                "Every window covering either epoch sees the same steady 10/s. \
+                A window starting at the restart must measure from the restart, \
+                not across the downtime, and the reset must not read as a \
+                negative or enormous jump. `{query}` gave {rates:?}",
+            );
+        }
+        ctx.cleanup_successful().await;
+    }
 }
