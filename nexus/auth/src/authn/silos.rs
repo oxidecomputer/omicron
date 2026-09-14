@@ -15,6 +15,7 @@ use samael::metadata::NameIdFormat;
 use samael::schema::Response as SAMLResponse;
 use samael::service_provider::ServiceProvider;
 use samael::service_provider::ServiceProviderBuilder;
+use samael::signature::Signature;
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize)]
@@ -243,11 +244,16 @@ impl SamlIdentityProvider {
             return Err(HttpError::for_bad_request(
                 None,
                 format!(
-                    "SAMLResponse issuer {} does not match configured idp entity id {}",
+                    "SAMLResponse issuer {} does not match configured idp \
+                    entity id {}",
                     issuer, self.idp_entity_id,
                 ),
             ));
         }
+
+        // Before doing anything else, validate the deserialized response.
+
+        validate_saml_response(&saml_response)?;
 
         // Drop the parsed SAMLResponse, create a samael ServiceProvider object,
         // and use it to parse the same SAMLResponse string into a
@@ -390,4 +396,140 @@ pub struct SamlLoginPost {
 pub struct AuthenticatedSubject {
     pub external_id: String,
     pub groups: Vec<String>,
+}
+
+/// Validate the SAML response, returning a HTTP error if invalid.
+///
+/// Note these errors should be as clear and descriptive as possible:
+/// administrators will be counting on their contents to debug why logging into
+/// our system isn't working, and we want to make that process as straight
+/// forward as possible. SAML is a complicated beast.
+fn validate_saml_response(response: &SAMLResponse) -> Result<(), HttpError> {
+    // Check that all references point to identifiers in the document
+    //
+    // From the SAML core spec, section 5.4.2 References: "Signatures MUST
+    // contain a single <ds:Reference> containing a same-document reference to
+    // the ID attribute value of the root element of the assertion or protocol
+    // message being signed."
+
+    if let Some(reason) = validate_references_in_response(response) {
+        return Err(HttpError::for_bad_request(None, reason));
+    }
+
+    // Check for unacceptable transforms, and return a 400 if found.
+    //
+    // From the SAML core spec, section 5.4.4 Transforms: "Verifiers of
+    // signatures MAY reject signatures that contain other transform algorithms
+    // as invalid."
+
+    if let Some(identifier) = other_transform_present_in_response(response) {
+        return Err(HttpError::for_bad_request(
+            None,
+            format!("rejecting signature with transform {identifier}"),
+        ));
+    }
+
+    Ok(())
+}
+
+/// If either Signature block in a SAMLResponse contains multiple references,
+/// reject it. If the expected single reference contains a non-same-document
+/// reference, also reject it. Return a reason string.
+fn validate_references_in_response(response: &SAMLResponse) -> Option<String> {
+    if let Some(signature) = &response.signature {
+        if let Some(reason) =
+            validate_references_in_signature(&response.id, &signature)
+        {
+            return Some(reason);
+        }
+    }
+
+    if let Some(assertion) = &response.assertion {
+        if let Some(signature) = &assertion.signature {
+            if let Some(reason) =
+                validate_references_in_signature(&assertion.id, &signature)
+            {
+                return Some(reason);
+            }
+        }
+    }
+
+    None
+}
+
+/// If the signature contains multiple references, reject it. If the expected
+/// single reference contains an unexpected URI reference (according to SAML
+/// core section 5.4.2), reject it. Return a reason string.
+fn validate_references_in_signature(
+    expected_id: &str,
+    signature: &Signature,
+) -> Option<String> {
+    if signature.signed_info.reference.len() != 1 {
+        return Some(String::from("multiple references in signature"));
+    }
+
+    let Some(uri) = &signature.signed_info.reference[0].uri else {
+        return Some(String::from("reference without URI"));
+    };
+
+    if *uri != format!("#{expected_id}") {
+        return Some(format!("URI {uri} does not match #{expected_id}"));
+    }
+
+    None
+}
+
+/// If either Signature block in a SAMLResponse contains a transform other than
+/// the enveloped signature transform or the exclusive canonicalization
+/// transforms, then return that transform's identifier.
+fn other_transform_present_in_response(
+    response: &SAMLResponse,
+) -> Option<&str> {
+    if let Some(signature) = &response.signature {
+        if let Some(identifier) =
+            other_transform_present_in_signature(&signature)
+        {
+            return Some(identifier);
+        }
+    }
+
+    if let Some(assertion) = &response.assertion {
+        if let Some(signature) = &assertion.signature {
+            if let Some(identifier) =
+                other_transform_present_in_signature(&signature)
+            {
+                return Some(identifier);
+            }
+        }
+    }
+
+    None
+}
+
+/// If a transform other than the enveloped signature transform or the exclusive
+/// canonicalization transforms is present in a Signature, return that
+/// identifier, otherwise return None.
+fn other_transform_present_in_signature(signature: &Signature) -> Option<&str> {
+    for reference in &signature.signed_info.reference {
+        let Some(transforms) = &reference.transforms else {
+            continue;
+        };
+
+        for transform in &transforms.transforms {
+            match transform.algorithm.as_str() {
+                "http://www.w3.org/2000/09/xmldsig#enveloped-signature"
+                | "http://www.w3.org/2001/10/xml-exc-c14n#"
+                | "http://www.w3.org/2001/10/xml-exc-c14n#WithComments" => {
+                    // These transforms are explicitly named in section 5.4.4 as
+                    // accepted.
+                }
+
+                _ => {
+                    return Some(transform.algorithm.as_str());
+                }
+            }
+        }
+    }
+
+    None
 }
