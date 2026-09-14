@@ -495,11 +495,16 @@ impl DataStore {
                     // The query above joins the disk table with the
                     // disk_type_local_storage table, meaning the higher level
                     // Disk can never be the Crucible type, unless there's a
-                    // serious problem. Return an error instead of panicking.
-                    return Err(Error::internal_error(&format!(
-                        "disk {} should be the local storage, not crucible",
+                    // serious problem. Log an error but return whatever disks
+                    // we can for deletion.
+                    //
+                    // TODO surface this to operators, support intervention is
+                    // likely required.
+                    error!(
+                        self.log,
+                        "disk {} should be local storage, not crucible",
                         crucible_disk.id(),
-                    )));
+                    );
                 }
 
                 datastore::Disk::LocalStorage(local_storage_disk) => {
