@@ -104,7 +104,7 @@ capabilities = 0x20
 presence = "Present"
 
 [simulated_sps.gimlet.components.vpd.pmbus]
-mfr_id = "FlexAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+mfr_id = "Flex"
 mfr_model = "BMR4913203851"
 mfr_revision = "R1C A"
 mfr_location = "CB6"
