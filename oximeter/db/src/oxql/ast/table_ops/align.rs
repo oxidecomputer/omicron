@@ -550,96 +550,6 @@ fn select_input_values(
     }
 }
 
-// Given an interval start and end, and a window start and end, compute the
-// fraction of the _interval_ that the time window represents.
-fn fraction_overlap_with_window(
-    interval_start: DateTime<Utc>,
-    interval_end: DateTime<Utc>,
-    window_start: DateTime<Utc>,
-    window_end: DateTime<Utc>,
-) -> f64 {
-    assert!(interval_start < interval_end);
-    assert!(window_start < window_end);
-    let end = window_end.min(interval_end);
-    let start = window_start.max(interval_start);
-    let contained_size = (end - start).num_nanoseconds().unwrap() as f64;
-    if contained_size < 0.0 {
-        return 0.0;
-    }
-    let interval_size =
-        (interval_end - interval_start).num_nanoseconds().unwrap() as f64;
-    let fraction = contained_size / interval_size;
-    assert!(fraction >= 0.0);
-    assert!(fraction <= 1.0);
-    fraction
-}
-
-// For a delta metric, sum the points falling within the provided window,
-// weighting each by how much of its interval the window covers.
-//
-// This uses both the start and end times when considering each point, so that
-// a point overlapping the window only partially contributes only that part.
-// Returns `None` if no overlapping point has a value.
-fn overlap_weighted_sum(
-    start_times: &[DateTime<Utc>],
-    timestamps: &[DateTime<Utc>],
-    input_points: &[Option<f64>],
-    window_start: DateTime<Utc>,
-    window_end: DateTime<Utc>,
-) -> Option<f64> {
-    // We can find the indices where the timestamp and start times separately
-    // overlap the window of interest. Then any interval is potentially of
-    // interest if _either_ its start time or timestamp is within the window.
-    //
-    // Since the start times are <= the timestamps, we can take the min of those
-    // two to get the first point that overlaps at all, and the max to get the
-    // last.
-    let first_timestamp = timestamps.partition_point(|t| t <= &window_start);
-    let last_timestamp = timestamps.partition_point(|t| t <= &window_end);
-    let first_start_time = start_times.partition_point(|t| t <= &window_start);
-    let last_start_time = start_times.partition_point(|t| t <= &window_end);
-    let first_index = first_timestamp.min(first_start_time);
-    let last_index = last_timestamp.max(last_start_time);
-
-    // Detect the possible case where the interval is entirely before or
-    // entirely after the window.
-    if first_index == last_index {
-        let t = *timestamps.get(first_timestamp)?;
-        let s = *start_times.get(first_timestamp)?;
-        if t < window_start || s > window_end {
-            return None;
-        }
-        let val = input_points[first_timestamp]?;
-        let fraction = fraction_overlap_with_window(
-            start_times[first_start_time],
-            timestamps[first_timestamp],
-            window_start,
-            window_end,
-        );
-        return Some(fraction * val);
-    }
-
-    // Compute the overlap for all points which have some overlap.
-    let starts = &start_times[first_index..last_index];
-    let times = &timestamps[first_index..last_index];
-    let vals = &input_points[first_index..last_index];
-    let iter = starts
-        .iter()
-        .copied()
-        .zip(times.iter().copied())
-        .zip(vals.iter().copied());
-    let mut maybe_sum = None;
-    for it in iter.filter_map(|((start, time), maybe_val)| {
-        let val = maybe_val?;
-        let fraction =
-            fraction_overlap_with_window(start, time, window_start, window_end);
-        Some(fraction * val)
-    }) {
-        *maybe_sum.get_or_insert(0.0) += it;
-    }
-    maybe_sum
-}
-
 // Compute the mean of the points falling within the provided window.
 //
 // Only gauges reach here, so every point is either wholly inside the window or
@@ -709,26 +619,55 @@ fn rate_in_window(window: &MetricWindow) -> Option<f64> {
     // a gauge before it reaches here, so this is a backstop.
     let start_times = window.start_times?;
 
-    let window_secs = (window.end - window.start)
-        .to_std()
-        .ok()
-        .map(|d| d.as_secs_f64())
-        .unwrap_or(0.0);
-    if window_secs <= 0.0 {
+    // Points whose timestamp falls in the window.
+    let first = window.timestamps.partition_point(|t| t <= &window.start);
+    let last = window.timestamps.partition_point(|t| t <= &window.end);
+
+    // The first point of the series is a baseline rather than a measurement.
+    // `Points::from_cumulative()` builds it from the sample's own start time,
+    // which is whenever the producer began counting -- often long before the
+    // query -- and gives it everything the counter accumulated over that whole
+    // span. Including it would report the producer's lifetime average as if it
+    // were measured here.
+    //
+    // Skip it, and use it only for the span below, the way a counter's first
+    // scrape is used everywhere else. The exception is a producer that started
+    // inside this window, where the count really did go from zero to its value
+    // in view, and there is nothing earlier to be a baseline for.
+    let first =
+        if first == 0 && start_times[0] < window.start { 1 } else { first };
+    if first >= last {
         return None;
     }
 
-    // Dividing the amount attributable to this window by the window's own
-    // duration is what makes a rate independent of how often the producer
-    // sampled.
-    let sum = overlap_weighted_sum(
-        start_times,
-        window.timestamps,
-        window.input_points,
-        window.start,
-        window.end,
-    )?;
-    Some(sum / window_secs)
+    // Within an epoch each value is the increase since the previous sample, so
+    // summing them telescopes to (last cumulative - first cumulative) without
+    // having to recover the cumulative values themselves. A restart begins a
+    // new epoch whose first value is the increase since the restart rather
+    // than a difference -- still an increase, so it sums in correctly.
+    let mut maybe_sum = None;
+    for value in window.input_points[first..last].iter().flatten() {
+        *maybe_sum.get_or_insert(0.0) += *value;
+    }
+    let sum = maybe_sum?;
+
+    // Divide by the span actually observed, not by the width of the window.
+    //
+    // A sample carries no increase of its own -- the increase belongs to the
+    // gap between it and the sample before -- so the increases inside a window
+    // span from the baseline sample to the last one, which is narrower than
+    // the window by about one sample interval. Using the observed span as the
+    // divisor cancels that exactly, instead of reporting a rate depressed by
+    // however coarsely the producer samples. It also excludes the dead time
+    // after a restart, so what comes back is the rate while running.
+    let span = (window.timestamps[last - 1] - start_times[first])
+        .to_std()
+        .ok()?
+        .as_secs_f64();
+    if span <= 0.0 {
+        return None;
+    }
+    Some(sum / span)
 }
 
 // Select the index of the largest point falling within the provided window.
@@ -805,171 +744,6 @@ mod tests {
                 end: self.end,
             }
         }
-    }
-
-    #[test]
-    fn test_fraction_overlap_with_window() {
-        let now = Utc::now();
-        let window_start = now - Duration::from_secs(1);
-        let window_end = now;
-        let interval_start = window_start;
-        let interval_end = window_end;
-        assert_eq!(
-            fraction_overlap_with_window(
-                interval_start,
-                interval_end,
-                window_start,
-                window_end,
-            ),
-            1.0
-        );
-
-        let window_start = now - Duration::from_secs(1);
-        let window_end = now;
-        let interval_start = window_start;
-        let interval_end = now - Duration::from_secs_f64(0.5);
-        assert_eq!(
-            fraction_overlap_with_window(
-                interval_start,
-                interval_end,
-                window_start,
-                window_end,
-            ),
-            1.0,
-            "This interval is aligned with the start time \
-            of the window, and contained entirely within it, \
-            so the fraction should be 1.0",
-        );
-
-        // If we reverse the window and interval, then the interval entirely
-        // contains the window, which is 50% of the interval.
-        let (window_start, window_end, interval_start, interval_end) =
-            (interval_start, interval_end, window_start, window_end);
-        assert_eq!(
-            fraction_overlap_with_window(
-                interval_start,
-                interval_end,
-                window_start,
-                window_end,
-            ),
-            0.5,
-            "The window is entirely contained within the interval, \
-            and covers 50% of it",
-        );
-
-        // If the interval is entirely contained in the window, we should have
-        // the entire interval as our fraction.
-        let window_start = now - Duration::from_secs(1);
-        let window_end = now;
-        let interval_start = window_start + Duration::from_secs_f64(0.25);
-        let interval_end = window_start + Duration::from_secs_f64(0.5);
-        assert_eq!(
-            fraction_overlap_with_window(
-                interval_start,
-                interval_end,
-                window_start,
-                window_end,
-            ),
-            1.0,
-            "The interval is entirely contained within the window",
-        );
-
-        // This is aligned at the right with the window end.
-        let window_start = now - Duration::from_secs(1);
-        let window_end = now;
-        let interval_start = window_start + Duration::from_secs_f64(0.25);
-        let interval_end = window_end;
-        assert_eq!(
-            fraction_overlap_with_window(
-                interval_start,
-                interval_end,
-                window_start,
-                window_end,
-            ),
-            1.0,
-            "The interval is aligned at right with the window, and \
-            entirely contained within it, so the fraction should still \
-            be 1.0",
-        );
-
-        // But if we reverse it again, the fraction should reveal itself.
-        let (window_start, window_end, interval_start, interval_end) =
-            (interval_start, interval_end, window_start, window_end);
-        assert_eq!(
-            fraction_overlap_with_window(
-                interval_start,
-                interval_end,
-                window_start,
-                window_end,
-            ),
-            0.75,
-            "The window represents 75% of the interval",
-        );
-
-        // This interval does not overlap at all, to the left.
-        let window_start = now - Duration::from_secs(1);
-        let window_end = now;
-        let interval_start = window_start - Duration::from_secs(2);
-        let interval_end = window_start - Duration::from_secs(1);
-        assert_eq!(
-            fraction_overlap_with_window(
-                interval_start,
-                interval_end,
-                window_start,
-                window_end,
-            ),
-            0.0,
-        );
-
-        // This interval does not overlap at all, to the right.
-        let window_start = now - Duration::from_secs(1);
-        let window_end = now;
-        let interval_start = window_start + Duration::from_secs(1);
-        let interval_end = window_start + Duration::from_secs(2);
-        assert_eq!(
-            fraction_overlap_with_window(
-                interval_start,
-                interval_end,
-                window_start,
-                window_end,
-            ),
-            0.0,
-        );
-    }
-
-    #[test]
-    fn test_overlap_weighted_sum() {
-        let now = Utc::now();
-        let start_times = &[
-            now - Duration::from_secs(4),
-            now - Duration::from_secs(3),
-            now - Duration::from_secs(2),
-            now - Duration::from_secs(1),
-        ];
-        let timestamps = &[
-            now - Duration::from_secs(3),
-            now - Duration::from_secs(2),
-            now - Duration::from_secs(1),
-            now,
-        ];
-        let input_points = &[Some(0.0), Some(1.0), Some(2.0), Some(3.0)];
-
-        let window_start = now - Duration::from_secs_f64(0.5);
-        let window_end = now;
-        let sum = overlap_weighted_sum(
-            start_times,
-            timestamps,
-            input_points,
-            window_start,
-            window_end,
-        )
-        .expect("This should overlap the last interval");
-        assert_eq!(
-            sum,
-            input_points.last().unwrap().unwrap() / 2.0,
-            "This overlaps the last interval by half, so only half of that \
-            interval's amount is attributable to the window",
-        );
     }
 
     #[test]
@@ -1436,29 +1210,6 @@ mod tests {
         );
         assert!(
             verify_max_upsampling_ratio(&[], &Duration::from_nanos(1),).is_ok()
-        );
-    }
-
-    #[test]
-    fn test_overlap_weighted_sum_does_not_modify_missing_values() {
-        let now = Utc::now();
-        let start_times =
-            &[now - Duration::from_secs(2), now - Duration::from_secs(1)];
-        let timestamps = &[now - Duration::from_secs(1), now];
-        let input_points = &[Some(1.0), None];
-        let window_start = now - Duration::from_secs(1);
-        let window_end = now;
-        let sum = overlap_weighted_sum(
-            start_times,
-            timestamps,
-            input_points,
-            window_start,
-            window_end,
-        );
-        assert!(
-            sum.is_none(),
-            "This time window contains only a None value, which should not be \
-            included in the sum"
         );
     }
 

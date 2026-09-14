@@ -1904,4 +1904,61 @@ mod tests {
         );
         logctx.cleanup_successful();
     }
+
+    // The inserted fixture is a counter that advances by exactly 1 every
+    // second, so every aligned window should report a rate of 1.0/s no matter
+    // what period is asked for. Running it through a real ClickHouse exercises
+    // the cumulative -> delta conversion, which is where the interesting edge
+    // cases live.
+    #[tokio::test]
+    async fn test_align_rate_over_a_real_counter() {
+        let ctx = setup_oxql_test("test_align_rate_over_a_real_counter").await;
+        let ((target, foo), _) =
+            ctx.test_data.samples_by_timeseries.first_key_value().unwrap();
+
+        for period in ["2s", "5s"] {
+            let query = format!(
+                "get some_target:some_metric | filter {} | align rate({})",
+                exact_filter_for(target, *foo),
+                period,
+            );
+            let result = ctx
+                .client
+                .oxql_query(&query, QueryAuthzScope::Fleet)
+                .await
+                .unwrap_or_else(|e| panic!("`{query}` failed: {e}"));
+
+            let table = result.tables.first().expect("one table");
+            let timeseries =
+                find_timeseries_in_table(table, target, foo).expect("found");
+
+            // Alignment walks back from the query end time, so most windows
+            // fall in the gap between the fixture and now and hold no data.
+            // The ones that do have data all cover the same steady counter.
+            let rates: Vec<f64> = timeseries
+                .points
+                .values(0)
+                .unwrap()
+                .as_double()
+                .expect("rate emits doubles")
+                .iter()
+                .flatten()
+                .copied()
+                .collect();
+
+            assert!(
+                !rates.is_empty(),
+                "`{query}` produced no aligned points at all",
+            );
+            for rate in rates.iter() {
+                assert!(
+                    (rate - 1.0).abs() < 1e-9,
+                    "The fixture counter advances by 1 per second, so every \
+                    window with data should report 1.0/s. `{query}` gave \
+                    {rates:?}",
+                );
+            }
+        }
+        ctx.cleanup_successful().await;
+    }
 }
