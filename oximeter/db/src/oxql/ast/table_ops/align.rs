@@ -644,22 +644,32 @@ fn rate_in_window(window: &MetricWindow) -> Option<f64> {
     // summing them telescopes to (last cumulative - first cumulative) without
     // having to recover the cumulative values themselves. A restart begins a
     // new epoch whose first value is the increase since the restart rather
-    // than a difference -- still an increase, so it sums in correctly.
+    // than a difference -- still an increase, so it sums in correctly. This is
+    // what PromQL's rate() reconstructs by adding back the pre-reset value at
+    // every counter reset; the epochs hand it to us already done.
     let mut maybe_sum = None;
     for value in window.input_points[first..last].iter().flatten() {
         *maybe_sum.get_or_insert(0.0) += *value;
     }
     let sum = maybe_sum?;
 
-    // Divide by the span actually observed, not by the width of the window.
+    // Divide by the span from end to end, not by the width of the window and
+    // not by the time the producer was actually up.
     //
     // A sample carries no increase of its own -- the increase belongs to the
     // gap between it and the sample before -- so the increases inside a window
     // span from the baseline sample to the last one, which is narrower than
-    // the window by about one sample interval. Using the observed span as the
-    // divisor cancels that exactly, instead of reporting a rate depressed by
-    // however coarsely the producer samples. It also excludes the dead time
-    // after a restart, so what comes back is the rate while running.
+    // the window by about one sample interval. Dividing by the end-to-end span
+    // cancels that, where dividing by the window width would report a rate
+    // depressed by however coarsely the producer happens to sample. PromQL
+    // solves the same problem by extrapolating out to the range boundaries
+    // instead.
+    //
+    // Time the producer spent down stays in the divisor, which is also what
+    // PromQL does -- it only ever extrapolates the two edges, so an interior
+    // gap is just range time during which little was counted. That is the
+    // behaviour we want: an outage should pull the rate down and show up on
+    // the graph, not be divided away into a flat healthy-looking line.
     let span = (window.timestamps[last - 1] - start_times[first])
         .to_std()
         .ok()?
@@ -1000,6 +1010,49 @@ mod tests {
             (rate - 10.0).abs() < 1e-9,
             "Dead time while the producer was down must not dilute the rate, \
             got {rate}",
+        );
+    }
+
+    #[test]
+    fn test_rate_in_window_is_diluted_by_an_outage_it_spans() {
+        // A steady 10/s interrupted by 20s of downtime. Three samples before
+        // the restart, one after.
+        let fixture = &[
+            ("2025-08-12T19:00:00.0000Z", "2025-08-12T19:00:10.0000Z", 100f64),
+            ("2025-08-12T19:00:10.0000Z", "2025-08-12T19:00:20.0000Z", 100f64),
+            ("2025-08-12T19:00:20.0000Z", "2025-08-12T19:00:30.0000Z", 100f64),
+            // Restart: the start time jumps, skipping 19:00:30 - 19:00:50.
+            ("2025-08-12T19:00:50.0000Z", "2025-08-12T19:01:00.0000Z", 100f64),
+        ];
+
+        // A coarse window holding the whole outage in its middle.
+        let mut window = parse_example_data(fixture);
+        window.start = "2025-08-12T19:00:00.0000Z".parse().unwrap();
+        window.end = "2025-08-12T19:01:00.0000Z".parse().unwrap();
+        let coarse = rate_in_window(&window.metric_window()).expect("has data");
+
+        // A fine window holding only the samples after the restart.
+        let mut window = parse_example_data(fixture);
+        window.start = "2025-08-12T19:00:50.0000Z".parse().unwrap();
+        window.end = "2025-08-12T19:01:00.0000Z".parse().unwrap();
+        let fine = rate_in_window(&window.metric_window()).expect("has data");
+
+        assert!(
+            (fine - 10.0).abs() < 1e-9,
+            "A window holding only samples from after the restart sees the \
+            producer running at its steady 10/s, got {fine}",
+        );
+        assert!(
+            (coarse - 400.0 / 60.0).abs() < 1e-9,
+            "A window wide enough to span the outage counts 400 over the full \
+            60s, outage included, rather than over the 40s the producer was \
+            actually up. PromQL's rate() dilutes the same way -- it \
+            extrapolates only the two edges of a range, so an interior gap is \
+            just range time during which little was counted.\n\n\
+            This is deliberately not equal to the finer alignment above. The \
+            window is what you asked to average over, and an outage inside it \
+            should pull the rate down where a graph will show it, rather than \
+            being divided away into a flat healthy-looking line. Got {coarse}",
         );
     }
 
