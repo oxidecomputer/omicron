@@ -1389,4 +1389,91 @@ mod tests {
             "Limit should not be pushed through alignment"
         );
     }
+
+    // `collection_target:cpus_provisioned` is an I64, so it reaches alignment
+    // as a gauge. `physical_data_link:bytes_sent` is a CumulativeU64, so the
+    // planner inserts an implicit delta and alignment sees a delta.
+    const GAUGE: &str = "collection_target:cpus_provisioned";
+    const DELTA: &str = "physical_data_link:bytes_sent";
+
+    async fn plan_query(query: &str) -> anyhow::Result<Plan> {
+        Plan::new(query_parser::query(query).unwrap(), all_schema().await)
+    }
+
+    #[tokio::test]
+    async fn test_plan_every_alignment_method() {
+        // Each method against a metric type it accepts. Every one of these
+        // used to fail: the planner matched on (data_type, method) and its
+        // `(_, _)` arm swallowed the three newer methods, reporting them as a
+        // bad *data type*.
+        for query in [
+            format!("get {DELTA} | align mean_within(1m)"),
+            format!("get {GAUGE} | align mean_within(1m)"),
+            format!("get {DELTA} | align rate(1m)"),
+            format!("get {GAUGE} | align min(1m)"),
+            format!("get {GAUGE} | align max(1m)"),
+        ] {
+            plan_query(&query)
+                .await
+                .unwrap_or_else(|e| panic!("`{query}` should plan: {e}"));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_plan_rejects_methods_against_the_wrong_metric_type() {
+        for (query, expected) in [
+            (
+                format!("get {GAUGE} | align rate(1m)"),
+                "rate alignment does not yet support gauge metrics",
+            ),
+            (
+                format!("get {DELTA} | align min(1m)"),
+                "min and max alignment require a gauge metric",
+            ),
+            (
+                format!("get {DELTA} | align max(1m)"),
+                "min and max alignment require a gauge metric",
+            ),
+        ] {
+            let err = plan_query(&query)
+                .await
+                .expect_err(&format!("`{query}` should not plan"));
+            assert!(
+                err.to_string().contains(expected),
+                "Unexpected error for `{query}`: {err}",
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_plan_chained_alignment() {
+        // The supported way to ask for a peak rate. This works only because
+        // alignment reports a gauge output: were the plan to keep claiming the
+        // input's delta metric type, the second alignment would reject data
+        // that is in fact a gauge.
+        let query = format!("get {DELTA} | align rate(10s) | align max(1m)");
+        let plan = plan_query(&query)
+            .await
+            .unwrap_or_else(|e| panic!("`{query}` should plan: {e}"));
+
+        let output = plan.output();
+        assert_eq!(output.tables.len(), 1);
+        assert_eq!(
+            output.tables[0].schema.metric_types,
+            vec![MetricType::Gauge]
+        );
+        assert_eq!(
+            output.tables[0].schema.data_types,
+            vec![DataType::Double],
+            "`rate` widens to a double, and the `max` that follows selects one \
+            of those doubles rather than computing a new value",
+        );
+
+        let aligns = plan
+            .nodes
+            .iter()
+            .filter(|node| matches!(node, Node::Align(_)))
+            .count();
+        assert_eq!(aligns, 2, "Both alignments should survive planning");
+    }
 }
