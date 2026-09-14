@@ -4,7 +4,6 @@
 
 //! OxQL query plan node for aligning tables.
 
-use oxql_types::point::DataType;
 use oxql_types::point::MetricType;
 
 use crate::oxql::ast::table_ops::align;
@@ -61,27 +60,31 @@ fn align_input_schema(
             schema.name,
         );
     }
+    // Check the data type and the method separately, rather than matching on
+    // the pair of them. A combined match needs a `(_, _)` arm to cover the
+    // non-numeric data types, and that arm silently swallows any alignment
+    // method not listed above it -- reporting an unhandled method as a bad
+    // *data type*, which is both wrong and hard to chase down. Matching the
+    // method on its own means a new variant fails to compile instead.
     let mut data_types = Vec::with_capacity(schema.data_types.len());
     for data_type in schema.data_types.iter() {
-        match (data_type, method) {
-            (
-                DataType::Integer | DataType::Double,
-                align::AlignmentMethod::MeanWithin,
-            ) => {
-                data_types.push(DataType::Double);
+        anyhow::ensure!(
+            data_type.is_numeric(),
+            "Tables with '{}' data types cannot be aligned",
+            data_type,
+        );
+        match method {
+            align::AlignmentMethod::MeanWithin
+            | align::AlignmentMethod::Rate
+            | align::AlignmentMethod::Min
+            | align::AlignmentMethod::Max => {
+                data_types.push(method.output_data_type(*data_type));
             }
-            (
-                DataType::Integer | DataType::Double,
-                align::AlignmentMethod::Interpolate,
-            ) => {
+            align::AlignmentMethod::Interpolate => {
                 anyhow::bail!(
                     "Alignment via interpolation is not yet implemented"
                 );
             }
-            (_, _) => anyhow::bail!(
-                "Tables with '{}' data types cannot be aligned",
-                data_type,
-            ),
         }
     }
     // Report the metric type each method actually emits, so that later table
@@ -125,6 +128,91 @@ mod test {
         assert_eq!(out.fields, schema.fields);
         assert_eq!(out.metric_types, vec![MetricType::Gauge]);
         assert_eq!(out.data_types[0], DataType::Double);
+    }
+
+    // A gauge table with the provided data type, which every alignment method
+    // accepts.
+    fn gauge_schema(data_type: DataType) -> TableSchema {
+        TableSchema {
+            name: String::from("foo:bar"),
+            fields: BTreeMap::from([(String::from("a"), FieldType::Bool)]),
+            metric_types: vec![MetricType::Gauge],
+            data_types: vec![data_type],
+        }
+    }
+
+    #[test]
+    fn test_selectors_preserve_the_input_data_type() {
+        for method in [align::AlignmentMethod::Min, align::AlignmentMethod::Max]
+        {
+            let out =
+                align_input_schema(gauge_schema(DataType::Integer), method)
+                    .unwrap();
+            assert_eq!(
+                out.data_types,
+                vec![DataType::Integer],
+                "`align {method}(..)` selects one of the input points rather \
+                than computing a new value, so an integer metric must stay an \
+                integer. Widening to a double would lose precision on the way \
+                out for no reason.",
+            );
+
+            let out =
+                align_input_schema(gauge_schema(DataType::Double), method)
+                    .unwrap();
+            assert_eq!(out.data_types, vec![DataType::Double]);
+        }
+    }
+
+    #[test]
+    fn test_aggregates_widen_to_a_double() {
+        for method in
+            [align::AlignmentMethod::MeanWithin, align::AlignmentMethod::Rate]
+        {
+            for input in [DataType::Integer, DataType::Double] {
+                let out =
+                    align_input_schema(gauge_schema(input), method).unwrap();
+                assert_eq!(
+                    out.data_types,
+                    vec![DataType::Double],
+                    "`align {method}(..)` computes a value that was not in \
+                    the input, in floating point, so it widens to a double",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_non_numeric_data_types_cannot_be_aligned() {
+        for data_type in [
+            DataType::Boolean,
+            DataType::String,
+            DataType::IntegerDistribution,
+            DataType::DoubleDistribution,
+        ] {
+            let err = align_input_schema(
+                gauge_schema(data_type),
+                align::AlignmentMethod::MeanWithin,
+            )
+            .expect_err("Non-numeric data types cannot be aligned");
+            assert!(
+                err.to_string().contains("cannot be aligned"),
+                "Unexpected error for data type {data_type}: {err}",
+            );
+        }
+    }
+
+    #[test]
+    fn test_interpolation_is_still_rejected() {
+        let err = align_input_schema(
+            gauge_schema(DataType::Double),
+            align::AlignmentMethod::Interpolate,
+        )
+        .expect_err("Alignment by interpolation is not implemented");
+        assert!(
+            err.to_string().contains("not yet implemented"),
+            "Unexpected error: {err}",
+        );
     }
 
     #[test]

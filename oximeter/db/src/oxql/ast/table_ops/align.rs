@@ -66,6 +66,28 @@ struct MetricWindow<'a> {
     end: DateTime<Utc>,
 }
 
+/// How an alignment method turns the points in one output window into one
+/// output point.
+///
+/// The distinction is the usual one between an aggregate and a selector, and
+/// it decides the output data type. SQL draws the same line, as does the
+/// ClickHouse that backs this: `avg(Int64)` widens to `Float64`, while
+/// `max(Int64)` stays `Int64`.
+#[derive(Clone, Copy)]
+enum Aggregator {
+    /// Compute a new value from the points in the window.
+    ///
+    /// The result is a quantity that was not in the input -- a mean, a rate --
+    /// so it is always a double, whatever the input data type was.
+    Compute(fn(&MetricType, &MetricWindow) -> Option<f64>),
+    /// Select one of the points in the window, returning its index.
+    ///
+    /// The result is one of the input values, so it keeps the input's data
+    /// type: the largest of a set of integers is an integer, and returning it
+    /// as a double would only lose precision on the way out.
+    Select(fn(&MetricWindow) -> Option<usize>),
+}
+
 /// An `align` table operation, used to produce data at well-defined periods.
 ///
 /// Alignment is important for any kind of aggregation. Data is actually
@@ -107,56 +129,31 @@ impl Align {
         tables: &[Table],
         query_end: &DateTime<Utc>,
     ) -> Result<Vec<Table>, Error> {
-        match self.method {
-            AlignmentMethod::Interpolate => tables
-                .iter()
-                .map(|table| align_interpolate(table, query_end, &self.period))
-                .collect(),
-            AlignmentMethod::MeanWithin => tables
-                .iter()
-                .map(|table| {
-                    align_and_aggregate(
-                        table,
-                        query_end,
-                        &self.period,
-                        mean_value_in_window,
-                    )
-                })
-                .collect(),
-            AlignmentMethod::Rate => tables
-                .iter()
-                .map(|table| {
-                    align_and_aggregate(
-                        table,
-                        query_end,
-                        &self.period,
-                        rate_in_window,
-                    )
-                })
-                .collect(),
-            AlignmentMethod::Max => tables
-                .iter()
-                .map(|table| {
-                    align_and_aggregate(
-                        table,
-                        query_end,
-                        &self.period,
-                        max_value_in_window,
-                    )
-                })
-                .collect(),
-            AlignmentMethod::Min => tables
-                .iter()
-                .map(|table| {
-                    align_and_aggregate(
-                        table,
-                        query_end,
-                        &self.period,
-                        min_value_in_window,
-                    )
-                })
-                .collect(),
-        }
+        let aggregator = match self.method {
+            // Interpolation is not a reduction over the points in a window: it
+            // reads the two points bracketing each output timestamp, which may
+            // both lie outside the window. It could still be a `Compute`
+            // aggregator, since `MetricWindow` carries the whole input array
+            // rather than a window-limited slice, so an implementation can
+            // ignore `start` and search around `end`.
+            AlignmentMethod::Interpolate => {
+                anyhow::bail!(
+                    "Alignment with interpolation not yet implemented"
+                )
+            }
+            AlignmentMethod::MeanWithin => {
+                Aggregator::Compute(mean_value_in_window)
+            }
+            AlignmentMethod::Rate => Aggregator::Compute(rate_in_window),
+            AlignmentMethod::Max => Aggregator::Select(max_value_in_window),
+            AlignmentMethod::Min => Aggregator::Select(min_value_in_window),
+        };
+        tables
+            .iter()
+            .map(|table| {
+                align_and_aggregate(table, query_end, &self.period, aggregator)
+            })
+            .collect()
     }
 }
 
@@ -215,6 +212,28 @@ impl AlignmentMethod {
             AlignmentMethod::Interpolate => input,
         }
     }
+
+    /// The data type this method produces, given the data type it is applied
+    /// to.
+    ///
+    /// This follows the usual aggregate/selector split. `mean_within` and
+    /// `rate` compute a quantity that was not in the input, in floating point,
+    /// so they widen to a double. `min` and `max` pick out one of the input
+    /// points, so they return it at the type it was stored in -- the largest
+    /// of a set of integers is an integer. SQL and ClickHouse both draw the
+    /// line in the same place.
+    pub(crate) fn output_data_type(&self, input: DataType) -> DataType {
+        match self {
+            AlignmentMethod::MeanWithin | AlignmentMethod::Rate => {
+                DataType::Double
+            }
+            AlignmentMethod::Min | AlignmentMethod::Max => input,
+            // Interpolating between two samples computes a new value, so this
+            // widens even though the metric type is preserved. Provisional:
+            // interpolation is unimplemented, and rejected before we get here.
+            AlignmentMethod::Interpolate => DataType::Double,
+        }
+    }
 }
 
 impl fmt::Display for AlignmentMethod {
@@ -231,15 +250,12 @@ impl fmt::Display for AlignmentMethod {
 
 // Align the timeseries in a table by computing a value within each output period.
 
-fn align_and_aggregate<F>(
+fn align_and_aggregate(
     table: &Table,
     query_end: &DateTime<Utc>,
     period: &Duration,
-    aggregator: F,
-) -> Result<Table, Error>
-where
-    F: Fn(&MetricType, &MetricWindow) -> Option<f64>,
-{
+    aggregator: Aggregator,
+) -> Result<Table, Error> {
     let mut output_table = Table::new(table.name());
     for timeseries in table.iter() {
         let points = &timeseries.points;
@@ -262,16 +278,25 @@ where
         );
         verify_max_upsampling_ratio(points.timestamps(), &period)?;
 
-        // Always convert the output to doubles, when computing the mean. The
-        // output is always a gauge, so we do not need the start times of the
-        // input either.
+        // The output is always a gauge, so we do not need the start times of
+        // the input either.
         //
-        // IMPORTANT: We compute the mean in the loop below from the back of the
-        // array (latest timestamp) to the front (earliest timestamp). They are
-        // appended to these arrays here in that _reversed_ order. These arrays
-        // are flipped before pushing them onto the timeseries at the end of the
-        // loop below.
-        let mut output_values = Vec::with_capacity(points.len());
+        // IMPORTANT: We work through the loop below from the back of the array
+        // (latest timestamp) to the front (earliest timestamp). Results are
+        // appended to these arrays in that _reversed_ order. They are flipped
+        // before being pushed onto the timeseries at the end of the loop below.
+        //
+        // Only one of these two accumulators is used, depending on the kind of
+        // aggregator. A `Compute` aggregator produces a new double per window,
+        // while a `Select` aggregator produces the index of the input point it
+        // picked, so that we can read the value back out of the input at its
+        // original data type. The unused one never allocates.
+        let mut computed_values = Vec::new();
+        let mut selected_indices = Vec::new();
+        match aggregator {
+            Aggregator::Compute(_) => computed_values.reserve(points.len()),
+            Aggregator::Select(_) => selected_indices.reserve(points.len()),
+        }
         let mut output_timestamps = Vec::with_capacity(points.len());
 
         // Convert the input to doubles now, so the tight loop below does less
@@ -323,9 +348,15 @@ where
                 start: window_start,
                 end: output_time,
             };
-            // Aggregate all values within this time window.
-            let output_value = aggregator(&metric_type, &window);
-            output_values.push(output_value);
+            // Reduce all values within this time window to a single output.
+            match aggregator {
+                Aggregator::Compute(compute) => {
+                    computed_values.push(compute(&metric_type, &window))
+                }
+                Aggregator::Select(select) => {
+                    selected_indices.push(select(&window))
+                }
+            }
 
             // In any case, we push the window's end time and increment to the
             // next period.
@@ -336,14 +367,29 @@ where
         // We've accumulated our input values into the output arrays, but in
         // reverse order. Flip them and push onto the existing table, as a gauge
         // timeseries.
+        //
+        // A computed value is a new quantity, and always a double. A selected
+        // one is a point that was in the input, so it is read back out of the
+        // input array and keeps the input's data type.
+        let (values, output_data_type) = match aggregator {
+            Aggregator::Compute(_) => (
+                ValueArray::Double(computed_values.into_iter().rev().collect()),
+                DataType::Double,
+            ),
+            Aggregator::Select(_) => (
+                select_input_values(
+                    points.values(0).unwrap(),
+                    selected_indices.into_iter().rev(),
+                )?,
+                data_type,
+            ),
+        };
         let mut new_timeseries = Timeseries::new(
             timeseries.fields.clone().into_iter(),
-            DataType::Double,
+            output_data_type,
             MetricType::Gauge,
         )
         .unwrap();
-        let values =
-            ValueArray::Double(output_values.into_iter().rev().collect());
         let timestamps = output_timestamps.into_iter().rev().collect();
         let values = Values { values, metric_type: MetricType::Gauge };
         new_timeseries.points = Points::new(None, timestamps, vec![values]);
@@ -352,6 +398,35 @@ where
         output_table.insert(new_timeseries).unwrap();
     }
     Ok(output_table)
+}
+
+// Build an output array by reading back the point each output window selected.
+//
+// Each entry is the index of the selected point in `input`, or `None` for a
+// window that had no point to select from. Reading the values back out of the
+// input array is what preserves the data type: the largest of a set of
+// integers comes back an exact integer, rather than one that has been through
+// a double.
+fn select_input_values(
+    input: &ValueArray,
+    indices: impl Iterator<Item = Option<usize>>,
+) -> Result<ValueArray, Error> {
+    match input {
+        ValueArray::Integer(values) => Ok(ValueArray::Integer(
+            indices
+                .map(|index| index.and_then(|index| values[index]))
+                .collect(),
+        )),
+        ValueArray::Double(values) => Ok(ValueArray::Double(
+            indices
+                .map(|index| index.and_then(|index| values[index]))
+                .collect(),
+        )),
+        other => anyhow::bail!(
+            "Alignment requires numeric data type, not {}",
+            other.data_type(),
+        ),
+    }
 }
 
 fn mean_value_in_window(
@@ -613,46 +688,56 @@ fn rate_in_window(
     maybe_sum.map(|sum| sum / window_secs)
 }
 
-fn max_value_in_window(
-    _metric_type: &MetricType,
+// Select the index of the largest point falling within the provided window.
+fn max_value_in_window(window: &MetricWindow) -> Option<usize> {
+    select_in_window(window, |candidate, best| candidate > best)
+}
+
+// Select the index of the smallest point falling within the provided window.
+fn min_value_in_window(window: &MetricWindow) -> Option<usize> {
+    select_in_window(window, |candidate, best| candidate < best)
+}
+
+// Select the index of the point in the window that beats all the others,
+// according to `is_better`.
+//
+// Returns `None` if the window contains no point with a value, either because
+// it contains no points at all or because all of them are missing.
+//
+// Note that candidates are compared as doubles, even when the underlying data
+// is integral. Two integers larger than 2^53 can therefore compare equal, in
+// which case the earlier one wins. Only the choice between two near-identical
+// points is affected; the value returned for the winner is read from the input
+// array at full precision.
+fn select_in_window(
     window: &MetricWindow,
-) -> Option<f64> {
+    is_better: impl Fn(f64, f64) -> bool,
+) -> Option<usize> {
+    // Points are "within" the window if their timestamp is, which is the same
+    // rule `mean_gauge_value_in_window()` applies. Only gauges reach here, and
+    // a gauge has no start times to consider: its value is a level at an
+    // instant, rather than an amount accrued over an interval.
     let start_index = window.timestamps.partition_point(|t| t <= &window.start);
     let output_index = window.timestamps.partition_point(|t| t <= &window.end);
     assert!(output_index >= start_index);
 
-    window.input_points[start_index..output_index]
+    let mut best: Option<(usize, f64)> = None;
+    for (offset, value) in window.input_points[start_index..output_index]
         .iter()
-        .filter_map(|&x| x)
-        .fold(None, |acc, x| match acc {
-            None => Some(x),
-            Some(max_val) => Some(max_val.max(x)),
-        })
-}
-
-fn min_value_in_window(
-    _metric_type: &MetricType,
-    window: &MetricWindow,
-) -> Option<f64> {
-    let start_index = window.timestamps.partition_point(|t| t <= &window.start);
-    let output_index = window.timestamps.partition_point(|t| t <= &window.end);
-    assert!(output_index >= start_index);
-
-    window.input_points[start_index..output_index]
-        .iter()
-        .filter_map(|&x| x)
-        .fold(None, |acc, x| match acc {
-            None => Some(x),
-            Some(min_val) => Some(min_val.min(x)),
-        })
-}
-
-fn align_interpolate(
-    _table: &Table,
-    _query_end: &DateTime<Utc>,
-    _period: &Duration,
-) -> Result<Table, Error> {
-    anyhow::bail!("Alignment with interpolation not yet implemented")
+        .enumerate()
+        .filter_map(|(offset, maybe_value)| Some((offset, (*maybe_value)?)))
+    {
+        // NaN loses every comparison, so it never displaces a real value. It
+        // can still seed `best`, so skip it outright and keep the previous
+        // behaviour of `f64::max()`, which ignores NaN operands.
+        if value.is_nan() {
+            continue;
+        }
+        if best.is_none_or(|(_, best_value)| is_better(value, best_value)) {
+            best = Some((start_index + offset, value));
+        }
+    }
+    best.map(|(index, _)| index)
 }
 
 #[cfg(test)]
@@ -660,7 +745,8 @@ mod tests {
     use super::*;
 
     struct OwnedMetricWindow {
-        start_times: Vec<DateTime<Utc>>,
+        // `None` for a gauge, which has no intervals, only instants.
+        start_times: Option<Vec<DateTime<Utc>>>,
         timestamps: Vec<DateTime<Utc>>,
         input_points: Vec<Option<f64>>,
         start: DateTime<Utc>,
@@ -669,7 +755,7 @@ mod tests {
     impl OwnedMetricWindow {
         fn metric_window(&self) -> MetricWindow<'_> {
             MetricWindow {
-                start_times: Some(&self.start_times),
+                start_times: self.start_times.as_deref(),
                 timestamps: &self.timestamps,
                 input_points: &self.input_points,
                 start: self.start,
@@ -942,7 +1028,31 @@ mod tests {
         let window_end = timestamps[timestamps.len() - 1];
 
         OwnedMetricWindow {
-            start_times,
+            start_times: Some(start_times),
+            timestamps,
+            input_points,
+            start: window_start,
+            end: window_end,
+        }
+    }
+
+    // Build a gauge window from `(timestamp, value)` pairs.
+    //
+    // A gauge carries no start times, so this is the right fixture for the
+    // selectors, which only ever see gauges.
+    fn parse_gauge_data(fixture: &[(&str, f64)]) -> OwnedMetricWindow {
+        let timestamps: Vec<DateTime<Utc>> =
+            fixture.iter().map(|r| r.0.parse().unwrap()).collect();
+        let input_points: Vec<_> = fixture.iter().map(|r| Some(r.1)).collect();
+
+        // Start one nanosecond early, so that the first point is inside the
+        // window: a point is within the window if its timestamp is strictly
+        // later than the window start.
+        let window_start = timestamps[0] - Duration::from_nanos(1);
+        let window_end = *timestamps.last().unwrap();
+
+        OwnedMetricWindow {
+            start_times: None,
             timestamps,
             input_points,
             start: window_start,
@@ -971,56 +1081,84 @@ mod tests {
         );
     }
 
+    // Resolve a selected index back to its value, the way
+    // `select_input_values()` does for a real timeseries.
+    fn selected_value(
+        window: &OwnedMetricWindow,
+        index: Option<usize>,
+    ) -> Option<f64> {
+        index.and_then(|index| window.input_points[index])
+    }
+
     #[test]
     fn test_min_and_max_in_window() {
-        let mut window = parse_example_data(&[
-            ("2025-08-12T19:17:00.0000Z", "2025-08-12T19:17:10.0000Z", 5000f64),
-            ("2025-08-12T19:17:10.0000Z", "2025-08-12T19:17:20.0000Z", 1000f64),
-            ("2025-08-12T19:17:20.0000Z", "2025-08-12T19:17:30.0000Z", 3000f64),
-            ("2025-08-12T19:17:30.0000Z", "2025-08-12T19:17:40.0000Z", 4000f64),
-            ("2025-08-12T19:17:40.0000Z", "2025-08-12T19:17:50.0000Z", 3000f64),
-            ("2025-08-12T19:17:50.0000Z", "2025-08-12T19:18:00.0000Z", 2000f64),
+        let mut window = parse_gauge_data(&[
+            ("2025-08-12T19:17:10.0000Z", 5000f64),
+            ("2025-08-12T19:17:20.0000Z", 1000f64),
+            ("2025-08-12T19:17:30.0000Z", 3000f64),
+            ("2025-08-12T19:17:40.0000Z", 4000f64),
+            ("2025-08-12T19:17:50.0000Z", 3000f64),
+            ("2025-08-12T19:18:00.0000Z", 2000f64),
         ]);
 
-        // Test the full window
-        let min =
-            min_value_in_window(&MetricType::Gauge, &window.metric_window())
-                .unwrap();
-        let expected = 1000.0;
-        assert!(
-            (min - expected).abs() < 1e-6,
-            "min={min}, expected={expected}"
-        );
+        // Test the full window.
+        let min = min_value_in_window(&window.metric_window());
+        assert_eq!(min, Some(1), "The smallest point is at index 1");
+        assert_eq!(selected_value(&window, min), Some(1000.0));
 
-        let max =
-            max_value_in_window(&MetricType::Gauge, &window.metric_window())
-                .unwrap();
-        let expected = 5000.0;
-        assert!(
-            (max - expected).abs() < 1e-6,
-            "max={max}, expected={expected}"
-        );
+        let max = max_value_in_window(&window.metric_window());
+        assert_eq!(max, Some(0), "The largest point is at index 0");
+        assert_eq!(selected_value(&window, max), Some(5000.0));
 
-        // Test a partial window
+        // Test a partial window, covering the points at 19:17:30 and 19:17:40.
         window.start = "2025-08-12T19:17:25.0000Z".parse().unwrap();
         window.end = "2025-08-12T19:17:45.0000Z".parse().unwrap();
-        let min =
-            min_value_in_window(&MetricType::Gauge, &window.metric_window())
-                .unwrap();
-        let expected = 3000.0;
-        assert!(
-            (min - expected).abs() < 1e-6,
-            "min={min}, expected={expected}"
-        );
 
-        let max =
-            max_value_in_window(&MetricType::Gauge, &window.metric_window())
-                .unwrap();
-        let expected = 4000.0;
-        assert!(
-            (max - expected).abs() < 1e-6,
-            "max={max}, expected={expected}"
+        let min = min_value_in_window(&window.metric_window());
+        assert_eq!(min, Some(2));
+        assert_eq!(selected_value(&window, min), Some(3000.0));
+
+        let max = max_value_in_window(&window.metric_window());
+        assert_eq!(max, Some(3));
+        assert_eq!(selected_value(&window, max), Some(4000.0));
+    }
+
+    #[test]
+    fn test_min_and_max_select_nothing_from_an_empty_window() {
+        let mut window = parse_gauge_data(&[
+            ("2025-08-12T19:17:10.0000Z", 5000f64),
+            ("2025-08-12T19:17:20.0000Z", 1000f64),
+        ]);
+
+        // A window falling between two points contains neither of them.
+        window.start = "2025-08-12T19:17:12.0000Z".parse().unwrap();
+        window.end = "2025-08-12T19:17:18.0000Z".parse().unwrap();
+        assert_eq!(min_value_in_window(&window.metric_window()), None);
+        assert_eq!(max_value_in_window(&window.metric_window()), None);
+    }
+
+    #[test]
+    fn test_min_and_max_ignore_missing_values() {
+        let mut window = parse_gauge_data(&[
+            ("2025-08-12T19:17:10.0000Z", 5000f64),
+            ("2025-08-12T19:17:20.0000Z", 1000f64),
+            ("2025-08-12T19:17:30.0000Z", 3000f64),
+        ]);
+        window.input_points[1] = None;
+
+        let min = min_value_in_window(&window.metric_window());
+        assert_eq!(
+            min,
+            Some(2),
+            "The missing point must be skipped rather than selected, so the \
+            smallest remaining point wins",
         );
+        assert_eq!(selected_value(&window, min), Some(3000.0));
+
+        // A window of nothing but missing values selects nothing at all.
+        window.input_points = vec![None, None, None];
+        assert_eq!(min_value_in_window(&window.metric_window()), None);
+        assert_eq!(max_value_in_window(&window.metric_window()), None);
     }
 
     #[test]
