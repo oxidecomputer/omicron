@@ -4296,7 +4296,7 @@ dependencies = [
 [[package]]
 name = "gateway-ereport-messages"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=01f06089a97bd084bec2595d4d62e0f91338cf57#01f06089a97bd084bec2595d4d62e0f91338cf57"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=438cd185666d5f164548885873f0f5df9a38eed1#438cd185666d5f164548885873f0f5df9a38eed1"
 dependencies = [
  "hubpack",
  "serde",
@@ -4306,7 +4306,7 @@ dependencies = [
 [[package]]
 name = "gateway-messages"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=01f06089a97bd084bec2595d4d62e0f91338cf57#01f06089a97bd084bec2595d4d62e0f91338cf57"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=438cd185666d5f164548885873f0f5df9a38eed1#438cd185666d5f164548885873f0f5df9a38eed1"
 dependencies = [
  "bitflags 2.11.0",
  "gateway-ereport-messages",
@@ -4325,7 +4325,7 @@ dependencies = [
 [[package]]
 name = "gateway-sp-comms"
 version = "0.1.2"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=01f06089a97bd084bec2595d4d62e0f91338cf57#01f06089a97bd084bec2595d4d62e0f91338cf57"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=438cd185666d5f164548885873f0f5df9a38eed1#438cd185666d5f164548885873f0f5df9a38eed1"
 dependencies = [
  "async-trait",
  "backoff",
@@ -4352,7 +4352,7 @@ dependencies = [
  "socket2 0.6.3",
  "string_cache",
  "thiserror 2.0.18",
- "tlvc 0.3.1 (git+https://github.com/oxidecomputer/tlvc.git?branch=main)",
+ "tlvc 0.4.1 (git+https://github.com/oxidecomputer/tlvc.git?branch=main)",
  "tokio",
  "usdt 0.5.0",
  "uuid",
@@ -5213,7 +5213,7 @@ dependencies = [
  "path-slash 0.1.5",
  "rsa 0.9.10",
  "thiserror 1.0.69",
- "tlvc 0.3.1 (git+https://github.com/oxidecomputer/tlvc)",
+ "tlvc 0.3.1",
  "tlvc-text 0.3.0",
  "toml 0.7.8",
  "x509-cert",
@@ -5234,7 +5234,7 @@ dependencies = [
  "path-slash 0.1.5",
  "rsa 0.9.10",
  "thiserror 1.0.69",
- "tlvc 0.3.1 (git+https://github.com/oxidecomputer/tlvc)",
+ "tlvc 0.3.1",
  "tlvc-text 0.3.0",
  "toml 0.7.8",
  "x509-cert",
@@ -5255,7 +5255,7 @@ dependencies = [
  "path-slash 0.2.1",
  "rsa 0.9.10",
  "thiserror 2.0.18",
- "tlvc 0.4.1",
+ "tlvc 0.4.1 (git+https://github.com/oxidecomputer/tlvc?rev=7a96eab94c8aec9120412d8601ffd68853957da3)",
  "tlvc-text 0.4.0",
  "toml 1.1.2+spec-1.1.0",
  "x509-cert",
@@ -10018,6 +10018,7 @@ dependencies = [
  "gateway-messages",
  "generic-array 0.14.7",
  "getrandom 0.2.17",
+ "getrandom 0.3.4",
  "getrandom 0.4.3",
  "group 0.13.0",
  "hashbrown 0.15.5",
@@ -15734,7 +15735,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.4",
  "windows-sys 0.59.0",
@@ -16039,7 +16040,7 @@ dependencies = [
 [[package]]
 name = "tlvc"
 version = "0.3.1"
-source = "git+https://github.com/oxidecomputer/tlvc.git?branch=main#e644a21a7ca973ed31499106ea926bd63ebccc6f"
+source = "git+https://github.com/oxidecomputer/tlvc#e644a21a7ca973ed31499106ea926bd63ebccc6f"
 dependencies = [
  "byteorder",
  "crc",
@@ -16048,12 +16049,13 @@ dependencies = [
 
 [[package]]
 name = "tlvc"
-version = "0.3.1"
-source = "git+https://github.com/oxidecomputer/tlvc#e644a21a7ca973ed31499106ea926bd63ebccc6f"
+version = "0.4.1"
+source = "git+https://github.com/oxidecomputer/tlvc.git?branch=main#7a96eab94c8aec9120412d8601ffd68853957da3"
 dependencies = [
- "byteorder",
  "crc",
- "zerocopy 0.6.6",
+ "thiserror 2.0.18",
+ "zerocopy 0.8.55",
+ "zerocopy-derive 0.8.55",
 ]
 
 [[package]]
@@ -16074,7 +16076,7 @@ source = "git+https://github.com/oxidecomputer/tlvc#e644a21a7ca973ed31499106ea92
 dependencies = [
  "ron",
  "serde",
- "tlvc 0.3.1 (git+https://github.com/oxidecomputer/tlvc)",
+ "tlvc 0.3.1",
  "zerocopy 0.6.6",
 ]
 
@@ -16085,7 +16087,7 @@ source = "git+https://github.com/oxidecomputer/tlvc?rev=7a96eab94c8aec9120412d86
 dependencies = [
  "ron",
  "serde",
- "tlvc 0.4.1",
+ "tlvc 0.4.1 (git+https://github.com/oxidecomputer/tlvc?rev=7a96eab94c8aec9120412d8601ffd68853957da3)",
  "zerocopy 0.8.55",
 ]
 

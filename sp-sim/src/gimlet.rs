@@ -1571,6 +1571,22 @@ impl SpHandler for Handler {
         self.update_state.get_component_caboose_value(component, slot, key, buf)
     }
 
+    fn component_get_vpd(
+        &mut self,
+        component: SpComponent,
+        _buf: &mut [u8],
+    ) -> Result<usize, SpError> {
+        // TODO(eliza): we should allow configuring a VPD response in the sim
+        // config file...
+        warn!(
+            &self.log,
+            "asked to read VPD for component, which the simulator doesn't
+             implement yet";
+            "component" => ?component,
+        );
+        Err(SpError::RequestUnsupportedForComponent)
+    }
+
     fn read_sensor(
         &mut self,
         request: gateway_messages::SensorRequest,

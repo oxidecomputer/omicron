@@ -1849,24 +1849,26 @@ impl ServiceManager {
                     Self::opte_interface_set_up_install(&installed_zone)?;
 
                 // We need to tell external_dns to listen on its OPTE port IP
-                // address, which comes from `nic`. Attach the port from its
-                // true external DNS address (`dns_address`).
-                //
-                // Make sure we take the VPC-private IP address with the same
-                // version as the external address.
-                //
-                // TODO(#11008): external DNS should listen on the private IP
-                // address for *all* of its external addresses. For now we bind
-                // a single address, preferring the IPv4 one (else IPv6) to
-                // match `opte_interface_set_up_install`.
-                let dns_address = dns_addresses.temporary_primary_address();
-                let private_ip = Self::private_ip_for_external_address(
-                    dns_address.ip(),
+                // addresses, which come from `nic`. It can have 1 or 2,
+                // depending on how the zone was configured.
+                let dns_port = dns_addresses
+                    .iter()
+                    .next()
+                    .expect("type guarantees this is non-empty")
+                    .port();
+                let private_ips = Self::private_ips_for_external_addresses(
+                    dns_addresses.iter().map(|addr| addr.ip()),
                     &nic.ip_config,
                     config.zone_type.kind(),
                 )?;
-                let private_dns_address =
-                    SocketAddr::new(private_ip, dns_address.port()).to_string();
+
+                // The DNS SMF service accepts one or more socket addresses for
+                // it to listen on as a comma-separated string.
+                let private_dns_addresses = private_ips
+                    .iter()
+                    .map(|ip| SocketAddr::new(*ip, dns_port).to_string())
+                    .collect::<Vec<_>>()
+                    .join(",");
 
                 let external_dns_config = PropertyGroupBuilder::new("config")
                     .add_property(
@@ -1877,7 +1879,7 @@ impl ServiceManager {
                     .add_property(
                         "dns_address",
                         "astring",
-                        private_dns_address,
+                        private_dns_addresses,
                     );
                 let external_dns_service =
                     ServiceBuilder::new("oxide/external_dns").add_instance(
@@ -2215,23 +2217,29 @@ impl ServiceManager {
                     })?;
                 let opte_iface_name = port.name();
 
-                // Fetch the private IP of the same IP version as the external
-                // IP address.
+                // Fetch the private IPs for each of the external addresses.
                 //
-                // TODO(#11006): Nexus should be reachable on the private IP
-                // address for *all* of its external IPs. For now we bind a
-                // single address, preferring the IPv4 one (else IPv6) to match
-                // match `opte_interface_set_up_install`.
-                let external_ip = external_ips.temporary_primary_address();
-                let private_ip = Self::private_ip_for_external_address(
-                    external_ip,
+                // Consume the first private address, which always exists, and
+                // then collect any additional addresses into a list.
+                let nexus_port = if *external_tls { 443 } else { 80 };
+                let mut private_ips = Self::private_ips_for_external_addresses(
+                    external_ips.iter().copied(),
                     &nic.ip_config,
                     config.zone_type.kind(),
-                )?;
+                )?
+                .into_iter();
+                let bind_address = SocketAddr::new(
+                    private_ips.next().expect(
+                        "Always at least one external address for Nexus",
+                    ),
+                    nexus_port,
+                );
+                let dropshot_external_additional_addresses = private_ips
+                    .map(|ip| SocketAddr::new(ip, nexus_port))
+                    .collect();
 
                 // Nexus takes a separate config file for parameters
                 // which cannot be known at packaging time.
-                let nexus_port = if *external_tls { 443 } else { 80 };
                 let deployment_config = DeploymentConfig {
                     id: *id,
                     rack_id: info.rack_id,
@@ -2240,9 +2248,7 @@ impl ServiceManager {
                     dropshot_external: ConfigDropshotWithTls {
                         tls: *external_tls,
                         dropshot: dropshot::ConfigDropshot {
-                            bind_address: SocketAddr::new(
-                                private_ip, nexus_port,
-                            ),
+                            bind_address,
                             default_request_body_max_bytes: 1048576,
                             default_handler_task_mode:
                                 HandlerTaskMode::Detached,
@@ -2250,9 +2256,7 @@ impl ServiceManager {
                             compression: dropshot::CompressionConfig::Gzip,
                         },
                     },
-                    // TODO(#9288): populate additional external addresses here
-                    // once sled-agent assigns dual-stack external IPs to Nexus.
-                    dropshot_external_additional_addresses: vec![],
+                    dropshot_external_additional_addresses,
                     dropshot_internal: dropshot::ConfigDropshot {
                         bind_address: (*internal_address).into(),
                         default_request_body_max_bytes: 1048576,
@@ -3796,35 +3800,62 @@ impl ServiceManager {
         }
     }
 
-    fn private_ip_for_external_address(
-        external_ip: IpAddr,
-        ip_config: &PrivateIpConfig,
+    // Return the private IP addresses for each external IP address.
+    //
+    // When given at least one address, this returns 1 or 2 private IPs for
+    // those external addresses, i.e., at least one address and as many as one
+    // per family.
+    fn private_ips_for_external_addresses<'a>(
+        external_ips: impl Iterator<Item = IpAddr> + 'a,
+        ip_config: &'a PrivateIpConfig,
         kind: ZoneKind,
-    ) -> Result<IpAddr, Error> {
-        let maybe_private_ip = if external_ip.is_ipv6() {
-            ip_config.ipv6_addr().copied().map(IpAddr::V6)
-        } else {
-            ip_config.ipv4_addr().copied().map(IpAddr::V4)
-        };
-        maybe_private_ip.ok_or_else(|| {
-            let external_ip_version =
-                if external_ip.is_ipv6() { "6" } else { "4" };
-            let private_ip_stack = if ip_config.is_ipv4_only() {
-                "IPv4"
-            } else if ip_config.is_ipv6_only() {
-                "IPv6"
+    ) -> Result<Vec<IpAddr>, Error> {
+        let mut private_ipv4 = None;
+        let mut private_ipv6 = None;
+        for external_ip in external_ips {
+            if external_ip.is_ipv6() {
+                let Some(pip_v6) = ip_config.ipv6_addr().copied() else {
+                    return Err(Error::BadServiceRequest {
+                        service: kind.report_str().to_string(),
+                        message:
+                            "External IP address is IPv6, but VPC-private \
+                            IP configuration does not have an IPv6 \
+                            address"
+                                .to_string(),
+                    });
+                };
+
+                // We always have at most one private IPv6 address, so
+                // "replacing" it is fine.
+                let _ = private_ipv6.insert(IpAddr::V6(pip_v6));
             } else {
-                "dual-stack"
-            };
-            Error::BadServiceRequest {
-                service: kind.report_str().to_string(),
-                message: format!(
-                    "External IP address is IPv{}, but VPC-private \
-                    IP configuration is {}",
-                    external_ip_version, private_ip_stack,
-                ),
+                let Some(pip_v4) = ip_config.ipv4_addr().copied() else {
+                    return Err(Error::BadServiceRequest {
+                        service: kind.report_str().to_string(),
+                        message:
+                            "External IP address is IPv4, but VPC-private \
+                            IP configuration does not have an IPv4 \
+                            address"
+                                .to_string(),
+                    });
+                };
+
+                // We always have at most one private IPv4 address, so
+                // "replacing" it is fine.
+                let _ = private_ipv4.insert(IpAddr::V4(pip_v4));
             }
-        })
+        }
+        let out =
+            private_ipv4.into_iter().chain(private_ipv6).collect::<Vec<_>>();
+        if out.is_empty() {
+            return Err(Error::BadServiceRequest {
+                service: kind.report_str().to_string(),
+                message: "`private_ips_for_external_addresses()` requires \
+                at least one IP address, but none were provided"
+                    .to_string(),
+            });
+        }
+        Ok(out)
     }
 }
 

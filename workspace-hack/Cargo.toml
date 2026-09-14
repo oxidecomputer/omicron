@@ -66,7 +66,7 @@ futures-core = { version = "0.3.32" }
 futures-sink = { version = "0.3.32" }
 futures-task = { version = "0.3.32", default-features = false, features = ["std"] }
 futures-util = { version = "0.3.32", features = ["channel", "io", "sink"] }
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "01f06089a97bd084bec2595d4d62e0f91338cf57", features = ["std"] }
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "438cd185666d5f164548885873f0f5df9a38eed1", features = ["std"] }
 generic-array = { version = "0.14.7", default-features = false, features = ["more_lengths", "zeroize"] }
 getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.17", default-features = false, features = ["js", "rdrand", "std"] }
 getrandom-9fbad63c4bcf4a8f = { package = "getrandom", version = "0.4.3", default-features = false, features = ["std", "sys_rng", "wasm_js"] }
@@ -223,7 +223,7 @@ futures-core = { version = "0.3.32" }
 futures-sink = { version = "0.3.32" }
 futures-task = { version = "0.3.32", default-features = false, features = ["std"] }
 futures-util = { version = "0.3.32", features = ["channel", "io", "sink"] }
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "01f06089a97bd084bec2595d4d62e0f91338cf57", features = ["std"] }
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "438cd185666d5f164548885873f0f5df9a38eed1", features = ["std"] }
 generic-array = { version = "0.14.7", default-features = false, features = ["more_lengths", "zeroize"] }
 getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.17", default-features = false, features = ["js", "rdrand", "std"] }
 getrandom-9fbad63c4bcf4a8f = { package = "getrandom", version = "0.4.3", default-features = false, features = ["std", "sys_rng", "wasm_js"] }
@@ -339,6 +339,7 @@ zip-181b0d20215bb231 = { package = "zip", version = "8.6.0", default-features = 
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 dof-468e82937335b1c9 = { package = "dof", version = "0.3.0", default-features = false, features = ["des"] }
 dof-9fbad63c4bcf4a8f = { package = "dof", version = "0.4.0", default-features = false, features = ["des"] }
+getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2"] }
 hyper-util = { version = "0.1.20", features = ["full"] }
 linux-raw-sys = { version = "0.4.15", default-features = false, features = ["elf", "errno", "general", "ioctl", "no_std", "system"] }
@@ -354,6 +355,7 @@ tokio-rustls = { version = "0.26.4", default-features = false, features = ["aws-
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 dof-468e82937335b1c9 = { package = "dof", version = "0.3.0", default-features = false, features = ["des"] }
 dof-9fbad63c4bcf4a8f = { package = "dof", version = "0.4.0", default-features = false, features = ["des"] }
+getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2"] }
 hyper-util = { version = "0.1.20", features = ["full"] }
 linux-raw-sys = { version = "0.4.15", default-features = false, features = ["elf", "errno", "general", "ioctl", "no_std", "system"] }
@@ -368,6 +370,7 @@ tokio-rustls = { version = "0.26.4", default-features = false, features = ["aws-
 [target.x86_64-apple-darwin.dependencies]
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 errno = { version = "0.3.14" }
+getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2"] }
 hyper-util = { version = "0.1.20", features = ["full"] }
 miniz_oxide = { version = "0.8.9", default-features = false, features = ["simd", "with-alloc"] }
@@ -381,6 +384,7 @@ tokio-rustls = { version = "0.26.4", default-features = false, features = ["aws-
 [target.x86_64-apple-darwin.build-dependencies]
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 errno = { version = "0.3.14" }
+getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2"] }
 hyper-util = { version = "0.1.20", features = ["full"] }
 miniz_oxide = { version = "0.8.9", default-features = false, features = ["simd", "with-alloc"] }
@@ -394,6 +398,7 @@ tokio-rustls = { version = "0.26.4", default-features = false, features = ["aws-
 [target.aarch64-apple-darwin.dependencies]
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 errno = { version = "0.3.14" }
+getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2"] }
 hyper-util = { version = "0.1.20", features = ["full"] }
 miniz_oxide = { version = "0.8.9", default-features = false, features = ["simd", "with-alloc"] }
@@ -407,6 +412,7 @@ tokio-rustls = { version = "0.26.4", default-features = false, features = ["aws-
 [target.aarch64-apple-darwin.build-dependencies]
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 errno = { version = "0.3.14" }
+getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2"] }
 hyper-util = { version = "0.1.20", features = ["full"] }
 miniz_oxide = { version = "0.8.9", default-features = false, features = ["simd", "with-alloc"] }
@@ -422,6 +428,7 @@ cookie = { version = "0.18.1", default-features = false, features = ["percent-en
 dof-468e82937335b1c9 = { package = "dof", version = "0.3.0", default-features = false, features = ["des"] }
 dof-9fbad63c4bcf4a8f = { package = "dof", version = "0.4.0", default-features = false, features = ["des"] }
 errno = { version = "0.3.14" }
+getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2"] }
 hyper-util = { version = "0.1.20", features = ["full"] }
 miniz_oxide = { version = "0.8.9", default-features = false, features = ["simd", "with-alloc"] }
@@ -439,6 +446,7 @@ cookie = { version = "0.18.1", default-features = false, features = ["percent-en
 dof-468e82937335b1c9 = { package = "dof", version = "0.3.0", default-features = false, features = ["des"] }
 dof-9fbad63c4bcf4a8f = { package = "dof", version = "0.4.0", default-features = false, features = ["des"] }
 errno = { version = "0.3.14" }
+getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2"] }
 hyper-util = { version = "0.1.20", features = ["full"] }
 miniz_oxide = { version = "0.8.9", default-features = false, features = ["simd", "with-alloc"] }
