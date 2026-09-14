@@ -119,7 +119,7 @@ pub struct SledAgent {
     /// When > 0, local storage ensure/delete operations decrement this
     /// counter and return 503 Service Unavailable.
     local_storage_error_count: AtomicU32,
-    pub bootstore_network_config: watch::Sender<bootstore::NetworkConfig>,
+    bootstore_network_config: watch::Sender<bootstore::NetworkConfig>,
     pub repo_depot: dropshot::HttpServer<ArtifactStore<SimArtifactStorage>>,
     pub log: Logger,
     health_monitor: HealthMonitorHandle,
@@ -228,6 +228,17 @@ impl SledAgent {
             network_config_tx,
             scrimlet_reconcilers,
         })
+    }
+
+    pub fn current_bootstore_network_config(&self) -> bootstore::NetworkConfig {
+        self.bootstore_network_config.borrow().clone()
+    }
+
+    pub(super) fn set_bootstore_network_config(
+        &self,
+        config: bootstore::NetworkConfig,
+    ) {
+        self.bootstore_network_config.send_modify(|c| *c = config);
     }
 
     /// Start the scrimlet reconcilers pointing at the given switch zone service

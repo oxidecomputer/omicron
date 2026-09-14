@@ -734,7 +734,7 @@ async fn wait_for_sled_agent_bootstore_gen(
     wait_for_condition(
         || async {
             let generation =
-                sled_agent.bootstore_network_config.borrow().generation;
+                sled_agent.current_bootstore_network_config().generation;
             if generation == g {
                 Ok(())
             } else {
@@ -995,24 +995,11 @@ async fn test_scrimlet_reconcilers_update_on_bootstore_change(
     // Wait for the initial bootstore config (generation 3) to be written to
     // all sled agents. This happens as part of test setup.
     for (i, sled_agent) in ctx.sled_agents.iter().enumerate() {
-        let sled_agent = sled_agent.sled_agent().clone();
-        wait_for_condition(
-            || async {
-                let generation =
-                    sled_agent.bootstore_network_config.borrow().generation;
-                if generation == 3 {
-                    Ok(())
-                } else {
-                    Err(CondCheckError::<()>::NotYet { status: None })
-                }
-            },
-            &Duration::from_millis(50),
-            &Duration::from_secs(60),
-        )
-        .await
-        .unwrap_or_else(|_| {
-            panic!("sled-agent {i}'s bootstore should be 3 prior to update")
-        });
+        wait_for_sled_agent_bootstore_gen(&sled_agent.sled_agent(), 3)
+            .await
+            .unwrap_or_else(|_| {
+                panic!("sled-agent {i}'s bootstore should be 3 prior to update")
+            });
     }
 
     // Apply port settings to switch0.
@@ -1075,20 +1062,7 @@ async fn test_scrimlet_reconcilers_update_on_bootstore_change(
 
     // Verify the sled-agent bootstores were updated to generation 4.
     for (i, sled_agent) in ctx.sled_agents.iter().enumerate() {
-        let sled_agent = sled_agent.sled_agent().clone();
-        wait_for_condition(
-            || async {
-                let generation =
-                    sled_agent.bootstore_network_config.borrow().generation;
-                if generation == 4 {
-                    Ok(())
-                } else {
-                    Err(CondCheckError::<()>::NotYet { status: None })
-                }
-            },
-            &Duration::from_millis(50),
-            &Duration::from_secs(60),
-        )
+        wait_for_sled_agent_bootstore_gen(&sled_agent.sled_agent(), 4)
         .await
         .unwrap_or_else(|_| {
             panic!(

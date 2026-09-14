@@ -409,7 +409,7 @@ impl SledAgentApi for SledAgentSimImpl {
         use v42::system_networking::SystemNetworkingConfig as BodyV42;
         use v47::system_networking::SystemNetworkingConfig as BodyV47;
 
-        let config = rqctx.context().bootstore_network_config.borrow().clone();
+        let config = rqctx.context().current_bootstore_network_config();
 
         let envelope =
             EarlyNetworkConfigEnvelope::deserialize_from_bootstore(&config)
@@ -452,10 +452,10 @@ impl SledAgentApi for SledAgentSimImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
         let body = body.into_inner();
-        sa.bootstore_network_config.send_modify(|c| {
-            *c = EarlyNetworkConfigEnvelope::from(&body.body)
-                .serialize_to_bootstore_with_generation(body.generation);
-        });
+        sa.set_bootstore_network_config(
+            EarlyNetworkConfigEnvelope::from(&body.body)
+                .serialize_to_bootstore_with_generation(body.generation),
+        );
         Ok(HttpResponseUpdatedNoContent())
     }
 
@@ -465,10 +465,10 @@ impl SledAgentApi for SledAgentSimImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
         let body = body.into_inner();
-        sa.bootstore_network_config.send_modify(|c| {
-            *c = EarlyNetworkConfigEnvelope::from(&body.body)
-                .serialize_to_bootstore_with_generation(body.generation);
-        });
+        sa.set_bootstore_network_config(
+            EarlyNetworkConfigEnvelope::from(&body.body)
+                .serialize_to_bootstore_with_generation(body.generation),
+        );
         Ok(HttpResponseUpdatedNoContent())
     }
 
@@ -478,10 +478,10 @@ impl SledAgentApi for SledAgentSimImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
         let body = body.into_inner();
-        sa.bootstore_network_config.send_modify(|c| {
-            *c = EarlyNetworkConfigEnvelope::from(&body.body)
-                .serialize_to_bootstore_with_generation(body.generation);
-        });
+        sa.set_bootstore_network_config(
+            EarlyNetworkConfigEnvelope::from(&body.body)
+                .serialize_to_bootstore_with_generation(body.generation),
+        );
         Ok(HttpResponseUpdatedNoContent())
     }
 
@@ -491,10 +491,10 @@ impl SledAgentApi for SledAgentSimImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
         let body = body.into_inner();
-        sa.bootstore_network_config.send_modify(|c| {
-            *c = EarlyNetworkConfigEnvelope::from(&body.body)
-                .serialize_to_bootstore_with_generation(body.generation);
-        });
+        sa.set_bootstore_network_config(
+            EarlyNetworkConfigEnvelope::from(&body.body)
+                .serialize_to_bootstore_with_generation(body.generation),
+        );
         Ok(HttpResponseUpdatedNoContent())
     }
 
@@ -504,10 +504,10 @@ impl SledAgentApi for SledAgentSimImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
         let body = body.into_inner();
-        sa.bootstore_network_config.send_modify(|c| {
-            *c = EarlyNetworkConfigEnvelope::from(&body.body)
-                .serialize_to_bootstore_with_generation(body.generation);
-        });
+        sa.set_bootstore_network_config(
+            EarlyNetworkConfigEnvelope::from(&body.body)
+                .serialize_to_bootstore_with_generation(body.generation),
+        );
         Ok(HttpResponseUpdatedNoContent())
     }
 
@@ -517,10 +517,10 @@ impl SledAgentApi for SledAgentSimImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
         let body = body.into_inner();
-        sa.bootstore_network_config.send_modify(|c| {
-            *c = EarlyNetworkConfigEnvelope::from(&body.body)
-                .serialize_to_bootstore_with_generation(body.generation);
-        });
+        sa.set_bootstore_network_config(
+            EarlyNetworkConfigEnvelope::from(&body.body)
+                .serialize_to_bootstore_with_generation(body.generation),
+        );
         Ok(HttpResponseUpdatedNoContent())
     }
 
@@ -530,10 +530,10 @@ impl SledAgentApi for SledAgentSimImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
         let body = body.into_inner();
-        sa.bootstore_network_config.send_modify(|c| {
-            *c = EarlyNetworkConfigEnvelope::from(&body.body)
-                .serialize_to_bootstore_with_generation(body.generation);
-        });
+        sa.set_bootstore_network_config(
+            EarlyNetworkConfigEnvelope::from(&body.body)
+                .serialize_to_bootstore_with_generation(body.generation),
+        );
         Ok(HttpResponseUpdatedNoContent())
     }
 
@@ -543,10 +543,10 @@ impl SledAgentApi for SledAgentSimImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
         let body = body.into_inner();
-        sa.bootstore_network_config.send_modify(|c| {
-            *c = EarlyNetworkConfigEnvelope::from(&body.body)
-                .serialize_to_bootstore_with_generation(body.generation);
-        });
+        sa.set_bootstore_network_config(
+            EarlyNetworkConfigEnvelope::from(&body.body)
+                .serialize_to_bootstore_with_generation(body.generation),
+        );
         Ok(HttpResponseUpdatedNoContent())
     }
 
