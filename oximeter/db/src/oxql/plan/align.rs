@@ -84,7 +84,17 @@ fn align_input_schema(
             ),
         }
     }
-    Ok(TableSchema { data_types, ..schema })
+    // Report the metric type each method actually emits, so that later table
+    // ops -- including a second alignment -- plan against alignment's output
+    // rather than against the metric type of its input. Every method today
+    // emits a gauge, but that is a property of the methods rather than of
+    // alignment, so ask each one. See `AlignmentMethod::output_metric_type()`.
+    let metric_types = schema
+        .metric_types
+        .iter()
+        .map(|metric_type| method.output_metric_type(*metric_type))
+        .collect();
+    Ok(TableSchema { metric_types, data_types, ..schema })
 }
 
 #[cfg(test)]
@@ -113,7 +123,42 @@ mod test {
         let out = align_input_schema(schema.clone(), method).unwrap();
         assert_eq!(out.name, schema.name);
         assert_eq!(out.fields, schema.fields);
-        assert_eq!(out.metric_types, schema.metric_types);
+        assert_eq!(out.metric_types, vec![MetricType::Gauge]);
         assert_eq!(out.data_types[0], DataType::Double);
+    }
+
+    #[test]
+    fn test_align_input_schema_reports_the_method_output_metric_type() {
+        let schema = TableSchema {
+            name: String::from("foo:bar"),
+            fields: BTreeMap::from([(String::from("a"), FieldType::Bool)]),
+            metric_types: vec![MetricType::Delta],
+            data_types: vec![DataType::Integer],
+        };
+
+        let out = align_input_schema(
+            schema.clone(),
+            align::AlignmentMethod::MeanWithin,
+        )
+        .unwrap();
+        assert_eq!(
+            out.metric_types,
+            vec![MetricType::Gauge],
+            "Aligning a delta by mean must report a gauge output, since that \
+            is what `align_and_aggregate()` emits. Reporting the input metric \
+            type here would reject a following table op that only accepts \
+            gauges, such as a second `align min(..)` or `align max(..)`.",
+        );
+        assert_eq!(
+            out.metric_types,
+            vec![
+                align::AlignmentMethod::MeanWithin
+                    .output_metric_type(MetricType::Delta)
+            ],
+            "The planned metric type must come from the alignment method \
+            itself. A method that re-buckets deltas onto the output windows, \
+            as PromQL's `increase()` does, emits a delta rather than a gauge, \
+            and this function must not assume otherwise.",
+        );
     }
 }

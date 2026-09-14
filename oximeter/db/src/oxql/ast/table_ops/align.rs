@@ -180,6 +180,43 @@ pub enum AlignmentMethod {
     Min,
 }
 
+impl AlignmentMethod {
+    /// The metric type this method produces, given the metric type it is
+    /// applied to.
+    ///
+    /// Note that this is a property of the alignment *method*, not of
+    /// alignment in general. Every method implemented today reduces each
+    /// output window to a single level -- a mean, a rate, an extremum -- and
+    /// levels are gauges. That is not a law about alignment.
+    ///
+    /// Consider PromQL's `increase()`. It widens a run of deltas out to the
+    /// edges of each output window, so what comes back is another delta
+    /// series: the same dimensional quantity as the input, re-bucketed onto
+    /// `[output_time - period, output_time]`. Alignment defines those bounds
+    /// itself, so it always has the interval available to report. Such a
+    /// method must return `Delta` here, or a following `align rate(..)` could
+    /// never consume its output -- rate needs the start times that only a
+    /// delta carries.
+    pub(crate) fn output_metric_type(&self, input: MetricType) -> MetricType {
+        match self {
+            // These reduce each window to one level, so the output carries no
+            // interval. `align_and_aggregate()` builds its points by passing
+            // `None` for the start-time array of `Points::new()`, and carrying
+            // no start times is what makes a series a gauge rather than a
+            // delta.
+            AlignmentMethod::MeanWithin
+            | AlignmentMethod::Rate
+            | AlignmentMethod::Min
+            | AlignmentMethod::Max => MetricType::Gauge,
+            // Interpolation estimates the input at new timestamps rather than
+            // summarizing it, so it should preserve the shape of its input: an
+            // interpolated delta is still a run of amounts over intervals.
+            // Unimplemented today, and rejected before we get here.
+            AlignmentMethod::Interpolate => input,
+        }
+    }
+}
+
 impl fmt::Display for AlignmentMethod {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
