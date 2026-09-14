@@ -385,3 +385,45 @@ pub struct Ereport {
     #[serde(flatten)]
     pub data: BTreeMap<String, serde_cbor::Value>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Config;
+    use crate::sensors::Sensors;
+    use crate::vpd::ComponentVpds;
+
+    #[test]
+    fn example_config_is_valid() {
+        let config =
+            toml::from_str::<Config>(include_str!("../examples/config.toml"))
+                .expect("example config must parse");
+
+        for (i, gimlet) in config.simulated_sps.gimlet.iter().enumerate() {
+            eprintln!("validating gimlet {i}...");
+            let components = &gimlet.common.components;
+            // this doesn't return an error, so just hope it doesn't panic, and
+            // hope the fact that we printed which config we're checking helps
+            // figure out the bug...
+            Sensors::from_component_configs(components);
+            if let Err(e) = ComponentVpds::from_component_configs(components) {
+                panic!(
+                    "example config has an invalid sensor config for sim \
+                     gimlet {i}: {e:?}"
+                )
+            }
+        }
+
+        for (i, sidecar) in config.simulated_sps.sidecar.iter().enumerate() {
+            eprintln!("validating sidecar {i}...");
+            let components = &sidecar.common.components;
+            // as above
+            Sensors::from_component_configs(components);
+            if let Err(e) = ComponentVpds::from_component_configs(components) {
+                panic!(
+                    "example config has an invalid sensor config for sim \
+                     sidecar {i}: {e:?}"
+                )
+            }
+        }
+    }
+}
