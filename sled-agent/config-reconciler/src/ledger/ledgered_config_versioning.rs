@@ -19,6 +19,7 @@ use sled_agent_types_versions::v14;
 use sled_agent_types_versions::v49;
 use sled_agent_types_versions::v50;
 use sled_agent_types_versions::v51;
+use sled_agent_types_versions::v52;
 use slog::Logger;
 use slog::info;
 use slog::warn;
@@ -81,6 +82,7 @@ version_conversion_chain!(
 );
 
 version_conversion_chain!(
+    v52::artifact::ArtifactConfig,
     v1::artifact::ArtifactConfig,
     VersionConversionChainTerminal,
 );
@@ -442,7 +444,7 @@ pub(super) mod tests {
         // Use an explicit type so that adding a new artifact config version
         // breaks compilation here. Bump the version and add the new version's
         // path to the array of ledger paths below.
-        type LatestConfig = v1::artifact::ArtifactConfig;
+        type LatestConfig = v52::artifact::ArtifactConfig;
 
         let counts = check_ledger_reads::<LatestConfig, _, _>(
             log,

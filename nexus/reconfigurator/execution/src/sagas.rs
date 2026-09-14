@@ -222,8 +222,8 @@ mod test {
         BlueprintZoneConfig, BlueprintZoneDisposition,
         BlueprintZoneImageSource, BlueprintZoneType,
         CockroachDbPreserveDowngrade, LastAllocatedSubnetIpOffset,
-        OmicronZoneExternalFloatingIp, OximeterReadMode, PendingMgsUpdates,
-        blueprint_zone_type,
+        OmicronZoneExternalFloatingIp, OmicronZoneExternalFloatingIps,
+        OximeterReadMode, PendingMgsUpdates, blueprint_zone_type,
     };
     use nexus_types::external_api::sled::SledState;
     use omicron_common::address::Ipv6Subnet;
@@ -281,10 +281,13 @@ mod test {
                             internal_address: "[::1]:0".parse().unwrap(),
                             lockstep_port: 0,
                             external_dns_servers: Vec::new(),
-                            external_ip: OmicronZoneExternalFloatingIp {
-                                id: ExternalIpUuid::new_v4(),
-                                ip: IpAddr::V6(Ipv6Addr::LOCALHOST),
-                            },
+                            external_ips:
+                                OmicronZoneExternalFloatingIps::from_single(
+                                    OmicronZoneExternalFloatingIp {
+                                        id: ExternalIpUuid::new_v4(),
+                                        ip: IpAddr::V6(Ipv6Addr::LOCALHOST),
+                                    },
+                                ),
                             external_tls: true,
                             nic: NetworkInterface {
                                 id: uuid::Uuid::new_v4(),

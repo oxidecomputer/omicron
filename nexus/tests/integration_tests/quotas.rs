@@ -262,6 +262,7 @@ async fn setup_silo_with_quota(
                 name: "project".parse().unwrap(),
                 description: "".into(),
             },
+            defaults: None,
         },
     )
     .authn_as(auth_mode.clone())

@@ -684,7 +684,7 @@ mod tests {
     use camino_tempfile::tempfile;
     use iddqd::IdOrdMap;
     use illumos_utils::zpool::ZpoolName;
-    use omicron_generation_kinds::Generation;
+    use omicron_generation_kinds::ArtifactConfigGeneration;
     use omicron_test_utils::dev;
     use omicron_test_utils::dev::poll::wait_for_watch_channel_condition;
     use omicron_uuid_kinds::InternalZpoolUuid;
@@ -1275,7 +1275,7 @@ mod tests {
                 .await;
 
         let mut artifact_config = ArtifactConfig {
-            generation: Generation::new(),
+            generation: ArtifactConfigGeneration::new(),
             artifacts: BTreeSet::new(),
         };
 
