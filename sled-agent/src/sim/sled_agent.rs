@@ -80,6 +80,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
+use tokio::sync::watch;
 use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
@@ -118,17 +119,14 @@ pub struct SledAgent {
     /// When > 0, local storage ensure/delete operations decrement this
     /// counter and return 503 Service Unavailable.
     local_storage_error_count: AtomicU32,
-    pub bootstore_network_config:
-        tokio::sync::watch::Sender<bootstore::NetworkConfig>,
+    pub bootstore_network_config: watch::Sender<bootstore::NetworkConfig>,
     pub repo_depot: dropshot::HttpServer<ArtifactStore<SimArtifactStorage>>,
     pub log: Logger,
     health_monitor: HealthMonitorHandle,
     /// Watch channel that sends the deserialized [`SystemNetworkingConfig`]
     /// whenever Nexus writes a new bootstore config. Present on all sim sleds;
     /// only scrimlet sleds subscribe to it via [`Self::start_scrimlet_reconcilers`].
-    network_config_tx: tokio::sync::watch::Sender<
-        sled_agent_types::system_networking::SystemNetworkingConfig,
-    >,
+    network_config_tx: watch::Sender<SystemNetworkingConfig>,
     /// Keeps the scrimlet reconcilers alive.
     scrimlet_reconcilers: ScrimletReconcilers,
 }
@@ -175,8 +173,7 @@ impl SledAgent {
             EarlyNetworkConfigEnvelope::from(&sys_net_config)
                 .serialize_to_bootstore_with_generation(0);
 
-        let (bootstore_network_config, _) =
-            tokio::sync::watch::channel(initial_bootstore);
+        let (bootstore_network_config, _) = watch::channel(initial_bootstore);
 
         let storage = Storage::new(
             id.into_untyped_uuid(),
@@ -194,8 +191,7 @@ impl SledAgent {
 
         let health_monitor = HealthMonitorHandle::stub();
 
-        let (network_config_tx, _) =
-            tokio::sync::watch::channel(sys_net_config);
+        let (network_config_tx, _) = watch::channel(sys_net_config);
 
         tokio::spawn(forward_network_config_to_reconcilers(
             bootstore_network_config.subscribe(),
@@ -1254,8 +1250,8 @@ impl SledAgent {
 /// Watches `bootstore_rx` for changes and forwards deserialized
 /// [`SystemNetworkingConfig`] values to `network_config_tx`.
 async fn forward_network_config_to_reconcilers(
-    mut bootstore_rx: tokio::sync::watch::Receiver<bootstore::NetworkConfig>,
-    network_config_tx: tokio::sync::watch::Sender<SystemNetworkingConfig>,
+    mut bootstore_rx: watch::Receiver<bootstore::NetworkConfig>,
+    network_config_tx: watch::Sender<SystemNetworkingConfig>,
     log: slog::Logger,
 ) {
     loop {
