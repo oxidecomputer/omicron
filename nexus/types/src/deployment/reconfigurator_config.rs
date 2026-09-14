@@ -118,7 +118,6 @@ pub struct ReconfiguratorConfig {
     #[serde(default)]
     pub planner_config: PlannerConfig,
     pub tuf_repo_pruner_enabled: bool,
-    pub disruption_policy: ReconfiguratorDisruptionPolicy,
     pub blueprint_pruner_enabled: bool,
     pub blueprint_pruner_nkeep: u32,
 }
@@ -142,7 +141,6 @@ impl Default for ReconfiguratorConfig {
             planner_enabled: true,
             planner_config: PlannerConfig::default(),
             tuf_repo_pruner_enabled: true,
-            disruption_policy: ReconfiguratorDisruptionPolicy::default(),
             blueprint_pruner_enabled: true,
             blueprint_pruner_nkeep: DEFAULT_BLUEPRINT_PRUNER_NKEEP,
         }
@@ -164,6 +162,7 @@ impl Default for ReconfiguratorConfig {
     strum::VariantArray,
 )]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum ReconfiguratorDisruptionPolicy {
     /// Terminate instances during updates -- do not attempt to migrate
     /// instances. This is currently the default.
@@ -212,18 +211,17 @@ impl fmt::Display for ReconfiguratorConfigDisplay<'_> {
             config:
                 ReconfiguratorConfig {
                     planner_enabled,
-                    planner_config: _,
+                    planner_config,
                     tuf_repo_pruner_enabled,
-                    disruption_policy,
                     blueprint_pruner_enabled,
                     blueprint_pruner_nkeep,
                 },
         } = self;
         writeln!(f, "tuf repo pruner enabled: {}", tuf_repo_pruner_enabled)?;
-        writeln!(f, "disruption policy: {}", disruption_policy)?;
-        writeln!(f, "planner enabled: {}", planner_enabled)?;
         writeln!(f, "blueprint pruner enabled: {}", blueprint_pruner_enabled)?;
         writeln!(f, "blueprint pruner nkeep: {}", blueprint_pruner_nkeep)?;
+        writeln!(f, "planner enabled: {}", planner_enabled)?;
+        writeln!(f, "planner config:\n{}", planner_config.display())?;
 
         Ok(())
     }
@@ -243,9 +241,8 @@ impl fmt::Display for ReconfiguratorConfigDiffDisplay<'_, '_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let ReconfiguratorConfigDiff {
             planner_enabled,
-            planner_config: _,
+            planner_config: PlannerConfigDiff { disruption_policy },
             tuf_repo_pruner_enabled,
-            disruption_policy,
             blueprint_pruner_enabled,
             blueprint_pruner_nkeep,
         } = self.diff;
@@ -262,9 +259,6 @@ impl fmt::Display for ReconfiguratorConfigDiffDisplay<'_, '_> {
         );
         // No need for writeln! here because KvList adds its own newlines.
         write!(f, "{list}")?;
-
-        // When there are fields in `PlannerConfigDiff`, this is where their
-        // display would go.
 
         Ok(())
     }
@@ -284,7 +278,9 @@ impl fmt::Display for ReconfiguratorConfigDiffDisplay<'_, '_> {
     JsonSchema,
 )]
 #[cfg_attr(test, derive(test_strategy::Arbitrary))]
-pub struct PlannerConfig {}
+pub struct PlannerConfig {
+    pub disruption_policy: ReconfiguratorDisruptionPolicy,
+}
 
 impl PlannerConfig {
     pub fn display(&self) -> PlannerConfigDisplay<'_> {
@@ -297,7 +293,7 @@ impl PlannerConfig {
 #[expect(clippy::derivable_impls)]
 impl Default for PlannerConfig {
     fn default() -> Self {
-        Self {}
+        Self { disruption_policy: ReconfiguratorDisruptionPolicy::default() }
     }
 }
 
@@ -307,10 +303,7 @@ pub struct PlannerConfigDisplay<'a> {
 
 impl<'a> fmt::Display for PlannerConfigDisplay<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Self { config: PlannerConfig {} } = self;
-        // `PlannerConfig` currently has no fields; once it gains some, we'll
-        // render them here as a `KvList`. The 4-space indent matches where
-        // those rows would appear.
-        writeln!(f, "    (no current planner configs)")
+        let Self { config: PlannerConfig { disruption_policy } } = self;
+        writeln!(f, "    disruption policy: {}", disruption_policy)
     }
 }

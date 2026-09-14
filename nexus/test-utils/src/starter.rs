@@ -62,7 +62,6 @@ use nexus_types::deployment::OximeterReadMode;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::ReconfiguratorConfig;
-use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::external_api::sled::SledState;
 use nexus_types::internal_api::params::DnsConfigParams;
@@ -594,7 +593,6 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                 planner_enabled: false,
                 planner_config: PlannerConfig::default(),
                 tuf_repo_pruner_enabled: true,
-                disruption_policy: ReconfiguratorDisruptionPolicy::default(),
                 blueprint_pruner_enabled: true,
                 blueprint_pruner_nkeep: DEFAULT_BLUEPRINT_PRUNER_NKEEP,
             });
