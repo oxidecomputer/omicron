@@ -2405,6 +2405,7 @@ pub(in crate::db::datastore) mod test {
     use crate::db::pub_test_utils::helpers::create_anti_affinity_group;
     use crate::db::pub_test_utils::helpers::create_project;
     use crate::db::pub_test_utils::helpers::small_resource_request;
+    use crate::db::pub_test_utils::simulated_sleds::initialize_sled_bp_availability;
     use crate::db::pub_test_utils::simulated_sleds::sled_updates_from_system;
     use crate::db::pub_test_utils::simulated_sleds::test_sled_resources;
     use crate::db::pub_test_utils::simulated_sleds::upsert_sleds_from_system;
@@ -2419,12 +2420,17 @@ pub(in crate::db::datastore) mod test {
     use nexus_db_model::PhysicalDiskPolicy;
     use nexus_db_model::PhysicalDiskState;
     use nexus_db_model::{InstanceCpuPlatform, PhysicalDisk};
+    use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_reconfigurator_planning::example::ExampleSystem;
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
+    use nexus_reconfigurator_planning::planner::PlannerRng;
     use nexus_reconfigurator_planning::system::SimulatedSledResources;
+    use nexus_types::deployment::Blueprint;
+    use nexus_types::deployment::BlueprintSource;
     use nexus_types::external_api::{affinity, disk, instance};
     use nexus_types::identity::Asset;
     use nexus_types::identity::Resource;
+    use omicron_common::address::Ipv6Subnet;
     use omicron_common::api::external;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::AffinityGroupUuid;
@@ -2440,6 +2446,7 @@ pub(in crate::db::datastore) mod test {
     use sled_agent_types::inventory::ZpoolHealth;
     use std::collections::BTreeMap;
     use std::collections::HashMap;
+    use std::net::Ipv6Addr;
     use std::net::SocketAddrV6;
 
     #[tokio::test]
@@ -2590,7 +2597,11 @@ pub(in crate::db::datastore) mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let example = example_system_with_resources(&opctx, 5);
+        // (Note that all five sleds have their update disposition set to
+        // available in the blueprint, so the only thing making a sled
+        // ineligible below is its policy and/or state.)
+        let (example, blueprint) = example_system_with_resources(&opctx, 5);
+        initialize_sled_bp_availability(&datastore, &blueprint).await;
         let [
             non_provisionable_update,
             expunged_update,
@@ -2740,13 +2751,11 @@ pub(in crate::db::datastore) mod test {
     fn example_system_with_resources(
         opctx: &OpContext,
         nsleds: usize,
-    ) -> ExampleSystem {
-        let (example, _) =
-            ExampleSystemBuilder::new(&opctx.log, "sled_reservation_tests")
-                .nsleds(nsleds)
-                .sled_resources(test_sled_resources())
-                .build();
-        example
+    ) -> (ExampleSystem, Blueprint) {
+        ExampleSystemBuilder::new(&opctx.log, "sled_reservation_tests")
+            .nsleds(nsleds)
+            .sled_resources(test_sled_resources())
+            .build()
     }
 
     async fn create_sleds(
@@ -2754,7 +2763,8 @@ pub(in crate::db::datastore) mod test {
         datastore: &DataStore,
         count: usize,
     ) -> Vec<Sled> {
-        let example = example_system_with_resources(opctx, count);
+        let (example, blueprint) = example_system_with_resources(opctx, count);
+        initialize_sled_bp_availability(datastore, &blueprint).await;
         upsert_sleds_from_system(
             datastore,
             &example.system,
@@ -4096,7 +4106,8 @@ pub(in crate::db::datastore) mod test {
                 )
                 .expect("sled index is in range");
         }
-        let (example, _) = builder.build();
+        let (example, blueprint) = builder.build();
+        initialize_sled_bp_availability(&datastore, &blueprint).await;
         upsert_sleds_from_system(
             &datastore,
             &example.system,
@@ -4583,6 +4594,28 @@ pub(in crate::db::datastore) mod test {
         datastore: &DataStore,
         config: &LocalStorageTest,
     ) {
+        // Ordinarily we would use ExampleSystem to build a blueprint, but do it
+        // blueprint manually here because the test config in this file sets up
+        // a number of things not currently modeled by that.
+        //
+        // TODO: port this over to ExampleSystem.
+        let empty = BlueprintBuilder::build_empty("local storage tests");
+        let mut builder = BlueprintBuilder::new_based_on(
+            &opctx.log,
+            &empty,
+            "local storage tests",
+            PlannerRng::from_entropy(),
+        )
+        .expect("created BlueprintBuilder from empty blueprint");
+        for sled_config in &config.sleds {
+            builder.ensure_sled_exists(
+                sled_config.sled_id,
+                Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
+            );
+        }
+        let blueprint = builder.build(BlueprintSource::Test);
+        initialize_sled_bp_availability(datastore, &blueprint).await;
+
         for sled_config in &config.sleds {
             let sled = SledUpdate::new(
                 sled_config.sled_id,
