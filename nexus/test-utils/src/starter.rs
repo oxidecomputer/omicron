@@ -1112,7 +1112,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         }
     }
 
-    /// Set up a single "extra" sled agent, meaning not the special first one.
+    /// Set up a single "extra" (non-scrimlet) sled agent
     pub async fn extra_sled_agent(
         &mut self,
         sled_id: SledUuid,
