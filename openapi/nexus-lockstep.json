@@ -7639,7 +7639,15 @@
         ]
       },
       "PlannerConfig": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "disruption_policy": {
+            "$ref": "#/components/schemas/ReconfiguratorDisruptionPolicy"
+          }
+        },
+        "required": [
+          "disruption_policy"
+        ]
       },
       "PlanningAddOutOfEligibleSleds": {
         "description": "How many discretionary zones we actually placed out of how many we wanted to place.",
@@ -9069,11 +9077,10 @@
             "format": "uint32",
             "minimum": 0
           },
-          "disruption_policy": {
-            "$ref": "#/components/schemas/ReconfiguratorDisruptionPolicy"
-          },
           "planner_config": {
-            "default": {},
+            "default": {
+              "disruption_policy": "terminate"
+            },
             "allOf": [
               {
                 "$ref": "#/components/schemas/PlannerConfig"
@@ -9090,7 +9097,6 @@
         "required": [
           "blueprint_pruner_enabled",
           "blueprint_pruner_nkeep",
-          "disruption_policy",
           "planner_enabled",
           "tuf_repo_pruner_enabled"
         ]
