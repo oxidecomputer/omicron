@@ -236,9 +236,56 @@ impl AlignmentMethod {
             but table '{table_name}' has cumulative metric type",
         );
         match self {
-            // A mean is defined over either. Gauges average their levels,
-            // deltas average their amounts weighted by overlap.
-            AlignmentMethod::MeanWithin => Ok(()),
+            AlignmentMethod::MeanWithin
+            | AlignmentMethod::Min
+            | AlignmentMethod::Max => {
+                // All three of these are interval-blind: they combine the
+                // values of the points in a window without regard to the span
+                // each one covers. Over a gauge that is exactly right, since a
+                // gauge value is a level at an instant.
+                //
+                // Over a delta it is not. Producers choose their own sample
+                // intervals, so a run of deltas holds amounts accrued over
+                // spans of differing length, and combining them without
+                // weighting by duration yields a number that depends on how
+                // often the producer samples rather than on what it measured.
+                // For the mean that means an average per *sample*; for the
+                // extrema it means the largest is whichever covered the
+                // longest span, not whichever was busiest.
+                //
+                // There is no interval-aware version of these to reach for
+                // either: divide the mean by the window duration instead of
+                // the sample count and you have written `rate`. So the remedy
+                // is always to align a rate first, and the errors say so --
+                // nearly every counter arrives here as a delta, so the
+                // restriction would otherwise look arbitrary.
+                //
+                // Note that `Points::from_cumulative()` makes the extrema case
+                // worse still: it gives the first delta of each epoch the whole
+                // cumulative value rather than an increment, and an extremum
+                // would reliably select it. The mean's overlap weighting
+                // happens to defuse that one.
+                //
+                // If a future method emits deltas already bucketed onto the
+                // alignment grid, as PromQL's `increase()` does, its intervals
+                // are uniform and all of this becomes well defined again.
+                // `TableOpData::alignment` is how the planner could tell the
+                // two apart.
+                let remedy = if matches!(self, AlignmentMethod::MeanWithin) {
+                    "align rate(1m)"
+                } else {
+                    "align rate(10s) | align max(1m)"
+                };
+                anyhow::ensure!(
+                    metric_type != MetricType::Delta,
+                    "{self} alignment requires a gauge metric, but table \
+                    '{table_name}' has delta metric type. Delta values depend \
+                    on the length of their interval, so combining them \
+                    without weighting by duration is not meaningful; align a \
+                    rate instead, e.g. `{remedy}`",
+                );
+                Ok(())
+            }
             AlignmentMethod::Rate => {
                 // Rate over a gauge is meaningful -- the rate a disk fills, or
                 // a temperature climbs -- but it is a different computation
@@ -250,31 +297,6 @@ impl AlignmentMethod {
                     metric_type != MetricType::Gauge,
                     "rate alignment does not yet support gauge metrics, \
                     but table '{table_name}' has gauge metric type",
-                );
-                Ok(())
-            }
-            AlignmentMethod::Min | AlignmentMethod::Max => {
-                // Producers choose their own sample intervals, so a run of
-                // deltas holds amounts accrued over spans of differing length.
-                // The largest of them is whichever covered the longest span,
-                // not whichever was busiest. Worse, the first delta of each
-                // epoch carries the whole cumulative value rather than an
-                // increment -- see `Points::from_cumulative()` -- so an
-                // extremum would reliably pick that one out.
-                //
-                // Rate normalizes all of that away, which is why the remedy
-                // below composes. If a future method emits deltas already
-                // bucketed onto the alignment grid, as PromQL's `increase()`
-                // does, its intervals are uniform and extrema over *those*
-                // would be meaningful. `TableOpData::alignment` is how the
-                // planner could tell the two apart.
-                anyhow::ensure!(
-                    metric_type != MetricType::Delta,
-                    "min and max alignment require a gauge metric, but table \
-                    '{table_name}' has delta metric type. Delta values depend \
-                    on the length of their interval, so extrema over them are \
-                    not meaningful; align a rate first, e.g. \
-                    `align rate(10s) | align max(1m)`",
                 );
                 Ok(())
             }

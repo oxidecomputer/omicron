@@ -1066,7 +1066,7 @@ mod tests {
     async fn group_by_plan_leaves_only_grouped_fields() {
         let query = query_parser::query(
             "get physical_data_link:bytes_received \
-                | align mean_within(20s) \
+                | align rate(20s) \
                 | group_by [sled_id, serial]",
         )
         .unwrap();
@@ -1148,7 +1148,7 @@ mod tests {
                 get physical_data_link:bytes_sent; \
                 get physical_data_link:bytes_received \
              } \
-                | align mean_within(10s) \
+                | align rate(10s) \
                 | group_by [sled_id]",
         )
         .unwrap();
@@ -1167,7 +1167,7 @@ mod tests {
     async fn cannot_join_one_table() {
         let query = query_parser::query(
             "get physical_data_link:bytes_sent \
-                | align mean_within(10s) \
+                | align rate(10s) \
                 | join",
         )
         .unwrap();
@@ -1277,7 +1277,7 @@ mod tests {
     async fn predicate_pushdown_pushes_filter_nodes_through_group_by() {
         let query = query_parser::query(
             "get physical_data_link:bytes_sent \
-                | align mean_within(1m) \
+                | align rate(1m) \
                 | group_by [serial] \
                 | filter serial == 'foo'",
         )
@@ -1302,7 +1302,7 @@ mod tests {
                 get physical_data_link:bytes_sent; \
                 get physical_data_link:bytes_received \
             } \
-                | align mean_within(1m) \
+                | align rate(1m) \
                 | join
                 | filter serial == 'foo'",
         )
@@ -1378,8 +1378,9 @@ mod tests {
     #[tokio::test]
     async fn limit_pushdown_does_not_reorder_around_align() {
         let query = query_parser::query(
-            "get physical_data_link:bytes_sent | align mean_within(10m) | first 10"
-        ).unwrap();
+            "get physical_data_link:bytes_sent | align rate(10m) | first 10",
+        )
+        .unwrap();
         let plan = Plan::new(query, all_schema().await).unwrap();
         let Node::Get(get) = &plan.optimized_nodes()[0] else {
             unreachable!();
@@ -1407,7 +1408,6 @@ mod tests {
         // `(_, _)` arm swallowed the three newer methods, reporting them as a
         // bad *data type*.
         for query in [
-            format!("get {DELTA} | align mean_within(1m)"),
             format!("get {GAUGE} | align mean_within(1m)"),
             format!("get {DELTA} | align rate(1m)"),
             format!("get {GAUGE} | align min(1m)"),
@@ -1428,11 +1428,18 @@ mod tests {
             ),
             (
                 format!("get {DELTA} | align min(1m)"),
-                "min and max alignment require a gauge metric",
+                "min alignment requires a gauge metric",
             ),
             (
                 format!("get {DELTA} | align max(1m)"),
-                "min and max alignment require a gauge metric",
+                "max alignment requires a gauge metric",
+            ),
+            // The pre-existing method, restricted for the same reason: a mean
+            // over deltas is an average per *sample*, so it reports how often
+            // the producer sampled rather than what it measured.
+            (
+                format!("get {DELTA} | align mean_within(1m)"),
+                "mean_within alignment requires a gauge metric",
             ),
         ] {
             let err = plan_query(&query)

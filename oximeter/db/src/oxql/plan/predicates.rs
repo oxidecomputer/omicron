@@ -453,7 +453,7 @@ mod tests {
     #[tokio::test]
     async fn push_single_predicate_through_alignment() {
         let query = query_parser::query(
-            "get physical_data_link:bytes_sent | align mean_within(1s)",
+            "get physical_data_link:bytes_sent | align rate(1s)",
         )
         .unwrap();
         let plan = Plan::new(query, all_schema().await).unwrap();
@@ -480,7 +480,7 @@ mod tests {
     #[tokio::test]
     async fn push_single_predicate_partway_through_alignment() {
         let query = query_parser::query(
-            "get physical_data_link:bytes_sent | align mean_within(1s)",
+            "get physical_data_link:bytes_sent | align rate(1s)",
         )
         .unwrap();
         let plan = Plan::new(query, all_schema().await).unwrap();
@@ -518,7 +518,7 @@ mod tests {
     #[tokio::test]
     async fn push_none_of_single_predicate_through_alignment() {
         let query = query_parser::query(
-            "get physical_data_link:bytes_sent | align mean_within(1s)",
+            "get physical_data_link:bytes_sent | align rate(1s)",
         )
         .unwrap();
         let plan = Plan::new(query, all_schema().await).unwrap();
@@ -549,7 +549,7 @@ mod tests {
     #[tokio::test]
     async fn push_multiple_predicates_partway_through_alignment() {
         let query = query_parser::query(
-            "get physical_data_link:bytes_sent | align mean_within(1s)",
+            "get physical_data_link:bytes_sent | align rate(1s)",
         )
         .unwrap();
         let plan = Plan::new(query, all_schema().await).unwrap();
@@ -597,7 +597,7 @@ mod tests {
     #[tokio::test]
     async fn push_predicates_partway_through_alignment_differently() {
         let query = query_parser::query(
-            "get physical_data_link:bytes_sent | align mean_within(1s)",
+            "get physical_data_link:bytes_sent | align rate(1s)",
         )
         .unwrap();
         let plan = Plan::new(query, all_schema().await).unwrap();

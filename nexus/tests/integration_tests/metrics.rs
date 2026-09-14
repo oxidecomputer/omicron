@@ -547,10 +547,12 @@ async fn test_project_timeseries_query(
     assert_eq!(result[0].timeseries.len(), 0);
 
     // now let's test it with group_by
-    let q4 = &format!(
-        "{} | align mean_within(1m) | group_by [instance_id], sum",
-        q1
-    );
+    //
+    // `virtual_machine:check` is a cumulative metric, so it reaches alignment
+    // as a delta, and `rate` is the alignment method defined over those. The
+    // mean of a run of deltas is an average per *sample*, which measures how
+    // often the producer sampled rather than what it sampled.
+    let q4 = &format!("{} | align rate(1m) | group_by [instance_id], sum", q1);
     let result = metrics_querier.project_timeseries_query("project1", q4).await;
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].timeseries.len(), 2);

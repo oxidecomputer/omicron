@@ -50,12 +50,10 @@ fn align_input_schema(
     schema: TableSchema,
     method: align::AlignmentMethod,
 ) -> anyhow::Result<TableSchema> {
-    // Not every method accepts every metric type. The check lives on the
-    // method itself, so that this and `align_and_aggregate()` cannot disagree
-    // about what is allowed.
-    for metric_type in schema.metric_types.iter() {
-        method.check_metric_type(*metric_type, &schema.name)?;
-    }
+    // Check the data type before the metric type. Whether a table can be
+    // aligned at all is the more fundamental question -- a histogram cannot,
+    // by any method -- so answering it first gives the more useful error.
+    //
     // Check the data type and the method separately, rather than matching on
     // the pair of them. A combined match needs a `(_, _)` arm to cover the
     // non-numeric data types, and that arm silently swallows any alignment
@@ -82,6 +80,12 @@ fn align_input_schema(
                 );
             }
         }
+    }
+    // Not every method accepts every metric type. The check lives on the
+    // method itself, so that this and `align_and_aggregate()` cannot disagree
+    // about what is allowed.
+    for metric_type in schema.metric_types.iter() {
+        method.check_metric_type(*metric_type, &schema.name)?;
     }
     // Report the metric type each method actually emits, so that later table
     // ops -- including a second alignment -- plan against alignment's output
@@ -163,10 +167,9 @@ mod test {
     #[test]
     fn test_aggregates_widen_to_a_double() {
         // Each method is paired with a metric type it accepts: rate is
-        // defined only over deltas.
+        // defined only over deltas, and mean_within only over gauges.
         let cases = [
             (align::AlignmentMethod::MeanWithin, MetricType::Gauge),
-            (align::AlignmentMethod::MeanWithin, MetricType::Delta),
             (align::AlignmentMethod::Rate, MetricType::Delta),
         ];
         for (method, metric_type) in cases {
@@ -248,27 +251,31 @@ mod test {
     }
 
     #[test]
-    fn test_min_and_max_reject_a_delta() {
-        for method in [align::AlignmentMethod::Min, align::AlignmentMethod::Max]
-        {
+    fn test_interval_blind_methods_reject_a_delta() {
+        for method in [
+            align::AlignmentMethod::MeanWithin,
+            align::AlignmentMethod::Min,
+            align::AlignmentMethod::Max,
+        ] {
             let err = align_input_schema(
                 schema_with_metric_type(MetricType::Delta),
                 method,
             )
             .expect_err(
-                "Producers pick their own sample intervals, so the largest of \
-                a run of deltas is whichever covered the longest span rather \
-                than whichever was busiest. The first delta of each epoch is \
-                worse still: it carries a whole cumulative value rather than \
-                an increment, so an extremum would reliably select it.",
+                "Producers pick their own sample intervals, so a run of deltas \
+                holds amounts accrued over spans of differing length. \
+                Combining them without weighting by duration measures how \
+                often the producer sampled, not what it sampled.",
             );
             let err = err.to_string();
             assert!(
-                err.contains("min and max alignment require a gauge metric"),
+                err.contains(&format!(
+                    "{method} alignment requires a gauge metric"
+                )),
                 "Unexpected error: {err}",
             );
             assert!(
-                err.contains("align rate(10s) | align max(1m)"),
+                err.contains("align rate("),
                 "The error must point at the spelling that does work, since \
                 nearly every counter in the system reaches alignment as a \
                 delta and would otherwise look arbitrarily forbidden: {err}",
@@ -277,9 +284,12 @@ mod test {
     }
 
     #[test]
-    fn test_min_and_max_accept_a_gauge() {
-        for method in [align::AlignmentMethod::Min, align::AlignmentMethod::Max]
-        {
+    fn test_interval_blind_methods_accept_a_gauge() {
+        for method in [
+            align::AlignmentMethod::MeanWithin,
+            align::AlignmentMethod::Min,
+            align::AlignmentMethod::Max,
+        ] {
             let out = align_input_schema(
                 schema_with_metric_type(MetricType::Gauge),
                 method,
@@ -331,15 +341,13 @@ mod test {
             data_types: vec![DataType::Integer],
         };
 
-        let out = align_input_schema(
-            schema.clone(),
-            align::AlignmentMethod::MeanWithin,
-        )
-        .unwrap();
+        let out =
+            align_input_schema(schema.clone(), align::AlignmentMethod::Rate)
+                .unwrap();
         assert_eq!(
             out.metric_types,
             vec![MetricType::Gauge],
-            "Aligning a delta by mean must report a gauge output, since that \
+            "Aligning a delta by rate must report a gauge output, since that \
             is what `align_and_aggregate()` emits. Reporting the input metric \
             type here would reject a following table op that only accepts \
             gauges, such as a second `align min(..)` or `align max(..)`.",
@@ -347,7 +355,7 @@ mod test {
         assert_eq!(
             out.metric_types,
             vec![
-                align::AlignmentMethod::MeanWithin
+                align::AlignmentMethod::Rate
                     .output_metric_type(MetricType::Delta)
             ],
             "The planned metric type must come from the alignment method \
