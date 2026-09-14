@@ -59,9 +59,9 @@ fn verify_max_upsampling_ratio(
 }
 
 struct MetricWindow<'a> {
-    start_times: Option<&'a[DateTime<Utc>]>,
-    timestamps: &'a[DateTime<Utc>],
-    input_points: &'a[Option<f64>],
+    start_times: Option<&'a [DateTime<Utc>]>,
+    timestamps: &'a [DateTime<Utc>],
+    input_points: &'a [Option<f64>],
     start: DateTime<Utc>,
     end: DateTime<Utc>,
 }
@@ -114,19 +114,47 @@ impl Align {
                 .collect(),
             AlignmentMethod::MeanWithin => tables
                 .iter()
-                .map(|table| align_and_aggregate(table, query_end, &self.period, mean_value_in_window))
+                .map(|table| {
+                    align_and_aggregate(
+                        table,
+                        query_end,
+                        &self.period,
+                        mean_value_in_window,
+                    )
+                })
                 .collect(),
             AlignmentMethod::Rate => tables
                 .iter()
-                .map(|table| align_and_aggregate(table, query_end, &self.period, rate_in_window))
+                .map(|table| {
+                    align_and_aggregate(
+                        table,
+                        query_end,
+                        &self.period,
+                        rate_in_window,
+                    )
+                })
                 .collect(),
             AlignmentMethod::Max => tables
                 .iter()
-                .map(|table| align_and_aggregate(table, query_end, &self.period, max_value_in_window))
+                .map(|table| {
+                    align_and_aggregate(
+                        table,
+                        query_end,
+                        &self.period,
+                        max_value_in_window,
+                    )
+                })
                 .collect(),
             AlignmentMethod::Min => tables
                 .iter()
-                .map(|table| align_and_aggregate(table, query_end, &self.period, min_value_in_window))
+                .map(|table| {
+                    align_and_aggregate(
+                        table,
+                        query_end,
+                        &self.period,
+                        min_value_in_window,
+                    )
+                })
                 .collect(),
         }
     }
@@ -170,10 +198,11 @@ fn align_and_aggregate<F>(
     table: &Table,
     query_end: &DateTime<Utc>,
     period: &Duration,
-    aggregator: F) -> Result<Table, Error>
-    where F: Fn(&MetricType, &MetricWindow) -> Option<f64>
+    aggregator: F,
+) -> Result<Table, Error>
+where
+    F: Fn(&MetricType, &MetricWindow) -> Option<f64>,
 {
-
     let mut output_table = Table::new(table.name());
     for timeseries in table.iter() {
         let points = &timeseries.points;
@@ -250,7 +279,7 @@ fn align_and_aggregate<F>(
                 break;
             }
 
-            let window = MetricWindow{
+            let window = MetricWindow {
                 start_times: points.start_times(),
                 timestamps: points.timestamps(),
                 input_points: &input_points,
@@ -327,7 +356,6 @@ fn mean_value_in_window(
         )
     }
 }
-
 
 // Given an interval start and end, and a window start and end, compute the
 // fraction of the _interval_ that the time window represents.
@@ -484,10 +512,12 @@ fn rate_in_window(
     // Since the start times are <= the timestamps, we can take the min of those
     // two to get the first point that overlaps at all, and the max to get the
     // last.
-    
+
     let start_times = window.start_times?;
-    let first_timestamp = window.timestamps.partition_point(|t| t <= &window.start);
-    let last_timestamp = window.timestamps.partition_point(|t| t <= &window.end);
+    let first_timestamp =
+        window.timestamps.partition_point(|t| t <= &window.start);
+    let last_timestamp =
+        window.timestamps.partition_point(|t| t <= &window.end);
     let first_start_time = start_times.partition_point(|t| t <= &window.start);
     let last_start_time = start_times.partition_point(|t| t <= &window.end);
     let first_index = first_timestamp.min(first_start_time);
@@ -557,12 +587,10 @@ fn max_value_in_window(
     window.input_points[start_index..output_index]
         .iter()
         .filter_map(|&x| x)
-        .fold(None, |acc, x| {
-        match acc {
+        .fold(None, |acc, x| match acc {
             None => Some(x),
             Some(max_val) => Some(max_val.max(x)),
-        }
-    })
+        })
 }
 
 fn min_value_in_window(
@@ -576,12 +604,10 @@ fn min_value_in_window(
     window.input_points[start_index..output_index]
         .iter()
         .filter_map(|&x| x)
-        .fold(None, |acc, x| {
-        match acc {
+        .fold(None, |acc, x| match acc {
             None => Some(x),
             Some(min_val) => Some(min_val.min(x)),
-        }
-    })
+        })
 }
 
 fn align_interpolate(
@@ -605,7 +631,7 @@ mod tests {
     }
     impl OwnedMetricWindow {
         fn metric_window(&self) -> MetricWindow<'_> {
-            MetricWindow{
+            MetricWindow {
                 start_times: Some(&self.start_times),
                 timestamps: &self.timestamps,
                 input_points: &self.input_points,
@@ -878,10 +904,10 @@ mod tests {
         let window_start = start_times[0];
         let window_end = timestamps[timestamps.len() - 1];
 
-        OwnedMetricWindow{
-            start_times: start_times,
-            timestamps: timestamps,
-            input_points: input_points,
+        OwnedMetricWindow {
+            start_times,
+            timestamps,
+            input_points,
             start: window_start,
             end: window_end,
         }
@@ -899,9 +925,13 @@ mod tests {
             ("2025-08-12T19:17:50.0000Z", "2025-08-12T19:18:00.0000Z", 1000f64),
         ]);
 
-        let mean = rate_in_window(&MetricType::Delta, &window.metric_window()).unwrap();
+        let mean = rate_in_window(&MetricType::Delta, &window.metric_window())
+            .unwrap();
         let expected = 100.0;
-        assert!((mean - expected).abs() < 1e-6, "mean={mean}, expected={expected}");
+        assert!(
+            (mean - expected).abs() < 1e-6,
+            "mean={mean}, expected={expected}"
+        );
     }
 
     #[test]
@@ -916,25 +946,44 @@ mod tests {
         ]);
 
         // Test the full window
-        let min = min_value_in_window(&MetricType::Gauge, &window.metric_window()).unwrap();
+        let min =
+            min_value_in_window(&MetricType::Gauge, &window.metric_window())
+                .unwrap();
         let expected = 1000.0;
-        assert!((min - expected).abs() < 1e-6, "min={min}, expected={expected}");
+        assert!(
+            (min - expected).abs() < 1e-6,
+            "min={min}, expected={expected}"
+        );
 
-        let max = max_value_in_window(&MetricType::Gauge, &window.metric_window()).unwrap();
+        let max =
+            max_value_in_window(&MetricType::Gauge, &window.metric_window())
+                .unwrap();
         let expected = 5000.0;
-        assert!((max - expected).abs() < 1e-6, "max={max}, expected={expected}");
+        assert!(
+            (max - expected).abs() < 1e-6,
+            "max={max}, expected={expected}"
+        );
 
         // Test a partial window
         window.start = "2025-08-12T19:17:25.0000Z".parse().unwrap();
         window.end = "2025-08-12T19:17:45.0000Z".parse().unwrap();
-        let min = min_value_in_window(&MetricType::Gauge, &window.metric_window()).unwrap();
+        let min =
+            min_value_in_window(&MetricType::Gauge, &window.metric_window())
+                .unwrap();
         let expected = 3000.0;
-        assert!((min - expected).abs() < 1e-6, "min={min}, expected={expected}");
+        assert!(
+            (min - expected).abs() < 1e-6,
+            "min={min}, expected={expected}"
+        );
 
-        let max = max_value_in_window(&MetricType::Gauge, &window.metric_window()).unwrap();
+        let max =
+            max_value_in_window(&MetricType::Gauge, &window.metric_window())
+                .unwrap();
         let expected = 4000.0;
-        assert!((max - expected).abs() < 1e-6, "max={max}, expected={expected}");
-
+        assert!(
+            (max - expected).abs() < 1e-6,
+            "max={max}, expected={expected}"
+        );
     }
 
     #[test]
