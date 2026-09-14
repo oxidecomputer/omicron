@@ -18,7 +18,10 @@ use sled_hardware::DendriteAsic;
 use sled_hardware::ExternalDisks;
 use sled_hardware::SledMode;
 use sled_hardware::SwitchProbe;
+use slog::Logger;
 use sprockets_tls::keys::SprocketsConfig;
+
+use crate::bootstrap::server::StartError;
 
 /// The role a deployment asks of this sled; `auto` lets detection decide.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
@@ -134,9 +137,31 @@ impl Deployment {
         }
     }
 
+    /// Resolve the sled mode: probe for the switch hardware this deployment
+    /// can carry, then decide from what was found.
+    pub async fn sled_mode(
+        &self,
+        log: &Logger,
+    ) -> Result<SledMode, StartError> {
+        let found = match self.probe() {
+            Some(probe) => {
+                let log = log.clone();
+                // The probe touches devinfo and device nodes, so it may block.
+                tokio::task::spawn_blocking(move || {
+                    sled_hardware::detect_switch_hardware(&log, probe)
+                })
+                .await
+                .expect("switch detection panicked")
+                .map_err(StartError::DetectSwitch)?
+            }
+            None => None,
+        };
+        self.resolve(found).map_err(StartError::SledModeConfig)
+    }
+
     /// What startup detection should look for, if anything. A sled never
     /// probes, and the stub and zone backends have nothing to find.
-    pub fn probe(&self) -> Option<SwitchProbe> {
+    fn probe(&self) -> Option<SwitchProbe> {
         match self {
             Deployment::Production { .. } => Some(SwitchProbe::PhysicalAsic),
             Deployment::Virtual { .. } => Some(SwitchProbe::SoftNpu),
@@ -153,8 +178,8 @@ impl Deployment {
         }
     }
 
-    /// Resolve the sled mode from what `probe()` found.
-    pub fn sled_mode(
+    /// Decide the sled mode from what `probe()` found.
+    fn resolve(
         &self,
         found: Option<DendriteAsic>,
     ) -> Result<SledMode, &'static str> {
@@ -417,7 +442,7 @@ mod test {
     // Each case: deployment, what the probe found (None when nothing was
     // found or no probe ran), expected mode or a config error.
     #[test]
-    fn sled_mode_table() {
+    fn resolve_table() {
         let err: Result<SledMode, &'static str> = Err("");
         let cases = [
             // Production: a found ASIC is a scrimlet now; nothing found
@@ -465,7 +490,7 @@ mod test {
         ];
         for (i, (deployment, found, expected)) in cases.into_iter().enumerate()
         {
-            let actual = deployment.sled_mode(found).map_err(|_| "");
+            let actual = deployment.resolve(found).map_err(|_| "");
             assert_eq!(actual, expected, "case {i}");
         }
     }

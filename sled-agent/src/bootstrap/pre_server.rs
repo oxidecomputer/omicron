@@ -35,7 +35,6 @@ use illumos_utils::zone::Zones;
 use omicron_common::FileKv;
 use omicron_common::address::Ipv6Subnet;
 use sled_agent_config_reconciler::ConfigReconcilerSpawnToken;
-use sled_hardware::SledMode;
 use sled_hardware::underlay;
 use sled_hardware::underlay::BootstrapInterface;
 use slog::Drain;
@@ -114,7 +113,7 @@ impl BootstrapAgentStartup {
         BootstrapNetworking::enable_ipv6_forwarding().await?;
 
         // Are we a gimlet or scrimlet?
-        let sled_mode = sled_mode_from_config(&config, &log).await?;
+        let sled_mode = config.deployment.sled_mode(&log).await?;
 
         // Spawn all important long running tasks that live for the lifetime of
         // the process and are used by both the bootstrap agent and sled agent
@@ -286,29 +285,6 @@ async fn ensure_zfs_ramdisk_dataset() -> Result<(), StartError> {
     })
     .await
     .map_err(StartError::EnsureZfsRamdiskDataset)
-}
-
-// Resolve the deployment to a sled mode: probe for the switch hardware it
-// can carry, then let the deployment decide.
-async fn sled_mode_from_config(
-    config: &Config,
-    log: &Logger,
-) -> Result<SledMode, StartError> {
-    let deployment = config.deployment.clone();
-    let found = match deployment.probe() {
-        Some(probe) => {
-            let log = log.clone();
-            // The probe touches devinfo and device nodes, so it may block.
-            tokio::task::spawn_blocking(move || {
-                sled_hardware::detect_switch_hardware(&log, probe)
-            })
-            .await
-            .expect("switch detection panicked")
-            .map_err(StartError::DetectSwitch)?
-        }
-        None => None,
-    };
-    deployment.sled_mode(found).map_err(StartError::SledModeConfig)
 }
 
 #[derive(Debug, Clone)]
