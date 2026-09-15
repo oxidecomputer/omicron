@@ -186,13 +186,56 @@ impl KnownTarget {
             }
         }
 
-        if !matches!(machine, Some(Machine::Gimlet))
-            && matches!(switch, Some(Switch::Asic))
-        {
-            bail!("'switch=asic' is only valid with 'machine=gimlet'");
+        // `machine` selects a sled-agent config that names its switch backend,
+        // and `switch` selects the zone package. The pair must match.
+        if let (Some(machine), Some(switch)) = (&machine, &switch) {
+            let expected = match machine {
+                Machine::Gimlet => Switch::Asic,
+                Machine::GimletStandalone => Switch::Stub,
+                Machine::NonGimlet => Switch::SoftNpu,
+            };
+            if !matches!(
+                (switch, &expected),
+                (Switch::Asic, Switch::Asic)
+                    | (Switch::Stub, Switch::Stub)
+                    | (Switch::SoftNpu, Switch::SoftNpu)
+            ) {
+                bail!(
+                    "'machine={machine}' ships a sled-agent config for \
+                     'switch={expected}', not 'switch={switch}'"
+                );
+            }
         }
 
         Ok(Self { image, machine, switch, rack_topology, clickhouse_topology })
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    fn create(machine: Machine, switch: Switch) -> Result<KnownTarget> {
+        KnownTarget::validate_and_create(
+            Image::Standard,
+            Some(machine),
+            Some(switch),
+            RackTopology::SingleSled,
+            ClickhouseTopology::SingleNode,
+        )
+    }
+
+    #[test]
+    fn machine_and_switch_must_agree() {
+        assert!(create(Machine::Gimlet, Switch::Asic).is_ok());
+        assert!(create(Machine::GimletStandalone, Switch::Stub).is_ok());
+        assert!(create(Machine::NonGimlet, Switch::SoftNpu).is_ok());
+
+        assert!(create(Machine::Gimlet, Switch::Stub).is_err());
+        assert!(create(Machine::GimletStandalone, Switch::Asic).is_err());
+        assert!(create(Machine::GimletStandalone, Switch::SoftNpu).is_err());
+        assert!(create(Machine::NonGimlet, Switch::Stub).is_err());
+        assert!(create(Machine::NonGimlet, Switch::Asic).is_err());
     }
 }
 
@@ -201,7 +244,7 @@ impl Default for KnownTarget {
         KnownTarget {
             image: Image::Standard,
             machine: Some(Machine::NonGimlet),
-            switch: Some(Switch::Stub),
+            switch: Some(Switch::SoftNpu),
             rack_topology: RackTopology::MultiSled,
             clickhouse_topology: ClickhouseTopology::SingleNode,
         }

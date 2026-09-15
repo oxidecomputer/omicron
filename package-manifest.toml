@@ -869,12 +869,12 @@ output.type = "zone"
 
 # To package and install the stub variant of the switch, do the following:
 #
-# $ cargo run --release --bin omicron-package -- -t default target create -p dev -m <gimlet|gimlet-standalone|non-gimlet> -s stub
+# $ cargo run --release --bin omicron-package -- -t default target create -p dev -m gimlet-standalone -s stub
 # $ cargo run --release --bin omicron-package -- package
 # $ pfexec ./target/release/omicron-package install
 #
-# The sled-agent config must set
-# deployment = { kind = "custom", sled_mode = "scrimlet", switch = "tofino_stub" }.
+# The gimlet-standalone sled-agent config selects the stub Dendrite;
+# omicron-package rejects any other machine with this switch.
 [package.switch-stub]
 service_name = "switch"
 only_for_targets.switch = "stub"
@@ -899,13 +899,14 @@ output.type = "zone"
 
 # To package and install the softnpu variant of the switch, do the following:
 #
-# $ cargo run --release --bin omicron-package -- -t default target create -p dev -m <gimlet|gimlet-standalone|non-gimlet>
+# $ cargo run --release --bin omicron-package -- -t default target create -p dev
 # $ cargo run --release --bin omicron-package -- package
 # $ pfexec ./target/release/omicron-package install
 #
-# The sled-agent config selects between a SoftNPU zone on this host
-# (deployment kind "standalone") and a propolis SoftNPU device, which is
-# detected at startup (deployment kind "virtual").
+# The non-gimlet sled-agent config selects a SoftNPU zone on this host
+# (deployment kind "standalone") whereas  a propolis-hosted lab rewrites
+# it to "virtual", which detects the SoftNPU device at startup. 
+# omicron-package rejects any other machine with this switch.
 [package.switch-softnpu]
 service_name = "switch"
 only_for_targets.switch = "softnpu"
