@@ -17,10 +17,6 @@ use slog::{debug, warn};
 use steno::{ActionError, DagBuilder, Node};
 use uuid::Uuid;
 
-use dpd_client::types::{
-    MulticastGroupExternalResponse, MulticastGroupUnderlayResponse,
-};
-
 use nexus_db_lookup::LookupDataStore;
 use nexus_db_model::{MulticastGroup, UnderlayMulticastGroup};
 use nexus_db_queries::authn;
@@ -44,12 +40,6 @@ pub(crate) struct Params {
     pub underlay_group_id: Uuid,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-pub struct DataplaneUpdateResponse {
-    underlay: MulticastGroupUnderlayResponse,
-    external: MulticastGroupExternalResponse,
-}
-
 /// Fetched multicast group data for dataplane programming.
 #[derive(Debug, Deserialize, Serialize)]
 struct GroupData {
@@ -71,7 +61,7 @@ declare_saga_actions! {
     // CONFLICT paths fill in missing switches while leaving configured
     // ones forwarding. Attribute drift on configured switches heals in
     // the "Active" drift check.
-    UPDATE_DATAPLANE -> "update_responses" {
+    UPDATE_DATAPLANE -> "dataplane_updated" {
         + mgde_update_dataplane
         - mgde_rollback_dataplane
     }
@@ -101,7 +91,7 @@ impl NexusSaga for SagaMulticastGroupDpdEnsure {
         ));
 
         builder.append(Node::action(
-            "update_responses",
+            "dataplane_updated",
             "UpdateDataplane",
             UPDATE_DATAPLANE.as_ref(),
         ));
@@ -211,7 +201,7 @@ async fn mgde_fetch_group_data(
 /// Apply external and underlay groups in dataplane atomically.
 async fn mgde_update_dataplane(
     sagactx: NexusActionContext,
-) -> Result<DataplaneUpdateResponse, ActionError> {
+) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let GroupData { external_group, underlay_group, source_filter } =
         sagactx.lookup::<GroupData>("group_data")?;
@@ -237,7 +227,7 @@ async fn mgde_update_dataplane(
         "has_any_source_member" => source_filter.has_any_source_member,
     );
 
-    let (underlay_response, external_response) = dataplane
+    dataplane
         .create_groups(&external_group, &underlay_group, &source_filter)
         .await
         .map_err(saga_action_failed)?;
@@ -252,10 +242,7 @@ async fn mgde_update_dataplane(
         "underlay_ip" => %underlay_group.multicast_ip
     );
 
-    Ok(DataplaneUpdateResponse {
-        underlay: underlay_response,
-        external: external_response,
-    })
+    Ok(())
 }
 
 /// Undo `mgde_update_dataplane` by removing the groups written to DPD.
