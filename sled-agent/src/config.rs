@@ -14,32 +14,238 @@ use illumos_utils::dladm::PhysicalLink;
 use omicron_common::vlan::VlanID;
 use serde::Deserialize;
 use sled_hardware::DataLinks;
+use sled_hardware::DendriteAsic;
 use sled_hardware::ExternalDisks;
+use sled_hardware::SledMode;
+use sled_hardware::SwitchProbe;
+use slog::Logger;
 use sprockets_tls::keys::SprocketsConfig;
 
-#[derive(Clone, Debug, Deserialize)]
+use crate::bootstrap::server::StartError;
+
+/// The role a deployment asks of this sled; `auto` lets detection decide.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
-pub enum SledMode {
+pub enum SledRole {
     Auto,
     #[serde(alias = "gimlet")]
     Sled,
     Scrimlet,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum SwitchBackend {
-    /// Probe for switch hardware: the Tofino ASIC first, then a SoftNPU 9p device
-    #[default]
-    Detect,
-    /// Run the stub Dendrite; no switch hardware
-    TofinoStub,
-    /// Run Dendrite against a SoftNPU zone on this host
-    SoftNpuZone,
+/// Switch backend of a `custom` deployment, with the parameters it needs.
+/// Flattened into the deployment table: `switch` names the backend and its
+/// parameters sit beside it.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "switch")]
+pub enum Switch {
+    TofinoAsic {
+        #[serde(default = "default_sidecar_revision")]
+        sidecar_revision: String,
+    },
+    TofinoStub {
+        #[serde(default = "default_sidecar_revision")]
+        sidecar_revision: String,
+    },
+    SoftNpuPropolisDevice {
+        front_port_count: u8,
+        rear_port_count: u8,
+    },
+    SoftNpuZone {
+        front_port_count: u8,
+        rear_port_count: u8,
+    },
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "snake_case")]
+impl Switch {
+    pub fn asic(&self) -> DendriteAsic {
+        match self {
+            Switch::TofinoAsic { .. } => DendriteAsic::TofinoAsic,
+            Switch::TofinoStub { .. } => DendriteAsic::TofinoStub,
+            Switch::SoftNpuPropolisDevice { .. } => {
+                DendriteAsic::SoftNpuPropolisDevice
+            }
+            Switch::SoftNpuZone { .. } => DendriteAsic::SoftNpuZone,
+        }
+    }
+
+    fn sidecar_revision(&self) -> SidecarRevision {
+        match self {
+            Switch::TofinoAsic { sidecar_revision }
+            | Switch::TofinoStub { sidecar_revision } => {
+                SidecarRevision::Physical(sidecar_revision.clone())
+            }
+            Switch::SoftNpuPropolisDevice {
+                front_port_count,
+                rear_port_count,
+            } => SidecarRevision::SoftPropolis(SoftPortConfig {
+                front_port_count: *front_port_count,
+                rear_port_count: *rear_port_count,
+            }),
+            Switch::SoftNpuZone { front_port_count, rear_port_count } => {
+                SidecarRevision::SoftZone(SoftPortConfig {
+                    front_port_count: *front_port_count,
+                    rear_port_count: *rear_port_count,
+                })
+            }
+        }
+    }
+}
+
+/// How this sled is deployed. Selects the switch backend and whether the
+/// sled is a scrimlet, which is detected where the backend allows it.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum Deployment {
+    /// Oxide rack. The hardware monitor detects the Tofino ASIC.
+    Production {
+        /// Sidecar board revision
+        #[serde(default = "default_sidecar_revision")]
+        sidecar_revision: String,
+    },
+    /// Propolis-hosted lab. A SoftNPU device makes the sled a scrimlet.
+    Virtual { front_port_count: u8, rear_port_count: u8 },
+    /// One host running a SoftNPU zone. Always a scrimlet.
+    Standalone { front_port_count: u8, rear_port_count: u8 },
+    /// Explicit sled mode and switch backend.
+    Custom {
+        sled_mode: SledRole,
+        #[serde(flatten)]
+        switch: Switch,
+    },
+}
+
+fn default_sidecar_revision() -> String {
+    "b".to_string()
+}
+
+impl Deployment {
+    /// Reject custom combinations that cannot be resolved at startup.
+    pub fn validate(&self) -> Result<(), String> {
+        match self {
+            Deployment::Custom {
+                sled_mode: SledRole::Auto,
+                switch:
+                    switch
+                    @ (Switch::TofinoStub { .. } | Switch::SoftNpuZone { .. }),
+            } => Err(format!(
+                "switch {:?} has no hardware to detect; sled_mode must be \
+                 \"sled\" or \"scrimlet\"",
+                switch.asic()
+            )),
+            _ => Ok(()),
+        }
+    }
+
+    /// Resolve the sled mode: probe for the switch hardware this deployment
+    /// can carry, then decide from what was found.
+    pub async fn sled_mode(
+        &self,
+        log: &Logger,
+    ) -> Result<SledMode, StartError> {
+        let found = match self.probe() {
+            Some(probe) => {
+                let log = log.clone();
+                // The probe touches devinfo and device nodes, so it may block.
+                tokio::task::spawn_blocking(move || {
+                    sled_hardware::detect_switch_hardware(&log, probe)
+                })
+                .await
+                .expect("switch detection panicked")
+                .map_err(StartError::DetectSwitch)?
+            }
+            None => None,
+        };
+        self.resolve(found).map_err(StartError::SledModeConfig)
+    }
+
+    /// What startup detection should look for, if anything. A sled never
+    /// probes, and the stub and zone backends have nothing to find.
+    fn probe(&self) -> Option<SwitchProbe> {
+        match self {
+            Deployment::Production { .. } => Some(SwitchProbe::PhysicalAsic),
+            Deployment::Virtual { .. } => Some(SwitchProbe::SoftNpu),
+            Deployment::Standalone { .. } => None,
+            Deployment::Custom { sled_mode: SledRole::Sled, .. } => None,
+            Deployment::Custom {
+                switch: Switch::TofinoAsic { .. }, ..
+            } => Some(SwitchProbe::PhysicalAsic),
+            Deployment::Custom {
+                switch: Switch::SoftNpuPropolisDevice { .. },
+                ..
+            } => Some(SwitchProbe::SoftNpu),
+            Deployment::Custom { .. } => None,
+        }
+    }
+
+    /// Decide the sled mode from what `probe()` found.
+    fn resolve(
+        &self,
+        found: Option<DendriteAsic>,
+    ) -> Result<SledMode, &'static str> {
+        use Deployment::*;
+        Ok(match (self, found) {
+            (Production { .. } | Virtual { .. }, Some(asic)) => {
+                SledMode::Scrimlet { asic }
+            }
+            // The ASIC driver can attach after startup; the hardware monitor
+            // keeps watching for it.
+            (Production { .. }, None) => SledMode::Auto,
+            (Virtual { .. }, None) => SledMode::Sled,
+            (Standalone { .. }, _) => {
+                SledMode::Scrimlet { asic: DendriteAsic::SoftNpuZone }
+            }
+            (Custom { sled_mode: SledRole::Sled, .. }, _) => SledMode::Sled,
+            (Custom { .. }, Some(asic)) => SledMode::Scrimlet { asic },
+            (Custom { sled_mode: SledRole::Auto, .. }, None) => {
+                match self.probe() {
+                    Some(SwitchProbe::PhysicalAsic) => SledMode::Auto,
+                    Some(SwitchProbe::SoftNpu) => SledMode::Sled,
+                    None => {
+                        return Err("switch backend has no hardware to detect");
+                    }
+                }
+            }
+            (Custom { sled_mode: SledRole::Scrimlet, switch }, None) => {
+                match switch {
+                    Switch::SoftNpuPropolisDevice { .. } => {
+                        return Err(
+                            "sled_mode is scrimlet but no SoftNPU device is \
+                             present",
+                        );
+                    }
+                    // A physical ASIC may attach later; force the role now.
+                    _ => SledMode::Scrimlet { asic: switch.asic() },
+                }
+            }
+        })
+    }
+
+    /// Sidecar parameters for the switch zone services.
+    pub fn sidecar_revision(&self) -> SidecarRevision {
+        match self {
+            Deployment::Production { sidecar_revision } => {
+                SidecarRevision::Physical(sidecar_revision.clone())
+            }
+            Deployment::Virtual { front_port_count, rear_port_count } => {
+                SidecarRevision::SoftPropolis(SoftPortConfig {
+                    front_port_count: *front_port_count,
+                    rear_port_count: *rear_port_count,
+                })
+            }
+            Deployment::Standalone { front_port_count, rear_port_count } => {
+                SidecarRevision::SoftZone(SoftPortConfig {
+                    front_port_count: *front_port_count,
+                    rear_port_count: *rear_port_count,
+                })
+            }
+            Deployment::Custom { switch, .. } => switch.sidecar_revision(),
+        }
+    }
+}
+
+/// Sidecar parameters derived from the deployment.
+#[derive(Debug, Clone)]
 pub enum SidecarRevision {
     Physical(String),
     SoftZone(SoftPortConfig),
@@ -55,7 +261,7 @@ impl SidecarRevision {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct SoftPortConfig {
     /// Number of front ports
     pub front_port_count: u8,
@@ -74,18 +280,8 @@ pub struct Config {
     pub dropshot: ConfigDropshot,
     /// Configuration for the sled agent debug log
     pub log: ConfigLogging,
-    /// The sled's mode of operation (auto detect or force gimlet/scrimlet).
-    pub sled_mode: SledMode,
-    // TODO: Remove once this can be auto-detected.
-    pub sidecar_revision: SidecarRevision,
-    /// Which switch backend to run when acting as a scrimlet.
-    ///
-    /// If this is not provided, it defaults to [`SwitchBackend::Detect`],
-    /// which will probe for switch hardware at runtime. The Tofino stub
-    /// and SoftNPU zone modes must be explicitly requested, and require
-    /// `sled_mode = "scrimlet"`.
-    #[serde(default)]
-    pub switch_backend: SwitchBackend,
+    /// How this sled is deployed, which selects the switch backend.
+    pub deployment: Deployment,
     /// Optional percentage of otherwise-unbudgeted DRAM to reserve for guest
     /// memory, after accounting for expected host OS memory consumption and, if
     /// set, `vmm_reservoir_size_mb`.
@@ -156,6 +352,8 @@ pub enum ConfigError {
         #[source]
         err: anyhow::Error,
     },
+    #[error("Invalid deployment in {path}: {reason}")]
+    InvalidDeployment { path: Utf8PathBuf, reason: String },
     #[error("Loading certificate")]
     Certificate(#[source] anyhow::Error),
     #[error("Could not determine if host is an Oxide sled")]
@@ -169,8 +367,11 @@ impl Config {
         let path = path.as_ref();
         let contents = std::fs::read_to_string(&path)
             .map_err(|err| ConfigError::Io { path: path.into(), err })?;
-        let config = toml::from_str(&contents).map_err(|err| {
+        let config: Self = toml::from_str(&contents).map_err(|err| {
             ConfigError::Parse { path: path.into(), err: err.into() }
+        })?;
+        config.deployment.validate().map_err(|reason| {
+            ConfigError::InvalidDeployment { path: path.into(), reason }
         })?;
         Ok(config)
     }
@@ -201,6 +402,124 @@ impl Config {
 #[cfg(test)]
 mod test {
     use super::*;
+    use DendriteAsic::*;
+
+    const AUTO: SledRole = SledRole::Auto;
+    const SLED: SledRole = SledRole::Sled;
+    const SCRIMLET: SledRole = SledRole::Scrimlet;
+
+    fn production() -> Deployment {
+        Deployment::Production { sidecar_revision: "b".to_string() }
+    }
+
+    fn virtual_lab() -> Deployment {
+        Deployment::Virtual { front_port_count: 2, rear_port_count: 4 }
+    }
+
+    fn standalone() -> Deployment {
+        Deployment::Standalone { front_port_count: 1, rear_port_count: 1 }
+    }
+
+    fn custom(sled_mode: SledRole, asic: DendriteAsic) -> Deployment {
+        let switch = match asic {
+            TofinoAsic => Switch::TofinoAsic { sidecar_revision: "b".into() },
+            TofinoStub => Switch::TofinoStub { sidecar_revision: "b".into() },
+            SoftNpuPropolisDevice => Switch::SoftNpuPropolisDevice {
+                front_port_count: 1,
+                rear_port_count: 1,
+            },
+            SoftNpuZone => {
+                Switch::SoftNpuZone { front_port_count: 1, rear_port_count: 1 }
+            }
+        };
+        Deployment::Custom { sled_mode, switch }
+    }
+
+    fn scrimlet(asic: DendriteAsic) -> Result<SledMode, &'static str> {
+        Ok(SledMode::Scrimlet { asic })
+    }
+
+    // Each case: deployment, what the probe found (None when nothing was
+    // found or no probe ran), expected mode or a config error.
+    #[test]
+    fn resolve_table() {
+        let err: Result<SledMode, &'static str> = Err("");
+        let cases = [
+            // Production: a found ASIC is a scrimlet now; nothing found
+            // leaves it to the hardware monitor.
+            (production(), Some(TofinoAsic), scrimlet(TofinoAsic)),
+            (production(), None, Ok(SledMode::Auto)),
+            // Virtual: the SoftNPU device decides.
+            (
+                virtual_lab(),
+                Some(SoftNpuPropolisDevice),
+                scrimlet(SoftNpuPropolisDevice),
+            ),
+            (virtual_lab(), None, Ok(SledMode::Sled)),
+            // Standalone is always a scrimlet with nothing to detect.
+            (standalone(), None, scrimlet(SoftNpuZone)),
+            // Custom sled: never a switch zone.
+            (custom(SLED, TofinoAsic), None, Ok(SledMode::Sled)),
+            (custom(SLED, SoftNpuPropolisDevice), None, Ok(SledMode::Sled)),
+            // Custom scrimlet: a physical ASIC may attach later, the zone and
+            // stub run as configured, the propolis device must be present.
+            (
+                custom(SCRIMLET, TofinoAsic),
+                Some(TofinoAsic),
+                scrimlet(TofinoAsic),
+            ),
+            (custom(SCRIMLET, TofinoAsic), None, scrimlet(TofinoAsic)),
+            (custom(SCRIMLET, TofinoStub), None, scrimlet(TofinoStub)),
+            (custom(SCRIMLET, SoftNpuZone), None, scrimlet(SoftNpuZone)),
+            (
+                custom(SCRIMLET, SoftNpuPropolisDevice),
+                Some(SoftNpuPropolisDevice),
+                scrimlet(SoftNpuPropolisDevice),
+            ),
+            (custom(SCRIMLET, SoftNpuPropolisDevice), None, err),
+            // Custom auto matches production and virtual.
+            (custom(AUTO, TofinoAsic), Some(TofinoAsic), scrimlet(TofinoAsic)),
+            (custom(AUTO, TofinoAsic), None, Ok(SledMode::Auto)),
+            (
+                custom(AUTO, SoftNpuPropolisDevice),
+                Some(SoftNpuPropolisDevice),
+                scrimlet(SoftNpuPropolisDevice),
+            ),
+            (custom(AUTO, SoftNpuPropolisDevice), None, Ok(SledMode::Sled)),
+            (custom(AUTO, TofinoStub), None, err),
+        ];
+        for (i, (deployment, found, expected)) in cases.into_iter().enumerate()
+        {
+            let actual = deployment.resolve(found).map_err(|_| "");
+            assert_eq!(actual, expected, "case {i}");
+        }
+    }
+
+    #[test]
+    fn probe_targets() {
+        assert_eq!(production().probe(), Some(SwitchProbe::PhysicalAsic));
+        assert_eq!(virtual_lab().probe(), Some(SwitchProbe::SoftNpu));
+        assert_eq!(standalone().probe(), None);
+        assert_eq!(custom(SLED, TofinoAsic).probe(), None);
+        assert_eq!(custom(SCRIMLET, TofinoStub).probe(), None);
+        assert_eq!(custom(SCRIMLET, SoftNpuZone).probe(), None);
+        assert_eq!(
+            custom(AUTO, TofinoAsic).probe(),
+            Some(SwitchProbe::PhysicalAsic)
+        );
+        assert_eq!(
+            custom(SCRIMLET, SoftNpuPropolisDevice).probe(),
+            Some(SwitchProbe::SoftNpu)
+        );
+    }
+
+    #[test]
+    fn custom_deployment_validation() {
+        assert!(custom(AUTO, TofinoStub).validate().is_err());
+        assert!(custom(AUTO, SoftNpuZone).validate().is_err());
+        assert!(custom(SCRIMLET, TofinoStub).validate().is_ok());
+        assert!(custom(AUTO, TofinoAsic).validate().is_ok());
+    }
     use slog_error_chain::InlineErrorChain;
 
     #[test]

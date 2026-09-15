@@ -873,7 +873,8 @@ output.type = "zone"
 # $ cargo run --release --bin omicron-package -- package
 # $ pfexec ./target/release/omicron-package install
 #
-# The sled-agent config must also set switch_backend = "tofino_stub".
+# The sled-agent config must set
+# deployment = { kind = "custom", sled_mode = "scrimlet", switch = "tofino_stub" }.
 [package.switch-stub]
 service_name = "switch"
 only_for_targets.switch = "stub"
@@ -903,8 +904,8 @@ output.type = "zone"
 # $ pfexec ./target/release/omicron-package install
 #
 # The sled-agent config selects between a SoftNPU zone on this host
-# (switch_backend = "soft_npu_zone") and a propolis SoftNPU device, which is
-# detected at startup.
+# (deployment kind "standalone") and a propolis SoftNPU device, which is
+# detected at startup (deployment kind "virtual").
 [package.switch-softnpu]
 service_name = "switch"
 only_for_targets.switch = "softnpu"

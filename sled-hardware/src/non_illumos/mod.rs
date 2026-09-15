@@ -87,9 +87,10 @@ pub fn is_oxide_sled() -> anyhow::Result<bool> {
     Ok(false)
 }
 
-/// Detect attached switch hardware.
+/// Probe for switch hardware. Nothing is attached off illumos.
 pub fn detect_switch_hardware(
     _log: &Logger,
-) -> Result<Option<crate::SwitchHardware>, crate::SwitchDetectError> {
+    _probe: crate::SwitchProbe,
+) -> Result<Option<crate::DendriteAsic>, crate::SwitchDetectError> {
     Ok(None)
 }

@@ -26,15 +26,7 @@ pub use disk::*;
 pub mod softnpu;
 pub mod underlay;
 
-/// Switch hardware attached to a sled, in detection priority order.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum SwitchHardware {
-    /// Tofino ASIC node in the device tree
-    Tofino,
-    /// Propolis SoftNPU virtio 9p device at this devfs path
-    SoftNpuPropolis { path: String },
-}
-
+/// Failure while probing for switch hardware at startup.
 #[derive(Debug, thiserror::Error)]
 pub enum SwitchDetectError {
     #[error("failed to walk device tree: {0}")]
@@ -49,6 +41,15 @@ pub enum SwitchDetectError {
 
     #[error("{path}: malformed Rversion: {reason}")]
     Protocol { path: String, reason: String },
+}
+
+/// What startup switch detection should look for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SwitchProbe {
+    /// A physical sidecar ASIC, whichever kind is attached.
+    PhysicalAsic,
+    /// The propolis SoftNPU virtio 9p device.
+    SoftNpu,
 }
 
 // The type of networking 'ASIC' the Dendrite service is expected to manage

@@ -8,7 +8,7 @@ use crate::HardwareView;
 use crate::TofinoSnapshot;
 use crate::TofinoView;
 use crate::{
-    DendriteAsic, SledMode, SwitchDetectError, SwitchHardware, UnparsedDisk,
+    DendriteAsic, SledMode, SwitchDetectError, SwitchProbe, UnparsedDisk,
 };
 use camino::Utf8PathBuf;
 use gethostname::gethostname;
@@ -36,20 +36,37 @@ pub use partitions::{NvmeFormattingError, ensure_partition_layout};
 
 const TOFINO_MONITOR: &'static str = "/opt/oxide/sled-agent/tofino-monitor";
 
-/// Detect attached switch hardware, checking each backend in the priority
-/// order of [`SwitchHardware`]. Tofino presence uses the same snapshot the
-/// hardware monitor polls, so startup detection and `is_scrimlet` agree.
+/// Whether one kind of physical ASIC is present in the device tree.
+type AsicProbe = fn(&Logger, &mut DevInfo) -> bool;
+
+/// Physical ASIC probes in detection priority order. A new ASIC is a
+/// `DendriteAsic` variant, an entry here, and its hardware monitor view.
+const PHYSICAL_ASICS: &[(DendriteAsic, AsicProbe)] =
+    &[(DendriteAsic::TofinoAsic, tofino_present)];
+
+fn tofino_present(log: &Logger, devinfo: &mut DevInfo) -> bool {
+    get_tofino_snapshot(log, devinfo).exists
+}
+
+/// Probe for the switch hardware a deployment can carry. Physical ASICs are
+/// checked in `PHYSICAL_ASICS` order; the SoftNPU device is answered by its
+/// 9p version handshake. Only device tree failures are errors.
 pub fn detect_switch_hardware(
     log: &Logger,
-) -> Result<Option<SwitchHardware>, SwitchDetectError> {
+    probe: SwitchProbe,
+) -> Result<Option<DendriteAsic>, SwitchDetectError> {
     let mut devinfo =
         DevInfo::new_force_load().map_err(SwitchDetectError::DevInfo)?;
-    if get_tofino_snapshot(log, &mut devinfo).exists {
-        info!(log, "found tofino asic");
-        return Ok(Some(SwitchHardware::Tofino));
+    match probe {
+        SwitchProbe::PhysicalAsic => Ok(PHYSICAL_ASICS
+            .iter()
+            .find(|(_, present)| present(log, &mut devinfo))
+            .map(|(asic, _)| *asic)),
+        SwitchProbe::SoftNpu => {
+            Ok(softnpu::find_softnpu_device(log, &mut devinfo)?
+                .then_some(DendriteAsic::SoftNpuPropolisDevice))
+        }
     }
-    Ok(softnpu::find_softnpu_device(log, &mut devinfo)?
-        .map(|path| SwitchHardware::SoftNpuPropolis { path }))
 }
 
 #[derive(thiserror::Error, Debug)]

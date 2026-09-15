@@ -27,7 +27,7 @@ enum Probe {
     Busy,
 }
 
-/// Returns the devfs path of the SoftNPU 9p device when one is attached.
+/// Returns whether the propolis SoftNPU 9p device is attached.
 ///
 /// Every virtio 9p node with an attached driver is opened exclusively and
 /// asked for its 9P version. Only the propolis SoftNPU handler answers with
@@ -37,23 +37,23 @@ enum Probe {
 pub(super) fn find_softnpu_device(
     log: &Logger,
     devinfo: &mut DevInfo,
-) -> Result<Option<String>, SwitchDetectError> {
+) -> Result<bool, SwitchDetectError> {
     for node in devinfo.walk_node() {
         let node = node.map_err(SwitchDetectError::DevInfo)?;
-        if let Some(path) = probe_node(log, &node)? {
-            return Ok(Some(path));
+        if probe_node(log, &node)? {
+            return Ok(true);
         }
     }
-    Ok(None)
+    Ok(false)
 }
 
-/// Returns the devfs path when `node` is the SoftNPU 9p device.
+/// Returns whether `node` is the SoftNPU 9p device.
 fn probe_node(
     log: &Logger,
     node: &Node<'_>,
-) -> Result<Option<String>, SwitchDetectError> {
+) -> Result<bool, SwitchDetectError> {
     if !is_virtio_9p(node)? {
-        return Ok(None);
+        return Ok(false);
     }
     let Some(path) = ninep_minor_path(node)? else {
         debug!(
@@ -61,12 +61,12 @@ fn probe_node(
             "virtio 9p node has no {NINEP_MINOR} minor";
             "node" => node.node_name(),
         );
-        return Ok(None);
+        return Ok(false);
     };
     match probe_version(&path) {
         Ok(Probe::Version(version)) if version == SOFTNPU_9P_VERSION => {
-            info!(log, "found SoftNPU 9p device"; "path" => &path);
-            Ok(Some(path))
+            info!(log, "found SoftNPU 9p device"; "path" => path);
+            Ok(true)
         }
         Ok(Probe::Version(version)) => {
             debug!(
@@ -75,11 +75,11 @@ fn probe_node(
                 "path" => path,
                 "version" => version,
             );
-            Ok(None)
+            Ok(false)
         }
         Ok(Probe::Busy) => {
             warn!(log, "virtio 9p device busy; skipping"; "path" => path);
-            Ok(None)
+            Ok(false)
         }
         Err(
             e @ (SwitchDetectError::Io { .. }
@@ -90,7 +90,7 @@ fn probe_node(
                 "virtio 9p device probe failed; skipping";
                 "error" => InlineErrorChain::new(&e),
             );
-            Ok(None)
+            Ok(false)
         }
         Err(e) => Err(e),
     }
@@ -151,11 +151,10 @@ fn probe_version(path: &str) -> Result<Probe, SwitchDetectError> {
                 });
             }
         };
-        let io_err =
-            |err| SwitchDetectError::Io { path: path.to_string(), err };
-        file.write_all(&encode_tversion(SOFTNPU_9P_VERSION)).map_err(io_err)?;
+        let io = |err| SwitchDetectError::Io { path: path.to_string(), err };
+        file.write_all(&encode_tversion(SOFTNPU_9P_VERSION)).map_err(io)?;
         let mut buf = vec![0u8; REPLY_BUF_LEN];
-        let n = file.read(&mut buf).map_err(io_err)?;
+        let n = file.read(&mut buf).map_err(io)?;
         return decode_rversion(&buf[..n]).map(Probe::Version).map_err(
             |reason| SwitchDetectError::Protocol {
                 path: path.to_string(),
@@ -163,6 +162,5 @@ fn probe_version(path: &str) -> Result<Probe, SwitchDetectError> {
             },
         );
     }
-
     Ok(Probe::Busy)
 }
