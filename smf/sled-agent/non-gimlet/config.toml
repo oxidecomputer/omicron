@@ -129,3 +129,8 @@ resolve = { which = "local", priv_key = "/opt/oxide/sled-agent/pkg/test-sprocket
 attest = { which = "local", priv_key = "/opt/oxide/sled-agent/pkg/test-alias-1.key.pem", cert_chain = "/opt/oxide/sled-agent/pkg/test-alias-1.certlist.pem", log = "/opt/oxide/sled-agent/pkg/sprockets-log.bin", test_corpus = [ "/opt/oxide/sled-agent/pkg/testing-measurements/corim-rot.cbor", "/opt/oxide/sled-agent/pkg/testing-measurements/corim-sp.cbor"] }
 roots = ["/opt/oxide/sled-agent/pkg/test-root-a.cert.pem"]
 enforce = "Enforced"
+
+# Support Shell (RFD 620). TODO: replace the sandbox root with the
+# production certificate.
+[sush]
+roots = ["/opt/oxide/sled-agent/pkg/sush-sandbox.pem"]

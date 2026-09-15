@@ -14,6 +14,8 @@ use either::Either;
 use omicron_common::address::BOOTSTRAP_PREFIX;
 use omicron_common::address::BOOTSTRAP_SLED_SUBNET_PREFIX_LENGTH;
 use omicron_common::address::DDMD_PORT;
+use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::SLED_PREFIX_LENGTH;
 use oxnet::Ipv6Net;
 use sled_hardware_types::underlay::BootstrapInterface;
 use slog::Logger;
@@ -101,6 +103,29 @@ impl Client {
         request: &EnableStatsRequest,
     ) -> Result<(), Error<types::Error>> {
         self.inner.enable_stats(request).await.map(|resp| resp.into_inner())
+    }
+
+    /// Returns every non-bootstrap /64 prefix ddmd has learned. These
+    /// are not all sled subnets: an internal DNS zone is reachable at
+    /// its own reserved /64, advertised by the sled hosting it, and
+    /// RFD 63 reserves others.
+    pub async fn derive_underlay_subnets_from_prefixes(
+        &self,
+    ) -> Result<
+        impl Iterator<Item = Ipv6Subnet<SLED_PREFIX_LENGTH>> + use<>,
+        DdmError,
+    > {
+        let prefixes = self.inner.get_prefixes().await?.into_inner();
+        Ok(prefixes.into_values().flatten().filter_map(|prefix| {
+            let addr = prefix.destination.addr();
+            if prefix.destination.width() == SLED_PREFIX_LENGTH
+                && addr.segments()[0] != BOOTSTRAP_PREFIX
+            {
+                Some(Ipv6Subnet::new(addr))
+            } else {
+                None
+            }
+        }))
     }
 
     /// Returns the addresses of connected sleds.
