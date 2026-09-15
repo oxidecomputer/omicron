@@ -179,16 +179,35 @@ impl PushedAlignment {
         schema: &TimeseriesSchema,
         query_end: DateTime<Utc>,
     ) -> Option<Self> {
-        // A cumulative metric is converted to deltas in Rust before it is
-        // aligned, so aligning it in the database means reconstructing those
-        // deltas in SQL first. That is a windowed difference partitioned by
-        // epoch, and it is not done yet.
-        if schema.datum_type.is_cumulative() {
+        // A cumulative metric reaches alignment as a delta, and `rate` is the
+        // only method defined over one. Anything else is a gauge, where every
+        // method is a plain aggregate.
+        let supported = if schema.datum_type.is_cumulative() {
+            matches!(align.method, align::AlignmentMethod::Rate)
+        } else {
+            Self::aggregate_for(align.method).is_some()
+        };
+        if !supported {
             return None;
         }
-        // Everything else is a gauge, where each method is a plain aggregate.
-        // `rate` never reaches here, since it requires a delta.
-        if Self::aggregate_for(align.method).is_none() {
+        // Histograms and the other non-scalar types cannot be aligned at all.
+        if !matches!(
+            schema.datum_type,
+            oximeter::DatumType::I8
+                | oximeter::DatumType::U8
+                | oximeter::DatumType::I16
+                | oximeter::DatumType::U16
+                | oximeter::DatumType::I32
+                | oximeter::DatumType::U32
+                | oximeter::DatumType::I64
+                | oximeter::DatumType::U64
+                | oximeter::DatumType::F32
+                | oximeter::DatumType::F64
+                | oximeter::DatumType::CumulativeI64
+                | oximeter::DatumType::CumulativeU64
+                | oximeter::DatumType::CumulativeF32
+                | oximeter::DatumType::CumulativeF64
+        ) {
             return None;
         }
         // Zero would make every period identical and divide the grid by zero
@@ -228,12 +247,19 @@ impl PushedAlignment {
     /// correct for samples at or before the end of the query. The caller
     /// excludes any later ones, which the Rust path also ignores.
     fn period_expr(&self) -> String {
+        format!(
+            "fromUnixTimestamp64Nano(toInt64({}), 'UTC')",
+            self.period_end_nanos_expr(),
+        )
+    }
+
+    /// The same expression, as a count of nanoseconds.
+    fn period_end_nanos_expr(&self) -> String {
         let end_nanos = self.query_end.timestamp_nanos_opt().unwrap_or(0);
         let period_nanos = self.align.period.as_nanos();
         format!(
-            "fromUnixTimestamp64Nano(toInt64({end_nanos} - \
-            intDiv({end_nanos} - toUnixTimestamp64Nano(timestamp), \
-            {period_nanos}) * {period_nanos}), 'UTC')"
+            "{end_nanos} - intDiv({end_nanos} - \
+            toUnixTimestamp64Nano(timestamp), {period_nanos}) * {period_nanos}"
         )
     }
 
@@ -325,25 +351,110 @@ impl PushedAlignment {
         inner: String,
         total_rows_fetched: &mut u64,
     ) -> Result<String, Error> {
-        let aggregate = Self::aggregate_for(self.align.method)
-            .expect("checked when the alignment was accepted");
-        let end_nanos = self.query_end.timestamp_nanos_opt().unwrap_or(0);
-        let period = self.period_expr();
-
         // The row budget applies to what crosses the wire, which is now the
-        // aggregated output rather than the samples behind it. That is the
+        // aligned points rather than the samples behind them. That is the
         // whole point of computing this in the database.
         let remainder = MAX_DATABASE_ROWS - *total_rows_fetched;
+        let end_nanos = self.query_end.timestamp_nanos_opt().unwrap_or(0);
+
+        // Samples after the end of the query are excluded here rather than
+        // left to the predicates, both because the Rust path ignores them and
+        // because `intDiv` truncates toward zero, so the period arithmetic is
+        // only correct for samples at or before it.
+        let inner = format!(
+            "{inner} AND timestamp <= \
+            fromUnixTimestamp64Nano(toInt64({end_nanos}), 'UTC')"
+        );
+        let body = match self.align.method {
+            align::AlignmentMethod::Rate => self.rate_body(inner),
+            _ => self.aggregate_body(inner),
+        };
         Ok(format!(
-            "SELECT timeseries_key, {period} AS timestamp, \
-            {aggregate}(datum) AS datum \
-            FROM ({inner} AND timestamp <= \
-            fromUnixTimestamp64Nano(toInt64({end_nanos}), 'UTC')) \
-            GROUP BY timeseries_key, timestamp \
-            ORDER BY timeseries_key, timestamp \
-            LIMIT {}",
+            "{body} GROUP BY timeseries_key, timestamp \
+            ORDER BY timeseries_key, timestamp LIMIT {}",
             remainder + 1,
         ))
+    }
+
+    /// Reduce a gauge's samples with a plain aggregate.
+    fn aggregate_body(&self, inner: String) -> String {
+        let aggregate = Self::aggregate_for(self.align.method)
+            .expect("checked when the alignment was accepted");
+        let period = self.period_expr();
+        format!(
+            "SELECT timeseries_key, {period} AS timestamp, \
+            {aggregate}(datum) AS datum FROM ({inner})"
+        )
+    }
+
+    /// Reduce a counter's samples to the rate it advanced in each period.
+    ///
+    /// This has to reproduce two steps at once: the conversion from cumulative
+    /// samples to deltas that `Points::from_cumulative()` does, and the
+    /// reduction that `rate_in_window()` does over the result.
+    ///
+    /// The conversion is a difference against the previous sample, taken
+    /// within an epoch -- a run of samples sharing a start time. A counter
+    /// resets when the producer restarts, which begins a new epoch, and since
+    /// the epoch is the partition the reset cannot leak into a difference. The
+    /// first sample of an epoch has no predecessor, and its own value is the
+    /// increase since the epoch began.
+    ///
+    /// Two different notions of "previous" are needed, and they differ only
+    /// when a sample is missing. The value is differenced against the last
+    /// sample that *had* one, so that a gap in collection is counted rather
+    /// than lost -- `anyLast` skips nulls, which is what makes that work. The
+    /// interval, though, runs back to the immediately preceding sample
+    /// whatever its value, which is what `lagInFrame` gives. That mirrors
+    /// `Points::from_cumulative()`, which advances timestamps across missing
+    /// samples while carrying the last real datum forward.
+    ///
+    /// Summing the differences in a period telescopes back to
+    /// `last - first`, so the result is the increase over the period divided
+    /// by the span it was observed over, which is what the Rust path computes.
+    fn rate_body(&self, inner: String) -> String {
+        let period = self.period_expr();
+        let period_end_nanos = self.period_end_nanos_expr();
+        let period_nanos = self.align.period.as_nanos();
+        let epoch =
+            "PARTITION BY timeseries_key, start_time ORDER BY timestamp";
+
+        format!(
+            // A period can span no time at all -- the first sample of a
+            // series carries its own start time, and a producer sampled the
+            // instant it started counting has the two equal. There is no rate
+            // to report over zero duration, so `nullIf` turns the divisor into
+            // NULL and the whole point becomes missing, which is what the Rust
+            // path does when the span is not positive.
+            "SELECT timeseries_key, period AS timestamp, \
+            sum(increase) / nullIf(toFloat64(max(end_nanos) - \
+            min(start_nanos)) / 1000000000, 0) AS datum \
+            FROM (\
+                SELECT timeseries_key, period, period_start_nanos, \
+                series_row, epoch_start_nanos, end_nanos, \
+                if(previous_end_nanos IS NULL, epoch_start_nanos, \
+                    previous_end_nanos) AS start_nanos, \
+                if(previous_datum IS NULL, toFloat64(datum), \
+                    toFloat64(datum) - toFloat64(previous_datum)) AS increase \
+                FROM (\
+                    SELECT timeseries_key, datum, \
+                    {period} AS period, \
+                    {period_end_nanos} - {period_nanos} AS period_start_nanos, \
+                    toUnixTimestamp64Nano(timestamp) AS end_nanos, \
+                    toUnixTimestamp64Nano(start_time) AS epoch_start_nanos, \
+                    row_number() OVER (PARTITION BY timeseries_key \
+                        ORDER BY start_time, timestamp) AS series_row, \
+                    anyLast(datum) OVER ({epoch} ROWS BETWEEN UNBOUNDED \
+                        PRECEDING AND 1 PRECEDING) AS previous_datum, \
+                    lagInFrame(toNullable(toUnixTimestamp64Nano(timestamp))) \
+                        OVER ({epoch} ROWS BETWEEN 1 PRECEDING AND CURRENT \
+                        ROW) AS previous_end_nanos \
+                    FROM ({inner})\
+                )\
+            ) \
+            WHERE NOT (series_row = 1 AND epoch_start_nanos < \
+                period_start_nanos)"
+        )
     }
 }
 
@@ -2378,16 +2489,48 @@ mod tests {
         }
         ctx.client.insert_samples(&samples).await.expect("inserted");
 
-        for method in ["max", "min", "mean_within"] {
+        // A counter advancing by 10 every second, restarting partway through
+        // so that the epoch handling is exercised too.
+        let counter = SomeTarget { name: String::from("counter"), index: 8 };
+        let mut samples = Vec::new();
+        for (epoch_start, offsets) in
+            [(first, 0..12u32), (first + Duration::from_secs(14), 15..32u32)]
+        {
+            for (i, offset) in offsets.enumerate() {
+                let datum = Cumulative::with_start_time(
+                    epoch_start,
+                    (i as u64 + 1) * 10,
+                );
+                let metric = SomeMetric { foo: 5, datum };
+                samples.push(
+                    Sample::new_with_timestamp(
+                        first + Duration::from_secs(offset.into()),
+                        &counter,
+                        &metric,
+                    )
+                    .unwrap(),
+                );
+            }
+        }
+        ctx.client.insert_samples(&samples).await.expect("inserted");
+
+        let cases = [
+            ("some_gauge", &target, "max"),
+            ("some_gauge", &target, "min"),
+            ("some_gauge", &target, "mean_within"),
+            ("some_metric", &counter, "rate"),
+        ];
+        for (metric, target, method) in cases {
             for period in ["3s", "5s", "10s"] {
                 // Pin the end of the query. It defaults to now, and the
                 // two queries below run a moment apart, which would anchor
                 // their output periods a few milliseconds from each other.
                 let end = format_timestamp(first + Duration::from_secs(40));
                 let query = format!(
-                    "get some_target:some_gauge | filter {} \
+                    "get some_target:{} | filter {} \
                      && timestamp <= @{} | align {}({})",
-                    exact_filter_for(&target, 5),
+                    metric,
+                    exact_filter_for(target, 5),
                     end,
                     method,
                     period,
@@ -2403,10 +2546,11 @@ mod tests {
                 // pushed. The filter admits everything, so the two must agree
                 // point for point.
                 let unpushed_query = format!(
-                    "get some_target:some_gauge | filter {} \
+                    "get some_target:{} | filter {} \
                      && timestamp <= @{} | filter datum >= -1 \
                      | align {}({})",
-                    exact_filter_for(&target, 5),
+                    metric,
+                    exact_filter_for(target, 5),
                     end,
                     method,
                     period,
@@ -2438,17 +2582,16 @@ mod tests {
                 // this the comparison would still pass if the alignment were
                 // quietly never pushed, since both sides would then be the
                 // same Rust code.
-                let aggregate = match method {
-                    "mean_within" => "avg(datum)",
-                    other => &format!("{other}(datum)"),
-                };
+                // Every pushed alignment groups the samples into periods, and
+                // nothing else the client issues does.
+                const GROUPS_BY_PERIOD: &str = "GROUP BY timeseries_key, ";
                 assert!(
-                    pushed
-                        .query_summaries
-                        .iter()
-                        .any(|summary| summary.query.contains(aggregate)),
+                    pushed.query_summaries.iter().any(|summary| summary
+                        .query
+                        .contains(GROUPS_BY_PERIOD)),
                     "`{query}` should have been aligned by the database, but \
-                    no query it ran aggregates with `{aggregate}`: {:#?}",
+                    none of the queries it ran group samples into periods: \
+                    {:#?}",
                     pushed
                         .query_summaries
                         .iter()
@@ -2456,10 +2599,9 @@ mod tests {
                         .collect::<Vec<_>>(),
                 );
                 assert!(
-                    unpushed
-                        .query_summaries
-                        .iter()
-                        .all(|summary| !summary.query.contains(aggregate)),
+                    unpushed.query_summaries.iter().all(|summary| !summary
+                        .query
+                        .contains(GROUPS_BY_PERIOD)),
                     "A filter on the datum cannot be applied by the database, \
                     so `{unpushed_query}` must not be aligned there either -- \
                     the filter would be applied to rows that had already been \
