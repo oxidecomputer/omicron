@@ -1604,7 +1604,7 @@ mod tests {
     use super::ConsistentKeyGroup;
     use crate::OxqlResult;
     use crate::client::oxql::{
-        QueryAuthzScope, chunk_consistent_key_groups_impl,
+        MAX_DATABASE_ROWS, QueryAuthzScope, chunk_consistent_key_groups_impl,
     };
     use crate::oxql::ast::grammar::query_parser;
     use crate::{Client, DATABASE_TIMESTAMP_FORMAT, DbWrite};
@@ -2804,6 +2804,113 @@ mod tests {
                 (name.to_string(), points)
             })
             .collect()
+    }
+
+    // A month of temperatures at one second intervals, reduced to a daily
+    // maximum.
+    //
+    // That is 2,592,000 samples against a `MAX_DATABASE_ROWS` of a million, so
+    // this is not a query that merely runs faster when the alignment is
+    // computed in the database -- it is one that only runs at all. Fetching
+    // every sample to find thirty numbers is two and a half times over the row
+    // budget, and the query is refused.
+    //
+    // That budget exists because results are not paginated, so the cost of an
+    // answer has to be bounded before it is known. Aligning in the database
+    // bounds it by construction: what comes back is one point per period, and
+    // the number of periods follows from the range and the period alone.
+    #[tokio::test]
+    async fn test_pushed_alignment_over_a_month_of_samples() {
+        const SAMPLE_COUNT: u32 = 30 * 86_400;
+        const SAMPLE_INTERVAL_SECS: u64 = 1;
+
+        let ctx =
+            setup_oxql_test("test_pushed_alignment_over_a_month_of_samples")
+                .await;
+        let target = SomeTarget { name: String::from("monthly"), index: 5 };
+        let first = ctx.test_data.first_timestamp;
+
+        let insert_start = std::time::Instant::now();
+        for chunk_start in (0..SAMPLE_COUNT).step_by(60_000) {
+            let chunk_end = (chunk_start + 60_000).min(SAMPLE_COUNT);
+            let samples: Vec<_> = (chunk_start..chunk_end)
+                .map(|i| {
+                    let metric =
+                        SomeGauge { foo: 6, datum: 60 + i64::from(i % 31) };
+                    Sample::new_with_timestamp(
+                        first
+                            + Duration::from_secs(
+                                u64::from(i) * SAMPLE_INTERVAL_SECS,
+                            ),
+                        &target,
+                        &metric,
+                    )
+                    .unwrap()
+                })
+                .collect();
+            ctx.client.insert_samples(&samples).await.expect("inserted");
+        }
+        assert!(
+            u64::from(SAMPLE_COUNT) > MAX_DATABASE_ROWS,
+            "This test is only meaningful if the samples outnumber the row \
+            budget of {MAX_DATABASE_ROWS}",
+        );
+        println!(
+            "inserted {SAMPLE_COUNT} samples in {:?}",
+            insert_start.elapsed(),
+        );
+
+        let end = format_timestamp(first + Duration::from_secs(30 * 86_400));
+        let query = format!(
+            "get some_target:some_gauge | filter {} && timestamp <= @{} \
+             | align max(1d)",
+            exact_filter_for(&target, 6),
+            end,
+        );
+        let start = std::time::Instant::now();
+        let pushed = ctx
+            .client
+            .oxql_query(&query, QueryAuthzScope::Fleet)
+            .await
+            .unwrap_or_else(|e| panic!("`{query}` failed: {e}"));
+        println!(
+            "align max(1d) over {SAMPLE_COUNT} samples: pushed {:?}",
+            start.elapsed(),
+        );
+
+        let points = only_timeseries(&pushed);
+        assert_eq!(points.len(), 31, "Thirty days plus the boundary period");
+        assert_eq!(points[0].1, Some(60.0), "{points:?}");
+        for (_, value) in points.iter().skip(1) {
+            assert_eq!(*value, Some(90.0), "{points:?}");
+        }
+
+        // The same query, with a filter on the datum in front of the alignment
+        // so that it cannot be pushed. It admits every sample, so it changes
+        // nothing about the answer -- only about where the work happens, and
+        // there is too much of it to do here.
+        let unpushed_query = format!(
+            "get some_target:some_gauge | filter {} && timestamp <= @{} \
+             | filter datum >= -1 | align max(1d)",
+            exact_filter_for(&target, 6),
+            end,
+        );
+        let error = ctx
+            .client
+            .oxql_query(&unpushed_query, QueryAuthzScope::Fleet)
+            .await
+            .expect_err(
+                "Aligning a month of samples in Rust means fetching all of \
+                them, which is more than the query is allowed to read",
+            )
+            .to_string();
+        assert!(
+            error.contains("more than the current limit"),
+            "Expected the row budget to refuse this, got: {error}",
+        );
+        println!("unpushed refused: {error}");
+
+        ctx.cleanup_successful().await;
     }
 
     #[tokio::test]
