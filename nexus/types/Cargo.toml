@@ -33,8 +33,10 @@ ipnet.workspace = true
 ipnetwork.workspace = true
 itertools.workspace = true
 newtype_derive.workspace = true
+omicron-generation-kinds.workspace = true
 omicron-uuid-kinds.workspace = true
 openssl.workspace = true
+owo-colors.workspace = true
 oximeter-db.workspace = true
 oxnet.workspace = true
 oxql-types.workspace = true
@@ -61,7 +63,8 @@ tufaceous-artifact.workspace = true
 
 newtype-uuid.workspace = true
 nexus-types-versions.workspace = true
-update-engine.workspace = true
+oxide-update-engine.workspace = true
+oxide-update-engine-types.workspace = true
 unicode-width.workspace = true
 uuid.workspace = true
 url = { workspace = true, features = ["serde"] }
@@ -79,13 +82,16 @@ swrite.workspace = true
 tough.workspace = true
 
 [dev-dependencies]
+camino.workspace = true
 expectorate.workspace = true
 gateway-types = { workspace = true, features = ["testing"] }
 iddqd = { workspace = true, features = ["proptest"] }
 newtype-uuid = { workspace = true, features = ["proptest1"] }
 omicron-common = { workspace = true, features = ["testing"] }
+omicron-generation-kinds = { workspace = true, features = ["testing"] }
 omicron-test-utils.workspace = true
 proptest.workspace = true
+reconfigurator-cli.workspace = true
 sled-agent-types-versions = { workspace = true, features = ["testing"] }
 sled-hardware-types = { workspace = true, features = ["testing"] }
 test-strategy.workspace = true

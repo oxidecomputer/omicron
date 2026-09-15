@@ -98,6 +98,13 @@ impl DendriteInstance {
         Ok(instance)
     }
 
+    /// The address clients should use to connect to dpd.
+    ///
+    /// This address stays bound whether dpd is running or not.
+    pub fn address(&self) -> SocketAddrV6 {
+        self.proxy().local_addr()
+    }
+
     /// The port clients should use to connect to dpd.
     ///
     /// This port stays bound whether dpd is running or not.
@@ -185,7 +192,7 @@ impl DendriteInstance {
             .kill_on_drop(true)
             .spawn()
             .with_context(|| {
-                format!("failed to spawn `dpd` (with args: {:?})", &args)
+                format!("failed to spawn `dpd` (with args: {:?})", args)
             })?;
         let stderr = child.stderr.take().unwrap();
 

@@ -96,7 +96,7 @@ impl super::Nexus {
 
         let (_, db_vpc) = saga_outputs
             .lookup_node_output::<(authz::Vpc, db::model::Vpc)>("vpc")
-            .map_err(|e| Error::internal_error(&format!("{:#}", &e)))
+            .map_err(|e| Error::internal_error(&format!("{:#}", e)))
             .internal_context("looking up output from VPC create saga")?;
 
         Ok(db_vpc)

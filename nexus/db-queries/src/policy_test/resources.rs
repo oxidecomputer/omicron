@@ -78,6 +78,7 @@ pub async fn make_resources(
     builder.new_resource(authz::CONSOLE_SESSION_LIST);
     builder.new_resource(authz::DNS_CONFIG);
     builder.new_resource(authz::DEVICE_AUTH_REQUEST_LIST);
+    builder.new_resource(authz::FM_CONFIG);
     builder.new_resource(authz::INVENTORY);
     builder.new_resource(authz::IP_POOL_LIST);
     builder.new_resource(authz::MULTICAST_GROUP_LIST);
@@ -305,6 +306,8 @@ async fn make_silo(
         certificate_id,
         LookupType::ByName(format!("{}-certificate", silo_name)),
     ));
+
+    builder.new_resource(authz::SiloImageList::new(silo.clone()));
 
     builder.new_resource(authz::SiloIdentityProviderList::new(silo.clone()));
     let idp_id = Uuid::new_v4();

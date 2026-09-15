@@ -18,6 +18,10 @@ use clap::Subcommand;
 use sled_agent_client::types::NodeStatus;
 use sled_agent_client::types::OperatorSwitchZonePolicy;
 
+mod reconciler_status;
+
+use reconciler_status::cmd_network_config_reconciler_status;
+
 /// Arguments to the "omdb sled-agent" subcommand
 #[derive(Debug, Args)]
 pub struct SledAgentArgs {
@@ -96,6 +100,11 @@ enum SwitchZonePolicyCommands {
 enum NetworkConfigCommands {
     /// show the current contents of the replicated network config
     Show,
+
+    /// get the state of the scrimlet-reconcilers system
+    ///
+    /// This will only be meaningful if the target sled-agent is a scrimlet.
+    ReconcilerStatus,
 }
 
 #[derive(Debug, Subcommand)]
@@ -192,6 +201,12 @@ impl SledAgentArgs {
             SledAgentCommands::NetworkConfig(NetworkConfigCommands::Show) => {
                 cmd_network_config_show(&make_ba_lockstep_client()?).await
             }
+            SledAgentCommands::NetworkConfig(
+                NetworkConfigCommands::ReconcilerStatus,
+            ) => cmd_network_config_reconciler_status(
+                &make_ba_lockstep_client()?,
+            )
+            .await,
             SledAgentCommands::Bootstore(BootstoreCommands::Status) => {
                 cmd_bootstore_status(&make_sa_client()?).await
             }

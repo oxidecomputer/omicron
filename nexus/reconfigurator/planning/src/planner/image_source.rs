@@ -19,14 +19,14 @@ use nexus_types::{
     },
     inventory::Collection,
 };
-use omicron_common::api::external::{Generation, TufArtifactMeta};
+use omicron_generation_kinds::SledConfigGeneration;
 use omicron_uuid_kinds::{MupdateOverrideUuid, OmicronZoneUuid, SledUuid};
 use sled_agent_types::inventory::{
     BootPartitionContents, BootPartitionDetails, ManifestBootInventory,
     ZoneKind,
 };
 use slog::{debug, info, o, warn};
-use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact::{Artifact, ArtifactHash};
 
 use crate::blueprint_builder::{BlueprintBuilder, Error};
 
@@ -498,7 +498,10 @@ pub(crate) enum NoopConvertSledIneligibleReason {
 
     /// The inventory is stale, as indicated by its generation number: it has an
     /// older generation for this sled than the parent blueprint.
-    InventoryStale { parent_bp_gen: Generation, inventory_gen: Generation },
+    InventoryStale {
+        parent_bp_gen: SledConfigGeneration,
+        inventory_gen: SledConfigGeneration,
+    },
 
     /// An error occurred retrieving the sled's install dataset zone manifest.
     ManifestError { message: String },
@@ -582,7 +585,7 @@ impl NoopConvertZoneInfo {
     fn new(
         zone: &BlueprintZoneConfig,
         zone_manifest: &ManifestBootInventory,
-        artifacts_by_hash: &HashMap<ArtifactHash, &TufArtifactMeta>,
+        artifacts_by_hash: &HashMap<ArtifactHash, &Artifact>,
     ) -> Self {
         let file_name = zone.kind().artifact_in_install_dataset();
 
@@ -750,7 +753,7 @@ impl NoopConvertHostPhase2Slots {
     fn new(
         current: BlueprintHostPhase2DesiredSlots,
         contents: Option<&BootPartitionContents>,
-        artifacts_by_hash: &HashMap<ArtifactHash, &TufArtifactMeta>,
+        artifacts_by_hash: &HashMap<ArtifactHash, &Artifact>,
     ) -> Self {
         Self {
             slot_a: NoopConvertHostPhase2Contents::new(
@@ -794,7 +797,7 @@ impl NoopConvertHostPhase2Contents {
     fn new(
         current: BlueprintHostPhase2DesiredContents,
         details: Option<&Result<BootPartitionDetails, String>>,
-        artifacts_by_hash: &HashMap<ArtifactHash, &TufArtifactMeta>,
+        artifacts_by_hash: &HashMap<ArtifactHash, &Artifact>,
     ) -> Self {
         match current {
             BlueprintHostPhase2DesiredContents::Artifact { version, hash } => {
@@ -814,7 +817,7 @@ impl NoopConvertHostPhase2Contents {
                             artifacts_by_hash.get(&details.artifact_hash)
                         {
                             let version = BlueprintArtifactVersion::Available {
-                                version: meta.id.version.clone(),
+                                version: meta.version.clone(),
                             };
                             let desired =
                                 BlueprintHostPhase2DesiredContents::Artifact {
@@ -957,7 +960,7 @@ impl NoopConvertMeasurements {
     fn new(
         current: BlueprintMeasurements,
         measurement_manifest: Result<&ManifestBootInventory, &String>,
-        artifacts_by_hash: &HashMap<ArtifactHash, &TufArtifactMeta>,
+        artifacts_by_hash: &HashMap<ArtifactHash, &Artifact>,
     ) -> Self {
         use NoopConvertMeasurementsIneligibleReason as IneligibleReason;
 
@@ -980,7 +983,7 @@ impl NoopConvertMeasurements {
                     {
                         artifacts.insert(BlueprintSingleMeasurement {
                             version: BlueprintArtifactVersion::Available {
-                                version: meta.id.version.clone(),
+                                version: meta.version.clone(),
                             },
                             hash: meta.hash,
                         });

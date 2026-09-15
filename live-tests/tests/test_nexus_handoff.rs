@@ -22,7 +22,7 @@ use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::blueprint_zone_type;
-use omicron_common::api::external::Generation;
+use omicron_generation_kinds::NexusGeneration;
 use omicron_test_utils::dev::poll::CondCheckError;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -179,7 +179,7 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
         blueprint_edit_current_target(
             log,
             &nexus,
-            &|builder: &mut BlueprintBuilder| {
+            |builder: &mut BlueprintBuilder| {
                 let mut external_networking_alloc =
                     ExternalNetworkingAllocator::from_current_zones(
                         builder,
@@ -279,7 +279,7 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
         blueprint_edit_current_target(
             log,
             &nexus,
-            &|builder: &mut BlueprintBuilder| {
+            |builder: &mut BlueprintBuilder| {
                 builder.set_nexus_generation(next_generation);
                 Ok(())
             },
@@ -441,7 +441,7 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
         blueprint_edit_current_target(
             log,
             new_nexus,
-            &|builder: &mut BlueprintBuilder| {
+            |builder: &mut BlueprintBuilder| {
                 for (id, current_zone) in &current_nexus_zones {
                     builder
                         .sled_expunge_zone(current_zone.sled_id, *id)
@@ -495,7 +495,7 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
 async fn check_internal_dns(
     log: &slog::Logger,
     blueprint: &Blueprint,
-    active_generation: Generation,
+    active_generation: NexusGeneration,
 ) -> Result<(), CondCheckError<anyhow::Error>> {
     // Compute what we expect to find, based on which Nexus instances in the
     // blueprint have the specified generation.
@@ -559,15 +559,17 @@ async fn check_internal_dns(
 async fn check_external_dns(
     log: &slog::Logger,
     blueprint: &Blueprint,
-    active_generation: Generation,
+    active_generation: NexusGeneration,
 ) -> Result<(), CondCheckError<anyhow::Error>> {
     // Compute which Nexus instances we expect to find in external DNS based on
     // what's in-service in the blueprint.
     let expected_nexus_addrs = blueprint
         .in_service_nexus_zones()
-        .filter_map(|(_sled_id, _zone_cfg, nexus_config)| {
-            (nexus_config.nexus_generation == active_generation)
-                .then_some(nexus_config.external_ip.ip)
+        .filter(|(_sled_id, _zone_cfg, nexus_config)| {
+            nexus_config.nexus_generation == active_generation
+        })
+        .flat_map(|(_sled_id, _zone_cfg, nexus_config)| {
+            nexus_config.external_ips.iter().map(|e| e.ip)
         })
         .collect::<BTreeSet<_>>();
 

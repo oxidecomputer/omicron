@@ -40,9 +40,9 @@ use nexus_db_schema::schema::webhook_delivery_attempt::dsl as attempt_dsl;
 use nexus_types::external_api::alert as types;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::DataPageParams;
-use omicron_common::api::external::Generation;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::http_pagination::PaginatedBy;
+use omicron_generation_kinds::AlertGeneration;
 use omicron_uuid_kinds::AlertReceiverUuid;
 use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::CaseUuid;
@@ -957,7 +957,7 @@ async fn cmd_db_webhook_delivery_info(
 
     // Okay, now go get attempts for this delivery.
     let ctx = || format!("listing delivery attempts for {delivery_id}");
-    let attempts = attempt_dsl::webhook_delivery_attempt
+    let attempts: Vec<_> = attempt_dsl::webhook_delivery_attempt
         .filter(attempt_dsl::delivery_id.eq(*delivery_id))
         .order_by(attempt_dsl::attempt.desc())
         .limit(fetch_opts.fetch_limit.get().into())
@@ -985,6 +985,8 @@ async fn cmd_db_webhook_delivery_info(
             status: Option<u16>,
             #[tabled(display_with = "display_option_blank")]
             duration: Option<chrono::TimeDelta>,
+            #[tabled(display_with = "display_option_blank")]
+            unreachable_reason: Option<String>,
         }
 
         let rows = attempts.into_iter().map(
@@ -998,6 +1000,7 @@ async fn cmd_db_webhook_delivery_info(
                  response_duration,
                  time_created,
                  deliverator_id,
+                 unreachable_reason,
              }| DeliveryAttemptRow {
                 id: id.into_untyped_uuid(),
                 attempt: attempt.0,
@@ -1006,6 +1009,7 @@ async fn cmd_db_webhook_delivery_info(
                 result,
                 status: response_status.map(|u| u.into()),
                 duration: response_duration,
+                unreachable_reason,
             },
         );
         let mut table = tabled::Table::new(rows);
@@ -1091,7 +1095,7 @@ async fn cmd_db_alert_list(
         #[tabled(display_with = "display_option_blank")]
         fm_case_id: Option<Uuid>,
         #[tabled(display_with = "display_option_blank")]
-        fm_gen: Option<Generation>,
+        fm_gen: Option<AlertGeneration>,
     }
 
     let make_row =
@@ -1105,7 +1109,7 @@ async fn cmd_db_alert_list(
             fm_case_id: alert.case_id.map(GenericUuid::into_untyped_uuid),
             fm_gen: marker
                 .as_ref()
-                .map(|marker| marker.created_at_generation.0),
+                .map(|marker| marker.created_at_generation()),
         };
 
     #[derive(Tabled)]
@@ -1222,7 +1226,7 @@ async fn cmd_db_alert_info(
                 Ok(Some(marker)) => {
                     println!(
                         "    {FM_GENERATION:>WIDTH$}: {}",
-                        marker.created_at_generation.0
+                        marker.created_at_generation()
                     );
                 }
                 Ok(None) => {} // may have been GCed...
@@ -1241,7 +1245,7 @@ async fn cmd_db_alert_info(
             );
             println!(
                 "    {FM_GENERATION:>WIDTH$}: {}",
-                marker.created_at_generation.0
+                marker.created_at_generation()
             );
         }
         // Note that this includes both cases where we successfully fetched an

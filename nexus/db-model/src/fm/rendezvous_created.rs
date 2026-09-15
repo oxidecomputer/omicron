@@ -7,10 +7,14 @@
 //! `schema/crdb/dbinit.sql` for the tombstone-and-idempotency semantics that
 //! motivate these tables.
 
-use crate::Generation;
+use crate::typed_generation::DbTypedGeneration;
 use crate::typed_uuid::DbTypedUuid;
 use nexus_db_schema::schema::rendezvous_alert_created;
 use nexus_db_schema::schema::rendezvous_support_bundle_created;
+use omicron_generation_kinds::{
+    AlertGeneration, AlertGenerationKind, SupportBundleGeneration,
+    SupportBundleGenerationKind,
+};
 use omicron_uuid_kinds::{AlertKind, AlertUuid};
 use omicron_uuid_kinds::{SupportBundleKind, SupportBundleUuid};
 
@@ -18,16 +22,23 @@ use omicron_uuid_kinds::{SupportBundleKind, SupportBundleUuid};
 #[diesel(table_name = rendezvous_alert_created)]
 pub struct RendezvousAlertCreated {
     alert_id: DbTypedUuid<AlertKind>,
-    pub created_at_generation: Generation,
+    created_at_generation: DbTypedGeneration<AlertGenerationKind>,
 }
 
 impl RendezvousAlertCreated {
-    pub fn new(alert_id: AlertUuid, generation: Generation) -> Self {
-        Self { alert_id: alert_id.into(), created_at_generation: generation }
+    pub fn new(alert_id: AlertUuid, generation: AlertGeneration) -> Self {
+        Self {
+            alert_id: alert_id.into(),
+            created_at_generation: generation.into(),
+        }
     }
 
     pub fn alert_id(&self) -> AlertUuid {
         self.alert_id.into()
+    }
+
+    pub fn created_at_generation(&self) -> AlertGeneration {
+        self.created_at_generation.into()
     }
 }
 
@@ -35,21 +46,25 @@ impl RendezvousAlertCreated {
 #[diesel(table_name = rendezvous_support_bundle_created)]
 pub struct RendezvousSupportBundleCreated {
     support_bundle_id: DbTypedUuid<SupportBundleKind>,
-    pub created_at_generation: Generation,
+    created_at_generation: DbTypedGeneration<SupportBundleGenerationKind>,
 }
 
 impl RendezvousSupportBundleCreated {
     pub fn new(
         support_bundle_id: SupportBundleUuid,
-        generation: Generation,
+        generation: SupportBundleGeneration,
     ) -> Self {
         Self {
             support_bundle_id: support_bundle_id.into(),
-            created_at_generation: generation,
+            created_at_generation: generation.into(),
         }
     }
 
     pub fn support_bundle_id(&self) -> SupportBundleUuid {
         self.support_bundle_id.into()
+    }
+
+    pub fn created_at_generation(&self) -> SupportBundleGeneration {
+        self.created_at_generation.into()
     }
 }

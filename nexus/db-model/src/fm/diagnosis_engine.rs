@@ -25,6 +25,7 @@ impl_enum_type!(
 
     PowerShelf => b"power_shelf"
     PhysicalDisk => b"physical_disk"
+    Saga => b"saga"
 
 );
 
@@ -35,6 +36,7 @@ impl From<DiagnosisEngine> for fm::DiagnosisEngineKind {
             DiagnosisEngine::PhysicalDisk => {
                 fm::DiagnosisEngineKind::PhysicalDisk
             }
+            DiagnosisEngine::Saga => fm::DiagnosisEngineKind::Saga,
         }
     }
 }
@@ -46,6 +48,7 @@ impl From<fm::DiagnosisEngineKind> for DiagnosisEngine {
             fm::DiagnosisEngineKind::PhysicalDisk => {
                 DiagnosisEngine::PhysicalDisk
             }
+            fm::DiagnosisEngineKind::Saga => DiagnosisEngine::Saga,
         }
     }
 }

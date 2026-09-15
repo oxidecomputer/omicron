@@ -14,10 +14,8 @@ use oxide_client::types::{
     SshKeyCreate,
 };
 use oxide_client::{ClientCurrentUserExt, ClientDisksExt, ClientInstancesExt};
-use russh::keys::PrivateKeyWithHashAlg;
+use russh::keys::{Algorithm, PrivateKey, PrivateKeyWithHashAlg, PublicKey};
 use russh::{ChannelMsg, Disconnect};
-use ssh_key::PublicKey;
-use ssh_key::private::Ed25519Keypair;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -26,7 +24,8 @@ async fn instance_launch() -> Result<()> {
     let ctx = Context::new().await?;
 
     eprintln!("generate SSH key");
-    let key = Arc::new(Ed25519Keypair::random(&mut rand_010::rng()).into());
+    let key =
+        Arc::new(PrivateKey::random(&mut rand_010::rng(), Algorithm::Ed25519)?);
     let key = PrivateKeyWithHashAlg::new(key, None);
     let public_key_str = key.public_key().to_openssh()?;
     eprintln!("create SSH key: {}", public_key_str);

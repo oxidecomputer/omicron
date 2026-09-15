@@ -7,7 +7,7 @@
 //! This crate provides helpers for generating example values for zone image
 //! resolver types.
 
-use std::{collections::BTreeSet, fs, io, sync::LazyLock};
+use std::{fs, io, sync::LazyLock};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile_ext::{
@@ -182,12 +182,7 @@ impl WriteInstallDatasetContext {
 
     /// Returns the override information for the mupdate.
     pub fn override_info(&self) -> MupdateOverrideInfo {
-        MupdateOverrideInfo {
-            mupdate_uuid: self.mupdate_override_uuid,
-            // The hash IDs are not used for validation, so leave this
-            // empty.
-            hash_ids: BTreeSet::new(),
-        }
+        MupdateOverrideInfo { mupdate_uuid: self.mupdate_override_uuid }
     }
 
     pub fn zone_manifest(&self) -> OmicronInstallManifest {

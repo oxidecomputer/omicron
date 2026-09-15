@@ -33,6 +33,7 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::backoff::backon_retry_policy_internal_service;
+use omicron_generation_kinds::InstanceStateGeneration;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
@@ -457,7 +458,11 @@ async fn sis_move_to_starting(
         db::model::InstanceRuntimeState {
             nexus_state: db::model::InstanceState::Vmm,
             propolis_id: Some(propolis_id.into_untyped_uuid()),
-            generation: db_instance.runtime().generation.next().into(),
+            generation: InstanceStateGeneration::from(
+                db_instance.runtime().generation,
+            )
+            .next()
+            .into(),
             time_last_auto_restarted,
             ..db_instance.runtime()
         }
@@ -499,7 +504,9 @@ async fn sis_move_to_starting_undo(
     let new_runtime = db::model::InstanceRuntimeState {
         nexus_state: db::model::InstanceState::NoVmm,
         propolis_id: None,
-        generation: db_instance.state_generation.next().into(),
+        generation: InstanceStateGeneration::from(db_instance.state_generation)
+            .next()
+            .into(),
         ..db_instance.runtime()
     };
 
@@ -1337,13 +1344,24 @@ mod test {
             }],
         }];
 
+        let allow_ddm_traffic = false;
         let uplink0_settings = datastore
-            .switch_port_settings_create(&opctx, &uplink0_params, None)
+            .switch_port_settings_create(
+                &opctx,
+                &uplink0_params,
+                None,
+                allow_ddm_traffic,
+            )
             .await
             .expect("should be able to create configuration for uplink0");
 
         let uplink1_settings = datastore
-            .switch_port_settings_create(&opctx, &uplink1_params, None)
+            .switch_port_settings_create(
+                &opctx,
+                &uplink1_params,
+                None,
+                allow_ddm_traffic,
+            )
             .await
             .expect("should be able to create configuration for uplink1");
 

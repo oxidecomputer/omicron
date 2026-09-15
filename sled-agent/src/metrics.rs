@@ -4,6 +4,8 @@
 
 //! Metrics produced by the sled-agent for collection by oximeter.
 
+use illumos_utils::opte::Port;
+use illumos_utils::opte::PortInfo;
 use illumos_utils::running_zone::RunningZone;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::ProducerKind;
@@ -20,11 +22,14 @@ use oximeter_instruments::kstat::cpu::SledCpu;
 use oximeter_instruments::kstat::cpu::SledCpuTarget;
 use oximeter_instruments::kstat::link::SledDataLink;
 use oximeter_instruments::kstat::link::SledDataLinkTarget;
+use oximeter_instruments::kstat::opte_port::OptePort;
+use oximeter_instruments::kstat::opte_port::OptePortTarget;
 use oximeter_instruments::kstat::zone::Zone;
 use oximeter_instruments::kstat::zone::ZoneTarget;
 use oximeter_instruments::zfs::usage::ZfsUsageProducer;
 use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
+use sled_agent_types::inventory::NetworkInterfaceKind;
 use slog::Logger;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
@@ -36,6 +41,7 @@ use tokio::sync::mpsc::error::TrySendError;
 use uuid::Uuid;
 
 type TrackedLinks = HashMap<String, Target>;
+type TrackedOptePorts = HashMap<String, TargetOptePort>;
 
 /// The interval on which we ask `oximeter` to poll us for metric data.
 const METRIC_COLLECTION_INTERVAL: Duration = Duration::from_secs(30);
@@ -124,7 +130,13 @@ pub enum Message {
     /// Stop tracking the named VNIC.
     UntrackVnic { name: String },
     /// Track the named OPTE port.
-    TrackOptePort { zone_name: String, name: String },
+    TrackOptePort {
+        port_name: String,
+        interface_kind: String,
+        interface_id: Uuid,
+        parent_id: Uuid,
+        zone_name: String,
+    },
     /// Stop tracking the named OPTE port.
     UntrackOptePort { name: String },
     /// Notify the task that a sled has been synced with NTP.
@@ -150,6 +162,11 @@ struct Target {
     sled_datalink: SledDataLink,
 }
 
+struct TargetOptePort {
+    id: TargetId,
+    opte_port: OptePort,
+}
+
 fn get_collection_details(kind: &str) -> CollectionDetails {
     if is_transient_link(kind) {
         CollectionDetails::duration(
@@ -171,6 +188,7 @@ async fn metrics_task(
     mut rx: mpsc::Receiver<Message>,
 ) {
     let mut tracked_links: TrackedLinks = HashMap::new();
+    let mut tracked_opte_ports: TrackedOptePorts = HashMap::new();
     let mut tracked_zone: Option<Zone> = None;
     let mut tracked_sled_cpu: Option<SledCpu> = None;
     let mut sled_time_synced: bool = false;
@@ -237,24 +255,62 @@ async fn metrics_task(
                 remove_datalink(&log, &mut tracked_links, &kstat_sampler, name)
                     .await
             }
-            Message::TrackOptePort { zone_name, name } => {
+            Message::TrackOptePort {
+                zone_name,
+                port_name,
+                interface_id,
+                interface_kind,
+                parent_id,
+            } => {
                 let target = SledDataLinkTarget {
                     kind: LinkKind::OPTE.into(),
-                    link_name: name.into(),
+                    link_name: port_name.clone().into(),
                     rack_id: sled_identifiers.rack_id,
                     sled_id: sled_identifiers.sled_id,
                     sled_model: sled_identifiers.model.clone().into(),
                     sled_revision: sled_identifiers.revision,
                     sled_serial: sled_identifiers.serial.clone().into(),
-                    zone_name: zone_name.into(),
+                    zone_name: zone_name.clone().into(),
                 };
                 let link = SledDataLink::new(target, sled_time_synced);
                 add_datalink(&log, &mut tracked_links, &kstat_sampler, link)
                     .await;
+                let port_target = OptePortTarget {
+                    port_name: port_name.into(),
+                    interface_id,
+                    interface_kind: interface_kind.into(),
+                    parent_id,
+                    zone_name: zone_name.into(),
+                    rack_id: sled_identifiers.rack_id,
+                    sled_id: sled_identifiers.sled_id,
+                    sled_model: sled_identifiers.model.clone().into(),
+                    sled_revision: sled_identifiers.revision,
+                    sled_serial: sled_identifiers.serial.clone().into(),
+                };
+                let port = OptePort::new(port_target, sled_time_synced);
+                add_opte_port(
+                    &log,
+                    &mut tracked_opte_ports,
+                    &kstat_sampler,
+                    port,
+                )
+                .await;
             }
             Message::UntrackOptePort { name } => {
-                remove_datalink(&log, &mut tracked_links, &kstat_sampler, name)
-                    .await
+                remove_datalink(
+                    &log,
+                    &mut tracked_links,
+                    &kstat_sampler,
+                    name.clone(),
+                )
+                .await;
+                remove_opte_port(
+                    &log,
+                    &mut tracked_opte_ports,
+                    &kstat_sampler,
+                    name,
+                )
+                .await;
             }
             Message::TimeSynced { sled_id } => {
                 assert!(
@@ -266,6 +322,12 @@ async fn metrics_task(
                     sync_sled_datalinks(
                         &log,
                         &mut tracked_links,
+                        &kstat_sampler,
+                    )
+                    .await;
+                    sync_sled_opte_ports(
+                        &log,
+                        &mut tracked_opte_ports,
                         &kstat_sampler,
                     )
                     .await;
@@ -404,6 +466,125 @@ async fn sync_sled_datalinks(
 /// its expiration behavior.
 fn is_transient_link(kind: &str) -> bool {
     kind == LinkKind::VNIC || kind == LinkKind::OPTE
+}
+
+/// Start tracking a new OPTE port of the specified kind.
+async fn add_opte_port(
+    log: &Logger,
+    tracked_ports: &mut HashMap<String, TargetOptePort>,
+    kstat_sampler: &KstatSampler,
+    port: OptePort,
+) {
+    match tracked_ports.entry(port.name().to_string()) {
+        Entry::Vacant(entry) => {
+            let details = CollectionDetails::duration(
+                LINK_SAMPLE_INTERVAL,
+                TRANSIENT_LINK_EXPIRATION_INTERVAL,
+                N_MAX_LINK_SAMPLES,
+            );
+            let port_to_add = port.clone();
+            match kstat_sampler.add_target(port_to_add, details).await {
+                Ok(id) => {
+                    debug!(
+                        log,
+                        "added new port to kstat sampler";
+                        "port_name" => entry.key(),
+                    );
+                    entry.insert(TargetOptePort { id, opte_port: port });
+                }
+                Err(err) => {
+                    error!(
+                        log,
+                        "failed to add port to kstat sampler, \
+                         no metrics will be collected for it";
+                        "port_name" => entry.key(),
+                        "error" => ?err,
+                    );
+                }
+            }
+        }
+        Entry::Occupied(entry) => {
+            debug!(
+                log,
+                "received message to track port, \
+                but it is already being tracked";
+                "port_name" => entry.key(),
+            );
+        }
+    }
+}
+
+/// Stop tracking a port by name.
+async fn remove_opte_port(
+    log: &Logger,
+    tracked_ports: &mut HashMap<String, TargetOptePort>,
+    kstat_sampler: &KstatSampler,
+    name: String,
+) {
+    match tracked_ports.remove(&name) {
+        Some(target) => match kstat_sampler.remove_target(target.id).await {
+            Ok(_) => {
+                debug!(
+                    log,
+                    "removed port from tracked ports";
+                    "port_name" => name,
+                );
+            }
+            Err(err) => {
+                error!(
+                    log,
+                    "failed to remove port from kstat sampler, \
+                     metrics may still be produced for it";
+                    "port_name" => name,
+                    "error" => ?err,
+                );
+            }
+        },
+        None => {
+            debug!(
+                log,
+                "received message to delete port, but \
+                it is not in the list of tracked ports";
+                "port_name" => name,
+            );
+        }
+    }
+}
+
+/// Update tracked ports when a sled is synced.
+async fn sync_sled_opte_ports(
+    log: &Logger,
+    tracked_ports: &mut TrackedOptePorts,
+    kstat_sampler: &KstatSampler,
+) {
+    for (port_name, target) in tracked_ports.iter_mut() {
+        target.opte_port.time_synced = true;
+        let details = CollectionDetails::duration(
+            LINK_SAMPLE_INTERVAL,
+            TRANSIENT_LINK_EXPIRATION_INTERVAL,
+            N_MAX_LINK_SAMPLES,
+        );
+        match kstat_sampler
+            .update_target(target.opte_port.clone(), details)
+            .await
+        {
+            Ok(_) => {
+                debug!(
+                    log,
+                    "updated port already tracked by kstat sampler";
+                    "port_name" => port_name,
+                );
+            }
+            Err(err) => {
+                error!(
+                    log,
+                    "failed to update port already tracked by kstat sampler";
+                    "port_name" => port_name,
+                    "error" => ?err,
+                );
+            }
+        }
+    }
 }
 
 /// Start tracking zone metrics for the sled.
@@ -693,12 +874,20 @@ impl MetricsRequestQueue {
     pub fn track_opte_port(
         &self,
         zone_name: impl Into<String>,
-        name: impl Into<String>,
+        port_info: &PortInfo,
     ) -> Result<(), Error> {
+        let (parent_kind, parent_id) = match port_info.nic_kind {
+            NetworkInterfaceKind::Instance { id } => ("instance", id),
+            NetworkInterfaceKind::Service { id } => ("service", id),
+            NetworkInterfaceKind::Probe { id } => ("probe", id),
+        };
         self.0
             .try_send(Message::TrackOptePort {
                 zone_name: zone_name.into(),
-                name: name.into(),
+                port_name: port_info.port.name().into(),
+                interface_id: port_info.nic_id,
+                interface_kind: parent_kind.into(),
+                parent_id,
             })
             .map_err(|e| Error::SendFailed(e))
     }
@@ -707,12 +896,9 @@ impl MetricsRequestQueue {
     ///
     /// This is non-blocking, and returns an error if the task is currently
     /// unavailable.
-    pub fn untrack_opte_port(
-        &self,
-        name: impl Into<String>,
-    ) -> Result<(), Error> {
+    pub fn untrack_opte_port(&self, port: &Port) -> Result<(), Error> {
         self.0
-            .try_send(Message::UntrackOptePort { name: name.into() })
+            .try_send(Message::UntrackOptePort { name: port.name().into() })
             .map_err(|e| Error::SendFailed(e))
     }
 
@@ -745,8 +931,8 @@ impl MetricsRequestQueue {
                 errors.push(e);
             }
         }
-        for port in running_zone.opte_port_names() {
-            if let Err(e) = self.track_opte_port(zone_name, port) {
+        for port_info in running_zone.opte_port_info() {
+            if let Err(e) = self.track_opte_port(zone_name, &port_info) {
                 errors.push(e);
             }
         }
@@ -773,7 +959,7 @@ impl MetricsRequestQueue {
                 errors.push(e);
             }
         }
-        for port in running_zone.opte_port_names() {
+        for port in running_zone.opte_ports() {
             if let Err(e) = self.untrack_opte_port(port) {
                 errors.push(e);
             }

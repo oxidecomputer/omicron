@@ -14,7 +14,7 @@ use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::hardware::UninitializedSled;
 use nexus_types::external_api::rack::Rack;
 use omicron_common::api::external::ByteCount;
-use omicron_common::api::external::Generation;
+use omicron_generation_kinds::Generation;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
 use std::time::Duration;

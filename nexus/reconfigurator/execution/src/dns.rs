@@ -321,6 +321,7 @@ mod test {
     use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
     use nexus_types::deployment::BlueprintMeasurements;
     use nexus_types::deployment::BlueprintSledConfig;
+    use nexus_types::deployment::BlueprintSledUpdateDisposition;
     use nexus_types::deployment::BlueprintSource;
     use nexus_types::deployment::BlueprintTarget;
     use nexus_types::deployment::BlueprintZoneConfig;
@@ -331,7 +332,10 @@ mod test {
     use nexus_types::deployment::ExternalIpPolicy;
     use nexus_types::deployment::LastAllocatedSubnetIpOffset;
     pub use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
+    pub use nexus_types::deployment::OmicronZoneExternalFloatingAddrs;
     pub use nexus_types::deployment::OmicronZoneExternalFloatingIp;
+    pub use nexus_types::deployment::OmicronZoneExternalFloatingIps;
+    pub use nexus_types::deployment::OmicronZoneExternalSnat;
     pub use nexus_types::deployment::OmicronZoneExternalSnatIp;
     use nexus_types::deployment::OximeterReadMode;
     use nexus_types::deployment::PendingMgsUpdates;
@@ -349,14 +353,17 @@ mod test {
     use nexus_types::silo::silo_dns_name;
     use omicron_common::address::IpRange;
     use omicron_common::address::Ipv6Subnet;
-    use omicron_common::address::RACK_PREFIX;
+    use omicron_common::address::RACK_PREFIX_LENGTH;
     use omicron_common::address::REPO_DEPOT_PORT;
-    use omicron_common::address::SLED_PREFIX;
+    use omicron_common::address::SLED_PREFIX_LENGTH;
     use omicron_common::address::get_sled_address;
     use omicron_common::address::get_switch_zone_address;
-    use omicron_common::api::external::Generation;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::zpool_name::ZpoolName;
+    use omicron_generation_kinds::{
+        Generation, NexusGeneration, SledConfigGeneration,
+        TargetReleaseGeneration,
+    };
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::ExternalIpUuid;
@@ -408,6 +415,10 @@ mod test {
     pub enum InvalidOmicronZoneType {
         #[allow(unused)]
         ExternalIpIdRequired { kind: ZoneKind },
+        #[allow(unused)]
+        MultipleExternalIps { kind: ZoneKind },
+        #[allow(unused)]
+        DualStackSnat { kind: ZoneKind },
     }
 
     /// **********************************************************************
@@ -466,11 +477,14 @@ mod test {
                 domain,
                 nic,
                 ntp_servers,
-                snat_cfg,
+                snat,
             } => {
                 let external_ip_id = external_ip_id.ok_or(
                     InvalidOmicronZoneType::ExternalIpIdRequired { kind },
                 )?;
+                let snat_cfg = snat.try_into().map_err(|_| {
+                    InvalidOmicronZoneType::DualStackSnat { kind }
+                })?;
                 BlueprintZoneType::BoundaryNtp(
                     blueprint_zone_type::BoundaryNtp {
                         address,
@@ -478,10 +492,12 @@ mod test {
                         dns_servers,
                         domain,
                         nic,
-                        external_ip: OmicronZoneExternalSnatIp {
-                            id: external_ip_id,
-                            snat_cfg,
-                        },
+                        external_ip: OmicronZoneExternalSnat::from_single(
+                            OmicronZoneExternalSnatIp {
+                                id: external_ip_id,
+                                snat_cfg,
+                            },
+                        ),
                     },
                 )
             }
@@ -519,21 +535,27 @@ mod test {
             }
             OmicronZoneType::ExternalDns {
                 dataset,
-                dns_address,
+                dns_addresses,
                 http_address,
                 nic,
             } => {
                 let external_ip_id = external_ip_id.ok_or(
                     InvalidOmicronZoneType::ExternalIpIdRequired { kind },
                 )?;
+                let addr = dns_addresses.into_single().ok_or(
+                    InvalidOmicronZoneType::MultipleExternalIps { kind },
+                )?;
                 BlueprintZoneType::ExternalDns(
                     blueprint_zone_type::ExternalDns {
                         dataset,
                         http_address,
-                        dns_address: OmicronZoneExternalFloatingAddr {
-                            id: external_ip_id,
-                            addr: dns_address,
-                        },
+                        dns_addresses:
+                            OmicronZoneExternalFloatingAddrs::from_single(
+                                OmicronZoneExternalFloatingAddr {
+                                    id: external_ip_id,
+                                    addr,
+                                },
+                            ),
                         nic,
                     },
                 )
@@ -561,7 +583,7 @@ mod test {
             OmicronZoneType::Nexus {
                 lockstep_port,
                 external_dns_servers,
-                external_ip,
+                external_ips,
                 external_tls,
                 internal_address,
                 nic,
@@ -569,17 +591,22 @@ mod test {
                 let external_ip_id = external_ip_id.ok_or(
                     InvalidOmicronZoneType::ExternalIpIdRequired { kind },
                 )?;
+                let ip = external_ips.into_single().ok_or(
+                    InvalidOmicronZoneType::MultipleExternalIps { kind },
+                )?;
                 BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                     internal_address,
                     lockstep_port,
-                    external_ip: OmicronZoneExternalFloatingIp {
-                        id: external_ip_id,
-                        ip: external_ip,
-                    },
+                    external_ips: OmicronZoneExternalFloatingIps::from_single(
+                        OmicronZoneExternalFloatingIp {
+                            id: external_ip_id,
+                            ip,
+                        },
+                    ),
                     nic,
                     external_tls,
                     external_dns_servers,
-                    nexus_generation: Generation::new(),
+                    nexus_generation: NexusGeneration::new(),
                 })
             }
             OmicronZoneType::Oximeter { address } => {
@@ -646,8 +673,9 @@ mod test {
         let rack_subnet_base: Ipv6Addr =
             "fd00:1122:3344:0100::".parse().unwrap();
         let rack_subnet =
-            ipnet::Ipv6Net::new(rack_subnet_base, RACK_PREFIX).unwrap();
-        let possible_sled_subnets = rack_subnet.subnets(SLED_PREFIX).unwrap();
+            ipnet::Ipv6Net::new(rack_subnet_base, RACK_PREFIX_LENGTH).unwrap();
+        let possible_sled_subnets =
+            rack_subnet.subnets(SLED_PREFIX_LENGTH).unwrap();
 
         let mut blueprint_sleds = BTreeMap::new();
 
@@ -677,6 +705,8 @@ mod test {
                 sa.sled_id,
                 BlueprintSledConfig {
                     state: SledState::Active,
+                    update_disposition: BlueprintSledUpdateDisposition::initial(
+                    ),
                     subnet: Ipv6Subnet::new(*sa.sled_agent_address.ip()),
                     last_allocated_ip_subnet_offset:
                         LastAllocatedSubnetIpOffset::initial(),
@@ -704,8 +734,8 @@ mod test {
             parent_blueprint_id: None,
             internal_dns_version: initial_dns_generation,
             external_dns_version: Generation::new(),
-            target_release_minimum_generation: Generation::new(),
-            nexus_generation: Generation::new(),
+            target_release_minimum_generation: TargetReleaseGeneration::new(),
+            nexus_generation: NexusGeneration::new(),
             external_networking_generation: Generation::new(),
             cockroachdb_fingerprint: String::new(),
             clickhouse_cluster_config: None,
@@ -729,7 +759,7 @@ mod test {
             .zones
             .insert_unique(BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::Expunged {
-                    as_of_generation: Generation::new(),
+                    as_of_generation: SledConfigGeneration::new(),
                     ready_for_cleanup: false,
                 },
                 id: out_of_service_id,
@@ -1176,7 +1206,7 @@ mod test {
             .find(|z| z.zone_type.is_nexus())
             .unwrap();
         nexus_zone.disposition = BlueprintZoneDisposition::Expunged {
-            as_of_generation: Generation::new(),
+            as_of_generation: SledConfigGeneration::new(),
             ready_for_cleanup: false,
         };
         mem::drop(nexus_zone);
@@ -1381,19 +1411,15 @@ mod test {
             .ip_pools_service_lookup_both_versions(&opctx)
             .await
             .expect("success looking up both versions of the service IP Pools");
-        let mut ranges = datastore
-            .ip_pool_list_ranges_batched(&opctx, &service_pools.ipv4.authz_pool)
-            .await
-            .expect("success listing IPv4 pool ranges");
-        ranges.append(
-            &mut datastore
-                .ip_pool_list_ranges_batched(
-                    &opctx,
-                    &service_pools.ipv6.authz_pool,
-                )
-                .await
-                .expect("success listing IPv6 pool ranges"),
-        );
+        let mut ranges = Vec::new();
+        for pool in service_pools.ipv4.iter().chain(service_pools.ipv6.iter()) {
+            ranges.append(
+                &mut datastore
+                    .ip_pool_list_ranges_batched(&opctx, &pool.authz_pool)
+                    .await
+                    .expect("success listing service pool ranges"),
+            );
+        }
         ranges
     }
 

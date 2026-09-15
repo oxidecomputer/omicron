@@ -77,7 +77,7 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
 
     // this this creates its own entry
     let session_token = create_console_session(ctx).await;
-    let session_cookie = format!("session={}", &session_token);
+    let session_cookie = format!("session={}", session_token);
 
     let t3 = Utc::now(); // after second entry
 
@@ -89,6 +89,7 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
             name: "test-proj2".parse().unwrap(),
             description: "a pier".to_string(),
         },
+        defaults: None,
     };
     let long_user_agent = "A".repeat(300);
     let long_query_value = "B".repeat(600);
@@ -863,6 +864,7 @@ async fn test_audit_log_access_token_auth(ctx: &ControlPlaneTestContext) {
             name: "token-project".parse().unwrap(),
             description: "created with access token".to_string(),
         },
+        defaults: None,
     };
     RequestBuilder::new(client, Method::POST, "/v1/projects")
         .body(Some(&body))

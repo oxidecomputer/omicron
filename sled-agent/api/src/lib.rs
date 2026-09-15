@@ -21,7 +21,8 @@ use omicron_common::api::internal::{
 };
 use sled_agent_types_versions::{
     latest, v1, v4, v6, v7, v9, v10, v11, v12, v14, v16, v17, v18, v20, v22,
-    v24, v25, v26, v28, v29, v30, v31, v32, v33, v34, v37, v39, v42,
+    v24, v25, v26, v28, v29, v30, v31, v32, v33, v34, v37, v39, v40, v41, v42,
+    v43, v46, v47, v48, v49, v50, v51,
 };
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 use slog_error_chain::InlineErrorChain;
@@ -38,6 +39,17 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (53, ADD_INSTANCE_MANAGER_STATUS_TO_INVENTORY),
+    (52, TYPED_ARTIFACT_CONFIG_GENERATION),
+    (51, MULTIPLE_ZONE_EXTERNAL_IPS),
+    (50, TYPED_SLED_CONFIG_GENERATION),
+    (49, ADD_UPDATE_DISPOSITION),
+    (48, ALLOW_DDM_TRAFFIC),
+    (47, BGP_PEER_SRC_ADDR),
+    (46, MODIFY_SVC_STATE_ENUM),
+    (45, REMOVE_UPLINK_ENSURE),
+    (44, PROPOLIS_NVME_VWC),
+    (43, INVENTORY_BASEBOARD_ID),
     (42, NON_EMPTY_UPLINK_PORTS),
     (41, ADD_INSTANCE_PRIMARY_NIC_MTU),
     (40, ADD_FMD_TO_INVENTORY),
@@ -366,12 +378,50 @@ pub trait SledAgentApi {
     #[endpoint {
         method = PUT,
         path = "/omicron-config",
-        versions = VERSION_MEASUREMENTS..,
+        versions = VERSION_MULTIPLE_ZONE_EXTERNAL_IPS..,
     }]
     async fn omicron_config_put(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<latest::inventory::OmicronSledConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        method = PUT,
+        path = "/omicron-config",
+        versions = VERSION_TYPED_SLED_CONFIG_GENERATION..VERSION_MULTIPLE_ZONE_EXTERNAL_IPS,
+    }]
+    async fn omicron_config_put_v50(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v50::inventory::OmicronSledConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::omicron_config_put(rqctx, body.map(Into::into)).await
+    }
+
+    #[endpoint {
+        operation_id = "omicron_config_put",
+        method = PUT,
+        path = "/omicron-config",
+        versions = VERSION_ADD_UPDATE_DISPOSITION..VERSION_TYPED_SLED_CONFIG_GENERATION,
+    }]
+    async fn omicron_config_put_v49(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v49::inventory::OmicronSledConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::omicron_config_put_v50(rqctx, body.map(Into::into)).await
+    }
+
+    #[endpoint {
+        operation_id = "omicron_config_put",
+        method = PUT,
+        path = "/omicron-config",
+        versions = VERSION_MEASUREMENTS..VERSION_ADD_UPDATE_DISPOSITION,
+    }]
+    async fn omicron_config_put_v14(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v14::inventory::OmicronSledConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::omicron_config_put_v49(rqctx, body.map(Into::into)).await
+    }
 
     #[endpoint {
         operation_id = "omicron_config_put",
@@ -384,9 +434,8 @@ pub trait SledAgentApi {
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<v11::inventory::OmicronSledConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let body =
-            body.try_map(latest::inventory::OmicronSledConfig::try_from)?;
-        Self::omicron_config_put(rqctx, body).await
+        let body = body.try_map(v14::inventory::OmicronSledConfig::try_from)?;
+        Self::omicron_config_put_v14(rqctx, body).await
     }
 
     #[endpoint {
@@ -446,13 +495,27 @@ pub trait SledAgentApi {
         operation_id = "vmm_register",
         method = PUT,
         path = "/vmms/{propolis_id}",
-        versions = VERSION_ADD_INSTANCE_PRIMARY_NIC_MTU..
+        versions = VERSION_PROPOLIS_NVME_VWC..
     }]
     async fn vmm_register(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::instance::VmmPathParam>,
         body: TypedBody<latest::instance::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError>;
+
+    #[endpoint {
+        operation_id = "vmm_register",
+        method = PUT,
+        path = "/vmms/{propolis_id}",
+        versions = VERSION_ADD_INSTANCE_PRIMARY_NIC_MTU..VERSION_PROPOLIS_NVME_VWC
+    }]
+    async fn vmm_register_v41(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::instance::VmmPathParam>,
+        body: TypedBody<v41::instance::InstanceEnsureBody>,
+    ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError> {
+        Self::vmm_register(rqctx, path_params, body.map(Into::into)).await
+    }
 
     #[endpoint {
         operation_id = "vmm_register",
@@ -465,7 +528,7 @@ pub trait SledAgentApi {
         path_params: Path<latest::instance::VmmPathParam>,
         body: TypedBody<v32::instance::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError> {
-        Self::vmm_register(rqctx, path_params, body.map(Into::into)).await
+        Self::vmm_register_v41(rqctx, path_params, body.map(Into::into)).await
     }
 
     #[endpoint {
@@ -686,15 +749,31 @@ pub trait SledAgentApi {
 
     #[endpoint {
         method = GET,
-        path = "/artifacts-config"
+        path = "/artifacts-config",
+        versions = VERSION_TYPED_ARTIFACT_CONFIG_GENERATION..,
     }]
     async fn artifact_config_get(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<latest::artifact::ArtifactConfig>, HttpError>;
 
     #[endpoint {
+        operation_id = "artifact_config_get",
+        method = GET,
+        path = "/artifacts-config",
+        versions = ..VERSION_TYPED_ARTIFACT_CONFIG_GENERATION,
+    }]
+    async fn artifact_config_get_v1(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v1::artifact::ArtifactConfig>, HttpError> {
+        Self::artifact_config_get(rqctx)
+            .await
+            .map(|response| response.map(v1::artifact::ArtifactConfig::from))
+    }
+
+    #[endpoint {
         method = PUT,
-        path = "/artifacts-config"
+        path = "/artifacts-config",
+        versions = VERSION_TYPED_ARTIFACT_CONFIG_GENERATION..,
     }]
     async fn artifact_config_put(
         rqctx: RequestContext<Self::Context>,
@@ -702,16 +781,46 @@ pub trait SledAgentApi {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     #[endpoint {
+        operation_id = "artifact_config_put",
+        method = PUT,
+        path = "/artifacts-config",
+        versions = ..VERSION_TYPED_ARTIFACT_CONFIG_GENERATION,
+    }]
+    async fn artifact_config_put_v1(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v1::artifact::ArtifactConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::artifact_config_put(rqctx, body.map(Into::into)).await
+    }
+
+    #[endpoint {
         method = GET,
-        path = "/artifacts"
+        path = "/artifacts",
+        versions = VERSION_TYPED_ARTIFACT_CONFIG_GENERATION..,
     }]
     async fn artifact_list(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<latest::artifact::ArtifactListResponse>, HttpError>;
 
     #[endpoint {
+        operation_id = "artifact_list",
+        method = GET,
+        path = "/artifacts",
+        versions = ..VERSION_TYPED_ARTIFACT_CONFIG_GENERATION,
+    }]
+    async fn artifact_list_v1(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v1::artifact::ArtifactListResponse>, HttpError>
+    {
+        Self::artifact_list(rqctx).await.map(|response| {
+            response.map(v1::artifact::ArtifactListResponse::from)
+        })
+    }
+
+    #[endpoint {
         method = POST,
-        path = "/artifacts/{sha256}/copy-from-depot"
+        path = "/artifacts/{sha256}/copy-from-depot",
+        versions = VERSION_TYPED_ARTIFACT_CONFIG_GENERATION..,
     }]
     async fn artifact_copy_from_depot(
         rqctx: RequestContext<Self::Context>,
@@ -724,9 +833,34 @@ pub trait SledAgentApi {
     >;
 
     #[endpoint {
+        operation_id = "artifact_copy_from_depot",
+        method = POST,
+        path = "/artifacts/{sha256}/copy-from-depot",
+        versions = ..VERSION_TYPED_ARTIFACT_CONFIG_GENERATION,
+    }]
+    async fn artifact_copy_from_depot_v1(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v1::artifact::ArtifactPathParam>,
+        query_params: Query<v1::artifact::ArtifactQueryParam>,
+        body: TypedBody<v1::artifact::ArtifactCopyFromDepotBody>,
+    ) -> Result<
+        HttpResponseAccepted<v1::artifact::ArtifactCopyFromDepotResponse>,
+        HttpError,
+    > {
+        Self::artifact_copy_from_depot(
+            rqctx,
+            path_params,
+            query_params.map(Into::into),
+            body,
+        )
+        .await
+    }
+
+    #[endpoint {
         method = PUT,
         path = "/artifacts/{sha256}",
         request_body_max_bytes = UPDATE_ARTIFACT_MAX_BYTES,
+        versions = VERSION_TYPED_ARTIFACT_CONFIG_GENERATION..,
     }]
     async fn artifact_put(
         rqctx: RequestContext<Self::Context>,
@@ -734,6 +868,29 @@ pub trait SledAgentApi {
         query_params: Query<latest::artifact::ArtifactQueryParam>,
         body: StreamingBody,
     ) -> Result<HttpResponseOk<latest::artifact::ArtifactPutResponse>, HttpError>;
+
+    #[endpoint {
+        operation_id = "artifact_put",
+        method = PUT,
+        path = "/artifacts/{sha256}",
+        request_body_max_bytes = UPDATE_ARTIFACT_MAX_BYTES,
+        versions = ..VERSION_TYPED_ARTIFACT_CONFIG_GENERATION,
+    }]
+    async fn artifact_put_v1(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v1::artifact::ArtifactPathParam>,
+        query_params: Query<v1::artifact::ArtifactQueryParam>,
+        body: StreamingBody,
+    ) -> Result<HttpResponseOk<v1::artifact::ArtifactPutResponse>, HttpError>
+    {
+        Self::artifact_put(
+            rqctx,
+            path_params,
+            query_params.map(Into::into),
+            body,
+        )
+        .await
+    }
 
     /// Take a snapshot of a disk that is attached to an instance
     #[endpoint {
@@ -832,12 +989,26 @@ pub trait SledAgentApi {
     #[endpoint {
         method = POST,
         path = "/switch-ports",
-        versions = VERSION_STRONGER_BGP_UNNUMBERED_TYPES..,
+        versions = VERSION_STRONGER_BGP_UNNUMBERED_TYPES..VERSION_REMOVE_UPLINK_ENSURE,
     }]
     async fn uplink_ensure(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<latest::uplink::SwitchPorts>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+        _rqctx: RequestContext<Self::Context>,
+        _body: TypedBody<latest::uplink::SwitchPorts>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        // This endpoint has been removed, but we still have to provide an
+        // implementation in case we're called by an old client.
+        //
+        // Nexus's `sync_switch_configuration` used to call this endpoint to
+        // induce us to update SMF properties of services within the switch
+        // zone. Now, `sync_switch_configuration` only pushes config to the
+        // bootstore, and the scrimlet reconcilers automatically update those
+        // properties. During a live update, we may be updated before Nexus, so
+        // may receive this request after we've transitioned to the scrimlet
+        // reconcilers system, but Nexus still thinks it needs to tell us to do
+        // this explicitly. We have nothing to do in that case - just claim
+        // success.
+        Ok(HttpResponseUpdatedNoContent())
+    }
 
     #[endpoint {
         method = POST,
@@ -948,14 +1119,58 @@ pub trait SledAgentApi {
     // (i.e., faithfully serialize the _old_ format into the bootstore). The
     // latest version does _not_ use the `latest::*` type alias to be a gentle
     // stumbling block toward this comment.
+    //
+    // This pattern opens the door for the opposite problem, too: what if we
+    // forget to add a new `write_network_bootstore_config_v*` endpoint when
+    // adding a new `WriteNetworkConfigRequest` type? `sled-agent-client` uses a
+    // `replace` directive pointed to `latest`, which will silently do the wrong
+    // thing: it will allow calling the most recent
+    // `write_network_bootstore_config_v*` endpoint defined here even though
+    // these types explicitly do not use the `latest` alias. To guard against
+    // this, the `static_assert_latest_write_network_config_type()` function
+    // below contains a compile-time check that the `latest` alias matches a
+    // specific version: when adding a new `write_network_bootstore_config_v*`
+    // endpoint, also update this assertion.
     // -------------------------------------------------------------------------
+    fn static_assert_latest_write_network_config_type() {
+        static_assertions::assert_type_eq_all!(
+            v48::system_networking::WriteNetworkConfigRequest,
+            latest::system_networking::WriteNetworkConfigRequest
+        );
+    }
 
     // As described above, this must not forward to newer versions; sled-agent
     // must implement this by faithfully serializing the requested version.
     #[endpoint {
         method = PUT,
         path = "/network-bootstore-config",
-        versions = VERSION_NON_EMPTY_UPLINK_PORTS..,
+        versions = VERSION_ALLOW_DDM_TRAFFIC..,
+        operation_id = "write_network_bootstore_config",
+    }]
+    async fn write_network_bootstore_config_v48(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v48::system_networking::WriteNetworkConfigRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    // As described above, this must not forward to newer versions; sled-agent
+    // must implement this by faithfully serializing the requested version.
+    #[endpoint {
+        method = PUT,
+        path = "/network-bootstore-config",
+        versions = VERSION_BGP_PEER_SRC_ADDR..VERSION_ALLOW_DDM_TRAFFIC,
+        operation_id = "write_network_bootstore_config",
+    }]
+    async fn write_network_bootstore_config_v47(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v47::system_networking::WriteNetworkConfigRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    // As described above, this must not forward to newer versions; sled-agent
+    // must implement this by faithfully serializing the requested version.
+    #[endpoint {
+        method = PUT,
+        path = "/network-bootstore-config",
+        versions = VERSION_NON_EMPTY_UPLINK_PORTS..VERSION_BGP_PEER_SRC_ADDR,
         operation_id = "write_network_bootstore_config",
     }]
     async fn write_network_bootstore_config_v42(
@@ -1081,11 +1296,101 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/inventory",
-        versions = VERSION_ADD_FMD_TO_INVENTORY..,
+        versions = VERSION_ADD_INSTANCE_MANAGER_STATUS_TO_INVENTORY..,
     }]
     async fn inventory(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<latest::inventory::Inventory>, HttpError>;
+
+    /// Fetch basic information about this sled
+    #[endpoint {
+        operation_id = "inventory",
+        method = GET,
+        path = "/inventory",
+        versions = VERSION_MULTIPLE_ZONE_EXTERNAL_IPS..VERSION_ADD_INSTANCE_MANAGER_STATUS_TO_INVENTORY,
+    }]
+    async fn inventory_v51(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v51::inventory::Inventory>, HttpError> {
+        Self::inventory(rqctx).await.map(|HttpResponseOk(inv)| {
+            HttpResponseOk(v51::inventory::Inventory::from(inv))
+        })
+    }
+
+    /// Fetch basic information about this sled
+    #[endpoint {
+        operation_id = "inventory",
+        method = GET,
+        path = "/inventory",
+        versions = VERSION_TYPED_SLED_CONFIG_GENERATION..VERSION_MULTIPLE_ZONE_EXTERNAL_IPS,
+    }]
+    async fn inventory_v50(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v50::inventory::Inventory>, HttpError> {
+        let HttpResponseOk(inv) = Self::inventory_v51(rqctx).await?;
+        v50::inventory::Inventory::try_from(inv)
+            .map(HttpResponseOk)
+            .map_err(HttpError::from)
+    }
+
+    /// Fetch basic information about this sled
+    #[endpoint {
+        operation_id = "inventory",
+        method = GET,
+        path = "/inventory",
+        versions = VERSION_ADD_UPDATE_DISPOSITION..VERSION_TYPED_SLED_CONFIG_GENERATION,
+    }]
+    async fn inventory_v49(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v49::inventory::Inventory>, HttpError> {
+        Self::inventory_v50(rqctx).await.map(|HttpResponseOk(inv)| {
+            HttpResponseOk(v49::inventory::Inventory::from(inv))
+        })
+    }
+
+    /// Fetch basic information about this sled
+    #[endpoint {
+        operation_id = "inventory",
+        method = GET,
+        path = "/inventory",
+        versions = VERSION_MODIFY_SVC_STATE_ENUM..VERSION_ADD_UPDATE_DISPOSITION,
+    }]
+    async fn inventory_v46(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v46::inventory::Inventory>, HttpError> {
+        Self::inventory_v49(rqctx).await.map(|HttpResponseOk(inv)| {
+            HttpResponseOk(v46::inventory::Inventory::from(inv))
+        })
+    }
+
+    /// Fetch basic information about this sled
+    #[endpoint {
+        operation_id = "inventory",
+        method = GET,
+        path = "/inventory",
+        versions = VERSION_INVENTORY_BASEBOARD_ID..VERSION_MODIFY_SVC_STATE_ENUM,
+    }]
+    async fn inventory_v43(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v43::inventory::Inventory>, HttpError> {
+        let HttpResponseOk(inventory) = Self::inventory_v46(rqctx).await?;
+        inventory.try_into().map_err(HttpError::from).map(HttpResponseOk)
+    }
+
+    /// Fetch basic information about this sled
+    #[endpoint {
+        operation_id = "inventory",
+        method = GET,
+        path = "/inventory",
+        versions = VERSION_ADD_FMD_TO_INVENTORY..VERSION_INVENTORY_BASEBOARD_ID,
+    }]
+    async fn inventory_v40(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v40::inventory::Inventory>, HttpError> {
+        Self::inventory_v43(rqctx).await.map(|HttpResponseOk(inv)| {
+            HttpResponseOk(v40::inventory::Inventory::from(inv))
+        })
+    }
 
     /// Fetch basic information about this sled
     #[endpoint {
@@ -1097,7 +1402,7 @@ pub trait SledAgentApi {
     async fn inventory_v37(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<v37::inventory::Inventory>, HttpError> {
-        Self::inventory(rqctx).await.map(|HttpResponseOk(inv)| {
+        Self::inventory_v40(rqctx).await.map(|HttpResponseOk(inv)| {
             HttpResponseOk(v37::inventory::Inventory::from(inv))
         })
     }

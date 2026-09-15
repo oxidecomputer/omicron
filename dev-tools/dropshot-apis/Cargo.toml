@@ -5,7 +5,6 @@ edition.workspace = true
 
 [dependencies]
 anyhow.workspace = true
-bootstrap-agent-api.workspace = true
 bootstrap-agent-lockstep-api.workspace = true
 camino.workspace = true
 clap.workspace = true
@@ -30,6 +29,7 @@ serde.workspace = true
 serde_json.workspace = true
 sled-agent-api.workspace = true
 wicketd-api.workspace = true
+wicketd-commission-api.workspace = true
 
 [lints]
 workspace = true

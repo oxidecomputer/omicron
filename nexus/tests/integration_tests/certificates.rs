@@ -359,7 +359,11 @@ async fn test_silo_certificates() {
     // create the other Silos and their users.
     let resolver = Arc::new(
         CustomDnsResolver::new(
-            cptestctx.external_dns.dns_server.local_address(),
+            cptestctx
+                .external_dns
+                .dns_server
+                .sole_local_address()
+                .expect("exactly one DNS address"),
         )
         .unwrap(),
     );
@@ -679,15 +683,15 @@ impl SiloCert {
 
     /// Returns the base URL of the HTTPS endpoint for this Silo
     fn base_url(&self, port: u16) -> String {
-        format!("https://{}:{}", &self.dns_name, port)
+        format!("https://{}:{}", self.dns_name, port)
     }
 
     /// Returns the full URL to the login endpoint for this Silo
     fn login_url(&self, port: u16) -> String {
         format!(
             "{}/v1/login/{}/local",
-            &self.base_url(port),
-            &self.silo_name.as_str()
+            self.base_url(port),
+            self.silo_name.as_str()
         )
     }
 

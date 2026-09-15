@@ -24,7 +24,6 @@ reqwest.workspace = true
 semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-sha2.workspace = true
 shell-words.workspace = true
 slog.workspace = true
 slog-async.workspace = true
@@ -32,9 +31,10 @@ slog-term.workspace = true
 tar.workspace = true
 tokio = { workspace = true, features = ["full"] }
 toml.workspace = true
+tufaceous.workspace = true
 tufaceous-artifact.workspace = true
-tufaceous-lib.workspace = true
-update-common.workspace = true
+tufaceous-artifact-v1 = { git = "https://github.com/oxidecomputer/tufaceous", branch = "v1", package = "tufaceous-artifact", features = ["proptest", "schemars"] }
+tufaceous-lib-v1 = { git = "https://github.com/oxidecomputer/tufaceous", branch = "v1", package = "tufaceous-lib" }
 
 [lints]
 workspace = true

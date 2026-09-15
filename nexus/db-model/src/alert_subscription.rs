@@ -91,11 +91,29 @@ impl AlertSubscriptionKind {
         if class == AlertClass::Probe {
             return Err(Error::invalid_value(
                 "alert_class",
-                "webhook receivers cannot subscribe to probes",
+                "the 'probe' alert class is a synthetic alert used \
+                only for webhook liveness probes, and is not included in alert \
+                lists and cannot be subscribed to",
             ));
         }
 
         Ok(Self::Exact(class))
+    }
+
+    /// Returns an iterator over the alert classes that match this subscription.
+    ///
+    /// If this is an exact subscription, the iterator contains only the single
+    /// alert class. Otherwise, if the subscription is a glob, this returns any
+    /// currently existing alert classes that match the glob.
+    pub fn matching_classes(
+        &self,
+    ) -> Result<impl Iterator<Item = AlertClass>, Error> {
+        use itertools::Either;
+
+        match self {
+            Self::Exact(class) => Ok(Either::Left(std::iter::once(*class))),
+            Self::Glob(glob) => glob.matching_classes().map(Either::Right),
+        }
     }
 }
 
@@ -223,6 +241,25 @@ impl AlertGlob {
         regex.push('$'); // End anchor
 
         Ok(regex)
+    }
+
+    pub fn matching_classes(
+        &self,
+    ) -> Result<impl Iterator<Item = AlertClass>, Error> {
+        let regex = regex::Regex::new(&self.regex).map_err(|error| {
+            Error::InternalError {
+                internal_message: format!(
+                    "valid alert class glob {:?} produced an invalid \
+                     regular expression: {error}",
+                    self.glob,
+                ),
+            }
+        })?;
+        let iter = AlertClass::ALL_CLASSES
+            .iter()
+            .copied()
+            .filter(move |class| regex.is_match(class.as_str()));
+        Ok(iter)
     }
 }
 

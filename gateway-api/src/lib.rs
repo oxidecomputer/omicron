@@ -24,6 +24,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (4, COMPONENT_VPD),
     (3, NEWTYPE_UUID_BUMP),
     (2, COSMO),
     (1, INITIAL),
@@ -333,6 +334,21 @@ pub trait GatewayApi {
         path: Path<latest::component::PathSpComponent>,
         body: TypedBody<latest::update::UpdateAbortBody>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Get the vital product data (VPD) identity of a component.
+    ///
+    /// Not all components have VPD. This endpoint will return an error if the
+    /// requested component does not advertise the `HAS_VPD` DeviceCapability
+    /// bit.
+    #[endpoint {
+        method = GET,
+        path = "/sp/{type}/{slot}/component/{component}/vpd",
+        versions = VERSION_COMPONENT_VPD..,
+    }]
+    async fn sp_component_vpd_get(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::component::PathSpComponent>,
+    ) -> Result<HttpResponseOk<latest::component_vpd::ComponentVpd>, HttpError>;
 
     /// Read the CMPA from a root of trust.
     ///

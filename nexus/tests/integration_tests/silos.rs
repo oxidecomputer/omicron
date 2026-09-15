@@ -202,6 +202,7 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
                 name: project_name.parse().unwrap(),
                 description: String::new(),
             },
+            defaults: None,
         },
     )
     .authn_as(AuthnMode::SiloUser(new_silo_user_id))
@@ -363,6 +364,7 @@ async fn test_silo_admin_group(cptestctx: &ControlPlaneTestContext) {
                 name: "myproj".parse().unwrap(),
                 description: "some proj".into(),
             },
+            defaults: None,
         },
     )
     .authn_as(AuthnMode::SiloUser(admin_group_user.id()))
@@ -2706,7 +2708,7 @@ async fn test_silo_delete_cleans_up_ip_pool_links(
     assert_eq!(links.items.len(), 0);
 
     // but the pools are of course still there
-    let url = "/v1/system/ip-pools";
+    let url = "/v1/system/ip-pools?assignment=silos";
     let pools = objects_list_page_authz::<ip_pool::IpPool>(client, &url).await;
     assert_eq!(pools.items.len(), 2);
     assert_eq!(pools.items[0].identity.name, "pool1");

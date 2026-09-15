@@ -1083,7 +1083,7 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
     let maybe_region =
         datastore.get_region_optional(region.id()).await.unwrap();
 
-    eprintln!("old_region_id: {:?}", &maybe_region);
+    eprintln!("old_region_id: {:?}", maybe_region);
     assert!(maybe_region.is_some());
 
     // But the new region id will be!
@@ -1092,7 +1092,7 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
         .await
         .unwrap();
 
-    eprintln!("new region id: {:?}", &maybe_region);
+    eprintln!("new region id: {:?}", maybe_region);
     assert!(maybe_region.is_none());
 
     // The region_replacement drive task should invoke the drive saga now, which

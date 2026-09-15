@@ -139,6 +139,7 @@ async fn do_run() -> Result<(), CmdError> {
                 &args,
                 nexus_server.local_addr(),
                 clickhouse,
+                oximeter_collector::default_refresh_interval(),
             )
             .await
             .unwrap()

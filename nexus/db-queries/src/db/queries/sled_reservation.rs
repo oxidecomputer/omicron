@@ -9,22 +9,27 @@ use crate::db::model::SledResourceVmm;
 use crate::db::raw_query_builder::QueryBuilder;
 use crate::db::raw_query_builder::TrustedStr;
 use crate::db::raw_query_builder::TypedSqlQuery;
+use diesel::Queryable;
 use diesel::sql_types;
+use nexus_db_model::AffinityPolicy;
+use nexus_db_model::DbTypedUuid;
 use nexus_db_model::SledCpuFamily;
 use nexus_db_schema::enums::AffinityPolicyEnum;
 use nexus_db_schema::enums::SledCpuFamilyEnum;
 use nexus_db_schema::enums::SledResourceVmmStateEnum;
 use nonempty::NonEmpty;
 use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::DiskUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
-use uuid::Uuid;
 
 #[derive(Debug, Clone)]
 pub struct LocalStorageAllocation {
-    pub disk_id: Uuid,
+    /// The virtual disk requiring this allocation
+    pub disk_id: DiskUuid,
     pub local_storage_unencrypted_dataset_allocation_id: DatasetUuid,
     pub required_dataset_size: i64,
     pub local_storage_unencrypted_dataset_id: DatasetUuid,
@@ -92,12 +97,52 @@ fn subquery_other_a_instances(query: &mut QueryBuilder) {
         ),");
 }
 
+/// One row of `sled_find_targets_query`.
+#[derive(Debug, Clone, Queryable)]
+pub(crate) struct SledFindTargetsRow {
+    /// The sled ID.
+    sled_id: DbTypedUuid<SledKind>,
+    /// True if the sled is a candidate for this allocation, based on the
+    /// requested resources.
+    ///
+    /// Some reasons this can be false include:
+    ///
+    /// * The sled is not in service and active.
+    /// * If a specific CPU family is required, the sled does not match it.
+    /// * The sled doesn't have enough space for this allocation.
+    ///
+    /// This does not account for local storage.
+    pub(crate) is_candidate: bool,
+    /// The affinity policy of the sled.
+    pub(crate) affinity_policy: Option<AffinityPolicy>,
+    /// The anti-affinity policy of the sled.
+    pub(crate) anti_affinity_policy: Option<AffinityPolicy>,
+}
+
+impl SledFindTargetsRow {
+    pub(crate) fn sled_id(&self) -> SledUuid {
+        self.sled_id.into()
+    }
+}
+
+/// The SQL columns corresponding to [`SledFindTargetsRow`], in order.
+///
+/// This _must_ match the order of columns in `SledFindTargetsRow` in order to
+/// keep the `Queryable` implementation working. There is no compile-time
+/// check for this!
+pub(crate) type SledFindTargetsSqlRow = (
+    sql_types::Uuid,
+    sql_types::Bool,
+    sql_types::Nullable<AffinityPolicyEnum>,
+    sql_types::Nullable<AffinityPolicyEnum>,
+);
+
 /// Return all possible Sleds where we might perform allocation
 ///
 /// The rows returned by this CTE indicate:
 ///
 /// - The Sled which we're considering
-/// - A bool indicating whether the allocation fits
+/// - A bool indicating whether the sled is a candidate for the allocation
 /// - Affinity Policy
 /// - Anti-Affinity Policy
 ///
@@ -112,12 +157,7 @@ pub fn sled_find_targets_query(
     instance_id: InstanceUuid,
     resources: &Resources,
     sled_families: Option<&[SledCpuFamily]>,
-) -> TypedSqlQuery<(
-    sql_types::Uuid,
-    sql_types::Bool,
-    sql_types::Nullable<AffinityPolicyEnum>,
-    sql_types::Nullable<AffinityPolicyEnum>,
-)> {
+) -> TypedSqlQuery<SledFindTargetsSqlRow> {
     let mut query = QueryBuilder::new();
     query.sql(
         "
@@ -602,7 +642,23 @@ pub fn sled_insert_resource_query(
                             .into_untyped_uuid(),
                     );
 
-                query.sql(")");
+                query.sql(") AND (");
+
+                // and the disk must still be attached and not be deleted
+
+                query
+                    .sql(
+                        "SELECT time_deleted IS NULL AND attach_instance_id = ",
+                    )
+                    .param()
+                    .bind::<sql_types::Uuid, _>(instance_id)
+                    .sql(" FROM DISK WHERE ID = ")
+                    .param()
+                    .bind::<sql_types::Uuid, _>(
+                        allocation.disk_id.into_untyped_uuid(),
+                    );
+
+                query.sql(") ");
 
                 if index != (allocations.len() - 1) {
                     query.sql(" AND ");
@@ -662,7 +718,7 @@ pub fn sled_insert_resource_query(
                 query
                     .sql("WHEN ")
                     .param()
-                    .bind::<sql_types::Uuid, _>(*disk_id)
+                    .bind::<sql_types::Uuid, _>(disk_id.into_untyped_uuid())
                     .sql(" THEN ")
                     .param()
                     .bind::<sql_types::Uuid, _>(
@@ -677,7 +733,9 @@ pub fn sled_insert_resource_query(
             for (index, allocation) in allocations.iter().enumerate() {
                 let LocalStorageAllocation { disk_id, .. } = allocation;
 
-                query.param().bind::<sql_types::Uuid, _>(*disk_id);
+                query
+                    .param()
+                    .bind::<sql_types::Uuid, _>(disk_id.into_untyped_uuid());
 
                 if index != (allocations.len() - 1) {
                     query.sql(",");
@@ -996,7 +1054,7 @@ mod test {
             &LocalStorageAllocationRequired::Yes {
                 allocations: nonempty![
                     LocalStorageAllocation {
-                        disk_id: Uuid::nil(),
+                        disk_id: DiskUuid::nil(),
                         local_storage_unencrypted_dataset_allocation_id:
                             DatasetUuid::nil(),
                         required_dataset_size: 64 * 1024 * 1024 * 1024,
@@ -1006,7 +1064,7 @@ mod test {
                         sled_id: SledUuid::nil(),
                     },
                     LocalStorageAllocation {
-                        disk_id: Uuid::nil(),
+                        disk_id: DiskUuid::nil(),
                         local_storage_unencrypted_dataset_allocation_id:
                             DatasetUuid::nil(),
                         required_dataset_size: 128 * 1024 * 1024 * 1024,
@@ -1066,7 +1124,7 @@ mod test {
             &resource,
             &LocalStorageAllocationRequired::Yes {
                 allocations: nonempty![LocalStorageAllocation {
-                    disk_id: Uuid::nil(),
+                    disk_id: DiskUuid::nil(),
                     local_storage_unencrypted_dataset_allocation_id:
                         DatasetUuid::nil(),
                     required_dataset_size: 128 * 1024 * 1024 * 1024,
@@ -1087,7 +1145,7 @@ mod test {
             &LocalStorageAllocationRequired::Yes {
                 allocations: nonempty![
                     LocalStorageAllocation {
-                        disk_id: Uuid::nil(),
+                        disk_id: DiskUuid::nil(),
                         local_storage_unencrypted_dataset_allocation_id:
                             DatasetUuid::nil(),
                         required_dataset_size: 128 * 1024 * 1024 * 1024,
@@ -1097,7 +1155,7 @@ mod test {
                         sled_id: SledUuid::nil(),
                     },
                     LocalStorageAllocation {
-                        disk_id: Uuid::nil(),
+                        disk_id: DiskUuid::nil(),
                         local_storage_unencrypted_dataset_allocation_id:
                             DatasetUuid::nil(),
                         required_dataset_size: 256 * 1024 * 1024 * 1024,

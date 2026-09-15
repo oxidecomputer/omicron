@@ -28,10 +28,29 @@ WHERE
     )
   AND CAST(
       IF(
-        (SELECT count(1) FROM ip_pool WHERE time_deleted IS NULL AND assignment = $5 LIMIT 2) >= 2,
+        EXISTS(SELECT 1 FROM external_service_ip_pool WHERE ip_pool_id = $5),
+        'assigned-to-services',
+        'TRUE'
+      )
+        AS BOOL
+    )
+  AND CAST(
+      IF(
+        (SELECT count(1) FROM ip_pool WHERE time_deleted IS NULL AND assignment = $6 LIMIT 2) >= 2,
         '1',
-        $6
+        $7
       )
         AS INT8
     )
     = 1
+RETURNING
+  id,
+  name,
+  description,
+  time_created,
+  time_modified,
+  time_deleted,
+  ip_version,
+  rcgen,
+  assignment,
+  pool_type

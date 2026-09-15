@@ -42,7 +42,7 @@ use futures::future::BoxFuture;
 use nexus_db_fixed_data::FLEET_ID;
 use nexus_types::external_api::policy::{FleetRole, ProjectRole, SiloRole};
 use omicron_common::api::external::{Error, LookupType, ResourceType};
-use omicron_uuid_kinds::{GenericUuid, RackUuid};
+use omicron_uuid_kinds::{BlueprintUuid, GenericUuid, RackUuid};
 use oso::PolarClass;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -310,6 +310,49 @@ impl AuthorizedResource for BlueprintConfig {
         // still need to load the Fleet-related roles to verify that the actor
         // has the "admin" role on the Fleet (possibly conferred from a Silo
         // role).
+        load_roles_for_resource_tree(&FLEET, opctx, authn, roleset).boxed()
+    }
+
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        error
+    }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
+    }
+}
+
+/// Synthetic resource describing access to the fault management
+/// configuration (the `fm_config` table)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FmConfig;
+
+pub const FM_CONFIG: FmConfig = FmConfig;
+
+impl oso::PolarClass for FmConfig {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        oso::Class::builder()
+            .with_equality_check()
+            .add_attribute_getter("fleet", |_: &FmConfig| FLEET)
+    }
+}
+
+impl AuthorizedResource for FmConfig {
+    fn load_roles<'fut>(
+        &'fut self,
+        opctx: &'fut OpContext,
+        authn: &'fut authn::Context,
+        roleset: &'fut mut RoleSet,
+    ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
+        // There are no roles on the FmConfig, only permissions. But we still
+        // need to load the Fleet-related roles to verify that the actor has
+        // the "admin" role on the Fleet (possibly conferred from a Silo role).
         load_roles_for_resource_tree(&FLEET, opctx, authn, roleset).boxed()
     }
 
@@ -924,6 +967,61 @@ impl oso::PolarClass for SiloGroupList {
 }
 
 impl AuthorizedResource for SiloGroupList {
+    fn load_roles<'fut>(
+        &'fut self,
+        opctx: &'fut OpContext,
+        authn: &'fut authn::Context,
+        roleset: &'fut mut RoleSet,
+    ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
+        // There are no roles on this resource, but we still need to load the
+        // Silo-related roles.
+        self.silo().load_roles(opctx, authn, roleset)
+    }
+
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        error
+    }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
+    }
+}
+
+/// Synthetic resource describing the list of Silo Images associated with a Silo
+///
+/// This synthetic resource is used to control who can list silo images and who
+/// can create them, whether directly or by promoting project images. By using a
+/// synthetic resource, we can grant limited-collaborators the ability to create
+/// silo images without giving them the broader create_child permission on Silo
+/// (which would allow creating projects, users, groups, etc.).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SiloImageList(Silo);
+
+impl SiloImageList {
+    pub fn new(silo: Silo) -> Self {
+        SiloImageList(silo)
+    }
+
+    pub fn silo(&self) -> &Silo {
+        &self.0
+    }
+}
+
+impl oso::PolarClass for SiloImageList {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        oso::Class::builder()
+            .with_equality_check()
+            .add_attribute_getter("silo", |list: &SiloImageList| list.0.clone())
+    }
+}
+
+impl AuthorizedResource for SiloImageList {
     fn load_roles<'fut>(
         &'fut self,
         opctx: &'fut OpContext,
@@ -1601,6 +1699,16 @@ authz_resource! {
     primary_key = Uuid,
     roles_allowed = false,
     polar_snippet = FleetChild,
+}
+
+impl Blueprint {
+    pub fn new_for_id(id: BlueprintUuid) -> Self {
+        Self::new(
+            FLEET,
+            *id.as_untyped_uuid(),
+            LookupType::ById(*id.as_untyped_uuid()),
+        )
+    }
 }
 
 authz_resource! {

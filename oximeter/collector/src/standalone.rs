@@ -10,17 +10,28 @@ use dropshot::ApiDescription;
 use dropshot::ConfigDropshot;
 use dropshot::HttpError;
 use dropshot::HttpResponseCreated;
+use dropshot::HttpResponseOk;
 use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::HttpServer;
+use dropshot::Path;
+use dropshot::Query;
 use dropshot::RequestContext;
+use dropshot::ResultsPage;
 use dropshot::ServerBuilder;
 use dropshot::TypedBody;
 use dropshot::endpoint;
 use nexus_types::internal_api::params::OximeterInfo;
 use omicron_common::FileKv;
+use omicron_common::api::external::http_pagination::PaginatedById;
+use omicron_common::api::external::http_pagination::ScanById;
+use omicron_common::api::external::http_pagination::ScanParams;
+use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::ProducerRegistrationResponse;
 use rand::seq::IteratorRandom;
+use schemars::JsonSchema;
+use serde::Deserialize;
+use serde::Serialize;
 use slog::Drain;
 use slog::Level;
 use slog::Logger;
@@ -149,6 +160,8 @@ pub fn standalone_nexus_api() -> ApiDescription<Arc<StandaloneNexus>> {
         .expect("Could not register cpapi_producers_post API handler");
     api.register(cpapi_collectors_post)
         .expect("Could not register cpapi_collectors_post API handler");
+    api.register(cpapi_assigned_producers_list)
+        .expect("Could not register cpapi_assigned_producers_list API handler");
     api
 }
 
@@ -168,6 +181,46 @@ async fn cpapi_producers_post(
         .await
         .map(HttpResponseCreated)
         .map_err(|e| HttpError::for_internal_error(e.to_string()))
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct CollectorIdPathParams {
+    /// The ID of the oximeter collector.
+    pub collector_id: Uuid,
+}
+
+/// List all metric producers assigned to an oximeter collector.
+#[endpoint {
+    method = GET,
+    path = "/metrics/collectors/{collector_id}/producers",
+}]
+async fn cpapi_assigned_producers_list(
+    request_context: RequestContext<Arc<StandaloneNexus>>,
+    path_params: Path<CollectorIdPathParams>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<ProducerEndpoint>>, HttpError> {
+    let context = request_context.context();
+    let inner = context.inner.lock().await;
+    let query = query_params.into_inner();
+    let collector_id = path_params.into_inner().collector_id;
+
+    let mut producers = inner
+        .producers
+        .values()
+        .filter(|assignment| assignment.collector_id == collector_id)
+        .map(|assignment| assignment.producer)
+        .collect::<Vec<_>>();
+    producers.sort_by_key(|p| p.id);
+    let pagparams = data_page_params_for(&request_context, &query)?;
+    if let Some(&last_seen) = pagparams.marker {
+        producers.retain(|p| p.id > last_seen);
+    }
+
+    Ok(HttpResponseOk(ScanById::results_page(
+        &query,
+        producers,
+        &|_, producer: &ProducerEndpoint| producer.id,
+    )?))
 }
 
 /// Accept a notification of a new oximeter collection server.

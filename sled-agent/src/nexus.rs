@@ -7,7 +7,7 @@ use internal_dns_resolver::Resolver;
 use internal_dns_types::names::ServiceName;
 use nexus_client::types::SledAgentInfo;
 use omicron_common::address::NEXUS_INTERNAL_PORT;
-use omicron_common::api::external::Generation;
+use omicron_generation_kinds::Generation;
 use omicron_uuid_kinds::SledUuid;
 use sled_hardware::HardwareManager;
 use slog::Logger;
@@ -569,8 +569,9 @@ mod test {
 
     use super::*;
     use omicron_common::api::external::{
-        ByteCount, Error, Generation, LookupType, MessagePair, ResourceType,
+        ByteCount, Error, LookupType, MessagePair, ResourceType,
     };
+    use omicron_generation_kinds::Generation;
     use omicron_test_utils::dev::test_setup_log;
     use sled_hardware_types::Baseboard;
 

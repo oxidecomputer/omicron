@@ -102,7 +102,7 @@ fn print_bootstrap_sled_data(
 ) {
     let slot = desc.id.slot;
 
-    let identifier = desc.baseboard.identifier();
+    let identifier = &desc.baseboard_id.serial_number;
     let address = desc.bootstrap_ip;
 
     // Create status indicators

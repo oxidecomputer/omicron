@@ -14,23 +14,30 @@
 //! documentation in [`nexus_types::fm`] for more information, and the
 //! [crate-level documentation](crate) for general conventions.
 
-use crate::Generation;
 use crate::SqlU32;
+use crate::typed_generation::DbTypedGeneration;
 use crate::typed_uuid::DbTypedUuid;
 use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::{fm_sitrep, fm_sitrep_history};
+use omicron_generation_kinds::{
+    AlertGenerationKind, SupportBundleGenerationKind,
+};
 use omicron_uuid_kinds::{CollectionKind, OmicronZoneKind, SitrepKind};
 
 mod alert_request;
 pub use alert_request::*;
 mod case;
 pub use case::*;
+mod config;
+pub use config::*;
 mod diagnosis_engine;
 pub use diagnosis_engine::*;
-mod rendezvous_created;
-pub use rendezvous_created::*;
 mod fact_physical_disk;
 pub use fact_physical_disk::*;
+mod fact_saga;
+pub use fact_saga::*;
+mod rendezvous_created;
+pub use rendezvous_created::*;
 mod support_bundle_request;
 pub use support_bundle_request::*;
 mod sitrep_analysis_report;
@@ -46,8 +53,9 @@ pub struct SitrepMetadata {
     pub creator_id: DbTypedUuid<OmicronZoneKind>,
     pub comment: String,
     pub next_inv_min_time_started: DateTime<Utc>,
-    pub alert_generation: Generation,
-    pub support_bundle_generation: Generation,
+    pub alert_generation: DbTypedGeneration<AlertGenerationKind>,
+    pub support_bundle_generation:
+        DbTypedGeneration<SupportBundleGenerationKind>,
 }
 
 impl From<SitrepMetadata> for nexus_types::fm::SitrepMetadata {

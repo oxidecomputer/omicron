@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 1237b177d71e965dfd8caf73a2f6fb1a099b7d2db81f8473beb51a18fc158261 # shrinks to input = TestInput { routes: {} }

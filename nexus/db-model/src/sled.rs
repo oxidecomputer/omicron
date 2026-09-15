@@ -16,6 +16,7 @@ use nexus_types::{
     external_api::{hardware, sled as sled_types},
     identity::Asset,
     internal_api::params,
+    inventory,
 };
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackKind;
@@ -25,6 +26,7 @@ use omicron_uuid_kinds::SledUuid;
 use sled_agent_types::inventory::SledRole;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
+use std::sync::Arc;
 
 /// Baseboard information about a sled.
 ///
@@ -149,22 +151,50 @@ impl Sled {
     pub fn rack_id(&self) -> RackUuid {
         self.rack_id.into()
     }
-}
 
-impl From<Sled> for sled_types::Sled {
-    fn from(sled: Sled) -> Self {
-        Self {
-            identity: sled.identity(),
-            rack_id: sled.rack_id.into_untyped_uuid(),
+    pub fn into_baseboard(self) -> hardware::Baseboard {
+        hardware::Baseboard {
+            serial: self.serial_number,
+            part: self.part_number,
+            revision: self.revision.into(),
+        }
+    }
+
+    /// Converts `self` to a [`nexus_types::external_api::sled::Sled`].
+    ///
+    /// The current inventory collection is consulted to determine the sled's
+    /// last observed physical location.
+    pub fn to_external_api(
+        self,
+        inv: &Option<Arc<inventory::Collection>>,
+    ) -> sled_types::Sled {
+        let slot = inv.as_ref().and_then(|inv| {
+            // TODO(eliza): it's quite sad that we must clone the serial and
+            // part number strings out of the `sled` just to perform this
+            // lookup against the inventory, but sadly, `BaseboardId` and
+            // `Baseboard` are different types, so we cannot just make the
+            // `Baseboard` and borrow it into the lookup. 'twould be nice to
+            // figure out a nicer way of doing this.
+            let bbid = sled_hardware_types::BaseboardId {
+                serial_number: self.serial_number.clone(),
+                part_number: self.part_number.clone(),
+            };
+            let sp = inv.sps.get(&bbid)?;
+            Some(sp.sp_slot)
+        });
+        sled_types::Sled {
+            identity: self.identity(),
+            rack_id: self.rack_id.into_untyped_uuid(),
+            slot,
             baseboard: hardware::Baseboard {
-                serial: sled.serial_number,
-                part: sled.part_number,
-                revision: *sled.revision,
+                serial: self.serial_number,
+                part: self.part_number,
+                revision: self.revision.into(),
             },
-            policy: sled.policy.into(),
-            state: sled.state.into(),
-            usable_hardware_threads: sled.usable_hardware_threads.0,
-            usable_physical_ram: *sled.usable_physical_ram,
+            policy: self.policy.into(),
+            state: self.state.into(),
+            usable_hardware_threads: self.usable_hardware_threads.0,
+            usable_physical_ram: *self.usable_physical_ram,
         }
     }
 }

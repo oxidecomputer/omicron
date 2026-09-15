@@ -27,6 +27,7 @@ progenitor::generate_api!(
     }),
     crates = {
         "iddqd" = "*",
+        "omicron-generation-kinds" = "*",
         "omicron-uuid-kinds" = "*",
         "oxnet" = "0.1.0",
     },
@@ -51,7 +52,9 @@ progenitor::generate_api!(
         DnsConfigParams = nexus_types::internal_api::params::DnsConfigParams,
         DnsConfigZone = nexus_types::internal_api::params::DnsConfigZone,
         DnsRecord = nexus_types::internal_api::params::DnsRecord,
-        Generation = omicron_common::api::external::Generation,
+        Generation = omicron_generation_kinds::Generation,
+        FmConfigView = nexus_types::fm::FmConfigView,
+        FmConfigParam = nexus_types::fm::FmConfigParam,
         ImportExportPolicy = sled_agent_types::early_networking::ImportExportPolicy,
         LinkFec = sled_agent_types::early_networking::LinkFec,
         LinkSpeed = sled_agent_types::early_networking::LinkSpeed,
@@ -63,6 +66,10 @@ progenitor::generate_api!(
         NetworkInterface = sled_agent_types::inventory::NetworkInterface,
         NetworkInterfaceKind = sled_agent_types::inventory::NetworkInterfaceKind,
         NewPasswordHash = omicron_passwords::NewPasswordHash,
+        OmicronZoneExternalFloatingAddr =
+            nexus_types::deployment::OmicronZoneExternalFloatingAddr,
+        OmicronZoneExternalFloatingIp =
+            nexus_types::deployment::OmicronZoneExternalFloatingIp,
         OximeterReadMode = nexus_types::deployment::OximeterReadMode,
         OximeterReadPolicy = nexus_types::deployment::OximeterReadPolicy,
         PendingMgsUpdate = nexus_types::deployment::PendingMgsUpdate,
@@ -75,6 +82,7 @@ progenitor::generate_api!(
         RouteConfig = sled_agent_types::early_networking::RouteConfig,
         RouterLifetimeConfig = sled_agent_types::early_networking::RouterLifetimeConfig,
         RouterPeerType = sled_agent_types::early_networking::RouterPeerType,
+        ServiceIpPoolConfig = nexus_types::internal_api::params::ServiceIpPoolConfig,
         SledAgentUpdateStatus = nexus_types::internal_api::views::SledAgentUpdateStatus,
         SwitchSlot = sled_agent_types::early_networking::SwitchSlot,
         TrustQuorumConfig = nexus_types::trust_quorum::TrustQuorumConfig,
@@ -144,15 +152,6 @@ impl From<omicron_common::address::Ipv4Range> for types::Ipv4Range {
 impl From<omicron_common::address::Ipv6Range> for types::Ipv6Range {
     fn from(r: omicron_common::address::Ipv6Range) -> Self {
         Self { first: r.first, last: r.last }
-    }
-}
-
-impl From<&sled_agent_types::inventory::SourceNatConfigGeneric>
-    for types::SourceNatConfigGeneric
-{
-    fn from(r: &sled_agent_types::inventory::SourceNatConfigGeneric) -> Self {
-        let (first_port, last_port) = r.port_range_raw();
-        Self { ip: r.ip, first_port, last_port }
     }
 }
 

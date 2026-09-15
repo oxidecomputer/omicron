@@ -12,6 +12,7 @@ mod task;
 
 pub use proxy::{Proxy, ProxyError};
 
+pub use connection_manager::platform_id_to_baseboard_id;
 pub(crate) use connection_manager::{
     ConnToMainMsg, ConnToMainMsgInner, MainToConnMsg, WireMsg,
 };

@@ -20,8 +20,10 @@ use std::sync::Arc;
 
 pub mod crdb;
 pub mod explain;
+pub mod fm;
 pub mod helpers;
 pub mod multicast;
+pub mod simulated_sleds;
 
 enum Populate {
     Nothing,

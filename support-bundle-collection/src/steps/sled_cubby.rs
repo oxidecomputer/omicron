@@ -12,7 +12,7 @@ use anyhow::Context;
 use anyhow::bail;
 use camino::Utf8Path;
 use gateway_client::Client as MgsClient;
-use gateway_client::types::SpIdentifier;
+use gateway_types::component::SpIdentifier;
 use gateway_types::component::SpType;
 use nexus_db_model::Sled;
 use omicron_uuid_kinds::GenericUuid;
@@ -86,9 +86,9 @@ async fn write_sled_cubby_info(
         let mut sled_info = BTreeMap::new();
         for sp in available_sps
             .into_iter()
-            .filter(|sp| matches!(sp.type_, SpType::Sled))
+            .filter(|sp| matches!(sp.typ, SpType::Sled))
         {
-            match mgs_client.sp_get(&sp.type_, sp.slot).await {
+            match mgs_client.sp_get(&sp.typ, sp.slot).await {
                 Ok(s) => {
                     let sp_state = s.into_inner();
                     if let Some(sled) =
@@ -112,7 +112,7 @@ async fn write_sled_cubby_info(
                     error!(log,
                         "Failed to get SP state for sled_info.json";
                         "cubby" => sp.slot,
-                        "component" => %sp.type_,
+                        "component" => %sp.typ,
                         "error" => InlineErrorChain::new(&e)
                     );
                 }

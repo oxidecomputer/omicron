@@ -10,7 +10,7 @@ use gateway_types::component::SpType;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
-use omicron_common::api::external::Generation;
+use omicron_generation_kinds::ArtifactConfigGeneration;
 use omicron_uuid_kinds::AlertReceiverUuid;
 use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::BlueprintUuid;
@@ -25,6 +25,7 @@ use semver::Version;
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_types::early_networking::SwitchSlot;
+use slog::Key;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::VecDeque;
@@ -371,7 +372,7 @@ impl SupportBundleCollectionReport {
 /// The status of a `tuf_artifact_replication` background task activation
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct TufArtifactReplicationStatus {
-    pub generation: Generation,
+    pub generation: ArtifactConfigGeneration,
     pub last_run_counters: TufArtifactReplicationCounters,
     pub lifetime_counters: TufArtifactReplicationCounters,
     pub request_debug_ringbuf: Arc<VecDeque<TufArtifactReplicationRequest>>,
@@ -471,7 +472,7 @@ pub struct TufArtifactReplicationRequest {
 )]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum TufArtifactReplicationOperation {
-    PutConfig { generation: Generation },
+    PutConfig { generation: ArtifactConfigGeneration },
     List,
     Put { hash: ArtifactHash },
     Copy { hash: ArtifactHash, source_sled: SledUuid },
@@ -613,23 +614,149 @@ impl IdOrdItem for TufRepoInfo {
     id_upcast!();
 }
 
-/// The status of an `blueprint_rendezvous` background task activation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// The status of a `blueprint_rendezvous` background task activation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BlueprintRendezvousStatus {
     /// ID of the target blueprint during this activation.
     pub blueprint_id: BlueprintUuid,
-    /// ID of the inventory collection used by this activation.
-    pub inventory_collection_id: CollectionUuid,
-    /// Counts of operations performed.
-    pub stats: BlueprintRendezvousStats,
+    /// Outcome of reconciling sled availability from the blueprint.
+    pub sled_blueprint_availability: SledBlueprintAvailabilityRendezvousOutcome,
+    /// Outcome of reconciling the dataset rendezvous tables from the blueprint
+    /// and inventory.
+    pub datasets: DatasetRendezvousOutcome,
+}
+
+/// Outcome of reconciling `rendezvous_bp_sled_availability`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SledBlueprintAvailabilityRendezvousOutcome {
+    /// Reconciliation ran to completion.
+    Reconciled(SledBlueprintAvailabilityRendezvousStats),
+    /// Reconciliation failed partway through; rows written before the
+    /// failure stay written.
+    Error(String),
+}
+
+/// Outcome of reconciling the rendezvous dataset tables.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DatasetRendezvousOutcome {
+    /// No inventory collection has been loaded yet, so dataset reconciliation
+    /// was skipped. (It needs inventory to confirm a dataset exists before
+    /// making it available to other subsystems.)
+    NoInventoryCollection,
+    /// Reconciliation ran to completion against `inventory_collection_id`.
+    Reconciled {
+        inventory_collection_id: CollectionUuid,
+        stats: DatasetRendezvousStats,
+    },
+    /// Reconciliation against `inventory_collection_id` failed partway through.
+    /// The rows written before the failure stay written.
+    Error { inventory_collection_id: CollectionUuid, error: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BlueprintRendezvousStats {
+pub struct DatasetRendezvousStats {
     pub debug_dataset: DatasetsRendezvousStats,
     pub crucible_dataset: CrucibleDatasetsRendezvousStats,
     pub local_storage_dataset: DatasetsRendezvousStats,
     pub local_storage_unencrypted_dataset: DatasetsRendezvousStats,
+}
+
+/// Stats for a sled availability rendezvous run.
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize,
+)]
+pub struct SledBlueprintAvailabilityRendezvousStats {
+    /// Number of sleds recorded as available for provisioning.
+    ///
+    /// This can be a fresh row or an update at a newer generation; the
+    /// availability value itself may be unchanged.
+    pub num_marked_available: usize,
+
+    /// Number of sleds recorded as unavailable for provisioning.
+    ///
+    /// This can be a fresh row or an update at a newer generation; the
+    /// availability value itself may be unchanged.
+    pub num_marked_unavailable: usize,
+
+    /// Number of sleds whose row was left as-is.
+    ///
+    /// This can be for any of the following reasons:
+    ///
+    /// * The blueprint's update generation wasn't newer.
+    /// * The row is already in a terminal state (while the blueprint still
+    ///   lists the sled as active).
+    /// * A concurrent Nexus won the write.
+    pub num_unchanged: usize,
+
+    /// Number of active sleds whose stored row and blueprint entry together
+    /// violate the generation invariant (equal generation but different
+    /// availability, indicating a planner bug). These rows are left untouched.
+    pub num_invariant_violations: usize,
+
+    /// Number of sleds newly moved to the terminal `decommissioned` state.
+    pub num_decommissioned: usize,
+
+    /// Number of decommissioned sleds in the blueprint whose row was already a
+    /// tombstone (possibly written by a concurrent Nexus during this pass).
+    pub num_already_decommissioned: usize,
+
+    /// Number of active rows for sleds the target blueprint doesn't mention.
+    /// These are left untouched.
+    ///
+    /// This can only happen if this Nexus is acting on a stale blueprint that
+    /// predates a sled another Nexus already recorded.
+    pub num_not_in_blueprint: usize,
+
+    /// Number of decommissioned rows for sleds the target blueprint doesn't
+    /// mention. These are terminal tombstones and are left untouched.
+    ///
+    /// Today the blueprint never prunes decommissioned sleds, so this is
+    /// expected to be zero; once it does, this becomes the steady state for
+    /// every pruned sled.
+    pub num_decommissioned_not_in_blueprint: usize,
+}
+
+impl slog::KV for SledBlueprintAvailabilityRendezvousStats {
+    fn serialize(
+        &self,
+        _record: &slog::Record,
+        serializer: &mut dyn slog::Serializer,
+    ) -> slog::Result {
+        let Self {
+            num_marked_available,
+            num_marked_unavailable,
+            num_unchanged,
+            num_invariant_violations,
+            num_decommissioned,
+            num_already_decommissioned,
+            num_not_in_blueprint,
+            num_decommissioned_not_in_blueprint,
+        } = *self;
+        serializer
+            .emit_usize("num_marked_available".into(), num_marked_available)?;
+        serializer.emit_usize(
+            "num_marked_unavailable".into(),
+            num_marked_unavailable,
+        )?;
+        serializer.emit_usize("num_unchanged".into(), num_unchanged)?;
+        serializer.emit_usize(
+            "num_invariant_violations".into(),
+            num_invariant_violations,
+        )?;
+        serializer
+            .emit_usize("num_decommissioned".into(), num_decommissioned)?;
+        serializer.emit_usize(
+            "num_already_decommissioned".into(),
+            num_already_decommissioned,
+        )?;
+        serializer
+            .emit_usize("num_not_in_blueprint".into(), num_not_in_blueprint)?;
+        serializer.emit_usize(
+            "num_decommissioned_not_in_blueprint".into(),
+            num_decommissioned_not_in_blueprint,
+        )?;
+        Ok(())
+    }
 }
 
 /// Stats for the rendezvous table that stores Crucible datasets
@@ -788,6 +915,117 @@ pub enum BlueprintPlannerStatus {
     },
 }
 
+/// High-level status of the blueprint pruner background task.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum BlueprintPrunerStatus {
+    /// The blueprint pruner is disabled.
+    Disabled {
+        /// The reason why the pruner is disabled.
+        reason: String,
+    },
+    /// The blueprint pruner is enabled and ran successfully.
+    Enabled(BlueprintPrunerDetails),
+}
+
+impl std::fmt::Display for BlueprintPrunerStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BlueprintPrunerStatus::Disabled { reason } => {
+                writeln!(f, "    status: disabled")?;
+                writeln!(f, "    reason: {}", reason)?;
+                Ok(())
+            }
+            BlueprintPrunerStatus::Enabled(details) => {
+                writeln!(f, "    status: enabled")?;
+                details.fmt(f)
+            }
+        }
+    }
+}
+
+/// The status of a `blueprint_pruner` background task activation.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct BlueprintPrunerDetails {
+    /// count of blueprints that were kept by policy
+    ///
+    /// More may be kept because of an error or because the maximum number
+    /// deleted per activation was hit.
+    pub nkept_by_policy: usize,
+    /// blueprints deleted
+    pub deleted: Vec<DeletedBlueprint>,
+    /// count of `bp_target` rows that were determined to be removable
+    pub ntargets_removable: usize,
+    /// count of `bp_target` rows deleted
+    pub ntargets_deleted: usize,
+    /// errors encountered while pruning
+    ///
+    /// Note that errors may have been encountered while some blueprints and
+    /// `bp_target` rows were also deleted.
+    pub errors: Vec<String>,
+}
+
+impl std::fmt::Display for BlueprintPrunerDetails {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "    blueprints kept by policy: {}", self.nkept_by_policy)?;
+        writeln!(
+            f,
+            "    bp_target rows that can be deleted: {}",
+            self.ntargets_removable
+        )?;
+        writeln!(f, "    bp_target rows deleted: {}", self.ntargets_deleted)?;
+        writeln!(f, "    blueprints deleted: {}", self.deleted.len())?;
+        for b in &self.deleted {
+            writeln!(
+                f,
+                "        {} (made target at {})",
+                b.id,
+                humantime::format_rfc3339_millis(b.time_made_target.into())
+            )?;
+        }
+        writeln!(f, "    errors: {}", self.errors.len())?;
+        for w in &self.errors {
+            writeln!(f, "        {}", w)?;
+        }
+        Ok(())
+    }
+}
+
+impl slog::KV for BlueprintPrunerDetails {
+    fn serialize(
+        &self,
+        _record: &slog::Record,
+        serializer: &mut dyn slog::Serializer,
+    ) -> slog::Result {
+        let Self {
+            nkept_by_policy,
+            deleted,
+            ntargets_removable,
+            ntargets_deleted,
+            errors,
+        } = self;
+
+        serializer
+            .emit_usize(Key::from("nkept_by_policy"), *nkept_by_policy)?;
+        serializer
+            .emit_usize(Key::from("ntargets_removable"), *ntargets_removable)?;
+        serializer
+            .emit_usize(Key::from("ntargets_deleted"), *ntargets_deleted)?;
+        // slog does not support nested values out-of-the-box so we settle for
+        // just the counts for now.
+        serializer.emit_usize(Key::from("ndeleted"), deleted.len())?;
+        serializer.emit_usize(Key::from("nerrors"), errors.len())?;
+        Ok(())
+    }
+}
+
+/// Describes a blueprint that was deleted by the pruner task
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct DeletedBlueprint {
+    pub id: BlueprintUuid,
+    pub time_made_target: DateTime<Utc>,
+}
+
 /// The status of a `alert_dispatcher` background task activation.
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct AlertDispatcherStatus {
@@ -893,6 +1131,35 @@ pub struct EreporterStatus {
     pub errors: Vec<String>,
 }
 
+/// The status of a `fm_config_loader` background task activation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub enum FmConfigLoadStatus {
+    /// An error occurred querying the database.
+    Error(String),
+
+    /// The latest config override in the database could not be converted to
+    /// the domain type. The previously loaded config (or the default, if no
+    /// config was previously loaded) is still in effect.
+    LatestConfigInvalid {
+        /// What's wrong with it?
+        error: String,
+        fallback: CurrentFmConfig,
+    },
+
+    /// A fault management configuration was loaded (as of `time_loaded`).
+    Loaded(CurrentFmConfig),
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct CurrentFmConfig {
+    /// The current configuration.
+    pub config: crate::fm::FmConfigView,
+    /// The time at which the current config was loaded.
+    pub time_loaded: DateTime<Utc>,
+    /// Whether the config was updated in this activation.
+    pub updated: bool,
+}
+
 /// The status of a `fm_sitrep_loader` background task activation.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub enum SitrepLoadStatus {
@@ -906,24 +1173,80 @@ pub enum SitrepLoadStatus {
     Loaded { version: crate::fm::SitrepVersion, time_loaded: DateTime<Utc> },
 }
 
-/// Per-child-table GC statistics, used by [`SitrepGcStatus`].
-#[derive(
-    Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq,
-)]
-pub struct ChildTableGcStats {
-    pub rows_deleted: usize,
-    pub batches: usize,
-}
-
 /// The status of a `fm_sitrep_gc` background task activation.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct SitrepGcStatus {
     pub orphaned_sitreps_deleted: usize,
     pub sitrep_metadata_batches: usize,
     pub batch_size: u32,
     /// Per-child-table statistics, keyed by table name.
-    pub child_tables: BTreeMap<String, ChildTableGcStats>,
+    pub child_tables: BTreeMap<String, fm_sitrep_gc::ChildTableGcStats>,
     pub errors: Vec<String>,
+}
+
+pub mod fm_sitrep_gc {
+    use super::*;
+
+    /// Per-child-table GC statistics, used by [`SitrepGcStatus`].
+    #[derive(
+        Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq,
+    )]
+    pub struct ChildTableGcStats {
+        pub rows_deleted: usize,
+        pub batches: usize,
+    }
+}
+
+/// The status of a `fm_sitrep_history_pruner` background task activation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub enum SitrepHistoryPrunerStatus {
+    /// The FM config has not yet been loaded from the database, so the pruning
+    /// task is waiting for the config to be available.
+    WaitingForConfig,
+    /// The pruning task has activated normally.
+    Activated {
+        /// The configuration values used for this pruning pass.
+        cfg: crate::fm::FmConfig,
+        /// The maximum number of history table entries deleted per query.
+        batch_size: u32,
+        /// Tracks how many sitreps were deleted during this activation.
+        pruned: fm_sitrep_history_pruner::SitrepsPruned,
+        /// The outcome of this activation (i.e. why it ended, and the last
+        /// observed history table count).
+        outcome: fm_sitrep_history_pruner::Outcome,
+    },
+}
+
+pub mod fm_sitrep_history_pruner {
+    use super::*;
+
+    #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+    pub struct SitrepsPruned {
+        /// The number of batched delete queries executed by this activation.
+        pub batches: usize,
+        /// The total number of history table entries deleted by this
+        /// activation, across all batches.
+        pub total: usize,
+        /// The range of sitrep versions deleted by this activation
+        /// (oldest..=newest), if any were deleted.
+        pub versions: Option<std::ops::RangeInclusive<u32>>,
+    }
+
+    /// Describes how a `fm_sitrep_history_pruner` activation ended.
+    #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+    pub enum Outcome {
+        /// The history table was already within the limit (with `count`
+        /// entries), so nothing was deleted.
+        NotPruned { count: u64 },
+        /// Entries were pruned from the history table, which is now within
+        /// the limit (with `count` entries remaining). The details of what
+        /// was pruned are recorded in [`SitrepsPruned`].
+        Pruned { count: u64 },
+        /// A pruning query failed. Any batches that completed before the
+        /// error still happened, and are recorded in
+        /// [`SitrepsPruned`].
+        Error(String),
+    }
 }
 
 /// The status of a `fm_analysis` background task activation.
@@ -946,21 +1269,26 @@ pub struct FmAnalysisStatus {
 
 pub mod fm_analysis {
     use super::*;
-    use crate::fm::analysis_reports;
+    use crate::fm::FmConfigSource;
+    use std::num::{NonZeroU32, NonZeroU64};
 
     #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
     pub struct PreparationStatus {
         /// Errors encountered during the preparation step which did *not*
         /// prevent the analysis step from completing.
         pub warnings: Vec<String>,
-        pub report: analysis_reports::InputReport,
     }
 
     #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
     #[allow(clippy::large_enum_variant)]
     pub enum Outcome {
         /// The task is disabled by config.
-        Disabled,
+        Disabled(FmConfigSource),
+
+        /// Fault management analysis was not performed, as the fault
+        /// management configuration has not yet been loaded from the
+        /// database.
+        WaitingForConfig,
 
         /// Fault management analysis was not performed, as no inventory
         /// collection has been loaded.
@@ -989,8 +1317,23 @@ pub mod fm_analysis {
     pub struct AnalysisStatus {
         pub start_time: DateTime<Utc>,
         pub end_time: DateTime<Utc>,
-        pub report: crate::fm::analysis_reports::AnalysisReport,
         pub outcome: AnalysisOutcome,
+        pub capacity: Option<SitrepCapacity>,
+    }
+
+    #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+    pub struct SitrepCapacity {
+        pub count: u64,
+        pub limit: NonZeroU32,
+    }
+
+    impl SitrepCapacity {
+        // NOTE(eliza): this _could_ be implemented as a float to get a couple
+        // decimal places, but I don't really think we need to be that precise,
+        // and matching on ranges nicely is cute...
+        pub fn usage_percent(&self) -> u64 {
+            self.count.saturating_mul(100) / NonZeroU64::from(self.limit)
+        }
     }
 
     #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -1001,6 +1344,10 @@ pub mod fm_analysis {
         /// Analysis produced a sitrep identical to the current sitrep,
         /// so we threw it away and did nothing.
         Unchanged,
+
+        /// Analysis produced a new sitrep, but the sitrep limit has been
+        /// reached, so it was not written to the database.
+        LimitReached { limit: NonZeroU32 },
 
         /// Analysis produced a new sitrep, but we failed to make it
         /// the current sitrep.
@@ -1025,6 +1372,9 @@ pub struct FmRendezvousStatus {
         fm_rendezvous::OpStatus<fm_rendezvous::SupportBundleCreationStatus>,
     pub ereport_marking:
         fm_rendezvous::OpStatus<fm_rendezvous::EreportMarkingStatus>,
+    pub alert_marker_gc: fm_rendezvous::OpStatus<fm_rendezvous::MarkerGcStatus>,
+    pub support_bundle_marker_gc:
+        fm_rendezvous::OpStatus<fm_rendezvous::MarkerGcStatus>,
 }
 
 impl FmRendezvousStatus {
@@ -1100,6 +1450,21 @@ pub mod fm_rendezvous {
         /// fresher activation will retry them.
         pub stale_sitrep: bool,
         /// Errors that occurred during this activation.
+        pub errors: Vec<String>,
+    }
+
+    /// Per-activation statistics for a `rendezvous_*_created` marker-table
+    /// GC sweep.
+    ///
+    /// Used for both `rendezvous_alert_created` and
+    /// `rendezvous_support_bundle_created` since the shape is identical.
+    #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+    pub struct MarkerGcStatus {
+        /// Number of marker rows deleted by this activation's sweep.
+        pub rows_deleted: usize,
+        /// Number of pages the sweep executed.
+        pub batches: usize,
+        /// Errors from this activation's sweep.
         pub errors: Vec<String>,
     }
 
@@ -1281,6 +1646,9 @@ mod test {
     use super::TufRepoInfo;
     use super::TufRepoPrunerDetails;
     use super::TufRepoPrunerStatus;
+    use crate::internal_api::background::BlueprintPrunerDetails;
+    use crate::internal_api::background::BlueprintPrunerStatus;
+    use crate::internal_api::background::DeletedBlueprint;
     use expectorate::assert_contents;
     use iddqd::IdOrdMap;
 
@@ -1325,6 +1693,44 @@ mod test {
 
         assert_contents(
             "output/tuf_repo_pruner_status_disabled.out",
+            &status.to_string(),
+        );
+    }
+
+    #[test]
+    fn test_display_blueprint_pruner_status_enabled() {
+        let blueprint1 = DeletedBlueprint {
+            id: "4e8a87a0-3102-4014-99d3-e1bf486685bd".parse().unwrap(),
+            time_made_target: "2025-09-30T01:23:45Z".parse().unwrap(),
+        };
+        let blueprint2 = DeletedBlueprint {
+            id: "867e42ae-ed72-4dc3-abcd-508b875c9601".parse().unwrap(),
+            time_made_target: "2025-09-30T02:34:56Z".parse().unwrap(),
+        };
+
+        let details = BlueprintPrunerDetails {
+            deleted: vec![blueprint1, blueprint2],
+            ntargets_deleted: 17,
+            ntargets_removable: 18,
+            nkept_by_policy: 12,
+            errors: vec![String::from("fake-oh problem-oh")],
+        };
+        let status = BlueprintPrunerStatus::Enabled(details);
+
+        assert_contents(
+            "output/blueprint_pruner_status_enabled.out",
+            &status.to_string(),
+        );
+    }
+
+    #[test]
+    fn test_display_blueprint_pruner_status_disabled() {
+        let status = BlueprintPrunerStatus::Disabled {
+            reason: "disabled in this test".to_string(),
+        };
+
+        assert_contents(
+            "output/blueprint_pruner_status_disabled.out",
             &status.to_string(),
         );
     }

@@ -22,11 +22,12 @@ use nexus_types::{
     internal_api::params::{DnsConfigParams, DnsConfigZone},
     inventory::{CabooseWhich, Collection},
 };
-use omicron_common::{api::external::Generation, disk::M2Slot};
+use omicron_generation_kinds::Generation;
 use omicron_uuid_kinds::{
     BlueprintUuid, CollectionUuid, ReconfiguratorSimOpUuid,
     ReconfiguratorSimStateUuid, SledUuid,
 };
+use sled_agent_types::disk::M2Slot;
 use strum::IntoEnumIterator as _;
 
 use crate::{

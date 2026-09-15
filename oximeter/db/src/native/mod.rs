@@ -143,6 +143,9 @@ mod probes {
     ) {
     }
 
+    /// Fires just after failing to send a packet.
+    fn packet__send__failed(addr: &str, kind: &str, message: &str) {}
+
     /// Fires just after we finish sending a packet.
     fn packet__send__done(addr: &str) {}
 
@@ -158,7 +161,7 @@ mod probes {
     fn disconnected(addr: &str) {}
 
     /// Emitted when we receive an unrecognized packet, with the kind and the
-    /// length of the discarded buffer.
+    /// length of the unprocessed buffer.
     fn unrecognized__server__packet(addr: &str, kind: u64, len: usize) {}
 
     /// Emitted when we receive an unexpected packet, based on the messages we've
@@ -166,8 +169,14 @@ mod probes {
     fn unexpected__server__packet(addr: &str, kind: &str) {}
 
     /// Emitted when we receive an invalid packet, with the kind we think it is
-    /// supposed to be and the length of the discarded buffer.
+    /// supposed to be and the length of the unprocessed buffer.
     fn invalid__packet(addr: &str, kind: &str, len: usize) {}
+
+    /// Emitted when we fail to decode a message frame from the server.
+    fn decode__failed(addr: &str, message: &str) {}
+
+    /// Emitted when there is a generic protocol error.
+    fn protocol__error(addr: &str, message: &str) {}
 }
 
 /// An error interacting ClickHouse over the native protocol.
@@ -250,6 +259,9 @@ pub enum Error {
         "A query unexpectedly resulted in an empty data block; query: {query}"
     )]
     UnexpectedEmptyBlock { query: String },
+
+    #[error("TCP connection to the ClickHouse server is poisoned")]
+    Poisoned,
 }
 
 impl Error {

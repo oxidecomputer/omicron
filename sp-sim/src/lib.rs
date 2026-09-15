@@ -10,6 +10,7 @@ mod sensors;
 mod server;
 mod sidecar;
 mod update;
+mod vpd;
 
 pub use anyhow::Result;
 use async_trait::async_trait;
@@ -32,6 +33,10 @@ pub use update::HostFlashHashCompletionSender;
 pub use update::HostFlashHashPolicy;
 
 pub const SIM_ROT_BOARD: &str = "SimRot";
+
+/// The staging/devel key signature reported in simulated RoT/stage0 cabooses.
+pub const ROT_STAGING_DEVEL_SIGN: &str =
+    "11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Responsiveness {

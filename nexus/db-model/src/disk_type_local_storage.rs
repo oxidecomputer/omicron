@@ -35,7 +35,8 @@ pub struct DiskTypeLocalStorage {
 
 impl DiskTypeLocalStorage {
     /// Creates a new `DiskTypeLocalStorage`. Returns Err if the computed
-    /// required dataset overhead does not fit in a `ByteCount`.
+    /// required dataset overhead does not fit in a `ByteCount`, or if the
+    /// requested size plus the required overhead does not fit in a `ByteCount`.
     pub fn new(
         disk_id: Uuid,
         size: external::ByteCount,
@@ -55,6 +56,14 @@ impl DiskTypeLocalStorage {
         // API call, and we don't want to panic on out of range input.
         let required_dataset_overhead =
             external::ByteCount::try_from(overhead)?;
+
+        // Check that later `required_dataset_size` calls won't overflow.
+        let size_bytes: i64 = size.into();
+        let overhead_bytes: i64 = required_dataset_overhead.into();
+
+        if size_bytes.checked_add(overhead_bytes).is_none() {
+            return Err(external::ByteCountRangeError::TooLarge);
+        }
 
         Ok(DiskTypeLocalStorage {
             disk_id,

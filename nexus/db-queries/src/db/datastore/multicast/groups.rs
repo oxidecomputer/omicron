@@ -577,7 +577,7 @@ impl DataStore {
         let (authz_pool, explicit_ip) = match &params.ip_allocation {
             MulticastIpAllocation::Explicit { ip } => {
                 let pool = self
-                    .ip_pool_fetch_containing_address(
+                    .ip_pool_fetch_containing_address_in_current_silo(
                         opctx,
                         *ip,
                         IpPoolType::Multicast,

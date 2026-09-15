@@ -4,6 +4,7 @@ to:   blueprint 86df79ea-8652-477a-960e-32c21f46d255
  REMOVED SLEDS:
 
   sled 68d24ac5-f341-49ea-a92a-0381b52ab387 (was decommissioned, config generation 3):
+-   update disposition:   available (generation 1)
 
     measurements:
     ---------------------------
@@ -130,6 +131,7 @@ to:   blueprint 86df79ea-8652-477a-960e-32c21f46d255
  MODIFIED SLEDS:
 
   sled 2d1cb4f2-cf44-40fc-b118-85036eb732a9 (active, config generation 2):
+    update disposition:   available (generation 1) (unchanged)
 
     measurements:
     ---------------------------
@@ -256,6 +258,7 @@ to:   blueprint 86df79ea-8652-477a-960e-32c21f46d255
 
 
   sled 48d95fef-bc9f-4f50-9a53-1e075836291d (decommissioned, config generation 3 -> 4):
+    update disposition:   available (generation 1) (unchanged)
 
     measurements:
     ---------------------------
@@ -391,10 +394,14 @@ mismatched zone type: after: Nexus(
     Nexus {
         internal_address: [fd01:1122:3344:105::4]:12221,
         lockstep_port: 12232,
-        external_ip: OmicronZoneExternalFloatingIp {
-            id: 6ebcade9-3a69-465e-99e9-6bf8eb9a8390 (external_ip),
-            ip: 192.0.2.2,
-        },
+        external_ips: OmicronZoneExternalFloatingIps(
+            {
+                192.0.2.2: OmicronZoneExternalFloatingIp {
+                    id: 6ebcade9-3a69-465e-99e9-6bf8eb9a8390 (external_ip),
+                    ip: 192.0.2.2,
+                },
+            },
+        ),
         nic: NetworkInterface {
             id: 93efbe06-a16a-449f-995b-82382534fcca,
             kind: Service {
@@ -433,9 +440,7 @@ mismatched zone type: after: Nexus(
         },
         external_tls: false,
         external_dns_servers: [],
-        nexus_generation: Generation(
-            1,
-        ),
+        nexus_generation: 1 (nexus),
     },
 )
 

@@ -67,7 +67,6 @@ progenitor::generate_api!(
         RotImageDetails = { derives = [PartialEq, Eq, PartialOrd, Ord] },
         SpComponentCaboose = { derives = [PartialEq, Eq] },
         SpComponentInfo = { derives = [PartialEq, Eq] },
-        SpIdentifier = { derives = [Copy, PartialEq, Hash, Eq] },
         SpUpdateStatus = { derives = [PartialEq, Hash, Eq] },
         UpdatePreparationProgress = { derives = [PartialEq, Hash, Eq] },
     },
@@ -76,33 +75,27 @@ progenitor::generate_api!(
     },
 
     replace = {
+        Barcode = gateway_types::component_vpd::Barcode,
+        ComponentVpd = gateway_types::component_vpd::ComponentVpd,
+        Mpn1Barcode = gateway_types::component_vpd::Mpn1Barcode,
+        OxideBarcode = gateway_types::component_vpd::OxideBarcode,
+        PmbusDevice = gateway_types::component_vpd::PmbusDevice,
         RotSlot = gateway_types::rot::RotSlot,
+        SledFanTray = gateway_types::component_vpd::SledFanTray,
+        Tmp11x = gateway_types::component_vpd::Tmp11x,
         RotState = gateway_types::rot::RotState,
         RotImageError = gateway_types::rot::RotImageError,
         Ena = ereport_types::Ena,
         Ereport = ereport_types::Ereport,
         Ereports = ereport_types::Ereports,
-        SpType = gateway_types::component::SpType,
-        TaskDump = gateway_types::task_dump::TaskDump,
+        SpIdentifier = gateway_types::component::SpIdentifier,
         SpIgnition = gateway_types::ignition::SpIgnition,
         SpIgnitionSystemType = gateway_types::ignition::SpIgnitionSystemType,
-        SpState = gateway_types::component::SpState
+        SpState = gateway_types::component::SpState,
+        SpType = gateway_types::component::SpType,
+        TaskDump = gateway_types::task_dump::TaskDump,
     },
 );
-
-// Override the impl of Ord for SpIdentifier because the default one orders the
-// fields in a different order than people are likely to want.
-impl Ord for crate::types::SpIdentifier {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.type_.cmp(&other.type_).then(self.slot.cmp(&other.slot))
-    }
-}
-
-impl PartialOrd for crate::types::SpIdentifier {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
 
 #[derive(Debug, thiserror::Error)]
 pub enum HostPhase1HashError {

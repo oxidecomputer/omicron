@@ -8,7 +8,7 @@ use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::MGD_PORT;
 use omicron_common::address::MGS_PORT;
-use omicron_common::address::SLED_PREFIX;
+use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::address::get_switch_zone_address;
 use omicron_uuid_kinds::SledUuid;
 use std::collections::BTreeMap;
@@ -110,7 +110,7 @@ impl Overridables {
     pub fn switch_zone_ip(
         &self,
         sled_id: SledUuid,
-        sled_subnet: Ipv6Subnet<SLED_PREFIX>,
+        sled_subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
     ) -> Ipv6Addr {
         self.switch_zone_ips
             .get(&sled_id)

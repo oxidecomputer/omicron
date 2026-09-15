@@ -44,7 +44,7 @@ impl DbMetadata {
 impl_enum_type!(
     DbMetadataNexusStateEnum:
 
-    #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq, Serialize, Deserialize)]
+    #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq, Serialize, Deserialize, strum::VariantArray)]
     pub enum DbMetadataNexusState;
 
     // Enum values
@@ -52,6 +52,10 @@ impl_enum_type!(
     NotYet => b"not_yet"
     Quiesced => b"quiesced"
 );
+
+impl DbMetadataNexusState {
+    pub const ALL: &'static [Self] = <Self as strum::VariantArray>::VARIANTS;
+}
 
 impl fmt::Display for DbMetadataNexusState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

@@ -132,6 +132,26 @@ WITH
         id = (SELECT ip_pool_range_id FROM next_external_ip) AND time_deleted IS NULL
       RETURNING
         id
+    ),
+  pool_still_assignable
+    AS MATERIALIZED (
+      SELECT
+        CAST(
+          CASE
+          WHEN EXISTS(
+            SELECT
+              1
+            FROM
+              ip_pool_resource
+            WHERE
+              ip_pool_id = $21 AND resource_type = 'silo' AND resource_id = $22
+          )
+          AND (SELECT assignment FROM ip_pool WHERE id = $23 AND time_deleted IS NULL) = 'silos'
+          THEN 'TRUE'
+          ELSE $24
+          END
+            AS BOOL
+        )
     )
 SELECT
   *

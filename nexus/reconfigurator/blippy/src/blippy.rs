@@ -16,15 +16,15 @@ use nexus_types::deployment::PlanningInput;
 use nexus_types::inventory::ZpoolName;
 use omicron_common::address::DnsSubnet;
 use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::SLED_PREFIX;
-use omicron_common::api::external::Generation;
+use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::api::external::MacAddr;
 use omicron_common::disk::DatasetKind;
-use omicron_common::disk::M2Slot;
+use omicron_generation_kinds::{Generation, NexusGeneration};
 use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use sled_agent_types::disk::M2Slot;
 use std::collections::BTreeSet;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
@@ -115,7 +115,7 @@ impl Kind {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum BlueprintKind {
     /// No zones exist in the blueprint using the active Nexus generation
-    NoZonesWithActiveNexusGeneration(Generation),
+    NoZonesWithActiveNexusGeneration(NexusGeneration),
 }
 
 impl fmt::Display for BlueprintKind {
@@ -138,7 +138,7 @@ pub enum SledKind {
     /// A sled has a zone with an IP that isn't a member of its subnet.
     UnderlayIpOnWrongSubnet {
         zone: BlueprintZoneConfig,
-        subnet: Ipv6Subnet<SLED_PREFIX>,
+        subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
     },
     /// A sled has a zone with an IP that is above the sled's overall "last
     /// allocated IP" value.
@@ -149,7 +149,7 @@ pub enum SledKind {
     /// Two sleds are using the same sled subnet.
     ConflictingSledSubnets {
         other_sled: SledUuid,
-        subnet: Ipv6Subnet<SLED_PREFIX>,
+        subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
     },
     /// An internal DNS zone has an IP that is not one of the expected rack DNS
     /// subnets.
@@ -242,15 +242,15 @@ pub enum SledKind {
     /// A Nexus zone exists which is too new, relative to the "active
     /// generation".
     NexusZoneGenerationTooNew {
-        active_generation: Generation,
-        zone_generation: Generation,
+        active_generation: NexusGeneration,
+        zone_generation: NexusGeneration,
         id: OmicronZoneUuid,
     },
     /// Nexus zones with the same generation have different image sources.
     NexusZoneGenerationImageSourceMismatch {
         zone1: BlueprintZoneConfig,
         zone2: BlueprintZoneConfig,
-        generation: Generation,
+        generation: NexusGeneration,
     },
 }
 

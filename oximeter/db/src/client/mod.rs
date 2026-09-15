@@ -252,16 +252,11 @@ impl Client {
         }
 
         let query = query_builder.build();
-        let mut handle = self.claim_connection().await?;
         let info = match query.field_query() {
             Some(field_query) => {
-                self.select_matching_timeseries_info(
-                    &mut handle,
-                    &field_query,
-                    &schema,
-                )
-                .await?
-                .1
+                self.select_matching_timeseries_info(&field_query, &schema)
+                    .await?
+                    .1
             }
             None => BTreeMap::new(),
         };
@@ -277,13 +272,7 @@ impl Client {
             // a way that is arbitrary with respect to the query.
             Err(Error::InvalidLimitQuery)
         } else {
-            self.select_timeseries_with_keys(
-                &mut handle,
-                &query,
-                &info,
-                &schema,
-            )
-            .await
+            self.select_timeseries_with_keys(&query, &info, &schema).await
         }
     }
 
@@ -318,29 +307,18 @@ impl Client {
         }
 
         let query = query_builder.build();
-        let mut handle = self.claim_connection().await?;
         let info = match query.field_query() {
             Some(field_query) => {
-                self.select_matching_timeseries_info(
-                    &mut handle,
-                    &field_query,
-                    &schema,
-                )
-                .await?
-                .1
+                self.select_matching_timeseries_info(&field_query, &schema)
+                    .await?
+                    .1
             }
             None => BTreeMap::new(),
         };
         let results = if info.is_empty() {
             vec![]
         } else {
-            self.select_timeseries_with_keys(
-                &mut handle,
-                &query,
-                &info,
-                &schema,
-            )
-            .await?
+            self.select_timeseries_with_keys(&query, &info, &schema).await?
         };
         Ok(ResultsPage::new(results, &params, |_, _| {
             NonZeroU32::try_from(limit.get() + offset).unwrap()
@@ -1087,7 +1065,14 @@ impl Client {
 
         // Skip the timeseries schema table, which doesn't have a TTL, and
         // prepend the database name.
-        let mut tables = Vec::with_capacity(oximeter_tables.len() - 1);
+        //
+        // NOTE: `oximeter_tables` may legitimately be empty, e.g., if this
+        // is called before the oximeter database schema has been created.
+        // Use `saturating_sub()` so that case doesn't panic; it's only used
+        // to size the output `Vec`, so being off by one costs at most one
+        // extra (unused) allocation slot.
+        let mut tables =
+            Vec::with_capacity(oximeter_tables.len().saturating_sub(1));
         for table in
             oximeter_tables.into_iter().filter(|n| n != "timeseries_schema")
         {
@@ -1256,14 +1241,18 @@ impl Client {
     // query.
     async fn select_matching_timeseries_info(
         &self,
-        handle: &mut Handle,
         field_query: &str,
         schema: &TimeseriesSchema,
     ) -> Result<
         (oxql_types::QuerySummary, BTreeMap<TimeseriesKey, (Target, Metric)>),
         Error,
     > {
-        let result = self.execute_with_block(handle, field_query).await?;
+        let result = self
+            .execute_with_block(
+                &mut self.claim_connection().await?,
+                field_query,
+            )
+            .await?;
         let summary = result.query_summary();
         let Some(block) = &result.data else {
             error!(
@@ -1289,7 +1278,6 @@ impl Client {
     // measurements from timeseries with those keys.
     async fn select_timeseries_with_keys(
         &self,
-        handle: &mut Handle,
         query: &query::SelectQuery,
         info: &BTreeMap<TimeseriesKey, (Target, Metric)>,
         schema: &TimeseriesSchema,
@@ -1297,8 +1285,13 @@ impl Client {
         let mut timeseries_by_key = BTreeMap::new();
         let keys = info.keys().copied().collect::<Vec<_>>();
         let measurement_query = query.measurement_query(&keys);
-        let Some(block) =
-            self.execute_with_block(handle, &measurement_query).await?.data
+        let Some(block) = self
+            .execute_with_block(
+                &mut self.claim_connection().await?,
+                &measurement_query,
+            )
+            .await?
+            .data
         else {
             error!(
                 self.log,
@@ -2114,6 +2107,29 @@ mod tests {
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
         let client = Client::new(db.native_address().into(), &logctx.log);
         client.ping().await.expect("Should be able to ping existing server");
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn set_retention_policy_before_db_init_does_not_panic() {
+        let logctx = test_setup_log(
+            "set_retention_policy_before_db_init_does_not_panic",
+        );
+        let mut db =
+            ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
+        let client = Client::new(db.native_address().into(), &logctx.log);
+
+        // Deliberately do *not* call `init_db()` here. The oximeter
+        // database (and its tables) don't exist yet, so
+        // `list_retention_policy_tables()` will see zero tables. This
+        // should be handled gracefully as a no-op, not panic on an
+        // integer underflow while sizing its output `Vec`.
+        let policy = RetentionPolicyRequest { days: Days::new(30).unwrap() };
+        client.set_retention_policy(policy, false).await.expect(
+            "setting a retention policy with no tables present yet should succeed as a no-op",
+        );
+
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -5037,7 +5053,7 @@ mod tests {
                 WHERE timeseries_name = '{}'",
                 crate::DATABASE_NAME,
                 table,
-                &to_delete[0].to_string(),
+                to_delete[0],
             );
             let count = client
                 .execute_with_block(&mut handle, &sql)

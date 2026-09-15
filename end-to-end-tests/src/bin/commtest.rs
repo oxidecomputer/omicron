@@ -11,9 +11,9 @@ use oxide_client::{
     ClientSystemHardwareExt, ClientSystemIpPoolsExt, ClientSystemStatusExt,
     ClientVpcsExt,
     types::{
-        IpPoolCreate, IpPoolLinkSilo, IpPoolType, IpRange, IpVersion, Name,
-        NameOrId, PingStatus, PoolSelector, ProbeCreate, ProbeInfo,
-        ProjectCreate, UsernamePasswordCredentials,
+        IpPoolAssignment, IpPoolCreate, IpPoolLinkSilo, IpPoolType, IpRange,
+        IpVersion, Name, NameOrId, PingStatus, PoolSelector, ProbeCreate,
+        ProbeInfo, ProjectCreate, UsernamePasswordCredentials,
     },
 };
 use std::{
@@ -270,6 +270,7 @@ async fn rack_prepare(
                 .body(ProjectCreate {
                     description: "A project for probes".into(),
                     name: "classone".parse().unwrap(),
+                    defaults: None,
                 })
                 .send()
                 .await?;
@@ -301,6 +302,7 @@ async fn rack_prepare(
                     description: "Default IP pool".to_string(),
                     ip_version,
                     pool_type: IpPoolType::Unicast,
+                    assignment: IpPoolAssignment::Silos,
                 })
                 .send()
                 .await?;

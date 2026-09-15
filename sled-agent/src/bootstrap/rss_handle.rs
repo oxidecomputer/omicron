@@ -4,16 +4,16 @@
 
 //! sled-agent's handle to the Rack Setup Service it spawns
 
-use super::client as bootstrap_agent_client;
-use ::bootstrap_agent_client::Client as BootstrapAgentClient;
-use bootstore::schemes::v0 as bootstore;
 use bootstrap_agent_lockstep_types::RssStep;
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use omicron_common::backoff::BackoffError;
 use omicron_common::backoff::retry_notify;
 use omicron_common::backoff::retry_policy_local;
-use sled_agent_config_reconciler::InternalDisksReceiver;
+use sled_agent_bootstrap_common::RssContext;
+use sled_agent_bootstrap_common::sprockets::{
+    SprocketsClient, SprocketsClientError,
+};
 use sled_agent_measurements::MeasurementsHandle;
 use sled_agent_rack_setup::LocalBootstrapAgent;
 use sled_agent_rack_setup::RackInitializeRequestParams;
@@ -21,94 +21,39 @@ use sled_agent_rack_setup::RackSetupService;
 use sled_agent_rack_setup::SetupServiceError;
 use sled_agent_types::sled::StartSledAgentRequest;
 use slog::Logger;
-use slog_error_chain::InlineErrorChain;
 use sprockets_tls::keys::SprocketsConfig;
-use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::sync::watch;
-use tokio::task::JoinHandle;
 
-pub(super) struct RssHandle {
-    _rss: RackSetupService,
-    task: JoinHandle<()>,
-}
+/// Executes the rack setup service until it has completed
+pub(super) async fn run_rss(
+    ctx: RssContext,
+    config: RackInitializeRequestParams,
+    step_tx: watch::Sender<RssStep>,
+) -> Result<(), SetupServiceError> {
+    let (tx, rx) =
+        rss_channel(ctx.sprockets_config.clone(), ctx.measurements.clone());
 
-impl Drop for RssHandle {
-    fn drop(&mut self) {
-        // NOTE: Ideally, with async drop, we'd await completion of the our task
-        // handler.
-        //
-        // Without that option, we instead opt to simply cancel the task to
-        // ensure it does not remain alive beyond the handle itself.
-        self.task.abort();
-    }
-}
-
-impl RssHandle {
-    /// Executes the rack setup service until it has completed
-    #[allow(clippy::too_many_arguments)]
-    pub(super) async fn run_rss(
-        log: &Logger,
-        sprockets: SprocketsConfig,
-        config: RackInitializeRequestParams,
-        our_bootstrap_address: Ipv6Addr,
-        internal_disks_rx: InternalDisksReceiver,
-        measurements: Arc<MeasurementsHandle>,
-        bootstore: bootstore::NodeHandle,
-        trust_quorum: trust_quorum::NodeTaskHandle,
-        step_tx: watch::Sender<RssStep>,
-    ) -> Result<(), SetupServiceError> {
-        let (tx, rx) = rss_channel(sprockets, measurements.clone());
-
-        let rss = RackSetupService::new(
-            log.new(o!("component" => "RSS")),
-            config,
-            internal_disks_rx,
-            tx,
-            our_bootstrap_address,
-            bootstore,
-            trust_quorum,
-            step_tx,
-        );
-        let log = log.new(o!("component" => "BootstrapAgentRssHandler"));
-        rx.await_local_rss_request(&log).await;
-        rss.join().await
-    }
-
-    /// Executes the rack setup service (reset mode) until it has completed
-    pub(super) async fn run_rss_reset(
-        log: &Logger,
-        our_bootstrap_address: Ipv6Addr,
-        sprockets: SprocketsConfig,
-        measurements: Arc<MeasurementsHandle>,
-    ) -> Result<(), SetupServiceError> {
-        let (tx, rx) = rss_channel(sprockets, measurements);
-
-        let rss = RackSetupService::new_reset_rack(
-            log.new(o!("component" => "RSS")),
-            tx,
-            our_bootstrap_address,
-        );
-        let log = log.new(o!("component" => "BootstrapAgentRssHandler"));
-        rx.await_local_rss_request(&log).await;
-        rss.join().await
-    }
+    let log = ctx.base_log.new(o!("component" => "BootstrapAgentRssHandler"));
+    let rss = RackSetupService::new(ctx, config, tx, step_tx);
+    rx.await_local_rss_request(&log).await;
+    rss.join().await
 }
 
 // Send a message to start a sled agent via bootstrap agent client
 async fn initialize_sled_agent(
     log: &Logger,
     bootstrap_addr: SocketAddrV6,
-    sprockets: SprocketsConfig,
+    sprockets_config: SprocketsConfig,
     measurements: Arc<MeasurementsHandle>,
     request: &StartSledAgentRequest,
-) -> Result<(), bootstrap_agent_client::Error> {
-    let client = bootstrap_agent_client::Client::new(
+) -> Result<(), SprocketsClientError> {
+    let client = SprocketsClient::new(
         bootstrap_addr,
-        sprockets,
+        sprockets_config,
         measurements,
         log.new(o!("BootstrapAgentClient" => bootstrap_addr.to_string())),
     );
@@ -119,7 +64,7 @@ async fn initialize_sled_agent(
             .await
             .map_err(BackoffError::transient)?;
 
-        Ok::<(), BackoffError<bootstrap_agent_client::Error>>(())
+        Ok::<(), BackoffError<SprocketsClientError>>(())
     };
 
     let log_failure = |error, _| {
@@ -150,7 +95,6 @@ fn rss_channel(
 }
 
 type InnerInitRequest = Vec<(SocketAddrV6, StartSledAgentRequest)>;
-type InnerResetRequest = Vec<SocketAddrV6>;
 
 #[derive(Debug)]
 struct Request {
@@ -161,7 +105,6 @@ struct Request {
 #[derive(Debug)]
 enum RequestKind {
     Init(InnerInitRequest),
-    Reset(InnerResetRequest),
 }
 
 pub(crate) struct BootstrapAgentHandle {
@@ -183,18 +126,6 @@ impl LocalBootstrapAgent for BootstrapAgentHandle {
         // https://github.com/oxidecomputer/omicron/issues/820.
         self.inner
             .send(Request { kind: RequestKind::Init(requests), tx })
-            .await
-            .unwrap();
-        rx.await.unwrap()
-    }
-
-    async fn reset_sleds(
-        self,
-        requests: Vec<SocketAddrV6>,
-    ) -> Result<(), String> {
-        let (tx, rx) = oneshot::channel();
-        self.inner
-            .send(Request { kind: RequestKind::Reset(requests), tx })
             .await
             .unwrap();
         rx.await.unwrap()
@@ -274,43 +205,6 @@ impl BootstrapAgentHandleReceiver {
                 // https://github.com/oxidecomputer/omicron/issues/820, we'll have to
                 // replace these channels with IPC, which will also eliminiate these
                 // unwraps.
-                while let Some(result) = futs.next().await {
-                    if result.is_err() {
-                        tx.send(result).unwrap();
-                        return;
-                    }
-                }
-            }
-            RequestKind::Reset(requests) => {
-                let mut futs = requests
-                    .into_iter()
-                    .map(|bootstrap_addr| async move {
-                        info!(
-                            log, "Received reset request from RSS";
-                            "target_sled" => %bootstrap_addr,
-                        );
-
-                        let dur = std::time::Duration::from_secs(60);
-                        let client = reqwest::ClientBuilder::new()
-                            .connect_timeout(dur)
-                            .timeout(dur)
-                            .build()
-                            .map_err(|e| InlineErrorChain::new(&e).to_string())?;
-                        let client = BootstrapAgentClient::new_with_client(
-                            &format!("http://{}", bootstrap_addr),
-                            client,
-                            log.new(o!("BootstrapAgentClient" => bootstrap_addr.to_string())),
-                        );
-                        client.sled_reset().await.map_err(|e| e.to_string())?;
-
-                        info!(
-                            log, "Reset sled";
-                            "target_sled" => %bootstrap_addr,
-                        );
-
-                        Ok(())
-                    })
-                    .collect::<FuturesUnordered<_>>();
                 while let Some(result) = futs.next().await {
                     if result.is_err() {
                         tx.send(result).unwrap();

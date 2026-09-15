@@ -55,7 +55,7 @@ pub async fn ipadm_info()
             results.push(res);
         }
     }
-    results.extend(commands.join_all().await);
+    results.extend(commands.join_remaining().await);
     results
 }
 
@@ -78,7 +78,7 @@ pub async fn dladm_info()
             results.push(res);
         }
     }
-    results.extend(commands.join_all().await);
+    results.extend(commands.join_remaining().await);
     results
 }
 
@@ -113,7 +113,7 @@ pub async fn pargs_oxide_processes(
         }
     }
 
-    results.extend(commands.join_all().await);
+    results.extend(commands.join_remaining().await);
     results
 }
 
@@ -142,7 +142,7 @@ pub async fn pstack_oxide_processes(
             results.push(res);
         }
     }
-    results.extend(commands.join_all().await);
+    results.extend(commands.join_remaining().await);
     results
 }
 
@@ -171,7 +171,7 @@ pub async fn pfiles_oxide_processes(
             results.push(res);
         }
     }
-    results.extend(commands.join_all().await);
+    results.extend(commands.join_remaining().await);
     results
 }
 

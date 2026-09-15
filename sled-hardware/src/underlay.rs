@@ -22,9 +22,9 @@ use omicron_common::api::external::MacAddr;
 use crate::DataLinks;
 
 #[doc(inline)]
-pub use sled_hardware_types::underlay::BOOTSTRAP_MASK;
+pub use omicron_common::address::BOOTSTRAP_PREFIX;
 #[doc(inline)]
-pub use sled_hardware_types::underlay::BOOTSTRAP_PREFIX;
+pub use omicron_common::address::BOOTSTRAP_SLED_SUBNET_PREFIX_LENGTH;
 #[doc(inline)]
 pub use sled_hardware_types::underlay::BootstrapInterface;
 

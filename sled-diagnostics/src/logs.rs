@@ -943,7 +943,7 @@ mod test {
             "bogus.log",
             "some/dir"
         ].into_iter().map(|l| {
-            oxlog::LogFile { path: Utf8PathBuf::from(l), size: None, modified: None }
+            oxlog::LogFile { path: Utf8PathBuf::from(l), size: None, modified: None, created: None }
         }).collect();
         let logs_map: HashMap<_, _> =
             logs.iter().map(|l| (l.path.as_str(), l)).collect();
@@ -983,14 +983,14 @@ mod illumos_tests {
     use super::*;
 
     use illumos_utils::zfs::ZFS;
-    use omicron_common::disk::DatasetConfig;
     use omicron_common::disk::DatasetKind;
     use omicron_common::disk::DatasetName;
-    use omicron_common::disk::SharedDatasetConfig;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::ExternalZpoolUuid;
+    use sled_agent_types::disk::DatasetConfig;
+    use sled_agent_types::disk::SharedDatasetConfig;
     use tokio::io::AsyncReadExt;
     use tokio::io::AsyncWriteExt;
     use zfs_test_harness::ZfsTestHarness;
@@ -1212,6 +1212,7 @@ mod illumos_tests {
                     .join(format!("var/svc/log/{}", logfile_to_data[0].0)),
                 size: None,
                 modified: None,
+                created: None,
             };
 
             loghandle
@@ -1306,7 +1307,12 @@ mod illumos_tests {
             let zipfile_path = mountpoint.join("test.zip");
             let zipfile = File::create_new(&zipfile_path).unwrap();
             let mut zip = ZipWriter::new(zipfile);
-            let log = LogFile { path: logfile, size: None, modified: None };
+            let log = LogFile {
+                path: logfile,
+                size: None,
+                modified: None,
+                created: None,
+            };
 
             loghandle
                 .process_logs(
@@ -1401,6 +1407,7 @@ mod illumos_tests {
                 path: log.parse().unwrap(),
                 size: None,
                 modified: None,
+                created: None,
             };
             let res = parse_extra_log(&logfile);
             assert_eq!(
@@ -1415,6 +1422,7 @@ mod illumos_tests {
                 path: log.parse().unwrap(),
                 size: None,
                 modified: None,
+                created: None,
             };
             let res = parse_extra_log(&logfile);
             assert_eq!(
@@ -1430,6 +1438,7 @@ mod illumos_tests {
                 path: log.parse().unwrap(),
                 size: None,
                 modified: None,
+                created: None,
             };
             let res = parse_extra_log(&logfile);
             assert!(res.is_none());

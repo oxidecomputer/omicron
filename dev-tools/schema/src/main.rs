@@ -148,7 +148,7 @@ fn generate_base_schema(commit_or_tag: &str) -> Result<()> {
     // Resolve the commit/tag to a full commit hash
     let commit_hash =
         resolve_commit_or_tag(workspace_root.as_ref(), commit_or_tag)?;
-    println!("Resolved {} to commit {}", commit_or_tag, &commit_hash);
+    println!("Resolved {} to commit {}", commit_or_tag, commit_hash);
 
     // Get the dbinit.sql content from that commit
     let dbinit_content = get_dbinit_from_commit(&workspace_root, &commit_hash)?;

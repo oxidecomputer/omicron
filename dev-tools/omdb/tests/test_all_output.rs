@@ -12,6 +12,7 @@ use expectorate::assert_contents;
 use gateway_client::ClientInfo as _;
 use http::StatusCode;
 use nexus_test_utils::background::activate_background_task;
+use nexus_test_utils::background::run_blueprint_rendezvous;
 use nexus_test_utils::wait_for_producer;
 use nexus_test_utils::{OXIMETER_UUID, PRODUCER_UUID};
 use nexus_test_utils_macros::nexus_test;
@@ -103,6 +104,12 @@ async fn test_omdb_usage_errors() {
         &["db", "ereport", "info", "--help"],
         &["db", "sleds", "--help"],
         &["db", "sitrep", "--help"],
+        &["db", "sitrep", "show", "--help"],
+        &["db", "sitrep", "analysis-report", "--help"],
+        // Invalid sitrep selectors: not a UUID, a version number, or "current"
+        &["db", "sitrep", "show", "not-a-sitrep"],
+        // Invalid sitrep selector: begins with 'v' but is not an integer.
+        &["db", "sitrep", "show", "v1.2.3"],
         &["db", "saga"],
         &["db", "snapshots"],
         &["db", "network"],
@@ -124,6 +131,7 @@ async fn test_omdb_usage_errors() {
         &["nexus", "sleds"],
         &["sled-agent"],
         &["sled-agent", "zones"],
+        &["sled-agent", "network-config"],
         &["oximeter", "--help"],
         &["oxql", "--help"],
         // Mispelled argument
@@ -131,6 +139,11 @@ async fn test_omdb_usage_errors() {
         &["reconfigurator"],
         &["reconfigurator", "export"],
         &["reconfigurator", "archive"],
+        // FM config help text. Mostly, let's check that the help text for the
+        // settings look reasonable.
+        &["nexus", "fm-config"],
+        &["nexus", "fm-config", "show", "--help"],
+        &["nexus", "fm-config", "set", "--help"],
     ];
 
     for args in invocations {
@@ -200,22 +213,48 @@ async fn test_omdb_success_cases() {
     // snapshot of each task's last completed activation is deterministic
     // rather than racing the tasks' watch-channel triggers:
     //
-    // 1. `fm_analysis` commits the first sitrep (unless its natural cadence
+    // 1. `fm_config_loader` loads the default config for the FM system.
+    // 2. `fm_analysis` commits the first sitrep (unless its natural cadence
     //    already has). This run reports "committed new sitrep".
-    // 2. `fm_sitrep_loader` loads that sitrep and publishes it on the sitrep
+    // 3. `fm_sitrep_loader` loads that sitrep and publishes it on the sitrep
     //    watch channel.
-    // 3. `fm_analysis` re-runs with the loaded sitrep as its parent and
+    // 4. `fm_sitrep_history_pruner` runs with the loaded config and exactly
+    //    one sitrep in the history, so its status deterministically reports
+    //    the config it used and a count of 1, rather than "waiting for
+    //    config". If we didn't run it explicitly after the config was loaded,
+    //    its initial activation may race with the config loader and sometimes
+    //    display that it's waiting for config, and sometimes display that it
+    //    did nothing.
+    // 5. `fm_analysis` re-runs with the loaded sitrep as its parent and
     //    reports "no changes" -- the steady-state output asserted below.
     //    (No later activation ever commits another sitrep here: this
     //    environment has no in-service control plane disks and no
     //    consumable ereports, so every post-load analysis is a no-op.)
-    // 4. `fm_rendezvous` runs against the loaded sitrep, so its status shows
+    // 6. `fm_rendezvous` runs against the loaded sitrep, so its status shows
     //    the executed operations rather than "no FM situation report loaded".
+    // 7. `fm_sitrep_history_pruner` runs, determines we have not reached the
+    //    sitrep history limit, and does nothing. However, this task's status
+    //    will print the count of sitrep history entries currently in the
+    //    database, so activating it explicitly *after* analysis has committed
+    //    the first sitrep ensures that its most recent status always says
+    //    there's 1 sitrep, rather than depending on whether it ran before or
+    //    after the analysis task.
     let lockstep_client = &cptestctx.lockstep_client;
+    activate_background_task(lockstep_client, "fm_config_loader").await;
     activate_background_task(lockstep_client, "fm_analysis").await;
     activate_background_task(lockstep_client, "fm_sitrep_loader").await;
+    activate_background_task(lockstep_client, "fm_sitrep_history_pruner").await;
     activate_background_task(lockstep_client, "fm_analysis").await;
     activate_background_task(lockstep_client, "fm_rendezvous").await;
+    activate_background_task(lockstep_client, "fm_sitrep_history_pruner").await;
+
+    // Populate the `rendezvous_sled_bp_availability` table deterministically so
+    // the BP AVAIL column in `omdb db sleds` has data present in it. Run
+    // this twice: the first pass populates the table (unless a watch-triggered
+    // activation already did), and the second reaches the steady state
+    // asserted by the expectorate output.
+    run_blueprint_rendezvous(&cptestctx.lockstep_client).await;
+    run_blueprint_rendezvous(&cptestctx.lockstep_client).await;
 
     let mut output = String::new();
 
@@ -367,6 +406,31 @@ async fn test_omdb_success_cases() {
             "--skip-blueprint-validation",
             &cptestctx.server.server_context().nexus.id().to_string(),
         ],
+        // FM config: show and set
+        &["nexus", "fm-config", "show", "current"],
+        &[
+            "-w",
+            "nexus",
+            "fm-config",
+            "set",
+            "--sitrep-limit",
+            "3000",
+            "--comment",
+            "I am altering the config. Pray I do not alter it further.",
+        ],
+        &["nexus", "fm-config", "current"],
+        &[
+            "-w",
+            "nexus",
+            "fm-config",
+            "set",
+            "--analysis-enabled",
+            "false",
+            "--comment",
+            "oops i altered it further",
+        ],
+        &["nexus", "fm-config", "current"],
+        &["nexus", "fm-config", "show", "v1"],
     ];
 
     let mut redactor = Redactor::default();
@@ -520,7 +584,12 @@ async fn test_omdb_success_cases() {
     ];
     let mut bundle_output = String::new();
     let p = postgres_url.clone();
-    let dns = cptestctx.internal_dns.dns_server.local_address().to_string();
+    let dns = cptestctx
+        .internal_dns
+        .dns_server
+        .sole_local_address()
+        .expect("exactly one internal DNS address")
+        .to_string();
     do_run_no_redactions(
         &mut bundle_output,
         move |exec| exec.env("OMDB_DB_URL", &p).env("OMDB_DNS_SERVER", &dns),
@@ -561,7 +630,12 @@ async fn test_omdb_success_cases() {
         std::fs::File::create(&stdout_path).expect("create stdout capture");
     let cmd_path_owned = cmd_path.to_path_buf();
     let p = postgres_url.clone();
-    let dns = cptestctx.internal_dns.dns_server.local_address().to_string();
+    let dns = cptestctx
+        .internal_dns
+        .dns_server
+        .sole_local_address()
+        .expect("exactly one internal DNS address")
+        .to_string();
     let stream_tempdir = tmpdir.path().to_owned();
     let exit_status = tokio::task::spawn_blocking(move || {
         Exec::cmd(&cmd_path_owned)
@@ -649,8 +723,21 @@ async fn test_omdb_env_settings(cptestctx: &ControlPlaneTestContext) {
     let ox_url = format!("http://{}/", cptestctx.oximeter.server_address());
     let ox_test_producer = cptestctx.producer.address().ip();
     let ch_url = format!("http://{}/", cptestctx.clickhouse.http_address());
-    let dns_sockaddr = cptestctx.internal_dns.dns_server.local_address();
+    let dns_sockaddr = cptestctx
+        .internal_dns
+        .dns_server
+        .sole_local_address()
+        .expect("exactly one internal DNS address");
     let mut output = String::new();
+
+    // The blueprint_rendezvous task needs an inventory collection to run.
+    cptestctx
+        .wait_for_at_least_one_inventory_collection(Duration::from_secs(60))
+        .await;
+
+    // Populate the `rendezvous_sled_bp_availability` table deterministically so
+    // the BP AVAIL column in `omdb db sleds` has data present in it.
+    run_blueprint_rendezvous(&cptestctx.lockstep_client).await;
 
     // Database URL
     // Case 1: specified on the command line

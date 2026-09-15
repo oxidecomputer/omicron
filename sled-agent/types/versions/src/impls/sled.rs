@@ -7,7 +7,7 @@
 use std::net::{Ipv6Addr, SocketAddrV6};
 
 use async_trait::async_trait;
-use omicron_common::address::{self, Ipv6Subnet, SLED_PREFIX};
+use omicron_common::address::{self, Ipv6Subnet, SLED_PREFIX_LENGTH};
 use omicron_ledger::Ledgerable;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackUuid;
@@ -95,7 +95,7 @@ pub struct StartSledAgentRequestV0 {
     // `SledAgentRequest`s as toml. `subnet` serializes as a TOML table, so it
     // must come after non-table fields.
     /// Portion of the IP space to be managed by the Sled Agent.
-    pub subnet: Ipv6Subnet<SLED_PREFIX>,
+    pub subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
 }
 
 impl From<StartSledAgentRequestV0> for StartSledAgentRequest {

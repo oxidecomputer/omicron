@@ -982,6 +982,89 @@
         }
       }
     },
+    "/fm/config": {
+      "get": {
+        "operationId": "fm_config_show_current",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FmConfigView"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Update the fault management config at the latest version",
+        "operationId": "fm_config_set",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FmConfigParam"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/fm/config/versions/{version}": {
+      "get": {
+        "operationId": "fm_config_show_version",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FmConfigView"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/fm/known-ereport-classes": {
       "get": {
         "summary": "List ereport classes that this Nexus's diagnosis engines consume.",
@@ -1456,16 +1539,15 @@
         }
       }
     },
-    "/trust-quorum/remove/{sled}": {
+    "/trust-quorum/remove/{rack_id}": {
       "post": {
         "summary": "Remove a sled from the trust quorum",
-        "description": "This is a required first step towards expunging a sled\n\nReturn the epoch of the proposed configuration so it can be polled asynchronously.",
+        "description": "This is a required first step towards expunging a sled\n\nThe sled is identified by its baseboard, since trust quorum membership is tracked by baseboard and the sled may have no database record.\n\nReturn the epoch of the proposed configuration so it can be polled asynchronously.",
         "operationId": "trust_quorum_remove_sled",
         "parameters": [
           {
             "in": "path",
-            "name": "sled",
-            "description": "ID of the sled",
+            "name": "rack_id",
             "required": true,
             "schema": {
               "type": "string",
@@ -1473,6 +1555,16 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BaseboardId"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "successful operation",
@@ -1770,10 +1862,11 @@
         ]
       },
       "BgpPeerConfig": {
+        "description": "A BGP peer configuration for a port.",
         "type": "object",
         "properties": {
           "addr": {
-            "description": "Address of the peer.",
+            "description": "Address of the peer (numbered or unnumbered).",
             "allOf": [
               {
                 "$ref": "#/components/schemas/RouterPeerType"
@@ -2009,7 +2102,7 @@
             "description": "The generation of the active group of Nexuses\n\nIf a Nexus instance notices it has a nexus_generation less than this value, it will start to quiesce in preparation for handing off control to the newer generation (see: RFD 588).",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Generation"
+                "$ref": "#/components/schemas/NexusGeneration"
               }
             ]
           },
@@ -2065,7 +2158,7 @@
             "description": "The minimum release generation to accept for target release configuration. Target release configuration with a generation less than this number will be ignored.\n\nFor example, let's say that the current target release generation is 5. Then, when reconfigurator detects a MUPdate:\n\n* the target release is ignored in favor of the install dataset * this field is set to 6\n\nOnce an operator sets a new target release, its generation will be 6 or higher. Reconfigurator will then know that it is back in charge of driving the system to the target release.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Generation"
+                "$ref": "#/components/schemas/TargetReleaseGeneration"
               }
             ]
           },
@@ -2379,7 +2472,7 @@
             "description": "The Nexus generation number\n\nSee [`Blueprint::nexus_generation`].",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Generation"
+                "$ref": "#/components/schemas/NexusGeneration"
               }
             ]
           },
@@ -2404,7 +2497,7 @@
             "description": "The minimum generation for the target release.\n\nSee [`Blueprint::target_release_minimum_generation`].",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Generation"
+                "$ref": "#/components/schemas/TargetReleaseGeneration"
               }
             ]
           },
@@ -2499,7 +2592,7 @@
                 "description": "Generation of the parent config in which this disk became expunged.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/Generation"
+                    "$ref": "#/components/schemas/SledConfigGeneration"
                   }
                 ]
               },
@@ -2602,7 +2695,7 @@
             "description": "Generation number used when this type is converted into an `OmicronSledConfig` for use by sled-agent.\n\nThis field is explicitly named `sled_agent_generation` to indicate that it is only required to cover information that changes what Reconfigurator sends to sled agent. For example, changing the sled `state` from `Active` to `Decommissioned` would not require a bump to `sled_agent_generation`, because a `Decommissioned` sled will never be sent an `OmicronSledConfig`.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Generation"
+                "$ref": "#/components/schemas/SledConfigGeneration"
               }
             ]
           },
@@ -2611,6 +2704,9 @@
           },
           "subnet": {
             "$ref": "#/components/schemas/Ipv6Subnet"
+          },
+          "update_disposition": {
+            "$ref": "#/components/schemas/BlueprintSledUpdateDisposition"
           },
           "zones": {
             "title": "IdOrdMap",
@@ -2640,7 +2736,73 @@
           "sled_agent_generation",
           "state",
           "subnet",
+          "update_disposition",
           "zones"
+        ]
+      },
+      "BlueprintSledUpdateDisposition": {
+        "description": "Controls a sled's availability for provisioning and whether its migratable instances are evacuated during an update, along with a generation number bumped whenever that disposition changes.\n\nStored in [`BlueprintSledConfig::update_disposition`]. See RFD 666.",
+        "type": "object",
+        "properties": {
+          "generation": {
+            "description": "A generation number bumped whenever `kind` changes.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UpdateDispositionGeneration"
+              }
+            ]
+          },
+          "kind": {
+            "description": "The disposition itself.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BlueprintSledUpdateDispositionKind"
+              }
+            ]
+          }
+        },
+        "required": [
+          "generation",
+          "kind"
+        ]
+      },
+      "BlueprintSledUpdateDispositionKind": {
+        "description": "The content of a sled's update disposition: whether the sled is available for provisioning, and if being evacuated, which disruption policy applies.\n\nThe \"kind\" half of [`BlueprintSledUpdateDisposition`].",
+        "oneOf": [
+          {
+            "description": "The sled is available for use for all provisions.",
+            "type": "object",
+            "properties": {
+              "availability": {
+                "type": "string",
+                "enum": [
+                  "available"
+                ]
+              }
+            },
+            "required": [
+              "availability"
+            ]
+          },
+          {
+            "description": "The sled is disallowed for all use, and its migratable instances are evacuated according to `policy`.",
+            "type": "object",
+            "properties": {
+              "availability": {
+                "type": "string",
+                "enum": [
+                  "evacuating"
+                ]
+              },
+              "policy": {
+                "$ref": "#/components/schemas/ReconfiguratorDisruptionPolicy"
+              }
+            },
+            "required": [
+              "availability",
+              "policy"
+            ]
+          }
         ]
       },
       "BlueprintSource": {
@@ -2885,7 +3047,7 @@
                 "description": "Generation of the parent config in which this zone became expunged.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/Generation"
+                    "$ref": "#/components/schemas/SledConfigGeneration"
                   }
                 ]
               },
@@ -2972,7 +3134,12 @@
                 "type": "string"
               },
               "external_ip": {
-                "$ref": "#/components/schemas/OmicronZoneExternalSnatIp"
+                "description": "The source NAT configuration.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/OmicronZoneExternalSnat"
+                  }
+                ]
               },
               "nic": {
                 "description": "The service vNIC providing outbound connectivity using OPTE.",
@@ -3140,11 +3307,11 @@
               "dataset": {
                 "$ref": "#/components/schemas/OmicronZoneDataset"
               },
-              "dns_address": {
-                "description": "The address at which the external DNS server is reachable.",
+              "dns_addresses": {
+                "description": "The addresses at which the external DNS server is reachable.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/OmicronZoneExternalFloatingAddr"
+                    "$ref": "#/components/schemas/OmicronZoneExternalFloatingAddrs"
                   }
                 ]
               },
@@ -3169,7 +3336,7 @@
             },
             "required": [
               "dataset",
-              "dns_address",
+              "dns_addresses",
               "http_address",
               "nic",
               "type"
@@ -3243,11 +3410,11 @@
                   "format": "ip"
                 }
               },
-              "external_ip": {
-                "description": "The address at which the external nexus server is reachable.",
+              "external_ips": {
+                "description": "The addresses at which the external nexus server is reachable.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/OmicronZoneExternalFloatingIp"
+                    "$ref": "#/components/schemas/OmicronZoneExternalFloatingIps"
                   }
                 ]
               },
@@ -3269,7 +3436,7 @@
                 "description": "Generation number for this Nexus zone. This is used to coordinate handoff between old and new Nexus instances during updates. See RFD 588.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/Generation"
+                    "$ref": "#/components/schemas/NexusGeneration"
                   }
                 ]
               },
@@ -3290,7 +3457,7 @@
             },
             "required": [
               "external_dns_servers",
-              "external_ip",
+              "external_ips",
               "external_tls",
               "internal_address",
               "lockstep_port",
@@ -4267,6 +4434,15 @@
           }
         ]
       },
+      "ExternalDnsAddrs": {
+        "description": "A non-empty, bounded set of external socket addrs for an External DNS zone.",
+        "type": "object",
+        "additionalProperties": {
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0
+        }
+      },
       "ExternalIpUuid": {
         "x-rust-type": {
           "crate": "omicron-uuid-kinds",
@@ -4746,10 +4922,33 @@
                 "enum": [
                   "no_matching_artifact_found"
                 ]
+              },
+              "value": {
+                "type": "string"
               }
             },
             "required": [
-              "type"
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "Too many artifacts with the required conditions for the component were found",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "too_many_matching_artifacts"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "value"
             ]
           },
           {
@@ -4850,10 +5049,33 @@
                 "enum": [
                   "no_matching_artifact_found"
                 ]
+              },
+              "value": {
+                "type": "string"
               }
             },
             "required": [
-              "type"
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "Too many artifacts with the required conditions for the component were found",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "too_many_matching_artifacts"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "value"
             ]
           },
           {
@@ -4950,10 +5172,33 @@
                 "enum": [
                   "no_matching_artifact_found"
                 ]
+              },
+              "value": {
+                "type": "string"
               }
             },
             "required": [
-              "type"
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "Too many artifacts with the required conditions for the component were found",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "too_many_matching_artifacts"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "value"
             ]
           },
           {
@@ -4990,6 +5235,214 @@
               "value"
             ]
           }
+        ]
+      },
+      "FmConfig": {
+        "description": "A fault management configuration.\n\n# Validation\n\nFor a config to be valid, the following requirements must be upheld:\n\n- [`Self::sitrep_limit`] must be at least [`Self::MIN_SITREP_LIMIT`], and no more than [`Self::MAX_LIMIT`], - [`Self::history_pruning_threshold`] must be at least [`Self::MIN_HISTORY_PRUNING_THRESHOLD`], and no more than [`Self::MAX_LIMIT`], - [`Self::history_pruning_threshold`] must be strictly less than [`Self::sitrep_limit`],\n\nThese rules are checked by the [`Self::validate`] method, which is called prior to accepting a config update.",
+        "type": "object",
+        "properties": {
+          "analysis_enabled": {
+            "description": "BREAK GLASS TO COMPLETELY DISABLE FM ANALYSIS",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FmConfigBooleanSetting"
+              }
+            ]
+          },
+          "history_pruning_threshold": {
+            "description": "The maximum number of sitreps committed to the `fm_sitrep_history` table. If the number of sitreps exceeds this threshold, the `fm_sitrep_history_pruner` background task will remove the oldest entries from the history.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FmConfigNonZeroU32Setting"
+              }
+            ]
+          },
+          "sitrep_limit": {
+            "description": "The maximum number of sitreps to keep in the database.\n\nIf the number of sitreps exceeds this limit, the FM analysis background task will not produce a new sitrep until old ones are deleted.\n\nThis limit applies to both committed sitreps in the history *and* orphaned sitreps left behind when multiple Nexuses race to commit a sitrep.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FmConfigNonZeroU32Setting"
+              }
+            ]
+          }
+        },
+        "required": [
+          "analysis_enabled",
+          "history_pruning_threshold",
+          "sitrep_limit"
+        ]
+      },
+      "FmConfigBooleanSetting": {
+        "description": "A single configuration setting that is either explicitly overridden or inherits the system-defined default.\n\nThis is generic over a `V: `[`SettingValue`] type parameter, which represents a particular config setting. This trait defines both the type of the actual configuration value *and* the value of its default. Implementations of this trait for each field in [`FmConfig`] are defined in the [`settings`] module using the `define_setting!` macro. This may seem a bit more complex than just having a [`Default`] implementation for [`FmConfig`]. However, it is designed to allow us to define the default value for each setting in a single place, rather than having to keep them in sync between cases where *some* settings are the defaults and others are overridden, and cases where the entire config is the default because no overrides exist.\n\n[`Self::Default`] and [`Self::Override`] have different semantics even when an overridden value *happens* to be equal to the default value for that setting. This is because the default value for a given setting may change across multiple Oxide system software releases. Just because the *current* default for the sitrep limit is 2500 (for example) does not mean that we will not change this default value in the future. Therefore, it is necessary to represent that a particular config setting is explicitly set to \"whatever the default value in the current release happens to be\", rather than being set to a concrete value that is equal to the current default. In the database, this is represented using `NULL`s to indicate the default value (which is why [`Setting::into_override`] and the `From<Option>` impl exist).",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string",
+                "enum": [
+                  "override"
+                ]
+              },
+              "value": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "source",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string",
+                "enum": [
+                  "default"
+                ]
+              }
+            },
+            "required": [
+              "source"
+            ]
+          }
+        ]
+      },
+      "FmConfigNonZeroU32Setting": {
+        "description": "A single configuration setting that is either explicitly overridden or inherits the system-defined default.\n\nThis is generic over a `V: `[`SettingValue`] type parameter, which represents a particular config setting. This trait defines both the type of the actual configuration value *and* the value of its default. Implementations of this trait for each field in [`FmConfig`] are defined in the [`settings`] module using the `define_setting!` macro. This may seem a bit more complex than just having a [`Default`] implementation for [`FmConfig`]. However, it is designed to allow us to define the default value for each setting in a single place, rather than having to keep them in sync between cases where *some* settings are the defaults and others are overridden, and cases where the entire config is the default because no overrides exist.\n\n[`Self::Default`] and [`Self::Override`] have different semantics even when an overridden value *happens* to be equal to the default value for that setting. This is because the default value for a given setting may change across multiple Oxide system software releases. Just because the *current* default for the sitrep limit is 2500 (for example) does not mean that we will not change this default value in the future. Therefore, it is necessary to represent that a particular config setting is explicitly set to \"whatever the default value in the current release happens to be\", rather than being set to a concrete value that is equal to the current default. In the database, this is represented using `NULL`s to indicate the default value (which is why [`Setting::into_override`] and the `From<Option>` impl exist).",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string",
+                "enum": [
+                  "override"
+                ]
+              },
+              "value": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 1
+              }
+            },
+            "required": [
+              "source",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string",
+                "enum": [
+                  "default"
+                ]
+              }
+            },
+            "required": [
+              "source"
+            ]
+          }
+        ]
+      },
+      "FmConfigParam": {
+        "description": "Parameters to insert a new FM configuration override at a particular version.\n\nA config override is accepted if and only if:\n\n- [`Self::version`] is exactly one greater than the current latest override version (or 1, if no overrides exist), - [`Self::comment`] is a non-empty string, and does not  consist entirely of whitespace characters, and, - The values in [`Self::config`] pass [validation](FmConfig#validation).\n\nThe [`FmConfigParam::validate`] method checks all of these requirements and is called prior to inserting a new config.",
+        "type": "object",
+        "properties": {
+          "comment": {
+            "description": "A comment describing why the default configuration was overridden.\n\nA comment is mandatory when overriding the default configuration, so this must be non-empty.",
+            "type": "string"
+          },
+          "config": {
+            "description": "The configuration itself.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FmConfig"
+              }
+            ]
+          },
+          "version": {
+            "description": "The version of the configuration.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "comment",
+          "config",
+          "version"
+        ]
+      },
+      "FmConfigSource": {
+        "description": "Where a [`FmConfigView`]'s configuration came from.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "default"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "The fault management configuration was overridden.",
+            "type": "object",
+            "properties": {
+              "comment": {
+                "description": "A comment describing why the default configuration was overridden.",
+                "type": "string"
+              },
+              "time_modified": {
+                "description": "The time at which this override was created.",
+                "type": "string",
+                "format": "date-time"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "override"
+                ]
+              },
+              "version": {
+                "description": "The version of the override.",
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 1
+              }
+            },
+            "required": [
+              "comment",
+              "time_modified",
+              "type",
+              "version"
+            ]
+          }
+        ]
+      },
+      "FmConfigView": {
+        "description": "A view of the current fault management configuration.",
+        "type": "object",
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/FmConfig"
+          },
+          "source": {
+            "$ref": "#/components/schemas/FmConfigSource"
+          }
+        },
+        "required": [
+          "config",
+          "source"
         ]
       },
       "Generation": {
@@ -6077,6 +6530,28 @@
         "description": "Password hashes must be in PHC (Password Hashing Competition) string format.  Passwords must be hashed with Argon2id.  Password hashes may be rejected if the parameters appear not to be secure enough.",
         "type": "string"
       },
+      "NexusExternalIps": {
+        "description": "A non-empty, bounded set of external IPs for a Nexus zone.",
+        "type": "array",
+        "items": {
+          "type": "string",
+          "format": "ip"
+        },
+        "minItems": 1,
+        "maxItems": 16,
+        "uniqueItems": true
+      },
+      "NexusGeneration": {
+        "description": "Generation numbers stored in the database, used for optimistic concurrency control",
+        "x-rust-type": {
+          "crate": "omicron-generation-kinds",
+          "path": "omicron_generation_kinds::NexusGeneration",
+          "version": "*"
+        },
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0
+      },
       "NexusGenerationBumpWaitingOn": {
         "oneOf": [
           {
@@ -6173,8 +6648,29 @@
           "id"
         ]
       },
+      "OmicronZoneExternalFloatingAddrs": {
+        "title": "IdOrdMap",
+        "description": "A set of `OmicronZoneExternalFloatingAddrs`s allocated to a single zone.\n\nThe set of IPs is always non-empty, and there are no duplicate IP addresses. Also, the size is bounded above by `MAX_ZONE_EXTERNAL_IPS`.\n\nNOTE: This is the reconfigurator analog of the inventory `ExternalDnsAddrs` type.",
+        "x-rust-type": {
+          "crate": "iddqd",
+          "parameters": [
+            {
+              "$ref": "#/components/schemas/OmicronZoneExternalFloatingAddr"
+            }
+          ],
+          "path": "iddqd::IdOrdMap",
+          "version": "*"
+        },
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/OmicronZoneExternalFloatingAddr"
+        },
+        "minItems": 1,
+        "maxItems": 16,
+        "uniqueItems": true
+      },
       "OmicronZoneExternalFloatingIp": {
-        "description": "Floating external IP allocated to an Omicron-managed zone.\n\nThis is a slimmer `nexus_db_model::ExternalIp` that only stores the fields necessary for blueprint planning, and requires that the zone have a single IP.",
+        "description": "Floating external IP allocated to an Omicron-managed zone.\n\nThis is a slimmer `nexus_db_model::ExternalIp` that only stores the fields necessary for blueprint planning.",
         "type": "object",
         "properties": {
           "id": {
@@ -6190,15 +6686,125 @@
           "ip"
         ]
       },
-      "OmicronZoneExternalSnatIp": {
-        "description": "SNAT (outbound) external IP allocated to an Omicron-managed zone.\n\nThis is a slimmer `nexus_db_model::ExternalIp` that only stores the fields necessary for blueprint planning, and requires that the zone have a single IP.",
+      "OmicronZoneExternalFloatingIps": {
+        "title": "IdOrdMap",
+        "description": "A set of `OmicronZoneExternalFloatingIp`s allocated to a single zone.\n\nThe set of IPs is always non-empty, and there are no duplicate IP addresses. Also, the size is bounded above by `MAX_ZONE_EXTERNAL_IPS`.\n\nNOTE: This is the reconfigurator analog of the inventory `NexusExternalIps` type.",
+        "x-rust-type": {
+          "crate": "iddqd",
+          "parameters": [
+            {
+              "$ref": "#/components/schemas/OmicronZoneExternalFloatingIp"
+            }
+          ],
+          "path": "iddqd::IdOrdMap",
+          "version": "*"
+        },
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/OmicronZoneExternalFloatingIp"
+        },
+        "minItems": 1,
+        "maxItems": 16,
+        "uniqueItems": true
+      },
+      "OmicronZoneExternalSnat": {
+        "description": "SNAT configuration for a boundary NTP zone in a blueprint.\n\nBoundary NTP reaches upstream servers via source NAT and needs a source address per IP version it wants to reach them on: at most one per family, and at least one overall. This is the blueprint-layer analog of the sled-agent wire type `ZoneSnatConfig`, but each entry additionally carries its allocated `ExternalIpUuid`.",
+        "oneOf": [
+          {
+            "description": "An IPv4 SNAT external IP allocated to an Omicron-managed zone.\n\nThe family-typed analog of [`OmicronZoneExternalSnatIp`], used in the variants of [`OmicronZoneExternalSnat`] so the enum can't hold an address of the wrong family.",
+            "type": "object",
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/ExternalIpUuid"
+              },
+              "snat_cfg": {
+                "$ref": "#/components/schemas/SourceNatConfigV4"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ipv4_only"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "snat_cfg",
+              "type"
+            ]
+          },
+          {
+            "description": "An IPv6 SNAT external IP allocated to an Omicron-managed zone.\n\nThe family-typed analog of [`OmicronZoneExternalSnatIp`], used in the variants of [`OmicronZoneExternalSnat`] so the enum can't hold an address of the wrong family.",
+            "type": "object",
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/ExternalIpUuid"
+              },
+              "snat_cfg": {
+                "$ref": "#/components/schemas/SourceNatConfigV6"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ipv6_only"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "snat_cfg",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "ipv4": {
+                "$ref": "#/components/schemas/OmicronZoneExternalSnatIpv4"
+              },
+              "ipv6": {
+                "$ref": "#/components/schemas/OmicronZoneExternalSnatIpv6"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "dual_stack"
+                ]
+              }
+            },
+            "required": [
+              "ipv4",
+              "ipv6",
+              "type"
+            ]
+          }
+        ]
+      },
+      "OmicronZoneExternalSnatIpv4": {
+        "description": "An IPv4 SNAT external IP allocated to an Omicron-managed zone.\n\nThe family-typed analog of [`OmicronZoneExternalSnatIp`], used in the variants of [`OmicronZoneExternalSnat`] so the enum can't hold an address of the wrong family.",
         "type": "object",
         "properties": {
           "id": {
             "$ref": "#/components/schemas/ExternalIpUuid"
           },
           "snat_cfg": {
-            "$ref": "#/components/schemas/SourceNatConfigGeneric"
+            "$ref": "#/components/schemas/SourceNatConfigV4"
+          }
+        },
+        "required": [
+          "id",
+          "snat_cfg"
+        ]
+      },
+      "OmicronZoneExternalSnatIpv6": {
+        "description": "An IPv6 SNAT external IP allocated to an Omicron-managed zone.\n\nThe family-typed analog of [`OmicronZoneExternalSnatIp`], used in the variants of [`OmicronZoneExternalSnat`] so the enum can't hold an address of the wrong family.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/ExternalIpUuid"
+          },
+          "snat_cfg": {
+            "$ref": "#/components/schemas/SourceNatConfigV6"
           }
         },
         "required": [
@@ -6240,11 +6846,11 @@
                   "type": "string"
                 }
               },
-              "snat_cfg": {
+              "snat": {
                 "description": "The SNAT configuration for outbound connections.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/SourceNatConfigGeneric"
+                    "$ref": "#/components/schemas/ZoneSnatConfig"
                   }
                 ]
               },
@@ -6260,7 +6866,7 @@
               "dns_servers",
               "nic",
               "ntp_servers",
-              "snat_cfg",
+              "snat",
               "type"
             ]
           },
@@ -6401,9 +7007,13 @@
               "dataset": {
                 "$ref": "#/components/schemas/OmicronZoneDataset"
               },
-              "dns_address": {
-                "description": "The address at which the external DNS server is reachable.",
-                "type": "string"
+              "dns_addresses": {
+                "description": "The addresses at which the external DNS server is reachable.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/ExternalDnsAddrs"
+                  }
+                ]
               },
               "http_address": {
                 "description": "The address at which the external DNS server API is reachable.",
@@ -6426,7 +7036,7 @@
             },
             "required": [
               "dataset",
-              "dns_address",
+              "dns_addresses",
               "http_address",
               "nic",
               "type"
@@ -6500,10 +7110,13 @@
                   "format": "ip"
                 }
               },
-              "external_ip": {
-                "description": "The address at which the external nexus server is reachable.",
-                "type": "string",
-                "format": "ip"
+              "external_ips": {
+                "description": "The addresses at which the external nexus server is reachable.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/NexusExternalIps"
+                  }
+                ]
               },
               "external_tls": {
                 "description": "Whether Nexus's external endpoint should use TLS",
@@ -6537,7 +7150,7 @@
             },
             "required": [
               "external_dns_servers",
-              "external_ip",
+              "external_ips",
               "external_tls",
               "internal_address",
               "nic",
@@ -6905,7 +7518,7 @@
             "description": "what `reassignment_generation` was when this recovery started",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Generation"
+                "$ref": "#/components/schemas/SagaReassignmentGeneration"
               }
             ]
           }
@@ -7026,7 +7639,15 @@
         ]
       },
       "PlannerConfig": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "disruption_policy": {
+            "$ref": "#/components/schemas/ReconfiguratorDisruptionPolicy"
+          }
+        },
+        "required": [
+          "disruption_policy"
+        ]
       },
       "PlanningAddOutOfEligibleSleds": {
         "description": "How many discretionary zones we actually placed out of how many we wanted to place.",
@@ -7414,7 +8035,7 @@
                 ]
               },
               "value": {
-                "$ref": "#/components/schemas/Generation"
+                "$ref": "#/components/schemas/NexusGeneration"
               }
             },
             "required": [
@@ -7810,6 +8431,11 @@
             "items": {
               "$ref": "#/components/schemas/UplinkAddressConfig"
             }
+          },
+          "allow_ddm_traffic": {
+            "description": "Whether or not to allow DDM traffic on this port",
+            "default": false,
+            "type": "boolean"
           },
           "autoneg": {
             "description": "Whether or not to set autonegotiation",
@@ -8318,13 +8944,6 @@
               }
             ]
           },
-          "internal_services_ip_pool_ranges": {
-            "description": "Ranges of the service IP pool which may be used for internal services, such as Nexus.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/IpRange"
-            }
-          },
           "physical_disks": {
             "description": "\"Managed\" physical disks owned by the control plane",
             "type": "array",
@@ -8348,6 +8967,25 @@
               }
             ]
           },
+          "service_ip_pools": {
+            "title": "IdOrdMap",
+            "description": "Configuration for IP Pools used for system services.",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/ServiceIpPoolConfig"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ServiceIpPoolConfig"
+            },
+            "uniqueItems": true
+          },
           "zpools": {
             "description": "Zpools created within the physical disks created by the control plane.",
             "type": "array",
@@ -8363,10 +9001,10 @@
           "crucible_datasets",
           "external_dns_zone_name",
           "internal_dns_zone_config",
-          "internal_services_ip_pool_ranges",
           "physical_disks",
           "rack_network_config",
           "recovery_silo",
+          "service_ip_pools",
           "zpools"
         ]
       },
@@ -8431,11 +9069,18 @@
       "ReconfiguratorConfig": {
         "type": "object",
         "properties": {
-          "disruption_policy": {
-            "$ref": "#/components/schemas/ReconfiguratorDisruptionPolicy"
+          "blueprint_pruner_enabled": {
+            "type": "boolean"
+          },
+          "blueprint_pruner_nkeep": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
           },
           "planner_config": {
-            "default": {},
+            "default": {
+              "disruption_policy": "terminate"
+            },
             "allOf": [
               {
                 "$ref": "#/components/schemas/PlannerConfig"
@@ -8450,7 +9095,8 @@
           }
         },
         "required": [
-          "disruption_policy",
+          "blueprint_pruner_enabled",
+          "blueprint_pruner_nkeep",
           "planner_enabled",
           "tuf_repo_pruner_enabled"
         ]
@@ -8683,8 +9329,15 @@
           {
             "type": "object",
             "properties": {
-              "ip": {
-                "description": "IP address for numbered BGP peers.",
+              "src_addr": {
+                "nullable": true,
+                "description": "Optional local IP address to bind when establishing outbound TCP connections to this peer. If `None`, the OS selects the source address.",
+                "default": null,
+                "type": "string",
+                "format": "ip"
+              },
+              "target_addr": {
+                "description": "Target IP address for numbered BGP peers.",
                 "type": "string",
                 "format": "ip"
               },
@@ -8696,7 +9349,7 @@
               }
             },
             "required": [
-              "ip",
+              "target_addr",
               "type"
             ]
           }
@@ -8844,7 +9497,7 @@
             "description": "generation number for the saga reassignment\n\nThis gets bumped whenever a saga reassignment operation completes that may have re-assigned us some sagas.  It's used to keep track of when we've recovered all sagas that could be assigned to us.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Generation"
+                "$ref": "#/components/schemas/SagaReassignmentGeneration"
               }
             ]
           },
@@ -8865,7 +9518,7 @@
             "description": "\"saga reassignment generation number\" that was \"caught up to\" by the last recovery pass\n\nThis is used with `reassignment_generation` to help us know when we've recovered all the sagas that may have been assigned to us during a given reassignment pass.  See `reassignment_done()` for details.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Generation"
+                "$ref": "#/components/schemas/SagaReassignmentGeneration"
               }
             ]
           },
@@ -8906,6 +9559,17 @@
           "recovered_reassignment_generation",
           "sagas_pending"
         ]
+      },
+      "SagaReassignmentGeneration": {
+        "description": "Generation numbers stored in the database, used for optimistic concurrency control",
+        "x-rust-type": {
+          "crate": "omicron-generation-kinds",
+          "path": "omicron_generation_kinds::SagaReassignmentGeneration",
+          "version": "*"
+        },
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0
       },
       "SagaResultsPage": {
         "description": "A single page of results",
@@ -9046,6 +9710,36 @@
         "format": "uint64",
         "minimum": 0
       },
+      "ServiceIpPoolConfig": {
+        "description": "Full details of a system-service IP pool, provided at rack setup (RSS).",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "Description of the IP Pool",
+            "type": "string"
+          },
+          "name": {
+            "description": "Name of the IP Pool",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "ranges": {
+            "description": "List of IP address ranges in the pool.\n\nThere is guaranteed to be at least one range, and all ranges are of the same IP version.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpRange"
+            }
+          }
+        },
+        "required": [
+          "description",
+          "name",
+          "ranges"
+        ]
+      },
       "SledAgentUpdateStatus": {
         "type": "object",
         "properties": {
@@ -9079,6 +9773,17 @@
           "sled_id",
           "zones"
         ]
+      },
+      "SledConfigGeneration": {
+        "description": "Generation numbers stored in the database, used for optimistic concurrency control",
+        "x-rust-type": {
+          "crate": "omicron-generation-kinds",
+          "path": "omicron_generation_kinds::SledConfigGeneration",
+          "version": "*"
+        },
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0
       },
       "SledPolicy": {
         "description": "The operator-defined policy of a sled.",
@@ -9184,7 +9889,7 @@
         "type": "string",
         "format": "uuid"
       },
-      "SourceNatConfigGeneric": {
+      "SourceNatConfigV4": {
         "description": "An IP address and port range used for source NAT, i.e., making outbound network connections from guests or services.",
         "type": "object",
         "properties": {
@@ -9197,7 +9902,35 @@
           "ip": {
             "description": "The external address provided to the instance or service.",
             "type": "string",
-            "format": "ip"
+            "format": "ipv4"
+          },
+          "last_port": {
+            "description": "The last port used for source NAT, also inclusive.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "first_port",
+          "ip",
+          "last_port"
+        ]
+      },
+      "SourceNatConfigV6": {
+        "description": "An IP address and port range used for source NAT, i.e., making outbound network connections from guests or services.",
+        "type": "object",
+        "properties": {
+          "first_port": {
+            "description": "The first port used for source NAT, inclusive.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "ip": {
+            "description": "The external address provided to the instance or service.",
+            "type": "string",
+            "format": "ipv6"
           },
           "last_port": {
             "description": "The last port used for source NAT, also inclusive.",
@@ -9398,6 +10131,17 @@
             ]
           }
         ]
+      },
+      "TargetReleaseGeneration": {
+        "description": "Generation numbers stored in the database, used for optimistic concurrency control",
+        "x-rust-type": {
+          "crate": "omicron-generation-kinds",
+          "path": "omicron_generation_kinds::TargetReleaseGeneration",
+          "version": "*"
+        },
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0
       },
       "TrustQuorumConfig": {
         "type": "object",
@@ -9698,6 +10442,17 @@
           "took_over_concurrent_update"
         ]
       },
+      "UpdateDispositionGeneration": {
+        "description": "Generation numbers stored in the database, used for optimistic concurrency control",
+        "x-rust-type": {
+          "crate": "omicron-generation-kinds",
+          "path": "omicron_generation_kinds::UpdateDispositionGeneration",
+          "version": "*"
+        },
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0
+      },
       "UpdateStatus": {
         "type": "object",
         "properties": {
@@ -9882,6 +10637,103 @@
           "internal_ntp",
           "nexus",
           "oximeter"
+        ]
+      },
+      "ZoneSnatConfig": {
+        "description": "Source NAT configuration for a boundary NTP zone.\n\nBoundary NTP reaches upstream servers via source NAT and needs a source address per IP version it wants to reach them on: at most one per family, and at least one overall.",
+        "oneOf": [
+          {
+            "description": "An IP address and port range used for source NAT, i.e., making outbound network connections from guests or services.",
+            "type": "object",
+            "properties": {
+              "first_port": {
+                "description": "The first port used for source NAT, inclusive.",
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0
+              },
+              "ip": {
+                "description": "The external address provided to the instance or service.",
+                "type": "string",
+                "format": "ipv4"
+              },
+              "last_port": {
+                "description": "The last port used for source NAT, also inclusive.",
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ipv4_only"
+                ]
+              }
+            },
+            "required": [
+              "first_port",
+              "ip",
+              "last_port",
+              "type"
+            ]
+          },
+          {
+            "description": "An IP address and port range used for source NAT, i.e., making outbound network connections from guests or services.",
+            "type": "object",
+            "properties": {
+              "first_port": {
+                "description": "The first port used for source NAT, inclusive.",
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0
+              },
+              "ip": {
+                "description": "The external address provided to the instance or service.",
+                "type": "string",
+                "format": "ipv6"
+              },
+              "last_port": {
+                "description": "The last port used for source NAT, also inclusive.",
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ipv6_only"
+                ]
+              }
+            },
+            "required": [
+              "first_port",
+              "ip",
+              "last_port",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "ipv4": {
+                "$ref": "#/components/schemas/SourceNatConfigV4"
+              },
+              "ipv6": {
+                "$ref": "#/components/schemas/SourceNatConfigV6"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "dual_stack"
+                ]
+              }
+            },
+            "required": [
+              "ipv4",
+              "ipv6",
+              "type"
+            ]
+          }
         ]
       },
       "ZoneStatus": {
@@ -10085,7 +10937,7 @@
                 ]
               },
               "zone_generation": {
-                "$ref": "#/components/schemas/Generation"
+                "$ref": "#/components/schemas/NexusGeneration"
               }
             },
             "required": [

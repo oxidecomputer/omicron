@@ -60,7 +60,7 @@ impl DataStore {
                             omicron_common::api::external::Error::internal_error(
                                 &format!(
                                     "saml_identity_provider.try_into() failed! {}",
-                                    &e.to_string()
+                                    e
                                 )
                             )
                         )?

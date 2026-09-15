@@ -26,6 +26,15 @@ impl super::Nexus {
         config: &networking::BgpConfigCreate,
     ) -> CreateResult<BgpConfig> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
+        let (.., authz_bgp_announce_set) = self
+            .bgp_announce_set_lookup(opctx, config.bgp_announce_set_id.clone())?
+            .lookup_for(authz::Action::Read)
+            .await?;
+
+        let config =
+            BgpConfig::from_config_create(config, authz_bgp_announce_set.id());
+
         let result = self.db_datastore.bgp_config_create(opctx, config).await?;
         Ok(result)
     }
@@ -36,7 +45,13 @@ impl super::Nexus {
         name_or_id: NameOrId,
     ) -> LookupResult<BgpConfig> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        self.db_datastore.bgp_config_get(opctx, &name_or_id).await
+
+        let (.., bgp_config) = self
+            .bgp_config_lookup(opctx, name_or_id)?
+            .fetch_for(authz::Action::Read)
+            .await?;
+
+        Ok(bgp_config)
     }
 
     pub async fn bgp_config_list(
@@ -125,8 +140,13 @@ impl super::Nexus {
         sel: &networking::BgpConfigSelector,
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
-        let result = self.db_datastore.bgp_config_delete(opctx, sel).await?;
-        Ok(result)
+
+        let (.., authz_bgp_config) = self
+            .bgp_config_lookup(opctx, sel.name_or_id.clone())?
+            .lookup_for(authz::Action::Delete)
+            .await?;
+
+        self.db_datastore.bgp_config_delete(opctx, &authz_bgp_config).await
     }
 
     pub async fn bgp_update_announce_set(

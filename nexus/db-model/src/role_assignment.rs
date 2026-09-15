@@ -142,7 +142,7 @@ where
                     Error::internal_error(&format!(
                         "parsing database role assignment: \
                         unrecognized role name {:?}: {:#}",
-                        &role_asgn.role_name, error,
+                        role_asgn.role_name, error,
                     ))
                 })?,
         })

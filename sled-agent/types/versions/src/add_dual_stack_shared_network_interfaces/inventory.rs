@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::time::Duration;
 
+use crate::v1::inventory::Baseboard;
 use chrono::{DateTime, Utc};
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
@@ -14,10 +15,10 @@ use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_common::api::internal::shared::PrivateIpv4Config;
 use omicron_common::api::internal::shared::PrivateIpv6Config;
 use omicron_common::{
-    api::external::{self, ByteCount, Generation, Name, Vni},
-    disk::{DatasetConfig, OmicronPhysicalDiskConfig},
+    api::external::{self, ByteCount, Name, Vni},
     zpool_name::ZpoolName,
 };
+use omicron_generation_kinds::Generation;
 use omicron_ledger::Ledgerable;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::{DatasetUuid, OmicronZoneUuid};
@@ -25,9 +26,11 @@ use omicron_uuid_kinds::{MupdateOverrideUuid, PhysicalDiskUuid};
 use oxnet::IpNet;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use sled_hardware_types::{Baseboard, SledCpuFamily};
+use sled_hardware_types::SledCpuFamily;
 use uuid::Uuid;
 
+use crate::v1::disk::DatasetConfig;
+use crate::v1::disk::OmicronPhysicalDiskConfig;
 use crate::v1::inventory::{
     BootPartitionContents, ConfigReconcilerInventoryResult,
     HostPhase2DesiredSlots, InventoryDataset, InventoryDisk, InventoryZpool,

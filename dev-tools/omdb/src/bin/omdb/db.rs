@@ -55,6 +55,7 @@ use diesel::OptionalExtension;
 use diesel::TextExpressionMethods;
 use diesel::expression::SelectableHelper;
 use diesel::query_dsl::QueryDsl;
+use display_error_chain::DisplayErrorChain;
 use indicatif::ProgressBar;
 use indicatif::ProgressDrawTarget;
 use indicatif::ProgressStyle;
@@ -65,6 +66,7 @@ use nexus_db_errors::OptionalError;
 use nexus_db_lookup::DataStoreConnection;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::CrucibleDataset;
+use nexus_db_model::DbSledBpAvailability;
 use nexus_db_model::DnsGroup;
 use nexus_db_model::DnsName;
 use nexus_db_model::DnsVersion;
@@ -151,8 +153,11 @@ use nexus_types::inventory::Collection;
 use nexus_types::inventory::CollectionDisplayCliFilter;
 use omicron_common::api::external;
 use omicron_common::api::external::DataPageParams;
-use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;
+use omicron_generation_kinds::Generation;
+use omicron_generation_kinds::InstanceStateGeneration;
+use omicron_generation_kinds::InstanceUpdaterGeneration;
+use omicron_generation_kinds::UpdateDispositionGeneration;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::DownstairsRegionUuid;
@@ -166,6 +171,7 @@ use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::VolumeUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use parallel_task_set::ParallelTaskSet;
 use sled_agent_client::VolumeConstructionRequest;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
@@ -299,7 +305,7 @@ impl DbUrlOptions {
         log: &slog::Logger,
     ) -> anyhow::Result<Arc<DataStore>> {
         let db_url = self.resolve_pg_url(omdb, log).await?;
-        eprintln!("note: using database URL {}", &db_url);
+        eprintln!("note: using database URL {}", db_url);
 
         let addrs = db_url.all_addresses()?;
         let pool = Arc::new(db::Pool::new_fixed_hosts(log, addrs));
@@ -1092,6 +1098,10 @@ enum ValidateCommands {
     /// Crucible agent says were deleted, or region snapshots that Nexus doesn't
     /// know about.
     ValidateRegionSnapshots,
+
+    /// Validate that the artifact replication configuration in the database
+    /// matches the one present on all sleds.
+    ValidateArtifactReplication,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -1440,7 +1450,7 @@ impl DbArgs {
                         args.exec(&omdb, &opctx, &datastore).await
                     }
                     DbCommands::Sitrep(args) => {
-                        sitrep::cmd_db_sitrep(&opctx, &datastore, &fetch_opts, args).await
+                        sitrep::cmd_db_sitrep(&omdb, &opctx, &datastore, &fetch_opts, args).await
                     }
                     DbCommands::Sitreps(args) => {
                         sitrep::cmd_db_sitrep_history(&opctx, &datastore, &fetch_opts, args).await
@@ -1584,6 +1594,9 @@ impl DbArgs {
                     DbCommands::Validate(ValidateArgs {
                         command: ValidateCommands::ValidateRegionSnapshots,
                     }) => cmd_db_validate_region_snapshots(&datastore).await,
+                    DbCommands::Validate(ValidateArgs {
+                        command: ValidateCommands::ValidateArtifactReplication,
+                    }) => cmd_db_validate_artifact_replication(&opctx, &datastore, &fetch_opts).await,
                     DbCommands::Volumes(VolumeArgs {
                         command: VolumeCommands::Info(args),
                     }) => cmd_db_volume_info(&datastore, args).await,
@@ -4650,11 +4663,13 @@ struct SledRow {
     role: &'static str,
     policy: SledPolicy,
     state: SledState,
+    #[tabled(rename = "BP AVAIL")]
+    bp_availability: &'static str,
     id: SledUuid,
 }
 
-impl From<Sled> for SledRow {
-    fn from(s: Sled) -> Self {
+impl SledRow {
+    fn new(s: Sled, bp_availability: Option<DbSledBpAvailability>) -> Self {
         SledRow {
             id: s.id(),
             serial: s.serial_number().to_string(),
@@ -4662,6 +4677,10 @@ impl From<Sled> for SledRow {
             role: if s.is_scrimlet() { "scrimlet" } else { "-" },
             policy: s.policy(),
             state: s.state().into(),
+            bp_availability: match bp_availability {
+                Some(state) => state.label(),
+                None => "(missing)",
+            },
         }
     }
 }
@@ -4691,7 +4710,19 @@ async fn cmd_db_sleds(
         .context("listing sleds")?;
     check_limit(&sleds, limit, || String::from("listing sleds"));
 
-    let rows = sleds.into_iter().map(|s| SledRow::from(s));
+    // Look up each sled's reconfigurator provisioning availability from the
+    // `rendezvous_sled_bp_availability` rendezvous table. A sled might not be
+    // present in the table (e.g. it was just added and the reconciliation task
+    // has not run yet), in which case it is rendered as `(missing)`.
+    let bp_availability = datastore
+        .rendezvous_sled_bp_availability_list_all_batched(opctx)
+        .await
+        .context("listing sled bp-availability rendezvous rows")?;
+
+    let rows = sleds.into_iter().map(|s| {
+        let state = bp_availability.get(&s.id()).map(|r| r.bp_availability());
+        SledRow::new(s, state)
+    });
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())
         .with(tabled::settings::Padding::new(1, 1, 0, 0))
@@ -5033,7 +5064,7 @@ async fn cmd_db_instance_info(
     println!("    {INTENDED_STATE:>WIDTH$}: {}", instance.intended_state);
     println!(
         "    {LAST_UPDATED:>WIDTH$}: {time_updated:?} (generation {})",
-        generation.0
+        InstanceStateGeneration::from(generation)
     );
 
     // Reincarnation status
@@ -5089,7 +5120,10 @@ async fn cmd_db_instance_info(
     } else {
         print!("    {UPDATER_LOCK:>WIDTH$}: UNLOCKED");
     }
-    println!(" at generation: {}", instance.updater_gen.0);
+    println!(
+        " at generation: {}",
+        InstanceUpdaterGeneration::from(instance.updater_gen)
+    );
 
     fn print_vmm(kind: &str, id: Uuid, vmm: Option<&Vmm>) {
         match vmm {
@@ -5359,6 +5393,7 @@ async fn cmd_db_instance_info(
                     generation: _,
                     state: _,
                     failure_reason: _,
+                    stop_for_update_disposition_generation: _,
                 } = vmm;
                 VmmRow {
                     state: VmmStateRow::from(vmm),
@@ -6571,7 +6606,7 @@ async fn cmd_db_validate_volume_references(
                     // full table scan
                     conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
 
-                    let pattern = format!("%{}%", &snapshot_addr);
+                    let pattern = format!("%{}%", snapshot_addr);
 
                     use nexus_db_schema::schema::volume::dsl;
 
@@ -7268,6 +7303,96 @@ async fn cmd_db_validate_region_snapshots(
 
     println!("{}", table);
 
+    Ok(())
+}
+
+#[derive(Tabled)]
+#[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+struct ValidateArtifactReplicationRow {
+    id: SledUuid,
+    serial: String,
+    ip: String,
+    state: String,
+}
+
+async fn cmd_db_validate_artifact_replication(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+) -> Result<(), anyhow::Error> {
+    let config = datastore.tuf_list_artifacts_unpruned_batched(opctx).await?;
+
+    let limit = fetch_opts.fetch_limit;
+    let filter = SledFilter::TufArtifactReplication;
+    let sleds = datastore
+        .sled_list(&opctx, &first_page(limit), filter)
+        .await
+        .context("listing sleds")?;
+    check_limit(&sleds, limit, || String::from("listing sleds"));
+
+    let mut task_set = ParallelTaskSet::new();
+    let mut outputs = Vec::new();
+    for sled in sleds {
+        let log = opctx.log.clone();
+        if let Some(output) = task_set
+            .spawn(async move {
+                let url = format!("http://{}", sled.address());
+                let client = sled_agent_client::Client::new(&url, log);
+                let sled_config = client
+                    .artifact_config_get()
+                    .await
+                    .map(|res| res.into_inner());
+                (sled, sled_config)
+            })
+            .await
+        {
+            outputs.push(output);
+        }
+    }
+    let mut rows = Vec::new();
+    outputs.extend(task_set.join_remaining().await);
+    for (sled, sled_config_result) in outputs {
+        let state = match sled_config_result {
+            Ok(sled_config) => {
+                match config.generation.cmp(&sled_config.generation) {
+                    Ordering::Equal => {
+                        // `artifacts` is a BTreeSet, so no need to sort.
+                        if config.artifacts == sled_config.artifacts {
+                            "OK".to_owned()
+                        } else {
+                            format!(
+                                "BAD: nexus's {g} = sled's {sg} with incorrect artifacts",
+                                g = config.generation,
+                                sg = sled_config.generation
+                            )
+                        }
+                    }
+                    Ordering::Less => format!(
+                        "BAD: nexus's {g} < sled's {sg}",
+                        g = config.generation,
+                        sg = sled_config.generation
+                    ),
+                    Ordering::Greater => format!(
+                        "OLD: nexus's {g} > sled's {sg}",
+                        g = config.generation,
+                        sg = sled_config.generation
+                    ),
+                }
+            }
+            Err(err) => format!("ERROR: {}", DisplayErrorChain::new(&err)),
+        };
+        rows.push(ValidateArtifactReplicationRow {
+            id: sled.id(),
+            serial: sled.serial_number().to_owned(),
+            ip: sled.ip().to_string(),
+            state,
+        });
+    }
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+    println!("{table}");
     Ok(())
 }
 
@@ -8004,6 +8129,7 @@ fn prettyprint_vmm(
     const STATE: &'static str = "state";
     const FAILURE_REASON: &'static str = "  failure reason";
     const FAILURE_NOTE: &'static str = "  note";
+    const STOP_FOR_UPDATE: &'static str = "  marked to stop for sled update";
     const WIDTH: usize = const_max_len(&[
         ID,
         CREATED,
@@ -8017,6 +8143,7 @@ fn prettyprint_vmm(
         ADDRESS,
         FAILURE_REASON,
         FAILURE_NOTE,
+        STOP_FOR_UPDATE,
     ]);
 
     let width = std::cmp::max(width, Some(WIDTH)).unwrap_or(WIDTH);
@@ -8033,6 +8160,7 @@ fn prettyprint_vmm(
         generation,
         time_state_updated,
         failure_reason,
+        stop_for_update_disposition_generation,
     } = vmm;
 
     println!("{indent}{ID:>width$}: {id}");
@@ -8066,6 +8194,12 @@ fn prettyprint_vmm(
              non-NULL failure reason",
             "/!\\",
             width = indent.len(),
+        );
+    }
+    if let Some(ud_generation) = stop_for_update_disposition_generation {
+        let u_g = UpdateDispositionGeneration::from(*ud_generation);
+        println!(
+            "{indent}{STOP_FOR_UPDATE:>width$}: update disposition generation {u_g}"
         );
     }
 
@@ -8164,6 +8298,7 @@ async fn cmd_db_vmm_list(
                 generation: _,
                 state: _,
                 failure_reason: _,
+                stop_for_update_disposition_generation: _,
             } = vmm;
             let sled = match sled {
                 Some(sled) => sled.serial_number(),

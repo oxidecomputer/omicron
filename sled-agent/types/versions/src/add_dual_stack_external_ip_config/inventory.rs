@@ -12,10 +12,10 @@ use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use omicron_common::{
     address::{Ip, NUM_SOURCE_NAT_PORTS},
-    api::external::{ByteCount, Generation},
-    disk::{DatasetConfig, OmicronPhysicalDiskConfig},
+    api::external::ByteCount,
     zpool_name::ZpoolName,
 };
+use omicron_generation_kinds::Generation;
 use omicron_ledger::Ledgerable;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::{DatasetUuid, OmicronZoneUuid};
@@ -24,6 +24,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::impls::inventory::SourceNatConfigError;
+use crate::v1::disk::DatasetConfig;
+use crate::v1::disk::OmicronPhysicalDiskConfig;
+use crate::v1::inventory::Baseboard;
 use crate::v1::inventory::{
     BootPartitionContents, ConfigReconcilerInventoryResult,
     HostPhase2DesiredSlots, InventoryDataset, InventoryDisk, InventoryZpool,
@@ -32,7 +35,7 @@ use crate::v1::inventory::{
 };
 use crate::v10;
 use crate::v10::inventory::NetworkInterface;
-use sled_hardware_types::{Baseboard, SledCpuFamily};
+use sled_hardware_types::SledCpuFamily;
 
 /// Identity and basic status information about this sled agent
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]

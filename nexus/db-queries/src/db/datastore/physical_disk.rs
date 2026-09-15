@@ -769,14 +769,16 @@ mod test {
     use nexus_db_lookup::LookupPath;
     use nexus_types::identity::Asset;
     use omicron_common::api::external::ByteCount;
-    use omicron_common::disk::{DiskIdentity, DiskVariant};
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::ZpoolUuid;
+    use sled_agent_types::disk::DiskIdentity;
+    use sled_agent_types::disk::DiskVariant;
     use sled_agent_types::inventory::{
-        Baseboard, ConfigReconcilerInventoryStatus, FmdInventory, Inventory,
-        InventoryDisk, OmicronFileSourceResolverInventory, SledCpuFamily,
-        SledRole, SvcsEnabledNotOnlineResult,
+        ConfigReconcilerInventoryStatus, FmdInventory, InstanceManagerStatus,
+        Inventory, InventoryDisk, OmicronFileSourceResolverInventory,
+        SledCpuFamily, SledRole, SvcsEnabledNotOnlineResult,
     };
+    use sled_hardware_types::BaseboardId;
     use std::num::NonZeroU32;
 
     async fn create_test_sled(db: &DataStore) -> Sled {
@@ -1113,10 +1115,9 @@ mod test {
             .found_sled_inventory(
                 "fake sled agent",
                 Inventory {
-                    baseboard: Baseboard::Gimlet {
-                        identifier: sled.serial_number().to_string(),
-                        model: sled.part_number().to_string(),
-                        revision: 0,
+                    baseboard_id: BaseboardId {
+                        part_number: sled.part_number().to_string(),
+                        serial_number: sled.serial_number().to_string(),
                     },
                     reservoir_size: ByteCount::from(1024),
                     sled_role: SledRole::Gimlet,
@@ -1132,6 +1133,9 @@ mod test {
                     reconciler_status:
                         ConfigReconcilerInventoryStatus::NotYetRun,
                     last_reconciliation: None,
+                    instance_manager_status: InstanceManagerStatus::available(
+                        0,
+                    ),
                     file_source_resolver:
                         OmicronFileSourceResolverInventory::new_fake(),
                     smf_services_enabled_not_online:
