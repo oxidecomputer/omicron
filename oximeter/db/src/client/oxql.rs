@@ -2632,6 +2632,180 @@ mod tests {
     // `MAX_DATABASE_ROWS` budget, for a single timeseries. A month of the same
     // data would not fit in the budget at all, so the unaligned form of this
     // query would not fail slowly, it would refuse to run.
+    // A day of temperatures from seven sleds, reduced to an hourly maximum per
+    // sled.
+    //
+    // Two links on each sled, sampled every two seconds, keeps the total at
+    // the same 604,800 rows as the test above while giving `group_by`
+    // something to actually combine -- with one timeseries per group its
+    // reducer would just hand back what it was given.
+    //
+    // This covers two things the single-series tests cannot. The aggregate
+    // groups by `timeseries_key` as well as by period, so fourteen series have
+    // to come back correctly interleaved and be split apart again. And
+    // `group_by` refuses input that is not aligned, so it only accepts this at
+    // all because the pushed path marks its output aligned the way the Rust
+    // path does.
+    #[tokio::test]
+    async fn test_pushed_alignment_across_timeseries() {
+        const SLEDS: u32 = 7;
+        const LINKS: u32 = 2;
+        const SAMPLES_PER_LINK: u32 = 43_200;
+        const SAMPLE_INTERVAL_SECS: u64 = 2;
+
+        let ctx =
+            setup_oxql_test("test_pushed_alignment_across_timeseries").await;
+        let first = ctx.test_data.first_timestamp;
+
+        let insert_start = std::time::Instant::now();
+        for sled in 0..SLEDS {
+            let name = format!("sled-{sled}");
+            for link in 0..LINKS {
+                let target = SomeTarget { name: name.clone(), index: link };
+                for chunk_start in (0..SAMPLES_PER_LINK).step_by(60_000) {
+                    let chunk_end =
+                        (chunk_start + 60_000).min(SAMPLES_PER_LINK);
+                    let samples: Vec<_> = (chunk_start..chunk_end)
+                        .map(|i| {
+                            // The two links run ten degrees apart, so the mean
+                            // across them is a value neither one reports.
+                            let base = 60 + i64::from(link) * 10;
+                            let metric = SomeGauge {
+                                foo: 4,
+                                datum: base + i64::from(i % 31),
+                            };
+                            Sample::new_with_timestamp(
+                                first
+                                    + Duration::from_secs(
+                                        u64::from(i) * SAMPLE_INTERVAL_SECS,
+                                    ),
+                                &target,
+                                &metric,
+                            )
+                            .unwrap()
+                        })
+                        .collect();
+                    ctx.client
+                        .insert_samples(&samples)
+                        .await
+                        .expect("inserted");
+                }
+            }
+        }
+        let total = SLEDS * LINKS * SAMPLES_PER_LINK;
+        println!("inserted {total} samples in {:?}", insert_start.elapsed());
+
+        let end = format_timestamp(first + Duration::from_secs(86_400));
+        let tail = format!(
+            "filter foo == 4 && timestamp <= @{end} \
+             | align max(1h) | group_by [name], mean"
+        );
+        let query = format!("get some_target:some_gauge | {tail}");
+        let unpushed_query = format!(
+            "get some_target:some_gauge | filter foo == 4 \
+             && timestamp <= @{end} | filter datum >= -1 \
+             | align max(1h) | group_by [name], mean"
+        );
+
+        let start = std::time::Instant::now();
+        let pushed = ctx
+            .client
+            .oxql_query(&query, QueryAuthzScope::Fleet)
+            .await
+            .unwrap_or_else(|e| panic!("`{query}` failed: {e}"));
+        let pushed_elapsed = start.elapsed();
+
+        let start = std::time::Instant::now();
+        let unpushed = ctx
+            .client
+            .oxql_query(&unpushed_query, QueryAuthzScope::Fleet)
+            .await
+            .unwrap_or_else(|e| panic!("`{unpushed_query}` failed: {e}"));
+        let unpushed_elapsed = start.elapsed();
+
+        let left = timeseries_by_name(&pushed);
+        let right = timeseries_by_name(&unpushed);
+        println!(
+            "align max(1h) | group_by [name] over {total} samples:\n  \
+             pushed   {pushed_elapsed:?}\n  unpushed {unpushed_elapsed:?}\n  \
+             sleds    {}\n  periods  {}",
+            left.len(),
+            left.values().next().map(Vec::len).unwrap_or(0),
+        );
+
+        assert_eq!(
+            left, right,
+            "Grouping hourly maxima across seven sleds must give the same \
+            answer whether the alignment ran in the database or in Rust",
+        );
+        assert_eq!(
+            left.len() as u32,
+            SLEDS,
+            "One group per sled: {:?}",
+            left.keys().collect::<Vec<_>>(),
+        );
+        for (name, points) in left.iter() {
+            // 24 hours, plus the period holding the single sample that sits on
+            // the starting boundary -- see the test above for why.
+            assert_eq!(points.len(), 25, "{name}: {points:?}");
+            assert_eq!(
+                points[0].1,
+                Some(65.0),
+                "{name}: the boundary period holds one sample from each link, \
+                60 and 70, whose mean is 65: {points:?}",
+            );
+            for (_, value) in points.iter().skip(1) {
+                assert_eq!(
+                    *value,
+                    Some(95.0),
+                    "{name}: each link tops out at 90 and 100 within an hour, \
+                    so the mean across them is 95: {points:?}",
+                );
+            }
+        }
+        ctx.cleanup_successful().await;
+    }
+
+    /// The timestamps and values of one aligned timeseries.
+    type AlignedPoints = Vec<(chrono::DateTime<Utc>, Option<f64>)>;
+
+    // The points of every timeseries in a result, keyed by its `name` field.
+    fn timeseries_by_name(
+        result: &OxqlResult,
+    ) -> BTreeMap<String, AlignedPoints> {
+        let table = result.tables.first().expect("one table");
+        table
+            .iter()
+            .map(|timeseries| {
+                let FieldValue::String(name) =
+                    timeseries.fields.get("name").expect("a name field")
+                else {
+                    panic!("`name` should be a string");
+                };
+                let values: Vec<Option<f64>> =
+                    match timeseries.points.values(0).expect("values") {
+                        oxql_types::point::ValueArray::Double(values) => {
+                            values.clone()
+                        }
+                        oxql_types::point::ValueArray::Integer(values) => {
+                            values.iter().map(|v| v.map(|v| v as f64)).collect()
+                        }
+                        other => {
+                            panic!("unexpected type: {:?}", other.data_type())
+                        }
+                    };
+                let points = timeseries
+                    .points
+                    .timestamps()
+                    .iter()
+                    .copied()
+                    .zip(values)
+                    .collect();
+                (name.to_string(), points)
+            })
+            .collect()
+    }
+
     #[tokio::test]
     async fn test_pushed_alignment_over_a_week_of_samples() {
         const SAMPLE_COUNT: u32 = 7 * 86_400;
