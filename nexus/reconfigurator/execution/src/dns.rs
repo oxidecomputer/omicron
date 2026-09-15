@@ -1082,18 +1082,20 @@ mod test {
         blueprint.internal_dns_version = Generation::new();
         blueprint.external_dns_version = Generation::new();
 
-        let my_silo = Silo::new(silo::SiloCreate {
-            identity: IdentityMetadataCreateParams {
-                name: "my-silo".parse().unwrap(),
-                description: String::new(),
+        let my_silo = Silo::new(
+            silo::SiloCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "my-silo".parse().unwrap(),
+                    description: String::new(),
+                },
+                quotas: silo::SiloQuotasCreate::empty(),
+                identity_mode: silo::SiloIdentityMode::SamlJit,
+                admin_group_name: None,
+                tls_certificates: vec![],
+                mapped_fleet_roles: Default::default(),
             },
-            quotas: silo::SiloQuotasCreate::empty(),
-            discoverable: false,
-            identity_mode: silo::SiloIdentityMode::SamlJit,
-            admin_group_name: None,
-            tls_certificates: vec![],
-            mapped_fleet_roles: Default::default(),
-        })
+            false,
+        )
         .unwrap();
 
         // It shouldn't ever be possible to have no Silos at all, but at least
@@ -1924,7 +1926,6 @@ mod test {
         let silo = create_silo(
             &cptestctx.external_client,
             silo_name,
-            false,
             silo::SiloIdentityMode::SamlJit,
         )
         .await;
