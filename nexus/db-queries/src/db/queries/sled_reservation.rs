@@ -9,7 +9,10 @@ use crate::db::model::SledResourceVmm;
 use crate::db::raw_query_builder::QueryBuilder;
 use crate::db::raw_query_builder::TrustedStr;
 use crate::db::raw_query_builder::TypedSqlQuery;
+use diesel::Queryable;
 use diesel::sql_types;
+use nexus_db_model::AffinityPolicy;
+use nexus_db_model::DbTypedUuid;
 use nexus_db_model::SledCpuFamily;
 use nexus_db_schema::enums::AffinityPolicyEnum;
 use nexus_db_schema::enums::SledCpuFamilyEnum;
@@ -19,6 +22,7 @@ use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::DiskUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 
@@ -93,12 +97,52 @@ fn subquery_other_a_instances(query: &mut QueryBuilder) {
         ),");
 }
 
+/// One row of `sled_find_targets_query`.
+#[derive(Debug, Clone, Queryable)]
+pub(crate) struct SledFindTargetsRow {
+    /// The sled ID.
+    sled_id: DbTypedUuid<SledKind>,
+    /// True if the sled is a candidate for this allocation, based on the
+    /// requested resources.
+    ///
+    /// Some reasons this can be false include:
+    ///
+    /// * The sled is not in service and active.
+    /// * If a specific CPU family is required, the sled does not match it.
+    /// * The sled doesn't have enough space for this allocation.
+    ///
+    /// This does not account for local storage.
+    pub(crate) is_candidate: bool,
+    /// The affinity policy of the sled.
+    pub(crate) affinity_policy: Option<AffinityPolicy>,
+    /// The anti-affinity policy of the sled.
+    pub(crate) anti_affinity_policy: Option<AffinityPolicy>,
+}
+
+impl SledFindTargetsRow {
+    pub(crate) fn sled_id(&self) -> SledUuid {
+        self.sled_id.into()
+    }
+}
+
+/// The SQL columns corresponding to [`SledFindTargetsRow`], in order.
+///
+/// This _must_ match the order of columns in `SledFindTargetsRow` in order to
+/// keep the `Queryable` implementation working. There is no compile-time
+/// check for this!
+pub(crate) type SledFindTargetsSqlRow = (
+    sql_types::Uuid,
+    sql_types::Bool,
+    sql_types::Nullable<AffinityPolicyEnum>,
+    sql_types::Nullable<AffinityPolicyEnum>,
+);
+
 /// Return all possible Sleds where we might perform allocation
 ///
 /// The rows returned by this CTE indicate:
 ///
 /// - The Sled which we're considering
-/// - A bool indicating whether the allocation fits
+/// - A bool indicating whether the sled is a candidate for the allocation
 /// - Affinity Policy
 /// - Anti-Affinity Policy
 ///
@@ -113,12 +157,7 @@ pub fn sled_find_targets_query(
     instance_id: InstanceUuid,
     resources: &Resources,
     sled_families: Option<&[SledCpuFamily]>,
-) -> TypedSqlQuery<(
-    sql_types::Uuid,
-    sql_types::Bool,
-    sql_types::Nullable<AffinityPolicyEnum>,
-    sql_types::Nullable<AffinityPolicyEnum>,
-)> {
+) -> TypedSqlQuery<SledFindTargetsSqlRow> {
     let mut query = QueryBuilder::new();
     query.sql(
         "
