@@ -119,10 +119,25 @@ fn default_sidecar_revision() -> String {
 }
 
 impl Deployment {
-    /// Reject custom combinations that cannot be resolved at startup.
+    /// Reject custom combinations that cannot be resolved at startup. The
+    /// named kinds are valid by construction.
     pub fn validate(&self) -> Result<(), String> {
+        use Deployment::*;
         match self {
-            Deployment::Custom {
+            Production { .. } | Virtual { .. } | Standalone { .. } => Ok(()),
+            // The config shape requires a switch here, but sled_mode = "sled"
+            // never becomes a scrimlet and never launches a switch zone.
+            Custom { sled_mode: SledRole::Sled, .. } => Ok(()),
+            // A forced scrimlet runs whichever backend it names.
+            Custom { sled_mode: SledRole::Scrimlet, .. } => Ok(()),
+            // Auto needs something to detect: the Tofino ASIC through the
+            // hardware monitor, or the propolis SoftNPU device at startup.
+            Custom {
+                sled_mode: SledRole::Auto,
+                switch:
+                    Switch::TofinoAsic { .. } | Switch::SoftNpuPropolisDevice { .. },
+            } => Ok(()),
+            Custom {
                 sled_mode: SledRole::Auto,
                 switch:
                     switch
@@ -132,7 +147,6 @@ impl Deployment {
                  \"sled\" or \"scrimlet\"",
                 switch.asic()
             )),
-            _ => Ok(()),
         }
     }
 
@@ -158,7 +172,9 @@ impl Deployment {
     }
 
     /// Whether startup detection runs. Only the propolis SoftNPU device is
-    /// found this way.
+    /// found this way: a role fixed to `sled` has nothing to probe, the
+    /// Tofino ASIC is the hardware monitor's job, and the stub and zone
+    /// backends have nothing to find.
     fn probes_switch(&self) -> bool {
         match self {
             Deployment::Virtual { .. } => true,
