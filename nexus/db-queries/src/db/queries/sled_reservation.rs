@@ -149,7 +149,8 @@ pub(crate) type SledFindTargetsSqlRow = (
 /// Generally, we'd like to only return sleds where an allocation of [Resources]
 /// could fit. However, we also need to observe all affinity groups, in case
 /// affinity group policy forces us to allocate on a sled where insufficient
-/// space exists.
+/// space exists. We also need to look at the `rendezvous_sled_bp_availability`
+/// table to determine which sleds are available for allocation.
 ///
 /// Note that we don't bother checking if the VMM has already been provisioned,
 /// we're just searching for spots where it might fit.
@@ -164,6 +165,9 @@ pub fn sled_find_targets_query(
         WITH sled_targets AS (
             SELECT sled.id as sled_id
             FROM sled
+            JOIN rendezvous_sled_bp_availability AS sled_bp_avail
+            ON sled_bp_avail.sled_id = sled.id
+            AND sled_bp_avail.bp_availability = 'available'
             LEFT JOIN sled_resource_vmm
             ON sled_resource_vmm.sled_id = sled.id
             WHERE
@@ -319,6 +323,10 @@ pub const SLED_HAS_SPACE_SENTINEL: &'static str = "SLED_HAS_SPACE";
 pub const SLED_HAS_SPACE_SENTINEL_REASON: &'static str =
     "sled target does not have the available hardware resources";
 
+pub const SLED_BP_AVAILABLE_SENTINEL: &'static str = "SLED_BP_AVAILABLE";
+pub const SLED_BP_AVAILABLE_SENTINEL_REASON: &'static str =
+    "sled target is not available for provisioning per the target blueprint";
+
 pub const BANNED_SLEDS_SENTINEL: &'static str = "BANNED_SLEDS";
 pub const BANNED_SLEDS_SENTINEL_REASON: &'static str =
     "sled target hosts another instance in anti-affinity group";
@@ -329,14 +337,19 @@ pub const REQUIRED_SLEDS_SENTINEL_REASON: &'static str =
 
 /// The sled insert query will return a sentinel (using the pattern of an
 /// erroneous cast of a string into a bool) if the insert is no longer valid due
-/// to three of the conditions related to a sled's available hardware resources,
-/// or affinity rules.
-pub const SLED_INSERT_QUERY_SENTINELS: [&'static str; 3] =
-    [SLED_HAS_SPACE_SENTINEL, BANNED_SLEDS_SENTINEL, REQUIRED_SLEDS_SENTINEL];
+/// to four of the conditions related to a sled's blueprint availability,
+/// available hardware resources, or affinity rules.
+pub const SLED_INSERT_QUERY_SENTINELS: [&'static str; 4] = [
+    SLED_BP_AVAILABLE_SENTINEL,
+    SLED_HAS_SPACE_SENTINEL,
+    BANNED_SLEDS_SENTINEL,
+    REQUIRED_SLEDS_SENTINEL,
+];
 
 /// Turn the returned sentinel into a human-readable error
 pub fn sentinel_to_reason(sentinel: &'static str) -> &'static str {
     match sentinel {
+        SLED_BP_AVAILABLE_SENTINEL => SLED_BP_AVAILABLE_SENTINEL_REASON,
         SLED_HAS_SPACE_SENTINEL => SLED_HAS_SPACE_SENTINEL_REASON,
         BANNED_SLEDS_SENTINEL => BANNED_SLEDS_SENTINEL_REASON,
         REQUIRED_SLEDS_SENTINEL => REQUIRED_SLEDS_SENTINEL_REASON,
@@ -362,8 +375,23 @@ pub fn sled_insert_resource_query(
     // This is similar to the "sled_targets" subquery in
     // "sled_find_targets_query", but it's scoped to the single sled we're
     // trying to select.
+    //
+    // Blueprint availability is checked in its own CTE, `sled_bp_available`, so
+    // the insert can report "sled became unavailable" separately from "sled ran
+    // out of room". But note that if a sled is both unavailable and out of
+    // room, we will only report one of the two reasons. (CockroachDB evaluates
+    // left to right, so we expect the reason to be the unavailability, but that
+    // isn't guaranteed, and regardless isn't something we make decisions based
+    // on.)
     query.sql("
-        WITH sled_has_space AS (
+        WITH sled_bp_available AS (
+            SELECT 1
+            FROM rendezvous_sled_bp_availability
+            WHERE
+                sled_id = ").param().sql(" AND
+                bp_availability = 'available'
+        ),
+        sled_has_space AS (
             SELECT 1
             FROM sled
             LEFT JOIN sled_resource_vmm
@@ -382,6 +410,7 @@ pub fn sled_insert_resource_query(
                 COALESCE(SUM(CAST(sled_resource_vmm.reservoir_ram AS INT8)), 0) + "
             ).param().sql(" <= sled.reservoir_size
         ),")
+        .bind::<sql_types::Uuid, _>(resource.sled_id.into_untyped_uuid())
         .bind::<sql_types::Uuid, _>(resource.sled_id.into_untyped_uuid())
         .bind::<sql_types::BigInt, _>(resource.resources.hardware_threads)
         .bind::<sql_types::BigInt, _>(resource.resources.rss_ram)
@@ -459,6 +488,7 @@ pub fn sled_insert_resource_query(
 
     // Any mutation this CTE does is only valid if:
     //
+    // - The sled is still available for provisioning per the target blueprint
     // - The sled still has space for our instance
     // - The sled is not banned (due to anti-affinity rules)
     // - If the sled is required (due to affinity rules) we're selecting it
@@ -477,6 +507,14 @@ pub fn sled_insert_resource_query(
               WHERE
                   ",
     );
+
+    query.true_or_cast_error(
+        |query| {
+            query.sql("EXISTS(SELECT 1 FROM sled_bp_available)");
+        },
+        SLED_BP_AVAILABLE_SENTINEL,
+    );
+    query.sql(" AND ");
 
     query.true_or_cast_error(
         |query| {

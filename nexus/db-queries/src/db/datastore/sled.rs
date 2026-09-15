@@ -2402,6 +2402,9 @@ impl TransitionError {
 pub(in crate::db::datastore) mod test {
     use super::*;
     use crate::db;
+    use crate::db::datastore::SledBpAvailabilityUpsertOutcome;
+    use crate::db::datastore::SledBpAvailabilityWrite;
+    use crate::db::datastore::SledBpAvailabilityWriteOutcome;
     use crate::db::datastore::test_utils::{
         Expected, IneligibleSleds, sled_set_policy, sled_set_state,
     };
@@ -2415,6 +2418,7 @@ pub(in crate::db::datastore) mod test {
     use crate::db::pub_test_utils::helpers::create_anti_affinity_group;
     use crate::db::pub_test_utils::helpers::create_project;
     use crate::db::pub_test_utils::helpers::small_resource_request;
+    use crate::db::pub_test_utils::simulated_sleds::apply_sled_bp_availability;
     use crate::db::pub_test_utils::simulated_sleds::initialize_sled_bp_availability;
     use crate::db::pub_test_utils::simulated_sleds::sled_updates_from_system;
     use crate::db::pub_test_utils::simulated_sleds::test_sled_resources;
@@ -2422,6 +2426,7 @@ pub(in crate::db::datastore) mod test {
     use crate::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
     use crate::db::queries::sled_reservation::BANNED_SLEDS_SENTINEL;
     use crate::db::queries::sled_reservation::REQUIRED_SLEDS_SENTINEL;
+    use crate::db::queries::sled_reservation::SLED_BP_AVAILABLE_SENTINEL;
     use crate::db::queries::sled_reservation::SLED_HAS_SPACE_SENTINEL;
     use anyhow::{Context, Result};
     use async_bb8_diesel::AsyncConnection;
@@ -2432,6 +2437,8 @@ pub(in crate::db::datastore) mod test {
     use nexus_db_model::PhysicalDiskKind;
     use nexus_db_model::PhysicalDiskPolicy;
     use nexus_db_model::PhysicalDiskState;
+    use nexus_db_model::SledBlueprintAvailabilityInput;
+    use nexus_db_model::SledBpAvailabilityState;
     use nexus_db_model::{InstanceCpuPlatform, PhysicalDisk};
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_reconfigurator_planning::example::ExampleSystem;
@@ -2439,7 +2446,9 @@ pub(in crate::db::datastore) mod test {
     use nexus_reconfigurator_planning::planner::PlannerRng;
     use nexus_reconfigurator_planning::system::SimulatedSledResources;
     use nexus_types::deployment::Blueprint;
+    use nexus_types::deployment::BlueprintSledUpdateDispositionKind;
     use nexus_types::deployment::BlueprintSource;
+    use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
     use nexus_types::external_api::{affinity, disk, instance};
     use nexus_types::identity::Asset;
     use nexus_types::identity::Resource;
@@ -2702,6 +2711,298 @@ pub(in crate::db::datastore) mod test {
         logctx.cleanup_successful();
     }
 
+    fn assert_insufficient_capacity(error: external::Error) {
+        match error {
+            external::Error::InsufficientCapacity { .. } => (),
+            other => panic!("expected InsufficientCapacity, got {other:?}"),
+        }
+    }
+
+    // Test that reservations are never created on sleds the blueprint hasn't
+    // marked available, and that marking a sled available again makes it
+    // eligible.
+    #[tokio::test]
+    async fn sled_reservation_create_bp_unavailable() {
+        let logctx =
+            dev::test_setup_log("sled_reservation_create_bp_unavailable");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // * Both sleds are active in the sled table.
+        // * unavailable_sled is marked evacuating in the blueprint.
+        let (example, blueprint) = example_system_with_resources(&opctx, 1);
+        let [unavailable_sled]: [Sled; 1] = upsert_sleds_from_system(
+            &datastore,
+            &example.system,
+            nexus_test_utils::RACK_UUID,
+        )
+        .await
+        .try_into()
+        .expect("simulated system has exactly one sled");
+        let evacuating = child_blueprint(&opctx, &blueprint, |builder| {
+            builder
+                .sled_set_update_disposition_kind(
+                    unavailable_sled.id(),
+                    BlueprintSledUpdateDispositionKind::Evacuating {
+                        policy: ReconfiguratorDisruptionPolicy::Terminate,
+                    },
+                )
+                .expect("set update disposition of a blueprint sled");
+        });
+        initialize_sled_bp_availability(&datastore, &evacuating).await;
+
+        // * new_sled is not in any blueprint at all, simulating a
+        //   newly added sled before the planner has picked it up.
+        let (new_sled, _) =
+            datastore.sled_upsert(test_new_sled_update()).await.unwrap();
+
+        let resources = small_resource_request();
+
+        // Unconstrained query: no sled is eligible.
+        let error = datastore
+            .sled_reservation_create(
+                &opctx,
+                InstanceUuid::new_v4(),
+                PropolisUuid::new_v4(),
+                resources.clone(),
+                db::model::SledReservationConstraints::none(),
+                SledReservationReason::Start,
+            )
+            .await
+            .unwrap_err();
+        assert_insufficient_capacity(error);
+
+        // A query constrained to unavailable_sled: also not eligible.
+        let error = datastore
+            .sled_reservation_create(
+                &opctx,
+                InstanceUuid::new_v4(),
+                PropolisUuid::new_v4(),
+                resources.clone(),
+                db::model::SledReservationConstraintBuilder::new()
+                    .must_select_from(&[unavailable_sled.id()])
+                    .build(),
+                SledReservationReason::Start,
+            )
+            .await
+            .unwrap_err();
+        assert_insufficient_capacity(error);
+
+        // A query constrained to new_sled: still not eligible.
+        let error = datastore
+            .sled_reservation_create(
+                &opctx,
+                InstanceUuid::new_v4(),
+                PropolisUuid::new_v4(),
+                resources.clone(),
+                db::model::SledReservationConstraintBuilder::new()
+                    .must_select_from(&[new_sled.id()])
+                    .build(),
+                SledReservationReason::Start,
+            )
+            .await
+            .unwrap_err();
+        assert_insufficient_capacity(error);
+
+        // Simulate a later blueprint, which marks the sled available again.
+        // (For testing purposes, we pretend that new_sled has not been
+        // picked up by the planner yet.)
+        let available_again = child_blueprint(&opctx, &evacuating, |builder| {
+            builder
+                .sled_set_update_disposition_kind(
+                    unavailable_sled.id(),
+                    BlueprintSledUpdateDispositionKind::Available,
+                )
+                .expect("set update disposition of a blueprint sled");
+        });
+        let writes =
+            apply_sled_bp_availability(&datastore, &available_again).await;
+        assert_eq!(
+            writes,
+            [expected_active_write(
+                &available_again,
+                unavailable_sled.id(),
+                SledBpAvailabilityUpsertOutcome::Written,
+            )]
+            .into_iter()
+            .collect::<IdOrdMap<_>>(),
+            "newer generation applies to the re-available sled"
+        );
+        for _ in 0..10 {
+            let resource = datastore
+                .sled_reservation_create(
+                    &opctx,
+                    InstanceUuid::new_v4(),
+                    PropolisUuid::new_v4(),
+                    resources.clone(),
+                    db::model::SledReservationConstraints::none(),
+                    SledReservationReason::Start,
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                resource.sled_id(),
+                unavailable_sled.id(),
+                "resource is always allocated to the re-available sled"
+            );
+            datastore
+                .sled_reservation_delete(&opctx, resource.id.into())
+                .await
+                .unwrap();
+        }
+
+        // Simulate another blueprint with the new sled now present in it.
+        let with_new_sled =
+            child_blueprint(&opctx, &available_again, |builder| {
+                builder.ensure_sled_exists(
+                    new_sled.id(),
+                    Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
+                );
+            });
+        let writes =
+            apply_sled_bp_availability(&datastore, &with_new_sled).await;
+        assert_eq!(
+            writes,
+            [
+                expected_active_write(
+                    &with_new_sled,
+                    unavailable_sled.id(),
+                    SledBpAvailabilityUpsertOutcome::Rejected,
+                ),
+                expected_active_write(
+                    &with_new_sled,
+                    new_sled.id(),
+                    SledBpAvailabilityUpsertOutcome::Written,
+                ),
+            ]
+            .into_iter()
+            .collect::<IdOrdMap<_>>(),
+            "only the newly included sled is written"
+        );
+        let resource = datastore
+            .sled_reservation_create(
+                &opctx,
+                InstanceUuid::new_v4(),
+                PropolisUuid::new_v4(),
+                resources.clone(),
+                db::model::SledReservationConstraintBuilder::new()
+                    .must_select_from(&[new_sled.id()])
+                    .build(),
+                SledReservationReason::Start,
+            )
+            .await
+            .unwrap();
+        assert_eq!(resource.sled_id(), new_sled.id());
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Test possible races in sled availability between the find-targets and
+    // insert halves of a reservation.
+    //
+    // The two parts run outside the context of a transaction, so the overall
+    // allocation process must be resilient to concurrent modifications to the
+    // database.
+    #[tokio::test]
+    async fn sled_reservation_insert_bp_unavailable() {
+        let logctx =
+            dev::test_setup_log("sled_reservation_insert_bp_unavailable");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let (example, blueprint) = example_system_with_resources(&opctx, 2);
+        initialize_sled_bp_availability(&datastore, &blueprint).await;
+        let [evacuating_sled, other_sled]: [Sled; 2] =
+            upsert_sleds_from_system(
+                &datastore,
+                &example.system,
+                nexus_test_utils::RACK_UUID,
+            )
+            .await
+            .try_into()
+            .expect("simulated system has exactly two sleds");
+        let (new_sled, _) =
+            datastore.sled_upsert(test_new_sled_update()).await.unwrap();
+
+        // The first half of a reservation: the search sees both sleds present
+        // in the blueprint.
+        let test_instance = Instance::new();
+        let mut found: Vec<SledUuid> = test_instance
+            .find_targets(&datastore)
+            .await
+            .into_iter()
+            .map(|target| {
+                assert!(
+                    target.is_candidate,
+                    "sled {} is a candidate",
+                    target.sled_id()
+                );
+                target.sled_id()
+            })
+            .collect();
+        found.sort();
+        let mut expected = vec![evacuating_sled.id(), other_sled.id()];
+        expected.sort();
+        assert_eq!(found, expected, "search finds exactly the available sleds");
+
+        // Now mark one of the sleds as evacuating.
+        let evacuating = child_blueprint(&opctx, &blueprint, |builder| {
+            builder
+                .sled_set_update_disposition_kind(
+                    evacuating_sled.id(),
+                    BlueprintSledUpdateDispositionKind::Evacuating {
+                        policy: ReconfiguratorDisruptionPolicy::Terminate,
+                    },
+                )
+                .expect("set update disposition of a blueprint sled");
+        });
+        apply_sled_bp_availability(&datastore, &evacuating).await;
+
+        // Now try doing an insert -- this should refuse to allocate on the
+        // evacuating sled.
+        for sled_id in [evacuating_sled.id(), new_sled.id()] {
+            let outcome = test_instance
+                .insert_resource(
+                    &datastore,
+                    PropolisUuid::new_v4(),
+                    sled_id,
+                    SledReservationReason::Start,
+                )
+                .await;
+            assert_eq!(
+                outcome,
+                InsertResourceOutcome::Rejected {
+                    sentinel: SLED_BP_AVAILABLE_SENTINEL
+                },
+                "insert on sled {sled_id} is rejected for blueprint availability"
+            );
+        }
+
+        // But the still-available sled still accepts the reservation.
+        let outcome = test_instance
+            .insert_resource(
+                &datastore,
+                PropolisUuid::new_v4(),
+                other_sled.id(),
+                SledReservationReason::Start,
+            )
+            .await;
+        assert_eq!(outcome, InsertResourceOutcome::Inserted);
+
+        // Do another find_targets -- this now agrees with the insert.
+        let found: Vec<SledUuid> = Instance::new()
+            .find_targets(&datastore)
+            .await
+            .into_iter()
+            .map(|target| target.sled_id())
+            .collect();
+        assert_eq!(found, [other_sled.id()]);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
     // Utilities to help with Affinity Testing
 
     // Create a resource request that will entirely fill a sled.
@@ -2769,6 +3070,53 @@ pub(in crate::db::datastore) mod test {
             .nsleds(nsleds)
             .sled_resources(test_sled_resources())
             .build()
+    }
+
+    fn expected_active_write(
+        blueprint: &Blueprint,
+        sled_id: SledUuid,
+        outcome: SledBpAvailabilityUpsertOutcome,
+    ) -> SledBpAvailabilityWrite {
+        let config = blueprint
+            .sleds
+            .get(&sled_id)
+            .unwrap_or_else(|| panic!("sled {sled_id} is in the blueprint"));
+        match SledBlueprintAvailabilityInput::from_blueprint(sled_id, config)
+            .state
+        {
+            SledBpAvailabilityState::Active {
+                availability,
+                update_disposition_generation,
+            } => SledBpAvailabilityWrite {
+                sled_id,
+                outcome: SledBpAvailabilityWriteOutcome::Active {
+                    availability,
+                    update_disposition_generation,
+                    outcome,
+                },
+            },
+            SledBpAvailabilityState::Decommissioned => {
+                panic!("sled {sled_id} is active in the blueprint")
+            }
+        }
+    }
+
+    // Build a child of the parent blueprint with the given edits (standing in
+    // for a planning run).
+    fn child_blueprint(
+        opctx: &OpContext,
+        parent: &Blueprint,
+        edit: impl FnOnce(&mut BlueprintBuilder<'_>),
+    ) -> Blueprint {
+        let mut builder = BlueprintBuilder::new_based_on(
+            &opctx.log,
+            parent,
+            "sled_reservation_tests",
+            PlannerRng::from_entropy(),
+        )
+        .expect("created BlueprintBuilder from parent blueprint");
+        edit(&mut builder);
+        builder.build(BlueprintSource::Test)
     }
 
     async fn create_sleds(
