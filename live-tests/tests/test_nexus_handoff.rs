@@ -179,7 +179,7 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
         blueprint_edit_current_target(
             log,
             &nexus,
-            &|builder: &mut BlueprintBuilder| {
+            |builder: &mut BlueprintBuilder| {
                 let mut external_networking_alloc =
                     ExternalNetworkingAllocator::from_current_zones(
                         builder,
@@ -279,7 +279,7 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
         blueprint_edit_current_target(
             log,
             &nexus,
-            &|builder: &mut BlueprintBuilder| {
+            |builder: &mut BlueprintBuilder| {
                 builder.set_nexus_generation(next_generation);
                 Ok(())
             },
@@ -441,7 +441,7 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
         blueprint_edit_current_target(
             log,
             new_nexus,
-            &|builder: &mut BlueprintBuilder| {
+            |builder: &mut BlueprintBuilder| {
                 for (id, current_zone) in &current_nexus_zones {
                     builder
                         .sled_expunge_zone(current_zone.sled_id, *id)
