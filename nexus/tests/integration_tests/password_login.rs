@@ -35,13 +35,9 @@ async fn test_local_users(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     let silo_name = Name::from_str("test-silo").unwrap();
-    let silo = create_silo(
-        client,
-        silo_name.as_str(),
-        true,
-        SiloIdentityMode::LocalOnly,
-    )
-    .await;
+    let silo =
+        create_silo(client, silo_name.as_str(), SiloIdentityMode::LocalOnly)
+            .await;
     test_local_user_basic(client, &silo).await;
     test_local_user_with_no_initial_password(client, &silo).await;
     NexusRequest::object_delete(

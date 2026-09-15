@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026091100.0.0"
+    "version": "2026091500.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -27724,10 +27724,6 @@
           "description": {
             "type": "string"
           },
-          "discoverable": {
-            "description": "A non-discoverable silo can only be retrieved by ID - it will not be part of the \"list all silos\" output.",
-            "type": "boolean"
-          },
           "identity_mode": {
             "$ref": "#/components/schemas/SiloIdentityMode"
           },
@@ -27764,7 +27760,6 @@
         },
         "required": [
           "description",
-          "discoverable",
           "identity_mode",
           "name",
           "quotas",
