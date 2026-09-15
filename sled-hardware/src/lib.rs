@@ -29,17 +29,34 @@ pub mod underlay;
 /// Failure while probing for switch hardware at startup.
 #[derive(Debug, thiserror::Error)]
 pub enum SwitchDetectError {
-    #[error("failed to walk device tree: {0}")]
-    DevInfo(anyhow::Error),
+    #[error("failed to walk device tree")]
+    DevInfo(#[source] anyhow::Error),
 
-    #[error("{path}: {err}")]
-    Io {
+    #[error("{path} still busy after {attempts} open attempts")]
+    Busy { path: String, attempts: usize },
+
+    #[error("opening {path}")]
+    Open {
         path: String,
         #[source]
         err: std::io::Error,
     },
 
-    #[error("{path}: malformed Rversion: {reason}")]
+    #[error("writing Tversion to {path}")]
+    Write {
+        path: String,
+        #[source]
+        err: std::io::Error,
+    },
+
+    #[error("reading Rversion from {path}")]
+    Read {
+        path: String,
+        #[source]
+        err: std::io::Error,
+    },
+
+    #[error("malformed Rversion from {path}: {reason}")]
     Protocol { path: String, reason: String },
 }
 
