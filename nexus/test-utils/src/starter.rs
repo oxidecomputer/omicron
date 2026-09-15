@@ -168,10 +168,6 @@ pub struct ControlPlaneStarter<'a, N: NexusServer> {
     pub dendrite: RwLock<HashMap<SwitchSlot, dev::dendrite::DendriteInstance>>,
     pub mgd: HashMap<SwitchSlot, dev::maghemite::MgdInstance>,
     pub ddm: HashMap<SwitchSlot, dev::maghemite::DdmInstance>,
-    /// Maps scrimlet sled IDs to their switch slot. Populated by
-    /// `record_switch_dns()` and used by `start_sled()` to configure
-    /// the sled-agent with `is_scrimlet = true` and start reconcilers.
-    scrimlets: BTreeMap<SledUuid, SwitchSlot>,
 
     // NOTE: Only exists after starting Nexus, until external Nexus is
     // initialized.
@@ -235,7 +231,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             dendrite: RwLock::new(HashMap::new()),
             mgd: HashMap::new(),
             ddm: HashMap::new(),
-            scrimlets: BTreeMap::new(),
+
             nexus_internal: None,
             nexus_internal_addr: None,
             external_dns_zone_name: None,
@@ -519,10 +515,6 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             "sled_id" => %sled_id,
             "switch_slot" => ?switch_slot,
         );
-
-        // Record that this sled is a scrimlet so that `start_sled()` can
-        // configure it with `is_scrimlet = true` and start reconcilers.
-        self.scrimlets.insert(sled_id, switch_slot);
 
         self.rack_init_builder
             .internal_dns_config
@@ -963,12 +955,12 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         &mut self,
         sled_id: SledUuid,
         sim_mode: sim::SimMode,
+        reconcilers_mode: Option<ScrimletReconcilersMode>,
     ) {
         let nexus_address =
             self.nexus_internal_addr.expect("Must launch Nexus first");
 
-        let switch_slot = self.scrimlets.get(&sled_id).copied();
-        let sled_role = if switch_slot.is_some() {
+        let sled_role = if reconcilers_mode.is_some() {
             SledRole::Scrimlet
         } else {
             SledRole::Gimlet
@@ -992,25 +984,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
 
         // If this is a scrimlet, start the scrimlet reconcilers so they can
         // react to bootstore network config updates.
-        if let Some(slot) = switch_slot {
-            let mgs_addr: SocketAddr =
-                self.gateway.get(&slot).unwrap().address().into();
-            let dpd_addr: SocketAddr = self
-                .dendrite
-                .read()
-                .unwrap()
-                .get(&slot)
-                .unwrap()
-                .address()
-                .into();
-            let mgd_addr: SocketAddr =
-                self.mgd.get(&slot).unwrap().address().into();
-            let mode = ScrimletReconcilersMode::Test {
-                mgs_addr,
-                dpd_addr,
-                mgd_addr,
-                bgp_socket_config: BgpSocketConfig::for_test(mgd_addr),
-            };
+        if let Some(mode) = reconcilers_mode {
             sled_agent.sled_agent.start_scrimlet_reconcilers(mode);
         }
 
@@ -1861,8 +1835,39 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
             vec![(
                 "start_sled1",
                 Box::new(move |builder| {
+                    let slot = SwitchSlot::Switch0;
+                    let mgs_addr: SocketAddr = builder
+                        .gateway
+                        .get(&slot)
+                        .unwrap_or_else(|| panic!("start_gateway() must be called for {slot:?} before starting a scrimlet sled"))
+                        .address()
+                        .into();
+                    let dpd_addr: SocketAddr = builder
+                        .dendrite
+                        .read()
+                        .unwrap()
+                        .get(&slot)
+                        .unwrap_or_else(|| panic!("start_dendrite() must be called for {slot:?} before starting a scrimlet sled"))
+                        .address()
+                        .into();
+                    let mgd_addr: SocketAddr = builder
+                        .mgd
+                        .get(&slot)
+                        .unwrap_or_else(|| panic!("start_mgd() must be called for {slot:?} before starting a scrimlet sled"))
+                        .address()
+                        .into();
+                    let mode = ScrimletReconcilersMode::Test {
+                        mgs_addr,
+                        dpd_addr,
+                        mgd_addr,
+                        bgp_socket_config: BgpSocketConfig::for_test(mgd_addr),
+                    };
                     builder
-                        .start_sled(SLED_AGENT_UUID.parse().unwrap(), sim_mode)
+                        .start_sled(
+                            SLED_AGENT_UUID.parse().unwrap(),
+                            sim_mode,
+                            Some(mode),
+                        )
                         .boxed()
                 }),
             )],
@@ -1876,10 +1881,38 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
                 vec![(
                     "start_sled2",
                     Box::new(move |builder| {
+                        let slot = SwitchSlot::Switch1;
+                        let mgs_addr: SocketAddr = builder
+                            .gateway
+                            .get(&slot)
+                            .unwrap_or_else(|| panic!("start_gateway() must be called for {slot:?} before starting a scrimlet sled"))
+                            .address()
+                            .into();
+                        let dpd_addr: SocketAddr = builder
+                            .dendrite
+                            .read()
+                            .unwrap()
+                            .get(&slot)
+                            .unwrap_or_else(|| panic!("start_dendrite() must be called for {slot:?} before starting a scrimlet sled"))
+                            .address()
+                            .into();
+                        let mgd_addr: SocketAddr = builder
+                            .mgd
+                            .get(&slot)
+                            .unwrap_or_else(|| panic!("start_mgd() must be called for {slot:?} before starting a scrimlet sled"))
+                            .address()
+                            .into();
+                        let mode = ScrimletReconcilersMode::Test {
+                            mgs_addr,
+                            dpd_addr,
+                            mgd_addr,
+                            bgp_socket_config: BgpSocketConfig::for_test(mgd_addr),
+                        };
                         builder
                             .start_sled(
                                 SLED_AGENT2_UUID.parse().unwrap(),
                                 sim_mode,
+                                Some(mode),
                             )
                             .boxed()
                     }),
