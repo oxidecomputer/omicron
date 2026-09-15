@@ -45,6 +45,14 @@ techport_external_server_port = 0
 # These are the DNS servers it should use.
 external_dns_servers = ["1.1.1.1", "9.9.9.9"]
 
+# This flag controls whether we record backtraces in the DB pool claim code
+# for debugging purposes. The performance testing we've done on Illumos has
+# not shown this to be expensive, so we typically leave this turned on, but
+# other platforms may see a greater performance hit (we've seen this make a
+# significant difference when developing and testing on macOS, for instance).
+# This can be set to false in development situations if needed.
+record_db_claim_backtraces = true
+
 # The test suite runs "external" servers (e.g. webhook receivers) on
 # localhost, so external HTTP clients must be permitted to connect to
 # loopback addresses. This must never be enabled in production configs.
