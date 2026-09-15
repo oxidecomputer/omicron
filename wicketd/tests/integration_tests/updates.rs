@@ -252,12 +252,18 @@ async fn test_updates() {
     // * The step fails because the simulated gimlet reports model
     //   "i86pc" (`FAKE_GIMLET_MODEL`), which is not a known Oxide host
     //   type.
+    let update::UpdateState::Failed { message, elapsed } =
+        &entry.progress.state
+    else {
+        panic!("sled 0 reached Failed: {:?}", entry.progress.state);
+    };
     assert_eq!(
-        entry.progress.state,
-        update::UpdateState::Failed {
-            message: "Get host type: Unknown host type i86pc".to_string(),
-        },
+        message, "Get host type: Unknown host type i86pc",
         "the failed update carries the expected operator-facing message",
+    );
+    assert!(
+        elapsed.is_some(),
+        "a failure reported by the engine (not inferred) records elapsed time",
     );
 
     // Try starting the update again -- this should fail because we require that
@@ -784,16 +790,16 @@ async fn test_update_races() {
         &wicketd_testctx,
         "sled 0 reached Running with its single step running",
         |p| {
-            p.progress.state == update::UpdateState::Running
+            matches!(p.progress.state, update::UpdateState::Running { .. })
                 && p.progress.innermost_running_steps().count() == 1
         },
     )
     .await;
-    assert_eq!(
-        entry.progress.state,
-        update::UpdateState::Running,
-        "sled 0 rolls up to Running",
-    );
+    let update::UpdateState::Running { elapsed: first_elapsed } =
+        entry.progress.state
+    else {
+        panic!("sled 0 rolls up to Running: {:?}", entry.progress.state);
+    };
     assert_eq!(
         entry.progress.steps.len(),
         1,
@@ -810,6 +816,24 @@ async fn test_update_races() {
         running[0].description.contains("Fake step"),
         "running step is the fake step: {}",
         running[0].description,
+    );
+
+    // The elapsed time must monotonically increase while the update stays
+    // blocked.
+    let later = wait_for_sled0_progress(
+        &wicketd_testctx,
+        "sled 0 still Running",
+        |p| matches!(p.progress.state, update::UpdateState::Running { .. }),
+    )
+    .await;
+    let update::UpdateState::Running { elapsed: later_elapsed } =
+        later.progress.state
+    else {
+        panic!("sled 0 still rolls up to Running: {:?}", later.progress.state);
+    };
+    assert!(
+        later_elapsed >= first_elapsed,
+        "elapsed monotonically increases: {later_elapsed:?} >= {first_elapsed:?}",
     );
 
     // Unblock the update, letting it run to completion.
@@ -834,23 +858,29 @@ async fn test_update_races() {
     let entry = wait_for_sled0_progress(
         &wicketd_testctx,
         "sled 0 reached Completed",
-        |p| p.progress.state == update::UpdateState::Completed,
+        |p| matches!(p.progress.state, update::UpdateState::Completed { .. }),
     )
     .await;
+    let update::UpdateState::Completed { elapsed } = entry.progress.state
+    else {
+        panic!("sled 0 reached Completed: {:?}", entry.progress.state);
+    };
+    assert!(
+        elapsed.is_some_and(|elapsed| elapsed >= later_elapsed),
+        "a reported completion records elapsed time at least as large as \
+         the last running observation ({later_elapsed:?}): {elapsed:?}",
+    );
     assert_eq!(
-        entry.progress,
-        update::UpdateProgress {
-            state: update::UpdateState::Completed,
-            steps: vec![update::UpdateStep {
-                description: "Fake step that waits for receiver to resolve"
-                    .to_string(),
-                status: UpdateStepStatus::Completed {
-                    outcome: StepOutcome::Success { message: None },
-                },
-                children: Vec::new(),
-            }],
-        },
-        "the fake update rolls up to Completed with its single clean step",
+        entry.progress.steps,
+        vec![update::UpdateStep {
+            description: "Fake step that waits for receiver to resolve"
+                .to_string(),
+            status: UpdateStepStatus::Completed {
+                outcome: StepOutcome::Success { message: None },
+            },
+            children: Vec::new(),
+        }],
+        "the fake update completes with its single clean step",
     );
 
     // sled 0's update completed, so it reports as cleared and no_update_data is
