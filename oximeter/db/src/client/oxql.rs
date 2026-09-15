@@ -13,12 +13,18 @@ use crate::model::columns;
 use crate::model::from_block::FromBlock as _;
 use crate::oxql;
 use crate::oxql::Query;
+use crate::oxql::ast::table_ops::BasicTableOp;
+use crate::oxql::ast::table_ops::TableOp;
+use crate::oxql::ast::table_ops::align;
 use crate::oxql::ast::table_ops::filter;
 use crate::oxql::ast::table_ops::filter::Filter;
 use crate::oxql::ast::table_ops::limit::Limit;
 use crate::oxql::ast::table_ops::limit::LimitKind;
 use crate::oxql::query::QueryAuthzScope;
 use crate::query::field_table_name;
+use chrono::DateTime;
+use chrono::TimeDelta;
+use chrono::Utc;
 use oximeter::Measurement;
 use oximeter::TimeseriesSchema;
 use oximeter::schema::TimeseriesKey;
@@ -111,6 +117,234 @@ pub const MAX_DATABASE_ROWS: u64 = 1_000_000;
 struct ConsistentKeyGroup {
     predicates: Option<Filter>,
     consistent_keys: BTreeMap<TimeseriesKey, (Target, Metric)>,
+}
+
+/// Work the database does beyond selecting the rows that match a query.
+///
+/// The two are mutually exclusive, which is why they share a type. A limit
+/// applies to the output of an alignment, so pushing both would have the
+/// database apply the limit to the raw samples instead -- taking `last 10`
+/// of the samples and aligning those, rather than aligning everything and
+/// taking the last 10 periods. `Query::pushable_alignment()` declines an
+/// alignment whenever there is a limit, for exactly that reason.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+enum PushedWork {
+    /// Just select the rows; everything else happens in Rust.
+    #[default]
+    Nothing,
+    /// Take only the first or last few samples of each timeseries.
+    Limit(Limit),
+    /// Reduce the samples in each period to a single point.
+    Alignment(PushedAlignment),
+}
+
+impl PushedWork {
+    fn limit(&self) -> Option<Limit> {
+        match self {
+            PushedWork::Limit(limit) => Some(*limit),
+            _ => None,
+        }
+    }
+
+    fn alignment(&self) -> Option<PushedAlignment> {
+        match self {
+            PushedWork::Alignment(alignment) => Some(*alignment),
+            _ => None,
+        }
+    }
+}
+
+/// An alignment operation being computed in the database rather than in Rust.
+///
+/// Alignment reduces every sample in a period to a single point, so computing
+/// it in ClickHouse is the difference between fetching a day of raw samples
+/// and fetching the handful of numbers they reduce to.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct PushedAlignment {
+    /// The alignment being computed.
+    align: align::Align,
+    /// The end of the query, which anchors the output periods.
+    query_end: DateTime<Utc>,
+}
+
+impl PushedAlignment {
+    /// Decide whether an alignment can be computed in the database for a
+    /// timeseries with this schema.
+    ///
+    /// The shape of the query is checked separately, by
+    /// `Query::pushable_alignment()`. This is the part that depends on what
+    /// kind of data is being aligned.
+    fn new(
+        align: align::Align,
+        schema: &TimeseriesSchema,
+        query_end: DateTime<Utc>,
+    ) -> Option<Self> {
+        // A cumulative metric is converted to deltas in Rust before it is
+        // aligned, so aligning it in the database means reconstructing those
+        // deltas in SQL first. That is a windowed difference partitioned by
+        // epoch, and it is not done yet.
+        if schema.datum_type.is_cumulative() {
+            return None;
+        }
+        // Everything else is a gauge, where each method is a plain aggregate.
+        // `rate` never reaches here, since it requires a delta.
+        if Self::aggregate_for(align.method).is_none() {
+            return None;
+        }
+        // Zero would make every period identical and divide the grid by zero
+        // below. The Rust path loops forever on it, which is its own bug.
+        if align.period.is_zero() {
+            return None;
+        }
+        Some(Self { align, query_end })
+    }
+
+    /// The ClickHouse aggregate that computes this method over a gauge.
+    fn aggregate_for(method: align::AlignmentMethod) -> Option<&'static str> {
+        match method {
+            // `avg` and ClickHouse's other aggregates skip NULL inputs and
+            // return NULL over an empty set, which is exactly how the Rust
+            // implementation treats missing points.
+            align::AlignmentMethod::MeanWithin => Some("avg"),
+            align::AlignmentMethod::Min => Some("min"),
+            align::AlignmentMethod::Max => Some("max"),
+            // A rate needs the intervals that only a delta carries.
+            align::AlignmentMethod::Rate => None,
+            align::AlignmentMethod::Interpolate => None,
+        }
+    }
+
+    /// The SQL expression giving the output period a sample falls in.
+    ///
+    /// Periods run backwards from the end of the query, so the window holding
+    /// a sample at `t` is `(end - (ix + 1) * period, end - ix * period]` for
+    /// `ix = floor((end - t) / period)`, and the point it produces is stamped
+    /// with that window's end. Reproducing that arithmetic exactly matters
+    /// more than it might seem: `toStartOfInterval` would bucket on a grid
+    /// anchored at the Unix epoch instead, quietly returning different numbers
+    /// from the Rust path for the same query.
+    ///
+    /// `intDiv` truncates toward zero rather than flooring, so this is only
+    /// correct for samples at or before the end of the query. The caller
+    /// excludes any later ones, which the Rust path also ignores.
+    fn period_expr(&self) -> String {
+        let end_nanos = self.query_end.timestamp_nanos_opt().unwrap_or(0);
+        let period_nanos = self.align.period.as_nanos();
+        format!(
+            "fromUnixTimestamp64Nano(toInt64({end_nanos} - \
+            intDiv({end_nanos} - toUnixTimestamp64Nano(timestamp), \
+            {period_nanos}) * {period_nanos}), 'UTC')"
+        )
+    }
+
+    /// Fill in the periods the database returned nothing for.
+    ///
+    /// `GROUP BY` emits a row only for a period that contained samples, while
+    /// aligning in Rust walks a fixed grid and emits a missing point for the
+    /// empty ones. Rebuild that grid here, so that the two paths return the
+    /// same array of points and a query's result does not depend on whether
+    /// the alignment happened to be pushed down.
+    ///
+    /// The grid runs from the earliest period the database returned up to the
+    /// end of the query. That is the same extent the Rust path produces, which
+    /// stops once a period falls entirely before the first sample -- and the
+    /// earliest period holding a sample is exactly the earliest one returned.
+    fn restore_empty_periods(
+        &self,
+        points: &oxql_types::point::Points,
+    ) -> Result<oxql_types::point::Points, Error> {
+        let Some(&first) = points.timestamps().first() else {
+            return Ok(points.clone());
+        };
+        let period = TimeDelta::from_std(self.align.period).map_err(|_| {
+            Error::Database(String::from("period out of range"))
+        })?;
+
+        // Walk the grid backwards from the end of the query, the way the Rust
+        // implementation does, so the two agree on where the periods fall even
+        // if the arithmetic drifts.
+        let mut grid = Vec::with_capacity(points.len());
+        let mut output_time = self.query_end;
+        while output_time >= first {
+            grid.push(output_time);
+            let Some(next) = output_time.checked_sub_signed(period) else {
+                break;
+            };
+            output_time = next;
+        }
+        grid.reverse();
+
+        // Both arrays are sorted, so line the returned periods up against the
+        // grid in one pass. Anything the grid has and the database did not
+        // returned no samples, and becomes a missing point.
+        let returned = points.timestamps();
+        let mut slots = Vec::with_capacity(grid.len());
+        let mut next = 0;
+        for timestamp in grid.iter() {
+            if returned.get(next) == Some(timestamp) {
+                slots.push(Some(next));
+                next += 1;
+            } else {
+                slots.push(None);
+            }
+        }
+
+        let metric_type = oxql_types::point::MetricType::Gauge;
+        let values = match points.values(0) {
+            Some(oxql_types::point::ValueArray::Integer(returned)) => {
+                oxql_types::point::ValueArray::Integer(
+                    slots.iter().map(|s| s.and_then(|s| returned[s])).collect(),
+                )
+            }
+            Some(oxql_types::point::ValueArray::Double(returned)) => {
+                oxql_types::point::ValueArray::Double(
+                    slots.iter().map(|s| s.and_then(|s| returned[s])).collect(),
+                )
+            }
+            _ => {
+                return Err(Error::Oxql(anyhow::anyhow!(
+                    "An aligned timeseries must hold numeric points",
+                )));
+            }
+        };
+        Ok(oxql_types::point::Points::new(
+            None,
+            grid,
+            vec![oxql_types::point::Values { values, metric_type }],
+        ))
+    }
+
+    /// Wrap a query selecting raw samples in one that aligns them.
+    ///
+    /// The result has a `timeseries_key`, a `timestamp` and a `datum`, and no
+    /// `start_time`. That is the shape of a gauge, which is what alignment
+    /// produces, so it is parsed by the same code that reads raw gauge
+    /// samples.
+    fn wrap(
+        &self,
+        inner: String,
+        total_rows_fetched: &mut u64,
+    ) -> Result<String, Error> {
+        let aggregate = Self::aggregate_for(self.align.method)
+            .expect("checked when the alignment was accepted");
+        let end_nanos = self.query_end.timestamp_nanos_opt().unwrap_or(0);
+        let period = self.period_expr();
+
+        // The row budget applies to what crosses the wire, which is now the
+        // aggregated output rather than the samples behind it. That is the
+        // whole point of computing this in the database.
+        let remainder = MAX_DATABASE_ROWS - *total_rows_fetched;
+        Ok(format!(
+            "SELECT timeseries_key, {period} AS timestamp, \
+            {aggregate}(datum) AS datum \
+            FROM ({inner} AND timestamp <= \
+            fromUnixTimestamp64Nano(toInt64({end_nanos}), 'UTC')) \
+            GROUP BY timeseries_key, timestamp \
+            ORDER BY timeseries_key, timestamp \
+            LIMIT {}",
+            remainder + 1,
+        ))
+    }
 }
 
 impl Client {
@@ -437,6 +671,27 @@ impl Client {
             "coalesced" => ?&limit,
         );
 
+        // Decide what else the database can do for us. The shape of the query
+        // has to allow the alignment to be pushed, and so does the kind of
+        // data; failing either, we fall back to the limit, which is what was
+        // pushed before alignment ever was.
+        let alignment = query.pushable_alignment(limit).and_then(|align| {
+            PushedAlignment::new(align, &schema, *query.end_time())
+        });
+        let pushed = match (alignment, limit) {
+            (Some(alignment), _) => {
+                debug!(
+                    query_log,
+                    "pushing alignment into the database";
+                    "method" => %alignment.align.method,
+                    "period" => ?alignment.align.period,
+                );
+                PushedWork::Alignment(alignment)
+            }
+            (None, Some(limit)) => PushedWork::Limit(limit),
+            (None, None) => PushedWork::Nothing,
+        };
+
         // We generally run a few SQL queries for each OxQL query:
         //
         // - Some number of queries to fetch the timeseries keys that are
@@ -554,7 +809,7 @@ impl Client {
                 handle,
                 &schema,
                 &consistent_key_groups,
-                limit,
+                pushed,
                 total_rows_fetched,
             )
             .await?;
@@ -576,6 +831,19 @@ impl Client {
             "n_transformations" => transformations.len(),
         );
         for tr in transformations {
+            // Skip the alignment the database already computed, or the data
+            // would be aligned twice -- the second pass would run over points
+            // that are one per period already.
+            if alignment.is_some()
+                && matches!(tr, TableOp::Basic(BasicTableOp::Align(_)))
+            {
+                trace!(
+                    query_log,
+                    "skipping alignment computed in the database";
+                    "transformation" => ?tr,
+                );
+                continue;
+            }
             trace!(
                 query_log,
                 "applying query transformation";
@@ -610,7 +878,7 @@ impl Client {
         handle: &mut Handle,
         schema: &TimeseriesSchema,
         consistent_key_groups: &[ConsistentKeyGroup],
-        limit: Option<Limit>,
+        pushed: PushedWork,
         total_rows_fetched: &mut u64,
     ) -> Result<
         (
@@ -638,7 +906,7 @@ impl Client {
             let measurements_query = self.measurements_query(
                 schema,
                 &key_group_chunk,
-                limit,
+                pushed,
                 total_rows_fetched,
             )?;
             let result =
@@ -704,27 +972,56 @@ impl Client {
         for (key, measurements) in measurements_by_key.into_iter() {
             // Constuct a new timeseries, from the target/metric info.
             let (target, metric) = info.get(&key).unwrap();
+            // An alignment computed in the database has already reduced the
+            // samples to one point per period, so what came back is a gauge
+            // whose data type is whatever the method produces, rather than raw
+            // samples of the timeseries' own type. `avg` over an integer gauge
+            // comes back a double, for instance.
+            let input_data_type =
+                oxql_types::point::DataType::try_from(schema.datum_type)?;
+            let (data_type, metric_type) = match pushed.alignment() {
+                Some(alignment) => (
+                    alignment.align.method.output_data_type(input_data_type),
+                    oxql_types::point::MetricType::Gauge,
+                ),
+                None if schema.datum_type.is_cumulative() => {
+                    (input_data_type, oxql_types::point::MetricType::Delta)
+                }
+                None => (input_data_type, oxql_types::point::MetricType::Gauge),
+            };
             let mut timeseries = oxql_types::Timeseries::new(
                 target
                     .fields
                     .iter()
                     .chain(metric.fields.iter())
                     .map(|field| (field.name.clone(), field.value.clone())),
-                oxql_types::point::DataType::try_from(schema.datum_type)?,
-                if schema.datum_type.is_cumulative() {
-                    oxql_types::point::MetricType::Delta
-                } else {
-                    oxql_types::point::MetricType::Gauge
-                },
+                data_type,
+                metric_type,
             )?;
 
             // Covert its oximeter measurements into OxQL data types.
-            let points = if schema.datum_type.is_cumulative() {
+            let points = if pushed.alignment().is_none()
+                && schema.datum_type.is_cumulative()
+            {
                 oxql_types::point::Points::delta_from_cumulative(&measurements)?
             } else {
                 oxql_types::point::Points::gauge_from_gauge(&measurements)?
             };
             timeseries.points = points;
+
+            // The database emits nothing at all for a period containing no
+            // samples, where aligning in Rust emits a missing point. Restore
+            // those, so that a query returns the same thing however it was
+            // computed, and mark the result aligned for the table operations
+            // that require it.
+            if let Some(alignment) = pushed.alignment() {
+                timeseries.points =
+                    alignment.restore_empty_periods(&timeseries.points)?;
+                timeseries.set_alignment(oxql_types::Alignment {
+                    end_time: alignment.query_end,
+                    period: alignment.align.period,
+                });
+            }
             debug!(
                 query_log,
                 "inserted new OxQL timeseries";
@@ -741,7 +1038,7 @@ impl Client {
         &self,
         schema: &TimeseriesSchema,
         consistent_key_groups: &[ConsistentKeyGroup],
-        limit: Option<Limit>,
+        pushed: PushedWork,
         total_rows_fetched: &mut u64,
     ) -> Result<String, Error> {
         use std::fmt::Write;
@@ -809,6 +1106,17 @@ impl Client {
             query.push(')');
         }
 
+        // If the alignment is being computed in the database, wrap what we
+        // have so far in an aggregating query and return that instead.
+        //
+        // Everything below this point -- the sort order, the `LIMIT BY` that
+        // implements `first` / `last`, the row budget -- either does not apply
+        // or applies to the aggregated output rather than to the raw samples,
+        // so it is handled inside the wrapper.
+        if let Some(alignment) = pushed.alignment() {
+            return alignment.wrap(query, total_rows_fetched);
+        }
+
         // Always impose a strong order on these fields.
         //
         // The tables are all sorted by:
@@ -833,7 +1141,7 @@ impl Client {
         // if there is a sample with a globally later, and accurate, timestamp,
         // but with a start_time _after_ that previous block.
         query.push_str(" ORDER BY timeseries_key");
-        if schema.datum_type.is_cumulative() && limit.is_none() {
+        if schema.datum_type.is_cumulative() && pushed.limit().is_none() {
             query.push_str(", start_time");
         }
         query.push_str(", timestamp");
@@ -845,7 +1153,7 @@ impl Client {
         // is always the `timeseries_key`. Note that the clause is completely
         // independent of the the traditional SQL `LIMIT` clause, pushed below
         // to avoid selecting too many rows at once.
-        if let Some(limit) = limit {
+        if let Some(limit) = pushed.limit() {
             // If this limit takes the _last_ samples, we need to invert the
             // sorting by timestamp to be descending.
             let is_last = matches!(limit.kind, LimitKind::Last);
@@ -1183,6 +1491,7 @@ fn update_total_rows_and_check(
 #[cfg(test)]
 mod tests {
     use super::ConsistentKeyGroup;
+    use crate::OxqlResult;
     use crate::client::oxql::{
         QueryAuthzScope, chunk_consistent_key_groups_impl,
     };
@@ -1214,6 +1523,14 @@ mod tests {
     struct SomeMetric {
         foo: i32,
         datum: Cumulative<u64>,
+    }
+
+    // A gauge sharing the target above, for exercising the paths that only
+    // apply to gauges.
+    #[derive(Clone, Debug, oximeter::Metric)]
+    struct SomeGauge {
+        foo: i32,
+        datum: i64,
     }
 
     #[derive(Clone, Debug)]
@@ -2033,5 +2350,151 @@ mod tests {
             );
         }
         ctx.cleanup_successful().await;
+    }
+
+    // The fixture counter advances by exactly 1 per second. It is cumulative,
+    // so alignment is not pushed for it -- this checks the gauge path against
+    // a gauge metric inserted alongside it.
+    #[tokio::test]
+    async fn test_pushed_alignment_matches_the_rust_path() {
+        let ctx =
+            setup_oxql_test("test_pushed_alignment_matches_the_rust_path")
+                .await;
+
+        // A gauge that sawtooths, so that min, max and mean all differ.
+        let target = SomeTarget { name: String::from("gauge"), index: 8 };
+        let first = ctx.test_data.first_timestamp;
+        let mut samples = Vec::new();
+        for i in 0..32u32 {
+            let metric = SomeGauge { foo: 5, datum: i64::from(i % 7) };
+            samples.push(
+                Sample::new_with_timestamp(
+                    first + Duration::from_secs(i.into()),
+                    &target,
+                    &metric,
+                )
+                .unwrap(),
+            );
+        }
+        ctx.client.insert_samples(&samples).await.expect("inserted");
+
+        for method in ["max", "min", "mean_within"] {
+            for period in ["3s", "5s", "10s"] {
+                // Pin the end of the query. It defaults to now, and the
+                // two queries below run a moment apart, which would anchor
+                // their output periods a few milliseconds from each other.
+                let end = format_timestamp(first + Duration::from_secs(40));
+                let query = format!(
+                    "get some_target:some_gauge | filter {} \
+                     && timestamp <= @{} | align {}({})",
+                    exact_filter_for(&target, 5),
+                    end,
+                    method,
+                    period,
+                );
+                let pushed = ctx
+                    .client
+                    .oxql_query(&query, QueryAuthzScope::Fleet)
+                    .await
+                    .unwrap_or_else(|e| panic!("`{query}` failed: {e}"));
+
+                // Run the same query with the alignment forced into Rust, by
+                // putting a filter on the datum in front of it that cannot be
+                // pushed. The filter admits everything, so the two must agree
+                // point for point.
+                let unpushed_query = format!(
+                    "get some_target:some_gauge | filter {} \
+                     && timestamp <= @{} | filter datum >= -1 \
+                     | align {}({})",
+                    exact_filter_for(&target, 5),
+                    end,
+                    method,
+                    period,
+                );
+                let unpushed = ctx
+                    .client
+                    .oxql_query(&unpushed_query, QueryAuthzScope::Fleet)
+                    .await
+                    .unwrap_or_else(|e| {
+                        panic!("`{unpushed_query}` failed: {e}")
+                    });
+
+                let left = only_timeseries(&pushed);
+                let right = only_timeseries(&unpushed);
+                assert_eq!(
+                    left, right,
+                    "Aligning `{method}({period})` in the database must give \
+                    exactly what aligning it in Rust gives, including the \
+                    data type, the timestamps and the missing points.\n\
+                    pushed:   {left:?}\nunpushed: {right:?}",
+                );
+                assert!(
+                    left.iter().any(|(_, v)| v.is_some()),
+                    "`{query}` produced no data at all, so the comparison \
+                    above proved nothing",
+                );
+
+                // Prove the two really did take different paths. Without
+                // this the comparison would still pass if the alignment were
+                // quietly never pushed, since both sides would then be the
+                // same Rust code.
+                let aggregate = match method {
+                    "mean_within" => "avg(datum)",
+                    other => &format!("{other}(datum)"),
+                };
+                assert!(
+                    pushed
+                        .query_summaries
+                        .iter()
+                        .any(|summary| summary.query.contains(aggregate)),
+                    "`{query}` should have been aligned by the database, but \
+                    no query it ran aggregates with `{aggregate}`: {:#?}",
+                    pushed
+                        .query_summaries
+                        .iter()
+                        .map(|s| &s.query)
+                        .collect::<Vec<_>>(),
+                );
+                assert!(
+                    unpushed
+                        .query_summaries
+                        .iter()
+                        .all(|summary| !summary.query.contains(aggregate)),
+                    "A filter on the datum cannot be applied by the database, \
+                    so `{unpushed_query}` must not be aligned there either -- \
+                    the filter would be applied to rows that had already been \
+                    aggregated away",
+                );
+
+                // Note there is deliberately no assertion here that the
+                // pushed query reads fewer rows. `io_summary` counts what
+                // ClickHouse scanned, and it still has to scan every sample
+                // in order to aggregate it -- the two paths read the same
+                // rows. What pushing down saves is the rows that come *back*:
+                // one per period instead of one per sample, which is what
+                // crosses the network, what is held in memory, and what
+                // counts against `MAX_DATABASE_ROWS`. The protocol gives us
+                // no count of returned rows to assert on, so the check that
+                // this actually happened is the shape of the SQL above.
+            }
+        }
+        ctx.cleanup_successful().await;
+    }
+
+    // The timestamps and values of the single timeseries in a result.
+    fn only_timeseries(
+        result: &OxqlResult,
+    ) -> Vec<(chrono::DateTime<Utc>, Option<f64>)> {
+        let table = result.tables.first().expect("one table");
+        let timeseries = table.iter().next().expect("one timeseries");
+        let values: Vec<Option<f64>> =
+            match timeseries.points.values(0).expect("values") {
+                oxql_types::point::ValueArray::Double(values) => values.clone(),
+                oxql_types::point::ValueArray::Integer(values) => {
+                    values.iter().map(|v| v.map(|v| v as f64)).collect()
+                }
+                other => panic!("unexpected type: {:?}", other.data_type()),
+            };
+        timeseries.points.timestamps().iter().copied().zip(values).collect()
     }
 }

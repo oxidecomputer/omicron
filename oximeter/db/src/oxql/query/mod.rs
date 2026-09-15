@@ -13,6 +13,7 @@ use super::ast::literal::Literal;
 use super::ast::logical_op::LogicalOp;
 use super::ast::table_ops::BasicTableOp;
 use super::ast::table_ops::TableOp;
+use super::ast::table_ops::align::Align;
 use super::ast::table_ops::filter::CompoundFilter;
 use super::ast::table_ops::filter::FilterExpr;
 use super::ast::table_ops::filter::SimpleFilter;
@@ -247,6 +248,67 @@ impl Query {
     // 1        1           avg([5, 7]) -> 6
     //
     // So that also works fine.
+    /// Return the alignment operation that can be computed in the database,
+    /// if any.
+    ///
+    /// Alignment reduces every sample in a period to one point, so pushing it
+    /// into ClickHouse is the difference between fetching a day of raw samples
+    /// and fetching the handful of numbers they reduce to. The caller is
+    /// responsible for skipping the operation in the Rust pipeline when this
+    /// returns it, or the data would be aligned twice.
+    ///
+    /// Only the straightforward shape is pushed:
+    ///
+    /// - Exactly one alignment. A second one consumes the output of the first,
+    ///   which is no longer anything the database has.
+    /// - Nothing before it but filters. A `group_by` or `join` first would
+    ///   change what the alignment sees.
+    /// - No filter on `datum` anywhere before it.
+    ///   `rewrite_predicate_for_measurements` cannot push those, so they are
+    ///   applied in Rust, after the database has already aggregated away the
+    ///   rows they would have removed.
+    /// - No limit. A limit is applied to the aligned output, and the database
+    ///   would apply it to the raw samples instead.
+    pub(crate) fn pushable_alignment(
+        &self,
+        limit: Option<Limit>,
+    ) -> Option<Align> {
+        if limit.is_some() {
+            return None;
+        }
+        let mut alignment = None;
+        for op in self.transformations() {
+            let TableOp::Basic(op) = op else {
+                return None;
+            };
+            match op {
+                BasicTableOp::Filter(filter) => {
+                    // A filter after the alignment is fine -- it runs in Rust
+                    // on the aligned output either way. One before it is only
+                    // fine if the database can apply it too.
+                    if alignment.is_none() && filter.references_datum() {
+                        return None;
+                    }
+                }
+                BasicTableOp::Align(align) => {
+                    if alignment.is_some() {
+                        return None;
+                    }
+                    alignment = Some(*align);
+                }
+                BasicTableOp::Get(_) => {}
+                BasicTableOp::GroupBy(_)
+                | BasicTableOp::Join(_)
+                | BasicTableOp::Limit(_) => {
+                    if alignment.is_none() {
+                        return None;
+                    }
+                }
+            }
+        }
+        alignment
+    }
+
     pub(crate) fn coalesced_predicates(
         &self,
         outer: Option<Filter>,

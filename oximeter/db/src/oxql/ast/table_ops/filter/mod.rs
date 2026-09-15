@@ -109,6 +109,22 @@ impl Filter {
         }
     }
 
+    /// True if any predicate in this filter compares against `datum`.
+    ///
+    /// Unlike [`Self::only_datum()`], this needs no schema, which lets it be
+    /// called while deciding what can be pushed into the database, before any
+    /// table schema is in hand. Predicates on the datum cannot be pushed --
+    /// see `rewrite_predicate_for_measurements()` -- so anything that has to
+    /// run before them in the database has to stay in Rust too.
+    pub fn references_datum(&self) -> bool {
+        match &self.expr {
+            FilterExpr::Simple(inner) => inner.ident.as_str() == "datum",
+            FilterExpr::Compound(inner) => {
+                inner.left.references_datum() || inner.right.references_datum()
+            }
+        }
+    }
+
     /// Remove any predicates on the datum of a table.
     pub fn remove_datum(
         &self,
