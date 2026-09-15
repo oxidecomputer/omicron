@@ -38,6 +38,7 @@ use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventoryResul
 use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventoryStatus;
 use sled_agent_types_versions::latest::inventory::FmdInventory;
 use sled_agent_types_versions::latest::inventory::FmdInventoryError;
+use sled_agent_types_versions::latest::inventory::InstanceManagerStatus;
 use sled_agent_types_versions::latest::inventory::InventoryDataset;
 use sled_agent_types_versions::latest::inventory::InventoryDisk;
 use sled_agent_types_versions::latest::inventory::InventoryZpool;
@@ -715,6 +716,7 @@ pub struct SledAgent {
     pub datasets: Vec<Dataset>,
     pub ledgered_sled_config: Option<OmicronSledConfig>,
     pub reconciler_status: ConfigReconcilerInventoryStatus,
+    pub instance_manager_status: InstanceManagerStatus,
     pub last_reconciliation: Option<ConfigReconcilerInventory>,
     pub file_source_resolver: OmicronFileSourceResolverInventory,
     pub smf_services_enabled_not_online: SvcsEnabledNotOnlineResult,

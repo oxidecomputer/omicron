@@ -82,6 +82,7 @@ mod test {
     use nexus_types::deployment::CockroachDbPreserveDowngrade;
     use nexus_types::deployment::LastAllocatedSubnetIpOffset;
     use nexus_types::deployment::OmicronZoneExternalFloatingIp;
+    use nexus_types::deployment::OmicronZoneExternalFloatingIps;
     use nexus_types::deployment::OximeterReadMode;
     use nexus_types::deployment::PendingMgsUpdates;
     use nexus_types::deployment::blueprint_zone_type;
@@ -139,10 +140,13 @@ mod test {
                             internal_address: "[::1]:0".parse().unwrap(),
                             lockstep_port: 0,
                             external_dns_servers: Vec::new(),
-                            external_ip: OmicronZoneExternalFloatingIp {
-                                id: ExternalIpUuid::new_v4(),
-                                ip: IpAddr::V6(Ipv6Addr::LOCALHOST),
-                            },
+                            external_ips:
+                                OmicronZoneExternalFloatingIps::from_single(
+                                    OmicronZoneExternalFloatingIp {
+                                        id: ExternalIpUuid::new_v4(),
+                                        ip: IpAddr::V6(Ipv6Addr::LOCALHOST),
+                                    },
+                                ),
                             external_tls: true,
                             nic: NetworkInterface {
                                 id: uuid::Uuid::new_v4(),

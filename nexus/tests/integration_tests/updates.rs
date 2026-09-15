@@ -1039,7 +1039,12 @@ async fn test_repo_list() -> Result<()> {
 async fn test_request_without_api_version(cptestctx: &ControlPlaneTestContext) {
     // We can't use cptestctx.external_client directly since it always sets the
     // header. Instead, construct a NexusRequest by hand.
-    let server_addr = cptestctx.server.get_http_server_external_address();
+    let server_addr = cptestctx
+        .server
+        .get_all_http_server_external_addresses()
+        .into_iter()
+        .next()
+        .expect("Should have >= 1 external API address");
     let test_cx =
         ClientTestContext::new(server_addr, cptestctx.logctx.log.clone());
 

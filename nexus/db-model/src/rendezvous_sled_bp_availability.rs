@@ -120,7 +120,8 @@ impl SledBpAvailabilityState {
     }
 }
 
-/// Data prepared for a single sled to write to the `rendezvous_sled_bp_availability` table.
+/// Data prepared for a single sled to write to the
+/// `rendezvous_sled_bp_availability` table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SledBlueprintAvailabilityInput {
     /// The sled ID.

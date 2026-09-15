@@ -27,6 +27,7 @@ use crate::db::queries::disk::MAX_DISKS_PER_INSTANCE;
 use crate::db::queries::sled_reservation::LocalStorageAllocation;
 use crate::db::queries::sled_reservation::LocalStorageAllocationRequired;
 use crate::db::queries::sled_reservation::SLED_INSERT_QUERY_SENTINELS;
+use crate::db::queries::sled_reservation::SledFindTargetsRow;
 use crate::db::queries::sled_reservation::sentinel_to_reason;
 use crate::db::queries::sled_reservation::sled_find_targets_query;
 use crate::db::queries::sled_reservation::sled_insert_resource_query;
@@ -200,6 +201,59 @@ enum SledReservationTransactionError {
     Diesel(#[from] diesel::result::Error),
     #[error(transparent)]
     Reservation(#[from] SledReservationError),
+}
+
+#[derive(Debug, Default)]
+struct SledTargetSets {
+    targets: HashSet<SledUuid>,
+    banned: HashSet<SledUuid>,
+    unpreferred: HashSet<SledUuid>,
+    required: HashSet<SledUuid>,
+    preferred: HashSet<SledUuid>,
+}
+
+fn classify_sled_targets(
+    rows: Vec<SledFindTargetsRow>,
+    must_use_sleds: Option<&HashSet<SledUuid>>,
+) -> SledTargetSets {
+    let mut sets = SledTargetSets::default();
+
+    for row in rows {
+        let sled_id = row.sled_id();
+
+        if row.is_candidate {
+            // If there is a Some list of sleds to select from, only add
+            // this target if it is in that list. A None list means that any
+            // sled could be a target.
+            match must_use_sleds {
+                Some(must_use_sleds) => {
+                    if must_use_sleds.contains(&sled_id) {
+                        sets.targets.insert(sled_id);
+                    }
+                }
+
+                None => {
+                    sets.targets.insert(sled_id);
+                }
+            }
+        }
+
+        if let Some(policy) = row.affinity_policy {
+            match policy {
+                AffinityPolicy::Fail => sets.required.insert(sled_id),
+                AffinityPolicy::Allow => sets.preferred.insert(sled_id),
+            };
+        }
+
+        if let Some(policy) = row.anti_affinity_policy {
+            match policy {
+                AffinityPolicy::Fail => sets.banned.insert(sled_id),
+                AffinityPolicy::Allow => sets.unpreferred.insert(sled_id),
+            };
+        }
+    }
+
+    sets
 }
 
 // Chooses a sled for reservation with the supplied constraints.
@@ -1414,67 +1468,23 @@ impl DataStore {
             &resources,
             constraints.cpu_families(),
         )
-            .get_results_async::<(
-                // Sled UUID
-                Uuid,
-                // Would an allocation to this sled fit?
-                bool,
-                // Affinity policy on this sled
-                Option<AffinityPolicy>,
-                // Anti-affinity policy on this sled
-                Option<AffinityPolicy>,
-            )>(&*conn).await?;
+        .get_results_async::<SledFindTargetsRow>(&*conn)
+        .await?;
 
         // Translate the database results into a format which we can use to pick
         // a sled using more complex rules.
         //
         // See: `pick_sled_reservation_target(...)`
-        let mut sled_targets = HashSet::new();
-        let mut banned = HashSet::new();
-        let mut unpreferred = HashSet::new();
-        let mut required = HashSet::new();
-        let mut preferred = HashSet::new();
-
-        for (sled_id, fits, affinity_policy, anti_affinity_policy) in
-            possible_sleds
-        {
-            // this is required because [`sled_find_targets_query`] returns a
-            // query where the first element in the tuple is
-            // ['`sql_types::Uuid`], and typed uuids can't be returned in
-            // queries like this.
-            let sled_id = SledUuid::from_untyped_uuid(sled_id);
-
-            if fits {
-                // If there is a Some list of sleds to select from, only add
-                // this target if it is in that list. A None list means that any
-                // sled could be a target.
-                match &maybe_must_use_sleds {
-                    Some(must_use_sleds) => {
-                        if must_use_sleds.contains(&sled_id) {
-                            sled_targets.insert(sled_id);
-                        }
-                    }
-
-                    None => {
-                        sled_targets.insert(sled_id);
-                    }
-                }
-            }
-
-            if let Some(policy) = affinity_policy {
-                match policy {
-                    AffinityPolicy::Fail => required.insert(sled_id),
-                    AffinityPolicy::Allow => preferred.insert(sled_id),
-                };
-            }
-
-            if let Some(policy) = anti_affinity_policy {
-                match policy {
-                    AffinityPolicy::Fail => banned.insert(sled_id),
-                    AffinityPolicy::Allow => unpreferred.insert(sled_id),
-                };
-            }
-        }
+        let SledTargetSets {
+            targets: mut sled_targets,
+            mut banned,
+            mut unpreferred,
+            required,
+            mut preferred,
+        } = classify_sled_targets(
+            possible_sleds,
+            maybe_must_use_sleds.as_ref(),
+        );
 
         // Prior to R18, all Disks using the encrypted local storage dataset
         // should have been deleted, and we will be revisiting how to do
@@ -2855,13 +2865,6 @@ pub(in crate::db::datastore) mod test {
         cpu_platform: Option<db::model::InstanceCpuPlatform>,
     }
 
-    struct FindTargetsOutput {
-        id: SledUuid,
-        fits: bool,
-        affinity_policy: Option<AffinityPolicy>,
-        anti_affinity_policy: Option<AffinityPolicy>,
-    }
-
     /// The result of [`Instance::insert_resource`].
     #[derive(Debug, PartialEq, Eq)]
     enum InsertResourceOutcome {
@@ -2918,31 +2921,18 @@ pub(in crate::db::datastore) mod test {
         async fn find_targets(
             &self,
             datastore: &DataStore,
-        ) -> Vec<FindTargetsOutput> {
+        ) -> Vec<SledFindTargetsRow> {
             assert!(self.force_onto_sled.is_none());
 
             let families =
                 self.cpu_platform.map(|p| p.compatible_sled_cpu_families());
 
             sled_find_targets_query(self.id, &self.resources, families)
-                .get_results_async::<(
-                    Uuid,
-                    bool,
-                    Option<AffinityPolicy>,
-                    Option<AffinityPolicy>,
-                )>(&*datastore.pool_connection_for_tests().await.unwrap())
+                .get_results_async::<SledFindTargetsRow>(
+                    &*datastore.pool_connection_for_tests().await.unwrap(),
+                )
                 .await
                 .unwrap()
-                .into_iter()
-                .map(|(id, fits, affinity_policy, anti_affinity_policy)| {
-                    FindTargetsOutput {
-                        id: SledUuid::from_untyped_uuid(id),
-                        fits,
-                        affinity_policy,
-                        anti_affinity_policy,
-                    }
-                })
-                .collect()
         }
 
         // This is the second half of creating a sled reservation.
@@ -3830,7 +3820,7 @@ pub(in crate::db::datastore) mod test {
         // All sleds should be available.
         let possible_sleds = test_instance.find_targets(&datastore).await;
         assert_eq!(possible_sleds.len(), SLED_COUNT);
-        assert!(possible_sleds.iter().all(|sled| sled.fits));
+        assert!(possible_sleds.iter().all(|sled| sled.is_candidate));
         assert!(
             possible_sleds.iter().all(|sled| sled.affinity_policy.is_none())
         );
@@ -3863,7 +3853,7 @@ pub(in crate::db::datastore) mod test {
         // Now if we try to find targets again, the result will change.
         let possible_sleds = test_instance.find_targets(&datastore).await;
         assert_eq!(possible_sleds.len(), SLED_COUNT);
-        assert!(possible_sleds.iter().all(|sled| sled.fits));
+        assert!(possible_sleds.iter().all(|sled| sled.is_candidate));
         assert!(
             possible_sleds
                 .iter()
@@ -3871,7 +3861,7 @@ pub(in crate::db::datastore) mod test {
         );
         let affine_sled = possible_sleds
             .iter()
-            .find(|sled| sled.id == sleds[0].id())
+            .find(|sled| sled.sled_id() == sleds[0].id())
             .unwrap();
         assert!(matches!(
             affine_sled.affinity_policy.expect("Sled 0 should be affine"),
@@ -3936,7 +3926,7 @@ pub(in crate::db::datastore) mod test {
         // All sleds should be available.
         let possible_sleds = test_instance.find_targets(&datastore).await;
         assert_eq!(possible_sleds.len(), SLED_COUNT);
-        assert!(possible_sleds.iter().all(|sled| sled.fits));
+        assert!(possible_sleds.iter().all(|sled| sled.is_candidate));
         assert!(
             possible_sleds.iter().all(|sled| sled.affinity_policy.is_none())
         );
@@ -3970,13 +3960,13 @@ pub(in crate::db::datastore) mod test {
         // Now if we try to find targets again, the result will change.
         let possible_sleds = test_instance.find_targets(&datastore).await;
         assert_eq!(possible_sleds.len(), SLED_COUNT);
-        assert!(possible_sleds.iter().all(|sled| sled.fits));
+        assert!(possible_sleds.iter().all(|sled| sled.is_candidate));
         assert!(
             possible_sleds.iter().all(|sled| sled.affinity_policy.is_none())
         );
         let anti_affine_sled = possible_sleds
             .iter()
-            .find(|sled| sled.id == sleds[0].id())
+            .find(|sled| sled.sled_id() == sleds[0].id())
             .unwrap();
         assert!(matches!(
             anti_affine_sled
@@ -4037,7 +4027,7 @@ pub(in crate::db::datastore) mod test {
         // All sleds should be available.
         let possible_sleds = test_instance.find_targets(&datastore).await;
         assert_eq!(possible_sleds.len(), SLED_COUNT);
-        assert!(possible_sleds.iter().all(|sled| sled.fits));
+        assert!(possible_sleds.iter().all(|sled| sled.is_candidate));
         assert!(
             possible_sleds.iter().all(|sled| sled.affinity_policy.is_none())
         );
@@ -4069,8 +4059,8 @@ pub(in crate::db::datastore) mod test {
         assert_eq!(possible_sleds.len(), 1);
         assert!(possible_sleds[0].affinity_policy.is_none());
         assert!(possible_sleds[0].anti_affinity_policy.is_none());
-        assert!(possible_sleds[0].fits);
-        assert_eq!(possible_sleds[0].id, sleds[1].id());
+        assert!(possible_sleds[0].is_candidate);
+        assert_eq!(possible_sleds[0].sled_id(), sleds[1].id());
 
         // Inserting onto sleds[0, 2, 3] should fail - there shouldn't
         // be enough space on these sleds.

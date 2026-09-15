@@ -718,6 +718,11 @@ pub struct BlueprintTasksConfig {
     /// reads the reconfigurator config from the database
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs_load_reconfigurator_config: Duration,
+
+    /// period (in seconds) for periodic activations of the background task that
+    /// prunes old blueprints
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs_prune: Duration,
 }
 
 #[serde_as]
@@ -1169,7 +1174,6 @@ mod test {
     use super::*;
 
     use nexus_types::deployment::PlannerConfig;
-    use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
     use omicron_common::address::{
         CLICKHOUSE_TCP_PORT, Ipv6Subnet, RACK_PREFIX_LENGTH,
     };
@@ -1313,6 +1317,8 @@ mod test {
             planner_enabled = true
             tuf_repo_pruner_enabled = false
             disruption_policy = "terminate"
+            blueprint_pruner_enabled = false
+            blueprint_pruner_nkeep = 137
             [background_tasks]
             dns_internal.period_secs_config = 1
             dns_internal.period_secs_servers = 2
@@ -1339,6 +1345,7 @@ mod test {
             blueprints.period_secs_rendezvous = 300
             blueprints.period_secs_collect_crdb_node_ids = 180
             blueprints.period_secs_load_reconfigurator_config = 5
+            blueprints.period_secs_prune = 301
             switch_port_settings_manager.period_secs = 30
             region_replacement.period_secs = 30
             region_replacement_driver.period_secs = 30
@@ -1490,7 +1497,8 @@ mod test {
                         planner_enabled: true,
                         planner_config: PlannerConfig::default(),
                         tuf_repo_pruner_enabled: false,
-                        disruption_policy: ReconfiguratorDisruptionPolicy::Terminate,
+                        blueprint_pruner_enabled: false,
+                        blueprint_pruner_nkeep: 137,
                     }),
                     background_tasks: BackgroundTaskConfig {
                         dns_internal: DnsTasksConfig {
@@ -1545,7 +1553,9 @@ mod test {
                                 Duration::from_secs(180),
                             period_secs_rendezvous: Duration::from_secs(300),
                             period_secs_load_reconfigurator_config:
-                                Duration::from_secs(5)
+                                Duration::from_secs(5),
+                            period_secs_prune:
+                                Duration::from_secs(301),
                         },
                         switch_port_settings_manager:
                             SwitchPortSettingsManagerConfig {
@@ -1742,6 +1752,7 @@ mod test {
             blueprints.period_secs_rendezvous = 300
             blueprints.period_secs_collect_crdb_node_ids = 180
             blueprints.period_secs_load_reconfigurator_config = 5
+            blueprints.period_secs_prune = 301
             switch_port_settings_manager.period_secs = 30
             region_replacement.period_secs = 30
             region_replacement_driver.period_secs = 30
