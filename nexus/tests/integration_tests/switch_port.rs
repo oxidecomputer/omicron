@@ -32,6 +32,7 @@ use sled_agent_types::early_networking::LinkSpeed;
 use sled_agent_types::early_networking::MaxPathConfig;
 use sled_agent_types::early_networking::NumberedRouter;
 use sled_agent_types::early_networking::RouterLifetimeConfig;
+use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::UnnumberedRouter;
 use std::str::FromStr;
 use std::time::Duration;
@@ -896,17 +897,12 @@ async fn test_bgp_config_update(ctx: &ControlPlaneTestContext) {
 /// Tests the full pipeline:
 ///   Nexus (sync_switch_configuration)
 ///     → sled-agent bootstore updated
-///     → `notify_network_config_changed()` called
 ///     → reconcilers' watch channel updated
-///     → reconcilers run with `SystemNetworkingConfigChanged` reason
+///     → configured route appears in switch0's mgd
 #[nexus_test(extra_sled_agents = 1)]
 async fn test_scrimlet_reconcilers_update_on_bootstore_change(
     ctx: &ControlPlaneTestContext,
 ) {
-    use bootstrap_agent_lockstep_types::scrimlet_reconcilers::{
-        ReconcilerActivationReason, ScrimletReconcilersStatus,
-    };
-
     let client = &ctx.external_client;
 
     // Create an address lot.
@@ -1073,55 +1069,39 @@ async fn test_scrimlet_reconcilers_update_on_bootstore_change(
         });
     }
 
-    // After the bootstore update, `notify_network_config_changed()` was called,
-    // which sends the new config to the scrimlet reconcilers via a watch
-    // channel. Verify that the reconcilers ran in response to this config
-    // change, confirming the full pipeline works end-to-end.
-    for (i, sled_agent) in ctx.sled_agents.iter().enumerate() {
-        let sled_agent = sled_agent.sled_agent().clone();
-        wait_for_condition(
-            || async {
-                let status = sled_agent.scrimlet_reconcilers_status();
-                match status {
-                    ScrimletReconcilersStatus::Running {
-                        mgd_reconciler, ..
-                    } => {
-                        let Some(last) =
-                            mgd_reconciler.last_completion.as_ref()
-                        else {
-                            // Reconciler hasn't completed a run yet.
-                            return Err(CondCheckError::<()>::NotYet {
-                                status: None,
-                            });
-                        };
-                        if matches!(
-                            last.activation_reason,
-                            ReconcilerActivationReason::SystemNetworkingConfigChanged
-                        ) {
-                            Ok(())
-                        } else {
-                            // Still showing startup activation; waiting for
-                            // the config-change-triggered run.
-                            Err(CondCheckError::<()>::NotYet { status: None })
-                        }
-                    }
-                    _ => {
-                        // Reconcilers still initializing (determining switch
-                        // slot or waiting for networking info).
-                        Err(CondCheckError::<()>::NotYet { status: None })
-                    }
-                }
-            },
-            &Duration::from_millis(50),
-            &Duration::from_secs(60),
-        )
-        .await
-        .unwrap_or_else(|_| {
-            panic!(
-                "sled-agent {i}'s scrimlet reconcilers should have run in \
-                 response to the bootstore update (last status: {:?})",
-                sled_agent.scrimlet_reconcilers_status(),
-            )
-        });
-    }
+    // After the bootstore update the reconcilers' watch channel is updated,
+    // triggering the scrimlet reconcilers. Verify the full pipeline by polling
+    // switch0's mgd until the route we configured (`2000::/64` via `2000::1`)
+    // is present there.
+    let mgd_addr = ctx.mgd.get(&SwitchSlot::Switch0).unwrap().address();
+    let mgd_client = mg_admin_client::Client::new(
+        &format!("http://{mgd_addr}"),
+        ctx.logctx.log.clone(),
+    );
+    wait_for_condition(
+        || async {
+            let routes = mgd_client
+                .static_list_v6_routes()
+                .await
+                .expect("should be able to list mgd v6 routes")
+                .into_inner();
+            let expected_dst: oxnet::Ipv6Net = "2000::/64".parse().unwrap();
+            let expected_nexthop: std::net::IpAddr = "2000::1".parse().unwrap();
+            let found = routes.iter().any(|(prefix, paths)| {
+                prefix.parse::<oxnet::Ipv6Net>().ok() == Some(expected_dst)
+                    && paths.iter().any(|p| p.nexthop == expected_nexthop)
+            });
+            if found {
+                Ok(())
+            } else {
+                Err(CondCheckError::<()>::NotYet { status: None })
+            }
+        },
+        &Duration::from_millis(50),
+        &Duration::from_secs(60),
+    )
+    .await
+    .expect(
+        "switch0's mgd should have the configured route after bootstore update",
+    );
 }
