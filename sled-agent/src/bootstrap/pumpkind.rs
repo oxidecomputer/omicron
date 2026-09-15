@@ -4,6 +4,7 @@
 
 //! Starting the pumpkind service.
 
+use crate::config::Deployment;
 use thiserror::Error;
 
 const SERVICE_FMRI: &str = "svc:/oxide/pumpkind";
@@ -20,21 +21,27 @@ pub enum Error {
 
     #[error("Error detecting Oxide sled: {0}")]
     Detect(anyhow::Error),
+
+    #[error("pumpkind manifest not installed at {0}")]
+    ManifestMissing(&'static str),
 }
 
-/// Import and enable pumpkind on Oxide sleds with the manifest installed.
-pub(super) fn enable_pumpkind_service(log: &slog::Logger) -> Result<(), Error> {
+/// Import and enable pumpkind on Oxide sleds whose deployment has a physical
+/// ASIC.
+pub(super) fn enable_pumpkind_service(
+    log: &slog::Logger,
+    deployment: &Deployment,
+) -> Result<(), Error> {
+    if !deployment.has_physical_asic() {
+        info!(log, "deployment has no physical ASIC; skipping pumpkind");
+        return Ok(());
+    }
     if !sled_hardware::is_oxide_sled().map_err(Error::Detect)? {
         info!(log, "not an Oxide sled; skipping pumpkind");
         return Ok(());
     }
     if !std::path::Path::new(MANIFEST_PATH).exists() {
-        info!(
-            log,
-            "pumpkind manifest not installed; skipping";
-            "path" => MANIFEST_PATH,
-        );
-        return Ok(());
+        return Err(Error::ManifestMissing(MANIFEST_PATH));
     }
 
     info!(log, "Importing pumpkind service"; "path" => MANIFEST_PATH);

@@ -171,6 +171,20 @@ impl Deployment {
         self.resolve(found).map_err(StartError::SledModeConfig)
     }
 
+    /// Whether this deployment drives a physical sidecar ASIC, and so wants
+    /// the services that only ship with those builds.
+    pub fn has_physical_asic(&self) -> bool {
+        match self {
+            Deployment::Production { .. } => true,
+            Deployment::Custom {
+                switch: Switch::TofinoAsic { .. }, ..
+            } => true,
+            Deployment::Virtual { .. }
+            | Deployment::Standalone { .. }
+            | Deployment::Custom { .. } => false,
+        }
+    }
+
     /// Whether startup detection runs. Only the propolis SoftNPU device is
     /// found this way: a role fixed to `sled` has nothing to probe, the
     /// Tofino ASIC is the hardware monitor's job, and the stub and zone
@@ -506,6 +520,17 @@ mod test {
         assert!(!custom(AUTO, TofinoAsic).probes_switch());
         assert!(!custom(SCRIMLET, TofinoStub).probes_switch());
         assert!(!custom(SCRIMLET, SoftNpuZone).probes_switch());
+    }
+
+    #[test]
+    fn physical_asic_deployments() {
+        assert!(production().has_physical_asic());
+        assert!(custom(SLED, TofinoAsic).has_physical_asic());
+        assert!(custom(SCRIMLET, TofinoAsic).has_physical_asic());
+        assert!(!virtual_lab().has_physical_asic());
+        assert!(!standalone().has_physical_asic());
+        assert!(!custom(SCRIMLET, TofinoStub).has_physical_asic());
+        assert!(!custom(AUTO, SoftNpuPropolisDevice).has_physical_asic());
     }
 
     #[test]
