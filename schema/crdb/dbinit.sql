@@ -5555,6 +5555,17 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_fmd_resource (
     PRIMARY KEY (inv_collection_id, sled_id, resource_id)
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.reconfigurator_disruption_policy AS ENUM (
+    'terminate',
+    'migrate_or_terminate',
+    'migrate_only'
+);
+
+CREATE TYPE IF NOT EXISTS omicron.public.reconfigurator_planner_sled_reboot_policy AS ENUM (
+    'immediate_no_evacuation',
+    'evacuate'
+);
+
 /*
  * Various runtime configuration switches for reconfigurator
  *
@@ -5564,12 +5575,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_fmd_resource (
  *
  * See https://github.com/oxidecomputer/omicron/issues/8253 for more details.
  */
-CREATE TYPE IF NOT EXISTS omicron.public.reconfigurator_disruption_policy AS ENUM (
-    'terminate',
-    'migrate_or_terminate',
-    'migrate_only'
-);
-
 CREATE TABLE IF NOT EXISTS omicron.public.reconfigurator_config (
     -- Monotonically increasing version for all bp_targets
     version INT8 PRIMARY KEY,
@@ -5590,7 +5595,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.reconfigurator_config (
     blueprint_pruner_enabled BOOL NOT NULL,
 
     -- Number of recent target blueprints that the blueprint pruner keeps
-    blueprint_pruner_nkeep INT8 NOT NULL
+    blueprint_pruner_nkeep INT8 NOT NULL,
+
+    -- How the planner schedules updates that induce sled reboots
+    sled_reboot_policy omicron.public.reconfigurator_planner_sled_reboot_policy NOT NULL
 );
 
 /*
@@ -9524,7 +9532,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '301.0.0', NULL)
+    (TRUE, NOW(), NOW(), '302.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

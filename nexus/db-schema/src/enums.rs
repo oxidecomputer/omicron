@@ -92,6 +92,7 @@ define_enums! {
     PhysicalDiskKindEnum => "physical_disk_kind",
     PhysicalDiskPolicyEnum => "physical_disk_policy",
     PhysicalDiskStateEnum => "physical_disk_state",
+    PlannerSledRebootPolicyEnum => "reconfigurator_planner_sled_reboot_policy",
     ProducerKindEnum => "producer_kind",
     ReadOnlyTargetReplacementTypeEnum => "read_only_target_replacement_type",
     ReconfiguratorDisruptionPolicyEnum => "reconfigurator_disruption_policy",

@@ -18,9 +18,11 @@ use diesel::sql_types;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
+use nexus_db_model::DbPlannerSledRebootPolicy;
 use nexus_db_model::DbReconfiguratorDisruptionPolicy;
 use nexus_db_model::ReconfiguratorConfig as DbReconfiguratorConfig;
 use nexus_db_model::SqlU32;
+use nexus_db_schema::enums::PlannerSledRebootPolicyEnum;
 use nexus_db_schema::enums::ReconfiguratorDisruptionPolicyEnum;
 use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::ReconfiguratorConfig;
@@ -156,7 +158,8 @@ impl DataStore {
             config:
                 ReconfiguratorConfig {
                     planner_enabled,
-                    planner_config: PlannerConfig { disruption_policy },
+                    planner_config:
+                        PlannerConfig { disruption_policy, sled_reboot_policy },
                     tuf_repo_pruner_enabled,
                     blueprint_pruner_enabled,
                     blueprint_pruner_nkeep,
@@ -168,8 +171,9 @@ impl DataStore {
             r"INSERT INTO reconfigurator_config
                 (version, planner_enabled, time_modified,
                  tuf_repo_pruner_enabled, disruption_policy,
-                 blueprint_pruner_enabled, blueprint_pruner_nkeep)
-              SELECT $1, $2, $3, $4, $5, $6, $7
+                 blueprint_pruner_enabled, blueprint_pruner_nkeep,
+                 sled_reboot_policy)
+              SELECT $1, $2, $3, $4, $5, $6, $7, $8
               WHERE $1 - 1 IN (
                   SELECT COALESCE(MAX(version), 0)
                   FROM reconfigurator_config
@@ -184,6 +188,9 @@ impl DataStore {
         )
         .bind::<sql_types::Bool, _>(blueprint_pruner_enabled)
         .bind::<sql_types::BigInt, SqlU32>(blueprint_pruner_nkeep.into())
+        .bind::<PlannerSledRebootPolicyEnum, _>(
+            DbPlannerSledRebootPolicy::from(sled_reboot_policy),
+        )
         .execute_async(conn)
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
@@ -194,7 +201,8 @@ mod tests {
     use super::*;
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_types::deployment::{
-        DEFAULT_BLUEPRINT_PRUNER_NKEEP, PlannerConfig, ReconfiguratorConfig,
+        DEFAULT_BLUEPRINT_PRUNER_NKEEP, PlannerConfig, PlannerSledRebootPolicy,
+        ReconfiguratorConfig, ReconfiguratorDisruptionPolicy,
     };
     use omicron_test_utils::dev;
 
@@ -285,7 +293,14 @@ mod tests {
         );
 
         // Inserting version 4 should work
+        let v4_planner_config = PlannerConfig {
+            disruption_policy:
+                ReconfiguratorDisruptionPolicy::MigrateOrTerminate,
+            sled_reboot_policy: PlannerSledRebootPolicy::Evacuate,
+        };
+        assert_ne!(v4_planner_config, PlannerConfig::default());
         switches.version = 4;
+        switches.config.planner_config = v4_planner_config;
         switches.config.planner_enabled = true;
         switches.config.blueprint_pruner_enabled = false;
         switches.config.blueprint_pruner_nkeep = 17;
@@ -338,10 +353,15 @@ mod tests {
                     switches.config.blueprint_pruner_nkeep,
                     DEFAULT_BLUEPRINT_PRUNER_NKEEP
                 );
+                assert_eq!(
+                    switches.config.planner_config,
+                    PlannerConfig::default()
+                );
             } else {
                 assert_eq!(switches.config.planner_enabled, true);
                 assert_eq!(switches.config.blueprint_pruner_enabled, false);
                 assert_eq!(switches.config.blueprint_pruner_nkeep, 17);
+                assert_eq!(switches.config.planner_config, v4_planner_config);
             }
         }
 
