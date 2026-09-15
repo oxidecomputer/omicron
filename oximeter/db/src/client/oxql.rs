@@ -2623,6 +2623,132 @@ mod tests {
         ctx.cleanup_successful().await;
     }
 
+    // Seven days of temperature sampled every second, reduced to one maximum
+    // per day.
+    //
+    // This is the shape that motivated computing alignment in the database.
+    // The answer is eight numbers, and finding them in Rust means moving all
+    // 604,800 samples across the wire -- two thirds of the entire
+    // `MAX_DATABASE_ROWS` budget, for a single timeseries. A month of the same
+    // data would not fit in the budget at all, so the unaligned form of this
+    // query would not fail slowly, it would refuse to run.
+    #[tokio::test]
+    async fn test_pushed_alignment_over_a_week_of_samples() {
+        const SAMPLE_COUNT: u32 = 7 * 86_400;
+        let ctx =
+            setup_oxql_test("test_pushed_alignment_over_a_week_of_samples")
+                .await;
+
+        let target = SomeTarget { name: String::from("thermal"), index: 3 };
+        let first = ctx.test_data.first_timestamp;
+
+        // Insert in chunks. Holding every sample at once costs far more memory
+        // than the data itself does.
+        let insert_start = std::time::Instant::now();
+        for chunk_start in (0..SAMPLE_COUNT).step_by(60_000) {
+            let chunk_end = (chunk_start + 60_000).min(SAMPLE_COUNT);
+            let samples: Vec<_> = (chunk_start..chunk_end)
+                .map(|i| {
+                    // Cycle over a plausible range for a component
+                    // temperature, so that every full day hits the same known
+                    // maximum rather than whatever the last sample happened to
+                    // be. Starting well above zero keeps a real reading from
+                    // being mistaken for an empty period.
+                    let metric =
+                        SomeGauge { foo: 2, datum: 60 + i64::from(i % 31) };
+                    Sample::new_with_timestamp(
+                        first + Duration::from_secs(i.into()),
+                        &target,
+                        &metric,
+                    )
+                    .unwrap()
+                })
+                .collect();
+            ctx.client.insert_samples(&samples).await.expect("inserted");
+        }
+        println!(
+            "inserted {SAMPLE_COUNT} samples in {:?}",
+            insert_start.elapsed(),
+        );
+
+        let end = format_timestamp(first + Duration::from_secs(7 * 86_400));
+        let query = format!(
+            "get some_target:some_gauge | filter {} && timestamp <= @{} \
+             | align max(1d)",
+            exact_filter_for(&target, 2),
+            end,
+        );
+        let unpushed_query = format!(
+            "get some_target:some_gauge | filter {} && timestamp <= @{} \
+             | filter datum >= -1 | align max(1d)",
+            exact_filter_for(&target, 2),
+            end,
+        );
+
+        let start = std::time::Instant::now();
+        let pushed = ctx
+            .client
+            .oxql_query(&query, QueryAuthzScope::Fleet)
+            .await
+            .unwrap_or_else(|e| panic!("`{query}` failed: {e}"));
+        let pushed_elapsed = start.elapsed();
+
+        let start = std::time::Instant::now();
+        let unpushed = ctx
+            .client
+            .oxql_query(&unpushed_query, QueryAuthzScope::Fleet)
+            .await
+            .unwrap_or_else(|e| panic!("`{unpushed_query}` failed: {e}"));
+        let unpushed_elapsed = start.elapsed();
+
+        let left = only_timeseries(&pushed);
+        let right = only_timeseries(&unpushed);
+        println!(
+            "align max(1d) over {SAMPLE_COUNT} samples:\n  \
+             pushed   {pushed_elapsed:?}\n  unpushed {unpushed_elapsed:?}\n  \
+             points   {}\n  values   {:?}",
+            left.len(),
+            left.iter().map(|(_, v)| *v).collect::<Vec<_>>(),
+        );
+
+        assert_eq!(
+            left, right,
+            "Aligning a week of samples in the database must give exactly \
+            what aligning them in Rust gives",
+        );
+        // Eight periods, not seven. Periods run backwards from the end of the
+        // query and are half open as `(start, end]`, and this fixture puts the
+        // first sample exactly one whole number of periods before the end. So
+        // that sample lands in the period *ending* at its own timestamp, and
+        // the period after it, `(first, first + 1d]`, excludes it. The first
+        // period therefore holds a single sample and reports its value.
+        //
+        // Real data lands on a period boundary only by coincidence, since the
+        // end of a query is usually just "now". The reason to pin it here is
+        // that it looks like an off-by-one until you work out that it isn't.
+        assert_eq!(left.len(), 8, "{left:?}");
+        assert_eq!(
+            left[0].1,
+            Some(60.0),
+            "The first period holds only the sample sitting on its own \
+            boundary, whose reading is the bottom of the range: {left:?}",
+        );
+        for (_, value) in left.iter().skip(1) {
+            assert_eq!(
+                *value,
+                Some(90.0),
+                "Every period holding a full day should reach the top of the \
+                range: {left:?}",
+            );
+        }
+
+        // Deliberately not asserting that the pushed query is faster. Both
+        // scan the same rows in ClickHouse, the saving is in what comes back,
+        // and wall-clock on a loaded test machine is far too noisy to hang a
+        // failure on. The numbers are printed above to be looked at.
+        ctx.cleanup_successful().await;
+    }
+
     // The timestamps and values of the single timeseries in a result.
     fn only_timeseries(
         result: &OxqlResult,
