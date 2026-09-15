@@ -102,8 +102,17 @@ fn subquery_other_a_instances(query: &mut QueryBuilder) {
 pub(crate) struct SledFindTargetsRow {
     /// The sled ID.
     sled_id: DbTypedUuid<SledKind>,
-    /// Would an allocation to this sled fit?
-    pub(crate) fits: bool,
+    /// True if the sled is a candidate for this allocation, based on the
+    /// requested resources.
+    ///
+    /// Some reasons this can be false include:
+    ///
+    /// * The sled is not in service and active.
+    /// * If a specific CPU family is required, the sled does not match it.
+    /// * The sled doesn't have enough space for this allocation.
+    ///
+    /// This does not account for local storage.
+    pub(crate) is_candidate: bool,
     /// The affinity policy of the sled.
     pub(crate) affinity_policy: Option<AffinityPolicy>,
     /// The anti-affinity policy of the sled.
@@ -133,7 +142,7 @@ pub(crate) type SledFindTargetsSqlRow = (
 /// The rows returned by this CTE indicate:
 ///
 /// - The Sled which we're considering
-/// - A bool indicating whether the allocation fits
+/// - A bool indicating whether the sled is a candidate for the allocation
 /// - Affinity Policy
 /// - Anti-Affinity Policy
 ///

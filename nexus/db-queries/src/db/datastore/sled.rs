@@ -221,7 +221,7 @@ fn classify_sled_targets(
     for row in rows {
         let sled_id = row.sled_id();
 
-        if row.fits {
+        if row.is_candidate {
             // If there is a Some list of sleds to select from, only add
             // this target if it is in that list. A None list means that any
             // sled could be a target.
@@ -3820,7 +3820,7 @@ pub(in crate::db::datastore) mod test {
         // All sleds should be available.
         let possible_sleds = test_instance.find_targets(&datastore).await;
         assert_eq!(possible_sleds.len(), SLED_COUNT);
-        assert!(possible_sleds.iter().all(|sled| sled.fits));
+        assert!(possible_sleds.iter().all(|sled| sled.is_candidate));
         assert!(
             possible_sleds.iter().all(|sled| sled.affinity_policy.is_none())
         );
@@ -3853,7 +3853,7 @@ pub(in crate::db::datastore) mod test {
         // Now if we try to find targets again, the result will change.
         let possible_sleds = test_instance.find_targets(&datastore).await;
         assert_eq!(possible_sleds.len(), SLED_COUNT);
-        assert!(possible_sleds.iter().all(|sled| sled.fits));
+        assert!(possible_sleds.iter().all(|sled| sled.is_candidate));
         assert!(
             possible_sleds
                 .iter()
@@ -3926,7 +3926,7 @@ pub(in crate::db::datastore) mod test {
         // All sleds should be available.
         let possible_sleds = test_instance.find_targets(&datastore).await;
         assert_eq!(possible_sleds.len(), SLED_COUNT);
-        assert!(possible_sleds.iter().all(|sled| sled.fits));
+        assert!(possible_sleds.iter().all(|sled| sled.is_candidate));
         assert!(
             possible_sleds.iter().all(|sled| sled.affinity_policy.is_none())
         );
@@ -3960,7 +3960,7 @@ pub(in crate::db::datastore) mod test {
         // Now if we try to find targets again, the result will change.
         let possible_sleds = test_instance.find_targets(&datastore).await;
         assert_eq!(possible_sleds.len(), SLED_COUNT);
-        assert!(possible_sleds.iter().all(|sled| sled.fits));
+        assert!(possible_sleds.iter().all(|sled| sled.is_candidate));
         assert!(
             possible_sleds.iter().all(|sled| sled.affinity_policy.is_none())
         );
@@ -4027,7 +4027,7 @@ pub(in crate::db::datastore) mod test {
         // All sleds should be available.
         let possible_sleds = test_instance.find_targets(&datastore).await;
         assert_eq!(possible_sleds.len(), SLED_COUNT);
-        assert!(possible_sleds.iter().all(|sled| sled.fits));
+        assert!(possible_sleds.iter().all(|sled| sled.is_candidate));
         assert!(
             possible_sleds.iter().all(|sled| sled.affinity_policy.is_none())
         );
@@ -4059,7 +4059,7 @@ pub(in crate::db::datastore) mod test {
         assert_eq!(possible_sleds.len(), 1);
         assert!(possible_sleds[0].affinity_policy.is_none());
         assert!(possible_sleds[0].anti_affinity_policy.is_none());
-        assert!(possible_sleds[0].fits);
+        assert!(possible_sleds[0].is_candidate);
         assert_eq!(possible_sleds[0].sled_id(), sleds[1].id());
 
         // Inserting onto sleds[0, 2, 3] should fail - there shouldn't
