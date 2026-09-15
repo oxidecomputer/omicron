@@ -896,8 +896,8 @@ async fn test_bgp_config_update(ctx: &ControlPlaneTestContext) {
 ///
 /// Tests the full pipeline:
 ///   Nexus (sync_switch_configuration)
-///     → sled-agent bootstore updated
-///     → reconcilers' watch channel updated
+///     → Nexus updates bootstore
+///     → sled-agent reconciles changes to switch services
 ///     → configured route appears in switch0's mgd
 #[nexus_test(extra_sled_agents = 1)]
 async fn test_scrimlet_reconcilers_update_on_bootstore_change(
