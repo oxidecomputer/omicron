@@ -43,15 +43,6 @@ pub enum SwitchDetectError {
     Protocol { path: String, reason: String },
 }
 
-/// What startup switch detection should look for.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SwitchProbe {
-    /// A physical sidecar ASIC, whichever kind is attached.
-    PhysicalAsic,
-    /// The propolis SoftNPU virtio 9p device.
-    SoftNpu,
-}
-
 // The type of networking 'ASIC' the Dendrite service is expected to manage
 #[derive(
     Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,

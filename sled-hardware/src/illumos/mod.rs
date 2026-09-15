@@ -7,9 +7,7 @@ use crate::ExternalDisks;
 use crate::HardwareView;
 use crate::TofinoSnapshot;
 use crate::TofinoView;
-use crate::{
-    DendriteAsic, SledMode, SwitchDetectError, SwitchProbe, UnparsedDisk,
-};
+use crate::{DendriteAsic, SledMode, SwitchDetectError, UnparsedDisk};
 use camino::Utf8PathBuf;
 use gethostname::gethostname;
 use illumos_devinfo::{DevInfo, DevLinkType, DevLinks, Node, Property};
@@ -36,37 +34,16 @@ pub use partitions::{NvmeFormattingError, ensure_partition_layout};
 
 const TOFINO_MONITOR: &'static str = "/opt/oxide/sled-agent/tofino-monitor";
 
-/// Whether one kind of physical ASIC is present in the device tree.
-type AsicProbe = fn(&Logger, &mut DevInfo) -> bool;
-
-/// Physical ASIC probes in detection priority order. A new ASIC is a
-/// `DendriteAsic` variant, an entry here, and its hardware monitor view.
-const PHYSICAL_ASICS: &[(DendriteAsic, AsicProbe)] =
-    &[(DendriteAsic::TofinoAsic, tofino_present)];
-
-fn tofino_present(log: &Logger, devinfo: &mut DevInfo) -> bool {
-    get_tofino_snapshot(log, devinfo).exists
-}
-
-/// Probe for the switch hardware a deployment can carry. Physical ASICs are
-/// checked in `PHYSICAL_ASICS` order; the SoftNPU device is answered by its
-/// 9p version handshake. Only device tree failures are errors.
+/// Switch hardware sled-agent must find for itself at startup. Today that
+/// is only the propolis SoftNPU device, answered by its 9p version
+/// handshake; the Tofino ASIC is the hardware monitor's job.
 pub fn detect_switch_hardware(
     log: &Logger,
-    probe: SwitchProbe,
 ) -> Result<Option<DendriteAsic>, SwitchDetectError> {
     let mut devinfo =
         DevInfo::new_force_load().map_err(SwitchDetectError::DevInfo)?;
-    match probe {
-        SwitchProbe::PhysicalAsic => Ok(PHYSICAL_ASICS
-            .iter()
-            .find(|(_, present)| present(log, &mut devinfo))
-            .map(|(asic, _)| *asic)),
-        SwitchProbe::SoftNpu => {
-            Ok(softnpu::find_softnpu_device(log, &mut devinfo)?
-                .then_some(DendriteAsic::SoftNpuPropolisDevice))
-        }
-    }
+    Ok(softnpu::find_softnpu_device(log, &mut devinfo)?
+        .then_some(DendriteAsic::SoftNpuPropolisDevice))
 }
 
 #[derive(thiserror::Error, Debug)]
