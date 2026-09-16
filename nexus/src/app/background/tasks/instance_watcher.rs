@@ -249,8 +249,13 @@ impl Check {
                 let instance_state = {
                     // let state = state.state.state.into()! wow!!
                     let db_vmm_state = vmm_state.vmm_state.state.into();
+                    // Compute the state as though this VMM were the
+                    // instance's active VMM, since it may be a migration
+                    // target or no longer linked to the instance, and
+                    // `InstanceStateComputer` asserts on instance/VMM state
+                    // pairs that cannot occur for an active VMM.
                     InstanceStateComputer::compute_state_from(
-                        &instance.nexus_state,
+                        &nexus_db_model::InstanceState::Vmm,
                         instance.migration_id.as_ref(),
                         Some(&db_vmm_state),
                     )

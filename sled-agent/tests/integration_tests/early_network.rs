@@ -6,7 +6,8 @@
 
 use bootstore::schemes::v0 as bootstore;
 use iddqd::IdOrdMap;
-use omicron_common::api::external::{Generation, Vni};
+use omicron_common::api::external::Vni;
+use omicron_generation_kinds::Generation;
 use omicron_test_utils::dev::test_setup_log;
 use sled_agent_types::early_networking::{
     BgpConfig, BgpPeerConfig, EarlyNetworkConfigEnvelope, ImportExportPolicy,

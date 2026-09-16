@@ -19,10 +19,13 @@ use itertools::Itertools;
 use omicron_uuid_kinds::{
     DatasetUuid, OmicronZoneUuid, PhysicalDiskUuid, ZpoolUuid,
 };
-use sled_agent_types::disk::M2Slot;
 use sled_agent_types::inventory::{
-    SvcEnabledNotOnlineState, SvcsEnabledNotOnline, SvcsEnabledNotOnlineResult,
-    SvcsError,
+    InstanceManagerStatus, SvcEnabledNotOnlineState, SvcsEnabledNotOnline,
+    SvcsEnabledNotOnlineResult, SvcsError,
+};
+use sled_agent_types::{
+    disk::M2Slot,
+    inventory::{CurrentUpdateDisposition, OmicronSledUpdateDisposition},
 };
 use sled_agent_types_versions::latest::inventory::{
     BootImageHeader, BootPartitionContents, BootPartitionDetails,
@@ -622,6 +625,7 @@ fn display_sleds(
             ledgered_sled_config,
             reconciler_status,
             last_reconciliation,
+            instance_manager_status,
             file_source_resolver,
             smf_services_enabled_not_online,
             reference_measurements,
@@ -903,6 +907,30 @@ fn display_sleds(
                     )
                 )?;
             }
+        }
+
+        {
+            let InstanceManagerStatus {
+                update_disposition,
+                num_registered_vmms,
+            } = instance_manager_status;
+            let disposition = match update_disposition {
+                CurrentUpdateDisposition::ConfigNotAvailable => {
+                    "unknown (no config loaded)"
+                }
+                CurrentUpdateDisposition::Known(
+                    OmicronSledUpdateDisposition::Available,
+                ) => "available",
+                CurrentUpdateDisposition::Known(
+                    OmicronSledUpdateDisposition::Evacuating,
+                ) => "evacuating",
+            };
+            let s = if *num_registered_vmms == 1 { "" } else { "s" };
+            writeln!(
+                indented,
+                "instance manager status: {disposition} \
+                 ({num_registered_vmms} registered VMM{s})"
+            )?;
         }
 
         writeln!(indented, "reference measurements:")?;
@@ -1201,6 +1229,7 @@ fn display_sled_config(
         remove_mupdate_override,
         host_phase_2,
         measurements,
+        update_disposition,
     } = config;
 
     writeln!(f, "\n{label} SLED CONFIG")?;
@@ -1208,6 +1237,7 @@ fn display_sled_config(
 
     writeln!(indented, "generation: {}", generation)?;
     writeln!(indented, "remove_mupdate_override: {remove_mupdate_override:?}")?;
+    writeln!(indented, "update_disposition: {update_disposition:?}")?;
 
     let display_host_phase_2_desired = |desired| match desired {
         HostPhase2DesiredContents::CurrentContents => {

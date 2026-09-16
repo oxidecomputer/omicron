@@ -53,10 +53,12 @@ use nexus_types::external_api::sled::{SledPolicy, SledProvisionPolicy};
 use nexus_types::inventory::CollectionDisplayCliFilter;
 use nexus_types::tuf_repo::TufRepoDescription;
 use omicron_common::address::REPO_DEPOT_PORT;
-use omicron_common::api::external::Generation;
 use omicron_common::api::external::Name;
 use omicron_common::policy::NEXUS_REDUNDANCY;
 use omicron_common::update::OmicronInstallManifestSource;
+use omicron_generation_kinds::{
+    Generation, NexusGeneration, TargetReleaseGeneration,
+};
 use omicron_repl_utils::run_repl_from_file;
 use omicron_repl_utils::run_repl_on_stdin;
 use omicron_uuid_kinds::GenericUuid;
@@ -155,12 +157,13 @@ impl ReconfiguratorSim {
 
         // Handle zone networking setup first
         for (_, zone) in parent_blueprint.in_service_zones() {
-            if let Some((external_ip, nic)) =
-                zone.zone_type.external_networking()
-            {
-                builder
-                    .add_omicron_zone_external_ip(zone.id, external_ip)
-                    .context("adding omicron zone external IP")?;
+            if let Some(networking) = zone.zone_type.external_networking() {
+                for external_ip in networking.external_ips() {
+                    builder
+                        .add_omicron_zone_external_ip(zone.id, external_ip)
+                        .context("adding omicron zone external IP")?;
+                }
+                let nic = networking.nic();
                 let nic = OmicronZoneNic {
                     // TODO-cleanup use `TypedUuid` everywhere
                     id: VnicUuid::from_untyped_uuid(nic.id),
@@ -910,7 +913,7 @@ enum BlueprintEditCommands {
         sled_id: SledOpt,
 
         /// generation of the new Nexus instance
-        nexus_generation: Generation,
+        nexus_generation: NexusGeneration,
 
         /// image source for the new zone
         ///
@@ -974,7 +977,7 @@ enum BlueprintEditCommands {
     #[clap(visible_alias = "set-target-release-min-gen")]
     SetTargetReleaseMinimumGeneration {
         /// the minimum target release generation
-        generation: Generation,
+        generation: TargetReleaseGeneration,
     },
     /// expunge a zone
     ExpungeZones { zone_ids: Vec<OmicronZoneUuid> },
@@ -1556,7 +1559,7 @@ enum SetArgs {
     NumNexus { num_nexus: u16 },
     /// specify the generation of Nexus zones that are considered active when
     /// running the blueprint planner
-    ActiveNexusGen { r#gen: Generation },
+    ActiveNexusGen { r#gen: NexusGeneration },
     /// Control the set of Nexus zones seen as input to the planner
     NexusZones {
         #[clap(long, conflicts_with = "active")]
@@ -3903,6 +3906,6 @@ fn cmd_file_contents(args: FileContentsArgs) -> anyhow::Result<Option<String>> {
 /// second case above, this is always correct.  In the first case, this is
 /// basically equivalent to assuming that the Nexus handoff had happened
 /// instantaneously when the blueprint was created.
-fn blueprint_active_nexus_generation(blueprint: &Blueprint) -> Generation {
+fn blueprint_active_nexus_generation(blueprint: &Blueprint) -> NexusGeneration {
     blueprint.nexus_generation
 }

@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::*;
+use crate::handle::BgpSocketConfig;
 use assert_matches::assert_matches;
 use sled_agent_types::early_networking::LinkSpeed;
 use sled_agent_types::early_networking::PortConfig;
@@ -144,6 +145,7 @@ impl Harness {
                     dpd_addr: dummy_addr,
                     mgd_addr: dummy_addr,
                     ddmd_addr: dummy_addr,
+                    bgp_socket_config: BgpSocketConfig::for_test(dummy_addr),
                 },
                 ThisSledSwitchSlot::TEST_FAKE,
                 log,

@@ -4,12 +4,13 @@
 
 use super::InstanceIntendedState as IntendedState;
 use super::{
-    ByteCount, Disk, ExternalIp, Generation, InstanceAutoRestartPolicy,
-    InstanceCpuCount, InstanceCpuPlatform, InstanceState, Vmm, VmmState,
+    ByteCount, Disk, ExternalIp, InstanceAutoRestartPolicy, InstanceCpuCount,
+    InstanceCpuPlatform, InstanceState, Vmm, VmmState,
 };
 use crate::ExternalSubnet;
 use crate::collection::DatastoreAttachTargetConfig;
 use crate::serde_time_delta::optional_time_delta;
+use crate::typed_generation::DbTypedGeneration;
 use chrono::{DateTime, TimeDelta, Utc};
 use db_macros::Resource;
 use diesel::expression::{ValidGrouping, is_aggregate};
@@ -18,6 +19,10 @@ use diesel::prelude::*;
 use diesel::sql_types::{Bool, Nullable};
 use nexus_db_schema::schema::{disk, external_ip, external_subnet, instance};
 use nexus_types::external_api::instance as instance_types;
+use omicron_generation_kinds::{
+    InstanceStateGeneration, InstanceStateGenerationKind,
+    InstanceUpdaterGeneration, InstanceUpdaterGenerationKind,
+};
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use serde::Deserialize;
 use serde::Serialize;
@@ -55,7 +60,7 @@ pub struct Instance {
     /// including the fallback state, the instance's active Propolis ID, and its
     /// migration IDs.
     #[diesel(column_name = state_generation)]
-    pub state_generation: Generation,
+    pub state_generation: DbTypedGeneration<InstanceStateGenerationKind>,
 
     /// The ID of the Propolis server hosting the current incarnation of this
     /// instance, or None if the instance has no active VMM.
@@ -103,7 +108,7 @@ pub struct Instance {
     /// `updater_id` field to ensure that the snapshot which indicated that the
     /// lock was not held is still valid when setting the lock ID.
     #[diesel(column_name = updater_gen)]
-    pub updater_gen: Generation,
+    pub updater_gen: DbTypedGeneration<InstanceUpdaterGenerationKind>,
 
     /// The "internal" state of this instance. The instance's externally-visible
     /// state may be delegated to the instance's active VMM, if it has one.
@@ -175,7 +180,7 @@ impl Instance {
             project_id,
             user_data: params.user_data.clone(),
             time_state_updated: creation_time,
-            state_generation: Generation::new(),
+            state_generation: InstanceStateGeneration::new().into(),
             propolis_id: None,
             dst_propolis_id: None,
             migration_id: None,
@@ -183,7 +188,7 @@ impl Instance {
             memory: params.memory.into(),
             hostname: params.hostname.to_string(),
             updater_id: None,
-            updater_gen: Generation::new(),
+            updater_gen: InstanceUpdaterGeneration::new().into(),
             nexus_state: InstanceState::Creating,
             time_last_auto_restarted: None,
             auto_restart,
@@ -336,7 +341,7 @@ pub struct InstanceRuntimeState {
     /// migration IDs.
     #[diesel(column_name = state_generation)]
     #[serde(rename = "gen")]
-    pub generation: Generation,
+    pub generation: DbTypedGeneration<InstanceStateGenerationKind>,
 
     /// The ID of the Propolis server hosting the current incarnation of this
     /// instance, or None if the instance has no active VMM.

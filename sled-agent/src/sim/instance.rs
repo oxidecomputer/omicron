@@ -12,8 +12,8 @@ use async_trait::async_trait;
 use chrono::Utc;
 use nexus_client;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::Generation;
 use omicron_common::api::external::ResourceType;
+use omicron_generation_kinds::Generation;
 use omicron_uuid_kinds::{GenericUuid, PropolisUuid};
 use propolis_client::types::{
     InstanceMigrateStatusResponse as PropolisMigrateResponse,

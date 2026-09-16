@@ -133,7 +133,7 @@ impl SetupArgs {
             }
             SetupArgs::ResetConfig => {
                 slog::info!(log, "instructing wicketd to reset config...");
-                client
+                commission_client
                     .delete_rss_config()
                     .await
                     .context("failed to clear config")?;

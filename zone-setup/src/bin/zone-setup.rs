@@ -10,7 +10,7 @@ use clap::{ArgAction, Args, Parser, Subcommand};
 use illumos_utils::ExecutionError;
 use illumos_utils::addrobj::{AddrObject, IPV6_LINK_LOCAL_ADDROBJ_NAME};
 use illumos_utils::ipadm::Ipadm;
-use illumos_utils::route::{Gateway, Route};
+use illumos_utils::route::Route;
 use illumos_utils::svcadm::Svcadm;
 use illumos_utils::zone::{AddressRequest, Zones};
 use omicron_common::address::Ipv6Subnet;
@@ -22,7 +22,7 @@ use slog::{Logger, info};
 use std::fmt::Write as _;
 use std::fs::{OpenOptions, metadata, read_to_string, set_permissions, write};
 use std::io::Write as _;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::net::{Ipv4Addr, Ipv6Addr};
 use std::os::unix::fs::chown;
 use std::path::PathBuf;
 use uzers::{get_group_by_name, get_user_by_name};
@@ -71,15 +71,43 @@ struct CommonNetworkingArgs {
     static_addrs: Vec<Ipv6Addr>,
 }
 
+/// During the migration to support IPv6 control plane zones, we need a way for
+/// this program to know that it should set up an IPv4 address / routing on an
+/// OPTE port. In this case, the sled-agent will not set the SMF properties for
+/// the `gateway` and `ip` arguments. They'll be left as "unknown". This type
+/// handles this case, and converts the literal string into `None`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct MaybeIpv4Addr(Option<Ipv4Addr>);
+
+impl core::str::FromStr for MaybeIpv4Addr {
+    type Err = std::net::AddrParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s == "unknown" {
+            return Ok(Self(None));
+        }
+        s.parse().map(|a| Self(Some(a)))
+    }
+}
+
 #[derive(Debug, Args)]
 struct OpteInterfaceArgs {
     #[arg(short, long, value_parser = parse_string_rejecting_unknown)]
     interface: String,
-    /// OPTE-specific gateway for external connectivity via boundary services
-    #[arg(short, long)]
-    gateway: Ipv4Addr,
-    #[arg(short = 'p', long)]
-    ip: IpAddr,
+    /// OPTE's virtual gateway address for external connectivity via boundary
+    /// services
+    #[arg(short, long, requires = "ip")]
+    gateway: MaybeIpv4Addr,
+    /// The private IPv4 address for the OPTE port.
+    #[arg(short = 'p', long, requires = "gateway")]
+    ip: MaybeIpv4Addr,
+    /// Configure the OPTE port to support IPv6.
+    //
+    // NOTE: We're using the "set" action because this is populated by SMF,
+    // which doesn't let us conditionally add the whole flag. So we need to do
+    // things like `--create-ipv6 <true | false>`.
+    #[arg(long, action = ArgAction::Set, default_value_t = false)]
+    create_ipv6: bool,
 }
 
 #[derive(Debug, Args)]
@@ -717,50 +745,200 @@ async fn ensure_underlay_route_via_gateway_with_retries(
     .await
 }
 
+fn check_opte_config(
+    gateway_ip: &MaybeIpv4Addr,
+    private_ip: &MaybeIpv4Addr,
+    create_ipv6: bool,
+) -> anyhow::Result<Option<(Ipv4Addr, Ipv4Addr)>> {
+    let pair = match (gateway_ip.0, private_ip.0) {
+        (None, None) => None,
+        (None, Some(_)) | (Some(_), None) => anyhow::bail!(
+            "Gateway and private IPv4 address must both be \
+            specified, or neither can be specified"
+        ),
+        (Some(gw), Some(ip)) => Some((gw, ip)),
+    };
+    anyhow::ensure!(
+        pair.is_some() || create_ipv6,
+        "Neither IPv4 nor IPv6 setup requested!"
+    );
+    Ok(pair)
+}
+
 async fn opte_interface_set_up(
     args: OpteInterfaceArgs,
     log: &Logger,
 ) -> anyhow::Result<()> {
-    let OpteInterfaceArgs { interface, gateway, ip } = args;
+    let OpteInterfaceArgs { interface, gateway, ip, create_ipv6 } = args;
+    let maybe_ipv4_data = check_opte_config(&gateway, &ip, create_ipv6)?;
     info!(
         log,
-        "Creating gateway on the OPTE IP interface if it doesn't already exist";
-        "OPTE interface" => ?interface
+        "Configuring OPTE port";
+        "interface" => %interface,
+        "gateway_ip" => ?gateway,
+        "private_ip" => ?ip,
+        "create_ipv6" => %create_ipv6,
     );
-    Ipadm::create_opte_gateway(&interface).await.with_context(|| {
-        format!("failed to create OPTE gateway on interface {interface}")
-    })?;
-
-    info!(
-        log, "Ensuring there is a gateway route";
-        "OPTE gateway" => ?gateway,
-        "OPTE interface" => ?interface,
-        "OPTE IP" => ?ip,
-    );
-    Route::ensure_opte_route(&gateway, &interface, &ip).await.with_context(
-        || {
-            format!(
-                "failed to ensure OPTE gateway route on interface {interface} \
-                 with gateway {gateway} and IP {ip}",
-            )
-        },
-    )?;
-
-    info!(
-        log, "Ensuring there is a default route";
-        "gateway" => ?gateway,
-    );
-    Route::ensure_default_route_with_gateway(
-        Gateway::Ipv4(gateway),
-        interface.as_str(),
-    )
-    .await
-    .with_context(|| {
-        format!(
-            "failed to ensure default route on interface {interface} via \
-            gateway {gateway}"
+    if let Some((gateway_ip, private_ip)) = maybe_ipv4_data {
+        info!(log, "Configuring IPv4 for OPTE port"; "interface" => %interface);
+        let v4_addrobj =
+            AddrObject::new(&interface, "public").with_context(|| {
+                format!("invalid IPv4 addrobj name for interface {interface}")
+            })?;
+        // The `zone-setup` service runs inside the target zone, so all
+        // networking commands run in the current zone (`None`).
+        Zones::configure_opte_ipv4_port(
+            None,
+            &v4_addrobj,
+            gateway_ip,
+            private_ip,
         )
-    })?;
-
+        .await
+        .with_context(|| {
+            format!("failed to configure IPv4 OPTE port on {interface}")
+        })?;
+    }
+    if create_ipv6 {
+        info!(log, "Configuring IPv6 for OPTE port"; "interface" => %interface);
+        let v6_addrobj =
+            AddrObject::new(&interface, "publicv6").with_context(|| {
+                format!("invalid IPv6 addrobj name for interface {interface}")
+            })?;
+        // The `zone-setup` service runs inside the target zone, so all
+        // networking commands run in the current zone (`None`).
+        Zones::configure_opte_ipv6_port(None, &v6_addrobj, log)
+            .await
+            .with_context(|| {
+                format!("failed to configure IPv6 OPTE port on {interface}")
+            })?;
+    }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MaybeIpv4Addr;
+    use super::ZoneSetup;
+    use super::ZoneSetupCommand;
+    use super::check_opte_config;
+    use clap::Parser as _;
+    use std::net::Ipv4Addr;
+
+    #[test]
+    fn test_maybe_ipv4_addr_from_str() {
+        assert_eq!(MaybeIpv4Addr(None), "unknown".parse().unwrap());
+        assert_eq!(
+            MaybeIpv4Addr(Some(Ipv4Addr::new(172, 20, 0, 1))),
+            "172.20.0.1".parse().unwrap()
+        );
+        assert!("".parse::<MaybeIpv4Addr>().is_err());
+        assert!("abcd".parse::<MaybeIpv4Addr>().is_err());
+        assert!("fd00::1".parse::<MaybeIpv4Addr>().is_err());
+    }
+
+    #[test]
+    fn test_opte_interface_args_parsing() {
+        let s = ZoneSetup::try_parse_from([
+            "zone-setup",
+            "opte-interface",
+            "-i",
+            "foo",
+            "-g",
+            "unknown",
+            "-p",
+            "unknown",
+            "--create-ipv6",
+            "false",
+        ])
+        .unwrap();
+        let ZoneSetupCommand::OpteInterface(args) = &s.command else {
+            panic!(
+                "Expected zone-setup argv to parse as OPTE interface args, \
+                but found: {:#?}",
+                s.command,
+            );
+        };
+        assert_eq!(args.gateway, MaybeIpv4Addr(None));
+        assert_eq!(args.ip, MaybeIpv4Addr(None));
+
+        let s = ZoneSetup::try_parse_from([
+            "zone-setup",
+            "opte-interface",
+            "-i",
+            "foo",
+            "-g",
+            "172.20.0.1",
+            "-p",
+            "172.20.0.1",
+            "--create-ipv6",
+            "false",
+        ])
+        .unwrap();
+        let ZoneSetupCommand::OpteInterface(args) = &s.command else {
+            panic!(
+                "Expected zone-setup argv to parse as OPTE interface args, \
+                but found: {:#?}",
+                s.command,
+            );
+        };
+        assert_eq!(
+            args.gateway,
+            MaybeIpv4Addr(Some(Ipv4Addr::new(172, 20, 0, 1)))
+        );
+        assert_eq!(args.ip, MaybeIpv4Addr(Some(Ipv4Addr::new(172, 20, 0, 1))));
+
+        assert!(
+            ZoneSetup::try_parse_from([
+                "zone-setup",
+                "opte-interface",
+                "-i",
+                "foo",
+                "-g",
+                "aaaa",
+                "-p",
+                "172.20.0.1",
+                "--create-ipv6",
+                "false",
+            ])
+            .is_err()
+        );
+        assert!(
+            ZoneSetup::try_parse_from([
+                "zone-setup",
+                "opte-interface",
+                "-i",
+                "foo",
+                "-g",
+                "172.20.0.1",
+                "-p",
+                "aaaa",
+                "--create-ipv6",
+                "false",
+            ])
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn test_check_opte_config() {
+        let none = MaybeIpv4Addr(None);
+        let addr = MaybeIpv4Addr(Some(Ipv4Addr::new(1, 1, 1, 1)));
+        // Nothing at all
+        assert!(check_opte_config(&none, &none, false).is_err());
+
+        // One of the IPv4 / gateway is missing
+        assert!(check_opte_config(&none, &addr, false).is_err());
+        assert!(check_opte_config(&addr, &none, false).is_err());
+        assert!(check_opte_config(&none, &addr, true).is_err());
+        assert!(check_opte_config(&addr, &none, true).is_err());
+
+        // Both IPv4 / gateway, no IPv6
+        assert!(check_opte_config(&addr, &addr, false).is_ok());
+
+        // Neither IPv4 / gateway, yes IPv6
+        assert!(check_opte_config(&none, &none, true).is_ok());
+
+        // Both IPv4 and IPv6
+        assert!(check_opte_config(&addr, &addr, true).is_ok());
+    }
 }

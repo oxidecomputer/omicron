@@ -442,6 +442,8 @@ mod tests {
     use nexus_types::observed_saga::{
         OrphanedReason, SagaOwnerState, SagaProgressState,
     };
+    use omicron_generation_kinds::AlertGeneration;
+    use omicron_generation_kinds::SupportBundleGeneration;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::{OmicronZoneUuid, SitrepUuid};
     use std::sync::Arc;
@@ -619,10 +621,8 @@ mod tests {
                 time_created: Utc::now(),
                 next_inv_min_time_started: Utc::now(),
                 comment: String::new(),
-                alert_generation:
-                    omicron_common::api::external::Generation::new(),
-                support_bundle_generation:
-                    omicron_common::api::external::Generation::new(),
+                alert_generation: AlertGeneration::new(),
+                support_bundle_generation: SupportBundleGeneration::new(),
             },
             cases: case_map,
             ereports_by_id: Default::default(),

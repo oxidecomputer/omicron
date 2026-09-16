@@ -19,5 +19,13 @@ sigpipe.workspace = true
 uuid.workspace = true
 omicron-workspace-hack.workspace = true
 
+[target.'cfg(target_os = "illumos")'.dependencies]
+illumos-nvpair.workspace = true
+illumos-nvpair-sys.workspace = true
+libc.workspace = true
+
+[dev-dependencies]
+camino-tempfile.workspace = true
+
 [[bin]]
 name = "oxlog"

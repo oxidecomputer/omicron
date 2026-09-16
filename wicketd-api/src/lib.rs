@@ -10,12 +10,12 @@ use dropshot::Path;
 use dropshot::RequestContext;
 use dropshot::TypedBody;
 use gateway_client::types::IgnitionCommand;
+use iddqd::IdOrdMap;
 use schemars::JsonSchema;
 use semver::Version;
 use serde::Deserialize;
 use serde::Serialize;
 use sled_hardware_types::BaseboardId;
-use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::net::Ipv6Addr;
 use wicket_common::artifact::ArtifactId;
@@ -31,6 +31,7 @@ use wicket_common::rack_update::AbortUpdateOptions;
 use wicket_common::rack_update::ClearUpdateStateOptions;
 use wicket_common::rack_update::StartUpdateOptions;
 use wicket_common::update_events::EventReport;
+use wicket_common::update_events::SpEventReport;
 use wicketd_commission_types::rack_setup::BgpAuthKeyId;
 use wicketd_commission_types::update::ClearUpdateStateResponse;
 use wicketd_commission_types::update::UpdateTargets;
@@ -97,15 +98,6 @@ pub trait WicketdApi {
         // nice way to transmit this information as a batch.
         params: TypedBody<GetBgpAuthKeyParams>,
     ) -> Result<HttpResponseOk<GetBgpAuthKeyInfoResponse>, HttpError>;
-
-    /// Reset all RSS configuration to their default values.
-    #[endpoint {
-        method = DELETE,
-        path = "/rack-setup/config"
-    }]
-    async fn delete_rss_config(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Query current state of rack setup.
     #[endpoint {
@@ -332,7 +324,7 @@ pub struct GetArtifactsAndEventReportsResponse {
     /// repository.
     pub artifacts: Vec<ArtifactId>,
 
-    pub event_reports: BTreeMap<SpType, BTreeMap<u16, EventReport>>,
+    pub event_reports: IdOrdMap<SpEventReport>,
 }
 
 #[derive(Clone, Debug, JsonSchema, Deserialize)]

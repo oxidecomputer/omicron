@@ -29,7 +29,7 @@ use omicron_common::api::external::{
     CreateResult, DeleteResult, Error, ListResultVec, LookupResult, NameOrId,
     ResourceType, UpdateResult,
 };
-use omicron_uuid_kinds::{BgpConfigUuid, GenericUuid};
+use omicron_uuid_kinds::{BgpConfigUuid, GenericUuid, SwitchPortSettingsUuid};
 use ref_cast::RefCast;
 use sled_agent_types::early_networking::RouterPeerType;
 use uuid::Uuid;
@@ -783,14 +783,16 @@ impl DataStore {
     pub async fn communities_for_peer(
         &self,
         opctx: &OpContext,
-        port_settings_id: Uuid,
+        port_settings_id: SwitchPortSettingsUuid,
         interface_name: &external::Name,
         addr: RouterPeerType,
     ) -> ListResultVec<SwitchPortBgpPeerConfigCommunity> {
         use nexus_db_schema::schema::switch_port_settings_bgp_peer_config_communities::dsl;
 
         let results = dsl::switch_port_settings_bgp_peer_config_communities
-            .filter(dsl::port_settings_id.eq(port_settings_id))
+            .filter(
+                dsl::port_settings_id.eq(to_db_typed_uuid(port_settings_id)),
+            )
             .filter(dsl::interface_name.eq(interface_name.to_string()))
             // Use `is_not_distinct_from` instead of `eq` to compare NULL/None.
             .filter(dsl::addr.is_not_distinct_from(addr.ip_db_repr()))
@@ -809,7 +811,7 @@ impl DataStore {
     pub async fn allow_export_for_peer(
         &self,
         opctx: &OpContext,
-        port_settings_id: Uuid,
+        port_settings_id: SwitchPortSettingsUuid,
         interface_name: &external::Name,
         addr: RouterPeerType,
     ) -> LookupResult<Option<Vec<SwitchPortBgpPeerConfigAllowExport>>> {
@@ -826,7 +828,10 @@ impl DataStore {
                 async move {
                     // Query the main peer config table.
                     let active = peer_dsl::switch_port_settings_bgp_peer_config
-                        .filter(db_peer::port_settings_id.eq(port_settings_id))
+                        .filter(
+                            db_peer::port_settings_id
+                                .eq(to_db_typed_uuid(port_settings_id)),
+                        )
                         .filter(
                             db_peer::addr
                                 .is_not_distinct_from(addr.ip_db_repr()),
@@ -866,7 +871,8 @@ impl DataStore {
                     let list =
                         dsl::switch_port_settings_bgp_peer_config_allow_export
                             .filter(
-                                db_allow::port_settings_id.eq(port_settings_id),
+                                db_allow::port_settings_id
+                                    .eq(to_db_typed_uuid(port_settings_id)),
                             )
                             .filter(
                                 db_allow::interface_name
@@ -899,7 +905,7 @@ impl DataStore {
     pub async fn allow_import_for_peer(
         &self,
         opctx: &OpContext,
-        port_settings_id: Uuid,
+        port_settings_id: SwitchPortSettingsUuid,
         interface_name: &external::Name,
         addr: RouterPeerType,
     ) -> LookupResult<Option<Vec<SwitchPortBgpPeerConfigAllowImport>>> {
@@ -916,7 +922,10 @@ impl DataStore {
                 async move {
                     // Query the main peer config table.
                     let active = peer_dsl::switch_port_settings_bgp_peer_config
-                        .filter(db_peer::port_settings_id.eq(port_settings_id))
+                        .filter(
+                            db_peer::port_settings_id
+                                .eq(to_db_typed_uuid(port_settings_id)),
+                        )
                         .filter(
                             db_peer::addr
                                 .is_not_distinct_from(addr.ip_db_repr()),
@@ -956,7 +965,8 @@ impl DataStore {
                     let list =
                         dsl::switch_port_settings_bgp_peer_config_allow_import
                             .filter(
-                                db_allow::port_settings_id.eq(port_settings_id),
+                                db_allow::port_settings_id
+                                    .eq(to_db_typed_uuid(port_settings_id)),
                             )
                             .filter(
                                 db_allow::interface_name
@@ -999,6 +1009,7 @@ mod tests {
     use omicron_common::api::external::Name;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::BgpConfigUuid;
+    use omicron_uuid_kinds::SwitchPortSettingsUuid;
     use oxnet::IpNet;
     use sled_agent_types::early_networking::ImportExportPolicy;
     use sled_agent_types::early_networking::MaxPathConfig;
@@ -1330,7 +1341,7 @@ mod tests {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let port_settings_id = Uuid::new_v4();
+        let port_settings_id = SwitchPortSettingsUuid::new_v4();
         let iface_ext: Name = "phy0".parse().unwrap();
         let iface_db: nexus_db_model::Name = iface_ext.clone().into();
 
@@ -1468,7 +1479,7 @@ mod tests {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let port_settings_id = Uuid::new_v4();
+        let port_settings_id = SwitchPortSettingsUuid::new_v4();
         let iface_ext: Name = "phy0".parse().unwrap();
         let iface_db: nexus_db_model::Name = iface_ext.clone().into();
 
@@ -1630,7 +1641,7 @@ mod tests {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let port_settings_id = Uuid::new_v4();
+        let port_settings_id = SwitchPortSettingsUuid::new_v4();
         let iface_ext: Name = "phy0".parse().unwrap();
         let iface_db: nexus_db_model::Name = iface_ext.clone().into();
 

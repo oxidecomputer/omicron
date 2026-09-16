@@ -25,7 +25,7 @@ cockroachdb settings:
     version::::::::::::   (none)
     preserve downgrade:   (not set)
 planner config:
-    (no current planner configs)
+    disruption policy: terminate
 
 
 
@@ -1681,6 +1681,7 @@ sled 2eb69596-f081-4e2d-9425-9994926e0832 (role = Gimlet, serial serial1)
 LEDGERED SLED CONFIG
     generation: 2
     remove_mupdate_override: None
+    update_disposition: Available
     desired host phase 2 slot a: keep current contents
     desired host phase 2 slot b: keep current contents
     DISKS: 3
@@ -1749,6 +1750,7 @@ LEDGERED SLED CONFIG
         all datasets reconciled successfully
         all zones reconciled successfully
     reconciler task status: idle (finished at <REDACTED_TIMESTAMP> after running for <REDACTED_DURATION>s)
+    instance manager status: available (0 registered VMMs)
     reference measurements:
         (measurement set is empty)
     fmd:
@@ -1834,6 +1836,7 @@ sled 32d8d836-4d8a-4e54-8fa9-f31d79c42646 (role = Gimlet, serial serial2)
 LEDGERED SLED CONFIG
     generation: 2
     remove_mupdate_override: None
+    update_disposition: Available
     desired host phase 2 slot a: keep current contents
     desired host phase 2 slot b: keep current contents
     DISKS: 3
@@ -1902,6 +1905,7 @@ LEDGERED SLED CONFIG
         all datasets reconciled successfully
         all zones reconciled successfully
     reconciler task status: idle (finished at <REDACTED_TIMESTAMP> after running for <REDACTED_DURATION>s)
+    instance manager status: available (0 registered VMMs)
     reference measurements:
         (measurement set is empty)
     fmd:
@@ -2047,6 +2051,7 @@ sled 89d02b1b-478c-401a-8e28-7a26f74fa41b (role = Gimlet, serial serial0)
 LEDGERED SLED CONFIG
     generation: 2
     remove_mupdate_override: None
+    update_disposition: Available
     desired host phase 2 slot a: keep current contents
     desired host phase 2 slot b: keep current contents
     DISKS: 3
@@ -2148,6 +2153,7 @@ LEDGERED SLED CONFIG
         all datasets reconciled successfully
         all zones reconciled successfully
     reconciler task status: idle (finished at <REDACTED_TIMESTAMP> after running for <REDACTED_DURATION>s)
+    instance manager status: available (0 registered VMMs)
     reference measurements:
         (measurement set is empty)
     fmd:

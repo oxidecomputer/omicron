@@ -854,6 +854,12 @@ fn build_port_settings(
         .map(|a| a.address.ip_squashing_addrconf_to_unspecified())
         .collect();
 
+    // We always enable DDM on the backplane, so this only applies to the front
+    // IO ports which are _not_ uplinks. This entire code path is only used for
+    // the preflight uplink checks, so we can confidently say we don't want to
+    // allow DDM.
+    let allow_ddm_traffic = false;
+
     port_settings.links.insert(
         link_id.to_string(),
         LinkSettings {
@@ -865,7 +871,7 @@ fn build_port_settings(
                 speed,
                 lane: Some(LinkId(0)),
                 tx_eq: None,
-                allow_ddm_traffic: false,
+                allow_ddm_traffic,
             },
         },
     );

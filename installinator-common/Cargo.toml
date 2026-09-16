@@ -12,7 +12,6 @@ anyhow.workspace = true
 camino.workspace = true
 illumos-utils.workspace = true
 installinator-common-versions.workspace = true
-omicron-common.workspace = true
 libc.workspace = true
 schemars.workspace = true
 serde.workspace = true

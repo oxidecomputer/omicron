@@ -16,7 +16,6 @@ use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use omicron_common::address::NUM_SOURCE_NAT_PORTS;
 use omicron_common::api::external::ByteCount;
-use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::Vni;
@@ -25,6 +24,7 @@ use omicron_common::snake_case_result;
 use omicron_common::snake_case_result::SnakeCaseResult;
 use omicron_common::update::OmicronInstallManifestSource;
 use omicron_common::zpool_name::ZpoolName;
+use omicron_generation_kinds::Generation;
 use omicron_uuid_kinds::{
     DatasetUuid, InternalZpoolUuid, MupdateOverrideUuid, OmicronZoneUuid,
     PhysicalDiskUuid, SledUuid, ZpoolUuid,

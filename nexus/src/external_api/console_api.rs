@@ -9,7 +9,7 @@
 //! these routes directly from the external API.
 
 use crate::context::ApiContext;
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::{Utf8Component, Utf8Path, Utf8PathBuf};
 use dropshot::Body;
 use dropshot::{HttpError, Path, RequestContext};
 use futures::TryStreamExt;
@@ -20,6 +20,8 @@ use nexus_types::external_api::saml::RelativeUri;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{DataPageParams, Error, NameOrId};
+use rustix::fs::{Mode, OFlags, open, openat};
+use rustix::io::Errno;
 use serde_urlencoded;
 use slog_error_chain::InlineErrorChain;
 use std::collections::HashMap;
@@ -371,28 +373,22 @@ async fn serve_static(
         .get(http::header::ACCEPT_ENCODING)
         .and_then(|v| v.to_str().ok())
         .unwrap_or_default();
-    let path_to_read = match accept_gz(accept_encoding)
+    let file = match accept_gz(accept_encoding)
         .then(|| find_file(&with_gz_ext(&path), static_dir))
     {
-        Some(Ok(gzipped_path)) => {
+        Some(Ok(gzipped_file)) => {
             resp = resp
                 .header(http::header::CONTENT_ENCODING, CONTENT_ENCODING_GZIP);
-            gzipped_path
+            gzipped_file
         }
         _ => find_file(&path, static_dir)?,
     };
 
-    let file = File::open(&path_to_read).await.map_err(|e| {
-        not_found(&format!(
-            "accessing {:?}: {}",
-            path_to_read,
-            InlineErrorChain::new(&e)
-        ))
-    })?;
+    let file = File::from_std(file);
     let metadata = file.metadata().await.map_err(|e| {
         not_found(&format!(
             "accessing {:?}: {}",
-            path_to_read,
+            path,
             InlineErrorChain::new(&e)
         ))
     })?;
@@ -442,42 +438,58 @@ fn not_found(internal_msg: &str) -> HttpError {
     HttpError::for_not_found(None, internal_msg.to_string())
 }
 
-/// Starting from `root_dir`, follow the segments of `path` down the file tree
-/// until we find a file (or not). Do not follow symlinks.
-///
-/// WARNING: This function assumes that `..` path segments have already been
-/// found and rejected.
+/// Open `path` beneath `root_dir` without following symlinks. Reject paths
+/// containing anything other than normal segments (e.g., `..` or a leading
+/// `/`). Dropshot is expected to have rejected those already, but we don't
+/// rely on that here.
 fn find_file(
     path: &Utf8Path,
     root_dir: &Utf8Path,
-) -> Result<Utf8PathBuf, HttpError> {
-    let mut current = root_dir.to_owned(); // start from `root_dir`
-    for segment in path.into_iter() {
-        // If we hit a non-directory thing already and we still have segments
-        // left in the path, bail. We have nowhere to go.
-        if !current.is_dir() {
-            return Err(not_found("expected a directory"));
-        }
+) -> Result<std::fs::File, HttpError> {
+    let mut current = open(
+        root_dir.as_std_path(),
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
+        Mode::empty(),
+    )
+    .map_err(open_error)?;
+    let mut segments = path.components().peekable();
 
-        current.push(segment);
-
-        // Don't follow symlinks.
-        // Error means either the user doesn't have permission to pull
-        // metadata or the path doesn't exist.
-        let m = current
-            .symlink_metadata()
-            .map_err(|_| not_found("failed to get file metadata"))?;
-        if m.file_type().is_symlink() {
-            return Err(not_found("attempted to follow a symlink"));
-        }
+    while let Some(component) = segments.next() {
+        let Utf8Component::Normal(segment) = component else {
+            return Err(not_found("illegal path segment"));
+        };
+        let base = OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+        let flags = if segments.peek().is_some() {
+            // Intermediate segments must be directories; O_DIRECTORY makes
+            // the kernel enforce that atomically at open time.
+            base | OFlags::DIRECTORY
+        } else {
+            // O_NONBLOCK prevents open from hanging if the final segment is
+            // a FIFO; it has no effect on regular files.
+            base | OFlags::NONBLOCK
+        };
+        current = openat(&current, segment, flags, Mode::empty())
+            .map_err(open_error)?;
     }
 
-    // can't serve a directory
-    if current.is_dir() {
+    let file = std::fs::File::from(current);
+    if file
+        .metadata()
+        .map_err(|_| not_found("failed to get file metadata"))?
+        .is_dir()
+    {
         return Err(not_found("expected a non-directory"));
     }
 
-    Ok(current)
+    Ok(file)
+}
+
+fn open_error(error: Errno) -> HttpError {
+    match error {
+        Errno::LOOP => not_found("attempted to follow a symlink"),
+        Errno::NOTDIR => not_found("expected a directory"),
+        _ => not_found("failed to open file"),
+    }
 }
 
 #[cfg(test)]
@@ -485,6 +497,7 @@ mod test {
     use super::{RelativeUri, accept_gz, find_file};
     use camino::{Utf8Path, Utf8PathBuf};
     use http::StatusCode;
+    use std::io::Read;
 
     #[test]
     fn test_accept_gz() {
@@ -513,7 +526,7 @@ mod test {
             find_file(Utf8Path::new("tests/static/nonexistent.svg"), &root)
                 .unwrap_err();
         assert_eq!(error.status_code, StatusCode::NOT_FOUND);
-        assert_eq!(error.internal_message, "failed to get file metadata",);
+        assert_eq!(error.internal_message, "failed to open file");
     }
 
     #[test]
@@ -525,7 +538,17 @@ mod test {
         )
         .unwrap_err();
         assert_eq!(error.status_code, StatusCode::NOT_FOUND);
-        assert_eq!(error.internal_message, "failed to get file metadata")
+        assert_eq!(error.internal_message, "failed to open file")
+    }
+
+    #[test]
+    fn test_find_file_404_on_illegal_segment() {
+        let root = current_dir();
+        for path in ["tests/static/assets/../assets/hello.txt", "/etc/passwd"] {
+            let error = find_file(Utf8Path::new(path), &root).unwrap_err();
+            assert_eq!(error.status_code, StatusCode::NOT_FOUND);
+            assert_eq!(error.internal_message, "illegal path segment");
+        }
     }
 
     #[test]
@@ -566,10 +589,45 @@ mod test {
         // the file in question does exist
         assert!(root.join(path_str).exists());
 
-        // but it 404s because the path goes through a symlink
+        // but it 404s because the path goes through a symlink. Platforms
+        // differ on which error O_DIRECTORY | O_NOFOLLOW produces for a
+        // symlink (Linux reports ELOOP, macOS reports ENOTDIR), so accept
+        // either message.
         let error = find_file(Utf8Path::new(path_str), &root).unwrap_err();
         assert_eq!(error.status_code, StatusCode::NOT_FOUND);
-        assert_eq!(error.internal_message, "attempted to follow a symlink");
+        assert!(matches!(
+            error.internal_message.as_str(),
+            "attempted to follow a symlink" | "expected a directory"
+        ));
+    }
+
+    #[test]
+    fn test_find_file_race_does_not_escape_root() {
+        let tempdir = camino_tempfile::tempdir().unwrap();
+        let static_dir = tempdir.path().join("static");
+        let assets_dir = static_dir.join("assets");
+        let outside_dir = tempdir.path().join("outside");
+        std::fs::create_dir_all(&assets_dir).unwrap();
+        std::fs::create_dir(&outside_dir).unwrap();
+
+        let filename = "app.js";
+        std::fs::write(assets_dir.join(filename), "expected asset").unwrap();
+        std::fs::write(outside_dir.join(filename), "outside static root")
+            .unwrap();
+
+        // Open the requested path, then replace its parent directory with a
+        // symlink before consuming the result. Returning a checked pathname
+        // would read the outside file; returning an open handle remains tied
+        // to the original asset.
+        let mut file = find_file(Utf8Path::new("assets/app.js"), &static_dir)
+            .expect("asset initially exists beneath the static root");
+        std::fs::rename(&assets_dir, static_dir.join("original-assets"))
+            .unwrap();
+        std::os::unix::fs::symlink(&outside_dir, &assets_dir).unwrap();
+
+        let mut contents = String::new();
+        file.read_to_string(&mut contents).unwrap();
+        assert_eq!(contents, "expected asset");
     }
 
     #[test]

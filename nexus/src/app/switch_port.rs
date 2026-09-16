@@ -21,6 +21,7 @@ use omicron_common::api::external::{
 };
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackUuid;
+use omicron_uuid_kinds::SwitchPortSettingsUuid;
 use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
 use std::sync::Arc;
@@ -102,7 +103,7 @@ impl super::Nexus {
         self: &Arc<Self>,
         opctx: &OpContext,
         params: networking::SwitchPortSettingsCreate,
-        id: Option<Uuid>,
+        id: Option<SwitchPortSettingsUuid>,
     ) -> CreateResult<SwitchPortSettingsCombinedResult> {
         // We explicitly do not expose `allow_ddm_traffic` through the external
         // API. We want to wait until multirack is further along to determine
@@ -125,7 +126,7 @@ impl super::Nexus {
     pub(crate) async fn switch_port_settings_update(
         self: &Arc<Self>,
         opctx: &OpContext,
-        switch_port_settings_id: Uuid,
+        switch_port_settings_id: SwitchPortSettingsUuid,
         new_settings: networking::SwitchPortSettingsCreate,
     ) -> CreateResult<SwitchPortSettingsCombinedResult> {
         let result = self
@@ -199,8 +200,8 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         switch_port_id: Uuid,
-        port_settings_id: Option<Uuid>,
-        current_id: UpdatePrecondition<Uuid>,
+        port_settings_id: Option<SwitchPortSettingsUuid>,
+        current_id: UpdatePrecondition<SwitchPortSettingsUuid>,
     ) -> UpdateResult<()> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         self.db_datastore
@@ -232,7 +233,7 @@ impl super::Nexus {
             .await?;
 
         let switch_port_settings_id = match &settings.port_settings {
-            NameOrId::Id(id) => *id,
+            NameOrId::Id(id) => SwitchPortSettingsUuid::from_untyped_uuid(*id),
             NameOrId::Name(name) => {
                 self.db_datastore
                     .switch_port_settings_get_id(opctx, name.clone().into())

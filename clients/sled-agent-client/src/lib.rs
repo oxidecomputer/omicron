@@ -33,11 +33,13 @@ progenitor::generate_api!(
         VirtualNetworkInterfaceHost = { derives = [Eq, Hash] },
     },
     crates = {
+        "byte-wrapper" = "0.1.0",
         "omicron-uuid-kinds" = "*",
         "oxnet" = "0.1.0",
     },
     replace = {
         ArtifactConfig = sled_agent_types::artifact::ArtifactConfig,
+        ArtifactConfigGeneration = omicron_generation_kinds::ArtifactConfigGeneration,
         Attestation = sled_agent_types_versions::latest::rot::Attestation,
         Baseboard = sled_agent_types_versions::latest::inventory::Baseboard,
         BaseboardId = sled_hardware_types::BaseboardId,
@@ -62,7 +64,7 @@ progenitor::generate_api!(
         FmdInventoryError = sled_agent_types_versions::latest::inventory::FmdInventoryError,
         FmdInventoryErrorKind = sled_agent_types_versions::latest::inventory::FmdInventoryErrorKind,
         FmdResource = sled_agent_types_versions::latest::inventory::FmdResource,
-        Generation = omicron_common::api::external::Generation,
+        Generation = omicron_generation_kinds::Generation,
         Hostname = omicron_common::api::external::Hostname,
         ImportExportPolicy = sled_agent_types_versions::latest::early_networking::ImportExportPolicy,
         Inventory = sled_agent_types_versions::latest::inventory::Inventory,

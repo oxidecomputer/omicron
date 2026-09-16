@@ -528,7 +528,7 @@ mod test {
     use nexus_db_model::SagaId;
     use nexus_db_model::SagaReasonAbandoned;
     use nexus_db_model::{SagaNodeEvent, SecId};
-    use omicron_common::api::external::Generation;
+    use omicron_generation_kinds::SagaAdoptGeneration;
     use omicron_test_utils::dev;
     use rand::seq::SliceRandom;
     use std::collections::BTreeMap;
@@ -1226,14 +1226,20 @@ mod test {
             if sagas_affected.contains(&saga.id) {
                 assert!(saga.creator == sec_b || saga.creator == sec_c);
                 assert_eq!(current_sec, sec_a);
-                assert_eq!(*saga.adopt_generation, Generation::from(2));
+                assert_eq!(
+                    saga.adopt_generation,
+                    SagaAdoptGeneration::from_u32(2)
+                );
                 assert!(
                     saga.saga_state == SagaExecState::Running
                         || saga.saga_state == SagaExecState::Unwinding
                 );
             } else if sagas_unaffected.contains(&saga.id) {
                 assert_eq!(current_sec, saga.creator);
-                assert_eq!(*saga.adopt_generation, Generation::from(1));
+                assert_eq!(
+                    saga.adopt_generation,
+                    SagaAdoptGeneration::from_u32(1)
+                );
                 // Its SEC and state could be anything since we've deliberately
                 // included sagas with various states and SECs that should not
                 // be affected by the reassignment.

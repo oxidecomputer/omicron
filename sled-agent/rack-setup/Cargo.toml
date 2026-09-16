@@ -28,6 +28,7 @@ nexus-types.workspace = true
 ntp-admin-client.workspace = true
 omicron-common.workspace = true
 omicron-ddm-admin-client.workspace = true
+omicron-generation-kinds.workspace = true
 omicron-ledger.workspace = true
 omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true

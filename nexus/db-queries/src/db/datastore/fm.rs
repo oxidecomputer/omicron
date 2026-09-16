@@ -407,10 +407,11 @@ impl DataStore {
                         })
                         .map_err(|_| {
                             let internal_message = format!(
-                                "encountered multiple case ereports for case \
-                                 {case_id} with the same UUID {id}. this \
-                                 should really not be possible, as the \
-                                 assignment UUID is a primary key!",
+                                "ereport {ereport_id} is assigned to case \
+                                 {case_id} more than once (assignment {id} \
+                                 collides with a previously loaded one). an \
+                                 ereport may be assigned to a case at most \
+                                 once",
                             );
                             Error::InternalError { internal_message }
                         })?;
@@ -2099,7 +2100,8 @@ mod tests {
     use nexus_types::alert::AlertClass;
     use nexus_types::fm;
     use nexus_types::fm::ereport::{EreportData, Reporter};
-    use omicron_common::api::external::Generation;
+    use omicron_generation_kinds::AlertGeneration;
+    use omicron_generation_kinds::SupportBundleGeneration;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::CaseEreportUuid;
     use omicron_uuid_kinds::CollectionUuid;
@@ -2316,8 +2318,8 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
-                alert_generation: Generation::new(),
-                support_bundle_generation: Generation::new(),
+                alert_generation: AlertGeneration::new(),
+                support_bundle_generation: SupportBundleGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -2369,8 +2371,8 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
-                alert_generation: Generation::new(),
-                support_bundle_generation: Generation::new(),
+                alert_generation: AlertGeneration::new(),
+                support_bundle_generation: SupportBundleGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -2390,8 +2392,8 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: Some(sitrep1.id()),
                 next_inv_min_time_started: Utc::now(),
-                alert_generation: Generation::new(),
-                support_bundle_generation: Generation::new(),
+                alert_generation: AlertGeneration::new(),
+                support_bundle_generation: SupportBundleGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -2435,8 +2437,8 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
-                alert_generation: Generation::new(),
-                support_bundle_generation: Generation::new(),
+                alert_generation: AlertGeneration::new(),
+                support_bundle_generation: SupportBundleGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -2457,8 +2459,8 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: Some(nonexistent_id),
                 next_inv_min_time_started: Utc::now(),
-                alert_generation: Generation::new(),
-                support_bundle_generation: Generation::new(),
+                alert_generation: AlertGeneration::new(),
+                support_bundle_generation: SupportBundleGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -2496,8 +2498,8 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
-                alert_generation: Generation::new(),
-                support_bundle_generation: Generation::new(),
+                alert_generation: AlertGeneration::new(),
+                support_bundle_generation: SupportBundleGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -2517,8 +2519,8 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: Some(sitrep1.id()),
                 next_inv_min_time_started: Utc::now(),
-                alert_generation: Generation::new(),
-                support_bundle_generation: Generation::new(),
+                alert_generation: AlertGeneration::new(),
+                support_bundle_generation: SupportBundleGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -2539,8 +2541,8 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: Some(sitrep1.id()),
                 next_inv_min_time_started: Utc::now(),
-                alert_generation: Generation::new(),
-                support_bundle_generation: Generation::new(),
+                alert_generation: AlertGeneration::new(),
+                support_bundle_generation: SupportBundleGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -3023,8 +3025,8 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
-                alert_generation: Generation::new(),
-                support_bundle_generation: Generation::new(),
+                alert_generation: AlertGeneration::new(),
+                support_bundle_generation: SupportBundleGeneration::new(),
             },
             cases,
             ereports_by_id,
@@ -3130,6 +3132,10 @@ mod tests {
             .await
             .expect("failed to read sitrep");
 
+        // Before comparing against what we inserted, the loaded sitrep must
+        // be well-formed on its own.
+        nexus_fm_slippy::assert_sitrep_has_no_fatal_notes(&read_sitrep);
+
         assert_sitreps_eq(&sitrep, &read_sitrep);
 
         // Clean up
@@ -3215,8 +3221,8 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
-                alert_generation: Generation::new(),
-                support_bundle_generation: Generation::new(),
+                alert_generation: AlertGeneration::new(),
+                support_bundle_generation: SupportBundleGeneration::new(),
             },
             cases,
             ereports_by_id: Default::default(),
@@ -3232,6 +3238,9 @@ mod tests {
             .fm_sitrep_read(&opctx, sitrep_id)
             .await
             .expect("failed to read sitrep");
+
+        // The loaded sitrep must be well-formed
+        nexus_fm_slippy::assert_sitrep_has_no_fatal_notes(&read_sitrep);
 
         assert_sitreps_eq(&sitrep, &read_sitrep);
 
@@ -3270,8 +3279,9 @@ mod tests {
                         comment: "my cool sitrep".to_string(),
                         inv_collection_id: CollectionUuid::new_v4(),
                         next_inv_min_time_started: Utc::now(),
-                        alert_generation: Generation::new(),
-                        support_bundle_generation: Generation::new(),
+                        alert_generation: AlertGeneration::new(),
+                        support_bundle_generation: SupportBundleGeneration::new(
+                        ),
                     },
                     cases: Default::default(),
                     ereports_by_id: Default::default(),
@@ -3428,8 +3438,8 @@ mod tests {
                 comment: "my cool sitrep".to_string(),
                 inv_collection_id: CollectionUuid::new_v4(),
                 next_inv_min_time_started: Utc::now(),
-                alert_generation: Generation::new(),
-                support_bundle_generation: Generation::new(),
+                alert_generation: AlertGeneration::new(),
+                support_bundle_generation: SupportBundleGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -3566,8 +3576,8 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
-                alert_generation: Generation::new(),
-                support_bundle_generation: Generation::new(),
+                alert_generation: AlertGeneration::new(),
+                support_bundle_generation: SupportBundleGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -3878,8 +3888,8 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
-                alert_generation: Generation::new(),
-                support_bundle_generation: Generation::new(),
+                alert_generation: AlertGeneration::new(),
+                support_bundle_generation: SupportBundleGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -4008,8 +4018,8 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
-                alert_generation: Generation::new(),
-                support_bundle_generation: Generation::new(),
+                alert_generation: AlertGeneration::new(),
+                support_bundle_generation: SupportBundleGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -4165,8 +4175,8 @@ mod tests {
                 comment: "child sitrep".to_string(),
                 inv_collection_id: CollectionUuid::new_v4(),
                 next_inv_min_time_started: Utc::now(),
-                alert_generation: Generation::new(),
-                support_bundle_generation: Generation::new(),
+                alert_generation: AlertGeneration::new(),
+                support_bundle_generation: SupportBundleGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),

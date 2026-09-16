@@ -22,7 +22,7 @@ use nexus_types::{
     internal_api::params::{DnsConfigParams, DnsConfigZone},
     inventory::{CabooseWhich, Collection},
 };
-use omicron_common::api::external::Generation;
+use omicron_generation_kinds::Generation;
 use omicron_uuid_kinds::{
     BlueprintUuid, CollectionUuid, ReconfiguratorSimOpUuid,
     ReconfiguratorSimStateUuid, SledUuid,

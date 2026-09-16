@@ -55,6 +55,7 @@ mod uplinkd_reconciler;
 
 pub use bootstrap_agent_lockstep_types::scrimlet_reconcilers::ScrimletStatus;
 
+pub use handle::BgpSocketConfig;
 pub use handle::ScrimletReconcilers;
 pub use handle::ScrimletReconcilersMode;
 pub use handle::SledAgentNetworkingInfo;

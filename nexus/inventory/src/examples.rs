@@ -27,6 +27,7 @@ use omicron_cockroach_metrics::PrometheusMetrics;
 use omicron_common::api::external::ByteCount;
 use omicron_common::disk::DatasetKind;
 use omicron_common::disk::DatasetName;
+use omicron_generation_kinds::{GenericGeneration, SledConfigGeneration};
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -53,12 +54,14 @@ use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
 use sled_agent_types::inventory::FmdInventory;
 use sled_agent_types::inventory::HostPhase2DesiredSlots;
+use sled_agent_types::inventory::InstanceManagerStatus;
 use sled_agent_types::inventory::Inventory;
 use sled_agent_types::inventory::InventoryDataset;
 use sled_agent_types::inventory::InventoryDisk;
 use sled_agent_types::inventory::InventoryZpool;
 use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
 use sled_agent_types::inventory::OmicronSledConfig;
+use sled_agent_types::inventory::OmicronSledUpdateDisposition;
 use sled_agent_types::inventory::OmicronZonesConfig;
 use sled_agent_types::inventory::OrphanedDataset;
 use sled_agent_types::inventory::SingleMeasurementInventory;
@@ -84,6 +87,7 @@ use sled_agent_types::resolvable_files::ResolverStatus;
 use sled_agent_types::resolvable_files::ZoneManifestStatus;
 use sled_agent_types_versions::v4::inventory::OmicronZonesConfig as OmicronZonesConfigV4;
 use sled_agent_types_versions::v10::inventory::OmicronZonesConfig as OmicronZonesConfigV10;
+use sled_agent_types_versions::v11::inventory::OmicronZonesConfig as OmicronZonesConfigV11;
 use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -397,7 +401,8 @@ pub fn representative() -> Representative {
     let extract_current_omicron_zones_config = |data: &str| {
         let as_v4: OmicronZonesConfigV4 = serde_json::from_str(data).unwrap();
         OmicronZonesConfigV10::try_from(as_v4)
-            .and_then(OmicronZonesConfig::try_from)
+            .and_then(OmicronZonesConfigV11::try_from)
+            .map(OmicronZonesConfig::from)
     };
     let sled14 = extract_current_omicron_zones_config(sled14_data).unwrap();
     let sled16 = extract_current_omicron_zones_config(sled16_data).unwrap();
@@ -406,31 +411,40 @@ pub fn representative() -> Representative {
     // Convert these to `OmicronSledConfig`s. We'll start with empty disks and
     // datasets for now, and add to them below for sled14.
     let mut sled14 = OmicronSledConfig {
-        generation: sled14.generation,
+        generation: SledConfigGeneration::from_untyped_generation(
+            sled14.generation,
+        ),
         disks: Default::default(),
         datasets: Default::default(),
         zones: sled14.zones.into_iter().collect(),
         remove_mupdate_override: None,
         host_phase_2: HostPhase2DesiredSlots::current_contents(),
         measurements: Default::default(),
+        update_disposition: OmicronSledUpdateDisposition::Available,
     };
     let sled16 = OmicronSledConfig {
-        generation: sled16.generation,
+        generation: SledConfigGeneration::from_untyped_generation(
+            sled16.generation,
+        ),
         disks: Default::default(),
         datasets: Default::default(),
         zones: sled16.zones.into_iter().collect(),
         remove_mupdate_override: None,
         host_phase_2: HostPhase2DesiredSlots::current_contents(),
         measurements: Default::default(),
+        update_disposition: OmicronSledUpdateDisposition::Available,
     };
     let sled17 = OmicronSledConfig {
-        generation: sled17.generation,
+        generation: SledConfigGeneration::from_untyped_generation(
+            sled17.generation,
+        ),
         disks: Default::default(),
         datasets: Default::default(),
         zones: sled17.zones.into_iter().collect(),
         remove_mupdate_override: None,
         host_phase_2: HostPhase2DesiredSlots::current_contents(),
         measurements: Default::default(),
+        update_disposition: OmicronSledUpdateDisposition::Evacuating,
     };
 
     // Create iterator producing fixed IDs.
@@ -1133,6 +1147,7 @@ pub fn sled_agent(
         ledgered_sled_config,
         reconciler_status,
         last_reconciliation,
+        instance_manager_status: InstanceManagerStatus::available(3),
         file_source_resolver,
         smf_services_enabled_not_online,
         reference_measurements,

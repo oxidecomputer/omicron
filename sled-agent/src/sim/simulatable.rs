@@ -5,8 +5,8 @@
 use crate::nexus::NexusClient;
 use async_trait::async_trait;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::Generation;
 use omicron_common::api::external::ResourceType;
+use omicron_generation_kinds::Generation;
 use std::fmt;
 use std::sync::Arc;
 use uuid::Uuid;
