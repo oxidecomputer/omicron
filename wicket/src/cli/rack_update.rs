@@ -9,7 +9,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     io::{BufReader, Write},
-    net::SocketAddrV6,
     process::ExitCode,
     time::Duration,
 };
@@ -20,7 +19,7 @@ use crate::{
         ComponentId, CreateClearUpdateStateOptions, CreateStartUpdateOptions,
         parse_event_report_map,
     },
-    wicketd::create_wicketd_client,
+    wicketd::{WicketdAddrs, create_wicketd_client},
 };
 use anyhow::{Context, Result, anyhow, bail};
 use camino::Utf8PathBuf;
@@ -81,28 +80,26 @@ impl RackUpdateArgs {
     pub(crate) async fn exec(
         self,
         log: Logger,
-        wicketd_addr: SocketAddrV6,
+        addrs: WicketdAddrs,
         global_opts: GlobalOpts,
         output: CommandOutput<'_>,
     ) -> Result<ExitCode> {
         match self {
             RackUpdateArgs::Start(args) => {
-                args.exec(log, wicketd_addr, global_opts, output).await?;
+                args.exec(log, addrs, global_opts, output).await?;
                 Ok(ExitCode::SUCCESS)
             }
             RackUpdateArgs::Attach(args) => {
-                args.exec(log, wicketd_addr, global_opts, output).await?;
+                args.exec(log, addrs, global_opts, output).await?;
                 Ok(ExitCode::SUCCESS)
             }
-            RackUpdateArgs::Status(args) => {
-                args.exec(log, wicketd_addr, output).await
-            }
+            RackUpdateArgs::Status(args) => args.exec(log, addrs, output).await,
             RackUpdateArgs::Clear(args) => {
-                args.exec(log, wicketd_addr, global_opts, output).await?;
+                args.exec(log, addrs, global_opts, output).await?;
                 Ok(ExitCode::SUCCESS)
             }
             RackUpdateArgs::DebugDump(args) => {
-                args.exec(log, wicketd_addr).await?;
+                args.exec(log, addrs).await?;
                 Ok(ExitCode::SUCCESS)
             }
             RackUpdateArgs::DebugReplay(args) => {
@@ -141,11 +138,12 @@ impl StartRackUpdateArgs {
     async fn exec(
         self,
         log: Logger,
-        wicketd_addr: SocketAddrV6,
+        addrs: WicketdAddrs,
         global_opts: GlobalOpts,
         output: CommandOutput<'_>,
     ) -> Result<()> {
-        let client = create_wicketd_client(&log, wicketd_addr, WICKETD_TIMEOUT);
+        let client =
+            create_wicketd_client(&log, addrs.wicketd, WICKETD_TIMEOUT);
 
         let update_ids = self.component_ids.to_component_ids()?;
         let options = CreateStartUpdateOptions {
@@ -205,11 +203,12 @@ impl AttachArgs {
     async fn exec(
         self,
         log: Logger,
-        wicketd_addr: SocketAddrV6,
+        addrs: WicketdAddrs,
         global_opts: GlobalOpts,
         output: CommandOutput<'_>,
     ) -> Result<()> {
-        let client = create_wicketd_client(&log, wicketd_addr, WICKETD_TIMEOUT);
+        let client =
+            create_wicketd_client(&log, addrs.wicketd, WICKETD_TIMEOUT);
 
         let update_ids = self.component_ids.to_component_ids()?;
         do_attach_to_updates(log, client, update_ids, global_opts, output).await
@@ -352,7 +351,7 @@ impl StatusArgs {
     async fn exec(
         self,
         log: Logger,
-        wicketd_addr: SocketAddrV6,
+        addrs: WicketdAddrs,
         output: CommandOutput<'_>,
     ) -> Result<ExitCode> {
         // Read the artifact & event reports from wicketd, a file, or stdin.
@@ -370,7 +369,7 @@ impl StatusArgs {
             }
         } else {
             let client =
-                create_wicketd_client(&log, wicketd_addr, WICKETD_TIMEOUT);
+                create_wicketd_client(&log, addrs.wicketd, WICKETD_TIMEOUT);
             client
                 .get_artifacts_and_event_reports()
                 .await
@@ -651,11 +650,12 @@ impl ClearArgs {
     async fn exec(
         self,
         log: Logger,
-        wicketd_addr: SocketAddrV6,
+        addrs: WicketdAddrs,
         global_opts: GlobalOpts,
         output: CommandOutput<'_>,
     ) -> Result<()> {
-        let client = create_wicketd_client(&log, wicketd_addr, WICKETD_TIMEOUT);
+        let client =
+            create_wicketd_client(&log, addrs.wicketd, WICKETD_TIMEOUT);
 
         let update_ids = self.component_ids.to_component_ids()?;
         let response =
@@ -745,8 +745,9 @@ pub(crate) struct DumpArgs {
 }
 
 impl DumpArgs {
-    async fn exec(self, log: Logger, wicketd_addr: SocketAddrV6) -> Result<()> {
-        let client = create_wicketd_client(&log, wicketd_addr, WICKETD_TIMEOUT);
+    async fn exec(self, log: Logger, addrs: WicketdAddrs) -> Result<()> {
+        let client =
+            create_wicketd_client(&log, addrs.wicketd, WICKETD_TIMEOUT);
 
         let response = client
             .get_artifacts_and_event_reports()
