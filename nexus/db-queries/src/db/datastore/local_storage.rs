@@ -282,9 +282,9 @@ impl DataStore {
         Ok(())
     }
 
-    /// Mark the local storage dataset allocations as deleted, and re-compute
-    /// the appropriate dataset size_used columns.
-    pub async fn delete_local_storage_dataset_allocations(
+    /// Mark the local storage dataset allocation backing this disk as deleted,
+    /// and re-compute the appropriate dataset size_used columns.
+    pub async fn delete_local_storage_dataset_allocation(
         &self,
         opctx: &OpContext,
         local_storage_disk: &LocalStorageDisk,
@@ -298,7 +298,7 @@ impl DataStore {
         let conn = self.pool_connection_authorized(opctx).await?;
 
         self.transaction_retry_wrapper(
-            "delete_local_storage_dataset_allocations",
+            "delete_local_storage_dataset_allocation",
         )
         .transaction(&conn, |conn| async move {
             match local_storage_dataset_allocation {

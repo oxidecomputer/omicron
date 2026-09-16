@@ -303,7 +303,7 @@ impl LocalStorageDeleter {
 
             match self
                 .datastore
-                .delete_local_storage_dataset_allocations(opctx, &disk)
+                .delete_local_storage_dataset_allocation(opctx, &disk)
                 .await
             {
                 Ok(()) => {
@@ -320,7 +320,7 @@ impl LocalStorageDeleter {
                 Err(e) => {
                     let s = format!(
                         "error calling \
-                        delete_local_storage_dataset_allocations: {}",
+                        delete_local_storage_dataset_allocation: {}",
                         InlineErrorChain::new(&e),
                     );
 
