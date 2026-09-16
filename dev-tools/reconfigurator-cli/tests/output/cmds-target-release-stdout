@@ -1317,6 +1317,14 @@ eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51 0       <REDACTED_TIMESTAMP>
 61f451b3-2121-4ed6-91c7-a550054f6c21 0       <REDACTED_TIMESTAMP> 
 
 
+> # Set the planner config to perform sled evacuation.
+> set planner-config --sled-reboot-policy evacuate
+planner config updated:
+    disruption policy::   terminate (unchanged)
+*   sled reboot policy:   immediate (no evacuation) -> evacuate
+
+
+
 > # Measurements will block further planning progress, run a planning step
 > blueprint-plan latest latest
 INFO performed noop zone image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 9, num_already_artifact: 9, num_eligible: 0, num_ineligible: 0
@@ -1331,6 +1339,10 @@ INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noo
 generated blueprint af934083-59b5-4bf6-8966-6fb5292c29e1 based on parent blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * zone updates waiting on reference measurement changes
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 Measurement updates:
@@ -1627,6 +1639,10 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint df06bb57-ad42-4431-9206-abff322896c7 based on parent blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 pending MGS update:
   * 913-0000019:serial0: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
 * zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
@@ -1688,6 +1704,10 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba based on parent blueprint df06bb57-ad42-4431-9206-abff322896c7
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 pending MGS update:
   * 913-0000019:serial0: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
 * zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
@@ -1751,6 +1771,10 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 9034c710-3e57-45f3-99e5-4316145e87ac based on parent blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 pending MGS update:
   * 913-0000019:serial0: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
 * zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
@@ -1824,6 +1848,10 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976 based on parent blueprint 9034c710-3e57-45f3-99e5-4316145e87ac
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 sled changed update disposition:
   * 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: evacuating (terminate)
 * zone updates waiting on sled update disposition changes
@@ -1960,6 +1988,10 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736 based on parent blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 blocked MGS update:
   * 913-0000019:serial0: cannot update SP until sled is evacuated: waiting for ledgered sled config generation to be 5 (currently 4)
 * zone updates waiting on blocked MGS updates (RoT bootloader / RoT / SP / Host OS)
@@ -2025,6 +2057,10 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 626487fa-7139-45ec-8416-902271fc730b based on parent blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 blocked MGS update:
   * 913-0000019:serial0: cannot update SP until sled is evacuated: instance manager still has 5 registered VMMs
 * zone updates waiting on blocked MGS updates (RoT bootloader / RoT / SP / Host OS)
@@ -2085,6 +2121,10 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b based on parent blueprint 626487fa-7139-45ec-8416-902271fc730b
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 pending MGS update:
   * 913-0000019:serial0: Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion })
 * zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
@@ -2158,6 +2198,10 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint afb09faf-a586-4483-9289-04d4f1d8ba23 based on parent blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 pending MGS update:
   * 913-0000019:serial0: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash(HexArray(0101010101010101010101010101010101010101010101010101010101010101)), expected_active_phase_2_hash: ArtifactHash(HexArray(0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a)), expected_inactive_phase_1_hash: ArtifactHash(HexArray(0202020202020202020202020202020202020202020202020202020202020202)), expected_inactive_phase_2_hash: ArtifactHash(HexArray(c2a8af75d6907ef138d033dc3be1fcbf7d7a78a87aee04796caf283a6bb0952d)), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
 * zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
@@ -2294,6 +2338,10 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700 based on parent blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 pending MGS update:
   * 913-0000019:serial0: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash(HexArray(0101010101010101010101010101010101010101010101010101010101010101)), expected_active_phase_2_hash: ArtifactHash(HexArray(0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a)), expected_inactive_phase_1_hash: ArtifactHash(HexArray(0202020202020202020202020202020202020202020202020202020202020202)), expected_inactive_phase_2_hash: ArtifactHash(HexArray(c2a8af75d6907ef138d033dc3be1fcbf7d7a78a87aee04796caf283a6bb0952d)), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
 * zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
@@ -2355,6 +2403,10 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1 based on parent blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 pending MGS update:
   * 913-0000019:serial0: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash(HexArray(0101010101010101010101010101010101010101010101010101010101010101)), expected_active_phase_2_hash: ArtifactHash(HexArray(0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a)), expected_inactive_phase_1_hash: ArtifactHash(HexArray(0202020202020202020202020202020202020202020202020202020202020202)), expected_inactive_phase_2_hash: ArtifactHash(HexArray(c2a8af75d6907ef138d033dc3be1fcbf7d7a78a87aee04796caf283a6bb0952d)), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
 * zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
@@ -2415,6 +2467,10 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300 based on parent blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 pending MGS update:
   * 913-0000019:serial0: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash(HexArray(0101010101010101010101010101010101010101010101010101010101010101)), expected_active_phase_2_hash: ArtifactHash(HexArray(0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a)), expected_inactive_phase_1_hash: ArtifactHash(HexArray(0202020202020202020202020202020202020202020202020202020202020202)), expected_inactive_phase_2_hash: ArtifactHash(HexArray(c2a8af75d6907ef138d033dc3be1fcbf7d7a78a87aee04796caf283a6bb0952d)), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
 * zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
@@ -2478,6 +2534,10 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839 based on parent blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 pending MGS update:
   * 913-0000019:serial1: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
 * 1 sled changed update disposition:
@@ -2637,6 +2697,10 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 27e755bc-dc10-4647-853c-f89bb3a15a2c based on parent blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 pending MGS update:
   * 913-0000019:serial1: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: Version(ArtifactVersion("0.5.0")) })
 * zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
@@ -2706,6 +2770,10 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 9f89efdf-a23e-4137-b7cc-79f4a91cbe1f based on parent blueprint 27e755bc-dc10-4647-853c-f89bb3a15a2c
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 pending MGS update:
   * 913-0000019:serial1: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
 * zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
@@ -2779,6 +2847,10 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 9a9e6c32-5a84-4020-a159-33dceff18d35 based on parent blueprint 9f89efdf-a23e-4137-b7cc-79f4a91cbe1f
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 pending MGS update:
   * 913-0000019:serial1: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: Version(ArtifactVersion("0.5.0")), expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
 * zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
@@ -2849,6 +2921,10 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 13cfdd24-52ba-4e94-8c83-02e3a48fc746 based on parent blueprint 9a9e6c32-5a84-4020-a159-33dceff18d35
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 sled changed update disposition:
   * 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: evacuating (terminate)
 * zone updates waiting on sled update disposition changes
@@ -2994,6 +3070,10 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint b82656b0-a9be-433d-83d0-e2bdf371777a based on parent blueprint 13cfdd24-52ba-4e94-8c83-02e3a48fc746
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 pending MGS update:
   * 913-0000019:serial1: Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion })
 * zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
@@ -3065,6 +3145,10 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 31c84831-be52-4630-bc3f-128d72cd8f22 based on parent blueprint b82656b0-a9be-433d-83d0-e2bdf371777a
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 pending MGS update:
   * 913-0000019:serial1: Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: Version(ArtifactVersion("0.5.0")) })
 * zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
@@ -3135,6 +3219,10 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 778e3f3a-58b1-4a5e-acff-d23c5d7124c2 based on parent blueprint 31c84831-be52-4630-bc3f-128d72cd8f22
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 pending MGS update:
   * 913-0000019:serial1: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash(HexArray(0101010101010101010101010101010101010101010101010101010101010101)), expected_active_phase_2_hash: ArtifactHash(HexArray(0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a)), expected_inactive_phase_1_hash: ArtifactHash(HexArray(0202020202020202020202020202020202020202020202020202020202020202)), expected_inactive_phase_2_hash: ArtifactHash(HexArray(c2a8af75d6907ef138d033dc3be1fcbf7d7a78a87aee04796caf283a6bb0952d)), sled_agent_address: [fd00:1122:3344:102::1]:12345 })
 * zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
@@ -3290,6 +3378,10 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 386a7ec3-7c2e-43cf-8f00-999e91e1d5e6 based on parent blueprint 778e3f3a-58b1-4a5e-acff-d23c5d7124c2
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 pending MGS update:
   * 913-0000019:serial1: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash(HexArray(0101010101010101010101010101010101010101010101010101010101010101)), expected_active_phase_2_hash: ArtifactHash(HexArray(0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a)), expected_inactive_phase_1_hash: ArtifactHash(HexArray(ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff)), expected_inactive_phase_2_hash: ArtifactHash(HexArray(c2a8af75d6907ef138d033dc3be1fcbf7d7a78a87aee04796caf283a6bb0952d)), sled_agent_address: [fd00:1122:3344:102::1]:12345 })
 * zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
@@ -3365,6 +3457,10 @@ INFO ran out of boards for MGS-driven update
 generated blueprint e54a0836-53e1-4948-a3af-0b77165289b5 based on parent blueprint 386a7ec3-7c2e-43cf-8f00-999e91e1d5e6
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 pending MGS update:
   * 913-0000019:serial2: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
 * 1 sled changed update disposition:
@@ -3521,6 +3617,10 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 459a45a5-616e-421f-873b-2fb08c36205c based on parent blueprint e54a0836-53e1-4948-a3af-0b77165289b5
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 pending MGS update:
   * 913-0000019:serial2: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
 * zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
@@ -3593,6 +3693,10 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint b2295597-5788-482e-acf9-1731ec63fbd2 based on parent blueprint 459a45a5-616e-421f-873b-2fb08c36205c
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 pending MGS update:
   * 913-0000019:serial2: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: Version(ArtifactVersion("1.0.0")), expected_persistent_boot_preference: B, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
 * zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
@@ -3667,6 +3771,10 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 6fad8fd4-e825-433f-b76d-495484e068ce based on parent blueprint b2295597-5788-482e-acf9-1731ec63fbd2
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 pending MGS update:
   * 913-0000019:serial2: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: B, version: ArtifactVersion("1.1.0") }, expected_inactive_version: Version(ArtifactVersion("0.0.2")), expected_persistent_boot_preference: B, expected_pending_persistent_boot_preference: Some(B), expected_transient_boot_preference: None })
 * zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
@@ -3738,6 +3846,10 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 24b6e243-100c-428d-8ea6-35b504226f55 based on parent blueprint 6fad8fd4-e825-433f-b76d-495484e068ce
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 pending MGS update:
   * 913-0000019:serial2: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: B, version: ArtifactVersion("1.1.0") }, expected_inactive_version: Version(ArtifactVersion("0.0.2")), expected_persistent_boot_preference: B, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: Some(B) })
 * zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
@@ -3807,6 +3919,10 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 79fff7a2-2495-4c75-8465-4dc01bab48ce based on parent blueprint 24b6e243-100c-428d-8ea6-35b504226f55
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 sled changed update disposition:
   * d81c6a84-79b8-4958-ae41-ea46c9b19763: evacuating (terminate)
 * zone updates waiting on sled update disposition changes
@@ -3948,6 +4064,10 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 3bcc37b2-0c0b-44d0-b4ed-3bcb605e4312 based on parent blueprint 79fff7a2-2495-4c75-8465-4dc01bab48ce
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 pending MGS update:
   * 913-0000019:serial2: Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion })
 * zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
@@ -4015,6 +4135,10 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 4d2eb6f3-7eb1-443a-8e76-7ecf05da2f6d based on parent blueprint 3bcc37b2-0c0b-44d0-b4ed-3bcb605e4312
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 pending MGS update:
   * 913-0000019:serial2: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash(HexArray(0101010101010101010101010101010101010101010101010101010101010101)), expected_active_phase_2_hash: ArtifactHash(HexArray(0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a)), expected_inactive_phase_1_hash: ArtifactHash(HexArray(0202020202020202020202020202020202020202020202020202020202020202)), expected_inactive_phase_2_hash: ArtifactHash(HexArray(c2a8af75d6907ef138d033dc3be1fcbf7d7a78a87aee04796caf283a6bb0952d)), sled_agent_address: [fd00:1122:3344:103::1]:12345 })
 * zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
@@ -4165,6 +4289,10 @@ INFO ran out of boards for MGS-driven update
 generated blueprint e2125c83-b255-45c9-bc9b-802cff09a812 based on parent blueprint 4d2eb6f3-7eb1-443a-8e76-7ecf05da2f6d
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 sled changed update disposition:
   * d81c6a84-79b8-4958-ae41-ea46c9b19763: available
 * zone updates waiting on sled update disposition changes
@@ -4310,6 +4438,10 @@ INFO ran out of boards for MGS-driven update
 generated blueprint f4a6848e-d13c-46e1-8c6a-944f886d7ba3 based on parent blueprint e2125c83-b255-45c9-bc9b-802cff09a812
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 out-of-date zone updated in-place:
   * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone 353b3b65-20f7-48c3-88f7-495bd5d31545 (clickhouse)
 * 24 remaining out-of-date zones
@@ -4448,6 +4580,10 @@ INFO ran out of boards for MGS-driven update
 generated blueprint 834e4dbe-3b71-443d-bd4c-20e8253abc0c based on parent blueprint f4a6848e-d13c-46e1-8c6a-944f886d7ba3
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 out-of-date zone expunged:
   * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone 62620961-fc4a-481e-968b-f5acbac0dc63 (internal_ntp)
 * 23 remaining out-of-date zones
@@ -4600,6 +4736,10 @@ INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIn
 generated blueprint d9c5c5e3-c532-4c45-9ef5-22cb00f6a2e1 based on parent blueprint 834e4dbe-3b71-443d-bd4c-20e8253abc0c
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * waiting for NTP zones to appear in inventory on sleds: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 * sleds getting NTP zones and which have other services already, making them eligible for discretionary zones: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 * missing NTP zone on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
@@ -4747,6 +4887,10 @@ INFO ran out of boards for MGS-driven update
 generated blueprint e2deb7c0-2262-49fe-855f-4250c22afb36 based on parent blueprint d9c5c5e3-c532-4c45-9ef5-22cb00f6a2e1
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 out-of-date zone expunged:
   * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone 6c3ae381-04f7-41ea-b0ac-74db387dbc3a (external_dns)
 * 22 remaining out-of-date zones
@@ -4909,6 +5053,10 @@ INFO ran out of boards for MGS-driven update
 generated blueprint 23ce505c-8991-44a5-8863-f2b906fba9cf based on parent blueprint e2deb7c0-2262-49fe-855f-4250c22afb36
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * discretionary zones placed:
   * external_dns zone on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones
@@ -5072,6 +5220,10 @@ INFO ran out of boards for MGS-driven update
 generated blueprint c0d81ea6-909c-4efb-964e-beff67f6da0d based on parent blueprint 23ce505c-8991-44a5-8863-f2b906fba9cf
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 out-of-date zone updated in-place:
   * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone 86a22a56-0168-453d-9df1-cb2a7c64b5d3 (crucible)
 * 21 remaining out-of-date zones
@@ -5213,6 +5365,10 @@ INFO ran out of boards for MGS-driven update
 generated blueprint 60b55d33-5fec-4277-9864-935197eaead7 based on parent blueprint c0d81ea6-909c-4efb-964e-beff67f6da0d
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 out-of-date zone expunged:
   * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone 99e2f30b-3174-40bf-a78a-90da8abba8ca (internal_dns)
 * 20 remaining out-of-date zones
@@ -5378,6 +5534,10 @@ INFO ran out of boards for MGS-driven update
 generated blueprint aa13f40f-41ff-4b68-bee1-df2e1f805544 based on parent blueprint 60b55d33-5fec-4277-9864-935197eaead7
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * discretionary zones placed:
   * internal_dns zone on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones
@@ -5544,6 +5704,10 @@ INFO ran out of boards for MGS-driven update
 generated blueprint 316ccd9e-5c53-46c3-a2e9-20c3867b7111 based on parent blueprint aa13f40f-41ff-4b68-bee1-df2e1f805544
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 out-of-date zone expunged:
   * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone ad6a3a03-8d0f-4504-99a4-cbf73d69b973 (crucible_pantry)
 * 19 remaining out-of-date zones
@@ -5697,6 +5861,10 @@ INFO ran out of boards for MGS-driven update
 generated blueprint 02078c95-3d58-4b7b-a03f-9b160361c50a based on parent blueprint 316ccd9e-5c53-46c3-a2e9-20c3867b7111
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * discretionary zones placed:
   * crucible_pantry zone on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones
@@ -5851,6 +6019,10 @@ INFO ran out of boards for MGS-driven update
 generated blueprint e7a01ffc-6b0e-408b-917b-b1efe18b3110 based on parent blueprint 02078c95-3d58-4b7b-a03f-9b160361c50a
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 out-of-date zone updated in-place:
   * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone bd354eef-d8a6-4165-9124-283fb5e46d77 (crucible)
 * 18 remaining out-of-date zones
@@ -5997,6 +6169,10 @@ INFO ran out of boards for MGS-driven update
 generated blueprint 880e2ffc-8187-4275-a2f3-1b36aa2f4482 based on parent blueprint e7a01ffc-6b0e-408b-917b-b1efe18b3110
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 out-of-date zone updated in-place:
   * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone e2fdefe7-95b2-4fd2-ae37-56929a06d58c (crucible)
 * 17 remaining out-of-date zones
@@ -6146,6 +6322,10 @@ INFO ran out of boards for MGS-driven update
 generated blueprint c4a20bcb-1a71-4e88-97b4-36d16f55daec based on parent blueprint 880e2ffc-8187-4275-a2f3-1b36aa2f4482
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 out-of-date zone updated in-place:
   * sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, zone 058fd5f9-60a8-4e11-9302-15172782e17d (crucible)
 * 16 remaining out-of-date zones
@@ -6280,6 +6460,10 @@ INFO ran out of boards for MGS-driven update
 generated blueprint a2c6496d-98fc-444d-aa36-99508aa72367 based on parent blueprint c4a20bcb-1a71-4e88-97b4-36d16f55daec
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 out-of-date zone expunged:
   * sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, zone 427ec88f-f467-42fa-9bbb-66a91a36103c (internal_dns)
 * 15 remaining out-of-date zones
@@ -6434,6 +6618,10 @@ INFO ran out of boards for MGS-driven update
 generated blueprint 6ed56354-5941-40d1-a06c-b0e940701d52 based on parent blueprint a2c6496d-98fc-444d-aa36-99508aa72367
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * discretionary zones placed:
   * internal_dns zone on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones
@@ -6589,6 +6777,10 @@ INFO ran out of boards for MGS-driven update
 generated blueprint 9078c4ba-3a73-4b3f-ac2c-acb501f89cb2 based on parent blueprint 6ed56354-5941-40d1-a06c-b0e940701d52
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 out-of-date zone updated in-place:
   * sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, zone 5199c033-4cf9-4ab6-8ae7-566bd7606363 (crucible)
 * 14 remaining out-of-date zones
@@ -6725,6 +6917,10 @@ INFO ran out of boards for MGS-driven update
 generated blueprint 8763abc1-8a42-4932-b5a7-33109e0e0152 based on parent blueprint 9078c4ba-3a73-4b3f-ac2c-acb501f89cb2
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 out-of-date zone expunged:
   * sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, zone 6444f8a5-6465-4f0b-a549-1993c113569c (internal_ntp)
 * 13 remaining out-of-date zones
@@ -6871,6 +7067,10 @@ INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIn
 generated blueprint 2b89e0d7-f15b-4474-8ac4-85959ed1bc88 based on parent blueprint 8763abc1-8a42-4932-b5a7-33109e0e0152
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * waiting for NTP zones to appear in inventory on sleds: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 * sleds getting NTP zones and which have other services already, making them eligible for discretionary zones: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 * missing NTP zone on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
@@ -7018,6 +7218,10 @@ INFO ran out of boards for MGS-driven update
 generated blueprint 7f6b7297-c2bc-4f67-b3c0-c8e555ebbdc4 based on parent blueprint 2b89e0d7-f15b-4474-8ac4-85959ed1bc88
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 out-of-date zone expunged:
   * sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, zone 803bfb63-c246-41db-b0da-d3b87ddfc63d (external_dns)
 * 12 remaining out-of-date zones
@@ -7177,6 +7381,10 @@ INFO ran out of boards for MGS-driven update
 generated blueprint 59630e63-c953-4807-9e84-9e750a79f68e based on parent blueprint 7f6b7297-c2bc-4f67-b3c0-c8e555ebbdc4
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * discretionary zones placed:
   * external_dns zone on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones
@@ -7337,6 +7545,10 @@ INFO ran out of boards for MGS-driven update
 generated blueprint e93650dc-b5ba-4ec7-8550-9171c1ada194 based on parent blueprint 59630e63-c953-4807-9e84-9e750a79f68e
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 out-of-date zone expunged:
   * sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, zone ba4994a8-23f9-4b1a-a84f-a08d74591389 (crucible_pantry)
 * 11 remaining out-of-date zones
@@ -7487,6 +7699,10 @@ INFO ran out of boards for MGS-driven update
 generated blueprint 90650737-8142-47a6-9a48-a10efc487e57 based on parent blueprint e93650dc-b5ba-4ec7-8550-9171c1ada194
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * discretionary zones placed:
   * crucible_pantry zone on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones
@@ -7638,6 +7854,10 @@ INFO ran out of boards for MGS-driven update
 generated blueprint 2182613d-dc9f-41eb-9c6a-d33801849caa based on parent blueprint 90650737-8142-47a6-9a48-a10efc487e57
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 out-of-date zone updated in-place:
   * sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, zone dfac80b4-a887-430a-ae87-a4e065dba787 (crucible)
 * 10 remaining out-of-date zones
@@ -7784,6 +8004,10 @@ INFO ran out of boards for MGS-driven update
 generated blueprint e8b088a8-7da0-480b-a2dc-75ffef068ece based on parent blueprint 2182613d-dc9f-41eb-9c6a-d33801849caa
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 out-of-date zone updated in-place:
   * sled d81c6a84-79b8-4958-ae41-ea46c9b19763, zone 694bd14f-cb24-4be4-bb19-876e79cda2c8 (crucible)
 * 9 remaining out-of-date zones
@@ -7918,6 +8142,10 @@ INFO ran out of boards for MGS-driven update
 generated blueprint 810ea95a-4730-43dd-867e-1984aeb9d873 based on parent blueprint e8b088a8-7da0-480b-a2dc-75ffef068ece
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 out-of-date zone expunged:
   * sled d81c6a84-79b8-4958-ae41-ea46c9b19763, zone 75b220ba-a0f4-4872-8202-dc7c87f062d0 (crucible_pantry)
 * 8 remaining out-of-date zones
@@ -8060,6 +8288,10 @@ INFO ran out of boards for MGS-driven update
 generated blueprint 67c074ef-c52e-4ff1-851a-598c04dc2c8d based on parent blueprint 810ea95a-4730-43dd-867e-1984aeb9d873
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * discretionary zones placed:
   * crucible_pantry zone on sled d81c6a84-79b8-4958-ae41-ea46c9b19763 from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones
@@ -8203,6 +8435,10 @@ INFO ran out of boards for MGS-driven update
 generated blueprint 0a8d2f87-1d3e-4296-ba07-108940a7a57e based on parent blueprint 67c074ef-c52e-4ff1-851a-598c04dc2c8d
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 out-of-date zone updated in-place:
   * sled d81c6a84-79b8-4958-ae41-ea46c9b19763, zone 7c252b64-c5af-4ec1-989e-9a03f3b0f111 (crucible)
 * 7 remaining out-of-date zones
@@ -8338,6 +8574,10 @@ INFO ran out of boards for MGS-driven update
 generated blueprint d69e1109-06be-4469-8876-4292dc7885d7 based on parent blueprint 0a8d2f87-1d3e-4296-ba07-108940a7a57e
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 out-of-date zone expunged:
   * sled d81c6a84-79b8-4958-ae41-ea46c9b19763, zone ea5b4030-b52f-44b2-8d70-45f15f987d01 (internal_dns)
 * 6 remaining out-of-date zones
@@ -8491,6 +8731,10 @@ INFO ran out of boards for MGS-driven update
 generated blueprint 12f19448-6a10-4b4b-ae19-a8c94a566097 based on parent blueprint d69e1109-06be-4469-8876-4292dc7885d7
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * discretionary zones placed:
   * internal_dns zone on sled d81c6a84-79b8-4958-ae41-ea46c9b19763 from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones
@@ -8645,6 +8889,10 @@ INFO ran out of boards for MGS-driven update
 generated blueprint 4713f6c4-e8ba-4a28-87a0-df75ebf7b8b6 based on parent blueprint 12f19448-6a10-4b4b-ae19-a8c94a566097
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 out-of-date zone expunged:
   * sled d81c6a84-79b8-4958-ae41-ea46c9b19763, zone f10a4fb9-759f-4a65-b25e-5794ad2d07d8 (internal_ntp)
 * 5 remaining out-of-date zones
@@ -8793,6 +9041,10 @@ INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIn
 generated blueprint 6d830d26-547e-492b-adfe-c5c4ad9c3751 based on parent blueprint 4713f6c4-e8ba-4a28-87a0-df75ebf7b8b6
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * waiting for NTP zones to appear in inventory on sleds: d81c6a84-79b8-4958-ae41-ea46c9b19763
 * sleds getting NTP zones and which have other services already, making them eligible for discretionary zones: d81c6a84-79b8-4958-ae41-ea46c9b19763
 * missing NTP zone on sled d81c6a84-79b8-4958-ae41-ea46c9b19763
@@ -8942,6 +9194,10 @@ INFO ran out of boards for MGS-driven update
 generated blueprint 8e0cc787-e068-4a45-97ed-21029cbe4ddf based on parent blueprint 6d830d26-547e-492b-adfe-c5c4ad9c3751
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 out-of-date zone updated in-place:
   * sled d81c6a84-79b8-4958-ae41-ea46c9b19763, zone f55647d4-5500-4ad3-893a-df45bd50d622 (crucible)
 * 4 remaining out-of-date zones
@@ -9082,6 +9338,10 @@ INFO ran out of boards for MGS-driven update
 generated blueprint e31c9054-8549-4c68-acf9-a01f68d1fc9b based on parent blueprint 8e0cc787-e068-4a45-97ed-21029cbe4ddf
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 out-of-date zone expunged:
   * sled d81c6a84-79b8-4958-ae41-ea46c9b19763, zone f6ec9c67-946a-4da3-98d5-581f72ce8bf0 (external_dns)
 * 3 remaining out-of-date zones
@@ -9240,6 +9500,10 @@ INFO ran out of boards for MGS-driven update
 generated blueprint 3e332949-6785-4aff-ad86-6134f5ce6152 based on parent blueprint e31c9054-8549-4c68-acf9-a01f68d1fc9b
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * discretionary zones placed:
   * external_dns zone on sled d81c6a84-79b8-4958-ae41-ea46c9b19763 from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones
@@ -9402,6 +9666,10 @@ INFO ran out of boards for MGS-driven update
 generated blueprint 05685571-d61f-4754-a2b2-604ea8c45dff based on parent blueprint 3e332949-6785-4aff-ad86-6134f5ce6152
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * discretionary zones placed:
   * nexus zone on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c from source artifact: version 1.0.0
   * nexus zone on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 from source artifact: version 1.0.0
@@ -9734,6 +10002,10 @@ INFO ran out of boards for MGS-driven update
 generated blueprint 008e1541-3d9d-4a50-a877-eed4a3cf86ab based on parent blueprint 05685571-d61f-4754-a2b2-604ea8c45dff
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 3 remaining out-of-date zones
 * 3 zones waiting to be expunged:
   * zone 0c71b3b2-6ceb-4e8f-b020-b08675e83038: nexus image out-of-date, but nexus_generation 1 is still active
@@ -9822,6 +10094,10 @@ INFO ran out of boards for MGS-driven update
 generated blueprint 310670a1-8ec3-4579-b1d9-3137808a18d7 based on parent blueprint 008e1541-3d9d-4a50-a877-eed4a3cf86ab
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 3 remaining out-of-date zones
 * 3 zones waiting to be expunged:
   * zone 0c71b3b2-6ceb-4e8f-b020-b08675e83038: nexus image out-of-date, but nexus_generation 1 is still active
@@ -9879,6 +10155,10 @@ INFO ran out of boards for MGS-driven update
 generated blueprint 661acfdf-5168-4e79-a3a6-9d0dceeda09e based on parent blueprint 8bf03c24-8f07-4e5f-902e-e5f23b50be91
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * discretionary zones placed:
   * nexus zone on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 from source artifact: version 0.0.1
 * zone updates waiting on discretionary zones
@@ -10030,6 +10310,10 @@ INFO ran out of boards for MGS-driven update
 generated blueprint b70d07ba-a48d-48ef-a653-85b4715e3c08 based on parent blueprint 661acfdf-5168-4e79-a3a6-9d0dceeda09e
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 out-of-date zone expunged:
   * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone 466a9f29-62bf-4e63-924a-b9efdb86afec (nexus)
 * 2 remaining out-of-date zones
@@ -10261,6 +10545,10 @@ INFO ran out of boards for MGS-driven update
 generated blueprint 82039d86-8b67-4a8b-85b3-61889053daca based on parent blueprint b70d07ba-a48d-48ef-a653-85b4715e3c08
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 out-of-date zone expunged:
   * sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, zone e71e19bb-c952-489e-b684-97f5c255bd63 (nexus)
 * 1 remaining out-of-date zone
@@ -10399,6 +10687,10 @@ INFO ran out of boards for MGS-driven update
 generated blueprint 4c3fd4bf-90aa-41d9-b4f6-e763ba054aac based on parent blueprint 82039d86-8b67-4a8b-85b3-61889053daca
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 out-of-date zone expunged:
   * sled d81c6a84-79b8-4958-ae41-ea46c9b19763, zone 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6 (nexus)
 * 0 remaining out-of-date zones
