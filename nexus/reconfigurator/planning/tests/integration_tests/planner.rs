@@ -5538,7 +5538,8 @@ fn test_zone_update_ordering_respects_dependency_dag() {
             disruption_policy: ReconfiguratorDisruptionPolicy::default(),
         });
         Ok(())
-    }).unwrap();
+    })
+    .unwrap();
 
     // In order to walk through a complete update of the example system, we need
     // to first assemble metadata for a target release that we're updating to.
