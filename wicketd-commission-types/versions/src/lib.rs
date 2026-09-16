@@ -34,3 +34,5 @@ pub mod v1;
 pub mod v2;
 #[path = "bgp_peer_src_addr/mod.rs"]
 pub mod v3;
+#[path = "update_elapsed/mod.rs"]
+pub mod v4;
