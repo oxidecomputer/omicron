@@ -7,6 +7,9 @@ license = "MPL-2.0"
 [lints]
 workspace = true
 
+[build-dependencies]
+omicron-rpaths.workspace = true
+
 [dependencies]
 bootstrap-agent-lockstep-types.workspace = true
 iddqd.workspace = true
@@ -17,6 +20,10 @@ oxnet.workspace = true
 sled-agent-types.workspace = true
 sled-hardware-types.workspace = true
 toml.workspace = true
+
+[target.'cfg(target_os = "illumos")'.dependencies]
+# See omicron-rpaths for more about the "libtopo-sys" dependency.
+libtopo-sys.workspace = true
 
 [dev-dependencies]
 camino-tempfile.workspace = true

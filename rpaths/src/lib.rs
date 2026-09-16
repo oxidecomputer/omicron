@@ -21,7 +21,11 @@
 //! 1. Any crate that depends (directly or transitively) on a -sys crate from
 //!    the list above needs to follow these instructions.  Often the dep is
 //!    indirect — pq-sys arrives via diesel, fmd-adm-sys via omicron-sled-agent,
-//!    libtopo-sys via sled-hardware.
+//!    libtopo-sys via sled-hardware.  Dev-dependencies count too: a crate
+//!    whose only path to the -sys crate runs through a dev-dependency still
+//!    links the native library into its test binaries, and those binaries
+//!    need the RPATH just as much.  When enumerating affected crates with
+//!    `cargo tree -i`, include dev edges (`-e normal,build,dev`).
 //! 2. Affected crates (e.g., omicron-nexus) have a build.rs that just calls
 //!    `omicron_rpath::configure_default_omicron_rpaths()`.
 //! 3. These crates must also add a *direct* dependency on the corresponding
