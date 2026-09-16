@@ -427,7 +427,8 @@ impl super::Nexus {
 
         match disk {
             datastore::Disk::Crucible(_) => {
-                // For now, do nothing. Stay tuned!
+                // For now, do nothing - all Crucible related clean-up is done
+                // in the disk delete saga. Stay tuned!
             }
 
             datastore::Disk::LocalStorage(_) => {
