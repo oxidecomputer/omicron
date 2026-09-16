@@ -9,18 +9,11 @@
 //! sources. This module holds sled-hardware's lookups against that tree.
 
 use crate::disk_location::NvmeInstance;
-use libtopo::{Node, PropValue, Scheme, TopoHdl, WalkAction};
+use libtopo::{Error, Node, Scheme, TopoHdl, WalkAction, hc};
 use slog::{Logger, debug, error, warn};
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::time::Instant;
-
-// Node and property names from <fm/topo_hc.h>.
-const NVME: &str = "nvme";
-const BAY: &str = "bay";
-const SLOT: &str = "slot";
-const TOPO_PGROUP_IO: &str = "io";
-const TOPO_IO_INSTANCE: &str = "instance";
 
 /// Takes a fresh topology snapshot and returns the chassis label of every
 /// NVMe controller that has one, keyed by driver instance.
@@ -43,7 +36,7 @@ pub(super) fn read_disk_locations(
 
     let mut labels = HashMap::new();
     snap.walk(Scheme::Hc, |node| {
-        if node.name() != NVME {
+        if node.name() != hc::NVME {
             return Ok(WalkAction::Continue);
         }
         let Some(instance) = nvme_instance_of(log, &node) else {
@@ -85,25 +78,26 @@ pub(super) fn read_disk_locations(
 /// `None`, with a log line, if the node has no such property or it is not the
 /// uint32 topo documents it as.
 fn nvme_instance_of(log: &Logger, node: &Node<'_>) -> Option<NvmeInstance> {
-    let value = match node.property(TOPO_PGROUP_IO, TOPO_IO_INSTANCE) {
-        Ok(PropValue::UInt32(value)) => value,
-        Ok(other) => {
-            warn!(
-                log,
-                "ignoring nvme topology node whose io/instance is not a uint32";
-                "value" => ?other,
-            );
-            return None;
-        }
-        Err(_) => {
-            debug!(
-                log,
-                "nvme topology node has no io/instance property";
-                "node_instance" => node.instance(),
-            );
-            return None;
-        }
-    };
+    let value =
+        match node.property_u32(hc::TOPO_PGROUP_IO, hc::TOPO_IO_INSTANCE) {
+            Ok(value) => value,
+            Err(Error::PropertyNotFound { .. }) => {
+                debug!(
+                    log,
+                    "nvme topology node has no io/instance property";
+                    "node_instance" => node.instance(),
+                );
+                return None;
+            }
+            Err(err) => {
+                warn!(
+                    log,
+                    "ignoring nvme topology node with unreadable io/instance";
+                    "err" => %err,
+                );
+                return None;
+            }
+        };
     match NvmeInstance::try_from(value) {
         Ok(instance) => Some(instance),
         Err(err) => {
@@ -129,7 +123,7 @@ fn location_label_of(node: &Node<'_>) -> Option<String> {
         node.parent()
             .filter(|parent| {
                 let name = parent.name();
-                name == BAY || name == SLOT
+                name == hc::BAY || name == hc::SLOT
             })
             .and_then(|parent| label_of(&parent))
     })

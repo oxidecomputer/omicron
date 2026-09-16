@@ -6580,9 +6580,9 @@ dependencies = [
 
 [[package]]
 name = "libtopo"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08099e1e02473bb103f1ad4bfa9c81c04ebf7a638573c72959817a0347040022"
+checksum = "92b90fcffd6cba36f39a92ac8bad23d80ad4de13d8c15f217585364875e6dbdf"
 dependencies = [
  "illumos-nvpair",
  "illumos-nvpair-sys",
@@ -6592,9 +6592,9 @@ dependencies = [
 
 [[package]]
 name = "libtopo-sys"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e9c1776be01e57714dfe8247395585d69479444508dad3f4e35270801152001"
+checksum = "e556c0588d42db0408f33928d4d236566a77d430a9c43615ee67b0343d37c4a4"
 
 [[package]]
 name = "libxml"
