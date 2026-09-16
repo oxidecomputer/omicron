@@ -167,6 +167,171 @@ impl LocalStorageDeleter {
             }
         }
     }
+
+    async fn activate_impl(
+        &self,
+        opctx: &OpContext,
+    ) -> LocalStorageDeleteStatus {
+        let log = &opctx.log;
+        let mut status = LocalStorageDeleteStatus::default();
+
+        let disks_needing_clean_up = match self
+            .datastore
+            .deleted_disks_with_undeleted_local_storage(opctx)
+            .await
+        {
+            Ok(v) => v,
+
+            Err(e) => {
+                let s = format!(
+                    "error calling \
+                        deleted_disks_with_undeleted_local_storage: {}",
+                    InlineErrorChain::new(&e),
+                );
+
+                error!(log, "{s}");
+                status.errors.push(s);
+
+                return status;
+            }
+        };
+
+        for disk in disks_needing_clean_up {
+            let Some(allocation) = &disk.local_storage_dataset_allocation
+            else {
+                // No allocation was made for this disk
+                continue;
+            };
+
+            // Attempt deleting the local storage before removing the
+            // database record. If the delete does not succeed, try again in
+            // the next task activation.
+
+            match allocation {
+                LocalStorageAllocation::Unencrypted(allocation) => {
+                    match self
+                        .delete_unencrypted_allocation(log, opctx, &allocation)
+                        .await
+                    {
+                        DeleteResult::Deleted => {
+                            let s = format!(
+                                "deleted disk {} allocation {}",
+                                disk.id(),
+                                allocation.id(),
+                            );
+
+                            info!(log, "{s}");
+                            status.delete_results.push(s);
+
+                            // Drop through to deallocation once deletion
+                            // succeeds.
+                        }
+
+                        DeleteResult::SledExpunged => {
+                            let s = format!(
+                                "disk {} allocation {} sled expunged, \
+                                considering deleted",
+                                disk.id(),
+                                allocation.id(),
+                            );
+
+                            info!(log, "{s}");
+                            status.delete_results.push(s);
+
+                            // Drop through to deallocation, deletion not
+                            // required.
+                        }
+
+                        DeleteResult::ZpoolExpunged => {
+                            let s = format!(
+                                "disk {} allocation {} zpool expunged, \
+                                considering deleted",
+                                disk.id(),
+                                allocation.id(),
+                            );
+
+                            info!(log, "{s}");
+                            status.delete_results.push(s);
+
+                            // Drop through to deallocation, deletion not
+                            // required.
+                        }
+
+                        DeleteResult::WaitForNextActivation => {
+                            let s = format!(
+                                "requested deletion of disk {} allocation \
+                                {}",
+                                disk.id(),
+                                allocation.id(),
+                            );
+
+                            info!(log, "{s}");
+                            status.delete_results.push(s);
+
+                            // Cannot deallocate the record until deletion
+                            // succeeds.
+                            continue;
+                        }
+
+                        DeleteResult::Error { message } => {
+                            info!(log, "{message}");
+                            status.errors.push(message);
+
+                            // Cannot deallocate the record until deletion
+                            // succeeds.
+                            continue;
+                        }
+                    }
+                }
+
+                LocalStorageAllocation::Encrypted(allocation) => {
+                    // Until encrypted local storage is supported, seeing a
+                    // request to clean up disks of that type should be
+                    // noted as a error.
+                    let s = format!(
+                        "request to delete disk {} encrypted allocation {}",
+                        disk.id(),
+                        allocation.id(),
+                    );
+
+                    error!(log, "{s}");
+                    status.errors.push(s);
+
+                    continue;
+                }
+            }
+
+            match self
+                .datastore
+                .delete_local_storage_dataset_allocations(opctx, &disk)
+                .await
+            {
+                Ok(()) => {
+                    let s = format!(
+                        "deallocated disk {} allocation {}",
+                        disk.id(),
+                        allocation.id(),
+                    );
+
+                    info!(log, "{s}");
+                    status.deallocate_results.push(s);
+                }
+
+                Err(e) => {
+                    let s = format!(
+                        "error calling \
+                        delete_local_storage_dataset_allocations: {}",
+                        InlineErrorChain::new(&e),
+                    );
+
+                    error!(log, "{s}");
+                    status.errors.push(s);
+                }
+            }
+        }
+
+        status
+    }
 }
 
 impl BackgroundTask for LocalStorageDeleter {
@@ -175,169 +340,16 @@ impl BackgroundTask for LocalStorageDeleter {
         opctx: &'a OpContext,
     ) -> BoxFuture<'a, serde_json::Value> {
         async {
-            let log = &opctx.log;
-            let mut status = LocalStorageDeleteStatus::default();
-
-            let disks_needing_clean_up = match self
-                .datastore
-                .deleted_disks_with_undeleted_local_storage(opctx)
-                .await
-            {
-                Ok(v) => v,
-
-                Err(e) => {
-                    let s = format!(
-                        "error calling \
-                            deleted_disks_with_undeleted_local_storage: {}",
+            let status = self.activate_impl(opctx).await;
+            match serde_json::to_value(status) {
+                Ok(val) => val,
+                Err(e) => json!({
+                    "error": format!(
+                        "could not serialize task status: {}",
                         InlineErrorChain::new(&e),
-                    );
-
-                    error!(log, "{s}");
-                    status.errors.push(s);
-
-                    return json!(status);
-                }
-            };
-
-            for disk in disks_needing_clean_up {
-                let Some(allocation) = &disk.local_storage_dataset_allocation
-                else {
-                    // No allocation was made for this disk
-                    continue;
-                };
-
-                // Attempt deleting the local storage before removing the
-                // database record. If the delete does not succeed, try again in
-                // the next task activation.
-
-                match allocation {
-                    LocalStorageAllocation::Unencrypted(allocation) => {
-                        match self
-                            .delete_unencrypted_allocation(
-                                log,
-                                opctx,
-                                &allocation,
-                            )
-                            .await
-                        {
-                            DeleteResult::Deleted => {
-                                let s = format!(
-                                    "deleted disk {} allocation {}",
-                                    disk.id(),
-                                    allocation.id(),
-                                );
-
-                                info!(log, "{s}");
-                                status.delete_results.push(s);
-
-                                // Drop through to deallocation once deletion
-                                // succeeds.
-                            }
-
-                            DeleteResult::SledExpunged => {
-                                let s = format!(
-                                    "disk {} allocation {} sled expunged, \
-                                    considering deleted",
-                                    disk.id(),
-                                    allocation.id(),
-                                );
-
-                                info!(log, "{s}");
-                                status.delete_results.push(s);
-
-                                // Drop through to deallocation, deletion not
-                                // required.
-                            }
-
-                            DeleteResult::ZpoolExpunged => {
-                                let s = format!(
-                                    "disk {} allocation {} zpool expunged, \
-                                    considering deleted",
-                                    disk.id(),
-                                    allocation.id(),
-                                );
-
-                                info!(log, "{s}");
-                                status.delete_results.push(s);
-
-                                // Drop through to deallocation, deletion not
-                                // required.
-                            }
-
-                            DeleteResult::WaitForNextActivation => {
-                                let s = format!(
-                                    "requested deletion of disk {} allocation \
-                                    {}",
-                                    disk.id(),
-                                    allocation.id(),
-                                );
-
-                                info!(log, "{s}");
-                                status.delete_results.push(s);
-
-                                // Cannot deallocate the record until deletion
-                                // succeeds.
-                                continue;
-                            }
-
-                            DeleteResult::Error { message } => {
-                                info!(log, "{message}");
-                                status.errors.push(message);
-
-                                // Cannot deallocate the record until deletion
-                                // succeeds.
-                                continue;
-                            }
-                        }
-                    }
-
-                    LocalStorageAllocation::Encrypted(allocation) => {
-                        // Until encrypted local storage is supported, seeing a
-                        // request to clean up disks of that type should be
-                        // noted as a error.
-                        let s = format!(
-                            "request to delete disk {} encrypted allocation {}",
-                            disk.id(),
-                            allocation.id(),
-                        );
-
-                        error!(log, "{s}");
-                        status.errors.push(s);
-
-                        continue;
-                    }
-                }
-
-                match self
-                    .datastore
-                    .delete_local_storage_dataset_allocations(opctx, &disk)
-                    .await
-                {
-                    Ok(()) => {
-                        let s = format!(
-                            "deallocated disk {} allocation {}",
-                            disk.id(),
-                            allocation.id(),
-                        );
-
-                        info!(log, "{s}");
-                        status.deallocate_results.push(s);
-                    }
-
-                    Err(e) => {
-                        let s = format!(
-                            "error calling \
-                            delete_local_storage_dataset_allocations: {}",
-                            InlineErrorChain::new(&e),
-                        );
-
-                        error!(log, "{s}");
-                        status.errors.push(s);
-                    }
-                }
+                    )
+                }),
             }
-
-            json!(status)
         }
         .boxed()
     }
