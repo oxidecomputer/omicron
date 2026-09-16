@@ -25,21 +25,40 @@ pub struct LocalStorageDeleter {
     reqwest_client: reqwest::Client,
 }
 
-/// Functions that poll for an expected change will either return that the
-/// change occurred, or that the current activation of this task has to wait for
-/// the change to occur in a future activations of this task.
 #[derive(PartialEq)]
 enum DeleteResult {
+    /// This invocation of the task deleted the local storage allocation
     Deleted,
 
+    /// No delete is required as the sled hosting the local storage allocation
+    /// was expunged.
+    SledExpunged,
+
+    /// No delete is required as the zpool hosting the local storage allocation
+    /// was expunged.
+    ZpoolExpunged,
+
+    /// This invocation of the task requested deletion but needs to wait
     WaitForNextActivation,
+
+    Error {
+        message: String,
+    },
 }
 
 impl LocalStorageDeleter {
     pub fn new(datastore: Arc<DataStore>) -> Self {
+        let duration = std::time::Duration::from_secs(5);
+
         LocalStorageDeleter {
             datastore,
-            reqwest_client: reqwest::Client::new(),
+            // Create a client with a _short_ timeout, don't block this task
+            // waiting for request responses.
+            reqwest_client: reqwest::ClientBuilder::new()
+                .connect_timeout(duration)
+                .timeout(duration)
+                .build()
+                .unwrap(),
         }
     }
 
@@ -48,7 +67,6 @@ impl LocalStorageDeleter {
         log: &Logger,
         opctx: &OpContext,
         allocation: &LocalStorageUnencryptedDatasetAllocation,
-        status: &mut LocalStorageDeleteStatus,
     ) -> DeleteResult {
         let sled_id = allocation.sled_id();
         let zpool_id = allocation.pool_id().upcast();
@@ -61,21 +79,19 @@ impl LocalStorageDeleter {
                 Ok(sled_in_service) => sled_in_service,
 
                 Err(e) => {
-                    let s = format!(
+                    let message = format!(
                         "error calling check_sled_in_service for sled \
-                        {sled_id}: {e}",
+                        {sled_id}: {}",
+                        InlineErrorChain::new(&e),
                     );
 
-                    error!(log, "{s}");
-                    status.errors.push(s);
-
-                    return DeleteResult::WaitForNextActivation;
+                    return DeleteResult::Error { message };
                 }
             };
 
         if !sled_in_service {
             // Sled's been expunged, so consider the local storage deleted.
-            return DeleteResult::Deleted;
+            return DeleteResult::SledExpunged;
         }
 
         let zpool_in_service =
@@ -84,22 +100,20 @@ impl LocalStorageDeleter {
                 Ok(zpool_in_service) => zpool_in_service,
 
                 Err(e) => {
-                    let s = format!(
+                    let message = format!(
                         "error calling check_zpool_in_service for zpool \
-                        {zpool_id}: {e}",
+                        {zpool_id}: {}",
+                        InlineErrorChain::new(&e),
                     );
 
-                    error!(log, "{s}");
-                    status.errors.push(s);
-
-                    return DeleteResult::WaitForNextActivation;
+                    return DeleteResult::Error { message };
                 }
             };
 
         if !zpool_in_service {
             // The disk backing the zpool's been expunged, so consider the local
             // storage deleted.
-            return DeleteResult::Deleted;
+            return DeleteResult::ZpoolExpunged;
         }
 
         // Now that all checks are done, get a sled agent client and make the
@@ -123,32 +137,34 @@ impl LocalStorageDeleter {
             Ok(client) => client,
 
             Err(e) => {
-                let s = format!(
+                let message = format!(
                     "error calling sled_client_ext for allocation {}: {}",
                     allocation.id(),
                     InlineErrorChain::new(&e),
                 );
 
-                error!(log, "{s}");
-                status.errors.push(s);
-
-                return DeleteResult::WaitForNextActivation;
+                return DeleteResult::Error { message };
             }
         };
 
         match sled_agent_client.local_storage_dataset_delete(&request).await {
             Ok(_) => DeleteResult::Deleted,
 
+            Err(progenitor_client::Error::CommunicationError(e))
+                if e.is_timeout() =>
+            {
+                // The request timed out but is still being processed by the
+                // remote sled-agent.
+                DeleteResult::WaitForNextActivation
+            }
+
             Err(e) => {
-                let s = format!(
+                let message = format!(
                     "error sending local_storage_dataset_delete: {}",
                     InlineErrorChain::new(&e),
                 );
 
-                error!(log, "{s}");
-                status.errors.push(s);
-
-                DeleteResult::WaitForNextActivation
+                DeleteResult::Error { message }
             }
         }
     }
@@ -173,7 +189,8 @@ impl BackgroundTask for LocalStorageDeleter {
                 Err(e) => {
                     let s = format!(
                         "error calling \
-                            deleted_disks_with_undeleted_local_storage: {e}"
+                            deleted_disks_with_undeleted_local_storage: {}",
+                        InlineErrorChain::new(&e),
                     );
 
                     error!(log, "{s}");
@@ -201,7 +218,6 @@ impl BackgroundTask for LocalStorageDeleter {
                                 log,
                                 opctx,
                                 &allocation,
-                                &mut status,
                             )
                             .await
                         {
@@ -219,7 +235,56 @@ impl BackgroundTask for LocalStorageDeleter {
                                 // succeeds.
                             }
 
+                            DeleteResult::SledExpunged => {
+                                let s = format!(
+                                    "disk {} allocation {} sled expunged, \
+                                    considering deleted",
+                                    disk.id(),
+                                    allocation.id(),
+                                );
+
+                                info!(log, "{s}");
+                                status.delete_results.push(s);
+
+                                // Drop through to deallocation, deletion not
+                                // required.
+                            }
+
+                            DeleteResult::ZpoolExpunged => {
+                                let s = format!(
+                                    "disk {} allocation {} zpool expunged, \
+                                    considering deleted",
+                                    disk.id(),
+                                    allocation.id(),
+                                );
+
+                                info!(log, "{s}");
+                                status.delete_results.push(s);
+
+                                // Drop through to deallocation, deletion not
+                                // required.
+                            }
+
                             DeleteResult::WaitForNextActivation => {
+                                let s = format!(
+                                    "requested deletion of disk {} allocation \
+                                    {}",
+                                    disk.id(),
+                                    allocation.id(),
+                                );
+
+                                info!(log, "{s}");
+                                status.delete_results.push(s);
+
+                                // Cannot deallocate the record until deletion
+                                // succeeds.
+                                continue;
+                            }
+
+                            DeleteResult::Error { message } => {
+                                info!(log, "{message}");
+                                status.errors.push(message);
+
                                 // Cannot deallocate the record until deletion
                                 // succeeds.
                                 continue;
@@ -255,6 +320,7 @@ impl BackgroundTask for LocalStorageDeleter {
                             disk.id(),
                             allocation.id(),
                         );
+
                         info!(log, "{s}");
                         status.deallocate_results.push(s);
                     }
@@ -262,13 +328,12 @@ impl BackgroundTask for LocalStorageDeleter {
                     Err(e) => {
                         let s = format!(
                             "error calling \
-                            delete_local_storage_dataset_allocations: {e}"
+                            delete_local_storage_dataset_allocations: {}",
+                            InlineErrorChain::new(&e),
                         );
 
                         error!(log, "{s}");
                         status.errors.push(s);
-
-                        continue;
                     }
                 }
             }
