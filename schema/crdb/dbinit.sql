@@ -6351,8 +6351,11 @@ CREATE TYPE IF NOT EXISTS omicron.public.sled_bp_availability AS ENUM (
  * Per-sled provisioning availability as of the target blueprint.
  *
  * This is a Reconfigurator rendezvous table reflecting which sleds the
- * target blueprint considers available for provisioning. Once wired up, the
- * instance-start allocation path will consult this table alongside `sled`.
+ * target blueprint considers available for provisioning. VMM placement
+ * consults this table alongside `sled`.
+ *
+ * The table is seeded at rack initialization and maintained by the
+ * blueprint_rendezvous background task.
  *
  * Unlike the other rendezvous tables, sled availability is not monotonic: a sled
  * becomes unavailable while evacuated for an update, then available again
