@@ -1238,7 +1238,8 @@ impl Zpool {
     }
 
     pub fn drop_dataset(&mut self, id: DatasetUuid) {
-        let _ = self.datasets.remove(&id).expect("Failed to get the dataset");
+        // Must remain idempotent to repeated requests
+        let _ = self.datasets.remove(&id);
     }
 
     fn insert_local_storage_unencrypted_dataset(
