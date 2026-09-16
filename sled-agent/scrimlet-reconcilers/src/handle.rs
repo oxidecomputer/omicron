@@ -25,7 +25,6 @@ use sled_agent_types::sled::ThisSledSwitchZoneUnderlayIpAddr;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use slog::Logger;
 use slog::info;
-use std::collections::BTreeSet;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
@@ -196,7 +195,6 @@ impl ScrimletReconcilersMode {
             ScrimletReconcilersMode::SwitchZone(ip) => {
                 SocketAddrV6::new(ip.into(), DDMD_PORT, 0, 0).into()
             }
-            #[cfg(any(test, feature = "testing"))]
             ScrimletReconcilersMode::Test { ddmd_addr, .. } => ddmd_addr,
         };
         let baseurl = format!("http://{addr}");

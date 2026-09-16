@@ -14,7 +14,6 @@ use bootstrap_agent_lockstep_types::scrimlet_reconcilers::dpd::{
 use dpd_client::Client;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use slog::Logger;
-use std::collections::BTreeSet;
 use std::time::Duration;
 
 mod nat;

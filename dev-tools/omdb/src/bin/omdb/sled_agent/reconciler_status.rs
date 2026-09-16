@@ -386,20 +386,26 @@ impl fmt::Display for DdmdReconcilerStatusDisplay<'_> {
             DdmdReconcilerStatus::Failed(reason) => {
                 write!(f, "reconciliation failed: {reason}")
             }
-            DdmdReconcilerStatus::Reconciled { interfaces } => {
-                let plural = if interfaces.len() == 1 { "" } else { "s" };
+            DdmdReconcilerStatus::Reconciled {
+                external_peers_address_objects,
+            } => {
+                let plural = if external_peers_address_objects.len() == 1 {
+                    ""
+                } else {
+                    "s"
+                };
                 write!(
                     f,
-                    "successfully reconciled {} interface{plural}",
-                    interfaces.len()
+                    "successfully reconciled {} external peer address object{plural}",
+                    external_peers_address_objects.len()
                 )?;
 
-                if !interfaces.is_empty() {
+                if !external_peers_address_objects.is_empty() {
                     writeln!(f, ":")?;
                     write_lines(
                         &mut IndentWriter::new(INDENT, f),
-                        interfaces,
-                        |f, interface| write!(f, "* {interface}"),
+                        external_peers_address_objects,
+                        |f, addrobj| write!(f, "* {addrobj}"),
                     )?;
                 }
                 Ok(())

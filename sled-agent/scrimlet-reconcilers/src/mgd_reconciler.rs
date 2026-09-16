@@ -13,7 +13,6 @@ use bootstrap_agent_lockstep_types::scrimlet_reconcilers::mgd::MgdReconcilerStat
 use mg_admin_client::Client;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use slog::Logger;
-use std::collections::BTreeSet;
 use std::time::Duration;
 
 mod bfd_reconciler;
