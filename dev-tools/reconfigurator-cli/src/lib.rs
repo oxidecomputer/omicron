@@ -32,7 +32,6 @@ use nexus_reconfigurator_simulation::{
 };
 use nexus_reconfigurator_simulation::{SimStateBuilder, SimTufRepoSource};
 use nexus_reconfigurator_simulation::{SimTufRepoDescription, Simulator};
-use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::BlueprintMeasurements;
 use nexus_types::deployment::BlueprintSledUpdateDispositionKind;
 use nexus_types::deployment::CockroachDbSettings;
@@ -42,6 +41,9 @@ use nexus_types::deployment::execution::blueprint_internal_dns_config;
 use nexus_types::deployment::{Blueprint, UnstableReconfiguratorState};
 use nexus_types::deployment::{BlueprintArtifactVersion, PendingMgsUpdate};
 use nexus_types::deployment::{BlueprintExpungedZoneAccessReason, execution};
+use nexus_types::deployment::{
+    BlueprintHostPhase2DesiredContents, PlannerConfig, PlannerSledRebootPolicy,
+};
 use nexus_types::deployment::{BlueprintSource, SledFilter};
 use nexus_types::deployment::{
     BlueprintZoneImageSource, PendingMgsUpdateDetails,
@@ -1584,6 +1586,8 @@ enum SetArgs {
     },
     /// CockroachDB settings
     CockroachdbSettings(SetCockroachdbSettingsArgs),
+    /// Planner config settings
+    PlannerConfig(SetPlannerConfigArgs),
 }
 
 #[derive(Debug, Clone)]
@@ -1644,6 +1648,80 @@ impl CockroachdbSettingsOpts {
                 .unwrap_or_else(|| current.preserve_downgrade.clone()),
         };
         (new != *current).then_some(new)
+    }
+}
+
+#[derive(Debug, Args)]
+struct SetPlannerConfigArgs {
+    #[clap(flatten)]
+    opts: PlannerConfigOpts,
+}
+
+#[derive(Debug, Clone, Args)]
+#[group(required = true, multiple = true)]
+struct PlannerConfigOpts {
+    /// sled reboot policy
+    #[clap(long)]
+    sled_reboot_policy: Option<PlannerSledRebootPolicyOpt>,
+    /// disruption policy
+    #[clap(long)]
+    disruption_policy: Option<ReconfiguratorDisruptionPolicyOpt>,
+}
+
+impl PlannerConfigOpts {
+    fn update_if_modified(
+        &self,
+        current: &PlannerConfig,
+    ) -> Option<PlannerConfig> {
+        let new = PlannerConfig {
+            sled_reboot_policy: self
+                .sled_reboot_policy
+                .map(From::from)
+                .unwrap_or_else(|| current.sled_reboot_policy),
+            disruption_policy: self
+                .disruption_policy
+                .map(From::from)
+                .unwrap_or_else(|| current.disruption_policy),
+        };
+        (new != *current).then_some(new)
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum ReconfiguratorDisruptionPolicyOpt {
+    Terminate,
+    MigrateOrTerminate,
+    MigrateOnly,
+}
+
+impl From<ReconfiguratorDisruptionPolicyOpt>
+    for ReconfiguratorDisruptionPolicy
+{
+    fn from(value: ReconfiguratorDisruptionPolicyOpt) -> Self {
+        match value {
+            ReconfiguratorDisruptionPolicyOpt::Terminate => Self::Terminate,
+            ReconfiguratorDisruptionPolicyOpt::MigrateOrTerminate => {
+                Self::MigrateOrTerminate
+            }
+            ReconfiguratorDisruptionPolicyOpt::MigrateOnly => Self::MigrateOnly,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum PlannerSledRebootPolicyOpt {
+    ImmediateNoEvacuation,
+    Evacuate,
+}
+
+impl From<PlannerSledRebootPolicyOpt> for PlannerSledRebootPolicy {
+    fn from(value: PlannerSledRebootPolicyOpt) -> Self {
+        match value {
+            PlannerSledRebootPolicyOpt::ImmediateNoEvacuation => {
+                Self::ImmediateNoEvacuation
+            }
+            PlannerSledRebootPolicyOpt::Evacuate => Self::Evacuate,
+        }
     }
 }
 
@@ -3456,11 +3534,7 @@ fn cmd_show(sim: &mut ReconfiguratorSim) -> anyhow::Result<Option<String>> {
     swriteln!(s, "planner config:");
     // No need for swriteln! here because .display() adds its own newlines at
     // the end.
-    swrite!(
-        s,
-        "{}",
-        state.system().description().get_planner_config().display()
-    );
+    swrite!(s, "{}", state.system().description().planner_config().display());
 
     Ok(Some(s))
 }
@@ -3583,6 +3657,19 @@ fn cmd_set(
                     "no changes to cockroachdb settings:\n{}",
                     current.display()
                 )
+            }
+        }
+        SetArgs::PlannerConfig(args) => {
+            let current = state.system_mut().description().planner_config();
+            if let Some(new) = args.opts.update_if_modified(&current) {
+                let rv = format!(
+                    "planner config updated:\n{}",
+                    current.diff(&new).display()
+                );
+                state.system_mut().description_mut().set_planner_config(new);
+                rv
+            } else {
+                format!("no changes to planner config:\n{}", current.display())
             }
         }
     };
