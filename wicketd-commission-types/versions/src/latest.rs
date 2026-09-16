@@ -104,17 +104,18 @@ pub mod update {
     pub use crate::v1::update::ClearUpdateStateParams;
     pub use crate::v1::update::ClearUpdateStateResponse;
     pub use crate::v1::update::EmptyUpdateTargets;
-    pub use crate::v1::update::GetUpdateProgressResponse;
     pub use crate::v1::update::RepositoryDescription;
     pub use crate::v1::update::RunningProgress;
-    pub use crate::v1::update::SpUpdateProgress;
     pub use crate::v1::update::StartUpdateOptions;
     pub use crate::v1::update::StartUpdateParams;
     pub use crate::v1::update::StepOutcome;
     pub use crate::v1::update::StepProgress;
-    pub use crate::v1::update::UpdateProgress;
-    pub use crate::v1::update::UpdateState;
-    pub use crate::v1::update::UpdateStep;
     pub use crate::v1::update::UpdateStepStatus;
     pub use crate::v1::update::UpdateTargets;
+
+    pub use crate::v4::update::GetUpdateProgressResponse;
+    pub use crate::v4::update::SpUpdateProgress;
+    pub use crate::v4::update::UpdateProgress;
+    pub use crate::v4::update::UpdateState;
+    pub use crate::v4::update::UpdateStep;
 }
