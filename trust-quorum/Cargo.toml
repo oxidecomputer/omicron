@@ -8,6 +8,9 @@ description = "trust quorum library for use by bootstrap agent"
 [lints]
 workspace = true
 
+[build-dependencies]
+omicron-rpaths.workspace = true
+
 [dependencies]
 anyhow.workspace = true
 bootstore.workspace = true
@@ -45,6 +48,10 @@ trust-quorum-types.workspace = true
 uuid.workspace = true
 zeroize.workspace = true
 omicron-workspace-hack.workspace = true
+
+[target.'cfg(target_os = "illumos")'.dependencies]
+# See omicron-rpaths for more about the "libtopo-sys" dependency.
+libtopo-sys.workspace = true
 
 [dev-dependencies]
 assert_matches.workspace = true

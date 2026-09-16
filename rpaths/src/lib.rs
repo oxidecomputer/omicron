@@ -8,10 +8,11 @@
 //!
 //! This build-time crate is used by several top-level Omicron crates to set
 //! RPATH so that native libraries linked via *-sys crates can be found at
-//! runtime. Currently we do this for two libraries:
+//! runtime. Currently we do this for three libraries:
 //!
 //! - **libpq** (via pq-sys, pulled in by diesel)
 //! - **libfmd_adm** (via fmd-adm-sys, pulled in by fmd-adm in sled-agent)
+//! - **libtopo** (via libtopo-sys, pulled in by libtopo in sled-hardware)
 //!
 //! Cargo/Rust have no built-in way to set the RPATH for a transitively-linked
 //! native library.  (See below.)  So we've developed the pattern here instead.
@@ -19,7 +20,8 @@
 //!
 //! 1. Any crate that depends (directly or transitively) on a -sys crate from
 //!    the list above needs to follow these instructions.  Often the dep is
-//!    indirect — pq-sys arrives via diesel, fmd-adm-sys via omicron-sled-agent.
+//!    indirect — pq-sys arrives via diesel, fmd-adm-sys via omicron-sled-agent,
+//!    libtopo-sys via sled-hardware.
 //! 2. Affected crates (e.g., omicron-nexus) have a build.rs that just calls
 //!    `omicron_rpath::configure_default_omicron_rpaths()`.
 //! 3. These crates must also add a *direct* dependency on the corresponding
@@ -33,8 +35,8 @@
 //! 4. The metadata that drives this comes from the -sys crate's build.rs:
 //!    - For pq-sys, we maintain a fork (see `[patch.crates-io.pq-sys]`
 //!      in the workspace Cargo.toml) that emits `cargo:LIBDIRS=...`.
-//!    - For fmd-adm-sys, the upstream crate emits the metadata directly,
-//!      so no patch is needed.
+//!    - For fmd-adm-sys and libtopo-sys, the upstream crates emit the
+//!      metadata directly, so no patch is needed.
 //!
 //! `configure_default_omicron_rpaths()` scans for every `DEP_*_LIBDIRS` env
 //! var in `RPATH_ENV_VARS`.  Each crate's build.rs makes the same call —
@@ -69,8 +71,8 @@
 //! As of 1.56, Cargo supports the "cargo:rustc-link-arg" instruction for use by
 //! [Build Scripts][3] to pass arbitrary options to the linker.  We use that
 //! here to tell the linker to include the correct RPATH entries for the
-//! native dependencies affected by this (currently libpq via pq-sys and
-//! libfmd_adm via fmd-adm-sys).
+//! native dependencies affected by this (currently libpq via pq-sys,
+//! libfmd_adm via fmd-adm-sys, and libtopo via libtopo-sys).
 //!
 //! A subtle but critical point here is that the RPATH is knowable only by the
 //! system that's building the top-level executable binary.  This mechanism can't
@@ -177,7 +179,7 @@ mod internal {
     /// (say) fmd-adm-sys simply won't have `DEP_FMD_ADM_LIBDIRS` set, and we
     /// skip it silently.
     pub static RPATH_ENV_VARS: &'static [&'static str] =
-        &["DEP_PQ_LIBDIRS", "DEP_FMD_ADM_LIBDIRS"];
+        &["DEP_PQ_LIBDIRS", "DEP_FMD_ADM_LIBDIRS", "DEP_TOPO_LIBDIRS"];
 
     /// Tells Cargo to pass linker arguments that specify RPATHs from the
     /// environment variable `env_var_name`, if it is set.
