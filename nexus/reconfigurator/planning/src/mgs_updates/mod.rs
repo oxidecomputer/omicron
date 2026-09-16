@@ -26,6 +26,7 @@ use nexus_types::deployment::PendingMgsUpdateRotDetails;
 use nexus_types::deployment::PendingMgsUpdateSpDetails;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::PlannerConfig;
+use nexus_types::deployment::PlannerSledRebootPolicy;
 use nexus_types::deployment::TargetReleaseDescription;
 use nexus_types::deployment::planning_report::BlockedMgsUpdate;
 use nexus_types::deployment::planning_report::FailedMgsUpdateReason;
@@ -372,6 +373,7 @@ impl<'a> MgsUpdatePlanner<'a> {
                 current_artifacts,
                 zone_safety_checks,
                 evacuating_sleds,
+                planner_config.sled_reboot_policy,
             ) {
                 TryMakeUpdateResult::Update(update, mut host_phase_2) => {
                     info!(log, "configuring MGS-driven update"; &update);
@@ -761,6 +763,7 @@ fn try_make_update(
     current_artifacts: &TufRepoDescription,
     zone_safety_checks: &ZoneSafetyChecks,
     evacuating_sleds: &EvacuatingSleds,
+    sled_reboot_policy: PlannerSledRebootPolicy,
 ) -> TryMakeUpdateResult {
     // We try MGS-driven update components in a hardcoded priority order until
     // any of them returns `Some`.  The order is described in RFD 565 section
@@ -817,51 +820,18 @@ fn try_make_update(
                 update,
                 pending_host_os_phase2_changes,
             )) => {
-                // If updating this component will reboot the sled, we need to
-                // check whether we're supposed to wait for the sled to be
-                // evacuated first (and whether it _is_ evacuated, if so).
-                let status = if let Some(sled_id) = board.sled_id()
-                    && component.update_requires_sled_reboot()
-                {
-                    match evacuating_sleds.evacuation_status(sled_id, inventory)
-                    {
-                        EvacuationStatus::Evacuated => {
-                            // Sled is evacuated - we can proceed with the
-                            // update.
-                            TryMakeUpdateResult::Update(
-                                update,
-                                pending_host_os_phase2_changes,
-                            )
-                        }
-                        EvacuationStatus::NeedsEvacuatingUpdateDisposition => {
-                            // Sled needs to be evacuated - mark that now, and
-                            // do _not_ proceed with the update.
-                            TryMakeUpdateResult::StartEvacuating(sled_id)
-                        }
-                        EvacuationStatus::WaitingOnEvacuation(details) => {
-                            // Sled is already marked for evacuation but is not
-                            // yet evacuated - this update is blocked.
-                            let baseboard_id = Arc::clone(board.baseboard_id());
-                            let reason = FailedMgsUpdateReason::WaitingOnSledEvacuation {
-                                component,
-                                details,
-                            };
-                            TryMakeUpdateResult::Blocked(BlockedMgsUpdate {
-                                baseboard_id,
-                                reason,
-                            })
-                        }
-                    }
-                } else {
-                    // No reboot required for this component - always add
-                    // the pending update.
-                    TryMakeUpdateResult::Update(
-                        update,
-                        pending_host_os_phase2_changes,
-                    )
-                };
-
-                return status;
+                // If updating this component will cause a sled to reboot, we
+                // need to check whether we're supposed to wait for the sled to
+                // be evacuated first (and whether it _is_ evacuated, if so).
+                return schedule_update_if_allowed_by_reboot_policy(
+                    board,
+                    component,
+                    inventory,
+                    evacuating_sleds,
+                    sled_reboot_policy,
+                    update,
+                    pending_host_os_phase2_changes,
+                );
             }
             Err(e) => {
                 return TryMakeUpdateResult::Blocked(BlockedMgsUpdate {
@@ -883,6 +853,72 @@ fn try_make_update(
         TryMakeUpdateResult::EndEvacuating(sled_id)
     } else {
         TryMakeUpdateResult::NoChangesNeeded
+    }
+}
+
+// Subset of the `try_make_update()` logic: knowing that we want to schedule an
+// update for the given sled, what action do we need to take based on our sled
+// reboot policy?
+fn schedule_update_if_allowed_by_reboot_policy(
+    board: &UpdateableBoard,
+    component: MgsUpdateComponent,
+    inventory: &Collection,
+    evacuating_sleds: &EvacuatingSleds,
+    sled_reboot_policy: PlannerSledRebootPolicy,
+    update: PendingMgsUpdate,
+    host_phase2: PendingHostPhase2Changes,
+) -> TryMakeUpdateResult {
+    // Is this board actually a sled? If not, we don't need to worry about sled
+    // reboots, and can just return the update. Otherwise, fall through to the
+    // remaining checks.
+    let Some(sled_id) = board.sled_id() else {
+        return TryMakeUpdateResult::Update(update, host_phase2);
+    };
+
+    // Does updating this component cause the sled to reboot? If not, we can
+    // return the update.
+    if !component.update_requires_sled_reboot() {
+        return TryMakeUpdateResult::Update(update, host_phase2);
+    }
+
+    // If our policy is "update immediately", just return the update. Otherwise,
+    // fall through to the remaining checks.
+    match sled_reboot_policy {
+        PlannerSledRebootPolicy::ImmediateNoEvacuation => {
+            return TryMakeUpdateResult::Update(update, host_phase2);
+        }
+        PlannerSledRebootPolicy::Evacuate => (),
+    }
+
+    // We now know that:
+    //
+    // 1. `board` is a sled
+    // 2. we want to update `component`, and doing so will reboot the sled
+    // 3. our policy says we need to evacuate the sled first
+    //
+    // so we need to evaluate 3 based on the evacuation status of the sled in
+    // inventory to determine the appropriate result:
+    match evacuating_sleds.evacuation_status(sled_id, inventory) {
+        EvacuationStatus::Evacuated => {
+            // Sled is evacuated - we can proceed with the update.
+            TryMakeUpdateResult::Update(update, host_phase2)
+        }
+        EvacuationStatus::NeedsEvacuatingUpdateDisposition => {
+            // Sled needs to be evacuated - mark that now, and do not
+            // proceed with the update.
+            TryMakeUpdateResult::StartEvacuating(sled_id)
+        }
+        EvacuationStatus::WaitingOnEvacuation(details) => {
+            // Sled is already marked for evacuation but is not yet
+            // evacuated - this update is blocked.
+            TryMakeUpdateResult::Blocked(BlockedMgsUpdate {
+                baseboard_id: Arc::clone(board.baseboard_id()),
+                reason: FailedMgsUpdateReason::WaitingOnSledEvacuation {
+                    component,
+                    details,
+                },
+            })
+        }
     }
 }
 
@@ -918,6 +954,7 @@ mod test {
     use nexus_types::deployment::PendingMgsUpdateSpDetails;
     use nexus_types::deployment::PendingMgsUpdates;
     use nexus_types::deployment::PlannerConfig;
+    use nexus_types::deployment::PlannerSledRebootPolicy;
     use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
     use nexus_types::deployment::TargetReleaseDescription;
     use nexus_types::deployment::planning_report::BlockedMgsUpdate;
@@ -1340,7 +1377,10 @@ mod test {
         let repo = test_boards.tuf_repo();
         let nmax_updates = 1;
         let impossible_update_policy = ImpossibleUpdatePolicy::Reevaluate;
-        let planner_config = PlannerConfig::default();
+        let planner_config = PlannerConfig {
+            sled_reboot_policy: PlannerSledRebootPolicy::Evacuate,
+            disruption_policy: ReconfiguratorDisruptionPolicy::default(),
+        };
 
         // We do not control the order of updates.  But we expect to update each
         // of the boards in this map.  When we do, we expect to find the given
@@ -1723,7 +1763,10 @@ mod test {
         let repo = test_boards.tuf_repo();
         let all_sleds_evacuating = test_boards.all_sleds_evacuating();
         let impossible_update_policy = ImpossibleUpdatePolicy::Reevaluate;
-        let planner_config = PlannerConfig::default();
+        let planner_config = PlannerConfig {
+            sled_reboot_policy: PlannerSledRebootPolicy::Evacuate,
+            disruption_policy: ReconfiguratorDisruptionPolicy::default(),
+        };
 
         let mut expected_updates = test_boards.expected_updates();
 
@@ -2157,7 +2200,10 @@ mod test {
         let test_boards = TestBoards::new(test_name);
         let repo = test_boards.tuf_repo();
         let sled_0_id = test_boards.sled_id(0).expect("have sled 0");
-        let planner_config = PlannerConfig::default();
+        let planner_config = PlannerConfig {
+            sled_reboot_policy: PlannerSledRebootPolicy::Evacuate,
+            disruption_policy: ReconfiguratorDisruptionPolicy::default(),
+        };
 
         // Sled 0 needs an SP update and is marked for evacuation, but its
         // inventory (the default) still reports an `Available` instance
@@ -2243,7 +2289,10 @@ mod test {
         let repo = test_boards.tuf_repo();
         let sled_0_id = test_boards.sled_id(0).expect("have sled 0");
         let sled_1_id = test_boards.sled_id(1).expect("have sled 1");
-        let planner_config = PlannerConfig::default();
+        let planner_config = PlannerConfig {
+            sled_reboot_policy: PlannerSledRebootPolicy::Evacuate,
+            disruption_policy: ReconfiguratorDisruptionPolicy::default(),
+        };
 
         // Sleds 0 and 1 both need SP updates; nothing is evacuating yet.
         let collection = test_boards
