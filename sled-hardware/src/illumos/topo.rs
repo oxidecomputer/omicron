@@ -8,7 +8,7 @@
 //! properties, built from platform topology maps, devinfo, and other
 //! sources. This module holds sled-hardware's lookups against that tree.
 
-use crate::disk_location::NvmeInstance;
+use crate::nvme_instance::NvmeInstance;
 use libtopo::{Error, Node, Scheme, TopoHdl, WalkAction, hc};
 use slog::{Logger, debug, error, warn};
 use std::collections::HashMap;

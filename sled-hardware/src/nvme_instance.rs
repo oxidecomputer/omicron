@@ -2,21 +2,18 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Chassis locations of disks, learned from the platform hardware topology.
+//! The instance number of an `nvme` driver node, the `N` in `nvme<N>`.
 //!
-//! libtopo knows which bay or M.2 socket each NVMe controller sits in and
-//! labels it the way the chassis does: "N5" for a U.2 bay, "M.2 East" for a
-//! boot device. This module holds the key that joins devinfo's view of a
-//! controller to topo's, so the label can be attached to the right disk.
+//! devinfo reports it on the controller's node and libtopo reports it as
+//! the `io/instance` property of its `nvme` node, so it is the key that
+//! joins the two views of a controller. sled-hardware uses that join to
+//! attach the chassis location topo knows about to the disk devinfo found.
 
 use std::fmt;
 
 /// Instance number of an `nvme` driver node, the `N` in `nvme<N>`.
 ///
-/// devinfo reports it on the `nvme` node and topo reports it as the
-/// `io/instance` property of its `nvme` node, so it is the key that joins the
-/// two views of a controller. It is unrelated to the PCIe physical slot
-/// number and to NVMe firmware slots.
+/// Unrelated to the PCIe physical slot number and to NVMe firmware slots.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
 pub struct NvmeInstance(i32);
 

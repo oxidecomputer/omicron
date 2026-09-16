@@ -7,7 +7,7 @@ use crate::ExternalDisks;
 use crate::HardwareView;
 use crate::TofinoSnapshot;
 use crate::TofinoView;
-use crate::disk_location::NvmeInstance;
+use crate::nvme_instance::NvmeInstance;
 use crate::{DendriteAsic, SledMode, UnparsedDisk};
 use camino::Utf8PathBuf;
 use gethostname::gethostname;
@@ -54,7 +54,7 @@ enum Error {
     InvalidNvmeInstance {
         node: String,
         #[source]
-        err: crate::disk_location::InvalidNvmeInstance,
+        err: crate::nvme_instance::InvalidNvmeInstance,
     },
 
     #[error("Invalid value for boot-storage-unit property: {0}")]
