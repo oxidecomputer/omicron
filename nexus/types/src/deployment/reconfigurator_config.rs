@@ -377,3 +377,32 @@ impl<'a> fmt::Display for PlannerConfigDisplay<'a> {
         Ok(())
     }
 }
+
+impl<'a> PlannerConfigDiff<'a> {
+    pub fn display(&self) -> PlannerConfigDiffDisplay<'a, '_> {
+        PlannerConfigDiffDisplay { diff: self }
+    }
+}
+
+pub struct PlannerConfigDiffDisplay<'a, 'b> {
+    diff: &'b PlannerConfigDiff<'a>,
+}
+
+impl fmt::Display for PlannerConfigDiffDisplay<'_, '_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let PlannerConfigDiff { disruption_policy, sled_reboot_policy } =
+            self.diff;
+
+        let list = KvList::new(
+            None,
+            vec![
+                diff_row!(disruption_policy, "disruption policy"),
+                diff_row!(sled_reboot_policy, "sled reboot policy"),
+            ],
+        );
+        // No need for writeln! here because KvList adds its own newlines.
+        write!(f, "{list}")?;
+
+        Ok(())
+    }
+}
