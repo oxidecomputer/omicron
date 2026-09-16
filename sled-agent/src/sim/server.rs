@@ -31,6 +31,7 @@ use nexus_types::deployment::{
 };
 use nexus_types::deployment::{
     BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZoneType,
+    OmicronZoneExternalFloatingAddrs, OmicronZoneExternalFloatingIps,
 };
 use omicron_common::FileKv;
 use omicron_common::address::IpRange;
@@ -500,9 +501,12 @@ pub async fn run_standalone_server(
                             SocketAddr::V6(a) => a,
                         },
                         lockstep_port: nexus_lockstep_port,
-                        external_ip: from_ipaddr_to_external_floating_ip(
-                            external_ip,
-                        ),
+                        external_ips:
+                            OmicronZoneExternalFloatingIps::from_single(
+                                from_ipaddr_to_external_floating_ip(
+                                    external_ip,
+                                ),
+                            ),
                         nic: NetworkInterface {
                             id: Uuid::new_v4(),
                             kind: NetworkInterfaceKind::Service {
@@ -557,9 +561,12 @@ pub async fn run_standalone_server(
                     blueprint_zone_type::ExternalDns {
                         dataset: OmicronZoneDataset { pool_name },
                         http_address: external_dns_internal_addr,
-                        dns_address: from_sockaddr_to_external_floating_addr(
-                            SocketAddr::V6(external_dns_internal_addr),
-                        ),
+                        dns_addresses:
+                            OmicronZoneExternalFloatingAddrs::from_single(
+                                from_sockaddr_to_external_floating_addr(
+                                    SocketAddr::V6(external_dns_internal_addr),
+                                ),
+                            ),
                         nic: NetworkInterface {
                             id: Uuid::new_v4(),
                             kind: NetworkInterfaceKind::Service {

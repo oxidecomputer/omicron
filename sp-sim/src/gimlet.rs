@@ -17,6 +17,7 @@ use crate::server::SimSpHandler;
 use crate::server::UdpServer;
 use crate::update::BaseboardKind;
 use crate::update::SimSpUpdate;
+use crate::vpd::ComponentVpds;
 use anyhow::{Context, Result, anyhow, bail};
 use async_trait::async_trait;
 use futures::Future;
@@ -836,6 +837,7 @@ struct Handler {
     update_state: SimSpUpdate,
     reset_pending: Option<SpComponent>,
     sensors: Sensors,
+    component_vpds: ComponentVpds,
 
     last_request_handled: Option<SimSpHandledRequest>,
 
@@ -873,6 +875,8 @@ impl Handler {
         }
 
         let sensors = Sensors::from_component_configs(&components);
+        let component_vpds = ComponentVpds::from_component_configs(&components)
+            .expect("component VPD configuration should be valid");
 
         let sp_dumps = HashMap::new();
 
@@ -880,6 +884,7 @@ impl Handler {
             log,
             common,
             sensors,
+            component_vpds,
             leaked_component_device_strings,
             leaked_component_description_strings,
             attached_mgs,
@@ -1398,7 +1403,7 @@ impl SpHandler for Handler {
             component: SpComponent::try_from(c.id.as_str()).unwrap(),
             device: self.leaked_component_device_strings[index],
             description: self.leaked_component_description_strings[index],
-            capabilities: c.capabilities,
+            capabilities: c.capabilities(),
             presence: c.presence,
         }
     }
@@ -1569,6 +1574,14 @@ impl SpHandler for Handler {
         buf: &mut [u8],
     ) -> Result<usize, SpError> {
         self.update_state.get_component_caboose_value(component, slot, key, buf)
+    }
+
+    fn component_get_vpd(
+        &mut self,
+        component: SpComponent,
+        buf: &mut [u8],
+    ) -> Result<usize, SpError> {
+        self.component_vpds.component_get_vpd(&component, buf)
     }
 
     fn read_sensor(

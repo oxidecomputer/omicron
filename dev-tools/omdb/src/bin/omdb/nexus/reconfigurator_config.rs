@@ -73,14 +73,15 @@ impl ReconfiguratorConfigOpts {
             planner_enabled: self
                 .planner_enabled
                 .unwrap_or(current.planner_enabled),
-            planner_config: PlannerConfig::default(),
+            planner_config: PlannerConfig {
+                disruption_policy: self
+                    .disruption_policy
+                    .map(|p| p.into())
+                    .unwrap_or(current.planner_config.disruption_policy),
+            },
             tuf_repo_pruner_enabled: self
                 .tuf_repo_pruner_enabled
                 .unwrap_or(current.tuf_repo_pruner_enabled),
-            disruption_policy: self
-                .disruption_policy
-                .map(|p| p.into())
-                .unwrap_or(current.disruption_policy),
             blueprint_pruner_enabled: self
                 .blueprint_pruner_enabled
                 .unwrap_or(current.blueprint_pruner_enabled),

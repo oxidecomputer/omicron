@@ -79,7 +79,6 @@ bind_addr = "[::1]:0"
 id = "dev-0"
 device = "fake-tmp-sensor"
 description = "FAKE temperature sensor 1"
-capabilities = 0x2
 presence = "Present"
 sensors = [
     {name = "Southwest", kind = "Temperature", last_data.value = 41.7890625, last_data.timestamp = 1234 },
@@ -89,7 +88,6 @@ sensors = [
 id = "dev-1"
 device = "fake-tmp-sensor"
 description = "FAKE temperature sensor 2"
-capabilities = 0x2
 presence = "Failed"
 sensors = [
     { name = "South", kind = "Temperature", last_error.value = "DeviceError", last_error.timestamp = 1234 },
@@ -192,7 +190,6 @@ bind_addr = "[::1]:0"
 id = "sp3-host-cpu"
 device = "sp3-host-cpu"
 description = "FAKE host cpu"
-capabilities = 0
 presence = "Present"
 serial_console = "[::1]:0"
 
@@ -200,7 +197,6 @@ serial_console = "[::1]:0"
 id = "dev-0"
 device = "fake-tmp-sensor"
 description = "FAKE temperature sensor"
-capabilities = 0x2
 presence = "Failed"
 sensors = [
     { name = "Southwest", kind = "Temperature", last_error.value = "DeviceError", last_error.timestamp = 1234 },
@@ -209,7 +205,6 @@ sensors = [
 id = "dev-1"
 device = "tmp117"
 description = "FAKE temperature sensor"
-capabilities = 0x2
 presence = "Present"
 sensors = [
     { name = "South", kind = "Temperature", last_data.value = 42.5625, last_data.timestamp = 1234 },
@@ -219,7 +214,6 @@ sensors = [
 id = "dev-2"
 device = "tmp117"
 description = "FAKE Southeast temperature sensor"
-capabilities = 0x2
 presence = "Present"
 sensors = [
     { name = "Southeast", kind = "Temperature", last_data.value = 41.570313, last_data.timestamp = 1234 },
@@ -229,14 +223,12 @@ sensors = [
 id = "dev-6"
 device = "at24csw080"
 description = "FAKE U.2 Sharkfin A VPD"
-capabilities = 0x0
 presence = "Present"
 
 [[simulated_sps.gimlet.components]]
 id = "dev-7"
 device = "max5970"
 description = "FAKE U.2 Sharkfin A hot swap controller"
-capabilities = 0x2
 presence = "Present"
 sensors = [
     { name = "V12_U2A_A0", kind = "Current", last_data.value = 0.45898438, last_data.timestamp = 1234 },
@@ -249,7 +241,6 @@ sensors = [
 id = "dev-8"
 device = "nvme_bmc"
 description = "FAKE U.2 A NVMe Basic Management Command"
-capabilities = 0x2
 presence = "Present"
 sensors = [
     { name = "U2_N0", kind = "Temperature", last_data.value = 56.0, last_data.timestamp = 1234 },
@@ -258,7 +249,6 @@ sensors = [
 id = "dev-39"
 device = "tmp451"
 description = "FAKE T6 temperature sensor"
-capabilities = 0x2
 presence = "Present"
 sensors = [
     { name = "t6", kind = "Temperature", last_data.value = 70.625, last_data.timestamp = 1234 },
@@ -268,7 +258,6 @@ sensors = [
 id = "dev-46"
 device = "sbtsi"
 description = "CPU temperature sensor"
-capabilities = 2
 presence = "Present"
 sensors = [
     { name = "CPU", kind = "Temperature", last_data.value = 64.5, last_data.timestamp = 1234 },
@@ -278,7 +267,6 @@ sensors = [
 id = "dev-53"
 device = "max31790"
 description = "FAKE Fan controller"
-capabilities = 0x2
 presence = "Present"
 sensors = [
     { name = "Southeast", kind = "Speed", last_data.value = 2607.0, last_data.timestamp = 1234 },
@@ -355,7 +343,6 @@ bind_addr = "[::1]:0"
 id = "sp3-host-cpu"
 device = "sp3-host-cpu"
 description = "FAKE host cpu"
-capabilities = 0
 presence = "Present"
 serial_console = "[::1]:0"
 
@@ -364,7 +351,6 @@ serial_console = "[::1]:0"
 id = "dev-0"
 device = "tmp117"
 description = "FAKE temperature sensor"
-capabilities = 0x2
 presence = "Present"
 sensors = [
     { name = "Southwest", kind = "Temperature", last_data.value = 41.3629, last_data.timestamp = 1234 },
@@ -373,7 +359,6 @@ sensors = [
 id = "dev-1"
 device = "tmp117"
 description = "FAKE temperature sensor"
-capabilities = 0x2
 presence = "Present"
 sensors = [
     { name = "South", kind = "Temperature", last_data.value = 42.5625, last_data.timestamp = 1234 },
@@ -383,7 +368,6 @@ sensors = [
 id = "dev-2"
 device = "tmp117"
 description = "FAKE Southeast temperature sensor"
-capabilities = 0x2
 presence = "Present"
 sensors = [
     { name = "Southeast", kind = "Temperature", last_data.value = 41.570313, last_data.timestamp = 1234 },
@@ -393,14 +377,12 @@ sensors = [
 id = "dev-6"
 device = "at24csw080"
 description = "FAKE U.2 Sharkfin A VPD"
-capabilities = 0x0
 presence = "Present"
 
 [[simulated_sps.gimlet.components]]
 id = "dev-7"
 device = "max5970"
 description = "FAKE U.2 Sharkfin A hot swap controller"
-capabilities = 0x2
 presence = "Present"
 sensors = [
     { name = "V12_U2A_A0", kind = "Current", last_data.value = 0.41893438, last_data.timestamp = 1234 },
@@ -413,7 +395,6 @@ sensors = [
 id = "dev-8"
 device = "nvme_bmc"
 description = "FAKE U.2 A NVMe Basic Management Command"
-capabilities = 0x2
 presence = "Present"
 sensors = [
     { name = "U2_N0", kind = "Temperature", last_data.value = 56.0, last_data.timestamp = 1234 },
@@ -422,7 +403,6 @@ sensors = [
 id = "dev-39"
 device = "tmp451"
 description = "FAKE T6 temperature sensor"
-capabilities = 0x2
 presence = "Present"
 sensors = [
     { name = "t6", kind = "Temperature", last_data.value = 70.625, last_data.timestamp = 1234 },
@@ -432,7 +412,6 @@ sensors = [
 id = "dev-46"
 device = "sbtsi"
 description = "CPU temperature sensor"
-capabilities = 2
 presence = "Present"
 sensors = [
     { name = "CPU", kind = "Temperature", last_data.value = 62.6, last_data.timestamp = 1234 },
@@ -442,7 +421,6 @@ sensors = [
 id = "dev-53"
 device = "max31790"
 description = "FAKE Fan controller"
-capabilities = 0x2
 presence = "Present"
 sensors = [
     { name = "Southeast", kind = "Speed", last_data.value = 2510.0, last_data.timestamp = 1234 },

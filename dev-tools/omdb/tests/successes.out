@@ -169,6 +169,8 @@ SP DETAILS: type "Sled" slot 0
         dev-39       FAKE T6 temperature sensor               tmp451          Present  None   
         dev-46       CPU temperature sensor                   sbtsi           Present  None   
         dev-53       FAKE Fan controller                      max31790        Present  None   
+        fan-tray-vpd FAKE Fan tray VPD                        at24csw080      Present  None   
+        ibc          FAKE intermediate bus converter          bmr491          Present  None   
 
     CABOOSES: none found
 
@@ -203,6 +205,7 @@ SP DETAILS: type "Sled" slot 1
         dev-39       FAKE T6 temperature sensor               tmp451       Present  None   
         dev-46       CPU temperature sensor                   sbtsi        Present  None   
         dev-53       FAKE Fan controller                      max31790     Present  None   
+        ibc          FAKE intermediate bus converter          bmr491       Present  None   
 
     CABOOSES: none found
 
@@ -226,9 +229,10 @@ SP DETAILS: type "Switch" slot 0
 
     COMPONENTS
 
-        NAME  DESCRIPTION               DEVICE          PRESENCE SERIAL 
-        dev-0 FAKE temperature sensor 1 fake-tmp-sensor Present  None   
-        dev-1 FAKE temperature sensor 2 fake-tmp-sensor Failed   None   
+        NAME  DESCRIPTION                     DEVICE          PRESENCE SERIAL 
+        dev-0 FAKE temperature sensor 1       fake-tmp-sensor Present  None   
+        dev-1 FAKE temperature sensor 2       fake-tmp-sensor Failed   None   
+        ibc   FAKE intermediate bus converter bmr491          Present  None   
 
     CABOOSES: none found
 
@@ -250,7 +254,12 @@ SP DETAILS: type "Switch" slot 1
         Stage0 status                      VALID                                                            
         stage0next status                  VALID                                                            
 
-    COMPONENTS: none found
+    COMPONENTS
+
+        NAME DESCRIPTION                     DEVICE PRESENCE SERIAL 
+        ibc  FAKE intermediate bus converter bmr491 Present  None   
+
+    CABOOSES: none found
 
 ---------------------------------------------
 stderr:
@@ -2245,10 +2254,12 @@ Reconfigurator config:
     version: 1
     modified time: <REDACTED_TIMESTAMP>
     tuf repo pruner enabled: true
-    disruption policy: terminate
-    planner enabled: false
     blueprint pruner enabled: true
     blueprint pruner nkeep: 1000
+    planner enabled: false
+    planner config:
+        disruption policy: terminate
+
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
@@ -2357,10 +2368,12 @@ Reconfigurator config:
     version: 3
     modified time: <REDACTED_TIMESTAMP>
     tuf repo pruner enabled: true
-    disruption policy: live-migrate or terminate
-    planner enabled: true
     blueprint pruner enabled: true
     blueprint pruner nkeep: 1000
+    planner enabled: true
+    planner config:
+        disruption policy: live-migrate or terminate
+
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/

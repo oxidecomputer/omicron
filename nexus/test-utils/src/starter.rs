@@ -53,13 +53,15 @@ use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::DEFAULT_BLUEPRINT_PRUNER_NKEEP;
 use nexus_types::deployment::LastAllocatedSubnetIpOffset;
 use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
+use nexus_types::deployment::OmicronZoneExternalFloatingAddrs;
 use nexus_types::deployment::OmicronZoneExternalFloatingIp;
+use nexus_types::deployment::OmicronZoneExternalFloatingIps;
+use nexus_types::deployment::OmicronZoneExternalSnat;
 use nexus_types::deployment::OmicronZoneExternalSnatIp;
 use nexus_types::deployment::OximeterReadMode;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::ReconfiguratorConfig;
-use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::external_api::sled::SledState;
 use nexus_types::internal_api::params::DnsConfigParams;
@@ -591,7 +593,6 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                 planner_enabled: false,
                 planner_config: PlannerConfig::default(),
                 tuf_repo_pruner_enabled: true,
-                disruption_policy: ReconfiguratorDisruptionPolicy::default(),
                 blueprint_pruner_enabled: true,
                 blueprint_pruner_nkeep: DEFAULT_BLUEPRINT_PRUNER_NKEEP,
             });
@@ -748,15 +749,17 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                     .deployment
                     .external_dns_servers
                     .clone(),
-                external_ip: OmicronZoneExternalFloatingIp {
-                    id: ExternalIpUuid::new_v4(),
-                    ip: config
-                        .deployment
-                        .dropshot_external
-                        .dropshot
-                        .bind_address
-                        .ip(),
-                },
+                external_ips: OmicronZoneExternalFloatingIps::from_single(
+                    OmicronZoneExternalFloatingIp {
+                        id: ExternalIpUuid::new_v4(),
+                        ip: config
+                            .deployment
+                            .dropshot_external
+                            .dropshot
+                            .bind_address
+                            .ip(),
+                    },
+                ),
                 external_tls: config.deployment.dropshot_external.tls,
                 internal_address,
                 lockstep_port,
@@ -1140,15 +1143,17 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                         slot: 0,
                         vni: Vni::SERVICES_VNI,
                     },
-                    external_ip: OmicronZoneExternalSnatIp {
-                        id: ExternalIpUuid::new_v4(),
-                        snat_cfg: SourceNatConfigGeneric::new(
-                            external_ip,
-                            0,
-                            16383,
-                        )
-                        .unwrap(),
-                    },
+                    external_ip: OmicronZoneExternalSnat::from_single(
+                        OmicronZoneExternalSnatIp {
+                            id: ExternalIpUuid::new_v4(),
+                            snat_cfg: SourceNatConfigGeneric::new(
+                                external_ip,
+                                0,
+                                16383,
+                            )
+                            .unwrap(),
+                        },
+                    ),
                 },
             ),
             image_source: BlueprintZoneImageSource::InstallDataset,
@@ -1246,10 +1251,13 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             zone_type: BlueprintZoneType::ExternalDns(
                 blueprint_zone_type::ExternalDns {
                     dataset: OmicronZoneDataset { pool_name },
-                    dns_address: OmicronZoneExternalFloatingAddr {
-                        id: ExternalIpUuid::new_v4(),
-                        addr: dns_address.into(),
-                    },
+                    dns_addresses:
+                        OmicronZoneExternalFloatingAddrs::from_single(
+                            OmicronZoneExternalFloatingAddr {
+                                id: ExternalIpUuid::new_v4(),
+                                addr: dns_address.into(),
+                            },
+                        ),
                     http_address: dropshot_address,
                     nic: NetworkInterface {
                         id: Uuid::new_v4(),

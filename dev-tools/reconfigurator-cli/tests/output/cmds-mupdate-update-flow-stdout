@@ -301,6 +301,7 @@ LEDGERED SLED CONFIG
         all datasets reconciled successfully
         all zones reconciled successfully
     reconciler task status: idle (finished at <REDACTED_TIMESTAMP> after running for <REDACTED_DURATION>s)
+    instance manager status: available (0 registered VMMs)
     reference measurements:
         (measurement set is empty)
     fmd:
@@ -440,6 +441,7 @@ LEDGERED SLED CONFIG
         all datasets reconciled successfully
         all zones reconciled successfully
     reconciler task status: idle (finished at <REDACTED_TIMESTAMP> after running for <REDACTED_DURATION>s)
+    instance manager status: available (0 registered VMMs)
     reference measurements:
         (measurement set is empty)
     fmd:
@@ -566,6 +568,7 @@ LEDGERED SLED CONFIG
         all datasets reconciled successfully
         all zones reconciled successfully
     reconciler task status: idle (finished at <REDACTED_TIMESTAMP> after running for <REDACTED_DURATION>s)
+    instance manager status: available (0 registered VMMs)
     reference measurements:
         (measurement set is empty)
     fmd:
