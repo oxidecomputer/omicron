@@ -506,6 +506,7 @@ mod tests {
     use nexus_types::deployment::PendingMgsUpdateHostPhase1Details;
     use nexus_types::deployment::PendingMgsUpdates;
     use nexus_types::deployment::PlannerConfig;
+    use nexus_types::deployment::PlannerSledRebootPolicy;
     use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
     use nexus_types::deployment::TargetReleaseDescription;
     use nexus_types::inventory::SpType;
@@ -529,7 +530,10 @@ mod tests {
             test_boards.sled_id(0).expect("have sled 0"),
             SledConfigGeneration::new(),
         )]);
-        let planner_config = PlannerConfig::default();
+        let planner_config = PlannerConfig {
+            sled_reboot_policy: PlannerSledRebootPolicy::Evacuate,
+            disruption_policy: ReconfiguratorDisruptionPolicy::default(),
+        };
 
         // Test that with no updates pending and no TUF repo specified, there
         // will remain no updates pending.
