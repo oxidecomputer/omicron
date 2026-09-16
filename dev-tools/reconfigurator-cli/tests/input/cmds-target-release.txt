@@ -66,6 +66,9 @@ sled-list
 blueprint-list
 inventory-list
 
+# Set the planner config to perform sled evacuation.
+set planner-config --sled-reboot-policy evacuate
+
 # Measurements will block further planning progress, run a planning step
 blueprint-plan latest latest
 blueprint-diff latest

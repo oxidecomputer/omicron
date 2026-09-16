@@ -49,6 +49,9 @@ sled-set serial2 omicron-config latest
 # Generate inventory once more to reflect the omicron config changes.
 inventory-generate
 
+# Set the planner config to perform sled evacuation.
+set planner-config --sled-reboot-policy evacuate
+
 # Setup is now done -- create another TUF repository which will act as the
 # target release being updated to.
 generate-fake-repo 1.0.0
@@ -118,6 +121,41 @@ blueprint-diff latest
 # the same pass it should mark the next sled (serial1) as `evacuating`.
 sled-update-host-phase2 serial0 --boot-disk B --slot-b c2a8af75d6907ef138d033dc3be1fcbf7d7a78a87aee04796caf283a6bb0952d
 sled-update-host-phase1 serial0 --active B --slot-b 2902cb5932fa703ed62fc6a0a330898fe6fd4bde68c74f6398a6aa916cb7e79c
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Simulate a nonzero number of VMMs on sled 1. This should cause the planner to
+# not proceed with an update (i.e., it's still waiting for evacuation).
+sled-set serial1 omicron-config latest
+sled-set serial1 registered-vmms 2
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Test that the "immediate, no evacuate" sled reboot policy takes effect even
+# if we were already waiting for a sled to evacuate. Change the policy and
+# replan; we should see an update scheduled for sled serial1 even though it
+# still has VMMs registered.
+set planner-config --sled-reboot-policy immediate-no-evacuation
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Completing the SP update. This should immediately proceed to the host OS
+# update.
+sled-update-sp serial1 --active 1.0.0
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Complete the host OS update. This should mark the sled back to `available`
+# despite the current config of `immediate-no-evacuation` (which means the
+# planner wouldn't currently try to evacuate the sled at all).
+#
+# We should also see an SP update planned for sled serial2 (again without
+# evacuation due to the `immediate-no-evacuation` policy).
+sled-update-host-phase2 serial1 --boot-disk B --slot-b c2a8af75d6907ef138d033dc3be1fcbf7d7a78a87aee04796caf283a6bb0952d
+sled-update-host-phase1 serial1 --active B --slot-b 2902cb5932fa703ed62fc6a0a330898fe6fd4bde68c74f6398a6aa916cb7e79c
 inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest

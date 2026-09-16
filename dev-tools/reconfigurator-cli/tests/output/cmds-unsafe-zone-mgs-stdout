@@ -1196,6 +1196,14 @@ INTERNAL DNS STATUS
 
 
 
+> # Set the planner config to perform sled evacuation.
+> set planner-config --sled-reboot-policy evacuate
+planner config updated:
+    disruption policy::   terminate (unchanged)
+*   sled reboot policy:   immediate (no evacuation) -> evacuate
+
+
+
 > # Setup is now done -- create another TUF repository which will act as the
 > # target release being updated to.
 > generate-fake-repo 1.0.0
@@ -1495,6 +1503,10 @@ INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noo
 generated blueprint df06bb57-ad42-4431-9206-abff322896c7 based on parent blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * zone updates waiting on reference measurement changes
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 Measurement updates:
@@ -1943,6 +1955,10 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 9034c710-3e57-45f3-99e5-4316145e87ac based on parent blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 pending MGS update:
   * 913-0000019:serial0: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
 * zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
@@ -2002,6 +2018,10 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976 based on parent blueprint 9034c710-3e57-45f3-99e5-4316145e87ac
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 pending MGS update:
   * 913-0000019:serial0: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
 * zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
@@ -2070,6 +2090,10 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736 based on parent blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 pending MGS update:
   * 913-0000019:serial0: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
 * zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
@@ -2149,6 +2173,10 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 626487fa-7139-45ec-8416-902271fc730b based on parent blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 blocked MGS update:
   * 913-0000019:serial0: failed to plan an SP update: sled contains zones that are unsafe to shut down: "427ec88f-f467-42fa-9bbb-66a91a36103c: only 2/2 internal DNS zones are synchronized; require at least 3"
 * 1 sled changed update disposition:
@@ -2304,6 +2332,10 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b based on parent blueprint 626487fa-7139-45ec-8416-902271fc730b
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 1 pending MGS update:
   * 913-0000019:serial1: Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion })
 * discretionary zones placed:
@@ -2494,6 +2526,10 @@ INFO ran out of boards for MGS-driven update
 generated blueprint afb09faf-a586-4483-9289-04d4f1d8ba23 based on parent blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled reboot policy: evacuate
+
 * 2 blocked MGS updates:
   * 913-0000019:serial0: failed to plan a Host OS update: sled contains zones that are unsafe to shut down: "427ec88f-f467-42fa-9bbb-66a91a36103c: only 2/3 internal DNS zones are synchronized; require at least 3"
   * 913-0000019:serial2: failed to plan a Host OS update: sled contains zones that are unsafe to shut down: "ea5b4030-b52f-44b2-8d70-45f15f987d01: only 2/3 internal DNS zones are synchronized; require at least 3"
