@@ -1434,9 +1434,8 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                 // * `baseboard` (must match this fake SP's)
                 // * `last_reconciliation` (must contain a valid boot disk and
                 //   active slot phase 2 hash)
-                // * `ledgered_sled_config` (its generation and update
-                //   disposition are checked when deciding whether a sled has
-                //   been evacuated)
+                // * `ledgered_sled_config` (its generation is checked when
+                //   deciding whether a sled has been evacuated)
                 // * `instance_manager_status` (likewise)
                 let fake_phase_2_header = BootImageHeader {
                     flags: 0,
