@@ -162,7 +162,7 @@ pub(crate) struct MgsUpdatePlanner<'a> {
     /// disposition, per the parent blueprint
     ///
     /// This set does not account for the contents of `inventory`; e.g., a
-    /// sled in this set may not yet be evacuated, or may not not even be aware
+    /// sled in this set may not yet be evacuated, or may not even be aware
     /// it's being evacuated!
     pub(crate) evacuating_sleds: &'a EvacuatingSleds,
     /// details about zones (and therefore sleds) that are unsafe to shut down
@@ -845,7 +845,7 @@ fn try_make_update(
     // If we made it through the loop above without returning early, then every
     // component evaluated as `NoUpdateNeeded`; i.e., every component is running
     // its current version. We have one more thing to check: if this is a sled
-    // and it's current in the `Evacuating` disposition, we need to make it
+    // and it's currently in the `Evacuating` disposition, we need to make it
     // `Available` now that all updates are complete.
     if let Some(sled_id) = board.sled_id()
         && evacuating_sleds.contains(&sled_id)
@@ -2186,8 +2186,8 @@ mod test {
         logctx.cleanup_successful();
     }
 
-    // Test that a sled marked is evaluated even though it counts against one of
-    // the `nmax_updates` cap.
+    // Test that a sled marked as evacuating is evaluated even though it counts
+    // against one of the `nmax_updates` cap.
     #[test]
     fn test_evacuating_sled_is_evaluated() {
         let test_name = "planning_mgs_updates_evacuating_sled_is_evaluated";
