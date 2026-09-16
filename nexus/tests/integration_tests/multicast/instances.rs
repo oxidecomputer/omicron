@@ -22,6 +22,7 @@
 use std::collections::BTreeSet;
 use std::net::IpAddr;
 
+use dpd_client::types as dpd_types;
 use http::{Method, StatusCode};
 
 use nexus_db_model::{MemberParentRef, MulticastGroupMemberState};
@@ -810,11 +811,25 @@ async fn test_multicast_migration_scenarios(
     )
     .await;
 
-    for (slot, dpd) in nexus_test_utils::dpd_clients_by_switch(cptestctx) {
-        dpd.multicast_group_get(&multicast_ip).await.unwrap_or_else(|e| {
-            panic!("{slot:?}: group should exist in DPD before migration: {e}")
-        });
+    let dpd_clients = nexus_test_utils::dpd_clients_by_switch(cptestctx);
+    let mut all_slots: Vec<_> = dpd_clients.keys().copied().collect();
+    all_slots.sort();
+    let mut external_switches = Vec::new();
+    for (slot, dpd) in &dpd_clients {
+        match dpd.multicast_group_get(&multicast_ip).await {
+            Ok(_) => external_switches.push(*slot),
+            Err(e) if e.status() == Some(StatusCode::NOT_FOUND) => {}
+            Err(e) => panic!(
+                "unexpected DPD error querying external group \
+                 {multicast_ip} on {slot:?}: {e}"
+            ),
+        }
     }
+    external_switches.sort();
+    assert_eq!(
+        external_switches, all_slots,
+        "external group should exist on every switch before migration"
+    );
 
     // Migrate instance
     let source_sled = nexus
@@ -874,12 +889,72 @@ async fn test_multicast_migration_scenarios(
 
     // Group-level DPD state is all Nexus owns. The rear-port move to the
     // target sled is owned by `ddmd`, derived from DDM peer subscriptions, and
-    // is not asserted here.
-    for (slot, dpd) in nexus_test_utils::dpd_clients_by_switch(cptestctx) {
-        dpd.multicast_group_get(&multicast_ip).await.unwrap_or_else(|e| {
-            panic!("{slot:?}: group should exist in DPD after migration: {e}")
-        });
+    // is not asserted here. Migration does not change ingress programming,
+    // so the external group still exists on every switch.
+    let mut external_switches_after_migration = Vec::new();
+    for (slot, dpd) in &dpd_clients {
+        match dpd.multicast_group_get(&multicast_ip).await {
+            Ok(_) => external_switches_after_migration.push(*slot),
+            Err(e) if e.status() == Some(StatusCode::NOT_FOUND) => {}
+            Err(e) => panic!(
+                "unexpected DPD error querying external group \
+                 {multicast_ip} on {slot:?}: {e}"
+            ),
+        }
     }
+    external_switches_after_migration.sort();
+    assert_eq!(
+        external_switches_after_migration, all_slots,
+        "external group should exist on every switch after migration"
+    );
+
+    // Drift: remove the external entry from one switch. The reconciler should
+    // notice the gap and recreate the entry there.
+    let removed_slot = all_slots[0];
+    let removed_dpd = &dpd_clients[&removed_slot];
+    let removed_response = removed_dpd
+        .multicast_group_get(&multicast_ip)
+        .await
+        .expect("switch should have the external group")
+        .into_inner();
+    let delete_tag: dpd_types::MulticastTag = match removed_response {
+        dpd_types::MulticastGroupResponse::External { tag, .. } => {
+            tag.parse().expect("DB multicast tag should be valid for DPD")
+        }
+        dpd_types::MulticastGroupResponse::Underlay { .. } => {
+            panic!("Expected an external group from DPD")
+        }
+    };
+    removed_dpd
+        .multicast_group_delete(&multicast_ip, &delete_tag)
+        .await
+        .expect("should remove the external group from one switch");
+
+    let mut gapped_slots = Vec::new();
+    for (slot, dpd) in &dpd_clients {
+        if dpd.multicast_group_get(&multicast_ip).await.is_ok() {
+            gapped_slots.push(*slot);
+        }
+    }
+    assert_eq!(
+        gapped_slots.len(),
+        all_slots.len() - 1,
+        "test setup should leave the external group missing on one switch"
+    );
+
+    activate_multicast_reconciler(lockstep_client).await;
+
+    let mut repaired_slots = Vec::new();
+    for (slot, dpd) in &dpd_clients {
+        if dpd.multicast_group_get(&multicast_ip).await.is_ok() {
+            repaired_slots.push(*slot);
+        }
+    }
+    repaired_slots.sort();
+    assert_eq!(
+        repaired_slots, all_slots,
+        "drift repair should recreate the external entry on every switch"
+    );
 
     // Verify sled-agent state after migration: the target sled should
     // have the VMM subscription and M2P mapping. The source sled should
@@ -2587,10 +2662,7 @@ async fn test_empty_active_group_reaped_by_sweep(
     )
     .await;
 
-    // Soft-delete the member row directly. The detach API's fast-path mark
-    // never runs, so only the sweep can observe the group empty. The NOT
-    // EXISTS guard in `multicast_group_mark_removal_if_empty` ignores
-    // soft-deleted rows, so no hard-delete pass is required first.
+    // Soft-delete the member row directly.
     let group_id =
         MulticastGroupUuid::from_untyped_uuid(group_view.identity.id);
     let member = datastore
