@@ -7,7 +7,7 @@ use crate::ExternalDisks;
 use crate::HardwareView;
 use crate::TofinoSnapshot;
 use crate::TofinoView;
-use crate::disk_location::{DiskLocationCache, NvmeInstance};
+use crate::disk_location::NvmeInstance;
 use crate::{DendriteAsic, SledMode, UnparsedDisk};
 use camino::Utf8PathBuf;
 use gethostname::gethostname;
@@ -23,7 +23,6 @@ use slog::info;
 use slog::o;
 use slog::warn;
 use std::collections::{HashMap, HashSet};
-use std::time::Instant;
 use tokio::sync::watch;
 use uuid::Uuid;
 
@@ -139,7 +138,6 @@ impl HardwareSnapshot {
     fn new(
         log: &Logger,
         external_disks: &ExternalDisks,
-        location_cache: &mut DiskLocationCache,
     ) -> Result<Self, Error> {
         let mut device_info =
             DevInfo::new_force_load().map_err(Error::DevInfo)?;
@@ -188,22 +186,40 @@ impl HardwareSnapshot {
                 }
 
                 // Now that we know which controllers are present, ask the
-                // hardware topology where they are. The cache decides whether
-                // topo actually needs to be consulted this time around.
-                let present: Vec<NvmeInstance> =
-                    found.iter().map(|(_, instance)| *instance).collect();
-                location_cache.refresh_if_needed(
-                    log,
-                    &present,
-                    Instant::now(),
-                    || topo::read_disk_locations(log),
-                );
+                // hardware topology where they are. A failure to read the
+                // topology costs only the locations, never the disks.
+                let locations = match topo::read_disk_locations(log) {
+                    Ok(locations) => Some(locations),
+                    Err(err) => {
+                        warn!(
+                            log,
+                            "failed to read disk locations from hardware \
+                             topology";
+                            "err" => %err,
+                        );
+                        None
+                    }
+                };
+                let mut unlabelled = Vec::new();
                 for (disk, instance) in found {
-                    let location =
-                        location_cache.location(instance).map(str::to_string);
+                    let location = locations
+                        .as_ref()
+                        .and_then(|locations| locations.get(&instance))
+                        .cloned();
+                    if location.is_none() && locations.is_some() {
+                        unlabelled.push(instance.to_string());
+                    }
                     disks.insert(
                         disk.identity().clone(),
                         disk.with_location(location),
+                    );
+                }
+                if !unlabelled.is_empty() {
+                    warn!(
+                        log,
+                        "hardware topology has no location label for some \
+                         disk controllers";
+                        "nvme_instances" => ?unlabelled,
                     );
                 }
             }
@@ -590,10 +606,9 @@ fn poll_device_tree(
     log: &Logger,
     hardware_view_tx: &watch::Sender<HardwareView>,
     external_disks: &ExternalDisks,
-    location_cache: &mut DiskLocationCache,
 ) -> Result<(), Error> {
     // Construct a view of hardware by walking the device tree.
-    let polled_hw = HardwareSnapshot::new(log, external_disks, location_cache);
+    let polled_hw = HardwareSnapshot::new(log, external_disks);
     let polled_hw = match polled_hw {
         Ok(polled_hw) => polled_hw,
 
@@ -810,15 +825,9 @@ fn hardware_tracking_task(
     log: Logger,
     hardware_view_tx: watch::Sender<HardwareView>,
     external_disks: ExternalDisks,
-    mut location_cache: DiskLocationCache,
 ) {
     loop {
-        match poll_device_tree(
-            &log,
-            &hardware_view_tx,
-            &external_disks,
-            &mut location_cache,
-        ) {
+        match poll_device_tree(&log, &hardware_view_tx, &external_disks) {
             // We've already warned about `NotAnOxideSled` by this point,
             // so let's not spam the logs.
             Ok(_) | Err(Error::NotAnOxideSled(_)) => (),
@@ -912,13 +921,7 @@ impl HardwareManager {
         // This mitigates issues where the Sled Agent could try to propagate
         // an "empty" view of hardware to other consumers before the first
         // query.
-        let mut location_cache = DiskLocationCache::new();
-        match poll_device_tree(
-            &log,
-            &hardware_view_tx,
-            &external_disks,
-            &mut location_cache,
-        ) {
+        match poll_device_tree(&log, &hardware_view_tx, &external_disks) {
             Ok(_) => (),
             // Allow non-sled devices to proceed with a "null" view of
             // hardware, otherwise they won't be able to start.
@@ -945,12 +948,7 @@ impl HardwareManager {
         });
 
         std::thread::spawn(move || {
-            hardware_tracking_task(
-                log,
-                hardware_view_tx,
-                external_disks,
-                location_cache,
-            );
+            hardware_tracking_task(log, hardware_view_tx, external_disks);
         });
 
         Ok(Self { hardware_view_rx })
