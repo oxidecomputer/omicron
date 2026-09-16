@@ -60,7 +60,6 @@ pub(super) async fn reconcile(
     client: &Client,
     desired_config: &RackNetworkConfig,
     our_switch_slot: ThisSledSwitchSlot,
-    bgp_dispatcher_addr: Option<SocketAddr>,
     log: &Logger,
 ) -> MgdBgpReconcilerStatus {
     let current_config = match DiffableBgpConfig::fetch_current(client).await {
@@ -75,7 +74,6 @@ pub(super) async fn reconcile(
     let desired_config = match DiffableBgpConfig::from_desired_config(
         &desired_config,
         our_switch_slot,
-        bgp_dispatcher_addr,
         log,
     ) {
         Ok(config) => config,
@@ -1239,7 +1237,6 @@ impl DiffableBgpConfig {
     fn from_desired_config(
         config: &RackNetworkConfig,
         our_switch_slot: ThisSledSwitchSlot,
-        bgp_dispatcher_addr: Option<SocketAddr>,
         log: &Logger,
     ) -> anyhow::Result<Self> {
         // Filter down to just the peers of the ports matching our switch slot.
@@ -1338,16 +1335,13 @@ impl DiffableBgpConfig {
                 entry.insert(DiffableBgpRouterConfig {
                     id: *asn,
                     graceful_shutdown: false,
-                    listen: match bgp_dispatcher_addr {
-                        Some(addr) => addr.to_string(),
-                        None => SocketAddrV6::new(
-                            Ipv6Addr::UNSPECIFIED,
-                            BGP_PORT,
-                            0,
-                            0,
-                        )
-                        .to_string(),
-                    },
+                    listen: SocketAddrV6::new(
+                        Ipv6Addr::UNSPECIFIED,
+                        BGP_PORT,
+                        0,
+                        0,
+                    )
+                    .to_string(),
                 });
 
                 originate4.insert(
@@ -1452,12 +1446,9 @@ impl DiffableBgpConfig {
                     }
                 }
                 RouterPeerType::Numbered(numbered_router) => {
-                    let bgp_port = bgp_dispatcher_addr
-                        .map(|a| a.port())
-                        .unwrap_or(BGP_PORT);
                     let addr = SocketAddr::new(
                         (numbered_router.target_addr()).into(),
-                        bgp_port,
+                        BGP_PORT,
                     );
                     if let Some(_prev) = numbered_peers.insert(addr, common) {
                         bail!(
