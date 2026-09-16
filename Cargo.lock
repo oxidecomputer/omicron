@@ -9124,6 +9124,7 @@ dependencies = [
  "oximeter",
  "oximeter-instruments",
  "oximeter-producer",
+ "pretty_assertions",
  "schemars 0.8.22",
  "serde",
  "serde_json",

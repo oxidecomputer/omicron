@@ -8717,8 +8717,7 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     // Create a silo with a Collaborator User
-    let silo =
-        create_silo(&client, "authz", true, SiloIdentityMode::LocalOnly).await;
+    let silo = create_silo(&client, "authz", SiloIdentityMode::LocalOnly).await;
     let user_id = create_local_user(
         client,
         &silo,
