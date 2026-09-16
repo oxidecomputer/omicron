@@ -92,6 +92,9 @@ pub(crate) fn ba_lockstep_error_to_http(
     >,
     operation: &str,
 ) -> HttpError {
+    // XXX This mirrors wicket's commission_error and has a workaround for the
+    // same reason. We should consider fixing this in progenitor (or
+    // progenitor-extras?).
     use bootstrap_agent_lockstep_client::Error as BaError;
 
     let (status_code, error_code, message) = match &err {

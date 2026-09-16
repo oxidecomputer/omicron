@@ -1,7 +1,6 @@
 State: not started
 
 System version: (none)
-TAGS  VERSION  
 
 TYPE  SLOT  STATE  PROGRESS  ELAPSED  
 
