@@ -1,0 +1,161 @@
+# Exercise sled evacuation before SP and host OS updates. For a given sled that
+# needs either (or both) of those updates, it should mark it evacuating, wait
+# for inventory to confirm evacuation is done, perform both updates, then set
+# the sled back to `available`.
+
+# Load example system
+load-example --nsleds 3 --ndisks-per-sled 3
+
+# Create a TUF repository from a fake manifest. (The output TUF repo is
+# written to a temporary directory that this invocation of `reconfigurator-cli`
+# is running out of as its working directory.)
+#
+# This is used to simulate the initial version of the system.
+generate-fake-repo 0.0.1
+
+# Load the target release from the assembled TUF repository.
+set target-release repo-0.0.1.zip
+
+# Update the install dataset on all sleds to the target release.
+# This will cause zones to be noop converted over to Artifact,
+# unblocking upgrades.
+sled-update-install-dataset serial0 --to-target-release
+sled-update-install-dataset serial1 --to-target-release
+sled-update-install-dataset serial2 --to-target-release
+
+# Measurements will block further planning progress, run a planning step
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Make sure the measurements are up to date for inventory
+sled-set serial0 omicron-config latest
+sled-set serial1 omicron-config latest
+sled-set serial2 omicron-config latest
+
+# Generate inventory, then do a planning run to ensure that all zones
+# are set to Artifact.
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+# The above blueprint includes a pending MGS update, which we should delete
+# (we want to start from a fresh state).
+blueprint-edit latest delete-sp-update serial0
+# Also set the Omicron config for all sleds to reflect the
+# corresponding image sources.
+sled-set serial0 omicron-config latest
+sled-set serial1 omicron-config latest
+sled-set serial2 omicron-config latest
+# Generate inventory once more to reflect the omicron config changes.
+inventory-generate
+
+# Set the planner config to perform sled evacuation.
+set planner-config --sled-reboot-policy evacuate
+
+# Setup is now done -- create another TUF repository which will act as the
+# target release being updated to.
+generate-fake-repo 1.0.0
+
+# Load the target release from the assembled TUF repository.
+set target-release repo-1.0.0.zip
+
+# Measurements will block further planning progress, run a planning step
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Make sure the measurements are up to date for inventory
+sled-set serial0 omicron-config latest
+sled-set serial1 omicron-config latest
+sled-set serial2 omicron-config latest
+
+# Bring every sled's RoT bootloader and RoT to the target release up front.
+# Neither of those updates requires a sled reboot; we want the first update the
+# planner wants to make to be a reboot-requiring SP update.
+sled-update-rot-bootloader serial0 --stage0 1.0.0
+sled-update-rot-bootloader serial1 --stage0 1.0.0
+sled-update-rot-bootloader serial2 --stage0 1.0.0
+sled-update-rot serial0 --slot-b 1.0.0 --active-slot b --persistent-boot-preference b
+sled-update-rot serial1 --slot-b 1.0.0 --active-slot b --persistent-boot-preference b
+sled-update-rot serial2 --slot-b 1.0.0 --active-slot b --persistent-boot-preference b
+inventory-generate
+
+# All three sleds need SP updates. Rather than scheduling one, the planner
+# should mark exactly one sled (serial0) as `evacuating`: an evacuating sled
+# occupies the single concurrent-update slot even though it doesn't have a
+# literal pending update in the blueprint, so no other sled is evacuated or
+# updated.
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Planning again before the sled has picked up its new config should make no
+# changes: the SP update is blocked waiting for the sled's ledgered config
+# generation to catch up.
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Have the sled pick up the new config, but with two VMMs still registered. The
+# SP update should still be blocked, now waiting for those VMMs to go away.
+sled-set serial0 omicron-config latest
+sled-set serial0 registered-vmms 2
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Once the VMMs are gone, the evacuation is complete and the SP update should be
+# scheduled.
+sled-set serial0 registered-vmms 0
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Simulate the SP update completing. The planner should replace it with a host
+# OS update for the same sled; the sled is still evacuated, so it does not need
+# to be evacuated again.
+sled-update-sp serial0 --active 1.0.0
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Simulate the host OS update completing. The planner should remove it and
+# restore serial0 to `available`. That frees the concurrent-update slot, so in
+# the same pass it should mark the next sled (serial1) as `evacuating`.
+sled-update-host-phase2 serial0 --boot-disk B --slot-b c2a8af75d6907ef138d033dc3be1fcbf7d7a78a87aee04796caf283a6bb0952d
+sled-update-host-phase1 serial0 --active B --slot-b 2902cb5932fa703ed62fc6a0a330898fe6fd4bde68c74f6398a6aa916cb7e79c
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Simulate a nonzero number of VMMs on sled 1. This should cause the planner to
+# not proceed with an update (i.e., it's still waiting for evacuation).
+sled-set serial1 omicron-config latest
+sled-set serial1 registered-vmms 2
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Test that the "immediate, no evacuate" sled reboot policy takes effect even
+# if we were already waiting for a sled to evacuate. Change the policy and
+# replan; we should see an update scheduled for sled serial1 even though it
+# still has VMMs registered.
+set planner-config --sled-reboot-policy immediate-no-evacuation
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Completing the SP update. This should immediately proceed to the host OS
+# update.
+sled-update-sp serial1 --active 1.0.0
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Complete the host OS update. This should mark the sled back to `available`
+# despite the current config of `immediate-no-evacuation` (which means the
+# planner wouldn't currently try to evacuate the sled at all).
+#
+# We should also see an SP update planned for sled serial2 (again without
+# evacuation due to the `immediate-no-evacuation` policy).
+sled-update-host-phase2 serial1 --boot-disk B --slot-b c2a8af75d6907ef138d033dc3be1fcbf7d7a78a87aee04796caf283a6bb0952d
+sled-update-host-phase1 serial1 --active B --slot-b 2902cb5932fa703ed62fc6a0a330898fe6fd4bde68c74f6398a6aa916cb7e79c
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest

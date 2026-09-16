@@ -41,6 +41,9 @@ sled-set serial1 omicron-config latest
 # Generate inventory once more to reflect the omicron config changes.
 inventory-generate
 
+# Set the planner config to perform sled evacuation.
+set planner-config --sled-reboot-policy evacuate
+
 # Setup is now done -- create another TUF repository which will act as the
 # target release being updated to.
 generate-fake-repo 1.0.0
@@ -61,13 +64,20 @@ inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest
 
-# One by one, update the RoT bootloader, RoT, SP, and host OS of the first sled.
+# One by one, update the RoT bootloader then the RoT, wait for the sled to be
+# evacuated, and update the SP then host OS of the first sled.
 sled-update-rot-bootloader serial0 --stage0 1.0.0
 inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest
 
 sled-update-rot serial0 --slot-b 1.0.0 --active-slot b --persistent-boot-preference b
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Regenerate inventory for the sled to pick up its evacuating status.
+sled-set serial0 omicron-config latest
 inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest

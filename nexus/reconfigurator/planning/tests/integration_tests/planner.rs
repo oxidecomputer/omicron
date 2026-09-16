@@ -38,6 +38,9 @@ use nexus_types::deployment::OmicronZoneExternalSnat;
 use nexus_types::deployment::OmicronZoneExternalSnatIpv6;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdates;
+use nexus_types::deployment::PlannerConfig;
+use nexus_types::deployment::PlannerSledRebootPolicy;
+use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
 use nexus_types::deployment::SledDisk;
 use nexus_types::deployment::TargetReleaseDescription;
 use nexus_types::deployment::ZoneRunningStatus;
@@ -5528,6 +5531,16 @@ fn test_zone_update_ordering_respects_dependency_dag() {
     .expect("loaded example system");
     let blueprint1 = sim.assert_latest_blueprint_is_blippy_clean();
 
+    // Ensure the simulator is set to evacuate sleds.
+    sim.change_description("set planner config to evacuate sleds", |desc| {
+        desc.set_planner_config(PlannerConfig {
+            sled_reboot_policy: PlannerSledRebootPolicy::Evacuate,
+            disruption_policy: ReconfiguratorDisruptionPolicy::default(),
+        });
+        Ok(())
+    })
+    .unwrap();
+
     // In order to walk through a complete update of the example system, we need
     // to first assemble metadata for a target release that we're updating to.
     // We use made-up version strings and artifact hashes.
@@ -5560,7 +5573,7 @@ fn test_zone_update_ordering_respects_dependency_dag() {
 
     /// The maximum number of iterations of the planner before we give up,
     /// assuming it must be in an infinite loop.
-    const MAX_PLANNING_ITERATIONS: usize = 100;
+    const MAX_PLANNING_ITERATIONS: usize = 200;
 
     // Next, walk through a complete system update by running the planner in a
     // loop and updating the example system each time to reflect the change that
@@ -5611,9 +5624,14 @@ fn test_zone_update_ordering_respects_dependency_dag() {
                 }
             };
         } else if let Some(p) = trace.get_mut(&units.host_os) {
-            // No pending host OS updates and we've previously seen
-            // activity: all host OS updates are complete.
-            if p.all_at_target.is_none() {
+            // No pending host OS updates and we've previously seen activity. We
+            // might be done, but also need to check for any evacuating sleds -
+            // a sled still marked as evacuating will get an update in a future
+            // planning pass.
+            let any_sled_evacuating = blueprint.sleds.values().any(|sled| {
+                !sled.update_disposition.kind.is_available_for_provisioning()
+            });
+            if p.all_at_target.is_none() && !any_sled_evacuating {
                 p.all_at_target = Some(i);
             }
         }
@@ -5734,6 +5752,25 @@ fn test_zone_update_ordering_respects_dependency_dag() {
         PendingMgsUpdates::new(),
         "after the blueprint stopped changing, no pending MGS updates should \
          remain",
+    );
+
+    // Every sled that was evacuated for its host OS update should have been
+    // restored to `Available`.
+    let still_evacuating: Vec<_> = final_blueprint
+        .sleds
+        .iter()
+        .filter(|(_, sled)| {
+            !sled.update_disposition.kind.is_available_for_provisioning()
+        })
+        .map(|(sled_id, sled)| {
+            format!("  sled {sled_id}: {}", sled.update_disposition)
+        })
+        .collect();
+    assert!(
+        still_evacuating.is_empty(),
+        "after the blueprint stopped changing, no sleds should still be \
+         evacuating:\n{}",
+        still_evacuating.join("\n"),
     );
 
     // Verify the trace against the DAG: every zone-based unit and host_os
