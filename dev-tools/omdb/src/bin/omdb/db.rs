@@ -2659,7 +2659,7 @@ async fn cmd_db_disk_info(
             .context("failed to find disk")?
     };
 
-    match datastore.disk_get_with_model(&conn, disk).await? {
+    match datastore.disk_get_with_model_on_connection(&conn, disk).await? {
         Disk::Crucible(disk) => {
             crucible_disk_info(opctx, datastore, disk).await
         }

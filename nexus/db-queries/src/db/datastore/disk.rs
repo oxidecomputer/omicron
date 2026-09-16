@@ -512,7 +512,7 @@ impl DataStore {
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        self.disk_get_with_model(&conn, disk).await
+        self.disk_get_with_model_on_connection(&conn, disk).await
     }
 
     /// Return a `datastore::Disk` given a `model::Disk`
@@ -522,7 +522,7 @@ impl DataStore {
     /// LookupPath induced permissions check and should only called from omdb.
     /// Code that is looking up deleted disks should also use this method, as
     /// `LookupPath` will not return deleted resources.
-    pub async fn disk_get_with_model(
+    pub async fn disk_get_with_model_on_connection(
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         disk: model::Disk,

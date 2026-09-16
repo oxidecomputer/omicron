@@ -490,7 +490,10 @@ impl DataStore {
         let mut disks = Vec::with_capacity(found_disks.len());
 
         for found_disk in found_disks {
-            match self.disk_get_with_model(&conn, found_disk).await? {
+            match self
+                .disk_get_with_model_on_connection(&conn, found_disk)
+                .await?
+            {
                 datastore::Disk::Crucible(crucible_disk) => {
                     // The query above joins the disk table with the
                     // disk_type_local_storage table, meaning the higher level
