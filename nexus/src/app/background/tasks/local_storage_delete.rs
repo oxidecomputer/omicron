@@ -138,8 +138,7 @@ impl LocalStorageDeleter {
 
             Err(e) => {
                 let message = format!(
-                    "error calling sled_client_ext for allocation {}: {}",
-                    allocation.id(),
+                    "error calling sled_client_ext for sled {sled_id}: {}",
                     InlineErrorChain::new(&e),
                 );
 
