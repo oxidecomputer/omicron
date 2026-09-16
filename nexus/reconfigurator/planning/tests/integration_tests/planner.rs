@@ -38,6 +38,9 @@ use nexus_types::deployment::OmicronZoneExternalSnat;
 use nexus_types::deployment::OmicronZoneExternalSnatIpv6;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdates;
+use nexus_types::deployment::PlannerConfig;
+use nexus_types::deployment::PlannerSledRebootPolicy;
+use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
 use nexus_types::deployment::SledDisk;
 use nexus_types::deployment::TargetReleaseDescription;
 use nexus_types::deployment::ZoneRunningStatus;
@@ -5527,6 +5530,15 @@ fn test_zone_update_ordering_respects_dependency_dag() {
     })
     .expect("loaded example system");
     let blueprint1 = sim.assert_latest_blueprint_is_blippy_clean();
+
+    // Ensure the simulator is set to evacuate sleds.
+    sim.change_description("set planner config to evacuate sleds", |desc| {
+        desc.set_planner_config(PlannerConfig {
+            sled_reboot_policy: PlannerSledRebootPolicy::Evacuate,
+            disruption_policy: ReconfiguratorDisruptionPolicy::default(),
+        });
+        Ok(())
+    }).unwrap();
 
     // In order to walk through a complete update of the example system, we need
     // to first assemble metadata for a target release that we're updating to.

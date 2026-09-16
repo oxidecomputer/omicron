@@ -1379,7 +1379,7 @@ mod test {
         let impossible_update_policy = ImpossibleUpdatePolicy::Reevaluate;
         let planner_config = PlannerConfig {
             sled_reboot_policy: PlannerSledRebootPolicy::Evacuate,
-            disruption_policy: ReconfiguratorDisruptionPolicy::default(),
+            disruption_policy: ReconfiguratorDisruptionPolicy::MigrateOnly,
         };
 
         // We do not control the order of updates.  But we expect to update each
@@ -1507,10 +1507,9 @@ mod test {
 
                 match kind {
                     BlueprintSledUpdateDispositionKind::Evacuating {
-                        // TODO: confirm we respect the policy specified by the
-                        // planning input, once we thread that through.
-                        policy: _,
+                        policy,
                     } => {
+                        assert_eq!(policy, planner_config.disruption_policy);
                         assert!(
                             started_evacuating
                                 .replace((
@@ -2365,7 +2364,10 @@ mod test {
         let sled_0_id = test_boards.sled_id(0).expect("have sled 0");
         let sled_0_serial =
             test_boards.sled_serial_number(sled_0_id).expect("have sled 0");
-        let planner_config = PlannerConfig::default();
+        let planner_config = PlannerConfig {
+            sled_reboot_policy: PlannerSledRebootPolicy::Evacuate,
+            disruption_policy: ReconfiguratorDisruptionPolicy::default(),
+        };
 
         let unsafe_reason = ZoneUnsafeToShutdown::InternalDns {
             total_internal_dns_zones: 3,
@@ -2465,7 +2467,10 @@ mod test {
             sled_0_id,
             SledConfigGeneration::new(),
         )]);
-        let planner_config = PlannerConfig::default();
+        let planner_config = PlannerConfig {
+            sled_reboot_policy: PlannerSledRebootPolicy::Evacuate,
+            disruption_policy: ReconfiguratorDisruptionPolicy::default(),
+        };
 
         // Sled 0 is evacuating and needs only a RoT update.
         let collection = test_boards
