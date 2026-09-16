@@ -14,7 +14,7 @@ use gateway_types::rot::RotSlot;
 use gateway_types::rot::RotState;
 use nexus_types::deployment::ExpectedActiveRotSlot;
 use nexus_types::deployment::ExpectedVersion;
-use omicron_common::disk::M2Slot;
+use sled_agent_types::disk::M2Slot;
 use sled_hardware_types::BaseboardId;
 use slog_error_chain::InlineErrorChain;
 use std::time::Duration;

@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 97a7ae995a37e08b76579a9307bc7ba7b7122c1b91438c04f0b7dc1e0d9ca2c1 # shrinks to input = TestInput { desired_peers: [] }

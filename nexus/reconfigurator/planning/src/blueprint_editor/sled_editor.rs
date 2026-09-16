@@ -31,6 +31,8 @@ use nexus_types::deployment::BlueprintMeasurements;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintSledConfig;
+use nexus_types::deployment::BlueprintSledUpdateDisposition;
+use nexus_types::deployment::BlueprintSledUpdateDispositionKind;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::BlueprintZoneType;
@@ -40,15 +42,17 @@ use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::external_api::sled::SledState;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX_LENGTH;
-use omicron_common::api::external::Generation;
 use omicron_common::disk::DatasetKind;
-use omicron_common::disk::M2Slot;
+use omicron_generation_kinds::{
+    SledConfigGeneration, UpdateDispositionGeneration,
+};
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use scalar::ScalarEditor;
+use sled_agent_types::disk::M2Slot;
 use sled_agent_types::inventory::MupdateOverrideBootInventory;
 use sled_agent_types::inventory::ZoneKind;
 use std::mem;
@@ -165,7 +169,9 @@ pub enum EnsureMupdateOverrideError {
 #[derive(Debug)]
 pub struct SledEditor {
     underlay_ip_allocator: SledUnderlayIpAllocator,
-    incoming_sled_agent_generation: Generation,
+    incoming_sled_agent_generation: SledConfigGeneration,
+    incoming_update_disposition_generation: UpdateDispositionGeneration,
+    update_disposition_kind: ScalarEditor<BlueprintSledUpdateDispositionKind>,
     zones: ZonesEditor,
     disks: DisksEditor,
     datasets: DatasetsEditor,
@@ -213,6 +219,12 @@ impl SledEditor {
                 config.last_allocated_ip_subnet_offset,
             ),
             incoming_sled_agent_generation: config.sled_agent_generation,
+            incoming_update_disposition_generation: config
+                .update_disposition
+                .generation,
+            update_disposition_kind: ScalarEditor::new(
+                config.update_disposition.kind,
+            ),
             zones,
             disks: DisksEditor::new(config.sled_agent_generation, config.disks),
             datasets: DatasetsEditor::new(config.datasets)?,
@@ -231,7 +243,12 @@ impl SledEditor {
                 subnet,
                 LastAllocatedSubnetIpOffset::initial(),
             ),
-            incoming_sled_agent_generation: Generation::new(),
+            incoming_sled_agent_generation: SledConfigGeneration::new(),
+            incoming_update_disposition_generation:
+                UpdateDispositionGeneration::new(),
+            update_disposition_kind: ScalarEditor::new(
+                BlueprintSledUpdateDispositionKind::Available,
+            ),
             zones: ZonesEditor::empty(),
             disks: DisksEditor::empty(),
             datasets: DatasetsEditor::empty(),
@@ -256,9 +273,21 @@ impl SledEditor {
         let mut sled_agent_generation = self.incoming_sled_agent_generation;
         let (measurements, measurement_counts) = self.measurements.finalize();
 
+        let update_disposition_is_modified =
+            self.update_disposition_kind.is_modified();
+        let update_disposition = BlueprintSledUpdateDisposition {
+            generation: if update_disposition_is_modified {
+                self.incoming_update_disposition_generation.next()
+            } else {
+                self.incoming_update_disposition_generation
+            },
+            kind: self.update_disposition_kind.finalize(),
+        };
+
         let scalar_edits = EditedSledScalarEdits {
             debug_force_generation_bump: self.debug_force_generation_bump,
             remove_mupdate_override: remove_mupdate_override_is_modified,
+            update_disposition: update_disposition_is_modified,
         };
 
         // Bump the generation if we made any changes of concern to sled-agent.
@@ -269,6 +298,7 @@ impl SledEditor {
             || remove_mupdate_override_is_modified
             || changed_host_phase_2
             || measurement_counts.has_nonzero_counts()
+            || update_disposition_is_modified
         {
             sled_agent_generation = sled_agent_generation.next();
         }
@@ -289,6 +319,7 @@ impl SledEditor {
                     .finalize(),
                 host_phase_2: self.host_phase_2.finalize(),
                 measurements,
+                update_disposition,
             },
             edit_counts: SledEditCounts {
                 disks: disks_counts,
@@ -391,7 +422,7 @@ impl SledEditor {
         self.zones.all_in_service_and_expunged_zones(reason)
     }
 
-    pub fn incoming_sled_agent_generation(&self) -> Generation {
+    pub fn incoming_sled_agent_generation(&self) -> SledConfigGeneration {
         self.incoming_sled_agent_generation
     }
 
@@ -927,6 +958,14 @@ impl SledEditor {
         self.remove_mupdate_override.set_value(remove_mupdate_override);
     }
 
+    /// Sets this sled's update disposition kind.
+    pub fn set_update_disposition_kind(
+        &mut self,
+        kind: BlueprintSledUpdateDispositionKind,
+    ) {
+        self.update_disposition_kind.set_value(kind);
+    }
+
     /// Debug method to force a sled agent generation number to be bumped, even
     /// if there are no changes to the sled.
     ///
@@ -1001,5 +1040,73 @@ impl ZoneDatasetConfigs {
         if let Some(dataset) = self.durable {
             datasets.ensure_in_service(dataset, rng);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
+    use std::net::Ipv6Addr;
+
+    fn new_active_editor() -> SledEditor {
+        SledEditor::for_new_active(Ipv6Subnet::new(Ipv6Addr::LOCALHOST))
+    }
+
+    const EVACUATING: BlueprintSledUpdateDispositionKind =
+        BlueprintSledUpdateDispositionKind::Evacuating {
+            policy: ReconfiguratorDisruptionPolicy::MigrateOrTerminate,
+        };
+
+    #[test]
+    fn update_disposition_kind_is_a_scalar_edit() {
+        // No edits: the disposition passes through untouched at generation 1.
+        let edited = new_active_editor().finalize();
+        assert_eq!(
+            edited.config.update_disposition,
+            BlueprintSledUpdateDisposition::initial(),
+        );
+        assert!(!edited.scalar_edits.update_disposition);
+
+        // Setting the kind several times bumps the generation exactly once.
+        let mut editor = new_active_editor();
+        editor.set_update_disposition_kind(EVACUATING);
+        editor.set_update_disposition_kind(
+            BlueprintSledUpdateDispositionKind::Available,
+        );
+        editor.set_update_disposition_kind(EVACUATING);
+        let edited = editor.finalize();
+        assert_eq!(edited.config.update_disposition.kind, EVACUATING);
+        assert_eq!(
+            edited.config.update_disposition.generation,
+            UpdateDispositionGeneration::new().next(),
+            "generation bumped exactly once despite three `set` calls",
+        );
+        assert!(edited.scalar_edits.update_disposition);
+        assert_eq!(
+            edited.config.sled_agent_generation,
+            SledConfigGeneration::new().next(),
+            "sled_agent_generation also bumped exactly once",
+        );
+
+        // Setting the kind and then back to the incoming value is a no-op: the
+        // generation is not bumped.
+        let mut editor = new_active_editor();
+        editor.set_update_disposition_kind(EVACUATING);
+        editor.set_update_disposition_kind(
+            BlueprintSledUpdateDispositionKind::Available,
+        );
+        let edited = editor.finalize();
+        assert_eq!(
+            edited.config.update_disposition,
+            BlueprintSledUpdateDisposition::initial(),
+            "edits that cancel out leave the disposition unchanged",
+        );
+        assert!(!edited.scalar_edits.update_disposition);
+        assert_eq!(
+            edited.config.sled_agent_generation,
+            SledConfigGeneration::new(),
+            "sled_agent_generation was not bumped - no visible change",
+        );
     }
 }

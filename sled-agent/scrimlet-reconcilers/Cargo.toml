@@ -9,6 +9,7 @@ workspace = true
 
 [dependencies]
 anyhow.workspace = true
+bootstrap-agent-lockstep-types.workspace = true
 chrono.workspace = true
 daft.workspace = true
 dpd-client.workspace = true
@@ -48,6 +49,3 @@ scuffle = { workspace = true, features = ["testing"] }
 serde_json.workspace = true
 sled-agent-types = { workspace = true, features = ["testing"] }
 test-strategy.workspace = true
-
-[features]
-testing = []

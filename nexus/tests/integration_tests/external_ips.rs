@@ -349,6 +349,7 @@ async fn test_floating_ip_create_non_admin(
                 name: PROJECT_NAME.parse().unwrap(),
                 description: "floating ip project".to_string(),
             },
+            defaults: None,
         },
     )
     .authn_as(AuthnMode::SiloUser(user.id))
@@ -430,13 +431,9 @@ async fn test_floating_ip_create_fails_in_other_silo_pool(
     let project = create_project(client, PROJECT_NAME).await;
 
     // Create other silo and pool linked to that silo
-    let other_silo = create_silo(
-        &client,
-        "not-my-silo",
-        true,
-        silo::SiloIdentityMode::SamlJit,
-    )
-    .await;
+    let other_silo =
+        create_silo(&client, "not-my-silo", silo::SiloIdentityMode::SamlJit)
+            .await;
     let other_pool_range = IpRange::V4(
         Ipv4Range::new(Ipv4Addr::new(10, 2, 0, 1), Ipv4Addr::new(10, 2, 0, 5))
             .unwrap(),
@@ -778,7 +775,7 @@ async fn test_floating_ip_create_attachment(
     .await;
     assert_eq!(
         error.message,
-        format!("Floating IP cannot be deleted while attached to an instance"),
+        "Floating IP cannot be deleted while attached to an instance",
     );
 
     // Stop and delete the instance.

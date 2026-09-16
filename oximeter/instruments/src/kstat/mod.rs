@@ -89,6 +89,8 @@ use std::time::Duration;
 pub mod cpu;
 #[cfg(any(feature = "datalink", test))]
 pub mod link;
+#[cfg(any(feature = "opte_port", test))]
+pub mod opte_port;
 mod sampler;
 #[cfg(any(feature = "zone", test))]
 pub mod zone;

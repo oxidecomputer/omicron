@@ -17,12 +17,8 @@ use gateway_test_utils::setup as gateway_setup;
 use http::StatusCode;
 use installinator::HOST_PHASE_2_FILE_NAME;
 use maplit::btreeset;
-use omicron_common::{
-    disk::DiskIdentity,
-    update::{
-        MupdateOverrideInfo, OmicronInstallManifest,
-        OmicronInstallManifestSource,
-    },
+use omicron_common::update::{
+    MupdateOverrideInfo, OmicronInstallManifest, OmicronInstallManifestSource,
 };
 use omicron_uuid_kinds::{InternalZpoolUuid, MupdateUuid};
 use oxide_update_engine_types::spec::SerializableError;
@@ -31,6 +27,7 @@ use sled_agent_config_reconciler::{
     InternalDiskDetails, InternalDisksReceiver, InternalDisksWithBootDisk,
 };
 use sled_agent_resolvable_files::ZoneImageSourceResolver;
+use sled_agent_types::disk::DiskIdentity;
 use sled_agent_types::resolvable_files::MupdateOverrideNonBootResult;
 use sled_storage::config::MountConfig;
 use tokio::sync::oneshot;
@@ -87,7 +84,7 @@ async fn test_updates() {
         .await
         .unwrap();
     wicketd_testctx
-        .wicketd_client
+        .commission_client
         .put_repository(zip_bytes)
         .await
         .expect("bytes read and archived");
@@ -301,7 +298,7 @@ async fn test_updates() {
             stderr: &mut stderr,
         };
 
-        wicket::exec_with_args(wicketd_testctx.wicketd_addr, args, output)
+        wicket::exec_with_args(wicketd_testctx.wicketd_addrs, args, output)
             .await
             .expect("wicket rack-update clear failed");
 
@@ -371,7 +368,7 @@ async fn get_rack_update_status(
         stdout: &mut stdout,
         stderr: &mut stderr,
     };
-    wicket::exec_with_args(wicketd_testctx.wicketd_addr, args, output)
+    wicket::exec_with_args(wicketd_testctx.wicketd_addrs, args, output)
         .await
         .expect("wicket rack-update status failed to run");
     serde_json::from_slice(&stdout)
@@ -400,7 +397,7 @@ async fn test_installinator_fetch() {
         .await
         .unwrap();
     wicketd_testctx
-        .wicketd_client
+        .commission_client
         .put_repository(zip_bytes)
         .await
         .expect("bytes read and archived");
@@ -697,7 +694,7 @@ async fn test_update_races() {
         .await
         .unwrap();
     wicketd_testctx
-        .wicketd_client
+        .commission_client
         .put_repository(zip_bytes.clone())
         .await
         .expect("bytes read and archived");
@@ -739,7 +736,7 @@ async fn test_update_races() {
     // An update is now running. Try uploading the repository again -- this time
     // it should fail.
     wicketd_testctx
-        .wicketd_client
+        .commission_client
         .put_repository(zip_bytes.clone())
         .await
         .expect_err("failed because update is currently running");
@@ -942,7 +939,7 @@ async fn test_update_races() {
     // Try uploading the repository again -- since no updates are running, this
     // should succeed.
     wicketd_testctx
-        .wicketd_client
+        .commission_client
         .put_repository(zip_bytes)
         .await
         .expect("no updates currently running");

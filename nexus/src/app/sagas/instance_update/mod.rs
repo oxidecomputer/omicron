@@ -349,7 +349,6 @@ use crate::app::db::datastore::InstanceGestalt;
 use crate::app::db::datastore::VmmStateUpdateResult;
 use crate::app::db::datastore::instance;
 use crate::app::db::model::ByteCount;
-use crate::app::db::model::Generation;
 use crate::app::db::model::InstanceIntendedState;
 use crate::app::db::model::InstanceRuntimeState;
 use crate::app::db::model::InstanceState;
@@ -370,6 +369,7 @@ use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::Error;
 use omicron_common::backoff;
 use omicron_common::backoff::BackoffError;
+use omicron_generation_kinds::InstanceStateGeneration;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
@@ -537,7 +537,8 @@ impl UpdatesRequired {
         snapshot: &InstanceGestalt,
     ) -> Option<Self> {
         let mut new_runtime = snapshot.instance.runtime().clone();
-        new_runtime.generation = Generation(new_runtime.generation.next());
+        new_runtime.generation =
+            InstanceStateGeneration::from(new_runtime.generation).next().into();
         new_runtime.time_updated = Utc::now();
         let mut new_intent = None;
         let instance_id = snapshot.instance.id();
@@ -1978,9 +1979,11 @@ mod test {
                 &instance_id,
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    generation: Generation(
-                        instance.runtime().generation.0.next(),
-                    ),
+                    generation: InstanceStateGeneration::from(
+                        instance.runtime().generation,
+                    )
+                    .next()
+                    .into(),
                     propolis_id: None,
                     dst_propolis_id: None,
                     migration_id: None,
@@ -1990,6 +1993,43 @@ mod test {
             )
             .await
             .unwrap();
+
+        // Hard delete any remaining VMM records for this instance. The
+        // instance-update saga doesn't unwind changes to VMM records, and we
+        // are about to delete the instance record directly rather than going
+        // through the normal deletion path, which requires the VMMs to be
+        // cleaned up first. If we leave live VMM rows behind pointing at a
+        // deleted instance, the `instance_watcher` background task may try to
+        // health check them and trip debug assertions on the (deleted
+        // instance, live VMM) state pair.
+        {
+            use async_bb8_diesel::AsyncRunQueryDsl;
+            use diesel::prelude::*;
+            use nexus_db_schema::schema::vmm::dsl as vmm_dsl;
+            use omicron_uuid_kinds::SledUuid;
+            let nexus = &cptestctx.server.server_context().nexus;
+            let datastore = nexus.datastore();
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+            let vmms: Vec<(Uuid, Uuid)> = diesel::delete(vmm_dsl::vmm)
+                .filter(vmm_dsl::instance_id.eq(instance.id()))
+                .filter(vmm_dsl::time_deleted.is_null())
+                .returning((vmm_dsl::id, vmm_dsl::sled_id))
+                .get_results_async(&*conn)
+                .await
+                .expect("should be able to delete the test VMMs");
+
+            // Also unregister the VMMs from their simulated sled-agents, so
+            // that the sim agents' state stays consistent with the database.
+            for (vmm_id, sled_id) in vmms {
+                nexus
+                    .sled_client(&SledUuid::from_untyped_uuid(sled_id))
+                    .await
+                    .expect("the VMM's sled should exist")
+                    .vmm_unregister(&PropolisUuid::from_untyped_uuid(vmm_id))
+                    .await
+                    .expect("should be able to unregister the VMM");
+            }
+        }
 
         test_helpers::instance_delete_by_name(
             cptestctx,
@@ -2183,9 +2223,11 @@ mod test {
                 &instance_id,
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    generation: Generation(
-                        instance.runtime().generation.0.next(),
-                    ),
+                    generation: InstanceStateGeneration::from(
+                        instance.runtime().generation,
+                    )
+                    .next()
+                    .into(),
                     propolis_id: None,
                     dst_propolis_id: None,
                     migration_id: None,
@@ -2928,13 +2970,24 @@ mod test {
             }],
         }];
 
+        let allow_ddm_traffic = false;
         let uplink0_settings = datastore
-            .switch_port_settings_create(&opctx, &uplink0_params, None)
+            .switch_port_settings_create(
+                &opctx,
+                &uplink0_params,
+                None,
+                allow_ddm_traffic,
+            )
             .await
             .expect("should be able to create configuration for uplink0");
 
         let uplink1_settings = datastore
-            .switch_port_settings_create(&opctx, &uplink1_params, None)
+            .switch_port_settings_create(
+                &opctx,
+                &uplink1_params,
+                None,
+                allow_ddm_traffic,
+            )
             .await
             .expect("should be able to create configuration for uplink1");
 

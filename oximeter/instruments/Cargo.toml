@@ -31,7 +31,7 @@ uuid = { workspace = true, optional = true }
 omicron-workspace-hack.workspace = true
 
 [features]
-default = ["http-instruments", "cpu", "datalink", "zfs", "zone"]
+default = ["http-instruments", "cpu", "datalink", "opte_port", "zfs", "zone"]
 http-instruments = [
     "dep:chrono",
     "dep:dropshot",
@@ -59,6 +59,7 @@ kstat = [
 ]
 cpu = ["kstat"]
 datalink = ["kstat"]
+opte_port = ["kstat"]
 zfs = [
     "dep:anyhow",
     "dep:illumos-utils",

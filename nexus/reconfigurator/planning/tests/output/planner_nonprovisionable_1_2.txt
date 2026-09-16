@@ -4,6 +4,7 @@ to:   blueprint 86df79ea-8652-477a-960e-32c21f46d255
  MODIFIED SLEDS:
 
   sled 48d95fef-bc9f-4f50-9a53-1e075836291d (active -> decommissioned, config generation 2 -> 3):
+    update disposition:   available (generation 1) (unchanged)
 
     measurements:
     ---------------------------
@@ -217,6 +218,7 @@ to:   blueprint 86df79ea-8652-477a-960e-32c21f46d255
 
 
   sled 75bc286f-2b4b-482c-9431-59272af529da (active, config generation 2 -> 3):
+    update disposition:   available (generation 1) (unchanged)
 
     measurements:
     ---------------------------
@@ -342,6 +344,7 @@ to:   blueprint 86df79ea-8652-477a-960e-32c21f46d255
 
 
   sled affab35f-600a-4109-8ea0-34a067a4e0bc (active, config generation 2 -> 3):
+    update disposition:   available (generation 1) (unchanged)
 
     measurements:
     ---------------------------

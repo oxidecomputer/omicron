@@ -12,6 +12,7 @@ use expectorate::assert_contents;
 use gateway_client::ClientInfo as _;
 use http::StatusCode;
 use nexus_test_utils::background::activate_background_task;
+use nexus_test_utils::background::run_blueprint_rendezvous;
 use nexus_test_utils::wait_for_producer;
 use nexus_test_utils::{OXIMETER_UUID, PRODUCER_UUID};
 use nexus_test_utils_macros::nexus_test;
@@ -130,6 +131,7 @@ async fn test_omdb_usage_errors() {
         &["nexus", "sleds"],
         &["sled-agent"],
         &["sled-agent", "zones"],
+        &["sled-agent", "network-config"],
         &["oximeter", "--help"],
         &["oxql", "--help"],
         // Mispelled argument
@@ -245,6 +247,14 @@ async fn test_omdb_success_cases() {
     activate_background_task(lockstep_client, "fm_analysis").await;
     activate_background_task(lockstep_client, "fm_rendezvous").await;
     activate_background_task(lockstep_client, "fm_sitrep_history_pruner").await;
+
+    // Populate the `rendezvous_sled_bp_availability` table deterministically so
+    // the BP AVAIL column in `omdb db sleds` has data present in it. Run
+    // this twice: the first pass populates the table (unless a watch-triggered
+    // activation already did), and the second reaches the steady state
+    // asserted by the expectorate output.
+    run_blueprint_rendezvous(&cptestctx.lockstep_client).await;
+    run_blueprint_rendezvous(&cptestctx.lockstep_client).await;
 
     let mut output = String::new();
 
@@ -574,7 +584,12 @@ async fn test_omdb_success_cases() {
     ];
     let mut bundle_output = String::new();
     let p = postgres_url.clone();
-    let dns = cptestctx.internal_dns.dns_server.local_address().to_string();
+    let dns = cptestctx
+        .internal_dns
+        .dns_server
+        .sole_local_address()
+        .expect("exactly one internal DNS address")
+        .to_string();
     do_run_no_redactions(
         &mut bundle_output,
         move |exec| exec.env("OMDB_DB_URL", &p).env("OMDB_DNS_SERVER", &dns),
@@ -615,7 +630,12 @@ async fn test_omdb_success_cases() {
         std::fs::File::create(&stdout_path).expect("create stdout capture");
     let cmd_path_owned = cmd_path.to_path_buf();
     let p = postgres_url.clone();
-    let dns = cptestctx.internal_dns.dns_server.local_address().to_string();
+    let dns = cptestctx
+        .internal_dns
+        .dns_server
+        .sole_local_address()
+        .expect("exactly one internal DNS address")
+        .to_string();
     let stream_tempdir = tmpdir.path().to_owned();
     let exit_status = tokio::task::spawn_blocking(move || {
         Exec::cmd(&cmd_path_owned)
@@ -703,8 +723,21 @@ async fn test_omdb_env_settings(cptestctx: &ControlPlaneTestContext) {
     let ox_url = format!("http://{}/", cptestctx.oximeter.server_address());
     let ox_test_producer = cptestctx.producer.address().ip();
     let ch_url = format!("http://{}/", cptestctx.clickhouse.http_address());
-    let dns_sockaddr = cptestctx.internal_dns.dns_server.local_address();
+    let dns_sockaddr = cptestctx
+        .internal_dns
+        .dns_server
+        .sole_local_address()
+        .expect("exactly one internal DNS address");
     let mut output = String::new();
+
+    // The blueprint_rendezvous task needs an inventory collection to run.
+    cptestctx
+        .wait_for_at_least_one_inventory_collection(Duration::from_secs(60))
+        .await;
+
+    // Populate the `rendezvous_sled_bp_availability` table deterministically so
+    // the BP AVAIL column in `omdb db sleds` has data present in it.
+    run_blueprint_rendezvous(&cptestctx.lockstep_client).await;
 
     // Database URL
     // Case 1: specified on the command line

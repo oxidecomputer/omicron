@@ -11,6 +11,7 @@ use super::instance::{self, SimInstance};
 use super::storage::CrucibleData;
 use super::storage::Storage;
 use crate::artifact_store::ArtifactStore;
+use crate::instance_manager::VmmRegistrationDisallowedReason;
 use crate::nexus::NexusClient;
 use crate::sim::SimulatedUpstairs;
 use crate::sim::simulatable::Simulatable;
@@ -24,15 +25,13 @@ use dropshot::Body;
 use dropshot::HttpError;
 use futures::Stream;
 use iddqd::IdOrdMap;
-use omicron_common::api::external::{
-    ByteCount, Error, Generation, ResourceType,
-};
+use omicron_common::api::external::{ByteCount, Error, ResourceType};
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::shared::{
     ResolvedVpcRoute, ResolvedVpcRouteSet, ResolvedVpcRouteState, RouterId,
     RouterKind, RouterVersion, VirtualNetworkInterfaceHost,
 };
-use omicron_common::disk::{DiskIdentity, DiskVariant};
+use omicron_generation_kinds::Generation;
 use omicron_uuid_kinds::{
     DatasetUuid, GenericUuid, PhysicalDiskUuid, PropolisUuid, SledUuid,
     SupportBundleUuid, ZpoolUuid,
@@ -45,9 +44,15 @@ use propolis_client::{
 };
 use range_requests::PotentialRange;
 use sled_agent_health_monitor::HealthMonitorHandle;
+use sled_agent_scrimlet_reconcilers::{
+    ScrimletReconcilers, ScrimletReconcilersMode, ScrimletStatus,
+    SledAgentNetworkingInfo,
+};
 use sled_agent_types::attached_subnet::{AttachedSubnet, AttachedSubnets};
 use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
+use sled_agent_types::disk::DiskIdentity;
 use sled_agent_types::disk::DiskStateRequested;
+use sled_agent_types::disk::DiskVariant;
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::early_networking::PortConfig;
 use sled_agent_types::early_networking::RackNetworkConfig;
@@ -59,20 +64,23 @@ use sled_agent_types::instance::{
 };
 use sled_agent_types::inventory::{
     ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
-    ConfigReconcilerInventoryStatus, FmdInventory, Inventory, InventoryDataset,
-    InventoryDisk, InventoryZpool, OmicronFileSourceResolverInventory,
-    OmicronSledConfig, SingleMeasurementInventory, SledRole, ZpoolHealth,
+    ConfigReconcilerInventoryStatus, CurrentUpdateDisposition, FmdInventory,
+    InstanceManagerStatus, Inventory, InventoryDataset, InventoryDisk,
+    InventoryZpool, OmicronFileSourceResolverInventory, OmicronSledConfig,
+    OmicronSledUpdateDisposition, SingleMeasurementInventory, ZpoolHealth,
 };
 use sled_agent_types::support_bundle::SupportBundleMetadata;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
+use tokio::sync::watch;
 use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
@@ -111,11 +119,16 @@ pub struct SledAgent {
     /// When > 0, local storage ensure/delete operations decrement this
     /// counter and return 503 Service Unavailable.
     local_storage_error_count: AtomicU32,
-    pub bootstore_network_config: Mutex<bootstore::NetworkConfig>,
-    pub(super) repo_depot:
-        dropshot::HttpServer<ArtifactStore<SimArtifactStorage>>,
+    bootstore_network_config: watch::Sender<bootstore::NetworkConfig>,
+    pub repo_depot: dropshot::HttpServer<ArtifactStore<SimArtifactStorage>>,
     pub log: Logger,
     health_monitor: HealthMonitorHandle,
+    /// Watch channel that sends the deserialized [`SystemNetworkingConfig`]
+    /// whenever Nexus writes a new bootstore config. Present on all sim sleds;
+    /// only scrimlet sleds subscribe to it via [`Self::start_scrimlet_reconcilers`].
+    network_config_tx: watch::Sender<SystemNetworkingConfig>,
+    /// Keeps the scrimlet reconcilers alive.
+    scrimlet_reconcilers: ScrimletReconcilers,
 }
 
 impl SledAgent {
@@ -136,29 +149,31 @@ impl SledAgent {
         let instance_log = log.new(o!("kind" => "instances"));
         let storage_log = log.new(o!("kind" => "storage"));
 
-        let bootstore_network_config = Mutex::new(
-            EarlyNetworkConfigEnvelope::from(&SystemNetworkingConfig {
-                rack_network_config: RackNetworkConfig {
-                    rack_subnet: Ipv6Net::new(Ipv6Addr::UNSPECIFIED, 56)
-                        .unwrap(),
-                    infra_ip_first: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-                    infra_ip_last: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-                    // The simulated sled-agent doesn't do real uplink setup,
-                    // but `UplinkPorts` must be non-empty, so use a single
-                    // placeholder port.
-                    ports: UplinkPorts::new(vec![PortConfig::empty_for_tests(
-                        "qsfp0",
-                    )])
-                    .expect("placeholder port list is non-empty"),
-                    bgp: Vec::new(),
-                    bfd: Vec::new(),
-                },
-                // TODO-correctness Can we fill this in for the simulated
-                // sled-agent?
-                blueprint_external_networking_config: None,
-            })
-            .serialize_to_bootstore_with_generation(0),
-        );
+        let sys_net_config = SystemNetworkingConfig {
+            rack_network_config: RackNetworkConfig {
+                rack_subnet: Ipv6Net::new(Ipv6Addr::UNSPECIFIED, 56).unwrap(),
+                infra_ip_first: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                infra_ip_last: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                // The simulated sled-agent doesn't do real uplink setup,
+                // but `UplinkPorts` must be non-empty, so use a single
+                // placeholder port.
+                ports: UplinkPorts::new(vec![PortConfig::empty_for_tests(
+                    "qsfp0",
+                )])
+                .expect("placeholder port list is non-empty"),
+                bgp: Vec::new(),
+                bfd: Vec::new(),
+            },
+            // TODO-correctness Can we fill this in for the simulated
+            // sled-agent?
+            blueprint_external_networking_config: None,
+        };
+
+        let initial_bootstore =
+            EarlyNetworkConfigEnvelope::from(&sys_net_config)
+                .serialize_to_bootstore_with_generation(0);
+
+        let (bootstore_network_config, _) = watch::channel(initial_bootstore);
 
         let storage = Storage::new(
             id.into_untyped_uuid(),
@@ -175,6 +190,16 @@ impl SledAgent {
                 .start(&log, &config.dropshot);
 
         let health_monitor = HealthMonitorHandle::stub();
+
+        let (network_config_tx, _) = watch::channel(sys_net_config);
+
+        tokio::spawn(forward_network_config_to_reconcilers(
+            bootstore_network_config.subscribe(),
+            network_config_tx.clone(),
+            log.clone(),
+        ));
+
+        let scrimlet_reconcilers = ScrimletReconcilers::new(&log);
 
         Arc::new(SledAgent {
             id,
@@ -200,14 +225,49 @@ impl SledAgent {
             log,
             bootstore_network_config,
             health_monitor,
+            network_config_tx,
+            scrimlet_reconcilers,
         })
+    }
+
+    pub fn current_bootstore_network_config(&self) -> bootstore::NetworkConfig {
+        self.bootstore_network_config.borrow().clone()
+    }
+
+    pub(super) fn set_bootstore_network_config(
+        &self,
+        config: bootstore::NetworkConfig,
+    ) {
+        self.bootstore_network_config.send_modify(|c| *c = config);
+    }
+
+    /// Start the scrimlet reconcilers pointing at the given switch zone service
+    /// addresses. Must only be called once and only on scrimlet sleds.
+    pub fn start_scrimlet_reconcilers(&self, mode: ScrimletReconcilersMode) {
+        // Reconcilers already exist; just provide networking info and mark as
+        // scrimlet.
+        self.scrimlet_reconcilers.set_sled_agent_networking_info_once(
+            SledAgentNetworkingInfo {
+                system_networking_config_rx: self.network_config_tx.subscribe(),
+                mode,
+            },
+        );
+        self.scrimlet_reconcilers.set_scrimlet_status(ScrimletStatus::Scrimlet);
+    }
+
+    /// Returns the current status of the scrimlet reconcilers.
+    pub fn scrimlet_reconcilers_status(
+        &self,
+    ) -> bootstrap_agent_lockstep_types::scrimlet_reconcilers::ScrimletReconcilersStatus
+    {
+        self.scrimlet_reconcilers.status()
     }
 
     pub async fn instance_register(
         self: &Arc<Self>,
         propolis_id: PropolisUuid,
         instance: InstanceEnsureBody,
-    ) -> Result<SledVmmState, Error> {
+    ) -> Result<SledVmmState, HttpError> {
         let InstanceEnsureBody {
             vmm_spec,
             local_config,
@@ -222,10 +282,31 @@ impl SledAgent {
         // with more than 16 CPUs.
         let ncpus = spec.board.cpus;
         if ncpus > 16 {
-            return Err(Error::internal_error(
-                "could not allocate an instance: ran out of CPUs!",
+            return Err(HttpError::for_internal_error(
+                "could not allocate an instance: ran out of CPUs!".to_owned(),
             ));
         };
+
+        // Respond with a fake 503 failure if we're evacuating. This is
+        // less-than-fully-faithful to real sled-agent in at least one way: real
+        // sled-agent will also return a 503 if it has no config. We don't do
+        // that here because sim-sled-agent never gets a config if it isn't
+        // explicitly given one.
+        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
+            if let Some(config) = self.omicron_sled_config() {
+                match config.update_disposition {
+                    OmicronSledUpdateDisposition::Available => (),
+                    OmicronSledUpdateDisposition::Evacuating => {
+                        let reason =
+                            VmmRegistrationDisallowedReason::SledEvacuating;
+                        return Err(HttpError::for_unavail(
+                            Some(reason.http_error_code().to_string()),
+                            "sim sled-agent is evacuating".to_owned(),
+                        ));
+                    }
+                }
+            }
+        }
 
         // Make sure each file backend was ensured before changing any state
         for (_id, disk) in vmm_spec.file_backends() {
@@ -339,7 +420,12 @@ impl SledAgent {
                 unreachable!("already verified Crucible disks have UUID keys");
             };
 
-            let vcr = serde_json::from_str(&disk_request.request_json)?;
+            let vcr = serde_json::from_str(&disk_request.request_json)
+                .map_err(|err| {
+                    HttpError::for_internal_error(
+                        InlineErrorChain::new(&err).to_string(),
+                    )
+                })?;
             self.simulated_upstairs.map_id_to_vcr(*id, &vcr);
         }
 
@@ -867,13 +953,24 @@ impl SledAgent {
         Ok(addr)
     }
 
-    pub fn inventory(&self, addr: SocketAddr) -> anyhow::Result<Inventory> {
+    pub async fn inventory(
+        &self,
+        addr: SocketAddr,
+    ) -> anyhow::Result<Inventory> {
         let sled_agent_address = match addr {
             SocketAddr::V4(_) => {
                 bail!("sled_agent_ip must be v6 for inventory")
             }
             SocketAddr::V6(v6) => v6,
         };
+
+        // TODO-correctness Unlike real sled-agent, the `InstanceManagerStatus`
+        // we report view is _not_ atomic - we acquire separate locks to fill
+        // the number of VMMs and the update disposition. If that becomes
+        // problematic in tests, we'll need to combine these (probably by moving
+        // the disposition into `self.vmms`, which is how sled-agent proper
+        // handles this).
+        let num_registered_vmms = self.vmms.size().await;
 
         let storage = self.storage.lock();
 
@@ -896,10 +993,23 @@ impl SledAgent {
         .into_iter()
         .collect();
 
+        let instance_manager_status = InstanceManagerStatus {
+            update_disposition: match maybe_sled_config
+                .as_ref()
+                .map(|c| c.update_disposition)
+            {
+                Some(disposition) => {
+                    CurrentUpdateDisposition::Known(disposition)
+                }
+                None => CurrentUpdateDisposition::ConfigNotAvailable,
+            },
+            num_registered_vmms,
+        };
+
         Ok(Inventory {
             sled_id: self.id,
             sled_agent_address,
-            sled_role: SledRole::Scrimlet,
+            sled_role: self.config.sled_role,
             baseboard_id: self.config.hardware.baseboard.clone().into(),
             usable_hardware_threads: self.config.hardware.hardware_threads,
             usable_physical_ram: ByteCount::try_from(
@@ -966,6 +1076,7 @@ impl SledAgent {
             },
             last_reconciliation: maybe_sled_config
                 .map(ConfigReconcilerInventory::debug_assume_success),
+            instance_manager_status,
             // TODO: simulate the file source resolver with greater fidelity
             file_source_resolver: OmicronFileSourceResolverInventory::new_fake(
             ),
@@ -1144,6 +1255,46 @@ impl SledAgent {
             request.dataset_id,
             request,
         );
+    }
+}
+
+/// Watches `bootstore_rx` for changes and forwards deserialized
+/// [`SystemNetworkingConfig`] values to `network_config_tx`.
+async fn forward_network_config_to_reconcilers(
+    mut bootstore_rx: watch::Receiver<bootstore::NetworkConfig>,
+    network_config_tx: watch::Sender<SystemNetworkingConfig>,
+    log: slog::Logger,
+) {
+    loop {
+        if bootstore_rx.changed().await.is_err() {
+            slog::error!(
+                log,
+                "bootstore_network_config sender dropped - \
+                 bridge task exiting",
+            );
+            return;
+        }
+        let config = bootstore_rx.borrow_and_update().clone();
+        match EarlyNetworkConfigEnvelope::deserialize_from_bootstore(&config)
+            .and_then(|e| e.deserialize_body())
+        {
+            Ok(system_config) => {
+                slog::info!(
+                    log,
+                    "received new network config from bootstore";
+                    "generation" => %config.generation,
+                );
+                network_config_tx.send_modify(|c| *c = system_config);
+            }
+            Err(e) => {
+                slog::error!(
+                    log,
+                    "failed to deserialize bootstore config; \
+                     will wait for new config then try again";
+                    "error" => %e,
+                );
+            }
+        }
     }
 }
 

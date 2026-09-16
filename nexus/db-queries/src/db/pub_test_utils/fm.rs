@@ -20,7 +20,8 @@ use nexus_types::fm::SitrepMetadata;
 use nexus_types::internal_api::background::fm_sitrep_history_pruner;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::Generation;
+use omicron_generation_kinds::AlertGeneration;
+use omicron_generation_kinds::SupportBundleGeneration;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -536,8 +537,8 @@ fn test_sitrep(
             creator_id: OmicronZoneUuid::new_v4(),
             comment,
             time_created: Utc::now(),
-            alert_generation: Generation::new(),
-            support_bundle_generation: Generation::new(),
+            alert_generation: AlertGeneration::new(),
+            support_bundle_generation: SupportBundleGeneration::new(),
         },
         cases: Default::default(),
         ereports_by_id: Default::default(),

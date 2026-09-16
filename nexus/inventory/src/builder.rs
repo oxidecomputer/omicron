@@ -36,8 +36,8 @@ use nexus_types::inventory::TimeSync;
 use nexus_types::inventory::Zpool;
 use omicron_cockroach_metrics::CockroachMetric;
 use omicron_cockroach_metrics::PrometheusMetrics;
-use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::CollectionKind;
+use sled_agent_types::disk::M2Slot;
 use sled_agent_types::inventory::Inventory;
 use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
@@ -657,6 +657,7 @@ impl CollectionBuilder {
             ledgered_sled_config: inventory.ledgered_sled_config,
             reconciler_status: inventory.reconciler_status,
             last_reconciliation: inventory.last_reconciliation,
+            instance_manager_status: inventory.instance_manager_status,
             file_source_resolver: inventory.file_source_resolver,
             smf_services_enabled_not_online: inventory
                 .smf_services_enabled_not_online,

@@ -26,10 +26,10 @@ use gateway_messages::UpdateId;
 use gateway_messages::UpdateInProgressStatus;
 use hubtools::RawHubrisImage;
 use nexus_types::inventory::Caboose;
-use omicron_common::disk::M2Slot;
 use sha2::Sha256;
 use sha3::Digest;
 use sha3::Sha3_256;
+use sled_agent_types::disk::M2Slot;
 use tokio::sync::mpsc;
 
 pub(crate) struct SimSpUpdate {

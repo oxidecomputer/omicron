@@ -6,10 +6,10 @@
 
 use super::asset::AssetIdentityMetadata;
 use daft::Diffable;
-use omicron_common::disk::DiskVariant;
 use omicron_uuid_kinds::SledUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sled_agent_types_versions::v1::disk::DiskVariant;
 use strum::EnumIter;
 use uuid::Uuid;
 

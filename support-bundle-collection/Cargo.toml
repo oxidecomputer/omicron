@@ -27,7 +27,6 @@ nexus-db-queries.workspace = true
 nexus-networking.workspace = true
 nexus-reconfigurator-preparation.workspace = true
 nexus-types.workspace = true
-omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
 parallel-task-set.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.

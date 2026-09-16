@@ -8,16 +8,14 @@ use dropshot::HttpResponseOk;
 use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Path;
 use dropshot::RequestContext;
-use dropshot::StreamingBody;
 use dropshot::TypedBody;
 use gateway_client::types::IgnitionCommand;
-use omicron_uuid_kinds::RackInitUuid;
+use iddqd::IdOrdMap;
 use schemars::JsonSchema;
 use semver::Version;
 use serde::Deserialize;
 use serde::Serialize;
 use sled_hardware_types::BaseboardId;
-use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::net::Ipv6Addr;
 use wicket_common::artifact::ArtifactId;
@@ -33,17 +31,10 @@ use wicket_common::rack_update::AbortUpdateOptions;
 use wicket_common::rack_update::ClearUpdateStateOptions;
 use wicket_common::rack_update::StartUpdateOptions;
 use wicket_common::update_events::EventReport;
-use wicketd_commission_types::rack_setup::BgpAuthKey;
+use wicket_common::update_events::SpEventReport;
 use wicketd_commission_types::rack_setup::BgpAuthKeyId;
-use wicketd_commission_types::rack_setup::CertificateUploadResponse;
-use wicketd_commission_types::rack_setup::PutRssUserConfigInsensitive;
-use wicketd_commission_types::rack_setup::SetBgpAuthKeyStatus;
 use wicketd_commission_types::update::ClearUpdateStateResponse;
 use wicketd_commission_types::update::UpdateTargets;
-
-/// Full release repositories are currently (Dec 2024) 1.8 GiB and are likely to
-/// continue growing.
-const PUT_REPOSITORY_MAX_BYTES: usize = 4 * 1024 * 1024 * 1024;
 
 #[dropshot::api_description]
 pub trait WicketdApi {
@@ -68,19 +59,6 @@ pub trait WicketdApi {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<CurrentRssUserConfig>, HttpError>;
 
-    /// Update (a subset of) the current RSS configuration.
-    ///
-    /// Sensitive values (certificates and password hash) are not set through
-    /// this endpoint.
-    #[endpoint {
-        method = PUT,
-        path = "/rack-setup/config"
-    }]
-    async fn put_rss_config(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<PutRssUserConfigInsensitive>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
-
     /// Get the current status of the multirack join configuration.
     #[endpoint {
         method = GET,
@@ -103,32 +81,6 @@ pub trait WicketdApi {
         body: TypedBody<MultirackJoinConfigBaseUserInput>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
-    /// Add an external certificate.
-    ///
-    /// This must be paired with its private key. They may be posted in either
-    /// order, but one cannot post two certs in a row (or two keys in a row).
-    #[endpoint {
-        method = POST,
-        path = "/rack-setup/config/cert"
-    }]
-    async fn post_rss_config_cert(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<String>,
-    ) -> Result<HttpResponseOk<CertificateUploadResponse>, HttpError>;
-
-    /// Add the private key of an external certificate.
-    ///
-    /// This must be paired with its certificate. They may be posted in either
-    /// order, but one cannot post two keys in a row (or two certs in a row).
-    #[endpoint {
-        method = POST,
-        path = "/rack-setup/config/key"
-    }]
-    async fn post_rss_config_key(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<String>,
-    ) -> Result<HttpResponseOk<CertificateUploadResponse>, HttpError>;
-
     // -- BGP authentication key management
 
     /// Return information about BGP authentication keys, including checking
@@ -147,36 +99,6 @@ pub trait WicketdApi {
         params: TypedBody<GetBgpAuthKeyParams>,
     ) -> Result<HttpResponseOk<GetBgpAuthKeyInfoResponse>, HttpError>;
 
-    /// Set the BGP authentication key for a particular key ID.
-    #[endpoint {
-        method = PUT,
-        path = "/rack-setup/config/bgp/auth-key/{key_id}"
-    }]
-    async fn put_bgp_auth_key(
-        rqctx: RequestContext<Self::Context>,
-        params: Path<PutBgpAuthKeyParams>,
-        body: TypedBody<PutBgpAuthKeyBody>,
-    ) -> Result<HttpResponseOk<PutBgpAuthKeyResponse>, HttpError>;
-
-    /// Update the RSS config recovery silo user password hash.
-    #[endpoint {
-        method = PUT,
-        path = "/rack-setup/config/recovery-user-password-hash"
-    }]
-    async fn put_rss_config_recovery_user_password_hash(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<PutRssRecoveryUserPasswordHash>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
-
-    /// Reset all RSS configuration to their default values.
-    #[endpoint {
-        method = DELETE,
-        path = "/rack-setup/config"
-    }]
-    async fn delete_rss_config(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
-
     /// Query current state of rack setup.
     #[endpoint {
         method = GET,
@@ -185,18 +107,6 @@ pub trait WicketdApi {
     async fn get_rack_setup_state(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<RackOperationStatus>, HttpError>;
-
-    /// Run rack setup.
-    ///
-    /// Will return an error if not all of the rack setup configuration has
-    /// been populated.
-    #[endpoint {
-        method = POST,
-        path = "/rack-setup"
-    }]
-    async fn post_run_rack_setup(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<RackInitUuid>, HttpError>;
 
     /// A status endpoint used to report high level information known to
     /// wicketd.
@@ -214,20 +124,6 @@ pub trait WicketdApi {
         rqctx: RequestContext<Self::Context>,
         body_params: TypedBody<GetInventoryParams>,
     ) -> Result<HttpResponseOk<GetInventoryResponse>, HttpError>;
-
-    /// Upload a TUF repository to the server.
-    ///
-    /// At any given time, wicketd will keep at most one TUF repository in
-    /// memory. Any previously-uploaded repositories will be discarded.
-    #[endpoint {
-        method = PUT,
-        path = "/repository",
-        request_body_max_bytes = PUT_REPOSITORY_MAX_BYTES,
-    }]
-    async fn put_repository(
-        rqctx: RequestContext<Self::Context>,
-        body: StreamingBody,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// An endpoint used to report all available artifacts and event reports.
     ///
@@ -402,26 +298,6 @@ pub struct GetBgpAuthKeyParams {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
-pub struct PutBgpAuthKeyParams {
-    pub key_id: BgpAuthKeyId,
-}
-
-#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Eq)]
-pub struct PutBgpAuthKeyBody {
-    pub key: BgpAuthKey,
-}
-
-#[derive(Clone, Debug, Serialize, JsonSchema, PartialEq)]
-pub struct PutBgpAuthKeyResponse {
-    pub status: SetBgpAuthKeyStatus,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
-pub struct PutRssRecoveryUserPasswordHash {
-    pub hash: omicron_passwords::NewPasswordHash,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct GetInventoryParams {
     /// Refresh the state of these SPs from MGS prior to returning (instead of
     /// returning cached data).
@@ -448,7 +324,7 @@ pub struct GetArtifactsAndEventReportsResponse {
     /// repository.
     pub artifacts: Vec<ArtifactId>,
 
-    pub event_reports: BTreeMap<SpType, BTreeMap<u16, EventReport>>,
+    pub event_reports: IdOrdMap<SpEventReport>,
 }
 
 #[derive(Clone, Debug, JsonSchema, Deserialize)]

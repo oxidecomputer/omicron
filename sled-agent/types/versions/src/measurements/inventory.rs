@@ -11,10 +11,8 @@ use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use omicron_common::api::external;
-use omicron_common::{
-    api::external::{ByteCount, Generation},
-    disk::{DatasetConfig, OmicronPhysicalDiskConfig},
-};
+use omicron_common::api::external::ByteCount;
+use omicron_generation_kinds::Generation;
 use omicron_ledger::Ledgerable;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::{DatasetUuid, OmicronZoneUuid};
@@ -25,6 +23,8 @@ use sled_hardware_types::SledCpuFamily;
 use std::time::Duration;
 
 use crate::v1;
+use crate::v1::disk::DatasetConfig;
+use crate::v1::disk::OmicronPhysicalDiskConfig;
 use crate::v1::inventory::{
     BootPartitionContents, ConfigReconcilerInventoryResult,
     HostPhase2DesiredSlots, InventoryDataset, InventoryDisk, InventoryZpool,

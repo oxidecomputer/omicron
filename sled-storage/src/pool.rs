@@ -5,7 +5,7 @@
 //! ZFS storage pool
 
 use illumos_utils::zpool::{GetInfoError, Zpool, ZpoolInfo, ZpoolName};
-use omicron_common::disk::DiskIdentity;
+use sled_agent_types::disk::DiskIdentity;
 
 /// A ZFS storage pool wrapper that tracks information returned from
 /// `zpool` commands

@@ -11,9 +11,9 @@ use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use omicron_common::address::NEXUS_LOCKSTEP_PORT;
-use omicron_common::api::external::{ByteCount, Generation};
-use omicron_common::disk::{DatasetConfig, OmicronPhysicalDiskConfig};
+use omicron_common::api::external::ByteCount;
 use omicron_common::zpool_name::ZpoolName;
+use omicron_generation_kinds::Generation;
 use omicron_ledger::Ledgerable;
 use omicron_uuid_kinds::{DatasetUuid, MupdateOverrideUuid, OmicronZoneUuid};
 use omicron_uuid_kinds::{PhysicalDiskUuid, SledUuid};
@@ -21,6 +21,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::v1;
+use crate::v1::disk::DatasetConfig;
+use crate::v1::disk::OmicronPhysicalDiskConfig;
 use crate::v1::inventory::Baseboard;
 use crate::v1::inventory::{
     BootPartitionContents, ConfigReconcilerInventoryResult,

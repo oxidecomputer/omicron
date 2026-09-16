@@ -27,16 +27,17 @@ use diesel::result::OptionalExtension;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_schema::schema::alert::dsl as alert_dsl;
+use nexus_types::external_api::alert as external_api;
 use nexus_types::fm::case::AlertRequest;
 use nexus_types::identity::Asset;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::Generation;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
+use omicron_generation_kinds::AlertGeneration;
 use omicron_uuid_kinds::CaseKind;
 use omicron_uuid_kinds::{AlertUuid, CaseUuid, GenericUuid};
 use std::collections::HashSet;
@@ -88,6 +89,8 @@ pub struct AlertFilters {
     cases: Vec<DbTypedUuid<CaseKind>>,
 
     /// Include only alerts with the specified alert classes.
+    ///
+    /// If this is empty, all alert classes will be included.
     classes: Vec<model::AlertClass>,
 
     /// If `true`, include only alerts that have been fully dispatched.
@@ -239,6 +242,45 @@ impl AlertFilters {
     }
 }
 
+impl TryFrom<external_api::AlertListParams> for AlertFilters {
+    type Error = Error;
+    fn try_from(
+        params: external_api::AlertListParams,
+    ) -> Result<Self, Self::Error> {
+        let external_api::AlertListParams { alert_class, start_time, end_time } =
+            params;
+
+        let mut filters = Self::default();
+        if let Some(start_time) = start_time {
+            filters = filters.after(start_time)?;
+        }
+        if let Some(end_time) = end_time {
+            filters = filters.before(end_time)?;
+        }
+
+        if let Some(alert_class) = alert_class {
+            let subscription =
+                model::AlertSubscriptionKind::try_from(alert_class)?;
+            let classes = subscription.matching_classes()?.collect::<Vec<_>>();
+
+            // If the provided glob doesn't match any classes, give up.
+            if classes.is_empty() {
+                return Err(Error::non_resourcetype_not_found(format!(
+                    "alert class glob '{subscription}' does not match any \
+                     existing alert classes"
+                )));
+            }
+
+            // The `AlertFilters::with_classes` method will `into_iter()` the
+            // argument and `extend()` the existing list of classes with it.
+            // This is not necessary here, since we just created the alert
+            // filters and are not going to add any other classes to it.
+            filters.classes = classes;
+        }
+        Ok(filters)
+    }
+}
+
 impl DataStore {
     /// Insert an alert row, returning the inserted alert on success.
     ///
@@ -294,14 +336,14 @@ impl DataStore {
         opctx: &OpContext,
         request: &AlertRequest,
         case_id: CaseUuid,
-        expected_alert_generation: Generation,
+        expected_alert_generation: AlertGeneration,
     ) -> Result<Alert, FmRendezvousAlertCreateError> {
         let conn = self.pool_connection_authorized(opctx).await?;
         let alert = Alert::for_fm_alert_request(request, case_id);
 
         let guarded = SitrepGuardedInsert::<Alert, _>::new(
             alert.id().into_untyped_uuid(),
-            expected_alert_generation.into(),
+            expected_alert_generation,
             Self::alert_insert_query(alert),
         );
 
@@ -464,6 +506,7 @@ impl DataStore {
         pagparams: &DataPageParams<'_, (DateTime<Utc>, Uuid)>,
     ) -> ListResultVec<(Alert, Option<fm::RendezvousAlertCreated>)> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+
         Self::alert_list_matching_query(filters, pagparams)
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -482,6 +525,8 @@ impl DataStore {
             (alert_dsl::time_created, alert_dsl::id),
             &pagparams,
         )
+        // The singleton probe alert should not appear in the alert list.
+        .filter(alert_dsl::alert_class.ne(model::AlertClass::Probe))
         .left_join(marker_dsl::rendezvous_alert_created)
         .select((
             Alert::as_select(),
@@ -548,6 +593,7 @@ mod tests {
     use nexus_types::alert::test_alerts;
     use nexus_types::fm::Sitrep;
     use nexus_types::fm::SitrepMetadata;
+    use omicron_generation_kinds::SupportBundleGeneration;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::CaseUuid;
     use omicron_uuid_kinds::CollectionUuid;
@@ -556,7 +602,7 @@ mod tests {
     use serde_json::json;
     use std::num::NonZeroU32;
 
-    fn make_sitrep(alert_generation: Generation) -> Sitrep {
+    fn make_sitrep(alert_generation: AlertGeneration) -> Sitrep {
         Sitrep {
             metadata: SitrepMetadata {
                 id: SitrepUuid::new_v4(),
@@ -567,7 +613,7 @@ mod tests {
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
                 alert_generation,
-                support_bundle_generation: Generation::new(),
+                support_bundle_generation: SupportBundleGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -804,7 +850,11 @@ mod tests {
         let conn = datastore.pool_connection_for_tests().await.unwrap();
 
         datastore
-            .fm_sitrep_insert(opctx, make_sitrep(Generation::from_u32(1)), None)
+            .fm_sitrep_insert(
+                opctx,
+                make_sitrep(AlertGeneration::from_u32(1)),
+                None,
+            )
             .await
             .unwrap();
 
@@ -815,7 +865,7 @@ mod tests {
                 opctx,
                 &make_alert_request(alert_id),
                 case_id,
-                Generation::from_u32(1),
+                AlertGeneration::from_u32(1),
             )
             .await
             .unwrap();
@@ -828,10 +878,7 @@ mod tests {
             .first_async::<RendezvousAlertCreated>(&*conn)
             .await
             .unwrap();
-        assert_eq!(
-            marker.created_at_generation,
-            nexus_db_model::Generation::new()
-        );
+        assert_eq!(marker.created_at_generation(), AlertGeneration::new());
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -847,7 +894,11 @@ mod tests {
         let conn = datastore.pool_connection_for_tests().await.unwrap();
 
         datastore
-            .fm_sitrep_insert(opctx, make_sitrep(Generation::from_u32(1)), None)
+            .fm_sitrep_insert(
+                opctx,
+                make_sitrep(AlertGeneration::from_u32(1)),
+                None,
+            )
             .await
             .unwrap();
 
@@ -866,7 +917,7 @@ mod tests {
                 opctx,
                 &make_alert_request(alert_id),
                 case_id,
-                Generation::from_u32(1),
+                AlertGeneration::from_u32(1),
             )
             .await
             .unwrap_err();
@@ -895,7 +946,11 @@ mod tests {
 
         // Latest sitrep is at generation 5; the rendezvous task expects 1.
         datastore
-            .fm_sitrep_insert(opctx, make_sitrep(Generation::from_u32(5)), None)
+            .fm_sitrep_insert(
+                opctx,
+                make_sitrep(AlertGeneration::from_u32(5)),
+                None,
+            )
             .await
             .unwrap();
 
@@ -904,7 +959,7 @@ mod tests {
                 opctx,
                 &make_alert_request(AlertUuid::new_v4()),
                 CaseUuid::new_v4(),
-                Generation::new(),
+                AlertGeneration::new(),
             )
             .await
             .unwrap_err();
@@ -933,11 +988,11 @@ mod tests {
                 .values(vec![
                     RendezvousAlertCreated::new(
                         present_a,
-                        nexus_db_model::Generation::new(),
+                        AlertGeneration::new(),
                     ),
                     RendezvousAlertCreated::new(
                         present_b,
-                        nexus_db_model::Generation::new(),
+                        AlertGeneration::new(),
                     ),
                 ])
                 .execute_async(&*conn)

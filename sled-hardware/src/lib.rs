@@ -4,9 +4,9 @@
 
 use std::collections::HashMap;
 
-use omicron_common::disk::DiskIdentity;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sled_agent_types::disk::DiskIdentity;
 use sled_hardware_types::Baseboard;
 use slog::{Logger, info};
 

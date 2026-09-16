@@ -34,7 +34,8 @@ use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::CockroachDbSettings;
-use nexus_types::deployment::OmicronZoneExternalSnatIp;
+use nexus_types::deployment::OmicronZoneExternalSnat;
+use nexus_types::deployment::OmicronZoneExternalSnatIpv6;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::SledDisk;
@@ -54,13 +55,10 @@ use nexus_types::inventory::TimeSync;
 use nexus_types::tuf_repo::TufRepoDescription;
 use omicron_common::address::Ipv4Range;
 use omicron_common::api::external::ByteCount;
-use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_common::disk::DatasetKind;
-use omicron_common::disk::DiskIdentity;
-use omicron_common::disk::M2Slot;
 use omicron_common::policy::BOUNDARY_NTP_REDUNDANCY;
 use omicron_common::policy::COCKROACHDB_REDUNDANCY;
 use omicron_common::policy::CRUCIBLE_PANTRY_REDUNDANCY;
@@ -71,6 +69,7 @@ use omicron_deployment_graph::DagEdge;
 use omicron_deployment_graph::DagEdgesFile;
 use omicron_deployment_graph::DeploymentUnitName;
 use omicron_deployment_graph::OMICRON_LS_APIS_PATH;
+use omicron_generation_kinds::{NexusGeneration, SledConfigGeneration};
 use omicron_test_utils::dev::test_setup_log;
 use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -80,12 +79,14 @@ use omicron_uuid_kinds::ZpoolUuid;
 use oxnet::Ipv6Net;
 use reconfigurator_cli::test_utils::ReconfiguratorCliTestState;
 use semver::Version;
+use sled_agent_types::disk::DiskIdentity;
+use sled_agent_types::disk::M2Slot;
 use sled_agent_types::inventory::ConfigReconcilerInventory;
 use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
 use sled_agent_types::inventory::NetworkInterface;
 use sled_agent_types::inventory::NetworkInterfaceKind;
 use sled_agent_types::inventory::OmicronZoneType;
-use sled_agent_types::inventory::SourceNatConfigGeneric;
+use sled_agent_types::inventory::SourceNatConfigV6;
 use sled_agent_types::inventory::ZoneKind;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
@@ -139,7 +140,7 @@ fn clickhouse_policy(mode: ClickhouseMode) -> ClickhousePolicy {
 
 fn get_nexus_ids_at_generation(
     blueprint: &Blueprint,
-    generation: Generation,
+    generation: NexusGeneration,
 ) -> BTreeSet<OmicronZoneUuid> {
     blueprint
         .in_service_zones()
@@ -272,7 +273,7 @@ fn test_basic_add_sled() {
     // We have defined elsewhere that the first generation contains no
     // zones.  So the first one with zones must be newer.  See
     // OmicronZonesConfig::INITIAL_GENERATION.
-    assert!(sled_added.sled_agent_generation > Generation::new());
+    assert!(sled_added.sled_agent_generation > SledConfigGeneration::new());
     assert_eq!(*sled_id, new_sled_id);
     assert_eq!(sled_added.zones.len(), 1);
     assert!(matches!(
@@ -685,17 +686,23 @@ fn test_reuse_external_ips_from_expunged_zones() {
     println!("2 -> 3 (maximum Nexus):\n{}", diff.display());
 
     // Planning succeeded, but let's prove that we reused the IP address!
-    let expunged_ip = zone.zone_type.external_networking().unwrap().0.ip();
+    let expunged_ip = zone
+        .zone_type
+        .external_networking()
+        .unwrap()
+        .external_ips()
+        .next()
+        .unwrap()
+        .ip();
     let new_zone = blueprint3
         .sleds
         .values()
         .flat_map(|c| c.zones.iter())
         .find(|zone| {
             zone.disposition == BlueprintZoneDisposition::InService
-                && zone
-                    .zone_type
-                    .external_networking()
-                    .map_or(false, |(ip, _)| expunged_ip == ip.ip())
+                && zone.zone_type.external_networking().map_or(false, |net| {
+                    net.external_ips().any(|ip| expunged_ip == ip.ip())
+                })
         })
         .expect("couldn't find that the external IP was reused");
     println!(
@@ -887,9 +894,15 @@ fn test_reuse_external_dns_ips_from_expunged_zones() {
     let mut ips = blueprint3
         .in_service_zones()
         .filter_map(|(_id, zone)| {
-            zone.zone_type
-                .is_external_dns()
-                .then(|| zone.zone_type.external_networking().unwrap().0.ip())
+            zone.zone_type.is_external_dns().then(|| {
+                zone.zone_type
+                    .external_networking()
+                    .unwrap()
+                    .external_ips()
+                    .next()
+                    .unwrap()
+                    .ip()
+            })
         })
         .collect::<Vec<IpAddr>>();
     ips.sort();
@@ -1080,7 +1093,10 @@ fn test_disk_add_expunge_decommission() {
 
     // The initial blueprint configuration has generation 2
     let (sled_id, sled_config) = blueprint1.sleds.first_key_value().unwrap();
-    assert_eq!(sled_config.sled_agent_generation, Generation::from_u32(2));
+    assert_eq!(
+        sled_config.sled_agent_generation,
+        SledConfigGeneration::from_u32(2)
+    );
 
     // All disks should have an `InService` disposition and `Active` state
     for disk in &sled_config.disks {
@@ -1118,7 +1134,10 @@ fn test_disk_add_expunge_decommission() {
     let sled_config = &blueprint2.sleds.first_key_value().unwrap().1;
 
     // The generation goes from 2 -> 3
-    assert_eq!(sled_config.sled_agent_generation, Generation::from_u32(3));
+    assert_eq!(
+        sled_config.sled_agent_generation,
+        SledConfigGeneration::from_u32(3)
+    );
     // One disk should have it's disposition set to
     // `Expunged{ready_for_cleanup: false, ..}`.
     for disk in &sled_config.disks {
@@ -1159,7 +1178,10 @@ fn test_disk_add_expunge_decommission() {
     // The reason for this is because the generation is there primarily to
     // inform the sled-agent that it has work to do, but decommissioning
     // doesn't trigger any sled-agent changes.
-    assert_eq!(sled_config.sled_agent_generation, Generation::from_u32(3));
+    assert_eq!(
+        sled_config.sled_agent_generation,
+        SledConfigGeneration::from_u32(3)
+    );
     // One disk should have its disposition set to
     // `Expunged{ready_for_cleanup: true, ..}`.
     for disk in &sled_config.disks {
@@ -1200,7 +1222,10 @@ fn test_disk_add_expunge_decommission() {
     let sled_config = &blueprint4.sleds.first_key_value().unwrap().1;
 
     // The config generation goes from 3 -> 4
-    assert_eq!(sled_config.sled_agent_generation, Generation::from_u32(4));
+    assert_eq!(
+        sled_config.sled_agent_generation,
+        SledConfigGeneration::from_u32(4)
+    );
     // We should still have 10 disks
     assert_eq!(sled_config.disks.len(), 10);
     // All disks should have their disposition set to
@@ -1729,7 +1754,7 @@ fn test_nexus_allocation_skips_nonprovisionable_sleds() {
             match next {
                 NextCrucibleMutate::Modify => {
                     zone.disposition = BlueprintZoneDisposition::Expunged {
-                        as_of_generation: Generation::new(),
+                        as_of_generation: SledConfigGeneration::new(),
                         ready_for_cleanup: false,
                     };
                     next = NextCrucibleMutate::Remove;
@@ -3616,7 +3641,10 @@ fn test_update_crucible_pantry_before_nexus() {
             let BlueprintZoneType::Nexus(nexus_zone) = &added.zone_type else {
                 panic!("Unexpected zone type: {:?}", added.zone_type);
             };
-            assert_eq!(nexus_zone.nexus_generation, Generation::new().next());
+            assert_eq!(
+                nexus_zone.nexus_generation,
+                NexusGeneration::new().next()
+            );
             assert_eq!(&added.image_source, &image_source);
             modified_sleds += 1;
         }
@@ -3633,9 +3661,9 @@ fn test_update_crucible_pantry_before_nexus() {
     //
     // First, we'll expect the nexus generation to get bumped.
     let active_nexus_zones =
-        get_nexus_ids_at_generation(&blueprint, Generation::new());
+        get_nexus_ids_at_generation(&blueprint, NexusGeneration::new());
     let not_yet_nexus_zones =
-        get_nexus_ids_at_generation(&blueprint, Generation::new().next());
+        get_nexus_ids_at_generation(&blueprint, NexusGeneration::new().next());
 
     assert_eq!(active_nexus_zones.len(), NEXUS_REDUNDANCY);
     assert_eq!(not_yet_nexus_zones.len(), NEXUS_REDUNDANCY);
@@ -4096,15 +4124,17 @@ fn test_update_boundary_ntp() {
                         primary: true,
                         slot: 0,
                     },
-                    external_ip: OmicronZoneExternalSnatIp {
-                        id: ExternalIpUuid::new_v4(),
-                        snat_cfg: SourceNatConfigGeneric::new(
-                            IpAddr::V6(Ipv6Addr::LOCALHOST),
-                            0,
-                            0x4000 - 1,
-                        )
-                        .unwrap(),
-                    },
+                    external_ip: OmicronZoneExternalSnat::Ipv6Only(
+                        OmicronZoneExternalSnatIpv6 {
+                            id: ExternalIpUuid::new_v4(),
+                            snat_cfg: SourceNatConfigV6::new(
+                                Ipv6Addr::LOCALHOST,
+                                0,
+                                0x4000 - 1,
+                            )
+                            .unwrap(),
+                        },
+                    ),
                 },
             );
             Ok(())
@@ -4980,7 +5010,7 @@ fn test_simple_measurements() {
                 // 4 because we plan a zone update
                 assert_eq!(
                     sled_config.sled_agent_generation,
-                    Generation::from_u32(4)
+                    SledConfigGeneration::from_u32(4)
                 );
                 println!("converted after {i} iterations");
                 logctx.cleanup_successful();

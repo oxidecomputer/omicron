@@ -8,7 +8,7 @@ use dropshot::{
     HttpResponseUpdatedNoContent, Path, Query, RequestContext, TypedBody,
 };
 use dropshot_api_manager_types::api_versions;
-use omicron_common::api::external::Generation;
+use omicron_generation_kinds::Generation;
 
 api_versions!([
     // NOTE: These versions will be used across **all three** APIs defined in

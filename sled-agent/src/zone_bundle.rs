@@ -1701,11 +1701,11 @@ mod illumos_tests {
     use chrono::TimeZone;
     use chrono::Timelike;
     use chrono::Utc;
-    use omicron_common::disk::DiskIdentity;
     use rand::RngCore;
     use sled_agent_config_reconciler::AvailableDatasetsReceiver;
     use sled_agent_config_reconciler::InternalDiskDetails;
     use sled_agent_config_reconciler::InternalDisksReceiver;
+    use sled_agent_types::disk::DiskIdentity;
     use slog::Drain;
     use slog::Logger;
     use std::sync::Arc;

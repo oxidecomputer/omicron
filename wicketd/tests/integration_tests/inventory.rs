@@ -98,7 +98,7 @@ async fn test_inventory() {
             stderr: &mut stderr,
         };
 
-        wicket::exec_with_args(wicketd_testctx.wicketd_addr, args, output)
+        wicket::exec_with_args(wicketd_testctx.wicketd_addrs, args, output)
             .await
             .expect("wicket inventory configured-bootstrap-sleds failed");
 

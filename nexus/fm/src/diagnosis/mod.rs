@@ -11,10 +11,12 @@ use crate::SitrepBuilder;
 
 mod physical_disk;
 mod power_shelf;
+mod saga;
 
 pub fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
     physical_disk::analyze(builder)?;
     power_shelf::analyze(builder)?;
+    saga::analyze(builder)?;
     Ok(())
 }
 

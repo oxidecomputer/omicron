@@ -43,7 +43,7 @@ type DiskTestBuilder<'a> = nexus_test_utils::resource_helpers::DiskTestBuilder<
 // The following are a set of helper functions to access Support Bundle APIs
 // through the public interface.
 
-const BUNDLES_URL: &str = "/experimental/v1/system/support-bundles";
+const BUNDLES_URL: &str = "/v1/system/support-bundles";
 
 async fn expect_not_found(
     client: &ClientTestContext,

@@ -301,10 +301,10 @@ mod tests {
         InstallinatorSpec, InstallinatorStepId, StepEvent, StepEventKind,
         StepInfo, StepInfoWithMetadata, StepOutcome, WriteOutput,
     };
-    use omicron_common::disk::M2Slot;
     use omicron_test_utils::dev::test_setup_log;
     use oxide_update_engine_types::events::ExecutionUuid;
     use schemars::JsonSchema;
+    use sled_agent_types::disk::M2Slot;
 
     use super::*;
 

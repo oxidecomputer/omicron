@@ -545,10 +545,10 @@ static SETUP_REQUESTS: LazyLock<Vec<SetupReq>> = LazyLock::new(|| {
             )
             .unwrap(),
             id_routes: vec![
-                "/experimental/v1/system/support-bundles/{id}",
-                "/experimental/v1/system/support-bundles/{id}/download",
-                "/experimental/v1/system/support-bundles/{id}/download/some-file.txt",
-                "/experimental/v1/system/support-bundles/{id}/index",
+                "/v1/system/support-bundles/{id}",
+                "/v1/system/support-bundles/{id}/download",
+                "/v1/system/support-bundles/{id}/download/some-file.txt",
+                "/v1/system/support-bundles/{id}/index",
             ],
         },
         // Create a trusted root for updates

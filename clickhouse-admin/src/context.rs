@@ -23,7 +23,7 @@ use clickhouse_admin_types::{
 use dropshot::{ClientErrorStatusCode, HttpError};
 use flume::{Receiver, Sender, TrySendError};
 use illumos_utils::svcadm::Svcadm;
-use omicron_common::api::external::Generation;
+use omicron_generation_kinds::Generation;
 use oximeter_db::Client as OximeterDbClient;
 use oximeter_db::OXIMETER_VERSION;
 use slog::{Logger, debug, warn};
@@ -790,7 +790,7 @@ mod tests {
     use clickhouse_admin_types::retention::Days;
     use clickhouse_admin_types::retention::RetentionPolicyRequest;
     use dropshot::ErrorStatusCode;
-    use omicron_common::api::external::Generation;
+    use omicron_generation_kinds::Generation;
     use omicron_test_utils::dev;
     use oximeter_db::native::block::Block;
     use oximeter_db::native::block::Column;

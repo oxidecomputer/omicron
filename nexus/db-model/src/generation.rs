@@ -7,7 +7,6 @@ use diesel::deserialize::{self, FromSql};
 use diesel::pg::Pg;
 use diesel::serialize::{self, ToSql};
 use diesel::sql_types;
-use omicron_common::api::external;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
@@ -28,14 +27,14 @@ use std::convert::TryFrom;
 )]
 #[diesel(sql_type = sql_types::BigInt)]
 #[repr(transparent)]
-pub struct Generation(pub external::Generation);
+pub struct Generation(pub omicron_generation_kinds::Generation);
 
-NewtypeFrom! { () pub struct Generation(external::Generation); }
-NewtypeDeref! { () pub struct Generation(external::Generation); }
+NewtypeFrom! { () pub struct Generation(omicron_generation_kinds::Generation); }
+NewtypeDeref! { () pub struct Generation(omicron_generation_kinds::Generation); }
 
 impl Generation {
     pub fn new() -> Self {
-        Self(external::Generation::new())
+        Self(omicron_generation_kinds::Generation::new())
     }
 }
 
@@ -57,16 +56,16 @@ where
     i64: FromSql<sql_types::BigInt, DB>,
 {
     fn from_sql(bytes: DB::RawValue<'_>) -> deserialize::Result<Self> {
-        external::Generation::try_from(i64::from_sql(bytes)?)
+        omicron_generation_kinds::Generation::try_from(i64::from_sql(bytes)?)
             .map(Generation)
             .map_err(|e| e.into())
     }
 }
 
 impl TryFrom<i64> for Generation {
-    type Error = external::GenerationNegativeError;
+    type Error = omicron_generation_kinds::GenerationNegativeError;
 
     fn try_from(value: i64) -> Result<Self, Self::Error> {
-        Ok(Self(external::Generation::try_from(value)?))
+        Ok(Self(omicron_generation_kinds::Generation::try_from(value)?))
     }
 }

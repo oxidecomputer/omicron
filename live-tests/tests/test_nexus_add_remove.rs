@@ -81,7 +81,7 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     let (blueprint1, blueprint2) = blueprint_edit_current_target(
         log,
         &nexus,
-        &|builder: &mut BlueprintBuilder| {
+        |builder: &mut BlueprintBuilder| {
             // We have to tell the builder what image source to use for the new
             // Nexus zone. If we were the planner, we'd check whether we have a
             // TUF repo (or two) then decide whether to use the image from one
@@ -201,7 +201,7 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     let (_blueprint2, blueprint3) = blueprint_edit_current_target(
         log,
         &nexus,
-        &|builder: &mut BlueprintBuilder| {
+        |builder: &mut BlueprintBuilder| {
             builder
                 .sled_expunge_zone(sled_id, new_zone.id)
                 .context("expunging zone")?;

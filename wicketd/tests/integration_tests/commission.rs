@@ -33,6 +33,7 @@ use wicketd_commission_types_versions::latest::rack_setup::{
 use wicketd_commission_types_versions::latest::update::{
     StartUpdateOptions, StartUpdateParams, UpdateState, UpdateTargets,
 };
+use zeroize::Zeroizing;
 
 /// Wait for the SP inventory to become ready.
 async fn wait_for_sp_inventory(
@@ -399,7 +400,9 @@ async fn test_commission_rss_config() {
     // 400.
     let err = ctx
         .commission_client
-        .post_rss_config_key(&PrivateKeyPem("a garbage key".to_string()))
+        .post_rss_config_key(&PrivateKeyPem(Zeroizing::new(
+            "a garbage key".to_string(),
+        )))
         .await
         .expect_err("post_rss_config_key rejects an invalid pair");
     assert_client_error(&err, StatusCode::BAD_REQUEST);

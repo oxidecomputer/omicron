@@ -5,7 +5,7 @@
 //! The stable wicketd commissioning API.
 //!
 //! This API is used by automated tooling such as rkdeploy to commission new
-//! racks. It is a reduced subset of the full, unstable wicketd API.
+//! racks.
 //!
 //! **Automation must always use the stable API!**
 //!

@@ -7,17 +7,14 @@
 pub(crate) mod bootstore_setup;
 mod http_entrypoints_lockstep;
 mod maghemite;
-pub(crate) mod params;
 mod pre_server;
 mod pumpkind;
 mod rack_ops;
 pub(crate) mod rss_handle;
 pub mod secret_retriever;
 pub mod server;
-pub mod sprockets_client;
 mod sprockets_server;
 pub(crate) mod trust_quorum_setup;
-mod views;
 
 pub(crate) use pre_server::BootstrapNetworking;
 pub use rack_ops::RssAccessError;

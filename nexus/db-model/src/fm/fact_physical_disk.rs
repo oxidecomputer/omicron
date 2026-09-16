@@ -156,9 +156,11 @@ fn db_kind(disk_fact: &DiskFact) -> FmFactPhysicalDiskKind {
 }
 
 fn missing_column(kind: FmFactPhysicalDiskKind, column: &str) -> Error {
-    Error::internal_error(&format!(
-        "fm_fact_physical_disk row of kind {kind:?} has a NULL {column}, \
-         violating the CHECK constraint requiring it to be non-NULL for \
-         this kind"
-    ))
+    Error::InternalError {
+        internal_message: format!(
+            "fm_fact_physical_disk row of kind {kind:?} has a NULL {column}, \
+             violating the CHECK constraint requiring it to be non-NULL for \
+             this kind"
+        ),
+    }
 }

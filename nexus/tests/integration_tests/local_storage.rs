@@ -118,6 +118,68 @@ async fn test_reject_creating_local_storage_disk(
         "unsupported value for \"size\": total size must be a multiple of 1 \
         GiB",
     );
+
+    // Reject disks where the size requested is larger than 10 PiB. This is used
+    // as a filter for user requests in order to avoid i64 overflows in the
+    // function that computes the required dataset size for local storage.
+    let error = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&DiskCreate {
+                identity: external::IdentityMetadataCreateParams {
+                    name: "chungus-disk".parse().unwrap(),
+                    description: String::from("chungus"),
+                },
+
+                // One day, we'll get to 100 PiB disks. Not today!
+                size: external::ByteCount::from_gibibytes_u32(
+                    100 * 1024 * 1024,
+                ),
+
+                disk_backend: DiskBackend::Local {},
+            }))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<dropshot::HttpErrorResponseBody>()
+    .unwrap();
+
+    assert_eq!(
+        error.message,
+        "unsupported value for \"size\": requested size over 10 PiB",
+    );
+
+    // Reject disks where the size requested is larger than any zpool in the
+    // inventory. By default, `DiskTest` creates 16GiB disks, so 1 TiB are
+    // right out.
+    let error = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&DiskCreate {
+                identity: external::IdentityMetadataCreateParams {
+                    name: "chungus-disk".parse().unwrap(),
+                    description: String::from("chungus"),
+                },
+
+                size: external::ByteCount::from_gibibytes_u32(1024),
+
+                disk_backend: DiskBackend::Local {},
+            }))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<dropshot::HttpErrorResponseBody>()
+    .unwrap();
+
+    assert_eq!(
+        error.message,
+        "unsupported value for \"size\": requested size is too large to fit \
+        on any physical disk",
+    );
 }
 
 // Test creating a local storage disk larger than MAX_DISK_SIZE_BYTES

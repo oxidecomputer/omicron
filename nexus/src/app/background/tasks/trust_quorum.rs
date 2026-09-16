@@ -19,8 +19,7 @@ use nexus_networking::{
 };
 use nexus_types::internal_api::background::TrustQuorumManagerStatus;
 use nexus_types::trust_quorum::{
-    TrustQuorumConfig as NexusTrustQuorumConfig, TrustQuorumConfigState,
-    TrustQuorumMemberState,
+    TrustQuorumConfig as NexusTrustQuorumConfig, TrustQuorumMemberState,
 };
 use omicron_common::address::{Ipv6Subnet, RACK_PREFIX_LENGTH, get_64_subnet};
 use omicron_uuid_kinds::{RackUuid, SledUuid};
@@ -165,7 +164,7 @@ enum Status {
     CoordinatorNoLongerCommissioned(BaseboardId),
     Preparing,
     Commit(Vec<CommitOpsResults>),
-    Committed(Vec<CommitOpsResults>, Vec<StartSledAgentResults>),
+    CommitAndStartSledAgents(Vec<CommitOpsResults>, Vec<StartSledAgentResults>),
 }
 
 impl Status {
@@ -197,7 +196,7 @@ impl Status {
                     r.write_to_string(&mut s);
                 }
             }
-            Status::Committed(op_results, start_results) => {
+            Status::CommitAndStartSledAgents(op_results, start_results) => {
                 for r in op_results {
                     r.write_to_string(&mut s);
                 }
@@ -228,41 +227,87 @@ async fn drive_reconfiguration(
 
     // If we are preparing, then collect from coordinator, otherwise
     // attempt to commit at unacked nodes.
-    if config.state.is_active() {
+    let status = if config.state.is_active() {
         info!(
             log,
-            "Loaded active trust quorum config from database";
+            "Loaded active trust quorum config from database.";
             "rack_id" => %rack_id,
             "epoch" => %epoch,
             "state" => ?config.state
         );
+        if config.state.is_preparing() {
+            prepare(&log, &opctx, &datastore, config.clone()).await?
+        } else {
+            commit(&log, &opctx, &datastore, config.clone()).await?
+        }
     } else {
         info!(
             log,
-            "Loaded inactive trust quorum config from database. Skipping";
+            "Loaded inactive trust quorum config from database.";
             "rack_id" => %rack_id,
             "epoch" => %epoch,
             "state" => ?config.state
         );
-        return Ok(Status::ConfigInactive);
-    }
+        Status::ConfigInactive
+    };
 
-    // Poll the coordinator for commit acks
-    if config.state.is_preparing() {
-        return prepare(log, opctx, datastore, config).await;
-    }
-
-    // For each unacked node, need to send a `Commit` or `PrepareAndCommit'
+    // We may have committed all members, but some of them may not have started
+    // sled-agents yet.
     //
-    // At this point we know that the configuration is active and we are not
-    // preparing. Therefore we must be committing.
-    commit(log, opctx, datastore, config).await
+    // We continue to retry sending them a `StartSledAgentRequest` until it
+    // starts.
+    let added_sleds = datastore
+        .tq_get_committed_members_without_active_sled(&opctx, authz_tq.clone())
+        .await?;
+
+    if added_sleds.is_empty() {
+        return Ok(status);
+    }
+
+    // At this point, We know we've committed at least some members in this or
+    // prior attempts and need to start their sled-agents. Get the results for
+    // this attempt, if they exist.
+    let commit_results = match status {
+        Status::Commit(commit_results) => commit_results,
+        _ => vec![],
+    };
+
+    // Allocate a subnet and start a sled agent for each sled that needs it
+    let rack_id = config.rack_id;
+    let epoch = config.epoch;
+
+    let existing_sleds: BTreeSet<_> = config
+        .members
+        .iter()
+        .filter_map(|m| {
+            if added_sleds.contains(&m.0) { None } else { Some(m.0.clone()) }
+        })
+        .collect();
+
+    let started_sleds = allocate_subnets_and_start_sled_agents(
+        log,
+        opctx,
+        datastore,
+        rack_id,
+        epoch,
+        added_sleds,
+        existing_sleds,
+    )
+    .await
+    .with_context(|| {
+        format!(
+            "Failed to start sled agents for added sleds for \
+                    rack {rack_id}, epoch {epoch}"
+        )
+    })?;
+
+    return Ok(Status::CommitAndStartSledAgents(commit_results, started_sleds));
 }
 
 async fn prepare(
-    log: Logger,
-    opctx: OpContext,
-    datastore: Arc<DataStore>,
+    log: &Logger,
+    opctx: &OpContext,
+    datastore: &DataStore,
     config: NexusTrustQuorumConfig,
 ) -> Result<Status, Error> {
     // Get a sled agent for the coordinator
@@ -327,9 +372,9 @@ enum CommitOp {
 //
 // Return a unique status for each client that issued operations.
 async fn commit(
-    log: Logger,
-    opctx: OpContext,
-    datastore: Arc<DataStore>,
+    log: &Logger,
+    opctx: &OpContext,
+    datastore: &DataStore,
     nexus_config: NexusTrustQuorumConfig,
 ) -> Result<Status, Error> {
     // All `Commit` or `PrepareAndCommit` requests sent to sled-agents
@@ -407,7 +452,7 @@ async fn commit(
         // Write state back to DB
         let authz_tq =
             authz::TrustQuorumConfig::for_rack_id(nexus_config.rack_id);
-        let state = datastore
+        let _ = datastore
             .tq_update_commit_status(
                 &opctx,
                 authz_tq,
@@ -423,45 +468,7 @@ async fn commit(
                 )
             })?;
 
-        // All sleds have acked commit. Let's see if any are newly added and
-        // therefore require their sled agents to be started.
-        //
-        // TODO: Currently we can only attempt to start sled agents from the
-        // Nexus that committed the configuration. This ensures a single Nexus
-        // issues the attempts, which is necessary because the call to start
-        // sled agents is neither idempotent nor concurrency safe.
-        //
-        // Unfortunately, this means that if the request fails here, it will
-        // never be retried. We'll likely have to debug this by either catching
-        // the error in the current call to the bg task status from omdb
-        // (unlikely), or reading logs.
-        //
-        // We are forced to do this because of urgency. Fixing how
-        // sled-agents get started has been a long standing issue:
-        // https://github.com/oxidecomputer/omicron/issues/4494. We'd like
-        // a reconciler pattern so that we could continuously retry from
-        // nexus in a background task similar to what is described here:
-        // https://github.com/oxidecomputer/omicron/issues/5132. However, this
-        // is a substantial project and will have to come after the initial
-        // trust quorum release.
-        if state == TrustQuorumConfigState::Committed {
-            let rack_id = nexus_config.rack_id;
-            let epoch = nexus_config.epoch;
-            let started_sleds = allocate_subnets_and_start_sled_agents(
-                log,
-                opctx,
-                datastore,
-                nexus_config,
-            )
-            .await
-            .with_context(|| {
-                format!(
-                    "Failed to start sled agents for added sleds for \
-                            rack {rack_id}, epoch {epoch}"
-                )
-            })?;
-            return Ok(Status::Committed(client_results, started_sleds));
-        }
+        return Ok(Status::Commit(client_results));
     }
 
     Ok(Status::Commit(client_results))
@@ -471,37 +478,11 @@ async fn allocate_subnets_and_start_sled_agents(
     log: Logger,
     opctx: OpContext,
     datastore: Arc<DataStore>,
-    committed_config: NexusTrustQuorumConfig,
+    rack_id: RackUuid,
+    epoch: Epoch,
+    added_sleds: BTreeSet<BaseboardId>,
+    existing_sleds: BTreeSet<BaseboardId>,
 ) -> Result<Vec<StartSledAgentResults>, Error> {
-    // No sleds could have been added to the trust quorum if there is no prior
-    // committed configuration.
-    let Some(last_committed_epoch) = committed_config.last_committed_epoch
-    else {
-        return Ok(vec![]);
-    };
-
-    let rack_id = committed_config.rack_id;
-    let epoch = committed_config.epoch;
-
-    // Retrieve the last committed configuration so we can diff members and see
-    // who was added.
-    let authz_tq = authz::TrustQuorumConfig::for_rack_id(rack_id);
-    let Some(last_committed_config) =
-        datastore.tq_get_config(&opctx, authz_tq, last_committed_epoch).await?
-    else {
-        bail!(
-            "Failed to retrieve config from DB for rack {rack_id}, \
-            last_committed_epoch {epoch}",
-        );
-    };
-
-    let added_sleds: BTreeSet<_> = committed_config
-        .members
-        .keys()
-        .filter(|&id| !last_committed_config.members.contains_key(id))
-        .cloned()
-        .collect();
-
     info!(
         log,
         "Looking up hw_baseboard_id for newly added sleds: {added_sleds:?}"
@@ -547,7 +528,7 @@ async fn allocate_subnets_and_start_sled_agents(
         datastore,
         rack_id,
         epoch,
-        last_committed_config.members.keys().cloned().collect(),
+        existing_sleds,
         allocations_by_baseboard_id,
     )
     .await
@@ -559,7 +540,7 @@ async fn start_sled_agents(
     datastore: Arc<DataStore>,
     rack_id: RackUuid,
     epoch: Epoch,
-    all_members: BTreeSet<BaseboardId>,
+    existing_sleds: BTreeSet<BaseboardId>,
     allocations_by_baseboard_id: BTreeMap<
         BaseboardId,
         SledUnderlaySubnetAllocation,
@@ -582,7 +563,7 @@ async fn start_sled_agents(
         &datastore,
         rack_id,
         epoch,
-        &all_members,
+        &existing_sleds,
         num_clients,
         Duration::from_mins(5),
     )
@@ -688,12 +669,12 @@ async fn get_sled_agent_clients(
     datastore: &DataStore,
     rack_id: RackUuid,
     epoch: Epoch,
-    all_members: &BTreeSet<BaseboardId>,
+    existing_sleds: &BTreeSet<BaseboardId>,
     num_clients: usize,
     timeout: Duration,
 ) -> Result<Vec<(BaseboardId, sled_agent_client::Client)>, Error> {
     // First shuffle the possible members
-    let mut randomized: Vec<_> = all_members.iter().cloned().collect();
+    let mut randomized: Vec<_> = existing_sleds.iter().cloned().collect();
     randomized.shuffle(&mut rand::rng());
     let mut clients = Vec::with_capacity(num_clients);
 

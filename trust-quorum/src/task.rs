@@ -981,6 +981,7 @@ mod tests {
     };
     use crate::proxy::ProxyError;
     use assert_matches::assert_matches;
+    use attest_mock::MockData;
     use camino::Utf8PathBuf;
     use dropshot::test_util::{LogContext, log_prefix_for_test};
     use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
@@ -1071,7 +1072,10 @@ mod tests {
             }],
         };
         // Write out the log document to the filesystem
-        let out = attest_mock::log::mock(attest_log_doc).unwrap();
+        let out = attest_mock::MockLog::from_document(attest_log_doc)
+            .unwrap()
+            .to_bytes()
+            .unwrap();
         std::fs::write(dir.join("log.bin"), &out).unwrap();
 
         let corim_doc = attest_mock::corim::Document {
@@ -1094,7 +1098,10 @@ mod tests {
             ],
         };
 
-        let corim = attest_mock::corim::mock(corim_doc).unwrap();
+        let corim = attest_mock::MockCorim::from_document(corim_doc)
+            .unwrap()
+            .to_bytes()
+            .unwrap();
         std::fs::write(dir.join("corim.cbor"), &corim).unwrap();
     }
 

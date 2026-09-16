@@ -12,6 +12,7 @@ bootstrap-agent-lockstep-types.workspace = true
 chrono.workspace = true
 futures.workspace = true
 iddqd.workspace = true
+omicron-generation-kinds.workspace = true
 sled-agent-types-versions.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true

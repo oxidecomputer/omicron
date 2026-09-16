@@ -22,7 +22,7 @@ cockroachdb settings:
     version::::::::::::   (none)
     preserve downgrade:   (not set)
 planner config:
-    (no current planner configs)
+    disruption policy: terminate
 
 
 
@@ -154,6 +154,7 @@ to:   blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
  MODIFIED SLEDS:
 
   sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 2 -> 3):
+    update disposition:   available (generation 1) (unchanged)
 
     measurements:
     ------------------------------------------------------------------------------------
@@ -240,6 +241,7 @@ to:   blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
 
 
   sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 2 -> 3):
+    update disposition:   available (generation 1) (unchanged)
 
     measurements:
     ------------------------------------------------------------------------------------
@@ -322,6 +324,7 @@ to:   blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
 
 
   sled d81c6a84-79b8-4958-ae41-ea46c9b19763 (active, config generation 2 -> 3):
+    update disposition:   available (generation 1) (unchanged)
 
     measurements:
     ------------------------------------------------------------------------------------
@@ -633,6 +636,7 @@ sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (role = Gimlet, serial serial1)
 LEDGERED SLED CONFIG
     generation: 3
     remove_mupdate_override: None
+    update_disposition: Available
     desired host phase 2 slot a: artifact c2a8af75d6907ef138d033dc3be1fcbf7d7a78a87aee04796caf283a6bb0952d
     desired host phase 2 slot b: keep current contents
     DISKS: 3
@@ -730,6 +734,7 @@ LEDGERED SLED CONFIG
         all datasets reconciled successfully
         all zones reconciled successfully
     reconciler task status: idle (finished at <REDACTED_TIMESTAMP> after running for <REDACTED_DURATION>s)
+    instance manager status: available (0 registered VMMs)
     reference measurements:
         (measurement set is empty)
     fmd:
@@ -833,6 +838,7 @@ sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (role = Gimlet, serial serial0)
 LEDGERED SLED CONFIG
     generation: 3
     remove_mupdate_override: None
+    update_disposition: Available
     desired host phase 2 slot a: artifact c2a8af75d6907ef138d033dc3be1fcbf7d7a78a87aee04796caf283a6bb0952d
     desired host phase 2 slot b: keep current contents
     DISKS: 3
@@ -927,6 +933,7 @@ LEDGERED SLED CONFIG
         all datasets reconciled successfully
         all zones reconciled successfully
     reconciler task status: idle (finished at <REDACTED_TIMESTAMP> after running for <REDACTED_DURATION>s)
+    instance manager status: available (0 registered VMMs)
     reference measurements:
         (measurement set is empty)
     fmd:
@@ -1030,6 +1037,7 @@ sled d81c6a84-79b8-4958-ae41-ea46c9b19763 (role = Gimlet, serial serial2)
 LEDGERED SLED CONFIG
     generation: 3
     remove_mupdate_override: None
+    update_disposition: Available
     desired host phase 2 slot a: artifact c2a8af75d6907ef138d033dc3be1fcbf7d7a78a87aee04796caf283a6bb0952d
     desired host phase 2 slot b: keep current contents
     DISKS: 3
@@ -1124,6 +1132,7 @@ LEDGERED SLED CONFIG
         all datasets reconciled successfully
         all zones reconciled successfully
     reconciler task status: idle (finished at <REDACTED_TIMESTAMP> after running for <REDACTED_DURATION>s)
+    instance manager status: available (0 registered VMMs)
     reference measurements:
         (measurement set is empty)
     fmd:
@@ -1174,10 +1183,11 @@ blueprint  58d5e830-0884-47d8-a7cd-b2b3751adeb4
 parent:    8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
 
   sled: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
-    state:::::::::::::   active
-    config generation:   3
-    subnet::::::::::::   fd00:1122:3344:102::/64
-    last allocated IP:   fd00:1122:3344:102::a
+    state::::::::::::::   active
+    update disposition:   available (generation 1)
+    config generation::   3
+    subnet:::::::::::::   fd00:1122:3344:102::/64
+    last allocated IP::   fd00:1122:3344:102::a
 
     host phase 2 contents:
     ------------------------------
@@ -1254,10 +1264,11 @@ parent:    8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
 
 
   sled: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
-    state:::::::::::::   active
-    config generation:   3
-    subnet::::::::::::   fd00:1122:3344:101::/64
-    last allocated IP:   fd00:1122:3344:101::9
+    state::::::::::::::   active
+    update disposition:   available (generation 1)
+    config generation::   3
+    subnet:::::::::::::   fd00:1122:3344:101::/64
+    last allocated IP::   fd00:1122:3344:101::9
 
     host phase 2 contents:
     ------------------------------
@@ -1331,10 +1342,11 @@ parent:    8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
 
 
   sled: d81c6a84-79b8-4958-ae41-ea46c9b19763
-    state:::::::::::::   active
-    config generation:   3
-    subnet::::::::::::   fd00:1122:3344:103::/64
-    last allocated IP:   fd00:1122:3344:103::9
+    state::::::::::::::   active
+    update disposition:   available (generation 1)
+    config generation::   3
+    subnet:::::::::::::   fd00:1122:3344:103::/64
+    last allocated IP::   fd00:1122:3344:103::9
 
     host phase 2 contents:
     ------------------------------
@@ -1502,6 +1514,7 @@ to:   blueprint 9034c710-3e57-45f3-99e5-4316145e87ac
  MODIFIED SLEDS:
 
   sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 4 -> 5):
+    update disposition:   available (generation 1) (unchanged)
 
     measurements:
     --------------------------------------------------------------------------------
@@ -1579,6 +1592,7 @@ to:   blueprint 9034c710-3e57-45f3-99e5-4316145e87ac
 
 
   sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 4 -> 5):
+    update disposition:   available (generation 1) (unchanged)
 
     measurements:
     --------------------------------------------------------------------------------
@@ -1653,6 +1667,7 @@ to:   blueprint 9034c710-3e57-45f3-99e5-4316145e87ac
 
 
   sled d81c6a84-79b8-4958-ae41-ea46c9b19763 (active, config generation 4 -> 5):
+    update disposition:   available (generation 1) (unchanged)
 
     measurements:
     --------------------------------------------------------------------------------
@@ -2073,6 +2088,7 @@ to:   blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1
  MODIFIED SLEDS:
 
   sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 5 -> 6):
+    update disposition:   available (generation 1) (unchanged)
 
     measurements:
     --------------------------------------------------------------------------------
@@ -2202,6 +2218,7 @@ to:   blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300
  MODIFIED SLEDS:
 
   sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 5 -> 6):
+    update disposition:   available (generation 1) (unchanged)
 
     measurements:
     --------------------------------------------------------------------------------
@@ -2327,6 +2344,7 @@ to:   blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839
  MODIFIED SLEDS:
 
   sled d81c6a84-79b8-4958-ae41-ea46c9b19763 (active, config generation 5 -> 6):
+    update disposition:   available (generation 1) (unchanged)
 
     measurements:
     --------------------------------------------------------------------------------

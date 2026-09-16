@@ -4,8 +4,9 @@
 
 //! APIs exposed by Nexus.
 
-use crate::api::external::{DiskState, Generation, Vni};
+use crate::api::external::{DiskState, Vni};
 use chrono::{DateTime, Utc};
+use omicron_generation_kinds::Generation;
 use omicron_uuid_kinds::DownstairsRegionKind;
 use omicron_uuid_kinds::TypedUuid;
 use omicron_uuid_kinds::UpstairsRepairKind;

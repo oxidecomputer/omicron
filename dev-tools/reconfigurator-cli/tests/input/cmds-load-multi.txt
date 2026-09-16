@@ -1,0 +1,30 @@
+# Test loading multiple state files at once.
+#
+# We make two saves of overlapping state and then load them in three ways:
+# via a glob, via explicit args in reversed order, and the same file twice.
+
+load-example --nsleds 3 --ndisks-per-sled 3
+save saved-1.out
+
+# Add another blueprint to the state.  This blueprint becomes part of
+# saved-2.out but not saved-1.out, so saved-2.out is a superset.
+blueprint-edit latest noop
+save saved-2.out
+wipe system
+
+# Glob expansion.  Both files match, and glob iterates them in sorted order,
+# so saved-1.out is processed first.  Both files declare the same target
+# blueprint, so the "latest" reported is whichever was processed first.
+load saved-*.out
+blueprint-list
+
+# Explicit args in reversed order.  Now saved-2.out is processed first, so
+# the "latest" should flip to saved-2.out.
+wipe system
+load saved-2.out saved-1.out
+blueprint-list
+
+# Same file twice -- should behave like a single load with no warnings.
+wipe system
+load saved-1.out saved-1.out
+blueprint-list

@@ -9,8 +9,10 @@ workspace = true
 [features]
 testing = [
     "omicron-test-utils",
+    "nexus-fm-slippy",
     "nexus-reconfigurator-planning",
     "ereport-types",
+    "uuid",
 ]
 
 [build-dependencies]
@@ -23,6 +25,7 @@ iddqd.workspace = true
 nexus-types.workspace = true
 nexus-db-model.workspace = true
 omicron-common.workspace = true
+omicron-generation-kinds.workspace = true
 omicron-uuid-kinds.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
@@ -32,18 +35,23 @@ serde_json.workspace = true
 strum.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true
+steno.workspace = true
 thiserror.workspace = true
 typed-rng.workspace = true
 
 # deps for test utils
 omicron-test-utils = { workspace = true, optional = true }
+nexus-fm-slippy = { workspace = true, optional = true }
 nexus-reconfigurator-planning = { workspace = true, optional = true }
 ereport-types = { workspace = true, optional = true }
+uuid = { workspace = true, optional = true }
 
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 omicron-test-utils.workspace = true
+nexus-fm-slippy.workspace = true
 nexus-inventory.workspace = true
 nexus-reconfigurator-planning.workspace = true
 ereport-types.workspace = true
+uuid.workspace = true

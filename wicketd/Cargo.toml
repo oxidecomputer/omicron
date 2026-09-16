@@ -74,6 +74,7 @@ wicket-common.workspace = true
 wicketd-api.workspace = true
 wicketd-commission-api.workspace = true
 wicketd-commission-types.workspace = true
+wicketd-commission-types-versions.workspace = true
 wicketd-client.workspace = true
 omicron-workspace-hack.workspace = true
 semver.workspace = true
@@ -110,3 +111,4 @@ subprocess.workspace = true
 tar.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 wicket.workspace = true
+zeroize.workspace = true

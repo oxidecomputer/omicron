@@ -25,7 +25,6 @@ progenitor::generate_api!(
     replace = {
         Duration = std::time::Duration,
         EventReportForGenericSpec = oxide_update_engine_types::events::EventReport<oxide_update_engine_types::spec::GenericSpec>,
-        M2Slot = omicron_common::disk::M2Slot,
         ProgressEventForGenericSpec = oxide_update_engine_types::events::ProgressEvent<oxide_update_engine_types::spec::GenericSpec>,
         StepEventForGenericSpec = oxide_update_engine_types::events::StepEvent<oxide_update_engine_types::spec::GenericSpec>,
     }

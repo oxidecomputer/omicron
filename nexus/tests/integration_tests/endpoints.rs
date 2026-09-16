@@ -154,8 +154,7 @@ pub static SLED_INSTANCES_URL: LazyLock<String> = LazyLock::new(|| {
     format!("/v1/system/hardware/sleds/{}/instances", SLED_AGENT_UUID)
 });
 
-pub const SUPPORT_BUNDLES_URL: &'static str =
-    "/experimental/v1/system/support-bundles";
+pub const SUPPORT_BUNDLES_URL: &'static str = "/v1/system/support-bundles";
 pub static SUPPORT_BUNDLE_URL: LazyLock<String> =
     LazyLock::new(|| format!("{SUPPORT_BUNDLES_URL}/{{id}}"));
 pub static SUPPORT_BUNDLE_DOWNLOAD_URL: LazyLock<String> =
@@ -234,7 +233,6 @@ pub static DEMO_SILO_CREATE: LazyLock<silo::SiloCreate> =
             description: String::from(""),
         },
         quotas: silo::SiloQuotasCreate::arbitrarily_high_default(),
-        discoverable: true,
         identity_mode: silo::SiloIdentityMode::SamlJit,
         admin_group_name: None,
         tls_certificates: vec![],
@@ -317,6 +315,7 @@ pub static DEMO_PROJECT_CREATE: LazyLock<project::ProjectCreate> =
             name: DEMO_PROJECT_NAME.clone(),
             description: String::from(""),
         },
+        defaults: None,
     });
 
 // VPC used for testing
@@ -342,6 +341,7 @@ pub static DEMO_VPC_CREATE: LazyLock<vpc::VpcCreate> =
         },
         ipv6_prefix: None,
         dns_name: DEMO_VPC_NAME.clone(),
+        defaults: None,
     });
 
 // VPC Subnet used for testing
@@ -1525,6 +1525,9 @@ pub static DEMO_TARGET_RELEASE: LazyLock<update::SetTargetReleaseParams> =
     });
 
 // Alerts
+pub static ALERTS_URL: &'static str = "/v1/alerts";
+pub static DEMO_ALERT_URL: &'static str =
+    "/v1/alerts/001de000-7768-4000-8000-000000000001";
 pub static ALERT_CLASSES_URL: &'static str = "/v1/alert-classes";
 pub static ALERT_RECEIVERS_URL: &'static str = "/v1/alert-receivers";
 pub static WEBHOOK_RECEIVERS_URL: &'static str = "/v1/webhook-receivers";
@@ -3574,6 +3577,18 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 ],
             },
             // Alerts
+            VerifyEndpoint {
+                url: &ALERTS_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: &DEMO_ALERT_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
             VerifyEndpoint {
                 url: &WEBHOOK_RECEIVERS_URL,
                 visibility: Visibility::Public,

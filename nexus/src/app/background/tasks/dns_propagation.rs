@@ -186,7 +186,7 @@ mod test {
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::internal_api::params::DnsConfigParams;
-    use omicron_common::api::external::Generation;
+    use omicron_generation_kinds::Generation;
     use serde::Deserialize;
     use serde_json::json;
     use std::collections::BTreeMap;
