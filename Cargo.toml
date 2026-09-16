@@ -630,10 +630,9 @@ ntp-admin-api = { path = "ntp-admin/api" }
 ntp-admin-client = { path = "clients/ntp-admin-client" }
 ntp-admin-types = { path = "ntp-admin/types" }
 ntp-admin-types-versions = { path = "ntp-admin/types/versions" }
-#mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "dbbeeabef5052148fb64580adbe9e5b2c36c1425" }
-#ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "dbbeeabef5052148fb64580adbe9e5b2c36c1425" }
-mg-admin-client = { path = "../maghemite/mg-admin-client" }
-ddm-admin-client = { path = "../maghemite/ddm-admin-client" }
+mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", branch = "ry/external-peers" }
+ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", branch = "ry/external-peers" }
+ddm-api-types = { git = "https://github.com/oxidecomputer/maghemite", branch = "ry/external-peers" }
 multimap = "0.10.1"
 nexus-auth = { path = "nexus/auth" }
 nexus-background-task-interface = { path = "nexus/background-task-interface" }

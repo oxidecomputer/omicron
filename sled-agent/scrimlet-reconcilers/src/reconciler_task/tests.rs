@@ -42,7 +42,6 @@ impl Reconciler for MockReconciler {
     fn new(
         _mode: ScrimletReconcilersMode,
         _switch_slot: ThisSledSwitchSlot,
-        _base_ddm_interfaces: BTreeSet<String>,
         _parent_log: &Logger,
     ) -> Self {
         unimplemented!("not called by tests")

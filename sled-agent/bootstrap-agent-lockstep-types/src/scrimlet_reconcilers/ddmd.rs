@@ -14,7 +14,7 @@ use std::collections::BTreeSet;
 #[serde(rename_all = "snake_case", tag = "status", content = "value")]
 pub enum DdmdReconcilerStatus {
     Failed(String),
-    Reconciled { interfaces: BTreeSet<String> },
+    Reconciled { external_peers_address_objects: BTreeSet<String> },
 }
 
 impl slog::KV for DdmdReconcilerStatus {
@@ -27,11 +27,12 @@ impl slog::KV for DdmdReconcilerStatus {
             DdmdReconcilerStatus::Failed(reason) => {
                 serializer.emit_str("ddmd".into(), reason)
             }
-            DdmdReconcilerStatus::Reconciled { interfaces } => serializer
-                .emit_usize(
-                    "ddmd-reconciled-interfaces".into(),
-                    interfaces.len(),
-                ),
+            DdmdReconcilerStatus::Reconciled {
+                external_peers_address_objects,
+            } => serializer.emit_usize(
+                "ddmd-reconciled-external-peers".into(),
+                external_peers_address_objects.len(),
+            ),
         }
     }
 }

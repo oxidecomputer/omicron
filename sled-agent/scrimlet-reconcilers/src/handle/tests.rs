@@ -109,7 +109,6 @@ impl<T: MgsFlavor> Harness<T> {
                 mgd_addr: dummy_addr,
                 ddmd_addr: dummy_addr,
             },
-            base_ddm_interfaces: BTreeSet::new(),
         }
     }
 

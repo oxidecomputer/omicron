@@ -178,14 +178,6 @@ impl ScrimletReconcilersMode {
 pub struct SledAgentNetworkingInfo {
     pub system_networking_config_rx: watch::Receiver<SystemNetworkingConfig>,
     pub mode: ScrimletReconcilersMode,
-
-    /// Interfaces the switch zone's ddmd runs DDM on regardless of the rack
-    /// network config; see `switch_zone_ddm_base_interfaces()` in sled-agent.
-    ///
-    /// ddmd's apply endpoint is declarative over every FSM it has running, so
-    /// `DdmdReconciler` must include these or it would stop the sessions ddmd
-    /// started from its SMF `interfaces` property.
-    pub base_ddm_interfaces: BTreeSet<String>,
 }
 
 /// Handle to tasks that reconcile network configuration with services within a
@@ -415,7 +407,6 @@ impl RunningReconcilers {
             networking_info.system_networking_config_rx.clone(),
             networking_info.mode,
             this_sled_switch_slot,
-            &networking_info.base_ddm_interfaces,
             parent_log,
         );
         let lldpd_reconciler = ReconcilerTaskHandle::<LldpdReconciler>::spawn(
@@ -423,7 +414,6 @@ impl RunningReconcilers {
             networking_info.system_networking_config_rx.clone(),
             networking_info.mode,
             this_sled_switch_slot,
-            &networking_info.base_ddm_interfaces,
             parent_log,
         );
         let mgd_reconciler = ReconcilerTaskHandle::<MgdReconciler>::spawn(
@@ -431,7 +421,6 @@ impl RunningReconcilers {
             networking_info.system_networking_config_rx.clone(),
             networking_info.mode,
             this_sled_switch_slot,
-            &networking_info.base_ddm_interfaces,
             parent_log,
         );
         let uplinkd_reconciler =
@@ -440,7 +429,6 @@ impl RunningReconcilers {
                 networking_info.system_networking_config_rx.clone(),
                 networking_info.mode,
                 this_sled_switch_slot,
-                &networking_info.base_ddm_interfaces,
                 parent_log,
             );
         let ddmd_reconciler = ReconcilerTaskHandle::<DdmdReconciler>::spawn(
@@ -448,7 +436,6 @@ impl RunningReconcilers {
             networking_info.system_networking_config_rx,
             networking_info.mode,
             this_sled_switch_slot,
-            &networking_info.base_ddm_interfaces,
             parent_log,
         );
         Self {

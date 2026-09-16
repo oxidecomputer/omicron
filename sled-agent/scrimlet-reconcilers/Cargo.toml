@@ -13,6 +13,7 @@ bootstrap-agent-lockstep-types.workspace = true
 chrono.workspace = true
 daft.workspace = true
 ddm-admin-client.workspace = true
+ddm-api-types.workspace = true
 dpd-client.workspace = true
 either.workspace = true
 futures.workspace = true

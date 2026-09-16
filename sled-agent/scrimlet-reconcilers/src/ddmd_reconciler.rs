@@ -14,20 +14,17 @@ use crate::reconciler_task::Reconciler;
 use crate::switch_zone_slot::ThisSledSwitchSlot;
 use bootstrap_agent_lockstep_types::scrimlet_reconcilers::ddmd::DdmdReconcilerStatus;
 use ddm_admin_client::Client;
-use ddm_admin_client::types::ApplyRequest;
-use sled_agent_types::early_networking::RackNetworkConfig;
+use ddm_api_types::external_peers::ExternalPeers;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use slog::Logger;
 use slog::info;
 use slog_error_chain::InlineErrorChain;
-use std::collections::BTreeSet;
 use std::time::Duration;
 
 #[derive(Debug)]
 pub(crate) struct DdmdReconciler {
     client: Client,
     switch_slot: ThisSledSwitchSlot,
-    base_interfaces: BTreeSet<String>,
 }
 
 impl Reconciler for DdmdReconciler {
@@ -39,14 +36,9 @@ impl Reconciler for DdmdReconciler {
     fn new(
         mode: ScrimletReconcilersMode,
         switch_slot: ThisSledSwitchSlot,
-        base_ddm_interfaces: BTreeSet<String>,
         parent_log: &Logger,
     ) -> Self {
-        Self {
-            client: mode.ddmd_client(parent_log),
-            switch_slot,
-            base_interfaces: base_ddm_interfaces,
-        }
+        Self { client: mode.ddmd_client(parent_log), switch_slot }
     }
 
     async fn do_reconciliation(
@@ -54,24 +46,28 @@ impl Reconciler for DdmdReconciler {
         system_networking_config: &SystemNetworkingConfig,
         log: &Logger,
     ) -> Self::Status {
-        let interfaces = desired_interfaces(
-            &self.base_interfaces,
-            &system_networking_config.rack_network_config,
-            self.switch_slot,
-        );
+        let address_objects = system_networking_config
+            .rack_network_config
+            .ports
+            .iter()
+            .filter(|port| {
+                port.switch == self.switch_slot && port.allow_ddm_traffic
+            })
+            .map(|port| format!("tfport{}_0/ll", port.port))
+            .collect();
 
         // Unconditional: the endpoint is idempotent, and reapplying every pass
         // means we recover on our own if ddmd restarts and loses its FSMs.
-        let request = ApplyRequest {
-            ddm_interfaces: interfaces.iter().cloned().collect(),
-        };
-        match self.client.ddm_apply(&request).await {
+        let request = ExternalPeers { address_objects };
+        match self.client.set_external_peers(&request).await {
             Ok(_) => {
                 info!(
-                    log, "applied DDM interfaces";
-                    "interfaces" => ?interfaces,
+                    log, "set external peers for DDM interfaces";
+                    "external_peers" => ?request,
                 );
-                DdmdReconcilerStatus::Reconciled { interfaces }
+                DdmdReconcilerStatus::Reconciled {
+                    external_peers_address_objects: request.address_objects,
+                }
             }
             Err(err) => DdmdReconcilerStatus::Failed(format!(
                 "failed to apply DDM interfaces to ddmd: {}",
@@ -79,29 +75,6 @@ impl Reconciler for DdmdReconciler {
             )),
         }
     }
-}
-
-/// The full set of interfaces ddmd should be running DDM on.
-///
-/// ddmd's apply endpoint is declarative over every FSM it has running, so this
-/// must be a superset of `base`: omitting those would tear down the rear-port
-/// sessions SMF started at switch zone boot and collapse underlay routing.
-///
-/// Names are returned bare (no `/ll` addrobj suffix); ddmd appends that itself.
-fn desired_interfaces(
-    base: &BTreeSet<String>,
-    rack_network_config: &RackNetworkConfig,
-    our_switch_slot: ThisSledSwitchSlot,
-) -> BTreeSet<String> {
-    let mut interfaces = base.clone();
-    for port in rack_network_config
-        .ports
-        .iter()
-        .filter(|port| port.switch == our_switch_slot && port.allow_ddm_traffic)
-    {
-        interfaces.insert(format!("tfport{}_0", port.port));
-    }
-    interfaces
 }
 
 #[cfg(test)]

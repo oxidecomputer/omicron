@@ -38,7 +38,6 @@ impl Reconciler for DpdReconciler {
     fn new(
         mode: ScrimletReconcilersMode,
         switch_slot: ThisSledSwitchSlot,
-        _base_ddm_interfaces: BTreeSet<String>,
         parent_log: &Logger,
     ) -> Self {
         Self {

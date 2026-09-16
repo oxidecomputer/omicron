@@ -34,7 +34,6 @@ impl Reconciler for MgdReconciler {
     fn new(
         mode: ScrimletReconcilersMode,
         switch_slot: ThisSledSwitchSlot,
-        _base_ddm_interfaces: BTreeSet<String>,
         parent_log: &Logger,
     ) -> Self {
         Self { client: mode.mgd_client(parent_log), switch_slot }

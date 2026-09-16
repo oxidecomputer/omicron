@@ -499,33 +499,6 @@ impl illumos_utils::smf_helper::Service for SwitchService {
     }
 }
 
-/// The interfaces the switch zone's `mg-ddm` should always run DDM on,
-/// independent of the rack network config.
-///
-/// Returned as bare interface names. Callers that need addrobjs (i.e. the SMF
-/// `interfaces` property) must wrap these in [`AddrObject`] themselves;
-/// `DdmdReconciler` passes them to ddmd's apply endpoint, which appends the
-/// link-local addrobj suffix server-side. Keeping this function the single
-/// producer of the names is what keeps those two callers in agreement — if they
-/// disagree, an apply would tear down the FSMs SMF started.
-pub(crate) fn switch_zone_ddm_base_interfaces(
-    sidecar_revision: &SidecarRevision,
-    switch_zone_maghemite_links: &[PhysicalLink],
-) -> BTreeSet<String> {
-    if sidecar_revision.is_physical() {
-        // See the `tfport_name` function for how tfportd names the addrconf it
-        // creates. Right now, that's `tfportrear[0-31]_0` for all rear ports,
-        // which is what we're directing ddmd to listen for advertisements on.
-        //
-        // Front ports are not listed here: they only carry DDM when the rack
-        // network config marks them `allow_ddm_traffic`, which is handled
-        // dynamically by `DdmdReconciler`.
-        (0..32).map(|i| format!("tfportrear{i}_0")).collect()
-    } else {
-        switch_zone_maghemite_links.iter().map(|l| l.to_string()).collect()
-    }
-}
-
 /// Describes SMF services related to DNS.
 #[derive(Debug, Clone, Copy)]
 enum DnsService {
