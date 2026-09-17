@@ -8835,6 +8835,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "omicron-clap-unparse"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "omicron-clap-unparse-derive",
+ "omicron-workspace-hack",
+ "shell-words",
+]
+
+[[package]]
+name = "omicron-clap-unparse-derive"
+version = "0.1.0"
+dependencies = [
+ "heck 0.5.0",
+ "omicron-workspace-hack",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "omicron-clickhouse-admin"
 version = "0.1.0"
 dependencies = [

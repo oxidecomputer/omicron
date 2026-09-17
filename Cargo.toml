@@ -33,6 +33,8 @@ members = [
     "common",
     "dev-tools/cert-dev",
     "dev-tools/clickana",
+    "dev-tools/clap-unparse",
+    "dev-tools/clap-unparse/derive",
     "dev-tools/clickhouse-cluster-dev",
     "dev-tools/ch-dev",
     "dev-tools/common",
@@ -229,6 +231,8 @@ default-members = [
     "common",
     "dev-tools/cert-dev",
     "dev-tools/clickana",
+    "dev-tools/clap-unparse",
+    "dev-tools/clap-unparse/derive",
     "dev-tools/clickhouse-cluster-dev",
     "dev-tools/ch-dev",
     "dev-tools/common",
@@ -677,6 +681,8 @@ nom = "7.1.3"
 nonempty = "0.12.0"
 num-integer = "0.1.46"
 num = { version = "0.4.3", default-features = false, features = [ "libm" ] }
+omicron-clap-unparse = { path = "dev-tools/clap-unparse" }
+omicron-clap-unparse-derive = { path = "dev-tools/clap-unparse/derive" }
 omicron-clickhouse-admin = { path = "clickhouse-admin" }
 omicron-certificates = { path = "certificates" }
 omicron-cockroach-admin = { path = "cockroach-admin" }

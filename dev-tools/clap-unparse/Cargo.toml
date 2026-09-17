@@ -1,0 +1,17 @@
+[package]
+name = "omicron-clap-unparse"
+version = "0.1.0"
+edition.workspace = true
+license = "MPL-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+clap.workspace = true
+omicron-clap-unparse-derive.workspace = true
+omicron-workspace-hack.workspace = true
+shell-words.workspace = true
+
+[dev-dependencies]
+shell-words.workspace = true
