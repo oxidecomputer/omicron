@@ -202,7 +202,6 @@ pub struct DeploymentConfig {
     ///
     /// This flag is intended as an escape hatch in case we ever encounter an unexpected
     /// pathological case where capturing backtraces is slow enough to be an issue.
-    #[schemars(skip)] // TODO we're protected against dropshot changes
     #[serde(default = "default_record_db_claim_backtraces")]
     pub record_db_claim_backtraces: bool,
 }
