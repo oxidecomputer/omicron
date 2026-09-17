@@ -14,6 +14,7 @@ use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::LocalStorageAllocation;
 use nexus_db_queries::db::model::LocalStorageUnencryptedDatasetAllocation;
 use nexus_types::internal_api::background::LocalStorageDeleteStatus;
+use rand::prelude::*;
 use serde_json::json;
 use sled_agent_client::types::LocalStorageDatasetDeleteRequest;
 use slog::Logger;
@@ -175,7 +176,7 @@ impl LocalStorageDeleter {
         let log = &opctx.log;
         let mut status = LocalStorageDeleteStatus::default();
 
-        let disks_needing_clean_up = match self
+        let mut disks_needing_clean_up = match self
             .datastore
             .deleted_disks_with_undeleted_local_storage(opctx)
             .await
@@ -216,6 +217,11 @@ impl LocalStorageDeleter {
         // assuming there aren't too many lingering problematic allocations.
 
         status.page_size = 128;
+
+        // Randomize the list: if there are lingering problematic allocations
+        // at the beginning of `disks_needing_clean_up` it could wedge the task.
+
+        disks_needing_clean_up.shuffle(&mut rand::rng());
 
         for disk in disks_needing_clean_up.into_iter().take(status.page_size) {
             let Some(allocation) = &disk.local_storage_dataset_allocation
