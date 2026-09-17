@@ -10502,6 +10502,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxide-versioned-envelope"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a36c6e7ec2aac34233572f24c8546dd7cd2c5fa01c8fec5a5126af37b9499c62"
+dependencies = [
+ "schemars 0.8.22",
+ "serde_core",
+ "serde_json",
+]
+
+[[package]]
 name = "oxide-vpc"
 version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/opte?rev=fd2d6ad625cef6fb903660e57dcd4729ff66a6fe#fd2d6ad625cef6fb903660e57dcd4729ff66a6fe"
@@ -17833,6 +17844,19 @@ dependencies = [
  "wicketd-commission-client",
  "wicketd-commission-types",
  "zeroize",
+]
+
+[[package]]
+name = "wicket-cli-types"
+version = "0.1.0"
+dependencies = [
+ "expectorate",
+ "omicron-workspace-hack",
+ "oxide-versioned-envelope",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "wicketd-commission-types-versions",
 ]
 
 [[package]]
