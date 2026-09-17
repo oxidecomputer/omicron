@@ -34,6 +34,8 @@ use crate::db::model::Volume;
 use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::paginated;
 use crate::db::queries::disk::DiskSetClauseForAttach;
+use crate::db::queries::virtual_provisioning_collection_update;
+use crate::db::queries::virtual_provisioning_collection_update::*;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -52,6 +54,7 @@ use nexus_types::identity::Asset;
 use omicron_common::api;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
+use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
@@ -1551,8 +1554,22 @@ impl DataStore {
         disk_id: &Uuid,
         ok_to_delete_states: &[api::external::DiskState],
     ) -> Result<model::Disk, Error> {
-        use nexus_db_schema::schema::disk::dsl;
         let conn = self.pool_connection_unauthorized().await?;
+
+        Self::project_delete_disk_no_auth_on_connection(
+            &conn,
+            disk_id,
+            ok_to_delete_states,
+        )
+        .await
+    }
+
+    async fn project_delete_disk_no_auth_on_connection(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        disk_id: &Uuid,
+        ok_to_delete_states: &[api::external::DiskState],
+    ) -> Result<model::Disk, Error> {
+        use nexus_db_schema::schema::disk::dsl;
         let now = Utc::now();
 
         let ok_to_delete_state_labels: Vec<_> =
@@ -2084,6 +2101,63 @@ impl DataStore {
         .await?;
 
         Ok(disk)
+    }
+
+    /// In a single transaction, set time_deleted for a disk and delete the
+    /// storage from the appropriate virtual provisioning collection.
+    pub async fn delete_disk_and_update_provisioning_collection(
+        &self,
+        opctx: &OpContext,
+        project: &authz::Project,
+        disk: &Disk,
+        ok_to_delete_states: &[api::external::DiskState],
+    ) -> DeleteResult {
+        let err = OptionalError::new();
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        let provisions = self
+            .transaction_retry_wrapper(
+                "delete_disk_and_update_provisioning_collection",
+            )
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                async move {
+                    Self::project_delete_disk_no_auth_on_connection(
+                        &conn,
+                        &disk.id(),
+                        ok_to_delete_states,
+                    )
+                    .await
+                    .map_err(|e| err.bail(e))?;
+
+                    let provisions =
+                        VirtualProvisioningCollectionUpdate::new_delete_storage(
+                            disk.id(),
+                            disk.size(),
+                            project.id(),
+                        )
+                        .get_results_async(&conn)
+                        .await
+                        .map_err(|e| err.bail(
+                            virtual_provisioning_collection_update::from_diesel(e)
+                        ))?;
+
+                    Ok(provisions)
+                }
+            })
+            .await
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    err
+                } else {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                }
+            })?;
+
+        self.virtual_provisioning_collection_producer
+            .append_disk_metrics(&provisions)?;
+
+        Ok(())
     }
 }
 
