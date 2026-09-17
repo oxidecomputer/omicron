@@ -455,12 +455,17 @@ impl Nexus {
                 let native_resolver =
                     qorb_resolver.for_service(ServiceName::OximeterReader);
                 oximeter_db::Client::new_with_resolver(
+                    oximeter_db::User::Reader,
                     native_resolver,
                     "nexus-oximeter-reader",
                     &log,
                 )
             }
-            Some(address) => oximeter_db::Client::new(*address, &log),
+            Some(address) => oximeter_db::Client::new(
+                oximeter_db::User::Reader,
+                *address,
+                &log,
+            ),
         };
 
         // TODO-cleanup We may want to make the populator a first-class

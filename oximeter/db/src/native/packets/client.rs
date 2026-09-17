@@ -78,19 +78,74 @@ pub const PROTOCOL_VERSION: u64 = super::server::REVISION;
 // database doesn't exist, so we just use the real "default" and always
 // fully-qualify table names with the database in queries.
 const DATABASE: Cow<'static, str> = Cow::Borrowed("default");
-const USERNAME: Cow<'static, str> = Cow::Borrowed("default");
-const PASSWORD: Cow<'static, str> = Cow::Borrowed("");
+const OXIMETER_ADMIN_USERNAME: Cow<'static, str> = Cow::Borrowed("default");
+const OXIMETER_READER_USERNAME: Cow<'static, str> = Cow::Borrowed("reader");
+const OXIMETER_WRITER_USERNAME: Cow<'static, str> = Cow::Borrowed("writer");
+const EMPTY_PASSWORD: Cow<'static, str> = Cow::Borrowed("");
 
-/// Static hello packet sent from the oximeter client.
-pub static OXIMETER_HELLO: Hello = Hello {
-    client_name: CLIENT_NAME,
-    version_major: VERSION_MAJOR,
-    version_minor: VERSION_MINOR,
-    protocol_version: PROTOCOL_VERSION,
-    database: DATABASE,
-    username: USERNAME,
-    password: PASSWORD,
-};
+fn hello(client_name: Cow<'static, str>, username: Cow<'static, str>) -> Hello {
+    Hello {
+        client_name,
+        version_major: VERSION_MAJOR,
+        version_minor: VERSION_MINOR,
+        protocol_version: PROTOCOL_VERSION,
+        database: DATABASE,
+        username,
+        password: EMPTY_PASSWORD,
+    }
+}
+
+/// A Hello packet for a read-only user.
+fn oximeter_reader_hello() -> Hello {
+    hello(Cow::Borrowed("oximeter_reader"), OXIMETER_READER_USERNAME)
+}
+
+/// A Hello packet for a user with write permissions.
+///
+/// This should only be used by `oximeter` itself, to insert data.
+fn oximeter_writer_hello() -> Hello {
+    hello(Cow::Borrowed("oximeter_writer"), OXIMETER_WRITER_USERNAME)
+}
+
+/// A Hello packet for an admin user.
+///
+/// This should only be used by tests or the ClickHouse admin servers.
+fn oximeter_admin_hello() -> Hello {
+    hello(Cow::Borrowed("oximeter_admin"), OXIMETER_ADMIN_USERNAME)
+}
+
+/// The user to connect to the server as.
+#[derive(Clone, Copy, Debug, strum::EnumIter)]
+pub enum User {
+    /// A read-only user, suitable for serving OxQL metric queries through
+    /// Nexus.
+    Reader,
+    /// A user with write permissions, suitable for `oximeter` itself.
+    Writer,
+    /// An admin user, should only be used in tests or the ClickHouse admin
+    /// servers.
+    Admin,
+}
+
+impl User {
+    /// Return the hello packet for the user.
+    pub fn hello(&self) -> Hello {
+        match self {
+            User::Reader => oximeter_reader_hello(),
+            User::Writer => oximeter_writer_hello(),
+            User::Admin => oximeter_admin_hello(),
+        }
+    }
+
+    /// Return the username for this user.
+    pub fn username(&self) -> Cow<'static, str> {
+        match self {
+            User::Reader => OXIMETER_READER_USERNAME,
+            User::Writer => OXIMETER_WRITER_USERNAME,
+            User::Admin => OXIMETER_ADMIN_USERNAME,
+        }
+    }
+}
 
 /// A query sent from the client.
 #[derive(Clone, Debug, serde::Serialize)]
@@ -112,19 +167,20 @@ pub struct Query {
 }
 
 impl Query {
-    pub fn new(id: Uuid, address: SocketAddr, query: &str) -> Self {
-        Self::new_with_settings(id, address, query, Settings::new())
+    pub fn new(id: Uuid, address: SocketAddr, user: User, query: &str) -> Self {
+        Self::new_with_settings(id, address, user, query, Settings::new())
     }
 
     pub fn new_with_settings(
         id: Uuid,
         address: SocketAddr,
+        user: User,
         query: &str,
         settings: Settings,
     ) -> Self {
         Self {
             id: id.to_string().into(),
-            client_info: ClientInfo::new(id.to_string(), address),
+            client_info: ClientInfo::new(id.to_string(), address, user),
             settings,
             secret: "".into(),
             stage: Stage::Complete,
@@ -278,10 +334,10 @@ static CLIENT_HOSTNAME: LazyLock<String> = LazyLock::new(|| {
 });
 
 impl ClientInfo {
-    fn new(id: String, address: SocketAddr) -> Self {
+    fn new(id: String, address: SocketAddr, user: User) -> Self {
         Self {
             query_kind: QueryKind::Initial,
-            initial_user: USERNAME,
+            initial_user: user.username(),
             initial_query_id: id.into(),
             initial_address: address.to_string().into(),
             initial_time: 0,
