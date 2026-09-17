@@ -48,7 +48,7 @@ enum DeleteResult {
 
 impl LocalStorageDeleter {
     pub fn new(datastore: Arc<DataStore>) -> Self {
-        let duration = std::time::Duration::from_secs(5);
+        let duration = std::time::Duration::from_millis(250);
 
         LocalStorageDeleter {
             datastore,
@@ -196,7 +196,28 @@ impl LocalStorageDeleter {
             }
         };
 
-        for disk in disks_needing_clean_up {
+        // Report the remaining work to do in the status.
+
+        status.total_allocations_to_delete = disks_needing_clean_up.len();
+
+        // Operate on a maximum of 128 disks per task invocation. If users
+        // create disks very quickly during the time between this task's
+        // periodic invocation (and then deletes them all), we could be faced
+        // with many disks to delete. Each Nexus that then activates this task
+        // would fetch all those disks for deletion, potentially causing each of
+        // the tasks to take a long time.
+        //
+        // The timeout for the reqwest client created by this task is 250
+        // milliseconds, so the maximum time (assuming the requests to all
+        // sled-agents time out) is 128 * 250 ms = 32 seconds, roughly
+        // approximating the periodic task wakeup time. Note that each local
+        // storage disk delete will activate this task, so the latency between
+        // the delete request and the actual deletion should remain low,
+        // assuming there aren't too many lingering problematic allocations.
+
+        status.page_size = 128;
+
+        for disk in disks_needing_clean_up.into_iter().take(status.page_size) {
             let Some(allocation) = &disk.local_storage_dataset_allocation
             else {
                 // No allocation was made for this disk
