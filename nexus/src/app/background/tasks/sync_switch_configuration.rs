@@ -279,20 +279,17 @@ impl BackgroundTask for SwitchPortSettingsManager {
 
                 // The control-plane (service port) router list rides the
                 // bootstore so sled-agents can create service ports before
-                // nexus is reachable (boundary NTP). Never configured → the
-                // default list; the NULL-id marker row → explicitly empty.
+                // nexus is reachable (boundary NTP). Preserve the stored list,
+                // including an empty list; initialization seeds the default.
                 let control_plane_router_list = match self
                     .datastore
                     .control_plane_router_configurations_list(opctx)
                     .await
                 {
-                    Ok(entries) if entries.is_empty() => default_router_list(),
                     Ok(entries) => {
                         crate::app::router_configuration::router_list_from_links(
-                            entries.into_iter().filter_map(|e| {
-                                e.router_configuration_id.map(|id| {
-                                    (*e.priority, id.into_untyped_uuid())
-                                })
+                            entries.into_iter().map(|e| {
+                                (*e.priority, e.router_configuration_id.into_untyped_uuid())
                             }),
                         )
                         .into_iter()
@@ -1043,6 +1040,34 @@ mod tests {
             },
             RouterConfigListEntry { priority: 1000, router_id: None },
         ];
+        assert_ne!(current.control_plane_router_list, desired_list);
+
+        assert!(does_bootstore_need_update(
+            &current,
+            &rnc,
+            &desired_blueprint,
+            &current.switch_router_configs,
+            &desired_list,
+            &logctx.log,
+        ));
+
+        logctx.cleanup_successful();
+    }
+    #[test]
+    fn bootstore_update_when_control_plane_router_list_is_cleared() {
+        let logctx = test_setup_log(
+            "bootstore_update_when_control_plane_router_list_is_cleared",
+        );
+
+        let rnc = make_rack_network_config("fd00:1122:3344:100::/56");
+        let desired_blueprint =
+            make_blueprint_config(3, make_nat_entries("172.20.26.3"));
+        let current = make_system_networking_config(
+            rnc.clone(),
+            Some(desired_blueprint.clone()),
+        );
+
+        let desired_list = vec![];
         assert_ne!(current.control_plane_router_list, desired_list);
 
         assert!(does_bootstore_need_update(

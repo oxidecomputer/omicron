@@ -341,13 +341,9 @@ pub struct ControlPlaneRouterConfiguration {
 /// The set of router configurations used by control-plane services
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct ControlPlaneRouterConfigurations {
-    /// Whether the control-plane list has ever been configured. When false,
-    /// control-plane services use the built-in default router. An empty
-    /// list with `configured: true` means no external egress for services.
-    pub configured: bool,
-
     /// The router configurations used by control-plane services, in
-    /// ascending priority order
+    /// ascending priority order. Initialization and upgrade assign
+    /// default-switch0 at priority 1000. An empty list disables external routing.
     pub configurations: Vec<ControlPlaneRouterConfiguration>,
 }
 

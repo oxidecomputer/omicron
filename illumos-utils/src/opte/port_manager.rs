@@ -482,10 +482,7 @@ impl PortManager {
         // Install the port's tunnel-router list before it can pass traffic,
         // whatever the xde default is: an empty list means no tunnel routers.
         let tunnel_routers = oxide_vpc::api::RouterList::new(
-            router_list
-                .iter()
-                .map(|entry| (entry.priority, entry.router_id))
-                .collect(),
+            router_list.iter().map(|entry| (entry.priority, entry.router_id)),
         )
         .map_err(Error::InvalidRouterList)?;
         debug!(
@@ -1007,10 +1004,7 @@ impl PortManager {
             port.name().to_string()
         };
         let opte_list = oxide_vpc::api::RouterList::new(
-            list.routers
-                .iter()
-                .map(|entry| (entry.priority, entry.router_id))
-                .collect(),
+            list.routers.iter().map(|entry| (entry.priority, entry.router_id)),
         )
         .map_err(Error::InvalidRouterList)?;
         let hdl = Handle::new()?;
@@ -1035,10 +1029,9 @@ impl PortManager {
                 routers: resp
                     .list
                     .entries()
-                    .iter()
                     .map(|(priority, router_id)| RouterListEntry {
-                        priority: *priority,
-                        router_id: *router_id,
+                        priority,
+                        router_id,
                     })
                     .collect(),
             });

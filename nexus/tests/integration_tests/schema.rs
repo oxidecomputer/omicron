@@ -1449,3 +1449,72 @@ async fn validate_migration_from_base_version() {
 
     logctx.cleanup_successful();
 }
+
+// Exercise each old control-plane state with the actual migration files.
+// Each step runs twice, matching migration retry behavior.
+#[tokio::test]
+async fn control_plane_router_list_migration_preserves_routing() {
+    let config = load_test_config();
+    let logctx = LogContext::new(
+        "control_plane_router_list_migration_preserves_routing",
+        &config.pkg.log,
+    );
+    let db = TestDatabase::new_populate_nothing(&logctx.log).await;
+    let client = db.crdb().connect().await.unwrap();
+    client
+        .batch_execute("CREATE DATABASE IF NOT EXISTS omicron;")
+        .await
+        .unwrap();
+    let old_schema = std::fs::read_to_string(format!(
+        "{SCHEMA_DIR}/router-configurations/up10.sql"
+    ))
+    .unwrap();
+    let default_id: uuid::Uuid =
+        "001de000-defa-4000-8000-000000000000".parse().unwrap();
+    let custom_id: uuid::Uuid =
+        "4f9c2ea1-53a3-4b76-9cf8-7f2be4e3e6c1".parse().unwrap();
+    let cases = [
+        ("", vec![(1000i32, default_id)]),
+        (
+            "INSERT INTO omicron.public.control_plane_router_configuration VALUES (0, NULL);",
+            vec![],
+        ),
+        (
+            "INSERT INTO omicron.public.control_plane_router_configuration VALUES (10, '4f9c2ea1-53a3-4b76-9cf8-7f2be4e3e6c1'), (1000, '001de000-defa-4000-8000-000000000000');",
+            vec![(10, custom_id), (1000, default_id)],
+        ),
+    ];
+    for (seed, expected) in cases {
+        client.batch_execute(&old_schema).await.unwrap();
+        client.batch_execute(seed).await.unwrap();
+        for step in 1..=3 {
+            let sql = std::fs::read_to_string(format!(
+                "{SCHEMA_DIR}/control-plane-router-list-default/up{step}.sql"
+            ))
+            .unwrap();
+            for _ in 0..2 {
+                client
+                    .batch_execute(&format!("BEGIN; {sql} COMMIT;"))
+                    .await
+                    .unwrap();
+            }
+        }
+        let rows = client.query(
+            "SELECT priority, router_configuration_id FROM omicron.public.control_plane_router_configuration ORDER BY priority", &[]
+        ).await.unwrap();
+        let actual: Vec<(i32, uuid::Uuid)> =
+            rows.iter().map(|r| (r.get(0), r.get(1))).collect();
+        assert_eq!(actual, expected);
+        assert!(client.batch_execute(
+            "INSERT INTO omicron.public.control_plane_router_configuration VALUES (1, NULL)"
+        ).await.is_err());
+        client
+            .batch_execute(
+                "DROP TABLE omicron.public.control_plane_router_configuration",
+            )
+            .await
+            .unwrap();
+    }
+    db.terminate().await;
+    logctx.cleanup_successful();
+}

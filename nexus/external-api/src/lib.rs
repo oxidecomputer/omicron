@@ -6278,8 +6278,11 @@ pub trait NexusExternalApi {
     async fn networking_router_configuration_bgp_peer_list(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::networking::RouterConfigurationSelector>,
+        query_params: Query<PaginatedByName>,
     ) -> Result<
-        HttpResponseOk<Vec<latest::networking::RouterConfigurationBgpPeer>>,
+        HttpResponseOk<
+            ResultsPage<latest::networking::RouterConfigurationBgpPeer>,
+        >,
         HttpError,
     >;
 
@@ -6358,7 +6361,11 @@ pub trait NexusExternalApi {
     async fn networking_router_configuration_static_route_list(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::networking::RouterConfigurationSelector>,
-    ) -> Result<HttpResponseOk<Vec<latest::networking::StaticRoute>>, HttpError>;
+        query_params: Query<PaginatedByName>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::networking::StaticRoute>>,
+        HttpError,
+    >;
 
     /// Add static route to router configuration
     #[endpoint {
@@ -6426,7 +6433,11 @@ pub trait NexusExternalApi {
     async fn networking_router_configuration_bfd_peer_list(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::networking::RouterConfigurationSelector>,
-    ) -> Result<HttpResponseOk<Vec<latest::networking::BfdPeer>>, HttpError>;
+        query_params: Query<PaginatedByName>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::networking::BfdPeer>>,
+        HttpError,
+    >;
 
     /// Add BFD peer to router configuration
     #[endpoint {

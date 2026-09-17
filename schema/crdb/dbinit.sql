@@ -4241,20 +4241,20 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_silo_router_configuration_by_router_con
  * The prioritized router-configuration list used by control-plane (service)
  * OPTE ports, fleet-wide. Rows are hard-deleted and replaced in bulk.
  *
- * Three states:
- *  - no rows: never configured; services fall back to the built-in default
- *    list (the daemon-owned default router).
- *  - a single row with a NULL router_configuration_id: explicitly configured
- *    empty (no external egress for services).
- *  - one or more rows with non-NULL router_configuration_id: the list.
- * The replace transaction only ever writes the marker row alone.
+ * Initialization seeds default-switch0 at priority 1000. An empty table
+ * means no external routing for services; normal startup never reseeds it.
  */
 CREATE TABLE IF NOT EXISTS omicron.public.control_plane_router_configuration (
     priority INT4 NOT NULL CHECK (priority >= 0 AND priority <= 65535),
-    router_configuration_id UUID,
+    router_configuration_id UUID NOT NULL,
 
     PRIMARY KEY (priority)
 );
+
+INSERT INTO omicron.public.control_plane_router_configuration
+    (priority, router_configuration_id)
+VALUES (1000, '001de000-defa-4000-8000-000000000000')
+ON CONFLICT DO NOTHING;
 
 /* A router configuration appears at most once in the control-plane list. */
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_control_plane_router_configuration_by_router_configuration
@@ -9686,7 +9686,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '300.0.0', NULL)
+    (TRUE, NOW(), NOW(), '301.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

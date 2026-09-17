@@ -500,15 +500,13 @@ impl SiloRouterConfiguration {
 /// One entry of the fleet-wide router-configuration list used by
 /// control-plane (service) OPTE ports.
 ///
-/// A `None` `router_configuration_id` is only valid in the single marker row
-/// `(0, NULL)` that records "explicitly configured empty" — without it, an
-/// empty table would be indistinguishable from "never configured" (which
-/// falls back to the built-in default list).
+/// An empty table means no external routing for services. Initialization and
+/// upgrade seed an explicit default assignment.
 #[derive(Queryable, Insertable, Selectable, Clone, Debug)]
 #[diesel(table_name = control_plane_router_configuration)]
 pub struct ControlPlaneRouterConfiguration {
     pub priority: SqlU16,
-    pub router_configuration_id: Option<DbTypedUuid<RouterConfigurationKind>>,
+    pub router_configuration_id: DbTypedUuid<RouterConfigurationKind>,
 }
 
 impl ControlPlaneRouterConfiguration {
@@ -517,14 +515,9 @@ impl ControlPlaneRouterConfiguration {
         priority: u16,
     ) -> Self {
         Self {
-            router_configuration_id: Some(router_configuration_id.into()),
+            router_configuration_id: router_configuration_id.into(),
             priority: priority.into(),
         }
-    }
-
-    /// The marker row meaning "explicitly configured empty".
-    pub fn empty_marker() -> Self {
-        Self { router_configuration_id: None, priority: 0.into() }
     }
 }
 

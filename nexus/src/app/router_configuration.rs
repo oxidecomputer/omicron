@@ -15,6 +15,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_types::external_api::networking;
 use nexus_types::identity::Resource;
 use nexus_types::router_configuration::is_builtin_router_configuration_id;
+use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
     CreateResult, DeleteResult, Error, ListResultVec, LookupResult, Name,
@@ -67,23 +68,26 @@ impl super::Nexus {
     ) -> Result<networking::RouterConfiguration, Error> {
         let mut view: networking::RouterConfiguration =
             db_configuration.try_into()?;
+        // The view carries the complete entry sets; the external per-entry
+        // list endpoints are paginated separately.
+        let ids = [authz_configuration.id()];
         view.bgp_peers = self
             .db_datastore
-            .router_configuration_bgp_peer_list(opctx, authz_configuration)
+            .router_configuration_bgp_peer_list_batch(opctx, &ids)
             .await?
             .into_iter()
             .map(TryInto::try_into)
             .collect::<Result<_, _>>()?;
         view.routes = self
             .db_datastore
-            .router_configuration_static_route_list(opctx, authz_configuration)
+            .router_configuration_static_route_list_batch(opctx, &ids)
             .await?
             .into_iter()
             .map(Into::into)
             .collect();
         view.bfd_peers = self
             .db_datastore
-            .router_configuration_bfd_peer_list(opctx, authz_configuration)
+            .router_configuration_bfd_peer_list_batch(opctx, &ids)
             .await?
             .into_iter()
             .map(TryInto::try_into)
@@ -371,6 +375,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         name_or_id: NameOrId,
+        pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<networking::RouterConfigurationBgpPeer> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let (.., authz_configuration) = self
@@ -378,7 +383,11 @@ impl super::Nexus {
             .lookup_for(authz::Action::Read)
             .await?;
         self.db_datastore
-            .router_configuration_bgp_peer_list(opctx, &authz_configuration)
+            .router_configuration_bgp_peer_list(
+                opctx,
+                &authz_configuration,
+                pagparams,
+            )
             .await?
             .into_iter()
             .map(TryInto::try_into)
@@ -400,6 +409,7 @@ impl super::Nexus {
             .db_datastore
             .router_configuration_bgp_peer_create(
                 opctx,
+                &authz_configuration,
                 RouterConfigurationBgpPeer::new(
                     authz_configuration.id(),
                     peer,
@@ -485,6 +495,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         name_or_id: NameOrId,
+        pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<networking::StaticRoute> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let (.., authz_configuration) = self
@@ -493,7 +504,11 @@ impl super::Nexus {
             .await?;
         Ok(self
             .db_datastore
-            .router_configuration_static_route_list(opctx, &authz_configuration)
+            .router_configuration_static_route_list(
+                opctx,
+                &authz_configuration,
+                pagparams,
+            )
             .await?
             .into_iter()
             .map(Into::into)
@@ -515,6 +530,7 @@ impl super::Nexus {
             .db_datastore
             .router_configuration_static_route_create(
                 opctx,
+                &authz_configuration,
                 RouterConfigurationStaticRoute::new(
                     authz_configuration.id(),
                     route,
@@ -601,6 +617,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         name_or_id: NameOrId,
+        pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<networking::BfdPeer> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let (.., authz_configuration) = self
@@ -609,7 +626,11 @@ impl super::Nexus {
             .await?;
         Ok(self
             .db_datastore
-            .router_configuration_bfd_peer_list(opctx, &authz_configuration)
+            .router_configuration_bfd_peer_list(
+                opctx,
+                &authz_configuration,
+                pagparams,
+            )
             .await?
             .into_iter()
             .map(TryInto::try_into)
@@ -631,7 +652,11 @@ impl super::Nexus {
             .db_datastore
             .router_configuration_bfd_peer_create(
                 opctx,
-                RouterConfigurationBfdPeer::new(authz_configuration.id(), peer)?,
+                &authz_configuration,
+                RouterConfigurationBfdPeer::new(
+                    authz_configuration.id(),
+                    peer,
+                )?,
             )
             .await?;
         self.activate_router_configuration_propagation();
@@ -678,7 +703,10 @@ impl super::Nexus {
                 opctx,
                 &authz_configuration,
                 peer_name,
-                RouterConfigurationBfdPeer::new(authz_configuration.id(), peer)?,
+                RouterConfigurationBfdPeer::new(
+                    authz_configuration.id(),
+                    peer,
+                )?,
             )
             .await?;
         self.activate_router_configuration_propagation();
@@ -816,27 +844,17 @@ impl super::Nexus {
             .control_plane_router_configurations_list(opctx)
             .await?;
 
-        let configured = !entries.is_empty();
         let configurations = entries
             .into_iter()
-            // The NULL-id marker row means "configured empty".
-            .filter_map(|entry| {
-                entry.router_configuration_id.map(|id| {
-                    networking::ControlPlaneRouterConfiguration {
-                        router_configuration_id: RouterConfigurationUuid::from(
-                            id,
-                        )
-                        .into_untyped_uuid(),
-                        priority: *entry.priority,
-                    }
-                })
+            .map(|entry| networking::ControlPlaneRouterConfiguration {
+                router_configuration_id: entry
+                    .router_configuration_id
+                    .into_untyped_uuid(),
+                priority: *entry.priority,
             })
             .collect();
 
-        Ok(networking::ControlPlaneRouterConfigurations {
-            configured,
-            configurations,
-        })
+        Ok(networking::ControlPlaneRouterConfigurations { configurations })
     }
 
     pub async fn control_plane_router_configurations_update(
@@ -901,23 +919,8 @@ impl super::Nexus {
         self.activate_router_configuration_propagation();
 
         configurations.sort_by_key(|c| c.priority);
-        Ok(networking::ControlPlaneRouterConfigurations {
-            configured: true,
-            configurations,
-        })
+        Ok(networking::ControlPlaneRouterConfigurations { configurations })
     }
-}
-
-/// Priority of the sole entry in the never-configured control-plane list.
-pub(crate) const DEFAULT_ROUTER_LIST_PRIORITY: u16 = 1000;
-
-/// The router list used for service ports when the control plane list was
-/// never configured: the daemon-owned default router at priority 1000.
-pub(crate) fn default_router_list() -> Vec<RouterListEntry> {
-    vec![RouterListEntry {
-        priority: DEFAULT_ROUTER_LIST_PRIORITY,
-        router_id: None,
-    }]
 }
 
 /// Keep only the highest-priority entry per resolved router.

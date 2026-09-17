@@ -428,7 +428,7 @@ joinable!(silo_router_configuration -> router_configuration (router_configuratio
 table! {
     control_plane_router_configuration (priority) {
         priority -> Int4,
-        router_configuration_id -> Nullable<Uuid>,
+        router_configuration_id -> Uuid,
     }
 }
 

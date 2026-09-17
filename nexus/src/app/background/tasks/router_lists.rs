@@ -8,10 +8,9 @@
 //! Each OPTE port gets the prioritized router-configuration list of the silo
 //! its instance belongs to. A silo with no assignment gets an EMPTY list —
 //! no config means no tunnel routers, i.e. no external egress. Service
-//! ports get the control-plane list if one was ever configured (an
-//! explicitly-configured-empty list means no egress), otherwise the
-//! default list `[(1000, default)]`. Ports we cannot account for (DB/sled
-//! skew) fail closed with an empty list. A list entry referencing either
+//! ports get the stored control-plane list; an empty list means no egress.
+//! Initialization and upgrade seed `[(1000, default-switch0)]`. Ports we
+//! cannot account for (DB/sled skew) fail closed with an empty list. A list entry referencing either
 //! built-in per-switch configuration ("default-switch0"/"default-switch1",
 //! fixed well-known IDs) is pushed to OPTE as the `None` (default) router —
 //! at the list level the two are aliases, and resolved lists are deduped to
@@ -33,9 +32,7 @@ use slog_error_chain::InlineErrorChain;
 use uuid::Uuid;
 
 use crate::app::background::BackgroundTask;
-use crate::app::router_configuration::{
-    default_router_list, router_list_from_links,
-};
+use crate::app::router_configuration::router_list_from_links;
 
 pub struct RouterListManager {
     datastore: Arc<DataStore>,
@@ -93,19 +90,15 @@ impl BackgroundTask for RouterListManager {
                 .map(|(silo, links)| (silo, router_list_from_links(links)))
                 .collect();
 
-            // The control-plane (service port) list: never configured →
-            // built-in default; the NULL-id marker row → explicitly empty.
+            // Apply the stored service-port list, including an empty list.
             let cp_list = match self
                 .datastore
                 .control_plane_router_configurations_list(opctx)
                 .await
             {
-                Ok(entries) if entries.is_empty() => default_router_list(),
                 Ok(entries) => router_list_from_links(
-                    entries.into_iter().filter_map(|e| {
-                        e.router_configuration_id.map(|id| {
-                            (*e.priority, id.into_untyped_uuid())
-                        })
+                    entries.into_iter().map(|e| {
+                        (*e.priority, e.router_configuration_id.into_untyped_uuid())
                     }),
                 ),
                 Err(e) => {
