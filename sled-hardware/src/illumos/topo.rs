@@ -10,7 +10,7 @@
 
 use crate::nvme_instance::NvmeInstance;
 use libtopo::{Error, Node, Scheme, TopoHdl, WalkAction, hc};
-use slog::{Logger, debug, error, warn};
+use slog::{Logger, debug, warn};
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::time::Instant;
@@ -47,7 +47,7 @@ pub(super) fn read_disk_locations(
                 Entry::Vacant(entry) => {
                     entry.insert(label);
                 }
-                Entry::Occupied(entry) => error!(
+                Entry::Occupied(entry) => warn!(
                     log,
                     "hardware topology has two nvme nodes with the same \
                      instance; keeping the first label";
@@ -98,7 +98,7 @@ fn nvme_instance_of(log: &Logger, node: &Node<'_>) -> Option<NvmeInstance> {
                 return None;
             }
         };
-    match NvmeInstance::try_from(value) {
+    match NvmeInstance::from_topo(value) {
         Ok(instance) => Some(instance),
         Err(err) => {
             warn!(

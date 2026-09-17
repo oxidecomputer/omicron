@@ -274,6 +274,10 @@ impl UnparsedDisk {
     /// It identifies the disk's position in the board's PCIe topology and is
     /// board-specific: the same U.2 bay has a different number on Gimlet and
     /// Cosmo. It is not the location label printed on the chassis.
+    ///
+    /// Although **thus far** it has been stable, this value may also change
+    /// in subsequent host OS versions. For stability, the value of "location"
+    /// should be preferred.
     pub fn pcie_slot(&self) -> i64 {
         self.pcie_slot
     }

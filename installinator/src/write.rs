@@ -124,7 +124,7 @@ impl WriteDestination {
         for disk in hardware.m2_disks() {
             let Ok(slot) = M2Slot::try_from(disk.pcie_slot()) else {
                 warn!(
-                    log, "skipping M.2 drive with unexpected slot number";
+                    log, "skipping M.2 drive with unexpected PCIe slot number";
                     "pcie_slot" => disk.pcie_slot(),
                 );
                 continue;

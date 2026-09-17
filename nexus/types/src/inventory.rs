@@ -617,9 +617,9 @@ pub struct PhysicalDisk {
     /// location label printed on the chassis; see `location` for that.
     //
     // Older serialized state (support bundles, `omdb` exports) called this
-    // field `slot`. Accept that name too so those files still load. The
-    // format is documented as unstable, so this isn't strictly necessary, but
-    // it is cheap and fail-safe.
+    // field `slot`. Accepting that name lets us still deserialize those files.
+    // The format is documented as unstable, so this isn't strictly necessary,
+    // but it is cheap and fail-safe.
     #[serde(alias = "slot")]
     pub pcie_slot: i64,
     /// Where this disk sits in the chassis, as labelled by the platform's
@@ -630,7 +630,7 @@ pub struct PhysicalDisk {
     /// for the disk or could not be read.
     //
     // Older serialized state had no such field; treating its absence as
-    // `None` is exactly right, since nothing recorded a location then.
+    // `None` accurately represents that nothing recorded a location.
     #[serde(default)]
     pub location: Option<String>,
     pub firmware: PhysicalDiskFirmware,

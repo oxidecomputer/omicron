@@ -22,6 +22,7 @@ use slog::error;
 use slog::info;
 use slog::o;
 use slog::warn;
+use slog_error_chain::InlineErrorChain;
 use std::collections::{HashMap, HashSet};
 use tokio::sync::watch;
 use uuid::Uuid;
@@ -186,40 +187,42 @@ impl HardwareSnapshot {
                 }
 
                 // Now that we know which controllers are present, ask the
-                // hardware topology where they are. A failure to read the
-                // topology costs only the locations, never the disks.
+                // hardware topology where they are. If the topology cannot
+                // be read, the disks are still reported, without locations.
                 let locations = match topo::read_disk_locations(log) {
-                    Ok(locations) => Some(locations),
+                    Ok(locations) => {
+                        let unlabelled: Vec<_> = found
+                            .iter()
+                            .filter(|(_, instance)| {
+                                !locations.contains_key(instance)
+                            })
+                            .map(|(_, instance)| instance.to_string())
+                            .collect();
+                        if !unlabelled.is_empty() {
+                            warn!(
+                                log,
+                                "hardware topology has no location label \
+                                 for some disk controllers";
+                                "nvme_instances" => ?unlabelled,
+                            );
+                        }
+                        locations
+                    }
                     Err(err) => {
                         warn!(
                             log,
                             "failed to read disk locations from hardware \
                              topology";
-                            "err" => %err,
+                            InlineErrorChain::new(&err),
                         );
-                        None
+                        HashMap::new()
                     }
                 };
-                let mut unlabelled = Vec::new();
                 for (disk, instance) in found {
-                    let location = locations
-                        .as_ref()
-                        .and_then(|locations| locations.get(&instance))
-                        .cloned();
-                    if location.is_none() && locations.is_some() {
-                        unlabelled.push(instance.to_string());
-                    }
+                    let location = locations.get(&instance).cloned();
                     disks.insert(
                         disk.identity().clone(),
                         disk.with_location(location),
-                    );
-                }
-                if !unlabelled.is_empty() {
-                    warn!(
-                        log,
-                        "hardware topology has no location label for some \
-                         disk controllers";
-                        "nvme_instances" => ?unlabelled,
                     );
                 }
             }
@@ -483,7 +486,7 @@ fn poll_blkdev_node(
         .instance()
         .ok_or(Error::MissingNvmeDevinfoInstance { node: node.node_name() })?;
     let nvme_instance =
-        NvmeInstance::try_from(nvme_instance).map_err(|err| {
+        NvmeInstance::from_devinfo(nvme_instance).map_err(|err| {
             Error::InvalidNvmeInstance { node: node.node_name(), err }
         })?;
 
