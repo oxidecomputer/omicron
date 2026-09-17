@@ -677,62 +677,47 @@ output.type = "zone"
 service_name = "mg-ddm"
 # Note: unlike every other package, `maghemite` is not restricted to either the
 # "standard" or "trampoline" image; it is included in both.
-# LOCAL TESTING: built from the /claude/maghemite checkout, not buildomat.
-#   cd /claude/maghemite && cargo run -p mg-package
-#   cp out/mg-ddm-gz.tar /claude/omicron/out/
-# Restore the commented `source.*` keys below to go back to the buildomat pin.
-source.type = "manual"
-#source.type = "prebuilt"
-#source.repo = "maghemite"
+source.type = "prebuilt"
+source.repo = "maghemite"
 # Updating the commit hash here currently requires also updating
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-#source.commit = "ce015cde17a1ebc839ae482026d522cf0e369a3b"
+source.commit = "999fdd67d024c9c05e5d201a06d284e41357e721"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm-gz.sha256.txt
-#source.sha256 = "279cb103525d4a554082fbea11f7b841fc1515f337cf895849b5e7c0950b925d"
+source.sha256 = "807a2422dfe5c1a0e40429026530c67d52ff381d4d07652e684681db62b89975"
 output.type = "tarball"
 
 [package.mg-ddm]
 service_name = "mg-ddm"
 # Note: unlike every other package, `maghemite` is not restricted to either the
 # "standard" or "trampoline" image; it is included in both.
-# LOCAL TESTING: built from the /claude/maghemite checkout, not buildomat.
-#   cd /claude/maghemite && cargo run -p mg-package
-#   cp out/mg-ddm.tar.gz /claude/omicron/out/
-# Restore the commented `source.*` keys below to go back to the buildomat pin.
-source.type = "manual"
-#source.type = "prebuilt"
-#source.repo = "maghemite"
+source.type = "prebuilt"
+source.repo = "maghemite"
 # Updating the commit hash here currently requires also updating
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-#source.commit = "ce015cde17a1ebc839ae482026d522cf0e369a3b"
+source.commit = "999fdd67d024c9c05e5d201a06d284e41357e721"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-#source.sha256 = "742d0bec146634695f40133b41f9da8a2de2bc36a905de0927c7515a6672e1ce"
+source.sha256 = "621a160214af2fea84f6f09877c79b409f59abd4a1ef3a6ed09e37ce54833e8c"
 output.type = "zone"
 output.intermediate_only = true
 
 [package.mgd]
 service_name = "mgd"
-# LOCAL TESTING: built from the /claude/maghemite checkout, not buildomat.
-#   cd /claude/maghemite && cargo run -p mg-package
-#   cp out/mgd.tar.gz /claude/omicron/out/
-# Restore the commented `source.*` keys below to go back to the buildomat pin.
-source.type = "manual"
-#source.type = "prebuilt"
-#source.repo = "maghemite"
+source.type = "prebuilt"
+source.repo = "maghemite"
 # Updating the commit hash here currently requires also updating
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-#source.commit = "ce015cde17a1ebc839ae482026d522cf0e369a3b"
+source.commit = "999fdd67d024c9c05e5d201a06d284e41357e721"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mgd.sha256.txt
-#source.sha256 = "a8ef9f24f794c9ac3c4e66b60e738d50aa1b22f86c7aa7baf7b07d300411ecde"
+source.sha256 = "e46b9d06de9b9760afd46e24bbbbe9a81a5b831cbb8a6a2a7affb9cc727f10ae"
 output.type = "zone"
 output.intermediate_only = true
 
