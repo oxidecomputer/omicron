@@ -156,7 +156,8 @@ function install_packages {
       "cmake"
       "library/postgresql-$PGVER"
       "pkg-config"
-      "library/libxmlsec1"
+      # temporarily use an older version until a Buildomat lab image with libxml2.so.16 is available
+      "library/libxmlsec1@1.2.35"
       # "bindgen leverages libclang to preprocess, parse, and type check C and C++ header files."
       "pkg:/ooce/developer/clang-$CLANGVER"
       "system/library/gcc-runtime"
