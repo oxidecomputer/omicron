@@ -114,6 +114,7 @@ predicates = { version = "3.1.4" }
 proc-macro2 = { version = "1.0.106" }
 quote = { version = "1.0.45" }
 rand-274715c4dabd11b0 = { package = "rand", version = "0.9.2" }
+rand-93f6ce9d446188ac = { package = "rand", version = "0.10.1" }
 rand-c38e5c1d305a1b54 = { package = "rand", version = "0.8.6" }
 rand_chacha-274715c4dabd11b0 = { package = "rand_chacha", version = "0.9.0", default-features = false, features = ["std"] }
 rand_chacha-468e82937335b1c9 = { package = "rand_chacha", version = "0.3.1", default-features = false, features = ["std"] }
@@ -156,6 +157,7 @@ tokio-util = { version = "0.7.18", features = ["codec", "io-util", "rt", "time"]
 toml = { version = "0.7.8" }
 toml_datetime = { version = "0.6.11", default-features = false, features = ["serde"] }
 toml_edit-3c51e837cfc5589a = { package = "toml_edit", version = "0.22.27", features = ["serde"] }
+toml_edit-cdcf2f9584511fe6 = { package = "toml_edit", version = "0.19.15", features = ["serde"] }
 toml_parser = { version = "1.1.2" }
 tough = { version = "0.22.0", default-features = false, features = ["http"] }
 tracing = { version = "0.1.44", features = ["log"] }
@@ -272,6 +274,7 @@ predicates = { version = "3.1.4" }
 proc-macro2 = { version = "1.0.106" }
 quote = { version = "1.0.45" }
 rand-274715c4dabd11b0 = { package = "rand", version = "0.9.2" }
+rand-93f6ce9d446188ac = { package = "rand", version = "0.10.1" }
 rand-c38e5c1d305a1b54 = { package = "rand", version = "0.8.6" }
 rand_chacha-274715c4dabd11b0 = { package = "rand_chacha", version = "0.9.0", default-features = false, features = ["std"] }
 rand_chacha-468e82937335b1c9 = { package = "rand_chacha", version = "0.3.1", default-features = false, features = ["std"] }
@@ -317,6 +320,7 @@ tokio-util = { version = "0.7.18", features = ["codec", "io-util", "rt", "time"]
 toml = { version = "0.7.8" }
 toml_datetime = { version = "0.6.11", default-features = false, features = ["serde"] }
 toml_edit-3c51e837cfc5589a = { package = "toml_edit", version = "0.22.27", features = ["serde"] }
+toml_edit-cdcf2f9584511fe6 = { package = "toml_edit", version = "0.19.15", features = ["serde"] }
 toml_parser = { version = "1.1.2" }
 tough = { version = "0.22.0", default-features = false, features = ["http"] }
 tracing = { version = "0.1.44", features = ["log"] }
@@ -339,7 +343,6 @@ zip-181b0d20215bb231 = { package = "zip", version = "8.6.0", default-features = 
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 dof-468e82937335b1c9 = { package = "dof", version = "0.3.0", default-features = false, features = ["des"] }
 dof-9fbad63c4bcf4a8f = { package = "dof", version = "0.4.0", default-features = false, features = ["des"] }
-getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2"] }
 hyper-util = { version = "0.1.20", features = ["full"] }
 linux-raw-sys = { version = "0.4.15", default-features = false, features = ["elf", "errno", "general", "ioctl", "no_std", "system"] }
@@ -355,7 +358,6 @@ tokio-rustls = { version = "0.26.4", default-features = false, features = ["aws-
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 dof-468e82937335b1c9 = { package = "dof", version = "0.3.0", default-features = false, features = ["des"] }
 dof-9fbad63c4bcf4a8f = { package = "dof", version = "0.4.0", default-features = false, features = ["des"] }
-getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2"] }
 hyper-util = { version = "0.1.20", features = ["full"] }
 linux-raw-sys = { version = "0.4.15", default-features = false, features = ["elf", "errno", "general", "ioctl", "no_std", "system"] }
@@ -370,7 +372,6 @@ tokio-rustls = { version = "0.26.4", default-features = false, features = ["aws-
 [target.x86_64-apple-darwin.dependencies]
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 errno = { version = "0.3.14" }
-getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2"] }
 hyper-util = { version = "0.1.20", features = ["full"] }
 miniz_oxide = { version = "0.8.9", default-features = false, features = ["simd", "with-alloc"] }
@@ -384,7 +385,6 @@ tokio-rustls = { version = "0.26.4", default-features = false, features = ["aws-
 [target.x86_64-apple-darwin.build-dependencies]
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 errno = { version = "0.3.14" }
-getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2"] }
 hyper-util = { version = "0.1.20", features = ["full"] }
 miniz_oxide = { version = "0.8.9", default-features = false, features = ["simd", "with-alloc"] }
@@ -398,7 +398,6 @@ tokio-rustls = { version = "0.26.4", default-features = false, features = ["aws-
 [target.aarch64-apple-darwin.dependencies]
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 errno = { version = "0.3.14" }
-getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2"] }
 hyper-util = { version = "0.1.20", features = ["full"] }
 miniz_oxide = { version = "0.8.9", default-features = false, features = ["simd", "with-alloc"] }
@@ -412,7 +411,6 @@ tokio-rustls = { version = "0.26.4", default-features = false, features = ["aws-
 [target.aarch64-apple-darwin.build-dependencies]
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 errno = { version = "0.3.14" }
-getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2"] }
 hyper-util = { version = "0.1.20", features = ["full"] }
 miniz_oxide = { version = "0.8.9", default-features = false, features = ["simd", "with-alloc"] }
@@ -428,7 +426,6 @@ cookie = { version = "0.18.1", default-features = false, features = ["percent-en
 dof-468e82937335b1c9 = { package = "dof", version = "0.3.0", default-features = false, features = ["des"] }
 dof-9fbad63c4bcf4a8f = { package = "dof", version = "0.4.0", default-features = false, features = ["des"] }
 errno = { version = "0.3.14" }
-getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2"] }
 hyper-util = { version = "0.1.20", features = ["full"] }
 miniz_oxide = { version = "0.8.9", default-features = false, features = ["simd", "with-alloc"] }
@@ -438,7 +435,6 @@ object = { version = "0.37.3", default-features = false, features = ["read", "st
 rustix-d585fab2519d2d1 = { package = "rustix", version = "0.38.44", features = ["fs", "stdio", "system", "termios"] }
 rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.1.4", default-features = false, features = ["stdio", "termios"] }
 tokio-rustls = { version = "0.26.4", default-features = false, features = ["aws-lc-rs"] }
-toml_edit-cdcf2f9584511fe6 = { package = "toml_edit", version = "0.19.15", features = ["serde"] }
 winnow = { version = "1.0.3" }
 
 [target.x86_64-unknown-illumos.build-dependencies]
@@ -446,7 +442,6 @@ cookie = { version = "0.18.1", default-features = false, features = ["percent-en
 dof-468e82937335b1c9 = { package = "dof", version = "0.3.0", default-features = false, features = ["des"] }
 dof-9fbad63c4bcf4a8f = { package = "dof", version = "0.4.0", default-features = false, features = ["des"] }
 errno = { version = "0.3.14" }
-getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2"] }
 hyper-util = { version = "0.1.20", features = ["full"] }
 miniz_oxide = { version = "0.8.9", default-features = false, features = ["simd", "with-alloc"] }
@@ -456,7 +451,6 @@ object = { version = "0.37.3", default-features = false, features = ["read", "st
 rustix-d585fab2519d2d1 = { package = "rustix", version = "0.38.44", features = ["fs", "stdio", "system", "termios"] }
 rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.1.4", default-features = false, features = ["stdio", "termios"] }
 tokio-rustls = { version = "0.26.4", default-features = false, features = ["aws-lc-rs"] }
-toml_edit-cdcf2f9584511fe6 = { package = "toml_edit", version = "0.19.15", features = ["serde"] }
 winnow = { version = "1.0.3" }
 
 ### END HAKARI SECTION
