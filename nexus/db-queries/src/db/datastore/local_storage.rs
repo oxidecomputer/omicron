@@ -459,6 +459,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
     ) -> Result<Vec<datastore::LocalStorageDisk>, Error> {
+        opctx.authorize(authz::Action::Delete, &authz::FLEET).await?;
         opctx.check_complex_operations_allowed()?;
 
         let conn = self.pool_connection_authorized(opctx).await?;
