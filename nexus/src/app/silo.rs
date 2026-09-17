@@ -4,6 +4,7 @@
 
 //! Silos, Users, and SSH Keys.
 
+use crate::app::external_client::ExternalClientBuilder;
 use anyhow::Context;
 use chrono::TimeDelta;
 use nexus_db_lookup::LookupPath;
@@ -1019,11 +1020,14 @@ impl super::Nexus {
                 // introduce attack surface to download it each time it was
                 // required.
                 let dur = std::time::Duration::from_secs(5);
-                let client = reqwest::ClientBuilder::new()
+                let builder = reqwest::ClientBuilder::new()
                     .connect_timeout(dur)
-                    .timeout(dur)
-                    .dns_resolver(self.external_resolver.clone())
-                    .build()
+                    .timeout(dur);
+                let client = ExternalClientBuilder::from(builder)
+                    .build(
+                        &self.external_http_client_config,
+                        &self.external_resolver,
+                    )
                     .map_err(|e| {
                         Error::internal_error(&format!(
                             "failed to build reqwest client: {}",
@@ -1031,15 +1035,28 @@ impl super::Nexus {
                         ))
                     })?;
 
-                let response = client.get(url).send().await.map_err(|e| {
-                    Error::invalid_value(
-                        "url",
-                        format!(
-                            "error querying url: {}",
-                            InlineErrorChain::new(&e)
-                        ),
-                    )
-                })?;
+                let response = client
+                    .get(url)
+                    .map_err(|e| {
+                        Error::invalid_value(
+                            "url",
+                            format!(
+                                "invald URL: {}",
+                                InlineErrorChain::new(&e)
+                            ),
+                        )
+                    })?
+                    .send()
+                    .await
+                    .map_err(|e| {
+                        Error::invalid_value(
+                            "url",
+                            format!(
+                                "error querying url: {}",
+                                InlineErrorChain::new(&e)
+                            ),
+                        )
+                    })?;
 
                 if !response.status().is_success() {
                     return Err(Error::invalid_value(
