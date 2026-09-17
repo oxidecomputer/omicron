@@ -51,23 +51,6 @@ pub enum ClaimBacktraceSetting {
     Skip,
 }
 
-impl ClaimBacktraceSetting {
-    /// Convert a bool config flag to a [`ClaimBacktraceSetting`] value.
-    ///
-    /// Assumes the same semantics used for the `record_db_claim_backtraces` flag in
-    /// [`DeploymentConfig`], where `true` maps to the default behavior of capturing backtraces, and
-    /// `false` disables backtrace capture.
-    ///
-    /// [`DeploymentConfig`]: nexus_config::DeploymentConfig
-    pub fn from_config_flag(record_db_claim_backtraces: bool) -> Self {
-        if record_db_claim_backtraces {
-            ClaimBacktraceSetting::Capture
-        } else {
-            ClaimBacktraceSetting::Skip
-        }
-    }
-}
-
 /// Wrapper around a database connection pool.
 ///
 /// Expected to be used as the primary interface to the database.

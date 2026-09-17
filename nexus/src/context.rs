@@ -274,9 +274,12 @@ impl ServerContext {
             }
         };
 
-        let backtrace_setting = db::ClaimBacktraceSetting::from_config_flag(
-            config.deployment.record_db_claim_backtraces,
-        );
+        let backtrace_setting = if config.deployment.record_db_claim_backtraces
+        {
+            db::ClaimBacktraceSetting::Capture
+        } else {
+            db::ClaimBacktraceSetting::Skip
+        };
 
         // Once this database pool is created, it spawns workers which will
         // be continually attempting to access database backends.
