@@ -7,9 +7,6 @@ license = "MPL-2.0"
 [lints]
 workspace = true
 
-[build-dependencies]
-omicron-rpaths.workspace = true
-
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true
@@ -56,10 +53,6 @@ tufaceous-artifact.workspace = true
 oxide-update-engine.workspace = true
 oxide-update-engine-types.workspace = true
 omicron-workspace-hack.workspace = true
-
-[target.'cfg(target_os = "illumos")'.dependencies]
-# See omicron-rpaths for more about the "libtopo-sys" dependency.
-libtopo-sys.workspace = true
 
 [dev-dependencies]
 omicron-test-utils.workspace = true

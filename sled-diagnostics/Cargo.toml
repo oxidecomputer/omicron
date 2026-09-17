@@ -6,9 +6,6 @@ edition.workspace = true
 [lints]
 workspace = true
 
-[build-dependencies]
-omicron-rpaths.workspace = true
-
 [dependencies]
 anyhow.workspace = true
 camino.workspace = true
@@ -33,10 +30,6 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
 zfs-test-harness.workspace = true
 zip = { workspace = true, features = ["jiff-02","zstd"] }
-
-[target.'cfg(target_os = "illumos")'.dependencies]
-# See omicron-rpaths for more about the "libtopo-sys" dependency.
-libtopo-sys.workspace = true
 
 [dev-dependencies]
 omicron-common.workspace = true

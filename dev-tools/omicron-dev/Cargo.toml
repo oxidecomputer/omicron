@@ -34,8 +34,6 @@ toml.workspace = true
 [target.'cfg(target_os = "illumos")'.dependencies]
 # See omicron-rpaths for more about the "fmd-adm-sys" dependency.
 fmd-adm-sys.workspace = true
-# See omicron-rpaths for more about the "libtopo-sys" dependency.
-libtopo-sys.workspace = true
 
 [dev-dependencies]
 expectorate.workspace = true

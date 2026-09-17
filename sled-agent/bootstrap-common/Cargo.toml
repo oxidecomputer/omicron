@@ -8,9 +8,6 @@ description = "shared code for bootstrap agent related crates"
 [lints]
 workspace = true
 
-[build-dependencies]
-omicron-rpaths.workspace = true
-
 [dependencies]
 bootstore.workspace = true
 camino.workspace = true
@@ -31,7 +28,3 @@ trust-quorum.workspace = true
 uuid.workspace = true
 
 omicron-workspace-hack.workspace = true
-
-[target.'cfg(target_os = "illumos")'.dependencies]
-# See omicron-rpaths for more about the "libtopo-sys" dependency.
-libtopo-sys.workspace = true

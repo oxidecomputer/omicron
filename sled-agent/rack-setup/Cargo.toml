@@ -7,9 +7,6 @@ license = "MPL-2.0"
 [lints]
 workspace = true
 
-[build-dependencies]
-omicron-rpaths.workspace = true
-
 [dependencies]
 anyhow.workspace = true
 bootstore.workspace = true
@@ -56,10 +53,6 @@ trust-quorum.workspace = true
 trust-quorum-protocol.workspace = true
 trust-quorum-types.workspace = true
 uuid.workspace = true
-
-[target.'cfg(target_os = "illumos")'.dependencies]
-# See omicron-rpaths for more about the "libtopo-sys" dependency.
-libtopo-sys.workspace = true
 
 [dev-dependencies]
 camino-tempfile.workspace = true

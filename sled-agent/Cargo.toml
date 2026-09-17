@@ -138,8 +138,6 @@ fmd-adm.workspace = true
 # Direct dep on fmd-adm-sys so this crate sees DEP_FMD_ADM_LIBDIRS in build.rs
 # and can configure RPATH via omicron-rpaths.
 fmd-adm-sys.workspace = true
-# See omicron-rpaths for more about the "libtopo-sys" dependency.
-libtopo-sys.workspace = true
 opte-ioctl.workspace = true
 
 [dev-dependencies]
