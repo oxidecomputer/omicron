@@ -203,6 +203,10 @@ pub struct DeploymentConfig {
     /// This flag is intended as an escape hatch in case we ever encounter an
     /// unexpected pathological case where capturing backtraces is slow enough
     /// to be an issue.
+    ///
+    /// Note that we probably shouldn't need a default here, but I'm leaving it
+    /// for now just to be safe in case there are any update-related corner
+    /// cases where this might matter. We can remove this in a future release.
     #[serde(default = "default_record_db_claim_backtraces")]
     pub record_db_claim_backtraces: bool,
 }
