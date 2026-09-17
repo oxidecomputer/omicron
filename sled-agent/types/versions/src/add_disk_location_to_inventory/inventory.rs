@@ -38,6 +38,9 @@ pub struct InventoryDisk {
     /// internal to the board's PCIe topology and board-specific: the same
     /// U.2 bay is numbered differently on Gimlet and Cosmo. It is not the
     /// location label printed on the chassis; see `location` for that.
+    /// Nothing guarantees the numbering stays the same across host OS
+    /// versions either, so anything that needs a stable identifier should
+    /// use `location`.
     pub pcie_slot: i64,
     /// Where this disk sits in the chassis, as labelled by the platform's
     /// hardware topology: "N5" for a U.2 bay, "M.2 East" for a boot device.

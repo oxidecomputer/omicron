@@ -512,10 +512,15 @@ fn poll_blkdev_node(
     // We expect that the parent of the "nvme" device is a "pcieb" driver.
     let pcieb_node = get_parent_node(&nvme_node, "pcieb")?;
 
-    // The "pcieb" device's PCIe physical slot number tells us which bay or
-    // M.2 socket the disk is in, and therefore what type of disk it is. The
-    // numbering is board-specific and internal to the PCIe topology; it is
-    // not the location label printed on the chassis.
+    // sled-hardware keeps a per-board table of the PCIe physical slot
+    // numbers behind which U.2 bays and M.2 sockets sit, and infers the
+    // disk's variant by finding this number in it. The number itself is
+    // board-internal and says nothing about the chassis; it is not the
+    // location label, and it may be renumbered by a future host OS.
+    //
+    // TODO(https://github.com/oxidecomputer/omicron/issues/11258): The
+    // topology's bay and slot nodes are the authoritative source. Derive the
+    // variant from them instead of from this table.
     let pcie_slot = i64_from_property(
         &find_properties(&pcieb_node, ["physical-slot#"])?[0],
     )?;

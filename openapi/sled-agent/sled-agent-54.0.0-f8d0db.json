@@ -6458,7 +6458,7 @@
             "minimum": 0
           },
           "pcie_slot": {
-            "description": "PCIe physical slot number of the bridge above this disk.\n\nThis is the `physical-slot#` of the parent `pcieb` device. It is internal to the board's PCIe topology and board-specific: the same U.2 bay is numbered differently on Gimlet and Cosmo. It is not the location label printed on the chassis; see `location` for that.",
+            "description": "PCIe physical slot number of the bridge above this disk.\n\nThis is the `physical-slot#` of the parent `pcieb` device. It is internal to the board's PCIe topology and board-specific: the same U.2 bay is numbered differently on Gimlet and Cosmo. It is not the location label printed on the chassis; see `location` for that. Nothing guarantees the numbering stays the same across host OS versions either, so anything that needs a stable identifier should use `location`.",
             "type": "integer",
             "format": "int64"
           },

@@ -615,6 +615,9 @@ pub struct PhysicalDisk {
     /// internal to the board's PCIe topology and board-specific: the same
     /// U.2 bay is numbered differently on Gimlet and Cosmo. It is not the
     /// location label printed on the chassis; see `location` for that.
+    /// Nothing guarantees the numbering stays the same across host OS
+    /// versions either, so anything that needs a stable identifier should
+    /// use `location`.
     //
     // Older serialized state (support bundles, `omdb` exports) called this
     // field `slot`. Accepting that name lets us still deserialize those files.

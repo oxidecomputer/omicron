@@ -1697,7 +1697,7 @@ mod test {
                         },
                         variant: DiskVariant::U2,
                         pcie_slot: i.try_into().unwrap(),
-                        location: None,
+                        location: Some(format!("N{i}")),
                         active_firmware_slot: 1,
                         next_active_firmware_slot: None,
                         number_of_firmware_slots: 1,
