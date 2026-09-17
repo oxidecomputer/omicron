@@ -990,7 +990,15 @@ async fn validate_data_migration_from_version_to_target(
             before(&ctx).await;
         }
 
-        apply_update(log, &crdb, version, 1).await;
+        // Apply each step twice to check for idempotency.
+        //
+        // We already have `update_since_base_has_idempotent_up()` that also
+        // applies each step twice and checks for idempotency, but that runs
+        // against a db with no data in it, so can only check for non-idempotent
+        // schema changes. Running each step twice here lets us catch
+        // non-idempotent steps that only show up with data (e.g., `INSERT ...`
+        // migrations that don't handle conflicts if run twice).
+        apply_update(log, &crdb, version, 2).await;
         assert_eq!(
             version.semver().to_string(),
             query_crdb_schema_version(&crdb).await

@@ -43,8 +43,11 @@ use nexus_types::deployment::ClickhouseClusterConfig;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
+use nexus_types::deployment::OmicronZoneExternalFloatingAddrs;
 use nexus_types::deployment::OmicronZoneExternalFloatingIp;
+use nexus_types::deployment::OmicronZoneExternalFloatingIps;
 use nexus_types::deployment::OmicronZoneExternalIp;
+use nexus_types::deployment::OmicronZoneExternalSnat;
 use nexus_types::deployment::OmicronZoneExternalSnatIp;
 use nexus_types::deployment::OperatorNexusConfig;
 use nexus_types::deployment::OximeterReadMode;
@@ -66,7 +69,7 @@ use omicron_common::address::ReservedRackSubnet;
 use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::api::external::Vni;
 use omicron_generation_kinds::{
-    Generation, SledConfigGeneration, TargetReleaseGeneration,
+    Generation, NexusGeneration, SledConfigGeneration, TargetReleaseGeneration,
 };
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid;
@@ -363,8 +366,8 @@ pub(crate) enum Operation {
         num_zones_expunged: usize,
     },
     SetNexusGeneration {
-        current_generation: Generation,
-        new_generation: Generation,
+        current_generation: NexusGeneration,
+        new_generation: NexusGeneration,
     },
     SetTargetReleaseMinimumGeneration {
         current_generation: TargetReleaseGeneration,
@@ -549,7 +552,7 @@ pub struct BlueprintBuilder<'a> {
     cockroachdb_setting_preserve_downgrade: CockroachDbPreserveDowngrade,
     cockroachdb_fingerprint: String,
     target_release_minimum_generation: TargetReleaseGeneration,
-    nexus_generation: Generation,
+    nexus_generation: NexusGeneration,
     internal_dns_version: Generation,
     external_dns_version: Generation,
 
@@ -566,12 +569,15 @@ impl<'a> BlueprintBuilder<'a> {
     /// Directly construct an empty blueprint: no sleds; default values for all
     /// other fields.
     pub fn build_empty(creator: &str) -> Blueprint {
-        Self::build_empty_seeded(creator, PlannerRng::from_entropy())
+        Self::build_empty_seeded(creator, &mut PlannerRng::from_entropy())
     }
 
     /// A version of [`Self::build_empty`] that allows the
     /// blueprint ID to be generated from a deterministic RNG.
-    pub fn build_empty_seeded(creator: &str, mut rng: PlannerRng) -> Blueprint {
+    pub fn build_empty_seeded(
+        creator: &str,
+        rng: &mut PlannerRng,
+    ) -> Blueprint {
         let id = rng.next_blueprint();
         Blueprint {
             id,
@@ -581,7 +587,7 @@ impl<'a> BlueprintBuilder<'a> {
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
             target_release_minimum_generation: TargetReleaseGeneration::new(),
-            nexus_generation: Generation::new(),
+            nexus_generation: NexusGeneration::new(),
             external_networking_generation: Generation::new(),
             cockroachdb_fingerprint: String::new(),
             cockroachdb_setting_preserve_downgrade:
@@ -944,6 +950,16 @@ impl<'a> BlueprintBuilder<'a> {
 
     /// Assemble a final [`Blueprint`] based on the contents of the builder
     pub fn build(self, source: BlueprintSource) -> Blueprint {
+        self.build_returning_rng(source).0
+    }
+
+    /// Like `build()`, but also returns the `PlannerRng` so that the same one
+    /// can be used for building more blueprints.  This version is only intended
+    /// for tests.
+    pub fn build_returning_rng(
+        self,
+        source: BlueprintSource,
+    ) -> (Blueprint, PlannerRng) {
         let blueprint_id = self.new_blueprint_id();
 
         // Collect the Omicron zones config for all sleds, including any
@@ -1045,7 +1061,7 @@ impl<'a> BlueprintBuilder<'a> {
                 blueprint.external_networking_generation.next();
         }
 
-        blueprint
+        (blueprint, self.rng)
     }
 
     pub fn current_sled_state(
@@ -1587,7 +1603,9 @@ impl<'a> BlueprintBuilder<'a> {
             BlueprintZoneType::ExternalDns(blueprint_zone_type::ExternalDns {
                 dataset: OmicronZoneDataset { pool_name },
                 http_address,
-                dns_address,
+                dns_addresses: OmicronZoneExternalFloatingAddrs::from_single(
+                    dns_address,
+                ),
                 nic,
             });
 
@@ -1710,7 +1728,7 @@ impl<'a> BlueprintBuilder<'a> {
         sled_id: SledUuid,
         image_source: BlueprintZoneImageSource,
         external_ip: ExternalNetworkingChoice,
-        nexus_generation: Generation,
+        nexus_generation: NexusGeneration,
         config: &OperatorNexusConfig<'_>,
     ) -> Result<(), Error> {
         let nexus_id = self.rng.sled_rng(sled_id).next_zone();
@@ -1740,7 +1758,9 @@ impl<'a> BlueprintBuilder<'a> {
         let zone_type = BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
             internal_address,
             lockstep_port: omicron_common::address::NEXUS_LOCKSTEP_PORT,
-            external_ip,
+            external_ips: OmicronZoneExternalFloatingIps::from_single(
+                external_ip,
+            ),
             nic,
             external_tls: config.external_tls,
             external_dns_servers: config.external_dns_servers.to_vec(),
@@ -1965,10 +1985,11 @@ impl<'a> BlueprintBuilder<'a> {
         let new_zone_id = self.rng.sled_rng(sled_id).next_zone();
         let ExternalSnatNetworkingChoice { snat_cfg, nic_ip_config, nic_mac } =
             external_ip;
-        let external_ip = OmicronZoneExternalSnatIp {
-            id: self.rng.sled_rng(sled_id).next_external_ip(),
-            snat_cfg,
-        };
+        let external_ip =
+            OmicronZoneExternalSnat::from_single(OmicronZoneExternalSnatIp {
+                id: self.rng.sled_rng(sled_id).next_external_ip(),
+                snat_cfg,
+            });
         let nic = NetworkInterface {
             id: self.rng.sled_rng(sled_id).next_network_interface(),
             kind: NetworkInterfaceKind::Service {
@@ -2308,13 +2329,13 @@ impl<'a> BlueprintBuilder<'a> {
     }
 
     /// Get the value of `nexus_generation`.
-    pub fn nexus_generation(&self) -> Generation {
+    pub fn nexus_generation(&self) -> NexusGeneration {
         self.nexus_generation
     }
 
     /// Given the current value of `nexus_generation`, set the new value for
     /// this blueprint.
-    pub fn set_nexus_generation(&mut self, new_generation: Generation) {
+    pub fn set_nexus_generation(&mut self, new_generation: NexusGeneration) {
         let current_generation = self.nexus_generation;
         self.nexus_generation = new_generation;
         self.record_operation(Operation::SetNexusGeneration {
@@ -2760,9 +2781,20 @@ fn is_external_networking_config_different(
     )> {
         blueprint
             .in_service_zones()
-            .filter_map(|(sled_id, zone_config)| {
-                let (ip, nic) = zone_config.zone_type.external_networking()?;
-                Some((sled_id, zone_config.id, ip, nic))
+            .flat_map(|(sled_id, zone_config)| {
+                zone_config
+                    .zone_type
+                    .external_networking()
+                    .into_iter()
+                    .flat_map(move |networking| {
+                        // NOTE: We really do need to collect here, because the
+                        // returned iterator borrows from `networking`, even
+                        // though the data is owned.
+                        let nic = networking.nic();
+                        let ips = networking.external_ips().collect::<Vec<_>>();
+                        ips.into_iter()
+                            .map(move |ip| (sled_id, zone_config.id, ip, nic))
+                    })
             })
             .collect()
     }
@@ -3423,9 +3455,15 @@ pub mod test {
                     let mut new_network_resources =
                         OmicronZoneNetworkResources::new();
                     let old_network_resources = builder.network_resources_mut();
+                    let removed_id = removed_nexus
+                        .external_ips
+                        .iter()
+                        .next()
+                        .expect("Nexus has an external IP")
+                        .id;
                     for ip in old_network_resources.omicron_zone_external_ips()
                     {
-                        if ip.ip.id() != removed_nexus.external_ip.id {
+                        if ip.ip.id() != removed_id {
                             new_network_resources
                                 .add_external_ip(ip.zone_id, ip.ip)
                                 .expect("copied IP to new input");
@@ -3525,10 +3563,10 @@ pub mod test {
             // Nexus with no remaining external IPs should fail.
             let mut used_ip_ranges = Vec::new();
             for (_, z) in parent.in_service_zones() {
-                if let Some((external_ip, _)) =
-                    z.zone_type.external_networking()
-                {
-                    used_ip_ranges.push(IpRange::from(external_ip.ip()));
+                if let Some(networking) = z.zone_type.external_networking() {
+                    for external_ip in networking.external_ips() {
+                        used_ip_ranges.push(IpRange::from(external_ip.ip()));
+                    }
                 }
             }
             assert!(!used_ip_ranges.is_empty());

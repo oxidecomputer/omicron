@@ -5,13 +5,14 @@
 //! Re-exports of the latest versions of all types.
 
 pub mod artifact {
-    pub use crate::v1::artifact::ArtifactConfig;
     pub use crate::v1::artifact::ArtifactCopyFromDepotBody;
     pub use crate::v1::artifact::ArtifactCopyFromDepotResponse;
-    pub use crate::v1::artifact::ArtifactListResponse;
     pub use crate::v1::artifact::ArtifactPathParam;
     pub use crate::v1::artifact::ArtifactPutResponse;
-    pub use crate::v1::artifact::ArtifactQueryParam;
+
+    pub use crate::v52::artifact::ArtifactConfig;
+    pub use crate::v52::artifact::ArtifactListResponse;
+    pub use crate::v52::artifact::ArtifactQueryParam;
 }
 
 pub mod attached_subnet {
@@ -42,7 +43,7 @@ pub mod diagnostics {
     pub use crate::v1::diagnostics::SledDiagnosticsLogsDownloadPathParam;
     pub use crate::v1::diagnostics::SledDiagnosticsLogsDownloadPathParm;
 
-    pub use crate::v51::diagnostics::SledDiagnosticsLogsDownloadQueryParam;
+    pub use crate::v54::diagnostics::SledDiagnosticsLogsDownloadQueryParam;
 }
 
 pub mod disk {
@@ -166,9 +167,6 @@ pub mod inventory {
 
     pub use crate::v10::inventory::NetworkInterface;
 
-    pub use crate::v11::inventory::OmicronZoneConfig;
-    pub use crate::v11::inventory::OmicronZoneType;
-    pub use crate::v11::inventory::OmicronZonesConfig;
     pub use crate::v11::inventory::SourceNatConfig;
     pub use crate::v11::inventory::SourceNatConfigGeneric;
     pub use crate::v11::inventory::SourceNatConfigV4;
@@ -204,10 +202,22 @@ pub mod inventory {
 
     pub use crate::v49::inventory::OmicronSledUpdateDisposition;
 
-    pub use crate::v50::inventory::ConfigReconcilerInventory;
-    pub use crate::v50::inventory::ConfigReconcilerInventoryStatus;
-    pub use crate::v50::inventory::Inventory;
-    pub use crate::v50::inventory::OmicronSledConfig;
+    pub use crate::v51::inventory::ConfigReconcilerInventory;
+    pub use crate::v51::inventory::ConfigReconcilerInventoryStatus;
+    pub use crate::v51::inventory::ExternalDnsAddrs;
+    pub use crate::v51::inventory::MAX_ZONE_EXTERNAL_IPS;
+    pub use crate::v51::inventory::NexusExternalIps;
+    pub use crate::v51::inventory::OmicronSledConfig;
+    pub use crate::v51::inventory::OmicronZoneConfig;
+    pub use crate::v51::inventory::OmicronZoneType;
+    pub use crate::v51::inventory::OmicronZonesConfig;
+    pub use crate::v51::inventory::ZoneExternalAddrsError;
+    pub use crate::v51::inventory::ZoneSnatConfig;
+    pub use crate::v51::inventory::check_external_ip_count;
+
+    pub use crate::v53::inventory::CurrentUpdateDisposition;
+    pub use crate::v53::inventory::InstanceManagerStatus;
+    pub use crate::v53::inventory::Inventory;
 
     pub use crate::impls::inventory::FmdHostCaseDisplay;
     pub use crate::impls::inventory::FmdInventoryDisplay;

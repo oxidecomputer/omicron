@@ -28,12 +28,12 @@ pub static DEFAULT_SILO: LazyLock<model::Silo> = LazyLock::new(|| {
             // This quota is actually _unused_ because the default silo
             // isn't constructed in the same way a normal silo would be.
             quotas: SiloQuotasCreate::empty(),
-            discoverable: false,
             identity_mode: SiloIdentityMode::LocalOnly,
             admin_group_name: None,
             tls_certificates: vec![],
             mapped_fleet_roles: Default::default(),
         },
+        false,
     )
     .unwrap()
 });
@@ -50,12 +50,12 @@ pub static INTERNAL_SILO: LazyLock<model::Silo> = LazyLock::new(|| {
             },
             // The internal silo contains no virtual resources, so it has no allotted capacity.
             quotas: SiloQuotasCreate::empty(),
-            discoverable: false,
             identity_mode: SiloIdentityMode::LocalOnly,
             admin_group_name: None,
             tls_certificates: vec![],
             mapped_fleet_roles: Default::default(),
         },
+        false,
     )
     .unwrap()
 });

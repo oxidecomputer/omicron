@@ -296,7 +296,7 @@ pub struct InstanceCreate {
     /// it is initially placed on.
     #[serde(default)]
     pub cpu_platform: Option<InstanceCpuPlatform>,
-    /// Enable jumbo frames (8500 byte MTU) on the instance's primary OPTE
+    /// Enable jumbo frames (8500 byte MTU) on the instance's primary network
     /// interface. Requires the fleet-wide jumbo-frames opt-in to be enabled
     /// by an operator; otherwise this field must be `false`. Changes only take
     /// effect on the next instance restart.

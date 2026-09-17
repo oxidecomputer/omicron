@@ -7,8 +7,9 @@
 use crate::ControlPlaneStarter;
 use crate::ControlPlaneTestContextSledAgent;
 use crate::starter::PopulateCrdb;
+use crate::starter::SledIndexAllocator;
 use crate::starter::setup_with_config_impl;
-#[cfg(feature = "omicron-dev")]
+use crate::starter::start_sled_agent;
 use anyhow::Context;
 #[cfg(feature = "omicron-dev")]
 use anyhow::Result;
@@ -20,7 +21,14 @@ use dropshot::test_util::LogContext;
 use gateway_test_utils::setup::DEFAULT_SP_SIM_CONFIG;
 use gateway_test_utils::setup::GatewayTestContext;
 use nexus_config::NexusConfig;
+use nexus_lockstep_client::types::BlueprintTarget;
+use nexus_lockstep_client::types::BlueprintTargetSet;
+use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
+use nexus_reconfigurator_planning::planner::PlannerRng;
 use nexus_test_interface::NexusServer;
+use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintSource;
+use omicron_common::address::Ipv6Subnet;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::UserId;
 use omicron_common::api::internal::nexus::Certificate;
@@ -31,12 +39,18 @@ use omicron_test_utils::dev::poll;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_test_utils::dev::poll::wait_for_watch_channel_condition;
 use omicron_uuid_kinds::BlueprintUuid;
+use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
 use oximeter_collector::Oximeter;
 use oximeter_producer::Server as ProducerServer;
 use sled_agent_types::early_networking::SwitchSlot;
+use sled_agent_types::inventory::SledCpuFamily;
+use sled_agent_types::inventory::SledRole;
+use slog::debug;
+use slog::info;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::net::Ipv6Addr;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use transient_dns_server::TransientDnsServer;
@@ -118,6 +132,7 @@ pub struct ControlPlaneTestContext<N> {
     pub clickhouse: dev::clickhouse::ClickHouseDeployment,
     pub logctx: LogContext,
     pub sled_agents: Vec<ControlPlaneTestContextSledAgent>,
+    pub(crate) sled_index_allocator: SledIndexAllocator,
     pub oximeter: Oximeter,
     pub producer: ProducerServer,
     pub gateway: BTreeMap<SwitchSlot, GatewayTestContext>,
@@ -135,6 +150,89 @@ pub struct ControlPlaneTestContext<N> {
     pub password: String,
 
     pub(crate) debug_dropbox_dir: TestTempDir,
+}
+
+async fn blueprint_load_target(
+    log: &slog::Logger,
+    nexus: &nexus_lockstep_client::Client,
+) -> Result<(BlueprintTarget, Blueprint), anyhow::Error> {
+    info!(log, "editing current target blueprint");
+    let target_blueprint = nexus
+        .blueprint_target_view()
+        .await
+        .context("fetching current target config")?
+        .into_inner();
+    debug!(log, "found current target blueprint";
+        "blueprint_id" => %target_blueprint.target_id
+    );
+    let blueprint = nexus
+        .blueprint_view(target_blueprint.target_id.as_untyped_uuid())
+        .await
+        .with_context(|| {
+            format!(
+                "fetching current target blueprint {}",
+                target_blueprint.target_id
+            )
+        })?
+        .into_inner();
+    debug!(log, "fetched current target blueprint";
+        "blueprint_id" => %target_blueprint.target_id
+    );
+    Ok((target_blueprint, blueprint))
+}
+
+fn blueprint_builder_based_on<'a>(
+    log: &slog::Logger,
+    parent: &'a Blueprint,
+) -> Result<BlueprintBuilder<'a>, anyhow::Error> {
+    BlueprintBuilder::new_based_on(
+        log,
+        parent,
+        "test-suite",
+        PlannerRng::from_entropy(),
+    )
+    .with_context(|| {
+        format!("creating BlueprintBuilder based on blueprint {}", parent.id)
+    })
+}
+
+async fn blueprint_import_and_set_target(
+    log: &slog::Logger,
+    nexus: &nexus_lockstep_client::Client,
+    target_blueprint: &BlueprintTarget,
+    blueprint1: &Blueprint,
+    blueprint2: &Blueprint,
+) -> Result<(), anyhow::Error> {
+    info!(log, "assembled new blueprint based on target";
+        "current_target_id" => %blueprint1.id,
+        "new_blueprint_id" => %blueprint2.id,
+    );
+    nexus.blueprint_import(blueprint2).await.with_context(|| {
+        format!(
+            "importing new blueprint {} (parent {})",
+            blueprint2.id, blueprint1.id
+        )
+    })?;
+    debug!(log, "imported new blueprint";
+        "blueprint_id" => %blueprint2.id,
+    );
+    nexus
+        .blueprint_target_set(&BlueprintTargetSet {
+            enabled: target_blueprint.enabled,
+            target_id: blueprint2.id,
+        })
+        .await
+        .with_context(|| {
+            format!(
+                "setting blueprint {} (parent {}) as target",
+                blueprint2.id, blueprint1.id
+            )
+        })?;
+    info!(log, "finished editing target blueprint";
+        "old_target_id" => %blueprint1.id,
+        "new_target_id" => %blueprint2.id,
+    );
+    Ok(())
 }
 
 impl<N: NexusServer> ControlPlaneTestContext<N> {
@@ -210,6 +308,185 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
                 );
             }
         }
+    }
+
+    /// Start a simulated sled agent partway through a test, waiting for the
+    /// sled to be registered with Nexus and present in inventory. Also adds the
+    /// sled to the target blueprint.
+    ///
+    /// The returned server must be held for as long as the sled should exist
+    /// (dropping it shuts the sled agent down).
+    ///
+    /// Unlike sled agents started during setup, sleds added this way are not
+    /// included in [`Self::all_sled_agents`].
+    #[must_use = "dropping the returned server shuts the sled agent down"]
+    pub async fn add_sled(
+        &self,
+        sled_id: SledUuid,
+        sim_mode: sim::SimMode,
+        cpu_family: SledCpuFamily,
+    ) -> sim::Server {
+        let sled_index = self.sled_index_allocator.next();
+        let nexus_address = self.server.get_http_server_internal_address();
+
+        // `start_sled_agent` uses `NexusRegistration::WaitForCompletion`, so
+        // Nexus knows about the sled once this returns.
+        let sled_agent = start_sled_agent(
+            self.logctx.log.new(slog::o!(
+                "component" => "omicron_sled_agent::sim::Server",
+                "sled_id" => sled_id.to_string(),
+            )),
+            nexus_address,
+            sled_id,
+            sled_index,
+            sim_mode,
+            cpu_family,
+            SledRole::Gimlet,
+            &self.first_sled_agent().simulated_upstairs,
+        )
+        .await
+        .expect("started simulated sled agent");
+
+        // Ensure the sled shows up in inventory.
+        self.collect_inventory_with_sled(sled_id).await;
+
+        // Reconfigurator autoplanning is disabled in tests, so we must add the
+        // sled to the target blueprint manually.
+        self.add_sled_to_target_blueprint(sled_id).await;
+
+        sled_agent
+    }
+
+    /// Run an inventory collection and load it, ensuring that the loaded
+    /// collection contains the sled ID.
+    async fn collect_inventory_with_sled(&self, sled_id: SledUuid) {
+        crate::background::run_inventory_collection(&self.lockstep_client)
+            .await;
+        crate::background::run_inventory_loader(&self.lockstep_client).await;
+
+        let inv_rx = self.server.inventory_load_rx();
+        let collection = inv_rx
+            .borrow()
+            .clone()
+            .expect("inventory loader left a collection in the watch channel");
+        assert!(
+            collection.sled_agents.contains_key(&sled_id),
+            "inventory collection {} contains sled {sled_id}",
+            collection.id,
+        );
+
+        // We don't check that collection.id is the same as the CollectionUuid
+        // returned from run_inventory_loader: it's technically possible (though
+        // unlikely) that another collection ran in between. What we care about
+        // is that the sled is visible.
+    }
+
+    /// Add a sled to the target blueprint, simulating part of what real Nexus
+    /// would do.
+    ///
+    /// This marks the sled active and available for provisioning in the
+    /// blueprint, though it doesn't add any disks or zones.
+    ///
+    /// Ideally this mangling with the lower-level `BlueprintBuilder` would go
+    /// away and we would be able to do a full-fledged planning run instead, but
+    /// that's a bit of a heavier lift.
+    async fn add_sled_to_target_blueprint(&self, sled_id: SledUuid) {
+        self.blueprint_edit_current_target(|builder| {
+            let parent = builder.parent_blueprint();
+            assert!(
+                !parent.sleds.contains_key(&sled_id),
+                "sled {sled_id} is not already in target blueprint {}",
+                parent.id
+            );
+            builder.ensure_sled_exists(
+                sled_id,
+                Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
+            );
+            builder.comment(format!("add sled {sled_id}"));
+            Ok(())
+        })
+        .await
+        .expect("edited target blueprint to add sled");
+
+        crate::background::run_blueprint_loader(&self.lockstep_client).await;
+        crate::background::run_blueprint_rendezvous(&self.lockstep_client)
+            .await;
+    }
+
+    /// Modify the system by editing the current target blueprint.
+    ///
+    /// More precisely, this function:
+    ///
+    /// - fetches the current target blueprint
+    /// - creates a new BlueprintBuilder based on it
+    /// - invokes the caller's `edit_fn`, which may modify the builder however it
+    ///   likes
+    /// - generates a new blueprint (thus based on the current target)
+    /// - uploads the new blueprint
+    /// - sets the new blueprint as the current target, with the same `enabled`
+    ///   state as the previous target
+    ///
+    /// Returns the previous and new target blueprints, in that order.
+    ///
+    /// This is the integration test counterpart of the live tests'
+    /// `blueprint_edit_current_target`.
+    ///
+    /// ## Enabled state
+    ///
+    /// Unlike the live tests version, this function does not require the
+    /// current target blueprint to be enabled. A disabled target blueprint
+    /// means somebody doesn't want Reconfigurator running or doesn't want it
+    /// using that blueprint. We don't want the test to inadvertently override
+    /// that behavior in either direction. The live tests achieve this by
+    /// refusing to run against a disabled target; integration tests start with
+    /// blueprint execution disabled, so this function instead retains the
+    /// current `enabled` state when setting the new target.
+    ///
+    /// ## Propagation
+    ///
+    /// Setting the new target activates the blueprint loader, but does not wait
+    /// for it. Tests that depend on the new blueprint having been loaded (or on
+    /// anything downstream of that, such as rendezvous tables) should run the
+    /// relevant background tasks explicitly, e.g. with
+    /// [`run_blueprint_loader`](crate::background::run_blueprint_loader).
+    ///
+    /// ## Errors
+    ///
+    /// This function fails if `edit_fn` fails, or if fetching, importing, or
+    /// setting the target blueprint fails. The last of these can happen if
+    /// another blueprint became the target after this function fetched the
+    /// current one. (Integration tests have automatic planning disabled, so
+    /// they generally shouldn't hit this race.)
+    pub async fn blueprint_edit_current_target(
+        &self,
+        edit_fn: impl FnOnce(&mut BlueprintBuilder<'_>) -> Result<(), anyhow::Error>,
+    ) -> Result<(Blueprint, Blueprint), anyhow::Error> {
+        // General note about this function: we move as much of the non-generic
+        // parts to separate functions as possible to avoid monomorphization bloat.
+
+        let log = &self.logctx.log;
+        let nexus = self.lockstep_client();
+
+        // Fetch the current target configuration.
+        let (target_blueprint, blueprint1) =
+            blueprint_load_target(log, &nexus).await?;
+
+        // Make a new builder based on that blueprint and use `edit_fn` to edit it.
+        let mut builder = blueprint_builder_based_on(log, &blueprint1)?;
+        edit_fn(&mut builder)?;
+
+        // Assemble the new blueprint, import it, and make it the new target.
+        let blueprint2 = builder.build(BlueprintSource::Test);
+        blueprint_import_and_set_target(
+            log,
+            &nexus,
+            &target_blueprint,
+            &blueprint1,
+            &blueprint2,
+        )
+        .await?;
+
+        Ok((blueprint1, blueprint2))
     }
 
     pub fn internal_client(&self) -> nexus_client::Client {

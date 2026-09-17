@@ -37,7 +37,7 @@ use omicron_common::api::external::ByteCount;
 use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::disk::DatasetName;
 use omicron_generation_kinds::{
-    Generation, SledConfigGeneration, TargetReleaseGeneration,
+    Generation, NexusGeneration, SledConfigGeneration, TargetReleaseGeneration,
     UpdateDispositionGeneration,
 };
 use omicron_uuid_kinds::BlueprintUuid;
@@ -102,15 +102,21 @@ pub use clickhouse::ClickhouseClusterConfig;
 use gateway_types::rot::RotSlot;
 pub use network_resources::AddNetworkResourceError;
 pub use network_resources::OmicronZoneExternalFloatingAddr;
+pub use network_resources::OmicronZoneExternalFloatingAddrs;
 pub use network_resources::OmicronZoneExternalFloatingIp;
+pub use network_resources::OmicronZoneExternalFloatingIps;
 pub use network_resources::OmicronZoneExternalIp;
 pub use network_resources::OmicronZoneExternalIpEntry;
 pub use network_resources::OmicronZoneExternalIpKey;
+pub use network_resources::OmicronZoneExternalSnat;
 pub use network_resources::OmicronZoneExternalSnatIp;
+pub use network_resources::OmicronZoneExternalSnatIpv4;
+pub use network_resources::OmicronZoneExternalSnatIpv6;
 pub use network_resources::OmicronZoneNetworkResources;
 pub use network_resources::OmicronZoneNic;
 pub use network_resources::OmicronZoneNicEntry;
 pub use network_resources::OmicronZoneNicIp;
+pub use network_resources::ZoneExternalSnatError;
 use omicron_common::api::external::Error;
 pub use planning_input::ClickhouseMode;
 pub use planning_input::ClickhousePolicy;
@@ -159,6 +165,7 @@ pub use planning_report::ZoneAddWaitingOn;
 pub use planning_report::ZoneUnsafeToShutdown;
 pub use planning_report::ZoneUpdatesWaitingOn;
 pub use planning_report::ZoneWaitingToExpunge;
+pub use reconfigurator_config::DEFAULT_BLUEPRINT_PRUNER_NKEEP;
 pub use reconfigurator_config::PlannerConfig;
 pub use reconfigurator_config::PlannerConfigDisplay;
 pub use reconfigurator_config::ReconfiguratorConfig;
@@ -262,7 +269,7 @@ pub struct Blueprint {
     /// If a Nexus instance notices it has a nexus_generation less than
     /// this value, it will start to quiesce in preparation for handing off
     /// control to the newer generation (see: RFD 588).
-    pub nexus_generation: Generation,
+    pub nexus_generation: NexusGeneration,
 
     /// The generation of the collective set of all external networking required
     /// for in-service zones
@@ -349,28 +356,37 @@ impl Blueprint {
         let entries = self
             .in_service_zones()
             .filter_map(|(sled_id, zone_config)| {
-                let (nic_mac, vni, kind) = match &zone_config.zone_type {
-                    BlueprintZoneType::BoundaryNtp(ntp) => (
-                        ntp.nic.mac,
-                        ntp.nic.vni,
-                        ServiceZoneNatKind::BoundaryNtp {
-                            snat_cfg: ntp.external_ip.snat_cfg,
-                        },
-                    ),
-                    BlueprintZoneType::ExternalDns(dns) => (
-                        dns.nic.mac,
-                        dns.nic.vni,
-                        ServiceZoneNatKind::ExternalDns {
-                            external_ip: dns.dns_address.addr.ip(),
-                        },
-                    ),
-                    BlueprintZoneType::Nexus(nexus) => (
-                        nexus.nic.mac,
-                        nexus.nic.vni,
-                        ServiceZoneNatKind::Nexus {
-                            external_ip: nexus.external_ip.ip,
-                        },
-                    ),
+                let (nic_mac, vni, kinds) = match &zone_config.zone_type {
+                    BlueprintZoneType::BoundaryNtp(ntp) => {
+                        let kinds = ntp
+                            .external_ip
+                            .iter()
+                            .map(|eip| ServiceZoneNatKind::BoundaryNtp {
+                                snat_cfg: eip.snat_cfg,
+                            })
+                            .collect::<Vec<_>>();
+                        (ntp.nic.mac, ntp.nic.vni, kinds)
+                    }
+                    BlueprintZoneType::ExternalDns(dns) => {
+                        let kinds = dns
+                            .dns_addresses
+                            .iter()
+                            .map(|addr| ServiceZoneNatKind::ExternalDns {
+                                external_ip: addr.addr.ip(),
+                            })
+                            .collect::<Vec<_>>();
+                        (dns.nic.mac, dns.nic.vni, kinds)
+                    }
+                    BlueprintZoneType::Nexus(nexus) => {
+                        let kinds = nexus
+                            .external_ips
+                            .iter()
+                            .map(|ip| ServiceZoneNatKind::Nexus {
+                                external_ip: ip.ip,
+                            })
+                            .collect::<Vec<_>>();
+                        (nexus.nic.mac, nexus.nic.vni, kinds)
+                    }
 
                     // None of these zone types have external NAT.
                     BlueprintZoneType::Clickhouse(_)
@@ -393,14 +409,18 @@ impl Blueprint {
                     .expect("sled must exist if we have in-service zones")
                     .subnet;
 
-                Some(ServiceZoneNatEntry {
-                    zone_id: zone_config.id,
-                    sled_underlay_ip: *get_sled_address(sled_subnet).ip(),
-                    nic_mac,
-                    vni,
-                    kind,
-                })
+                // Return a list of entries for all IPs in the zone.
+                let entries =
+                    kinds.into_iter().map(move |kind| ServiceZoneNatEntry {
+                        zone_id: zone_config.id,
+                        sled_underlay_ip: *get_sled_address(sled_subnet).ip(),
+                        nic_mac,
+                        vni,
+                        kind,
+                    });
+                Some(entries)
             })
+            .flatten()
             .collect::<IdOrdMap<_>>();
 
         entries.try_into()
@@ -647,7 +667,7 @@ impl Blueprint {
     pub fn find_generation_for_nexus(
         &self,
         nexus_zones: &BTreeSet<OmicronZoneUuid>,
-    ) -> Result<Option<Generation>, anyhow::Error> {
+    ) -> Result<Option<NexusGeneration>, anyhow::Error> {
         let mut r#gen = None;
         for (_, zone, nexus_zone) in self.in_service_nexus_zones() {
             if nexus_zones.contains(&zone.id) {
@@ -670,7 +690,7 @@ impl Blueprint {
     pub fn find_generation_for_self(
         &self,
         nexus_id: OmicronZoneUuid,
-    ) -> Result<Generation, Error> {
+    ) -> Result<NexusGeneration, Error> {
         for (_sled_id, zone_config) in self.all_maybe_running_zones() {
             if let BlueprintZoneType::Nexus(nexus_config) =
                 &zone_config.zone_type
@@ -728,11 +748,14 @@ impl Blueprint {
         self.all_in_service_and_expunged_zones(
             BlueprintExpungedZoneAccessReason::ExternalDnsExternalIps,
         )
-        .filter_map(|(_id, zone)| match &zone.zone_type {
-            BlueprintZoneType::ExternalDns(dns) => {
-                Some(dns.dns_address.addr.ip())
-            }
-            _ => None,
+        .flat_map(|(_id, zone)| {
+            let addrs = match &zone.zone_type {
+                BlueprintZoneType::ExternalDns(dns) => {
+                    Some(dns.dns_addresses.iter().map(|a| a.addr.ip()))
+                }
+                _ => None,
+            };
+            addrs.into_iter().flatten()
         })
         .collect()
     }
@@ -3434,7 +3457,7 @@ pub struct BlueprintMetadata {
     /// The Nexus generation number
     ///
     /// See [`Blueprint::nexus_generation`].
-    pub nexus_generation: Generation,
+    pub nexus_generation: NexusGeneration,
     /// The current generation of the collective set of external networking
     /// configuration across all in-service zones
     ///

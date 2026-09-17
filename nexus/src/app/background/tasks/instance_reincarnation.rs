@@ -341,6 +341,7 @@ mod test {
     use nexus_types_versions::latest;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::IdentityMetadataCreateParams;
+    use omicron_generation_kinds::InstanceStateGeneration;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::InstanceUuid;
     use omicron_uuid_kinds::PropolisUuid;
@@ -476,9 +477,11 @@ mod test {
                 &instance_id,
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    generation: Generation(
-                        prev_instance.state_generation.next(),
-                    ),
+                    generation: InstanceStateGeneration::from(
+                        prev_instance.state_generation,
+                    )
+                    .next()
+                    .into(),
                     nexus_state: InstanceState::Vmm,
                     propolis_id: Some(vmm_id),
                     ..prev_instance.runtime()
@@ -570,9 +573,11 @@ mod test {
                     time_updated: Utc::now(),
                     nexus_state: state,
                     propolis_id,
-                    generation: Generation(
-                        prev_instance.state_generation.next(),
-                    ),
+                    generation: InstanceStateGeneration::from(
+                        prev_instance.state_generation,
+                    )
+                    .next()
+                    .into(),
                     ..prev_instance.runtime()
                 },
             )
