@@ -211,6 +211,7 @@ mod tests {
                                 variant,
                                 pcie_slot: slot,
                                 firmware,
+                                location: "N0".to_string(),
                             })
                         }
                     }
