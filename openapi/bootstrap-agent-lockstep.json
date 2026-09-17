@@ -708,7 +708,7 @@
               "value": {
                 "type": "object",
                 "properties": {
-                  "interfaces": {
+                  "external_peers_address_objects": {
                     "type": "array",
                     "items": {
                       "type": "string"
@@ -717,7 +717,7 @@
                   }
                 },
                 "required": [
-                  "interfaces"
+                  "external_peers_address_objects"
                 ]
               }
             },

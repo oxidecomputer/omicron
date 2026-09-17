@@ -469,10 +469,12 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
         );
 
         let id = client
-            .multirack_join(&bootstrap_agent_lockstep_types::MultirackJoinRequest {
-                trust_quorum_peers,
-                rack_network_config,
-            })
+            .multirack_join(
+                &bootstrap_agent_lockstep_types::MultirackJoinRequest {
+                    trust_quorum_peers,
+                    rack_network_config,
+                },
+            )
             .await
             .map_err(|err| ba_lockstep_error_to_http(err, "multirack join"))?
             .into_inner();
