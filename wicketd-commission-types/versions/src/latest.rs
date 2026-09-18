@@ -95,41 +95,42 @@ pub mod rack_setup {
 
     pub use crate::v3::rack_setup::UserSpecifiedBgpPeerConfig;
 
-    pub use crate::v4::rack_setup::BfdMode;
-    pub use crate::v4::rack_setup::BfdPeerConfig;
-    pub use crate::v4::rack_setup::BgpPeerConfig;
-    pub use crate::v4::rack_setup::ImportExportPolicy;
-    pub use crate::v4::rack_setup::L1PortConfig;
-    pub use crate::v4::rack_setup::MultirackJoinRequest;
-    pub use crate::v4::rack_setup::NumberedRouter;
-    pub use crate::v4::rack_setup::PortConfig;
-    pub use crate::v4::rack_setup::PutRssUserConfigInsensitive;
-    pub use crate::v4::rack_setup::RackNetworkConfig;
-    pub use crate::v4::rack_setup::RouterPeerType;
-    pub use crate::v4::rack_setup::RunMultirackJoinResponse;
-    pub use crate::v4::rack_setup::UnnumberedRouter;
-    pub use crate::v4::rack_setup::UplinkAddressConfig;
-    pub use crate::v4::rack_setup::UplinkPortConfig;
-    pub use crate::v4::rack_setup::UplinkPorts;
-    pub use crate::v4::rack_setup::UserSpecifiedPortConfig;
-    pub use crate::v4::rack_setup::UserSpecifiedRackNetworkConfig;
+    pub use crate::v5::rack_setup::BfdMode;
+    pub use crate::v5::rack_setup::BfdPeerConfig;
+    pub use crate::v5::rack_setup::BgpPeerConfig;
+    pub use crate::v5::rack_setup::ImportExportPolicy;
+    pub use crate::v5::rack_setup::L1PortConfig;
+    pub use crate::v5::rack_setup::MultirackJoinRequest;
+    pub use crate::v5::rack_setup::NumberedRouter;
+    pub use crate::v5::rack_setup::PortConfig;
+    pub use crate::v5::rack_setup::PutRssUserConfigInsensitive;
+    pub use crate::v5::rack_setup::RackNetworkConfig;
+    pub use crate::v5::rack_setup::RouterPeerType;
+    pub use crate::v5::rack_setup::RunMultirackJoinResponse;
+    pub use crate::v5::rack_setup::UnnumberedRouter;
+    pub use crate::v5::rack_setup::UplinkAddressConfig;
+    pub use crate::v5::rack_setup::UplinkPortConfig;
+    pub use crate::v5::rack_setup::UplinkPorts;
+    pub use crate::v5::rack_setup::UserSpecifiedPortConfig;
+    pub use crate::v5::rack_setup::UserSpecifiedRackNetworkConfig;
 }
 
 pub mod update {
     pub use crate::v1::update::ClearUpdateStateParams;
     pub use crate::v1::update::ClearUpdateStateResponse;
     pub use crate::v1::update::EmptyUpdateTargets;
-    pub use crate::v1::update::GetUpdateProgressResponse;
     pub use crate::v1::update::RepositoryDescription;
     pub use crate::v1::update::RunningProgress;
-    pub use crate::v1::update::SpUpdateProgress;
     pub use crate::v1::update::StartUpdateOptions;
     pub use crate::v1::update::StartUpdateParams;
     pub use crate::v1::update::StepOutcome;
     pub use crate::v1::update::StepProgress;
-    pub use crate::v1::update::UpdateProgress;
-    pub use crate::v1::update::UpdateState;
-    pub use crate::v1::update::UpdateStep;
     pub use crate::v1::update::UpdateStepStatus;
     pub use crate::v1::update::UpdateTargets;
+
+    pub use crate::v4::update::GetUpdateProgressResponse;
+    pub use crate::v4::update::SpUpdateProgress;
+    pub use crate::v4::update::UpdateProgress;
+    pub use crate::v4::update::UpdateState;
+    pub use crate::v4::update::UpdateStep;
 }

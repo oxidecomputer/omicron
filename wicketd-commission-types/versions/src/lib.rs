@@ -34,5 +34,7 @@ pub mod v1;
 pub mod v2;
 #[path = "bgp_peer_src_addr/mod.rs"]
 pub mod v3;
-#[path = "multirack_join/mod.rs"]
+#[path = "update_elapsed/mod.rs"]
 pub mod v4;
+#[path = "multirack_join/mod.rs"]
+pub mod v5;
