@@ -273,9 +273,8 @@ impl HardwareMonitor {
         )
         .await;
 
-        self.raw_disks_tx.set_raw_disks(
-            snapshot.into_disks().into_values().map(RawDisk::from),
-            &self.log,
-        );
+        let (disks, _disk_bays) = snapshot.into_disks_and_bays();
+        self.raw_disks_tx
+            .set_raw_disks(disks.into_values().map(RawDisk::from), &self.log);
     }
 }

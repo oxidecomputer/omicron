@@ -7,14 +7,16 @@ use crate::ExternalDisks;
 use crate::HardwareView;
 use crate::TofinoSnapshot;
 use crate::TofinoView;
+use crate::disk_bay::{
+    ClassifyError, NvmeFacts, ObservedBay, ObservedOccupant, classify_bay,
+};
 use crate::nvme_instance::NvmeInstance;
-use crate::{DendriteAsic, SledMode, UnparsedDisk};
-use camino::Utf8PathBuf;
+use crate::{DendriteAsic, DiskBay, DiskBayOccupant, SledMode, UnparsedDisk};
 use gethostname::gethostname;
-use illumos_devinfo::{DevInfo, DevLinkType, DevLinks, Node, Property};
+use illumos_devinfo::{DevInfo, Node, Property};
+use libnvme::namespace::NamespaceDiscoveryLevel;
 use libnvme::{Nvme, controller::Controller};
 use sled_agent_types::disk::DiskIdentity;
-use sled_agent_types::disk::DiskVariant;
 use sled_hardware_types::{Baseboard, OxideSled, SledCpuFamily};
 use slog::Logger;
 use slog::debug;
@@ -22,7 +24,6 @@ use slog::error;
 use slog::info;
 use slog::o;
 use slog::warn;
-use slog_error_chain::InlineErrorChain;
 use std::collections::{HashMap, HashSet};
 use tokio::sync::watch;
 use uuid::Uuid;
@@ -51,30 +52,27 @@ enum Error {
     #[error("Node {node} missing device property {name}")]
     MissingDeviceProperty { node: String, name: String },
 
-    #[error("Node {node} has an invalid nvme instance")]
-    InvalidNvmeInstance {
-        node: String,
-        #[source]
-        err: crate::nvme_instance::InvalidNvmeInstance,
-    },
-
     #[error("Invalid value for boot-storage-unit property: {0}")]
     InvalidBootStorageUnitValue(i64),
-
-    #[error("Unrecognized PCIe physical slot for device {pcie_slot}")]
-    UnrecognizedPcieSlot { pcie_slot: i64 },
 
     #[error("Expected property {name} to have type {ty}")]
     UnexpectedPropertyType { name: String, ty: String },
 
-    #[error("Could not translate {0} to '/dev' path: no links")]
-    NoDevLinks(Utf8PathBuf),
-
     #[error("Failed to issue request to sysconf: {0}")]
     SysconfError(#[from] sysconf::Error),
 
-    #[error("Node {node} missing device instance")]
-    MissingNvmeDevinfoInstance { node: String },
+    #[error("Failed to read disk bays from the hardware topology")]
+    Topology(#[from] topo::TopoError),
+
+    #[error("Could not describe a disk bay from the topology and libnvme")]
+    Bay(#[from] ClassifyError),
+
+    #[error("Disk {identity:?} appears in both {first} and {second}")]
+    DuplicateDiskIdentity {
+        identity: DiskIdentity,
+        first: String,
+        second: String,
+    },
 
     #[error("Failed to init nvme handle: {0}")]
     NvmeHandleInit(#[from] libnvme::NvmeInitError),
@@ -84,6 +82,9 @@ enum Error {
 
     #[error("libnvme controller error: {0}")]
     NvmeController(#[from] libnvme::controller::NvmeControllerError),
+
+    #[error("libnvme controller info error: {0}")]
+    NvmeInfo(#[from] libnvme::controller_info::NvmeInfoError),
 
     #[error("Unable to grab NVMe Controller lock")]
     NvmeControllerLocked,
@@ -132,6 +133,7 @@ impl TryFrom<i64> for BootStorageUnit {
 struct HardwareSnapshot {
     tofino: TofinoSnapshot,
     disks: HashMap<DiskIdentity, UnparsedDisk>,
+    disk_bays: Vec<DiskBay>,
 }
 
 impl HardwareSnapshot {
@@ -167,74 +169,59 @@ impl HardwareSnapshot {
         // Monitor for the Tofino device and driver.
         let tofino = get_tofino_snapshot(log, &mut device_info);
 
-        // Monitor for block devices.
+        // Find the disks. The hardware topology says which bays exist and
+        // what is behind each one; libnvme fills in what only the controller
+        // knows. If either cannot answer, this snapshot cannot say which
+        // disks exist, and the previous view stands until the next poll.
         let mut disks = HashMap::new();
+        let mut disk_bays = Vec::new();
         match external_disks {
             ExternalDisks::DetectPhysical => {
-                let mut found = Vec::new();
-                let mut node_walker = device_info.walk_driver("blkdev");
-                while let Some(node) =
-                    node_walker.next().transpose().map_err(Error::DevInfo)?
-                {
-                    if let Some(found_disk) = poll_blkdev_node(
-                        &log,
+                let observed = topo::read_disk_bays(log)?;
+                let nvme = Nvme::new()?;
+                let mut bay_of_disk: HashMap<DiskIdentity, String> =
+                    HashMap::new();
+                for bay in &observed {
+                    let (described, disk) = poll_bay(
+                        log,
+                        &nvme,
                         sled_type,
-                        node,
                         boot_storage_unit,
-                    )? {
-                        found.push(found_disk);
-                    }
-                }
-
-                // Now that we know which controllers are present, ask the
-                // hardware topology where they are. If the topology cannot
-                // be read, the disks are still reported, without locations.
-                let locations = match topo::read_disk_locations(log) {
-                    Ok(locations) => {
-                        let unlabelled: Vec<_> = found
-                            .iter()
-                            .filter(|(_, instance)| {
-                                !locations.contains_key(instance)
-                            })
-                            .map(|(_, instance)| instance.to_string())
-                            .collect();
-                        if !unlabelled.is_empty() {
-                            warn!(
-                                log,
-                                "hardware topology has no location label \
-                                 for some disk controllers";
-                                "nvme_instances" => ?unlabelled,
-                            );
+                        bay,
+                    )?;
+                    if let Some(disk) = disk {
+                        let identity = disk.identity().clone();
+                        if let Some(first) = bay_of_disk
+                            .insert(identity.clone(), bay.location.clone())
+                        {
+                            return Err(Error::DuplicateDiskIdentity {
+                                identity,
+                                first,
+                                second: bay.location.clone(),
+                            });
                         }
-                        locations
+                        disks.insert(identity, disk);
                     }
-                    Err(err) => {
-                        warn!(
-                            log,
-                            "failed to read disk locations from hardware \
-                             topology";
-                            InlineErrorChain::new(&err),
-                        );
-                        HashMap::new()
-                    }
-                };
-                for (disk, instance) in found {
-                    let location = locations.get(&instance).cloned();
-                    disks.insert(
-                        disk.identity().clone(),
-                        disk.with_location(location),
-                    );
+                    disk_bays.push(described);
                 }
             }
 
             ExternalDisks::Hardcoded { vdevs: _, disks: hardcoded_disks } => {
+                // These stand in for real hardware, so give each one a bay.
                 for disk in hardcoded_disks {
+                    disk_bays.push(DiskBay {
+                        location: disk.location().to_string(),
+                        kind: disk.variant(),
+                        occupant: DiskBayOccupant::Disk {
+                            identity: disk.identity().clone(),
+                        },
+                    });
                     disks.insert(disk.identity().clone(), disk.clone());
                 }
             }
         }
 
-        Ok(Self { tofino, disks })
+        Ok(Self { tofino, disks, disk_bays })
     }
 }
 
@@ -252,27 +239,13 @@ impl HardwareView {
         Ok(Self {
             tofino,
             disks: HashMap::new(),
+            disk_bays: Vec::new(),
             baseboard,
             online_processor_count: sysconf::online_processor_count()?,
             usable_physical_pages: sysconf::usable_physical_pages()?,
             usable_physical_ram_bytes: sysconf::usable_physical_ram_bytes()?,
             cpu_family,
         })
-    }
-}
-
-fn pcie_slot_to_disk_variant(
-    sled: OxideSled,
-    pcie_slot: i64,
-) -> Option<DiskVariant> {
-    let u2_slots = sled.u2_pcie_slots();
-    let m2_slots = sled.m2_pcie_slots();
-    if u2_slots.contains(&pcie_slot) {
-        Some(DiskVariant::U2)
-    } else if m2_slots.contains(&pcie_slot) {
-        Some(DiskVariant::M2)
-    } else {
-        None
     }
 }
 
@@ -305,71 +278,6 @@ fn get_tofino_snapshot(log: &Logger, devinfo: &mut DevInfo) -> TofinoSnapshot {
         );
     }
     TofinoSnapshot { exists, available }
-}
-
-fn get_dev_path_of_whole_disk(
-    node: &Node<'_>,
-) -> Result<Option<Utf8PathBuf>, Error> {
-    let mut wm = node.minors();
-    while let Some(m) = wm.next().transpose().map_err(Error::DevInfo)? {
-        // "wd" stands for "whole disk"
-        if m.name() != "wd" {
-            continue;
-        }
-        let links = {
-            match DevLinks::new(true) {
-                Ok(links) => links,
-                Err(_) => DevLinks::new(false).map_err(Error::DevInfo)?,
-            }
-        };
-        let devfs_path = m.devfs_path().map_err(Error::DevInfo)?;
-
-        let paths = links
-            .links_for_path(&devfs_path)
-            .map_err(Error::DevInfo)?
-            .into_iter()
-            .filter(|l| {
-                // Devices in "/dev/dsk" have names that denote their purpose,
-                // of the form "controller, disk, slice" or "controller, disk,
-                // partition".
-                //
-                // The suffix of "d0" is typical of an individual disk, and is
-                // the expected device to correspond with the "wd" device in
-                // the "/devices" hierarchy.
-                l.linktype() == DevLinkType::Primary
-                    && l.path()
-                        .file_name()
-                        .map(|f| f.to_string_lossy().ends_with("d0"))
-                        .unwrap_or(false)
-            })
-            .collect::<Vec<_>>();
-
-        if paths.is_empty() {
-            return Err(Error::NoDevLinks(Utf8PathBuf::from(devfs_path)));
-        }
-        return Ok(Some(paths[0].path().to_path_buf().try_into()?));
-    }
-    Ok(None)
-}
-
-fn get_parent_node<'a>(
-    node: &Node<'a>,
-    expected_parent_driver_name: &'static str,
-) -> Result<Node<'a>, Error> {
-    let Some(parent) = node.parent().map_err(Error::DevInfo)? else {
-        return Err(Error::DevInfo(anyhow::anyhow!(
-            "{} has no parent node",
-            node.node_name()
-        )));
-    };
-    if parent.driver_name().as_deref() != Some(expected_parent_driver_name) {
-        return Err(Error::DevInfo(anyhow::anyhow!(
-            "{} has non-{} parent node",
-            node.node_name(),
-            expected_parent_driver_name
-        )));
-    }
-    Ok(parent)
 }
 
 /// Convert a property to a `u32` if possible, passing through an `i64`.
@@ -438,104 +346,57 @@ fn find_properties<'a, const N: usize>(
     Ok(output.try_into().map_err(|_| "Unexpected output size").unwrap())
 }
 
-// Describes the disk behind a "blkdev" devinfo node, along with the instance
-// of the "nvme" controller above it. The disk's chassis location is not yet
-// known here; the caller fills it in once every controller has been found.
-fn poll_blkdev_node(
+/// Describes one bay the topology reported and, when it holds an NVMe disk
+/// with a namespace, the disk to manage.
+fn poll_bay(
     log: &Logger,
+    nvme: &Nvme,
     sled: OxideSled,
-    node: Node<'_>,
     boot_storage_unit: BootStorageUnit,
-) -> Result<Option<(UnparsedDisk, NvmeInstance)>, Error> {
-    let Some(driver_name) = node.driver_name() else {
-        return Ok(None);
+    bay: &ObservedBay,
+) -> Result<(DiskBay, Option<UnparsedDisk>), Error> {
+    let facts = match &bay.occupant {
+        ObservedOccupant::Nvme { instance, namespaces, .. } => {
+            if namespaces.len() > 1 {
+                // Only the first namespace becomes a disk. See
+                // https://github.com/oxidecomputer/omicron/issues/5241.
+                warn!(
+                    log,
+                    "NVMe controller has more than one namespace; \
+                     only the first is used";
+                    "location" => &bay.location,
+                    "nvme_instance" => %instance,
+                    "namespaces" => namespaces.len(),
+                );
+            }
+            Some(nvme_facts(log, nvme, *instance)?)
+        }
+        ObservedOccupant::Empty | ObservedOccupant::Other { .. } => None,
     };
+    let is_boot_disk =
+        pcie_slot_is_boot_disk(sled, bay.pcie_slot, boot_storage_unit);
+    Ok(classify_bay(bay, facts.as_ref(), is_boot_disk)?)
+}
 
-    if driver_name != "blkdev" {
-        return Ok(None);
+/// Asks libnvme for what the topology does not record about a controller:
+/// its PCI vendor id, how many namespaces are active, and its firmware
+/// slots.
+fn nvme_facts(
+    log: &Logger,
+    nvme: &Nvme,
+    instance: NvmeInstance,
+) -> Result<NvmeFacts, Error> {
+    let controller = Controller::init_by_instance(nvme, instance.as_i32())?;
+    let pci_vid = controller.get_info()?.pci_vid()?;
+
+    let mut active_namespaces = 0;
+    for namespace in
+        controller.namespace_discovery(NamespaceDiscoveryLevel::Active)?
+    {
+        namespace?;
+        active_namespaces += 1;
     }
 
-    let devfs_path = node.devfs_path().map_err(Error::DevInfo)?;
-    let dev_path = get_dev_path_of_whole_disk(&node)?;
-
-    // libdevfs doesn't prepend "/devices" when referring to the path, but it
-    // still returns an absolute path. This is the absolute path from the
-    // kernel's perspective, but in userspace, it is typically mounted under
-    // "/devices"
-    //
-    // Validate that we're still using this leading slash, and also make the
-    // path usable.
-    assert!(devfs_path.starts_with('/'));
-    let devfs_path = format!("/devices{devfs_path}");
-
-    let properties = find_properties(
-        &node,
-        ["inquiry-serial-no", "inquiry-product-id", "inquiry-vendor-id"],
-    )?;
-    let inquiry_serial_no = string_from_property(&properties[0])?;
-    let inquiry_product_id = string_from_property(&properties[1])?;
-    let inquiry_vendor_id = string_from_property(&properties[2])?;
-
-    // We expect that the parent of the "blkdev" node is an "nvme" driver.
-    let nvme_node = get_parent_node(&node, "nvme")?;
-    // Importantly we grab the NVMe instance and not the blkdev instance.
-    // Eventually we should switch the logic here to search for nvme instances
-    // and confirm that we only have one blkdev sibling:
-    // https://github.com/oxidecomputer/omicron/issues/5241
-    let nvme_instance = nvme_node
-        .instance()
-        .ok_or(Error::MissingNvmeDevinfoInstance { node: node.node_name() })?;
-    let nvme_instance =
-        NvmeInstance::from_devinfo(nvme_instance).map_err(|err| {
-            Error::InvalidNvmeInstance { node: node.node_name(), err }
-        })?;
-
-    let vendor_id =
-        i64_from_property(&find_properties(&nvme_node, ["vendor-id"])?[0])?;
-
-    // The model is generally equal to "inquiry-vendor-id" plus
-    // "inquiry-product-id", separated by a space.
-    //
-    // However, libdevfs may emit a placeholder value for the
-    // "inquiry-vendor-id", in which case it should be omitted.
-    let model = match inquiry_vendor_id.as_str() {
-        "" | "NVMe" => inquiry_product_id,
-        _ => format!("{inquiry_vendor_id} {inquiry_product_id}"),
-    };
-
-    let device_id = DiskIdentity {
-        vendor: format!("{:x}", vendor_id),
-        serial: inquiry_serial_no,
-        model,
-    };
-
-    // We expect that the parent of the "nvme" device is a "pcieb" driver.
-    let pcieb_node = get_parent_node(&nvme_node, "pcieb")?;
-
-    // sled-hardware keeps a per-board table of the PCIe physical slot
-    // numbers behind which U.2 bays and M.2 sockets sit, and infers the
-    // disk's variant by finding this number in it. The number itself is
-    // board-internal and says nothing about the chassis; it is not the
-    // location label, and it may be renumbered by a future host OS.
-    //
-    // TODO(https://github.com/oxidecomputer/omicron/issues/11258): The
-    // topology's bay and slot nodes are the authoritative source. Derive the
-    // variant from them instead of from this table.
-    let pcie_slot = i64_from_property(
-        &find_properties(&pcieb_node, ["physical-slot#"])?[0],
-    )?;
-    let Some(variant) = pcie_slot_to_disk_variant(sled, pcie_slot) else {
-        warn!(
-            log,
-            "PCIe physical slot {pcie_slot} is not recognized as a disk: \
-             {devfs_path}"
-        );
-        return Err(Error::UnrecognizedPcieSlot { pcie_slot });
-    };
-
-    let nvme = Nvme::new()?;
-    let controller =
-        Controller::init_by_instance(&nvme, nvme_instance.as_i32())?;
     let controller_lock = match controller.try_read_lock() {
         libnvme::controller::TryLockResult::Ok(locked) => locked,
         // We should only hit this if something in the system has locked the
@@ -561,16 +422,7 @@ fn poll_blkdev_node(
         firmware_log_page.slot_iter().map(|s| s.map(str::to_string)).collect(),
     );
 
-    let disk = UnparsedDisk::new(
-        Utf8PathBuf::from(&devfs_path),
-        dev_path,
-        pcie_slot,
-        variant,
-        device_id,
-        pcie_slot_is_boot_disk(sled, pcie_slot, boot_storage_unit),
-        firmware,
-    );
-    Ok(Some((disk, nvme_instance)))
+    Ok(NvmeFacts { pci_vid, active_namespaces, firmware })
 }
 
 // Poll just enough of the device info tree to get the Baseboard. We really
@@ -651,8 +503,11 @@ fn poll_device_tree(
         }
     };
 
-    let HardwareSnapshot { tofino: polled_tofino, disks: polled_disks } =
-        polled_hw;
+    let HardwareSnapshot {
+        tofino: polled_tofino,
+        disks: polled_disks,
+        disk_bays: polled_bays,
+    } = polled_hw;
 
     // Check for any changes since the last view.
     let mut did_modify_tofino = false;
@@ -670,12 +525,14 @@ fn poll_device_tree(
             TofinoView::Stub { .. } => false,
         };
 
-        did_modify_disks = if inner.disks == polled_disks {
-            false
-        } else {
-            inner.disks = polled_disks.clone();
-            true
-        };
+        did_modify_disks =
+            if inner.disks == polled_disks && inner.disk_bays == polled_bays {
+                false
+            } else {
+                inner.disks = polled_disks.clone();
+                inner.disk_bays = polled_bays.clone();
+                true
+            };
 
         did_modify_tofino || did_modify_disks
     });
@@ -689,7 +546,11 @@ fn poll_device_tree(
         info!(log, "Updated tofino"; "tofino" => ?polled_tofino);
     }
     if did_modify_disks {
-        info!(log, "Updated disks"; "disks" => ?polled_disks);
+        info!(
+            log, "Updated disks";
+            "disks" => ?polled_disks,
+            "disk_bays" => ?polled_bays,
+        );
     }
 
     Ok(())

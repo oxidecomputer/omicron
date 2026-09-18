@@ -23,6 +23,8 @@ cfg_if::cfg_if! {
 pub mod cleanup;
 pub mod disk;
 pub use disk::*;
+pub mod disk_bay;
+pub use disk_bay::{DiskBay, DiskBayOccupant};
 pub mod nvme_instance;
 pub mod underlay;
 
@@ -360,6 +362,7 @@ enum TofinoView {
 pub struct HardwareView {
     tofino: TofinoView,
     disks: HashMap<DiskIdentity, UnparsedDisk>,
+    disk_bays: Vec<DiskBay>,
     baseboard: Baseboard,
     online_processor_count: u32,
     usable_physical_pages: u64,
@@ -384,8 +387,18 @@ impl HardwareView {
         self.disks.clone()
     }
 
-    pub fn into_disks(self) -> HashMap<DiskIdentity, UnparsedDisk> {
-        self.disks
+    /// Every U.2 bay and M.2 socket of the chassis and what occupies it.
+    ///
+    /// Empty on hosts that are not Oxide sleds, where there is no chassis
+    /// topology to read.
+    pub fn disk_bays(&self) -> &[DiskBay] {
+        &self.disk_bays
+    }
+
+    pub fn into_disks_and_bays(
+        self,
+    ) -> (HashMap<DiskIdentity, UnparsedDisk>, Vec<DiskBay>) {
+        (self.disks, self.disk_bays)
     }
 
     pub fn usable_physical_pages(&self) -> u64 {

@@ -1121,7 +1121,7 @@ mod tests {
                 pcie_slot: raw_disk.pcie_slot(),
                 identity: raw_disk.identity().clone(),
                 is_boot_disk: raw_disk.is_boot_disk(),
-                location: raw_disk.location().map(str::to_string),
+                location: raw_disk.location().to_string(),
                 partitions: vec![],
                 zpool_name: ZpoolName::new_external(pool_id),
                 firmware: raw_disk.firmware().clone(),
@@ -1165,6 +1165,7 @@ mod tests {
             },
             false,
             DiskFirmware::new(0, None, false, 1, vec![]),
+            "N0".to_string(),
         ))
     }
 

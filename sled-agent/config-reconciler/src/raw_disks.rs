@@ -112,7 +112,7 @@ impl RawDisksSender {
                     identity: disk.identity().clone(),
                     variant: disk.variant(),
                     pcie_slot: disk.pcie_slot(),
-                    location: disk.location().map(str::to_string),
+                    location: Some(disk.location().to_string()),
                     active_firmware_slot: firmware.active_slot(),
                     next_active_firmware_slot: firmware.next_active_slot(),
                     number_of_firmware_slots: firmware.number_of_slots(),
@@ -191,6 +191,7 @@ mod tests {
                     let variant = DiskVariant::U2;
                     let firmware =
                         DiskFirmware::new(0, None, false, 255, Vec::new());
+                    let location = "N0".to_string();
 
                     match kind {
                         ArbitraryDiskKind::Real => {
@@ -202,6 +203,7 @@ mod tests {
                                 identity,
                                 is_boot_disk,
                                 firmware,
+                                location,
                             ))
                         }
                         ArbitraryDiskKind::Synthetic => {
@@ -211,7 +213,7 @@ mod tests {
                                 variant,
                                 pcie_slot: slot,
                                 firmware,
-                                location: "N0".to_string(),
+                                location,
                             })
                         }
                     }
