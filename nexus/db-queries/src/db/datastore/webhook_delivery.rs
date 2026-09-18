@@ -191,18 +191,18 @@ impl DataStore {
 
     /// Returns a list of all permanently-failed deliveries which are eligible
     /// to resend should a liveness probe with `resend=true` succeed.
-    pub async fn webhook_rx_list_resendable_events(
+    pub async fn webhook_rx_list_resendable_alerts(
         &self,
         opctx: &OpContext,
         rx_id: &AlertReceiverUuid,
     ) -> ListResultVec<Alert> {
-        Self::rx_list_resendable_events_query(*rx_id)
+        Self::rx_list_resendable_alerts_query(*rx_id)
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    fn rx_list_resendable_events_query(
+    fn rx_list_resendable_alerts_query(
         rx_id: AlertReceiverUuid,
     ) -> impl RunnableQuery<Alert> {
         use diesel::dsl::*;
@@ -847,7 +847,7 @@ mod test {
         assert_eq!(inserted, 2);
 
         let resendable = datastore
-            .webhook_rx_list_resendable_events(opctx, &failed_rx_id)
+            .webhook_rx_list_resendable_alerts(opctx, &failed_rx_id)
             .await
             .expect("resendable alerts should be listed");
         assert_eq!(
@@ -862,25 +862,25 @@ mod test {
 
     #[tokio::test]
     async fn expectorate_rx_list_resendable() {
-        let query = DataStore::rx_list_resendable_events_query(
+        let query = DataStore::rx_list_resendable_alerts_query(
             AlertReceiverUuid::nil(),
         );
 
         expectorate_query_contents(
             &query,
-            "tests/output/webhook_rx_list_resendable_events.sql",
+            "tests/output/webhook_rx_list_resendable_alerts.sql",
         )
         .await;
     }
 
     #[tokio::test]
-    async fn explain_rx_list_resendable_events() {
-        let logctx = dev::test_setup_log("explain_rx_list_resendable_events");
+    async fn explain_rx_list_resendable_alerts() {
+        let logctx = dev::test_setup_log("explain_rx_list_resendable_alerts");
         let db = TestDatabase::new_with_pool(&logctx.log).await;
         let pool = db.pool();
         let conn = pool.claim().await.unwrap();
 
-        let query = DataStore::rx_list_resendable_events_query(
+        let query = DataStore::rx_list_resendable_alerts_query(
             AlertReceiverUuid::nil(),
         );
         let explanation = query
