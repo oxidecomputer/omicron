@@ -2,7 +2,7 @@
 
 # A single gimlet outside a rack: the switch zone runs against the stub
 # Dendrite. With a sidecar attached, use kind = "production" instead.
-deployment = { kind = "custom", sled_mode = "scrimlet", switch = "tofino_stub" }
+deployment = { kind = "custom", sled_mode = "scrimlet", switch = { kind = "tofino_stub" } }
 
 # Setting this to true causes sled-agent to always report that its time is
 # in-sync, rather than querying its NTP zone.
