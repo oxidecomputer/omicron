@@ -29,6 +29,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (4, UPDATE_ELAPSED),
     (3, BGP_PEER_SRC_ADDR),
     (2, FULL_SERVICE_IP_POOL_DETAILS),
     (1, INITIAL),
@@ -143,6 +144,7 @@ pub trait WicketdCommissionApi {
     #[endpoint {
         method = GET,
         path = "/update-progress",
+        versions = VERSION_UPDATE_ELAPSED..,
     }]
     async fn get_update_progress(
         rqctx: RequestContext<Self::Context>,
@@ -150,6 +152,21 @@ pub trait WicketdCommissionApi {
         HttpResponseOk<latest::update::GetUpdateProgressResponse>,
         HttpError,
     >;
+
+    #[endpoint {
+        operation_id = "get_update_progress",
+        method = GET,
+        path = "/update-progress",
+        versions = ..VERSION_UPDATE_ELAPSED,
+    }]
+    async fn get_update_progress_v1(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v1::update::GetUpdateProgressResponse>, HttpError>
+    {
+        Ok(Self::get_update_progress(rqctx)
+            .await?
+            .map(v1::update::GetUpdateProgressResponse::from))
+    }
 
     /// Start MUPdating one or more sleds, switches, or PSCs
     ///
