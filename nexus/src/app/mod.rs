@@ -273,6 +273,9 @@ pub struct Nexus {
     // https://github.com/oxidecomputer/omicron/issues/3732
     external_dns_servers: Vec<IpAddr>,
 
+    /// Configuration for external HTTP clients.
+    external_http_client_config: nexus_config::ExternalHttpClientConfig,
+
     /// Background task driver
     background_tasks_driver: OnceLock<background::Driver>,
 
@@ -577,6 +580,10 @@ impl Nexus {
             external_dns_servers: config
                 .deployment
                 .external_dns_servers
+                .clone(),
+            external_http_client_config: config
+                .deployment
+                .external_http_clients
                 .clone(),
             background_tasks_driver: OnceLock::new(),
             background_tasks,
