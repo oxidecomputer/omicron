@@ -667,10 +667,10 @@ service_name = "propolis-server"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "propolis"
-source.commit = "046f74302e2ea09a75b0a6810645d42c7df6644a"
+source.commit = "93e04e189a76f73b3764c6417928274b0f4df453"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/propolis/image/<commit>/propolis-server.sha256.txt
-source.sha256 = "42a6096035caeccb5f3472a6418180a5c961e4eec870ccf55f55ec7153406268"
+source.sha256 = "2c249d7e23042b3b03b48c61c34c5c3af18776229894b56816b5bb56df9d2842"
 output.type = "zone"
 
 [package.mg-ddm-gz]
