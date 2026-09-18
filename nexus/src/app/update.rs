@@ -958,6 +958,7 @@ mod test {
             usable_physical_ram: ByteCount::from(1024 * 1024),
             cpu_family: SledCpuFamily::AmdMilan,
             disks: vec![],
+            disk_bays: vec![],
             zpools,
             datasets: vec![],
             ledgered_sled_config: None,

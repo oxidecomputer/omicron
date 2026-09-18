@@ -1536,7 +1536,7 @@ impl Sled {
                         identity: disk.disk_identity.clone(),
                         variant: DiskVariant::U2,
                         pcie_slot: i64::try_from(i).unwrap(),
-                        location: Some(format!("N{i}")),
+                        location: format!("N{i}"),
                         active_firmware_slot: 1,
                         next_active_firmware_slot: None,
                         number_of_firmware_slots: 1,
@@ -1546,6 +1546,7 @@ impl Sled {
                         )],
                     })
                     .collect(),
+                disk_bays: vec![],
                 zpools: zpools
                     .keys()
                     .map(|id| InventoryZpool {
@@ -1747,6 +1748,7 @@ impl Sled {
             usable_physical_ram: inv_sled_agent.usable_physical_ram,
             cpu_family: inv_sled_agent.cpu_family,
             disks: vec![],
+            disk_bays: vec![],
             zpools: vec![],
             datasets: vec![],
             ledgered_sled_config: inv_sled_agent.ledgered_sled_config.clone(),

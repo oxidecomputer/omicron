@@ -645,7 +645,7 @@ impl From<InventoryDisk> for PhysicalDisk {
             identity: disk.identity,
             variant: disk.variant.into(),
             pcie_slot: disk.pcie_slot,
-            location: disk.location,
+            location: Some(disk.location),
             firmware: PhysicalDiskFirmware::Nvme(NvmeFirmware {
                 active_slot: disk.active_firmware_slot,
                 next_active_slot: disk.next_active_firmware_slot,

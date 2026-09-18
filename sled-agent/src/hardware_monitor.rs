@@ -8,6 +8,7 @@
 
 use crate::services::ServiceManager;
 use crate::sled_agent::SledAgent;
+use sled_agent_config_reconciler::DiskBaysSender;
 use sled_agent_config_reconciler::RawDisksSender;
 use sled_agent_scrimlet_reconcilers::ScrimletReconcilers;
 use sled_agent_scrimlet_reconcilers::ScrimletStatus;
@@ -63,6 +64,7 @@ pub struct HardwareMonitor {
 
     // A handle to send raw disk updates to the config-reconciler system.
     raw_disks_tx: RawDisksSender,
+    disk_bays_tx: DiskBaysSender,
 
     // A handle to the sled-agent
     //
@@ -92,6 +94,7 @@ impl HardwareMonitor {
         log: &Logger,
         hardware_manager: &HardwareManager,
         raw_disks_tx: RawDisksSender,
+        disk_bays_tx: DiskBaysSender,
         scrimlet_reconcilers: Arc<ScrimletReconcilers>,
     ) -> (
         HardwareMonitorHandle,
@@ -114,6 +117,7 @@ impl HardwareMonitor {
             hardware_view_rx,
             switch_zone_policy_rx,
             raw_disks_tx,
+            disk_bays_tx,
             sled_agent: None,
             service_manager: None,
             scrimlet_reconcilers,
@@ -273,8 +277,9 @@ impl HardwareMonitor {
         )
         .await;
 
-        let (disks, _disk_bays) = snapshot.into_disks_and_bays();
+        let (disks, disk_bays) = snapshot.into_disks_and_bays();
         self.raw_disks_tx
             .set_raw_disks(disks.into_values().map(RawDisk::from), &self.log);
+        self.disk_bays_tx.set_disk_bays(disk_bays);
     }
 }

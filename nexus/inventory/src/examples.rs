@@ -58,6 +58,8 @@ use sled_agent_types::inventory::InstanceManagerStatus;
 use sled_agent_types::inventory::Inventory;
 use sled_agent_types::inventory::InventoryDataset;
 use sled_agent_types::inventory::InventoryDisk;
+use sled_agent_types::inventory::InventoryDiskBay;
+use sled_agent_types::inventory::InventoryDiskBayOccupant;
 use sled_agent_types::inventory::InventoryZpool;
 use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
 use sled_agent_types::inventory::OmicronSledConfig;
@@ -489,7 +491,7 @@ pub fn representative() -> Representative {
             },
             variant: DiskVariant::U2,
             pcie_slot: 0,
-            location: Some("N0".to_string()),
+            location: "N0".to_string(),
             active_firmware_slot: 1,
             next_active_firmware_slot: None,
             number_of_firmware_slots: 1,
@@ -504,7 +506,7 @@ pub fn representative() -> Representative {
             },
             variant: DiskVariant::U2,
             pcie_slot: 1,
-            location: Some("N1".to_string()),
+            location: "N1".to_string(),
             active_firmware_slot: 1,
             next_active_firmware_slot: None,
             number_of_firmware_slots: 1,
@@ -519,7 +521,7 @@ pub fn representative() -> Representative {
             },
             variant: DiskVariant::U2,
             pcie_slot: 2,
-            location: Some("N2".to_string()),
+            location: "N2".to_string(),
             active_firmware_slot: 1,
             next_active_firmware_slot: None,
             number_of_firmware_slots: 1,
@@ -535,7 +537,7 @@ pub fn representative() -> Representative {
             },
             variant: DiskVariant::M2,
             pcie_slot: 18,
-            location: Some("M.2 West".to_string()),
+            location: "M.2 West".to_string(),
             active_firmware_slot: 1,
             next_active_firmware_slot: None,
             number_of_firmware_slots: 1,
@@ -543,6 +545,57 @@ pub fn representative() -> Representative {
             slot_firmware_versions: vec![Some("EXAMP1".to_string())],
         },
     ];
+
+    // Describe every bay of the chassis, not just the occupied ones: the
+    // first three U.2 bays and one M.2 socket hold the disks above, two more
+    // U.2 bays hold devices that are not usable disks, and the rest are empty.
+    let bay = |location: &str, kind, occupant| InventoryDiskBay {
+        location: location.to_string(),
+        kind,
+        occupant,
+    };
+    let holds = |disk: &InventoryDisk| InventoryDiskBayOccupant::Disk {
+        identity: disk.identity.clone(),
+    };
+    let mut disk_bays = vec![
+        bay("N0", DiskVariant::U2, holds(&disks[0])),
+        bay("N1", DiskVariant::U2, holds(&disks[1])),
+        bay("N2", DiskVariant::U2, holds(&disks[2])),
+        // An NVMe controller with no namespace.
+        bay(
+            "N3",
+            DiskVariant::U2,
+            InventoryDiskBayOccupant::Device {
+                driver: Some("nvme".to_string()),
+                devfs_path: Some(
+                    "/pci@0,0/example-nvme-no-namespace".to_string(),
+                ),
+            },
+        ),
+        // Something that is not an NVMe device at all.
+        bay(
+            "N4",
+            DiskVariant::U2,
+            InventoryDiskBayOccupant::Device {
+                driver: None,
+                devfs_path: Some("/pci@0,0/example-mystery-card".to_string()),
+            },
+        ),
+    ];
+    for n in 5..10 {
+        disk_bays.push(bay(
+            &format!("N{n}"),
+            DiskVariant::U2,
+            InventoryDiskBayOccupant::Empty,
+        ));
+    }
+    disk_bays.push(bay(
+        "M.2 East",
+        DiskVariant::M2,
+        InventoryDiskBayOccupant::Empty,
+    ));
+    disk_bays.push(bay("M.2 West", DiskVariant::M2, holds(&disks[3])));
+
     let mut zpools = Vec::new();
     for disk in &disks {
         let pool_id = zpool_id_iter.next().unwrap();
@@ -597,6 +650,7 @@ pub fn representative() -> Representative {
                 },
                 SledRole::Gimlet,
                 disks,
+                disk_bays,
                 zpools,
                 datasets,
                 Some(sled14),
@@ -630,6 +684,7 @@ pub fn representative() -> Representative {
                 vec![],
                 vec![],
                 vec![],
+                vec![],
                 Some(sled16),
                 file_source_resolver(
                     OmicronFileSourceResolverExampleKind::Success {
@@ -657,6 +712,7 @@ pub fn representative() -> Representative {
                 sled_agent_id_pc,
                 (*sled5_bb).clone(),
                 SledRole::Gimlet,
+                vec![],
                 vec![],
                 vec![],
                 vec![],
@@ -695,6 +751,7 @@ pub fn representative() -> Representative {
                 sled_agent_id_unknown,
                 (*sled6_bb).clone(),
                 SledRole::Gimlet,
+                vec![],
                 vec![],
                 vec![],
                 vec![],
@@ -1053,6 +1110,7 @@ pub fn sled_agent(
     baseboard_id: BaseboardId,
     sled_role: SledRole,
     disks: Vec<InventoryDisk>,
+    disk_bays: Vec<InventoryDiskBay>,
     zpools: Vec<InventoryZpool>,
     datasets: Vec<InventoryDataset>,
     ledgered_sled_config: Option<OmicronSledConfig>,
@@ -1147,6 +1205,7 @@ pub fn sled_agent(
         usable_physical_ram: ByteCount::from(1024 * 1024),
         cpu_family: SledCpuFamily::AmdMilan,
         disks,
+        disk_bays,
         zpools,
         datasets,
         ledgered_sled_config,

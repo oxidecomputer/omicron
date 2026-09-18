@@ -113,6 +113,8 @@ pub mod v52;
 pub mod v53;
 #[path = "add_disk_location_to_inventory/mod.rs"]
 pub mod v54;
+#[path = "add_disk_bays_to_inventory/mod.rs"]
+pub mod v55;
 #[path = "add_probe_put_endpoint/mod.rs"]
 pub mod v6;
 #[path = "multicast_support/mod.rs"]

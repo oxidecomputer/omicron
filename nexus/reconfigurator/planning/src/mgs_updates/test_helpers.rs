@@ -1317,6 +1317,7 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                             cpu_family: SledCpuFamily::Unknown,
                             reservoir_size: 0.into(),
                             disks: vec![],
+                            disk_bays: vec![],
                             zpools: vec![],
                             datasets: vec![],
                             ledgered_sled_config: Some(fake_sled_config),

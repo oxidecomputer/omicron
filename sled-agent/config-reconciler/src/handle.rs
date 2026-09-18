@@ -12,6 +12,7 @@ use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
 use sled_agent_types::inventory::CurrentUpdateDisposition;
 use sled_agent_types::inventory::InventoryDataset;
 use sled_agent_types::inventory::InventoryDisk;
+use sled_agent_types::inventory::InventoryDiskBay;
 use sled_agent_types::inventory::InventoryZpool;
 use sled_agent_types::inventory::OmicronSledConfig;
 use sled_storage::config::MountConfig;
@@ -55,6 +56,7 @@ use crate::dataset_serialization_task::DatasetTaskHandle;
 use crate::dataset_serialization_task::NestedDatasetMountError;
 use crate::debug_collector;
 use crate::debug_collector::FormerZoneRootArchiver;
+use crate::disk_bays::DiskBaysSender;
 use crate::internal_disks::InternalDisksReceiver;
 use crate::ledger::CurrentSledConfig;
 use crate::ledger::LedgerTaskHandle;
@@ -237,6 +239,7 @@ impl FakeUpdateDispositionSender {
 #[derive(Debug)]
 pub struct ConfigReconcilerHandle {
     raw_disks_tx: RawDisksSender,
+    disk_bays_tx: DiskBaysSender,
     internal_disks_rx: InternalDisksReceiver,
     dataset_task: DatasetTaskHandle,
     reconciler_result_rx: watch::Receiver<ReconcilerResult>,
@@ -273,6 +276,7 @@ impl ConfigReconcilerHandle {
 
         // Spawn the task that monitors our internal disks (M.2s).
         let (raw_disks_tx, raw_disks_rx) = raw_disks::new();
+        let disk_bays_tx = DiskBaysSender::new();
         let internal_disks_rx =
             InternalDisksReceiver::spawn_internal_disks_task(
                 Arc::clone(&mount_config),
@@ -306,6 +310,7 @@ impl ConfigReconcilerHandle {
         (
             Self {
                 raw_disks_tx,
+                disk_bays_tx,
                 internal_disks_rx,
                 dataset_task,
                 ledger_task: OnceLock::new(),
@@ -439,6 +444,11 @@ impl ConfigReconcilerHandle {
     /// Get a handle to update the set of raw disks visible to sled-agent.
     pub fn raw_disks_tx(&self) -> RawDisksSender {
         self.raw_disks_tx.clone()
+    }
+
+    /// Get a handle to update the disk bays the hardware reports.
+    pub fn disk_bays_tx(&self) -> DiskBaysSender {
+        self.disk_bays_tx.clone()
     }
 
     /// Get a watch channel to receive changes to the set of managed internal
@@ -576,6 +586,7 @@ impl ConfigReconcilerHandle {
 
         Ok(ReconcilerInventory {
             disks: self.raw_disks_tx.to_inventory(),
+            disk_bays: self.disk_bays_tx.to_inventory(),
             zpools: zpools
                 .into_iter()
                 .map(|(name, total_size, health)| InventoryZpool {
@@ -601,6 +612,7 @@ impl ConfigReconcilerHandle {
 #[derive(Debug)]
 pub struct ReconcilerInventory {
     pub disks: Vec<InventoryDisk>,
+    pub disk_bays: Vec<InventoryDiskBay>,
     pub zpools: Vec<InventoryZpool>,
     pub datasets: Vec<InventoryDataset>,
     pub ledgered_sled_config: Option<OmicronSledConfig>,

@@ -370,6 +370,7 @@ mod api_impl {
                 reservoir_size: (1 << 29).into(),
                 cpu_family: SledCpuFamily::AmdMilan,
                 disks: Vec::new(),
+                disk_bays: vec![],
                 zpools: Vec::new(),
                 datasets: Vec::new(),
                 ledgered_sled_config: Some(config.clone()),

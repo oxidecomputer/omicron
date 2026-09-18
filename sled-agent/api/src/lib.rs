@@ -22,7 +22,7 @@ use omicron_common::api::internal::{
 use sled_agent_types_versions::{
     latest, v1, v4, v6, v7, v9, v10, v11, v12, v14, v16, v17, v18, v20, v22,
     v24, v25, v26, v28, v29, v30, v31, v32, v33, v34, v37, v39, v40, v41, v42,
-    v43, v46, v47, v48, v49, v50, v51, v53,
+    v43, v46, v47, v48, v49, v50, v51, v53, v54,
 };
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 use slog_error_chain::InlineErrorChain;
@@ -39,6 +39,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (55, ADD_DISK_BAYS_TO_INVENTORY),
     (54, ADD_DISK_LOCATION_TO_INVENTORY),
     (53, ADD_INSTANCE_MANAGER_STATUS_TO_INVENTORY),
     (52, TYPED_ARTIFACT_CONFIG_GENERATION),
@@ -1297,11 +1298,26 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/inventory",
-        versions = VERSION_ADD_DISK_LOCATION_TO_INVENTORY..,
+        versions = VERSION_ADD_DISK_BAYS_TO_INVENTORY..,
     }]
     async fn inventory(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<latest::inventory::Inventory>, HttpError>;
+
+    /// Fetch basic information about this sled
+    #[endpoint {
+        operation_id = "inventory",
+        method = GET,
+        path = "/inventory",
+        versions = VERSION_ADD_DISK_LOCATION_TO_INVENTORY..VERSION_ADD_DISK_BAYS_TO_INVENTORY,
+    }]
+    async fn inventory_v54(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v54::inventory::Inventory>, HttpError> {
+        Self::inventory(rqctx).await.map(|HttpResponseOk(inv)| {
+            HttpResponseOk(v54::inventory::Inventory::from(inv))
+        })
+    }
 
     /// Fetch basic information about this sled
     #[endpoint {
@@ -1313,7 +1329,7 @@ pub trait SledAgentApi {
     async fn inventory_v53(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<v53::inventory::Inventory>, HttpError> {
-        Self::inventory(rqctx).await.map(|HttpResponseOk(inv)| {
+        Self::inventory_v54(rqctx).await.map(|HttpResponseOk(inv)| {
             HttpResponseOk(v53::inventory::Inventory::from(inv))
         })
     }

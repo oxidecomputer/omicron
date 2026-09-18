@@ -66,11 +66,13 @@ use sled_agent_types::inventory::{
     ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
     ConfigReconcilerInventoryStatus, CurrentUpdateDisposition, FmdInventory,
     InstanceManagerStatus, Inventory, InventoryDataset, InventoryDisk,
-    InventoryZpool, OmicronFileSourceResolverInventory, OmicronSledConfig,
+    InventoryDiskBay, InventoryDiskBayOccupant, InventoryZpool,
+    OmicronFileSourceResolverInventory, OmicronSledConfig,
     OmicronSledUpdateDisposition, SingleMeasurementInventory, ZpoolHealth,
 };
 use sled_agent_types::support_bundle::SupportBundleMetadata;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
+use sled_storage::disk::synthetic_disk_location;
 
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
@@ -1028,7 +1030,7 @@ impl SledAgent {
                     identity: info.identity.clone(),
                     variant: info.variant,
                     pcie_slot: info.slot,
-                    location: None,
+                    location: synthetic_disk_location(info.variant, info.slot),
                     active_firmware_slot: 1,
                     next_active_firmware_slot: None,
                     number_of_firmware_slots: 1,
@@ -1036,6 +1038,31 @@ impl SledAgent {
                     slot_firmware_versions: vec![Some("SIMUL1".to_string())],
                 })
                 .collect(),
+            // Simulated disks stand in for real hardware, so each occupies a
+            // bay, listed in slot order like a real sled's.
+            disk_bays: {
+                let mut bays: Vec<_> = storage
+                    .physical_disks()
+                    .values()
+                    .map(|info| {
+                        (
+                            info.slot,
+                            InventoryDiskBay {
+                                location: synthetic_disk_location(
+                                    info.variant,
+                                    info.slot,
+                                ),
+                                kind: info.variant,
+                                occupant: InventoryDiskBayOccupant::Disk {
+                                    identity: info.identity.clone(),
+                                },
+                            },
+                        )
+                    })
+                    .collect();
+                bays.sort_by_key(|(slot, _)| *slot);
+                bays.into_iter().map(|(_, bay)| bay).collect()
+            },
             zpools: storage
                 .zpools()
                 .iter()

@@ -47,6 +47,7 @@
 
 mod dataset_serialization_task;
 mod debug_collector;
+mod disk_bays;
 mod disks_common;
 mod handle;
 mod host_phase_2;
@@ -62,6 +63,7 @@ pub use dataset_serialization_task::NestedDatasetDestroyError;
 pub use dataset_serialization_task::NestedDatasetEnsureError;
 pub use dataset_serialization_task::NestedDatasetListError;
 pub use dataset_serialization_task::NestedDatasetMountError;
+pub use disk_bays::DiskBaysSender;
 pub use handle::AvailableDatasetsReceiver;
 pub use handle::ConfigReconcilerHandle;
 pub use handle::ConfigReconcilerSpawnToken;

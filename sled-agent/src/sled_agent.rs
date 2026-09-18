@@ -1368,6 +1368,7 @@ impl SledAgent {
 
         let ReconcilerInventory {
             disks,
+            disk_bays,
             zpools,
             datasets,
             ledgered_sled_config,
@@ -1385,6 +1386,7 @@ impl SledAgent {
             cpu_family,
             reservoir_size,
             disks,
+            disk_bays,
             zpools,
             datasets,
             ledgered_sled_config,

@@ -216,8 +216,10 @@ pub mod inventory {
     pub use crate::v53::inventory::CurrentUpdateDisposition;
     pub use crate::v53::inventory::InstanceManagerStatus;
 
-    pub use crate::v54::inventory::Inventory;
-    pub use crate::v54::inventory::InventoryDisk;
+    pub use crate::v55::inventory::Inventory;
+    pub use crate::v55::inventory::InventoryDisk;
+    pub use crate::v55::inventory::InventoryDiskBay;
+    pub use crate::v55::inventory::InventoryDiskBayOccupant;
 
     pub use crate::impls::inventory::FmdHostCaseDisplay;
     pub use crate::impls::inventory::FmdInventoryDisplay;

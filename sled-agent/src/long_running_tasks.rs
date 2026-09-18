@@ -28,8 +28,8 @@ use crate::zone_bundle::ZoneBundler;
 use bootstore::schemes::v0 as bootstore;
 use key_manager::{KeyManager, StorageKeyRequester};
 use sled_agent_config_reconciler::{
-    ConfigReconcilerHandle, ConfigReconcilerSpawnToken, InternalDisksReceiver,
-    RawDisksSender, TimeSyncConfig,
+    ConfigReconcilerHandle, ConfigReconcilerSpawnToken, DiskBaysSender,
+    InternalDisksReceiver, RawDisksSender, TimeSyncConfig,
 };
 use sled_agent_health_monitor::HealthMonitorHandle;
 use sled_agent_measurements::MeasurementsHandle;
@@ -145,6 +145,7 @@ pub async fn spawn_all_longrunning_tasks(
             log,
             &hardware_manager,
             raw_disks_tx,
+            config_reconciler.disk_bays_tx(),
             Arc::clone(&scrimlet_reconcilers),
         );
 
@@ -265,6 +266,7 @@ fn spawn_hardware_monitor(
     log: &Logger,
     hardware_manager: &HardwareManager,
     raw_disks_tx: RawDisksSender,
+    disk_bays_tx: DiskBaysSender,
     scrimlet_reconcilers: Arc<ScrimletReconcilers>,
 ) -> (
     HardwareMonitorHandle,
@@ -277,6 +279,7 @@ fn spawn_hardware_monitor(
             log,
             hardware_manager,
             raw_disks_tx,
+            disk_bays_tx,
             scrimlet_reconcilers,
         );
     (monitor, sled_agent_started_tx, service_manager_ready_tx)
