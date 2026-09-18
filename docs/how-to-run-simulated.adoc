@@ -192,7 +192,7 @@ CAUTION: This step does not currently work.  See https://github.com/oxidecompute
 +
 [source,text]
 ----
-$ cargo run --bin=dns-server -- --config-file dns-server/examples/config.toml --http-address [::1]:5353 --dns-address [::1]:5354
+$ cargo run --bin=dns-server -- --config-file dns-server/examples/config.toml --http-address [::1]:5353 --dns-addresses [::1]:5354
 ----
 . `sled-agent-sim` only accepts configuration on the command line.  Run it with a uuid identifying itself (this would be a uuid for the sled it's managing), an IP:port for itself, and the IP:port of `nexus`'s _internal_ interface.  It's recommended that you also provide some arguments specific to RSS (the rack setup service): Nexus's _external_ address and the external DNS server's _internal_ address.  Using default config, this might look like this:
 +

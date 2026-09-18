@@ -105,6 +105,7 @@ members = [
     "nexus/defaults",
     "nexus/external-api",
     "nexus/fm",
+    "nexus/fm/slippy",
     "nexus/internal-api",
     "nexus/inventory",
     "nexus/lockstep-api",
@@ -302,6 +303,7 @@ default-members = [
     "nexus/defaults",
     "nexus/external-api",
     "nexus/fm",
+    "nexus/fm/slippy",
     "nexus/internal-api",
     "nexus/inventory",
     "nexus/lockstep-api",
@@ -510,7 +512,7 @@ debug-ignore = "1.0.5"
 derive_more = "0.99.20"
 derive-where = "1.5.0"
 dev-tools-common = { path = "dev-tools/common" }
-dice-verifier = { git = "https://github.com/oxidecomputer/dice-util", branch = "main", default-features = false }
+dice-verifier = { git = "https://github.com/oxidecomputer/dice-util", rev = "ff9f27aa0d6ef6fb64c349890b6e3c242ea3d8fc", default-features = false }
 # Having the i-implement-... feature here makes diesel go away from the workspace-hack
 diesel = { version = "2.3.7", features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes", "postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 diesel-dtrace = "0.5.0"
@@ -518,7 +520,7 @@ digest = "0.10.7"
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
-dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "04a52a3240a26c58f03e1cf40353d67ff69d76b6" }
+dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "247502812015b409d33240b836d5bf242817453d" }
 dropshot = { version = "0.17.1", features = [ "usdt-probes" ] }
 dropshot-api-manager = "0.8.0"
 dropshot-api-manager-types = "0.8.0"
@@ -548,9 +550,9 @@ gateway-client = { path = "clients/gateway-client" }
 # compatibility, but will mean that faux-mgs might be missing new
 # functionality.)
 #
-gateway-ereport-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "6c0aca2545a73fd75536e149d29faa7108be5862", default-features = false, features = ["debug-impls"] }
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "6c0aca2545a73fd75536e149d29faa7108be5862", default-features = false, features = ["std"] }
-gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "6c0aca2545a73fd75536e149d29faa7108be5862" }
+gateway-ereport-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "438cd185666d5f164548885873f0f5df9a38eed1", default-features = false, features = ["debug-impls"] }
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "438cd185666d5f164548885873f0f5df9a38eed1", default-features = false, features = ["std"] }
+gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "438cd185666d5f164548885873f0f5df9a38eed1" }
 gateway-test-utils = { path = "gateway-test-utils" }
 gateway-types = { path = "gateway-types" }
 gateway-types-versions = { path = "gateway-types/versions" }
@@ -581,7 +583,7 @@ http-body-util = "0.1.3"
 http-range = "0.1.5"
 httpmock = "0.8.0-alpha.1"
 httptest = "0.16.3"
-hubtools = { git = "https://github.com/oxidecomputer/hubtools.git", rev = "2b1ef9b38d75563ea800baa3b17327eec17b1b7a" }
+hubtools = { git = "https://github.com/oxidecomputer/hubtools.git", rev = "87881bd389025f7c5692c0be153452c11ae3312e" }
 humantime = "2.2.0"
 hyper = "1.6.0"
 hyper-util = "0.1.16"
@@ -649,6 +651,7 @@ nexus-db-schema = { path = "nexus/db-schema" }
 nexus-defaults = { path = "nexus/defaults" }
 nexus-external-api = { path = "nexus/external-api" }
 nexus-fm = { path = "nexus/fm" }
+nexus-fm-slippy = { path = "nexus/fm/slippy" }
 nexus-inventory = { path = "nexus/inventory" }
 nexus-internal-api = { path = "nexus/internal-api" }
 nexus-lockstep-api = { path = "nexus/lockstep-api" }

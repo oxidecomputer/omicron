@@ -76,8 +76,9 @@ struct RuntimeStateChangeset {
     /// instance, this state is the instance's logical state.
     state: DbVmmState,
 
-    /// If this VMM is in the `Failed` state, this field describes why it
-    /// failed. This is `None` for VMMs that are not in the `Failed` state.
+    /// If this VMM is, or has ever been, in the `Failed` state, this field
+    /// describes why it failed. This is `None` for VMMs that have never been in
+    /// the `Failed` state.
     failure_reason: Option<model::VmmFailureReason>,
 }
 
@@ -374,6 +375,11 @@ impl DataStore {
             .filter(dsl::id.eq(vmm_id.into_untyped_uuid()))
             .set((
                 dsl::state.eq(DbVmmState::SagaUnwound),
+                // We deliberately do not alter or unset the failure reason here
+                // to preserve historical failed information. In the future, if
+                // we start tracking the reason a saga was unwound, we would
+                // probably want to extend the schema to store that as a
+                // separate column (or maybe some kind of history table?)
                 dsl::time_state_updated.eq(chrono::Utc::now()),
                 dsl::state_generation.eq(dsl::state_generation + 1),
             ))
@@ -491,7 +497,9 @@ mod tests {
     use crate::db::model::Generation;
     use crate::db::model::Migration;
     use crate::db::pub_test_utils::TestDatabase;
+    use crate::db::pub_test_utils::helpers::create_vmm_for_instance;
     use nexus_db_model::VmmCpuPlatform;
+    use nexus_types::instance::VmmFailureReason;
     use nexus_types::instance::VmmState;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::InstanceUuid;
@@ -761,6 +769,173 @@ mod tests {
         );
 
         // Clean up.
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    async fn mark_failed_no_such_instance(
+        opctx: &OpContext,
+        datastore: &DataStore,
+        vmm_id: PropolisUuid,
+    ) -> Vmm {
+        let vmm =
+            datastore.vmm_fetch(opctx, &vmm_id).await.expect("fetched VMM");
+        let failed_runtime = vmm
+            .runtime()
+            .transition(VmmState::Failed(VmmFailureReason::NoSuchInstance));
+        let updated = datastore
+            .vmm_update_runtime(&vmm_id, &failed_runtime)
+            .await
+            .expect("VMM should be marked failed");
+        assert!(updated, "VMM should have been updated to Failed");
+        let failed_vmm =
+            datastore.vmm_fetch(opctx, &vmm_id).await.expect("fetched VMM");
+        assert_eq!(failed_vmm.state, db::model::VmmState::Failed);
+        assert_eq!(
+            failed_vmm.failure_reason,
+            Some(db::model::VmmFailureReason::NoSuchInstance)
+        );
+        failed_vmm
+    }
+
+    async fn assert_vmm_transitioned(
+        opctx: &OpContext,
+        datastore: &DataStore,
+        prev: &Vmm,
+        expected_state: db::model::VmmState,
+        expected_failure_reason: Option<db::model::VmmFailureReason>,
+    ) -> Vmm {
+        let vmm_id = PropolisUuid::from_untyped_uuid(prev.id);
+        let vmm =
+            datastore.vmm_fetch(opctx, &vmm_id).await.expect("fetched VMM");
+        assert_eq!(vmm.state, expected_state);
+        assert_eq!(vmm.failure_reason, expected_failure_reason);
+        assert_eq!(vmm.generation, Generation(prev.generation.0.next()));
+        vmm
+    }
+
+    #[tokio::test]
+    async fn test_vmm_mark_saga_unwound_after_failure() {
+        let logctx =
+            dev::test_setup_log("test_vmm_mark_saga_unwound_after_failure");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let vmm_id = create_vmm_for_instance(
+            &opctx,
+            &datastore,
+            InstanceUuid::new_v4(),
+            SledUuid::new_v4(),
+        )
+        .await;
+
+        // Reproduce a race where Sled Agent reports NoSuchInstance for a VMM
+        // that a start saga is unwinding.
+        let failed_vmm =
+            mark_failed_no_such_instance(&opctx, &datastore, vmm_id).await;
+
+        let updated = datastore
+            .vmm_mark_saga_unwound(&opctx, &vmm_id)
+            .await
+            .expect("failed VMM should be marked saga-unwound");
+        assert!(updated, "VMM should have been updated to SagaUnwound");
+        let unwound_vmm = assert_vmm_transitioned(
+            &opctx,
+            &datastore,
+            &failed_vmm,
+            db::model::VmmState::SagaUnwound,
+            Some(db::model::VmmFailureReason::NoSuchInstance),
+        )
+        .await;
+
+        // Steno may replay the undo action on recovery, so a second call must
+        // idempotently succeed.
+        let updated = datastore
+            .vmm_mark_saga_unwound(&opctx, &vmm_id)
+            .await
+            .expect("saga-unwound VMM should be marked saga-unwound again");
+        assert!(updated, "VMM should have been updated again");
+        assert_vmm_transitioned(
+            &opctx,
+            &datastore,
+            &unwound_vmm,
+            db::model::VmmState::SagaUnwound,
+            Some(db::model::VmmFailureReason::NoSuchInstance),
+        )
+        .await;
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_vmm_update_runtime_from_failed() {
+        let logctx = dev::test_setup_log("test_vmm_update_runtime_from_failed");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        async fn insert_failed_vmm(
+            opctx: &OpContext,
+            datastore: &DataStore,
+        ) -> Vmm {
+            let vmm_id = create_vmm_for_instance(
+                opctx,
+                datastore,
+                InstanceUuid::new_v4(),
+                SledUuid::new_v4(),
+            )
+            .await;
+            mark_failed_no_such_instance(opctx, datastore, vmm_id).await
+        }
+
+        // A Sled Agent report with a newer generation can move a Failed VMM to
+        // a non-Failed state. Both vmm_update_runtime and
+        // vmm_and_migration_update_runtime should succeed and retain the
+        // failure reason.
+        let failed_vmm = insert_failed_vmm(&opctx, &datastore).await;
+        let updated = datastore
+            .vmm_update_runtime(
+                &PropolisUuid::from_untyped_uuid(failed_vmm.id),
+                &failed_vmm.runtime().transition(VmmState::Destroyed),
+            )
+            .await
+            .expect("failed VMM should be updated to Destroyed");
+        assert!(updated, "VMM should have been updated to Destroyed");
+        assert_vmm_transitioned(
+            &opctx,
+            &datastore,
+            &failed_vmm,
+            db::model::VmmState::Destroyed,
+            Some(db::model::VmmFailureReason::NoSuchInstance),
+        )
+        .await;
+
+        let failed_vmm = insert_failed_vmm(&opctx, &datastore).await;
+        let result = datastore
+            .vmm_and_migration_update_runtime(
+                &opctx,
+                PropolisUuid::from_untyped_uuid(failed_vmm.id),
+                &failed_vmm.runtime().transition(VmmState::Destroyed),
+                Migrations { migration_in: None, migration_out: None },
+            )
+            .await
+            .expect("failed VMM should be updated to Destroyed");
+        assert_eq!(result.found_vmm.state, db::model::VmmState::Failed);
+        assert!(
+            result.vmm_updated,
+            "VMM should have been updated to Destroyed"
+        );
+        assert!(!result.migration_in_updated);
+        assert!(!result.migration_out_updated);
+        assert_vmm_transitioned(
+            &opctx,
+            &datastore,
+            &failed_vmm,
+            db::model::VmmState::Destroyed,
+            Some(db::model::VmmFailureReason::NoSuchInstance),
+        )
+        .await;
+
         db.terminate().await;
         logctx.cleanup_successful();
     }

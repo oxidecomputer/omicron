@@ -16,7 +16,7 @@ use wicketd_commission_api::{
 };
 use wicketd_commission_types::inventory::{
     BaseboardId, GetBootstrapSledsResponse, Inventory, InventoryParams,
-    LocationInfo, SpIdentifier, SpType, SwitchSlot,
+    LocationInfo, SpType, SwitchSlot,
 };
 use wicketd_commission_types::rack_setup::{
     BgpAuthKey, BgpAuthKeyPath, CertificatePem, CertificateUploadResponse,
@@ -246,23 +246,13 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
         let ctx = rqctx.context();
         let event_reports = ctx.update_tracker.event_reports().await;
 
-        // event_reports is keyed by (sp_type, slot), so the derived
-        // SpIdentifiers are unique by construction.
-        //
-        // TODO: once rkdeploy is on the published API, we can make
-        // `event_reports` be an IdOrdMap and make this much simpler.
         let mut sps = IdOrdMap::new();
-        for (sp_type, slots) in event_reports {
-            for (slot, report) in slots {
-                sps.insert_unique(progress::sp_update_progress(
-                    SpIdentifier { typ: sp_type, slot },
-                    report,
-                ))
-                .expect(
-                    "event_reports is keyed by (sp_type, slot), so SP ids \
-                     are unique",
-                );
-            }
+        for report in event_reports {
+            sps.insert_unique(progress::sp_update_progress(
+                report.sp,
+                report.event_report,
+            ))
+            .expect("event_reports is keyed by SpIdentifier");
         }
 
         Ok(HttpResponseOk(GetUpdateProgressResponse { sps }))

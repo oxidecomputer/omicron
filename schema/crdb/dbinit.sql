@@ -4464,6 +4464,19 @@ CREATE TYPE IF NOT EXISTS omicron.public.inv_zone_manifest_source AS ENUM (
     'sled-agent'
 );
 
+-- A sled's update disposition in inventory.
+--
+-- This is analogous to the `sled_update_availability` enum used as a part of
+-- storing update disposition in blueprints. We use a separate enum (despite
+-- currently having identical variants) because there are separate Rust
+-- types, and it allows the two to evolve independently.
+CREATE TYPE IF NOT EXISTS omicron.public.inv_sled_update_disposition AS ENUM (
+    -- Available for use for all provisions.
+    'available',
+    -- Disallowed for all use + migratable instances are being evacuated.
+    'evacuating'
+);
+
 -- observations from and about sled agents
 CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     -- where this observation came from
@@ -4547,19 +4560,34 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     --
     -- The path to the boot disk file
     measurement_manifest_boot_disk_path TEXT NOT NULL,
-    -- The source of the measurement manifest on the boot disk: from installinator or
-    -- sled-agent (synthetic). NULL means there is an error reading the measurement manifest.
+    -- The source of the measurement manifest on the boot disk: from
+    -- installinator or sled-agent (synthetic). NULL means there is an error
+    -- reading the measurement manifest.
     measurement_manifest_source omicron.public.inv_zone_manifest_source,
-    -- The mupdate ID that created the measurement manifest if this is from installinator. If
-    -- this is NULL, then either the measurement manifest is synthetic or there was an
-    -- error reading the measurement manifest.
+    -- The mupdate ID that created the measurement manifest if this is from
+    -- installinator. If this is NULL, then either the measurement manifest is
+    -- synthetic or there was an error reading the measurement manifest.
     measurement_manifest_mupdate_id UUID,
-    -- Message describing the status of the measurement manifest on the boot disk. If
-    -- this is NULL, then the measurement manifest was successfully read, and the
-    -- inv_zone_manifest_measurement table has entries corresponding to the zone
-    -- manifest.
+    -- Message describing the status of the measurement manifest on the boot
+    -- disk. If this is NULL, then the measurement manifest was successfully
+    -- read, and the inv_zone_manifest_measurement table has entries
+    -- corresponding to the zone manifest.
     measurement_manifest_boot_disk_error TEXT,
 
+    -- Columns making up the instance manager status on this sled
+    --
+    -- The update disposition as observed (and acted upon) by the instance
+    -- manager. This should usually match the update disposition in the
+    -- most-recently-ledgered config, but there can be a lag between the
+    -- ledgered config updating and the instance manager being aware of it if
+    -- the instance manager is busy.
+    --
+    -- NULL in this column maps to
+    -- `CurrentUpdateDisposition::ConfigNotAvailable`. A non-`NULL` value maps
+    -- to `CurrentUpdateDisposition::Known(the_disposition)`.
+    instance_manager_update_disposition omicron.public.inv_sled_update_disposition,
+    -- Number of VMMs currently registered with the instance manager.
+    instance_manager_num_registered_vmms INT8 NOT NULL CHECK (instance_manager_num_registered_vmms >= 0),
 
     CONSTRAINT reconciler_status_sled_config_present_if_running CHECK (
         (reconciler_status_kind = 'running'
@@ -4861,19 +4889,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_dataset (
     -- - The sled reporting the disk
     -- - The name of this dataset
     PRIMARY KEY (inv_collection_id, sled_id, name)
-);
-
--- A sled's update disposition in inventory.
---
--- This is analogous to the `sled_update_availability` enum used as a part of
--- storing update disposition in blueprints. We use a separate enum (despite
--- currently having identical variants) because there are separate Rust
--- types, and it allows the two to evolve independently.
-CREATE TYPE IF NOT EXISTS omicron.public.inv_sled_update_disposition AS ENUM (
-    -- Available for use for all provisions.
-    'available',
-    -- Disallowed for all use + migratable instances are being evacuated.
-    'evacuating'
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config (
@@ -5569,7 +5584,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.reconfigurator_config (
     tuf_repo_pruner_enabled BOOL NOT NULL,
 
     -- How to disrupt instances during updates.
-    disruption_policy omicron.public.reconfigurator_disruption_policy NOT NULL
+    disruption_policy omicron.public.reconfigurator_disruption_policy NOT NULL,
+
+    -- Enable the blueprint pruner background task
+    blueprint_pruner_enabled BOOL NOT NULL,
+
+    -- Number of recent target blueprints that the blueprint pruner keeps
+    blueprint_pruner_nkeep INT8 NOT NULL
 );
 
 /*
@@ -6330,8 +6351,11 @@ CREATE TYPE IF NOT EXISTS omicron.public.sled_bp_availability AS ENUM (
  * Per-sled provisioning availability as of the target blueprint.
  *
  * This is a Reconfigurator rendezvous table reflecting which sleds the
- * target blueprint considers available for provisioning. Once wired up, the
- * instance-start allocation path will consult this table alongside `sled`.
+ * target blueprint considers available for provisioning. VMM placement
+ * consults this table alongside `sled`.
+ *
+ * The table is seeded at rack initialization and maintained by the
+ * blueprint_rendezvous background task.
  *
  * Unlike the other rendezvous tables, sled availability is not monotonic: a sled
  * becomes unavailable while evacuated for an update, then available again
@@ -6568,11 +6592,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.vmm (
      */
     stop_for_update_disposition_generation INT8,
 
-    -- If a VMM is in the 'failed' state, it must have a failure reason; if it
-    -- is not in the failed state, it must not have a failure reason.
-    CONSTRAINT failure_reason_iff_failed CHECK (
-        (state = 'failed' AND failure_reason IS NOT NULL)
-            OR (state != 'failed' AND failure_reason IS NULL)
+    -- If a VMM is in the 'failed' state, it must have a failure reason; VMMs
+    -- not in the 'failed' state are allowed to keep a stale reason from an
+    -- earlier failure.
+    CONSTRAINT failure_reason_if_failed CHECK (
+        state != 'failed' OR failure_reason IS NOT NULL
     )
 );
 
@@ -9500,7 +9524,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '298.0.0', NULL)
+    (TRUE, NOW(), NOW(), '301.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
