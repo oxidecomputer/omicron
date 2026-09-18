@@ -683,10 +683,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "999fdd67d024c9c05e5d201a06d284e41357e721"
+source.commit = "26fcf262ba3be2af6156a5a010cd834e18ae42c7"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm-gz.sha256.txt
-source.sha256 = "807a2422dfe5c1a0e40429026530c67d52ff381d4d07652e684681db62b89975"
+source.sha256 = "a2551615119859c037564158867f9005e384d0a1f59237b5458c0737a0123d79"
 output.type = "tarball"
 
 [package.mg-ddm]
@@ -699,10 +699,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "999fdd67d024c9c05e5d201a06d284e41357e721"
+source.commit = "26fcf262ba3be2af6156a5a010cd834e18ae42c7"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "621a160214af2fea84f6f09877c79b409f59abd4a1ef3a6ed09e37ce54833e8c"
+source.sha256 = "05da12de94b677498606a6c18b90a7444621d49efe3aeb8a52b52b875fb1e5b8"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -714,7 +714,7 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "999fdd67d024c9c05e5d201a06d284e41357e721"
+source.commit = "26fcf262ba3be2af6156a5a010cd834e18ae42c7"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mgd.sha256.txt
 source.sha256 = "e46b9d06de9b9760afd46e24bbbbe9a81a5b831cbb8a6a2a7affb9cc727f10ae"
