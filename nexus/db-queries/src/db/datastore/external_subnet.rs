@@ -2383,6 +2383,7 @@ mod tests {
                             name: "my-project".parse().unwrap(),
                             description: String::new(),
                         },
+                        defaults: None,
                     },
                 ),
             )
@@ -4172,6 +4173,7 @@ mod tests {
                             name: "my-project".parse().unwrap(),
                             description: String::new(),
                         },
+                        defaults: None,
                     },
                 ),
             )
@@ -4642,6 +4644,7 @@ mod tests {
                             name: "my-project".parse().unwrap(),
                             description: String::new(),
                         },
+                        defaults: None,
                     },
                 ),
             )
@@ -4767,6 +4770,7 @@ mod tests {
                             name: "my-project".parse().unwrap(),
                             description: String::new(),
                         },
+                        defaults: None,
                     },
                 ),
             )

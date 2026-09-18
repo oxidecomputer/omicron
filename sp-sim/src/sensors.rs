@@ -4,7 +4,7 @@
 
 use crate::config::SpComponentConfig;
 use gateway_messages::ComponentDetails;
-use gateway_messages::DeviceCapabilities;
+
 use gateway_messages::Measurement;
 use gateway_messages::SensorDataMissing;
 use gateway_messages::SensorError;
@@ -107,15 +107,6 @@ impl Sensors {
         for cfg in cfgs {
             if cfg.sensors.is_empty() {
                 continue;
-            }
-            if !cfg
-                .capabilities
-                .contains(DeviceCapabilities::HAS_MEASUREMENT_CHANNELS)
-            {
-                panic!(
-                    "invalid component config: a device with sensors should \
-                     have the `HAS_MEASUREMENT_CHANNELS` capability:{cfg:#?}"
-                );
             }
 
             let mut ids = Vec::with_capacity(cfg.sensors.len());

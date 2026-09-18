@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "3.0.0"
+    "version": "4.0.0"
   },
   "paths": {
     "/ignition": {
@@ -982,13 +982,14 @@
           }
         ],
         "responses": {
-          "default": {
-            "description": "",
-            "content": {
-              "*/*": {
-                "schema": {}
-              }
-            }
+          "101": {
+            "description": "Negotiating protocol upgrade from HTTP/1.1 to WebSocket"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "x-dropshot-websocket": {}
@@ -1218,6 +1219,60 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SpUpdateStatus"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/sp/{type}/{slot}/component/{component}/vpd": {
+      "get": {
+        "summary": "Get the vital product data (VPD) identity of a component.",
+        "description": "Not all components have VPD. This endpoint will return an error if the requested component does not advertise the `HAS_VPD` DeviceCapability bit.",
+        "operationId": "sp_component_vpd_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "component",
+            "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComponentVpd"
                 }
               }
             }
@@ -1818,6 +1873,68 @@
   },
   "components": {
     "schemas": {
+      "Barcode": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "part_number": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
+              "serial_number": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "oxide"
+                ]
+              }
+            },
+            "required": [
+              "part_number",
+              "revision",
+              "serial_number",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "manufacturer": {
+                "type": "string"
+              },
+              "part_number": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "string"
+              },
+              "serial_number": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "mpn1"
+                ]
+              }
+            },
+            "required": [
+              "manufacturer",
+              "part_number",
+              "revision",
+              "serial_number",
+              "type"
+            ]
+          }
+        ]
+      },
       "ComponentFirmwareHashStatus": {
         "oneOf": [
           {
@@ -1874,6 +1991,235 @@
             "required": [
               "sha256",
               "status"
+            ]
+          }
+        ]
+      },
+      "ComponentVpd": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "part_number": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
+              "serial_number": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "oxide_barcode"
+                ]
+              }
+            },
+            "required": [
+              "part_number",
+              "revision",
+              "serial_number",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "manufacturer": {
+                "type": "string"
+              },
+              "part_number": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "string"
+              },
+              "serial_number": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "mpn1_barcode"
+                ]
+              }
+            },
+            "required": [
+              "manufacturer",
+              "part_number",
+              "revision",
+              "serial_number",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "fan0": {
+                "$ref": "#/components/schemas/Barcode"
+              },
+              "fan1": {
+                "$ref": "#/components/schemas/Barcode"
+              },
+              "fan2": {
+                "$ref": "#/components/schemas/Barcode"
+              },
+              "identity": {
+                "$ref": "#/components/schemas/OxideBarcode"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "sled_fan_tray"
+                ]
+              },
+              "vpd_board_identity": {
+                "$ref": "#/components/schemas/OxideBarcode"
+              }
+            },
+            "required": [
+              "fan0",
+              "fan1",
+              "fan2",
+              "identity",
+              "type",
+              "vpd_board_identity"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "device_id": {
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0
+              },
+              "eeprom1": {
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0
+              },
+              "eeprom2": {
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0
+              },
+              "eeprom3": {
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "tmp11x"
+                ]
+              }
+            },
+            "required": [
+              "device_id",
+              "eeprom1",
+              "eeprom2",
+              "eeprom3",
+              "type"
+            ]
+          },
+          {
+            "description": "PMBus vital product data (VPD) read from a PMBus device.\n\nIf the device does not support a particular VPD command, the field in this struct corresponding to that command will be `None`. Otherwise, the value contains the exact bytes returned by the device, including an empty value or any NUL bytes returned by the device.",
+            "type": "object",
+            "properties": {
+              "ic_device_id": {
+                "nullable": true,
+                "description": "`IC_DEVICE_ID` (PMBus command 0xAD).",
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "uint8",
+                  "minimum": 0
+                }
+              },
+              "ic_device_rev": {
+                "nullable": true,
+                "description": "`IC_DEVICE_REV` (PMBus command 0xAE).",
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "uint8",
+                  "minimum": 0
+                }
+              },
+              "mfr_date": {
+                "nullable": true,
+                "description": "`MFR_DATE` (PMBus command 0x9D).",
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "uint8",
+                  "minimum": 0
+                }
+              },
+              "mfr_id": {
+                "nullable": true,
+                "description": "`MFR_ID` (PMBus command 0x99).",
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "uint8",
+                  "minimum": 0
+                }
+              },
+              "mfr_location": {
+                "nullable": true,
+                "description": "`MFR_LOCATION` (PMBus command 0x9C).",
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "uint8",
+                  "minimum": 0
+                }
+              },
+              "mfr_model": {
+                "nullable": true,
+                "description": "`MFR_MODEL` (PMBus command 0x9A).",
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "uint8",
+                  "minimum": 0
+                }
+              },
+              "mfr_revision": {
+                "nullable": true,
+                "description": "`MFR_REVISION` (PMBus command 0x9B).",
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "uint8",
+                  "minimum": 0
+                }
+              },
+              "mfr_serial": {
+                "nullable": true,
+                "description": "`MFR_SERIAL` (PMBus command 0x9E).",
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "uint8",
+                  "minimum": 0
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "pmbus"
+                ]
+              }
+            },
+            "required": [
+              "type"
             ]
           }
         ]
@@ -2404,6 +2750,27 @@
         },
         "type": "string",
         "format": "uuid"
+      },
+      "OxideBarcode": {
+        "type": "object",
+        "properties": {
+          "part_number": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "serial_number": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "part_number",
+          "revision",
+          "serial_number"
+        ]
       },
       "PacketCount": {
         "type": "object",

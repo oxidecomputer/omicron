@@ -156,9 +156,10 @@ impl DataStore {
             config:
                 ReconfiguratorConfig {
                     planner_enabled,
-                    planner_config: PlannerConfig {},
+                    planner_config: PlannerConfig { disruption_policy },
                     tuf_repo_pruner_enabled,
-                    disruption_policy,
+                    blueprint_pruner_enabled,
+                    blueprint_pruner_nkeep,
                 },
             time_modified,
         } = *switches;
@@ -166,8 +167,9 @@ impl DataStore {
         sql_query(
             r"INSERT INTO reconfigurator_config
                 (version, planner_enabled, time_modified,
-                 tuf_repo_pruner_enabled, disruption_policy)
-              SELECT $1, $2, $3, $4, $5
+                 tuf_repo_pruner_enabled, disruption_policy,
+                 blueprint_pruner_enabled, blueprint_pruner_nkeep)
+              SELECT $1, $2, $3, $4, $5, $6, $7
               WHERE $1 - 1 IN (
                   SELECT COALESCE(MAX(version), 0)
                   FROM reconfigurator_config
@@ -180,6 +182,8 @@ impl DataStore {
         .bind::<ReconfiguratorDisruptionPolicyEnum, _>(
             DbReconfiguratorDisruptionPolicy::from(disruption_policy),
         )
+        .bind::<sql_types::Bool, _>(blueprint_pruner_enabled)
+        .bind::<sql_types::BigInt, SqlU32>(blueprint_pruner_nkeep.into())
         .execute_async(conn)
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
@@ -190,7 +194,7 @@ mod tests {
     use super::*;
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_types::deployment::{
-        PlannerConfig, ReconfiguratorConfig, ReconfiguratorDisruptionPolicy,
+        DEFAULT_BLUEPRINT_PRUNER_NKEEP, PlannerConfig, ReconfiguratorConfig,
     };
     use omicron_test_utils::dev;
 
@@ -217,7 +221,8 @@ mod tests {
                 planner_enabled: false,
                 planner_config: PlannerConfig::default(),
                 tuf_repo_pruner_enabled: true,
-                disruption_policy: ReconfiguratorDisruptionPolicy::default(),
+                blueprint_pruner_enabled: true,
+                blueprint_pruner_nkeep: DEFAULT_BLUEPRINT_PRUNER_NKEEP,
             },
         };
 
@@ -282,6 +287,8 @@ mod tests {
         // Inserting version 4 should work
         switches.version = 4;
         switches.config.planner_enabled = true;
+        switches.config.blueprint_pruner_enabled = false;
+        switches.config.blueprint_pruner_nkeep = 17;
         assert!(
             datastore
                 .reconfigurator_config_insert_latest_version(opctx, switches)
@@ -326,8 +333,15 @@ mod tests {
             assert_eq!(switches.version, i as u32);
             if i != 4 {
                 assert_eq!(switches.config.planner_enabled, false);
+                assert_eq!(switches.config.blueprint_pruner_enabled, true);
+                assert_eq!(
+                    switches.config.blueprint_pruner_nkeep,
+                    DEFAULT_BLUEPRINT_PRUNER_NKEEP
+                );
             } else {
                 assert_eq!(switches.config.planner_enabled, true);
+                assert_eq!(switches.config.blueprint_pruner_enabled, false);
+                assert_eq!(switches.config.blueprint_pruner_nkeep, 17);
             }
         }
 

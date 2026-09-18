@@ -9,6 +9,7 @@ use nexus_client::types::SledAgentInfo;
 use omicron_common::address::NEXUS_INTERNAL_PORT;
 use omicron_generation_kinds::Generation;
 use omicron_uuid_kinds::SledUuid;
+use sled_agent_types::inventory::SledRole;
 use sled_hardware::HardwareManager;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
@@ -271,9 +272,9 @@ impl NexusNotifierTask {
         // Box a function that can return the latest `SledAgentInfo`
         let get_sled_agent_info = Box::new(move |generation| {
             let role = if hardware.is_scrimlet() {
-                nexus_client::types::SledRole::Scrimlet
+                SledRole::Scrimlet
             } else {
-                nexus_client::types::SledRole::Gimlet
+                SledRole::Gimlet
             };
             SledAgentInfo {
                 sa_address: sled_address.to_string(),
@@ -661,7 +662,7 @@ mod test {
             Arc::new(std::sync::Mutex::new(SledAgentInfo {
                 sa_address: sa_address.clone(),
                 repo_depot_port: 0,
-                role: nexus_client::types::SledRole::Gimlet,
+                role: SledRole::Gimlet,
                 baseboard: Baseboard::new_pc("test".into(), "test".into())
                     .convert(),
                 usable_hardware_threads: 16,
