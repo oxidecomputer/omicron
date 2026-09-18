@@ -210,15 +210,24 @@ impl DataStore {
             schema::webhook_delivery as delivery,
             schema::webhook_delivery as also_delivery
         );
+
+        let rx_id = rx_id.into_untyped_uuid();
+
         alert_dsl::alert
             .filter(alert_dsl::alert_class.ne(AlertClass::Probe))
             .inner_join(
                 delivery.on(delivery.field(dsl::alert_id).eq(alert_dsl::id)),
             )
-            .filter(delivery.field(dsl::rx_id).eq(rx_id.into_untyped_uuid()))
+            .filter(delivery.field(dsl::rx_id).eq(rx_id))
+            // Select only failed deliveries for which no successful delivery
+            // attempt exists for the same alert and receiver.
             .filter(not(exists(
                 also_delivery
                     .select(also_delivery.field(dsl::id))
+                    // We only want to check for successful deliveries to
+                    // the receiver we are listing resendable alerts for.
+                    .filter(also_delivery.field(dsl::rx_id).eq(rx_id))
+                    // ...and for the alert we are currently filtering.
                     .filter(
                         also_delivery.field(dsl::alert_id).eq(alert_dsl::id),
                     )
