@@ -639,22 +639,17 @@ mod test {
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::AlertUuid;
 
-    #[tokio::test]
-    async fn test_dispatched_deliveries_are_unique_per_rx() {
-        // Test setup
-        let logctx =
-            dev::test_setup_log("test_dispatched_deliveries_are_unique_per_rx");
-        let db = TestDatabase::new_with_datastore(&logctx.log).await;
-        let (opctx, datastore) = (db.opctx(), db.datastore());
-        // As webhook receivers are a collection that owns the delivery
-        // resource, we must create a "real" receiver before assigning
-        // deliveries to it.
+    async fn create_receiver(
+        datastore: &DataStore,
+        opctx: &OpContext,
+        name: &str,
+    ) -> AlertReceiverUuid {
         let rx = datastore
             .webhook_rx_create(
                 opctx,
                 alert::WebhookCreate {
                     identity: IdentityMetadataCreateParams {
-                        name: "test-webhook".parse().unwrap(),
+                        name: name.parse().unwrap(),
                         description: String::new(),
                     },
                     endpoint: "http://webhooks.example.com".parse().unwrap(),
@@ -666,7 +661,20 @@ mod test {
             )
             .await
             .unwrap();
-        let rx_id = rx.rx.identity.id.into();
+        rx.rx.identity.id.into()
+    }
+
+    #[tokio::test]
+    async fn test_dispatched_deliveries_are_unique_per_rx() {
+        // Test setup
+        let logctx =
+            dev::test_setup_log("test_dispatched_deliveries_are_unique_per_rx");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        // As webhook receivers are a collection that owns the delivery
+        // resource, we must create a "real" receiver before assigning
+        // deliveries to it.
+        let rx_id = create_receiver(datastore, opctx, "test-webhook").await;
         let alert_id = AlertUuid::new_v4();
         let alert = model::Alert::new(
             alert_id,
@@ -760,6 +768,84 @@ mod test {
         assert!(!all_deliveries.contains(&dispatch2.id));
         assert!(all_deliveries.contains(&resend1.id));
         assert!(all_deliveries.contains(&resend2.id));
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Regression test for https://github.com/oxidecomputer/omicron/issues/11235
+    //
+    // This reproduces a bug where, if an alert has been successfully delivered
+    // to one receiver, but delivering that alert to another receiver has
+    // failed, the alert will not be returned by the resendable-alert-list
+    // query.
+    #[tokio::test]
+    async fn test_successful_delivery_to_other_rx_is_still_resendable() {
+        let logctx = dev::test_setup_log(
+            "test_successful_delivery_to_other_rx_is_still_resendable",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create two webhook receivers. One will have a failed delivery of an
+        // alert, and the other will have a successful one.
+        let failed_rx_id = create_receiver(datastore, opctx, "failed-rx").await;
+        let successful_rx_id =
+            create_receiver(datastore, opctx, "successful-rx").await;
+
+        let alert_id = AlertUuid::new_v4();
+        let alert = model::Alert::new(
+            alert_id,
+            &test_alerts::Foo(serde_json::json!({
+                "answer": 42,
+            })),
+        )
+        .expect("alert payload should serialize");
+        datastore
+            .alert_create(opctx, alert.clone())
+            .await
+            .expect("alert should be created");
+
+        let completed_at = Utc::now();
+
+        // Create a failed delivery of the alert to `failed-rx`...
+        let mut failed_delivery = WebhookDelivery::new(
+            &alert_id,
+            &failed_rx_id,
+            AlertDeliveryTrigger::Alert,
+        );
+        failed_delivery.attempts = model::SqlU8::new(3);
+        failed_delivery.time_completed = Some(completed_at);
+        failed_delivery.state = AlertDeliveryState::Failed;
+
+        // ...and a successful delivery to `successful-rx`.
+        let mut successful_delivery = WebhookDelivery::new(
+            &alert_id,
+            &successful_rx_id,
+            AlertDeliveryTrigger::Alert,
+        );
+        successful_delivery.attempts = model::SqlU8::new(1);
+        successful_delivery.time_completed = Some(completed_at);
+        successful_delivery.state = AlertDeliveryState::Delivered;
+
+        let inserted = datastore
+            .webhook_delivery_create_batch(
+                opctx,
+                vec![failed_delivery, successful_delivery],
+            )
+            .await
+            .expect("deliveries should be created");
+        assert_eq!(inserted, 2);
+
+        let resendable = datastore
+            .webhook_rx_list_resendable_events(opctx, &failed_rx_id)
+            .await
+            .expect("resendable alerts should be listed");
+        assert_eq!(
+            resendable,
+            vec![alert],
+            "the alert with a failed delivery should be returned"
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
