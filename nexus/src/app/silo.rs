@@ -1041,7 +1041,7 @@ impl super::Nexus {
                         Error::invalid_value(
                             "url",
                             format!(
-                                "invald URL: {}",
+                                "invalid URL: {}",
                                 InlineErrorChain::new(&e)
                             ),
                         )
