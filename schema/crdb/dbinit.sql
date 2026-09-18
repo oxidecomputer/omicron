@@ -6351,8 +6351,11 @@ CREATE TYPE IF NOT EXISTS omicron.public.sled_bp_availability AS ENUM (
  * Per-sled provisioning availability as of the target blueprint.
  *
  * This is a Reconfigurator rendezvous table reflecting which sleds the
- * target blueprint considers available for provisioning. Once wired up, the
- * instance-start allocation path will consult this table alongside `sled`.
+ * target blueprint considers available for provisioning. VMM placement
+ * consults this table alongside `sled`.
+ *
+ * The table is seeded at rack initialization and maintained by the
+ * blueprint_rendezvous background task.
  *
  * Unlike the other rendezvous tables, sled availability is not monotonic: a sled
  * becomes unavailable while evacuated for an update, then available again
@@ -6589,11 +6592,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.vmm (
      */
     stop_for_update_disposition_generation INT8,
 
-    -- If a VMM is in the 'failed' state, it must have a failure reason; if it
-    -- is not in the failed state, it must not have a failure reason.
-    CONSTRAINT failure_reason_iff_failed CHECK (
-        (state = 'failed' AND failure_reason IS NOT NULL)
-            OR (state != 'failed' AND failure_reason IS NULL)
+    -- If a VMM is in the 'failed' state, it must have a failure reason; VMMs
+    -- not in the 'failed' state are allowed to keep a stale reason from an
+    -- earlier failure.
+    CONSTRAINT failure_reason_if_failed CHECK (
+        state != 'failed' OR failure_reason IS NOT NULL
     )
 );
 
@@ -9521,7 +9524,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '300.0.0', NULL)
+    (TRUE, NOW(), NOW(), '301.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

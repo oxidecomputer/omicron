@@ -21,7 +21,10 @@ WHERE
           FROM
             webhook_delivery AS also_delivery
           WHERE
-            (also_delivery.alert_id = alert.id AND also_delivery.state != $3)
-            AND also_delivery.triggered_by != $4
+            (
+              (also_delivery.rx_id = $3 AND also_delivery.alert_id = alert.id)
+              AND also_delivery.state != $4
+            )
+            AND also_delivery.triggered_by != $5
         )
       )
