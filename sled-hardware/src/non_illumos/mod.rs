@@ -88,8 +88,8 @@ pub fn is_oxide_sled() -> anyhow::Result<bool> {
 }
 
 /// No-op for non-illumos systems.
-pub fn detect_switch_hardware(
+pub fn find_softnpu_device(
     _log: &Logger,
-) -> Result<Option<crate::DendriteAsic>, crate::SwitchDetectError> {
-    Ok(None)
+) -> Result<bool, crate::SwitchDetectError> {
+    Ok(false)
 }

@@ -212,14 +212,17 @@ impl Deployment {
                 let log = log.clone();
                 // The probe touches devinfo and device nodes, so it may block.
                 let found = tokio::task::spawn_blocking(move || {
-                    sled_hardware::detect_switch_hardware(&log)
+                    sled_hardware::find_softnpu_device(&log)
                 })
                 .await
                 .expect("switch detection panicked")
                 .map_err(StartError::DetectSwitch)?;
-                Ok(match found {
-                    Some(asic) => SledMode::Scrimlet { asic },
-                    None => SledMode::Sled,
+                Ok(if found {
+                    SledMode::Scrimlet {
+                        asic: DendriteAsic::SoftNpuPropolisDevice,
+                    }
+                } else {
+                    SledMode::Sled
                 })
             }
             (

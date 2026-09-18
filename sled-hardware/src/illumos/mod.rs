@@ -7,7 +7,7 @@ use crate::ExternalDisks;
 use crate::HardwareView;
 use crate::TofinoSnapshot;
 use crate::TofinoView;
-use crate::{DendriteAsic, SledMode, SwitchDetectError, UnparsedDisk};
+use crate::{DendriteAsic, SledMode, UnparsedDisk};
 use camino::Utf8PathBuf;
 use gethostname::gethostname;
 use illumos_devinfo::{DevInfo, DevLinkType, DevLinks, Node, Property};
@@ -31,20 +31,9 @@ mod softnpu;
 mod sysconf;
 
 pub use partitions::{NvmeFormattingError, ensure_partition_layout};
+pub use softnpu::find_softnpu_device;
 
 const TOFINO_MONITOR: &'static str = "/opt/oxide/sled-agent/tofino-monitor";
-
-/// Switch hardware sled-agent must find for itself at startup. Today that
-/// is only the propolis SoftNPU device, answered by its 9p version
-/// handshake; the Tofino ASIC is the hardware monitor's job.
-pub fn detect_switch_hardware(
-    log: &Logger,
-) -> Result<Option<DendriteAsic>, SwitchDetectError> {
-    let mut devinfo =
-        DevInfo::new_force_load().map_err(SwitchDetectError::DevInfo)?;
-    Ok(softnpu::find_softnpu_device(log, &mut devinfo)?
-        .then_some(DendriteAsic::SoftNpuPropolisDevice))
-}
 
 #[derive(thiserror::Error, Debug)]
 enum Error {

@@ -24,18 +24,15 @@ const OPEN_RETRY_DELAY: Duration = Duration::from_millis(500);
 /// field. The reply will always fit here.
 const REPLY_BUF_LEN: usize = 65536;
 
-/// Returns whether the propolis SoftNPU 9p device is attached.
+/// Returns whether the propolis SoftNPU 9p device is attached. The Tofino
+/// ASIC is detected by the hardware monitor.
 ///
-/// Every virtio 9p node with an attached driver is opened exclusively and
-/// asked for its 9P version. Only the propolis SoftNPU handler answers with
-/// `9P2000.P4`; any other version is some other 9p device. A device that
-/// stays busy across retries, cannot be opened, or answers with anything but
-/// an Rversion is an error: it could not be ruled out, and skipping it would
-/// let a scrimlet come up as a plain sled.
-pub(super) fn find_softnpu_device(
-    log: &Logger,
-    devinfo: &mut DevInfo,
-) -> Result<bool, SwitchDetectError> {
+/// Each virtio 9p node is opened exclusively and sent a Tversion. Only the
+/// SoftNPU handler answers `9P2000.P4`; another version is another device.
+/// Busy, unopenable, or malformed replies are errors.
+pub fn find_softnpu_device(log: &Logger) -> Result<bool, SwitchDetectError> {
+    let mut devinfo =
+        DevInfo::new_force_load().map_err(SwitchDetectError::DevInfo)?;
     for node in devinfo.walk_node() {
         let node = node.map_err(SwitchDetectError::DevInfo)?;
         if probe_node(log, &node)? {
@@ -61,7 +58,7 @@ fn probe_node(
         );
         return Ok(false);
     };
-    let version = probe_version(&path)?;
+    let version = probe_version(log, &path)?;
     if version == SOFTNPU_9P_VERSION {
         info!(log, "found SoftNPU 9p device"; "path" => path);
         Ok(true)
@@ -110,8 +107,17 @@ fn ninep_minor_path(
 ///
 /// The driver permits a single exclusive open, so EBUSY means another
 /// consumer such as scadm currently holds the device; retry briefly.
-fn probe_version(path: &str) -> Result<String, SwitchDetectError> {
+fn probe_version(
+    log: &Logger,
+    path: &str,
+) -> Result<String, SwitchDetectError> {
     for attempt in 1..=OPEN_ATTEMPTS {
+        info!(
+            log,
+            "probing virtio 9p device for SoftNPU";
+            "path" => path,
+            "attempt" => attempt,
+        );
         let mut file = match OpenOptions::new()
             .read(true)
             .write(true)
