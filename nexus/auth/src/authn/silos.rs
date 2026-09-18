@@ -412,9 +412,7 @@ fn validate_saml_response(response: &SAMLResponse) -> Result<(), HttpError> {
     // the ID attribute value of the root element of the assertion or protocol
     // message being signed."
 
-    if let Some(reason) = validate_references_in_response(response) {
-        return Err(HttpError::for_bad_request(None, reason));
-    }
+    validate_references_in_response(response)?;
 
     // Check for unacceptable transforms, and return a 400 if found.
     //
@@ -422,94 +420,89 @@ fn validate_saml_response(response: &SAMLResponse) -> Result<(), HttpError> {
     // signatures MAY reject signatures that contain other transform algorithms
     // as invalid."
 
-    if let Some(identifier) = other_transform_present_in_response(response) {
-        return Err(HttpError::for_bad_request(
-            None,
-            format!("rejecting signature with transform {identifier}"),
-        ));
-    }
+    other_transform_present_in_response(response)?;
 
     Ok(())
 }
 
 /// If either Signature block in a SAMLResponse contains multiple references,
 /// reject it. If the expected single reference contains a non-same-document
-/// reference, also reject it. Return a reason string.
-fn validate_references_in_response(response: &SAMLResponse) -> Option<String> {
+/// reference, also reject it. Returns an HttpError if the response is rejected.
+fn validate_references_in_response(
+    response: &SAMLResponse,
+) -> Result<(), HttpError> {
     if let Some(signature) = &response.signature {
-        if let Some(reason) =
-            validate_references_in_signature(&response.id, &signature)
-        {
-            return Some(reason);
-        }
+        validate_references_in_signature(&response.id, &signature)?;
     }
 
     if let Some(assertion) = &response.assertion {
         if let Some(signature) = &assertion.signature {
-            if let Some(reason) =
-                validate_references_in_signature(&assertion.id, &signature)
-            {
-                return Some(reason);
-            }
+            validate_references_in_signature(&assertion.id, &signature)?;
         }
     }
 
-    None
+    Ok(())
 }
 
 /// If the signature contains multiple references, reject it. If the expected
 /// single reference contains an unexpected URI reference (according to SAML
-/// core section 5.4.2), reject it. Return a reason string.
+/// core section 5.4.2), reject it. Returns an HttpError if the signature is
+/// rejected.
 fn validate_references_in_signature(
     expected_id: &str,
     signature: &Signature,
-) -> Option<String> {
+) -> Result<(), HttpError> {
     if signature.signed_info.reference.len() != 1 {
-        return Some(String::from("multiple references in signature"));
+        return Err(HttpError::for_bad_request(
+            None,
+            format!(
+                "{} references in signature, should be 1",
+                signature.signed_info.reference.len()
+            ),
+        ));
     }
 
     let Some(uri) = &signature.signed_info.reference[0].uri else {
-        return Some(String::from("reference without URI"));
+        return Err(HttpError::for_bad_request(
+            None,
+            String::from("reference without URI"),
+        ));
     };
 
     if *uri != format!("#{expected_id}") {
-        return Some(format!("URI {uri} does not match #{expected_id}"));
+        return Err(HttpError::for_bad_request(
+            None,
+            format!("URI {uri} does not match #{expected_id}"),
+        ));
     }
 
-    None
+    Ok(())
 }
 
 /// If either Signature block in a SAMLResponse contains a transform other than
 /// the enveloped signature transform or the exclusive canonicalization
-/// transforms, then return that transform's identifier.
+/// transforms, then return an HttpError.
 fn other_transform_present_in_response(
     response: &SAMLResponse,
-) -> Option<&str> {
+) -> Result<(), HttpError> {
     if let Some(signature) = &response.signature {
-        if let Some(identifier) =
-            other_transform_present_in_signature(&signature)
-        {
-            return Some(identifier);
-        }
+        other_transform_present_in_signature(&signature)?;
     }
 
     if let Some(assertion) = &response.assertion {
         if let Some(signature) = &assertion.signature {
-            if let Some(identifier) =
-                other_transform_present_in_signature(&signature)
-            {
-                return Some(identifier);
-            }
+            other_transform_present_in_signature(&signature)?;
         }
     }
 
-    None
+    Ok(())
 }
 
 /// If a transform other than the enveloped signature transform or the exclusive
-/// canonicalization transforms is present in a Signature, return that
-/// identifier, otherwise return None.
-fn other_transform_present_in_signature(signature: &Signature) -> Option<&str> {
+/// canonicalization transforms is present in a Signature, return an HttpError.
+fn other_transform_present_in_signature(
+    signature: &Signature,
+) -> Result<(), HttpError> {
     for reference in &signature.signed_info.reference {
         let Some(transforms) = &reference.transforms else {
             continue;
@@ -525,11 +518,17 @@ fn other_transform_present_in_signature(signature: &Signature) -> Option<&str> {
                 }
 
                 _ => {
-                    return Some(transform.algorithm.as_str());
+                    return Err(HttpError::for_bad_request(
+                        None,
+                        format!(
+                            "rejecting signature with transform {}",
+                            transform.algorithm
+                        ),
+                    ));
                 }
             }
         }
     }
 
-    None
+    Ok(())
 }
