@@ -457,6 +457,25 @@ dependencies = [
 [[package]]
 name = "attest-data"
 version = "0.5.0"
+source = "git+https://github.com/oxidecomputer/dice-util?rev=e7dd1f5cddd2e28836935a0ad6478be272bad055#e7dd1f5cddd2e28836935a0ad6478be272bad055"
+dependencies = [
+ "const-oid 0.9.6",
+ "der 0.7.10",
+ "getrandom 0.4.3",
+ "hex",
+ "hubpack",
+ "rats-corim 0.1.0 (git+https://github.com/oxidecomputer/rats-corim?rev=1493d7f58e189125641d81f03f2dfb5941567c82)",
+ "salty",
+ "serde",
+ "serde_with 3.21.0",
+ "sha3 0.10.8",
+ "static_assertions",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "attest-data"
+version = "0.5.0"
 source = "git+https://github.com/oxidecomputer/dice-util?rev=ff9f27aa0d6ef6fb64c349890b6e3c242ea3d8fc#ff9f27aa0d6ef6fb64c349890b6e3c242ea3d8fc"
 dependencies = [
  "const-oid 0.9.6",
@@ -476,15 +495,15 @@ dependencies = [
 [[package]]
 name = "attest-mock"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dice-util?rev=4a39ef08d81e5177edee0bddb1146032aa21074d#4a39ef08d81e5177edee0bddb1146032aa21074d"
+source = "git+https://github.com/oxidecomputer/dice-util?rev=e7dd1f5cddd2e28836935a0ad6478be272bad055#e7dd1f5cddd2e28836935a0ad6478be272bad055"
 dependencies = [
  "anyhow",
- "attest-data 0.5.0 (git+https://github.com/oxidecomputer/dice-util?rev=4a39ef08d81e5177edee0bddb1146032aa21074d)",
+ "attest-data 0.5.0 (git+https://github.com/oxidecomputer/dice-util?rev=e7dd1f5cddd2e28836935a0ad6478be272bad055)",
  "clap",
  "hex",
  "hubpack",
  "knus",
- "rats-corim 0.1.0 (git+https://github.com/oxidecomputer/rats-corim)",
+ "rats-corim 0.1.0 (git+https://github.com/oxidecomputer/rats-corim?rev=1493d7f58e189125641d81f03f2dfb5941567c82)",
  "slog",
  "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?rev=15f69041f45774602108e47fb25e705dc23acfb2)",
  "thiserror 2.0.18",
@@ -12526,6 +12545,21 @@ dependencies = [
  "unicode-segmentation",
  "unicode-truncate",
  "unicode-width 0.2.0",
+]
+
+[[package]]
+name = "rats-corim"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/rats-corim?rev=1493d7f58e189125641d81f03f2dfb5941567c82#1493d7f58e189125641d81f03f2dfb5941567c82"
+dependencies = [
+ "ciborium",
+ "ciborium-io",
+ "clap",
+ "hex",
+ "serde",
+ "serde_with 3.21.0",
+ "strum 0.26.3",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
