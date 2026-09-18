@@ -360,6 +360,7 @@ struct DiffablePortSettings {
     fec: Option<LinkFec>,
     speed: LinkSpeed,
     addrs: BTreeSet<IpAddr>,
+    allow_ddm_traffic: bool,
 }
 
 impl IdOrdItem for DiffablePortSettings {
@@ -400,6 +401,7 @@ impl From<&'_ PortConfig> for DiffablePortSettings {
                     }
                 })
                 .collect(),
+            allow_ddm_traffic: port.allow_ddm_traffic,
         }
     }
 }
@@ -480,6 +482,7 @@ impl TryFrom<(DpdQsfp, DpdPortSettings)> for DiffablePortSettings {
             fec,
             speed,
             addrs,
+            allow_ddm_traffic: sole_link.params.allow_ddm_traffic,
         })
     }
 }
@@ -516,15 +519,6 @@ impl From<&'_ DiffablePortSettings> for DpdPortSettings {
             pre2: t.pre2,
         });
 
-        // TODO-multirack Whether we allow DDM traffic is based today only on
-        // whether the link is on a front QSFP port. We set it to false for
-        // them all now, but inter-rack links will need to support it when we
-        // implement multirack DDM routing.
-        //
-        // TODO-robustness: We should really be using the stronger types for
-        // ports in Dendrite, e.g., `PortId::Rear`, instead of strings.
-        let allow_ddm_traffic = port.port_id.starts_with("rear");
-
         // TODO breakouts?
         let mut links = HashMap::with_capacity(1);
         let link_id = DpdLinkId(0);
@@ -539,7 +533,7 @@ impl From<&'_ DiffablePortSettings> for DpdPortSettings {
                     lane: Some(link_id),
                     speed,
                     tx_eq,
-                    allow_ddm_traffic,
+                    allow_ddm_traffic: port.allow_ddm_traffic,
                 },
             },
         );

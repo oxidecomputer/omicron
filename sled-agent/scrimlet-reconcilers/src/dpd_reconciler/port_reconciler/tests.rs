@@ -584,6 +584,7 @@ impl ArbitraryPortSettings {
                     UplinkAddress::Static { ip_net } => Some(ip_net.addr()),
                 })
                 .collect(),
+            allow_ddm_traffic: false,
         })
     }
 }

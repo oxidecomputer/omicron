@@ -48,9 +48,9 @@ use wicketd_api::CurrentRssUserConfigSensitive;
 use wicketd_commission_types::rack_setup::BgpAuthKey;
 use wicketd_commission_types::rack_setup::CertificatePem;
 use wicketd_commission_types::rack_setup::CertificateUploadResponse;
-use wicketd_commission_types::rack_setup::ManualPortConfig;
 use wicketd_commission_types::rack_setup::PrivateKeyPem;
 use wicketd_commission_types::rack_setup::PutRssUserConfigInsensitive;
+use wicketd_commission_types::rack_setup::UplinkPortConfig;
 use wicketd_commission_types::rack_setup::UserSpecifiedRackNetworkConfig;
 use wicketd_commission_types::rack_setup::UserSpecifiedRouterPeerAddr;
 
@@ -522,9 +522,9 @@ fn validate_rack_network_config(
     // TODO Add more client side checks on `rack_network_config` contents?
 
     let ports = match config
-        .iter_uplinks()
+        .iter_port_configs()
         .map(|(switch, port, config)| {
-            build_port_config(switch, port, config, bgp_auth_keys)
+            build_port_config(switch, port, &config, bgp_auth_keys)
         })
         .collect::<Result<Vec<_>, AddressFamilyMismatchError>>()
     {
@@ -606,7 +606,7 @@ pub fn validate_rack_subnet(
 fn build_port_config(
     switch: SwitchSlot,
     port: &str,
-    config: &ManualPortConfig,
+    config: &UplinkPortConfig,
     bgp_auth_keys: &BgpAuthKeys,
 ) -> Result<PortConfig, AddressFamilyMismatchError> {
     use sled_agent_types::early_networking::BgpPeerConfig;
@@ -673,7 +673,7 @@ fn build_port_config(
         autoneg: config.autoneg,
         lldp: config.lldp.clone(),
         tx_eq: config.tx_eq,
-        allow_ddm_traffic: false,
+        allow_ddm_traffic: config.allow_ddm_traffic,
     })
 }
 
@@ -757,7 +757,7 @@ mod tests {
                 .first_key_value()
                 .expect("at least one switch0 port")
                 .1
-                .manual()
+                .uplink()
                 .unwrap()
                 .bgp_peers
                 .is_empty()
@@ -771,7 +771,7 @@ mod tests {
                 .first_entry()
                 .unwrap()
                 .into_mut()
-                .manual_mut()
+                .uplink_mut()
                 .unwrap()
                 .bgp_peers
                 .get_mut(0)
@@ -791,7 +791,7 @@ mod tests {
                 .first_entry()
                 .unwrap()
                 .into_mut()
-                .manual_mut()
+                .uplink_mut()
                 .unwrap()
                 .bgp_peers
                 .get_mut(0)
@@ -819,7 +819,7 @@ mod tests {
                 .first_entry()
                 .unwrap()
                 .into_mut()
-                .manual_mut()
+                .uplink_mut()
                 .unwrap()
                 .bgp_peers
                 .get_mut(0)
@@ -873,8 +873,8 @@ mod tests {
         let mut config_b = example.put_insensitive.clone();
         config_b.ntp_servers = vec!["ntp.config-b.example.com".to_owned()];
         for (_, _, port) in config_b.rack_network_config.iter_uplinks_mut() {
-            if let Some(manual) = port.manual_mut() {
-                manual.bgp_peers.clear();
+            if let Some(uplink) = port.uplink_mut() {
+                uplink.bgp_peers.clear();
             }
         }
         config_b.bootstrap_sleds.insert(999);

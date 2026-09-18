@@ -55,7 +55,8 @@ pub(crate) trait Reconciler: Send + 'static {
     ///
     /// Typically builds a client for the relevant service based on `mode` and
     /// record `switch_slot` for use inside future calls to
-    /// `do_reconciliation()`.
+    /// `do_reconciliation()`. Only `DdmdReconciler` uses
+    /// `base_ddm_interfaces`.
     fn new(
         mode: ScrimletReconcilersMode,
         switch_slot: ThisSledSwitchSlot,
@@ -99,7 +100,7 @@ impl<T: Reconciler> ReconcilerTaskHandle<T> {
             mode,
             this_sled_switch_slot,
             parent_log,
-            T::new,
+            move |mode, switch_slot, log| T::new(mode, switch_slot, log),
         )
     }
 

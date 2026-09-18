@@ -22,11 +22,12 @@ use crate::{
     rack_setup::{BootstrapSledDescription, CurrentRssUserConfigInsensitive},
 };
 use wicketd_commission_types::rack_setup::{
-    AllowedSourceIps, BgpAuthKeyId, IpRange, Ipv4Range, ManualPortConfig,
+    AllowedSourceIps, BgpAuthKeyId, IpRange, Ipv4Range,
     PutRssUserConfigInsensitive, ServiceIpPoolConfig, UplinkAddress,
-    UserSpecifiedBgpPeerConfig, UserSpecifiedImportExportPolicy,
-    UserSpecifiedPortConfig, UserSpecifiedRackNetworkConfig,
-    UserSpecifiedRouterPeerAddr, UserSpecifiedUplinkAddressConfig,
+    UplinkPortConfig, UserSpecifiedBgpPeerConfig,
+    UserSpecifiedImportExportPolicy, UserSpecifiedPortConfig,
+    UserSpecifiedRackNetworkConfig, UserSpecifiedRouterPeerAddr,
+    UserSpecifiedUplinkAddressConfig,
 };
 
 /// A collection of example data structures.
@@ -270,7 +271,7 @@ impl ExampleRackSetupData {
             infra_ip_last: "172.30.0.10".parse().unwrap(),
             #[rustfmt::skip]
             switch0: btreemap! {
-                "port0".to_owned() => UserSpecifiedPortConfig::Manual(ManualPortConfig {
+                "port0".to_owned() => UserSpecifiedPortConfig::Uplink(UplinkPortConfig {
                     addresses: vec![UserSpecifiedUplinkAddressConfig {
                         address: UplinkAddress::AddrConf,
                         vlan_id: Some(1),
@@ -287,13 +288,14 @@ impl ExampleRackSetupData {
                     lldp: switch0_port0_lldp,
                     tx_eq,
                     autoneg: true,
+                    allow_ddm_traffic: false,
                 }),
             },
             #[rustfmt::skip]
             switch1: btreemap! {
                 // Use the same port name as in switch0 to test that it doesn't
                 // collide.
-                "port0".to_owned() => UserSpecifiedPortConfig::Manual(ManualPortConfig {
+                "port0".to_owned() => UserSpecifiedPortConfig::Uplink(UplinkPortConfig {
                     addresses: vec![UserSpecifiedUplinkAddressConfig::without_vlan(
                         "172.30.0.1/24".parse().unwrap(),
                     )],
@@ -309,6 +311,7 @@ impl ExampleRackSetupData {
                     lldp: switch1_port0_lldp,
                     tx_eq,
                     autoneg: true,
+                    allow_ddm_traffic: false,
                 }),
             },
             bgp: vec![BgpConfig {
@@ -392,8 +395,8 @@ fn apply_tweak(
             let rnc = current_insensitive.rack_network_config.as_mut().unwrap();
             for (_, _, port) in rnc.iter_uplinks_mut() {
                 // Remove all but the first BGP peer.
-                let UserSpecifiedPortConfig::Manual(port) = port else {
-                    unimplemented!("DdmAutoPortConfig currently unsupported")
+                let UserSpecifiedPortConfig::Uplink(port) = port else {
+                    unimplemented!("DDM ports currently unsupported")
                 };
                 port.bgp_peers.drain(1..);
             }

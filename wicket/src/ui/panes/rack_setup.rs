@@ -44,8 +44,8 @@ use wicketd_client::types::CurrentRssUserConfigSensitive;
 use wicketd_client::types::RackOperationStatus;
 use wicketd_commission_types::rack_setup::AllowedSourceIps;
 use wicketd_commission_types::rack_setup::IpRange;
-use wicketd_commission_types::rack_setup::ManualPortConfig;
 use wicketd_commission_types::rack_setup::UplinkAddress;
+use wicketd_commission_types::rack_setup::UplinkPortConfig;
 use wicketd_commission_types::rack_setup::UserSpecifiedBgpPeerConfig;
 use wicketd_commission_types::rack_setup::UserSpecifiedImportExportPolicy;
 use wicketd_commission_types::rack_setup::UserSpecifiedRackNetworkConfig;
@@ -676,7 +676,7 @@ fn rss_config_text<'a>(
         } = cfg;
 
         for (i, (switch, port, uplink)) in cfg.iter_uplinks().enumerate() {
-            let ManualPortConfig {
+            let UplinkPortConfig {
                 routes,
                 addresses,
                 uplink_port_speed,
@@ -685,6 +685,9 @@ fn rss_config_text<'a>(
                 bgp_peers,
                 lldp,
                 tx_eq,
+                // TODO-multirack: Leave this out of RSS for now because it's
+                // not relevant to existing users until multirack is complete.
+                allow_ddm_traffic: _,
             } = uplink;
 
             let switch_description = match switch {
