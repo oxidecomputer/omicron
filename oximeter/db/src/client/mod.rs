@@ -2337,8 +2337,9 @@ mod tests {
             test_setup_log("test_client_select_timeseries_string_escaping");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(db.native_address().into(), &logctx.log);
-        init_db(&db, &client).await;
+        let client =
+            Client::new(User::Writer, db.native_address().into(), &logctx.log);
+        init_db(&db, &logctx.log).await;
 
         #[derive(oximeter::Target)]
         struct StringTarget {
@@ -2408,7 +2409,8 @@ mod tests {
         let mut db = runtime
             .block_on(ClickHouseDeployment::new_single_node(&logctx))
             .unwrap();
-        let client = Client::new(db.native_address().into(), &logctx.log);
+        let client =
+            Client::new(User::Reader, db.native_address().into(), &logctx.log);
 
         let check = |inputs: Vec<String>| -> Result<(), TestCaseError> {
             let literals: Vec<_> = inputs
