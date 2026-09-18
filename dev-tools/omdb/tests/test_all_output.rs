@@ -367,6 +367,14 @@ async fn test_omdb_success_cases() {
             "--disruption-policy",
             "migrate-or-terminate",
         ],
+        &[
+            "-w",
+            "nexus",
+            "reconfigurator-config",
+            "set",
+            "--sled-reboot-policy",
+            "evacuate",
+        ],
         &["nexus", "reconfigurator-config", "show", "current"],
         &["reconfigurator", "export", tmppath.as_str()],
         // We can't easily test the sled agent output because that's only

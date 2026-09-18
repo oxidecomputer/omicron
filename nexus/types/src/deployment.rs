@@ -168,6 +168,7 @@ pub use planning_report::ZoneWaitingToExpunge;
 pub use reconfigurator_config::DEFAULT_BLUEPRINT_PRUNER_NKEEP;
 pub use reconfigurator_config::PlannerConfig;
 pub use reconfigurator_config::PlannerConfigDisplay;
+pub use reconfigurator_config::PlannerSledRebootPolicy;
 pub use reconfigurator_config::ReconfiguratorConfig;
 pub use reconfigurator_config::ReconfiguratorConfigDiff;
 pub use reconfigurator_config::ReconfiguratorConfigDiffDisplay;

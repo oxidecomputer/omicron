@@ -241,7 +241,8 @@ impl fmt::Display for ReconfiguratorConfigDiffDisplay<'_, '_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let ReconfiguratorConfigDiff {
             planner_enabled,
-            planner_config: PlannerConfigDiff { disruption_policy },
+            planner_config:
+                PlannerConfigDiff { disruption_policy, sled_reboot_policy },
             tuf_repo_pruner_enabled,
             blueprint_pruner_enabled,
             blueprint_pruner_nkeep,
@@ -253,6 +254,7 @@ impl fmt::Display for ReconfiguratorConfigDiffDisplay<'_, '_> {
                 diff_row!(tuf_repo_pruner_enabled, "tuf repo pruner enabled"),
                 diff_row!(planner_enabled, "planner enabled"),
                 diff_row!(disruption_policy, "disruption policy"),
+                diff_row!(sled_reboot_policy, "sled reboot policy"),
                 diff_row!(blueprint_pruner_enabled, "blueprint pruner enabled"),
                 diff_row!(blueprint_pruner_nkeep, "blueprint pruner nkeep"),
             ],
@@ -264,12 +266,67 @@ impl fmt::Display for ReconfiguratorConfigDiffDisplay<'_, '_> {
     }
 }
 
-// `PlannerConfig` is currently empty. Future planner-wide feature flags will be
-// defined here.
+/// Controls how the planner interacts with sleds that it needs to reboot to
+/// perform an update (e.g., of the SP or host OS).
 #[derive(
     Clone,
     Copy,
     Debug,
+    Default,
+    Diffable,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
+pub enum PlannerSledRebootPolicy {
+    /// Reboot sleds without evacuating them first.
+    ///
+    /// This results in the fastest update time, but is the most disruptive to
+    /// instances on the sled: the sled will be rebooted out from under them.
+    ///
+    /// This is currently the default, but we expect to change the default to
+    /// `Evacuate` once all the supporting work to enable that is complete.
+    //
+    // TODO-correctness: This must remain the default until all the pieces
+    // required for sled evacuation land (in particular: the planner bits to
+    // mark sleds for evacuation and the Nexus bg task to enact sled
+    // evacuation). Once those are in place, we'll need to change this to
+    // `Evacuate` and update any existing configs persisted in the db to
+    // flip from this setting to `Evacuate`.
+    #[default]
+    ImmediateNoEvacuation,
+
+    /// Evacuate sleds before rebooting.
+    ///
+    /// With this policy, when the planner needs to schedule an update that will
+    /// cause a sled to reboot, it will first mark the sled for evacuation and
+    /// then wait for the sled to be fully evacuated before scheduling that
+    /// update.
+    Evacuate,
+}
+
+impl fmt::Display for PlannerSledRebootPolicy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ImmediateNoEvacuation => {
+                write!(f, "immediate (no evacuation)")
+            }
+            Self::Evacuate => {
+                write!(f, "evacuate")
+            }
+        }
+    }
+}
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
     Diffable,
     PartialEq,
     Eq,
@@ -279,6 +336,24 @@ impl fmt::Display for ReconfiguratorConfigDiffDisplay<'_, '_> {
 )]
 #[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub struct PlannerConfig {
+    /// Policy for how the planner schedules updates that will induce reboots on
+    /// sleds.
+    ///
+    /// If `sled_reboot_policy` is
+    /// [`PlannerSledRebootPolicy::ImmediateNoEvacuation`], the planner will not
+    /// mark sleds for evacuation at all, which means `disruption_policy` will
+    /// be ignored.
+    //
+    // We could combine this field with `disruption_policy` at the typesystem
+    // level to make it clear that `disruption_policy` is only applicable for
+    // certain `sled_reboot_policy` values, but that's less ergonomic from an
+    // omdb perspective: in most cases we expect to be adjusting only one or the
+    // other of these, and if we want to temporarily disable evacuation, we'll
+    // almost certainly want to preserve the existing `disruption_policy`
+    // whenever we reenable it.
+    pub sled_reboot_policy: PlannerSledRebootPolicy,
+
+    /// Disruption policy applied to sleds being evacuated.
     pub disruption_policy: ReconfiguratorDisruptionPolicy,
 }
 
@@ -288,22 +363,17 @@ impl PlannerConfig {
     }
 }
 
-// Allow the clippy::derivable_impls lint: spell out the default values for
-// these config values for clarity.
-#[expect(clippy::derivable_impls)]
-impl Default for PlannerConfig {
-    fn default() -> Self {
-        Self { disruption_policy: ReconfiguratorDisruptionPolicy::default() }
-    }
-}
-
 pub struct PlannerConfigDisplay<'a> {
     config: &'a PlannerConfig,
 }
 
 impl<'a> fmt::Display for PlannerConfigDisplay<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Self { config: PlannerConfig { disruption_policy } } = self;
-        writeln!(f, "    disruption policy: {}", disruption_policy)
+        let Self {
+            config: PlannerConfig { disruption_policy, sled_reboot_policy },
+        } = self;
+        writeln!(f, "    disruption policy : {}", disruption_policy)?;
+        writeln!(f, "    sled reboot policy: {}", sled_reboot_policy)?;
+        Ok(())
     }
 }
