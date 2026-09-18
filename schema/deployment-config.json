@@ -60,6 +60,11 @@
           "$ref": "#/definitions/RackUuid"
         }
       ]
+    },
+    "record_db_claim_backtraces": {
+      "description": "By default, we capture backtraces when claiming a connection from the DB pool, but setting this flag to `false` will disable that behavior.\n\nThis flag is intended as an escape hatch in case we ever encounter an unexpected pathological case where capturing backtraces is slow enough to be an issue.",
+      "default": true,
+      "type": "boolean"
     }
   },
   "definitions": {
