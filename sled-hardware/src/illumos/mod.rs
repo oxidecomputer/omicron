@@ -7,6 +7,7 @@ use crate::ExternalDisks;
 use crate::HardwareView;
 use crate::TofinoSnapshot;
 use crate::TofinoView;
+use crate::nvme_instance::NvmeInstance;
 use crate::{DendriteAsic, SledMode, UnparsedDisk};
 use camino::Utf8PathBuf;
 use gethostname::gethostname;
@@ -21,9 +22,12 @@ use slog::error;
 use slog::info;
 use slog::o;
 use slog::warn;
+use slog_error_chain::InlineErrorChain;
 use std::collections::{HashMap, HashSet};
 use tokio::sync::watch;
 use uuid::Uuid;
+
+mod topo;
 
 mod gpt;
 mod partitions;
@@ -47,11 +51,18 @@ enum Error {
     #[error("Node {node} missing device property {name}")]
     MissingDeviceProperty { node: String, name: String },
 
+    #[error("Node {node} has an invalid nvme instance")]
+    InvalidNvmeInstance {
+        node: String,
+        #[source]
+        err: crate::nvme_instance::InvalidNvmeInstance,
+    },
+
     #[error("Invalid value for boot-storage-unit property: {0}")]
     InvalidBootStorageUnitValue(i64),
 
-    #[error("Unrecognized slot for device {slot}")]
-    UnrecognizedSlot { slot: i64 },
+    #[error("Unrecognized PCIe physical slot for device {pcie_slot}")]
+    UnrecognizedPcieSlot { pcie_slot: i64 },
 
     #[error("Expected property {name} to have type {ty}")]
     UnexpectedPropertyType { name: String, ty: String },
@@ -160,17 +171,59 @@ impl HardwareSnapshot {
         let mut disks = HashMap::new();
         match external_disks {
             ExternalDisks::DetectPhysical => {
+                let mut found = Vec::new();
                 let mut node_walker = device_info.walk_driver("blkdev");
                 while let Some(node) =
                     node_walker.next().transpose().map_err(Error::DevInfo)?
                 {
-                    poll_blkdev_node(
+                    if let Some(found_disk) = poll_blkdev_node(
                         &log,
                         sled_type,
-                        &mut disks,
                         node,
                         boot_storage_unit,
-                    )?;
+                    )? {
+                        found.push(found_disk);
+                    }
+                }
+
+                // Now that we know which controllers are present, ask the
+                // hardware topology where they are. If the topology cannot
+                // be read, the disks are still reported, without locations.
+                let locations = match topo::read_disk_locations(log) {
+                    Ok(locations) => {
+                        let unlabelled: Vec<_> = found
+                            .iter()
+                            .filter(|(_, instance)| {
+                                !locations.contains_key(instance)
+                            })
+                            .map(|(_, instance)| instance.to_string())
+                            .collect();
+                        if !unlabelled.is_empty() {
+                            warn!(
+                                log,
+                                "hardware topology has no location label \
+                                 for some disk controllers";
+                                "nvme_instances" => ?unlabelled,
+                            );
+                        }
+                        locations
+                    }
+                    Err(err) => {
+                        warn!(
+                            log,
+                            "failed to read disk locations from hardware \
+                             topology";
+                            InlineErrorChain::new(&err),
+                        );
+                        HashMap::new()
+                    }
+                };
+                for (disk, instance) in found {
+                    let location = locations.get(&instance).cloned();
+                    disks.insert(
+                        disk.identity().clone(),
+                        disk.with_location(location),
+                    );
                 }
             }
 
@@ -208,27 +261,30 @@ impl HardwareView {
     }
 }
 
-fn slot_to_disk_variant(sled: OxideSled, slot: i64) -> Option<DiskVariant> {
-    let u2_slots = sled.u2_disk_slots();
-    let m2_slots = sled.m2_disk_slots();
-    if u2_slots.contains(&slot) {
+fn pcie_slot_to_disk_variant(
+    sled: OxideSled,
+    pcie_slot: i64,
+) -> Option<DiskVariant> {
+    let u2_slots = sled.u2_pcie_slots();
+    let m2_slots = sled.m2_pcie_slots();
+    if u2_slots.contains(&pcie_slot) {
         Some(DiskVariant::U2)
-    } else if m2_slots.contains(&slot) {
+    } else if m2_slots.contains(&pcie_slot) {
         Some(DiskVariant::M2)
     } else {
         None
     }
 }
 
-fn slot_is_boot_disk(
+fn pcie_slot_is_boot_disk(
     sled: OxideSled,
-    slot: i64,
+    pcie_slot: i64,
     boot_storage_unit: BootStorageUnit,
 ) -> bool {
-    let slots = sled.bootdisk_slots();
+    let slots = sled.bootdisk_pcie_slots();
     match boot_storage_unit {
-        BootStorageUnit::A => slots[0] == slot,
-        BootStorageUnit::B => slots[1] == slot,
+        BootStorageUnit::A => slots[0] == pcie_slot,
+        BootStorageUnit::B => slots[1] == pcie_slot,
     }
 }
 
@@ -382,19 +438,21 @@ fn find_properties<'a, const N: usize>(
     Ok(output.try_into().map_err(|_| "Unexpected output size").unwrap())
 }
 
+// Describes the disk behind a "blkdev" devinfo node, along with the instance
+// of the "nvme" controller above it. The disk's chassis location is not yet
+// known here; the caller fills it in once every controller has been found.
 fn poll_blkdev_node(
     log: &Logger,
     sled: OxideSled,
-    disks: &mut HashMap<DiskIdentity, UnparsedDisk>,
     node: Node<'_>,
     boot_storage_unit: BootStorageUnit,
-) -> Result<(), Error> {
+) -> Result<Option<(UnparsedDisk, NvmeInstance)>, Error> {
     let Some(driver_name) = node.driver_name() else {
-        return Ok(());
+        return Ok(None);
     };
 
     if driver_name != "blkdev" {
-        return Ok(());
+        return Ok(None);
     }
 
     let devfs_path = node.devfs_path().map_err(Error::DevInfo)?;
@@ -427,6 +485,10 @@ fn poll_blkdev_node(
     let nvme_instance = nvme_node
         .instance()
         .ok_or(Error::MissingNvmeDevinfoInstance { node: node.node_name() })?;
+    let nvme_instance =
+        NvmeInstance::from_devinfo(nvme_instance).map_err(|err| {
+            Error::InvalidNvmeInstance { node: node.node_name(), err }
+        })?;
 
     let vendor_id =
         i64_from_property(&find_properties(&nvme_node, ["vendor-id"])?[0])?;
@@ -450,18 +512,30 @@ fn poll_blkdev_node(
     // We expect that the parent of the "nvme" device is a "pcieb" driver.
     let pcieb_node = get_parent_node(&nvme_node, "pcieb")?;
 
-    // The "pcieb" device needs to have a physical slot for us to understand
-    // what type of disk it is.
-    let slot = i64_from_property(
+    // sled-hardware keeps a per-board table of the PCIe physical slot
+    // numbers behind which U.2 bays and M.2 sockets sit, and infers the
+    // disk's variant by finding this number in it. The number itself is
+    // board-internal and says nothing about the chassis; it is not the
+    // location label, and it may be renumbered by a future host OS.
+    //
+    // TODO(https://github.com/oxidecomputer/omicron/issues/11258): The
+    // topology's bay and slot nodes are the authoritative source. Derive the
+    // variant from them instead of from this table.
+    let pcie_slot = i64_from_property(
         &find_properties(&pcieb_node, ["physical-slot#"])?[0],
     )?;
-    let Some(variant) = slot_to_disk_variant(sled, slot) else {
-        warn!(log, "Slot# {slot} is not recognized as a disk: {devfs_path}");
-        return Err(Error::UnrecognizedSlot { slot });
+    let Some(variant) = pcie_slot_to_disk_variant(sled, pcie_slot) else {
+        warn!(
+            log,
+            "PCIe physical slot {pcie_slot} is not recognized as a disk: \
+             {devfs_path}"
+        );
+        return Err(Error::UnrecognizedPcieSlot { pcie_slot });
     };
 
     let nvme = Nvme::new()?;
-    let controller = Controller::init_by_instance(&nvme, nvme_instance)?;
+    let controller =
+        Controller::init_by_instance(&nvme, nvme_instance.as_i32())?;
     let controller_lock = match controller.try_read_lock() {
         libnvme::controller::TryLockResult::Ok(locked) => locked,
         // We should only hit this if something in the system has locked the
@@ -490,14 +564,13 @@ fn poll_blkdev_node(
     let disk = UnparsedDisk::new(
         Utf8PathBuf::from(&devfs_path),
         dev_path,
-        slot,
+        pcie_slot,
         variant,
-        device_id.clone(),
-        slot_is_boot_disk(sled, slot, boot_storage_unit),
-        firmware.clone(),
+        device_id,
+        pcie_slot_is_boot_disk(sled, pcie_slot, boot_storage_unit),
+        firmware,
     );
-    disks.insert(device_id, disk);
-    Ok(())
+    Ok(Some((disk, nvme_instance)))
 }
 
 // Poll just enough of the device info tree to get the Baseboard. We really
@@ -543,7 +616,8 @@ fn poll_device_tree(
     external_disks: &ExternalDisks,
 ) -> Result<(), Error> {
     // Construct a view of hardware by walking the device tree.
-    let polled_hw = match HardwareSnapshot::new(log, external_disks) {
+    let polled_hw = HardwareSnapshot::new(log, external_disks);
+    let polled_hw = match polled_hw {
         Ok(polled_hw) => polled_hw,
 
         Err(e) => {

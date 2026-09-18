@@ -23,6 +23,7 @@ cfg_if::cfg_if! {
 pub mod cleanup;
 pub mod disk;
 pub use disk::*;
+pub mod nvme_instance;
 pub mod underlay;
 
 // The type of networking 'ASIC' the Dendrite service is expected to manage

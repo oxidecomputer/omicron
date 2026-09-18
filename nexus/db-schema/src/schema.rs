@@ -2081,6 +2081,8 @@ table! {
         serial -> Text,
 
         variant -> crate::enums::PhysicalDiskKindEnum,
+
+        location -> Nullable<Text>,
     }
 }
 
