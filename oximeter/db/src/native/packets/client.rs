@@ -79,8 +79,14 @@ pub const PROTOCOL_VERSION: u64 = super::server::REVISION;
 // fully-qualify table names with the database in queries.
 const DATABASE: Cow<'static, str> = Cow::Borrowed("default");
 const OXIMETER_ADMIN_USERNAME: Cow<'static, str> = Cow::Borrowed("default");
+const OXIMETER_ADMIN_CLIENT_NAME: Cow<'static, str> =
+    Cow::Borrowed("oximeter_admin");
 const OXIMETER_READER_USERNAME: Cow<'static, str> = Cow::Borrowed("reader");
+const OXIMETER_READER_CLIENT_NAME: Cow<'static, str> =
+    Cow::Borrowed("oximeter_reader");
 const OXIMETER_WRITER_USERNAME: Cow<'static, str> = Cow::Borrowed("writer");
+const OXIMETER_WRITER_CLIENT_NAME: Cow<'static, str> =
+    Cow::Borrowed("oximeter_writer");
 const EMPTY_PASSWORD: Cow<'static, str> = Cow::Borrowed("");
 
 fn hello(client_name: Cow<'static, str>, username: Cow<'static, str>) -> Hello {
@@ -93,25 +99,6 @@ fn hello(client_name: Cow<'static, str>, username: Cow<'static, str>) -> Hello {
         username,
         password: EMPTY_PASSWORD,
     }
-}
-
-/// A Hello packet for a read-only user.
-fn oximeter_reader_hello() -> Hello {
-    hello(Cow::Borrowed("oximeter_reader"), OXIMETER_READER_USERNAME)
-}
-
-/// A Hello packet for a user with write permissions.
-///
-/// This should only be used by `oximeter` itself, to insert data.
-fn oximeter_writer_hello() -> Hello {
-    hello(Cow::Borrowed("oximeter_writer"), OXIMETER_WRITER_USERNAME)
-}
-
-/// A Hello packet for an admin user.
-///
-/// This should only be used by tests or the ClickHouse admin servers.
-fn oximeter_admin_hello() -> Hello {
-    hello(Cow::Borrowed("oximeter_admin"), OXIMETER_ADMIN_USERNAME)
 }
 
 /// The user to connect to the server as.
@@ -130,11 +117,7 @@ pub enum User {
 impl User {
     /// Return the hello packet for the user.
     pub fn hello(&self) -> Hello {
-        match self {
-            User::Reader => oximeter_reader_hello(),
-            User::Writer => oximeter_writer_hello(),
-            User::Admin => oximeter_admin_hello(),
-        }
+        hello(self.client_name(), self.username())
     }
 
     /// Return the username for this user.
@@ -143,6 +126,14 @@ impl User {
             User::Reader => OXIMETER_READER_USERNAME,
             User::Writer => OXIMETER_WRITER_USERNAME,
             User::Admin => OXIMETER_ADMIN_USERNAME,
+        }
+    }
+
+    fn client_name(&self) -> Cow<'static, str> {
+        match self {
+            User::Reader => OXIMETER_READER_CLIENT_NAME,
+            User::Writer => OXIMETER_WRITER_CLIENT_NAME,
+            User::Admin => OXIMETER_ADMIN_CLIENT_NAME,
         }
     }
 }
