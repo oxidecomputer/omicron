@@ -424,18 +424,6 @@ pub struct OmicronZoneExternalFloatingIps(
     IdOrdMap<OmicronZoneExternalFloatingIp>,
 );
 
-impl std::cmp::PartialOrd for OmicronZoneExternalFloatingIps {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl std::cmp::Ord for OmicronZoneExternalFloatingIps {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.0.iter().cmp(other.0.iter())
-    }
-}
-
 fn check_external_ip_ids<'a>(
     ids: impl Iterator<Item = &'a Uuid>,
 ) -> Result<(), ZoneExternalAddrsError> {
