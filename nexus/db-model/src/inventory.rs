@@ -45,9 +45,9 @@ use nexus_db_schema::schema::{
     inv_omicron_sled_config, inv_omicron_sled_config_dataset,
     inv_omicron_sled_config_disk, inv_omicron_sled_config_zone,
     inv_omicron_sled_config_zone_external_ip, inv_omicron_sled_config_zone_nic,
-    inv_physical_disk, inv_root_of_trust, inv_root_of_trust_page,
-    inv_service_processor, inv_single_measurements, inv_sled_agent,
-    inv_sled_boot_partition, inv_sled_config_reconciler,
+    inv_physical_disk, inv_power_shelf_psu, inv_root_of_trust,
+    inv_root_of_trust_page, inv_service_processor, inv_single_measurements,
+    inv_sled_agent, inv_sled_boot_partition, inv_sled_config_reconciler,
     inv_svc_enabled_not_online, inv_svc_enabled_not_online_parse_error,
     inv_svc_enabled_not_online_service, inv_zone_manifest_measurement,
     inv_zpool, sw_caboose, sw_root_of_trust_page,
@@ -2383,6 +2383,39 @@ impl From<InvFmdResource> for FmdResource {
             invisible: row.invisible,
         }
     }
+}
+
+/// Represents a PSU observed in a PSC's inventory of the power shelf.
+///
+/// Either all the VPD fields will be present and `vpd_error` will not be, or
+/// `vpd_error` will be present and all the VPD fields will be null.
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_power_shelf_psu)]
+pub struct InvPowerShelfPsu {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub time_collected: DateTime<Utc>,
+    pub source: String,
+    /// Baseboard ID of the PSC.
+    pub psc_baseboard_id: Uuid,
+    /// SP component ID, which can be used to index this PSU.
+    pub sp_component: String,
+    
+    /// Will probably be 'mwocp68' or 'mwocp67'; if it isn't, we have a new
+    /// power shelf that nobody told me about!
+    // XXX(eliza): perhaps this should be an enum?
+    pub device_type: String,
+
+    // PMBus VPD fields
+    
+    pub mfr_id: Option<String>,
+    pub mfr_model: Option<String>,
+    pub mfr_revision: Option<String>,
+    pub mfr_location: Option<String>,
+    pub mfr_date: Option<String>,
+    pub mfr_serial: Option<String>,
+
+    /// present iff the VPD fields aren't, null otherwise.
+    pub vpd_error: Option<String>,
 }
 
 // See [`sled_agent_types::inventory::SvcEnabledNotOnlineState`].
