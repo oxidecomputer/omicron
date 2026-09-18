@@ -389,14 +389,6 @@ Options:
           - gimlet-standalone: Use sled agent configuration for a Gimlet running in isolation
           - non-gimlet:        Use sled agent configuration for a device emulating a Gimlet
 
-  -s, --switch <SWITCH>
-          The switch to use for the target
-
-          Possible values:
-          - asic:    Use the "real" Dendrite, that attempts to interact with the Tofino
-          - stub:    Use a "stub" Dendrite that does not require any real hardware
-          - softnpu: Use a "softnpu" Dendrite that uses the SoftNPU asic emulator
-
   -r, --rack-topology <RACK_TOPOLOGY>
           Specify whether nexus will run in a single-sled or multi-sled environment.
 
