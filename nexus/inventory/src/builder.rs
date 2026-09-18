@@ -22,6 +22,7 @@ use nexus_types::inventory::CabooseFound;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::CockroachStatus;
 use nexus_types::inventory::Collection;
+use nexus_types::inventory::DiskBay;
 use nexus_types::inventory::HostPhase1ActiveSlot;
 use nexus_types::inventory::HostPhase1FlashHash;
 use nexus_types::inventory::InternalDnsGenerationStatus;
@@ -644,6 +645,15 @@ impl CollectionBuilder {
             time_collected,
             sled_id,
             disks: inventory.disks.into_iter().map(|d| d.into()).collect(),
+            disk_bays: {
+                // The sled lists bays in the order its topology walks them;
+                // the datastore reads them back by location. Sort them here
+                // so a collection equals its own database round trip.
+                let mut bays: Vec<DiskBay> =
+                    inventory.disk_bays.into_iter().map(|b| b.into()).collect();
+                bays.sort_by(|a, b| a.location.cmp(&b.location));
+                bays
+            },
             zpools: inventory
                 .zpools
                 .into_iter()
@@ -784,6 +794,7 @@ mod test {
     use gateway_types::rot::RotState;
     use nexus_types::inventory::Caboose;
     use nexus_types::inventory::CabooseWhich;
+    use nexus_types::inventory::DiskBayOccupant;
     use nexus_types::inventory::RotPage;
     use nexus_types::inventory::RotPageWhich;
     use nexus_types::inventory::SpType;
@@ -1183,6 +1194,31 @@ mod test {
         assert_eq!(sled1_agent.disks[3].identity.serial, "XXIV");
         assert_eq!(sled1_agent.disks[3].pcie_slot, 18);
         assert_eq!(sled1_agent.disks[3].location.as_deref(), Some("M.2 West"));
+        // Ten U.2 bays and two M.2 sockets, sorted by location.
+        assert_eq!(sled1_agent.disk_bays.len(), 12);
+        assert_eq!(sled1_agent.disk_bays[0].location, "M.2 East");
+        assert_eq!(sled1_agent.disk_bays[0].occupant, DiskBayOccupant::Empty);
+        assert_eq!(sled1_agent.disk_bays[1].location, "M.2 West");
+        assert_eq!(
+            sled1_agent.disk_bays[1].occupant,
+            DiskBayOccupant::Disk {
+                identity: sled1_agent.disks[3].identity.clone()
+            }
+        );
+        assert_eq!(sled1_agent.disk_bays[2].location, "N0");
+        assert_eq!(
+            sled1_agent.disk_bays[2].occupant,
+            DiskBayOccupant::Disk {
+                identity: sled1_agent.disks[0].identity.clone()
+            }
+        );
+        assert_eq!(sled1_agent.disk_bays[5].location, "N3");
+        assert!(matches!(
+            sled1_agent.disk_bays[5].occupant,
+            DiskBayOccupant::Device { driver: Some(ref d), .. } if d == "nvme"
+        ));
+        assert_eq!(sled1_agent.disk_bays[7].location, "N5");
+        assert_eq!(sled1_agent.disk_bays[7].occupant, DiskBayOccupant::Empty);
 
         let sled4_agent =
             collection.sled_agents.get(&sled_agent_id_extra).unwrap();

@@ -41,8 +41,9 @@ use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
 use crate::inventory::{
-    CabooseWhich, Collection, Dataset, InternalDnsGenerationStatus,
-    PhysicalDisk, RotPageWhich, SledAgent, TimeSync, Zpool,
+    CabooseWhich, Collection, Dataset, DiskBay, DiskBayOccupant,
+    InternalDnsGenerationStatus, PhysicalDisk, RotPageWhich, SledAgent,
+    TimeSync, Zpool,
 };
 
 /// Code to display inventory collections.
@@ -620,6 +621,7 @@ fn display_sleds(
             cpu_family,
             reservoir_size,
             disks,
+            disk_bays,
             zpools,
             datasets,
             ledgered_sled_config,
@@ -674,6 +676,33 @@ fn display_sleds(
             let loc = location.as_deref().unwrap_or("unknown location");
             let mut indent2 = IndentWriter::new("  ", &mut indented);
             writeln!(indent2, "{variant:?}: {identity:?} in {loc}")?;
+        }
+
+        if !disk_bays.is_empty() {
+            writeln!(indented, "disk bays:")?;
+        }
+        for bay in disk_bays {
+            let DiskBay { location, kind, occupant } = bay;
+            let mut indent2 = IndentWriter::new("  ", &mut indented);
+            match occupant {
+                DiskBayOccupant::Empty => {
+                    writeln!(indent2, "{location} ({kind:?}): empty")?;
+                }
+                DiskBayOccupant::Disk { identity } => {
+                    writeln!(
+                        indent2,
+                        "{location} ({kind:?}): disk {identity:?}"
+                    )?;
+                }
+                DiskBayOccupant::Device { driver, devfs_path } => {
+                    let driver = driver.as_deref().unwrap_or("no driver");
+                    let path = devfs_path.as_deref().unwrap_or("no path");
+                    writeln!(
+                        indent2,
+                        "{location} ({kind:?}): device, {driver}, {path}"
+                    )?;
+                }
+            }
         }
 
         if !zpools.is_empty() {

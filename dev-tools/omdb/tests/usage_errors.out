@@ -610,6 +610,7 @@ Commands:
   cabooses        list all cabooses ever found
   collections     list and show details from particular collections
   physical-disks  show all physical disks ever found
+  disk-bays       show every disk bay of every sled and what occupies it
   rot-pages       list all root of trust pages ever found
   help            Print this message or the help of the given subcommand(s)
 

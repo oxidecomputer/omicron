@@ -41,6 +41,8 @@ use sled_agent_types_versions::latest::inventory::FmdInventoryError;
 use sled_agent_types_versions::latest::inventory::InstanceManagerStatus;
 use sled_agent_types_versions::latest::inventory::InventoryDataset;
 use sled_agent_types_versions::latest::inventory::InventoryDisk;
+use sled_agent_types_versions::latest::inventory::InventoryDiskBay;
+use sled_agent_types_versions::latest::inventory::InventoryDiskBayOccupant;
 use sled_agent_types_versions::latest::inventory::InventoryZpool;
 use sled_agent_types_versions::latest::inventory::OmicronFileSourceResolverInventory;
 use sled_agent_types_versions::latest::inventory::OmicronSledConfig;
@@ -629,14 +631,63 @@ pub struct PhysicalDisk {
     /// hardware topology: "N5" for a U.2 bay, "M.2 East" for a boot device.
     ///
     /// This is the operator-facing position, matching what is printed on the
-    /// sled. It is best-effort: `None` means the sled's topology had no label
-    /// for the disk or could not be read.
+    /// sled. Sled agents at API version 55 and later always report one;
+    /// `None` only appears in collections taken from older sled agents.
     //
     // Older serialized state had no such field; treating its absence as
     // `None` accurately represents that nothing recorded a location.
     #[serde(default)]
     pub location: Option<String>,
     pub firmware: PhysicalDiskFirmware,
+}
+
+/// One U.2 bay or M.2 socket of a sled's chassis, and what the sled's
+/// hardware topology found behind it.
+///
+/// Unlike [`PhysicalDisk`], a bay is reported whether or not it holds a disk
+/// the sled can use, so this is how inventory sees empty bays and devices
+/// that are not usable disks.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct DiskBay {
+    /// The label printed on the chassis, such as "N3" or "M.2 East".
+    pub location: String,
+    /// Whether this is a U.2 bay or an M.2 socket.
+    pub kind: PhysicalDiskKind,
+    pub occupant: DiskBayOccupant,
+}
+
+/// What a sled's hardware topology found behind a bay.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum DiskBayOccupant {
+    /// Nothing is behind this bay. A drive whose PCIe link is down also
+    /// looks like this until the host OS gains presence detection.
+    Empty,
+    /// An NVMe disk the sled manages; it appears in the sled's disk list
+    /// under this identity.
+    Disk { identity: DiskIdentity },
+    /// A device is attached but there is no disk the sled can manage: an
+    /// NVMe controller with no active namespace, or something that is not
+    /// NVMe at all.
+    Device { driver: Option<String>, devfs_path: Option<String> },
+}
+
+impl From<InventoryDiskBay> for DiskBay {
+    fn from(bay: InventoryDiskBay) -> DiskBay {
+        DiskBay {
+            location: bay.location,
+            kind: bay.kind.into(),
+            occupant: match bay.occupant {
+                InventoryDiskBayOccupant::Empty => DiskBayOccupant::Empty,
+                InventoryDiskBayOccupant::Disk { identity } => {
+                    DiskBayOccupant::Disk { identity }
+                }
+                InventoryDiskBayOccupant::Device { driver, devfs_path } => {
+                    DiskBayOccupant::Device { driver, devfs_path }
+                }
+            },
+        }
+    }
 }
 
 impl From<InventoryDisk> for PhysicalDisk {
@@ -740,6 +791,13 @@ pub struct SledAgent {
     pub cpu_family: SledCpuFamily,
     pub reservoir_size: ByteCount,
     pub disks: Vec<PhysicalDisk>,
+    /// Every U.2 bay and M.2 socket of the sled's chassis, occupied or not,
+    /// sorted by location.
+    //
+    // Older serialized state had no such field, and sled agents before API
+    // version 55 do not report bays; an empty list represents both.
+    #[serde(default)]
+    pub disk_bays: Vec<DiskBay>,
     pub zpools: Vec<Zpool>,
     pub datasets: Vec<Dataset>,
     pub ledgered_sled_config: Option<OmicronSledConfig>,

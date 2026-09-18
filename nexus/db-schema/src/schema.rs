@@ -2101,6 +2101,24 @@ table! {
 }
 
 table! {
+    inv_disk_bay (inv_collection_id, sled_id, location) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+        location -> Text,
+
+        kind -> crate::enums::PhysicalDiskKindEnum,
+        occupant -> crate::enums::InvDiskBayOccupantEnum,
+
+        disk_vendor -> Nullable<Text>,
+        disk_model -> Nullable<Text>,
+        disk_serial -> Nullable<Text>,
+
+        device_driver -> Nullable<Text>,
+        device_devfs_path -> Nullable<Text>,
+    }
+}
+
+table! {
     inv_zpool (inv_collection_id, sled_id, id) {
         inv_collection_id -> Uuid,
         time_collected -> Timestamptz,
@@ -2816,6 +2834,7 @@ allow_tables_to_appear_in_same_query!(
     instance_network_interface,
     inv_physical_disk,
     inv_nvme_disk_firmware,
+    inv_disk_bay,
     physical_disk_adoption_request,
     service_network_interface,
     oximeter,

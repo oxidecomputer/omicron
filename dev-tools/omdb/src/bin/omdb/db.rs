@@ -77,6 +77,8 @@ use nexus_db_model::Image;
 use nexus_db_model::Instance;
 use nexus_db_model::InstanceIntendedState;
 use nexus_db_model::InvCollection;
+use nexus_db_model::InvDiskBay;
+use nexus_db_model::InvDiskBayOccupant;
 use nexus_db_model::InvNvmeDiskFirmware;
 use nexus_db_model::InvPhysicalDisk;
 use nexus_db_model::IpAttachState;
@@ -649,6 +651,8 @@ enum InventoryCommands {
     Collections(CollectionsArgs),
     /// show all physical disks ever found
     PhysicalDisks(InvPhysicalDisksArgs),
+    /// show every disk bay of every sled and what occupies it
+    DiskBays(InvPhysicalDisksArgs),
     /// list all root of trust pages ever found
     RotPages,
 }
@@ -7484,6 +7488,9 @@ async fn cmd_db_inventory(
         InventoryCommands::PhysicalDisks(args) => {
             cmd_db_inventory_physical_disks(&conn, limit, args).await
         }
+        InventoryCommands::DiskBays(args) => {
+            cmd_db_inventory_disk_bays(&conn, limit, args).await
+        }
         InventoryCommands::RotPages => {
             cmd_db_inventory_rot_pages(&conn, limit).await
         }
@@ -7644,6 +7651,86 @@ async fn cmd_db_inventory_physical_disks(
             variant: format!("{:?}", disk.variant),
             firmware: active_firmware.unwrap_or("UNKNOWN").to_string(),
             next_firmware: next_firmware.unwrap_or("").to_string(),
+        }
+    });
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
+
+    Ok(())
+}
+
+async fn cmd_db_inventory_disk_bays(
+    conn: &DataStoreConnection,
+    limit: NonZeroU32,
+    args: InvPhysicalDisksArgs,
+) -> Result<(), anyhow::Error> {
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct BayRow {
+        inv_collection_id: Uuid,
+        sled_id: Uuid,
+        location: String,
+        kind: String,
+        occupant: &'static str,
+        detail: String,
+    }
+
+    use nexus_db_schema::schema::inv_disk_bay::dsl;
+
+    let mut query = dsl::inv_disk_bay.into_boxed();
+    query = query.limit(i64::from(u32::from(limit)));
+
+    if let Some(collection_id) = args.collection_id {
+        query = query.filter(
+            dsl::inv_collection_id.eq(collection_id.into_untyped_uuid()),
+        );
+    }
+
+    if let Some(sled_id) = args.sled_id {
+        query = query.filter(dsl::sled_id.eq(sled_id.into_untyped_uuid()));
+    }
+
+    let bays = query
+        .order_by((dsl::inv_collection_id, dsl::sled_id, dsl::location))
+        .select(InvDiskBay::as_select())
+        .load_async(&**conn)
+        .await
+        .context("loading disk bays")?;
+
+    let rows = bays.into_iter().map(|bay| {
+        let blank = || String::new();
+        let (occupant, detail) = match bay.occupant {
+            InvDiskBayOccupant::Empty => ("empty", blank()),
+            InvDiskBayOccupant::Disk => (
+                "disk",
+                format!(
+                    "{} {} {}",
+                    bay.disk_vendor.unwrap_or_else(blank),
+                    bay.disk_model.unwrap_or_else(blank),
+                    bay.disk_serial.unwrap_or_else(blank),
+                ),
+            ),
+            InvDiskBayOccupant::Device => (
+                "device",
+                format!(
+                    "driver {}, {}",
+                    bay.device_driver.as_deref().unwrap_or("unknown"),
+                    bay.device_devfs_path.as_deref().unwrap_or("no path"),
+                ),
+            ),
+        };
+        BayRow {
+            inv_collection_id: bay.inv_collection_id.into_untyped_uuid(),
+            sled_id: bay.sled_id.into_untyped_uuid(),
+            location: bay.location,
+            kind: format!("{:?}", bay.kind),
+            occupant,
+            detail,
         }
     });
 

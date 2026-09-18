@@ -39,6 +39,7 @@ use nexus_db_model::InvCollectionError;
 use nexus_db_model::InvConfigReconcilerStatus;
 use nexus_db_model::InvConfigReconcilerStatusKind;
 use nexus_db_model::InvDataset;
+use nexus_db_model::InvDiskBay;
 use nexus_db_model::InvFmdHostCase;
 use nexus_db_model::InvFmdResource;
 use nexus_db_model::InvFmdStatus;
@@ -222,6 +223,17 @@ impl DataStore {
                 }
             }
         }
+
+        // Pull disk bays out of all sled agents
+        let disk_bays: Vec<_> = collection
+            .sled_agents
+            .iter()
+            .flat_map(|sled_agent| {
+                sled_agent.disk_bays.iter().map(|bay| {
+                    InvDiskBay::new(collection_id, sled_agent.sled_id, bay)
+                })
+            })
+            .collect();
 
         let mut svcs_enabled_not_online = Vec::new();
         let mut svcs_enabled_not_online_services = Vec::new();
@@ -1302,6 +1314,25 @@ impl DataStore {
                 }
             }
 
+            // Insert rows for all the disk bays we found.
+            {
+                use nexus_db_schema::schema::inv_disk_bay::dsl;
+
+                let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
+                let mut disk_bays = disk_bays.into_iter();
+                loop {
+                    let some_bays =
+                        disk_bays.by_ref().take(batch_size).collect::<Vec<_>>();
+                    if some_bays.is_empty() {
+                        break;
+                    }
+                    let _ = diesel::insert_into(dsl::inv_disk_bay)
+                        .values(some_bays)
+                        .execute_async(&conn)
+                        .await?;
+                }
+            }
+
             // Insert rows for all the zpools we found.
             {
                 use nexus_db_schema::schema::inv_zpool::dsl;
@@ -2320,6 +2351,7 @@ impl DataStore {
             ndatasets: usize,
             nphysical_disks: usize,
             nnvme_disk_firmware: usize,
+            ndisk_bays: usize,
             nlast_reconciliation_disk_results: usize,
             nlast_reconciliation_dataset_results: usize,
             nlast_reconciliation_orphaned_datasets: usize,
@@ -2364,6 +2396,7 @@ impl DataStore {
             ndatasets,
             nphysical_disks,
             nnvme_disk_firmware,
+            ndisk_bays,
             nlast_reconciliation_disk_results,
             nlast_reconciliation_dataset_results,
             nlast_reconciliation_orphaned_datasets,
@@ -2502,6 +2535,16 @@ impl DataStore {
                     let nnvme_disk_firmware = {
                         use nexus_db_schema::schema::inv_nvme_disk_firmware::dsl;
                         diesel::delete(dsl::inv_nvme_disk_firmware.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
+
+                    // Remove rows for disk bays found.
+                    let ndisk_bays = {
+                        use nexus_db_schema::schema::inv_disk_bay::dsl;
+                        diesel::delete(dsl::inv_disk_bay.filter(
                             dsl::inv_collection_id.eq(db_collection_id),
                         ))
                         .execute_async(&conn)
@@ -2793,6 +2836,7 @@ impl DataStore {
                         ndatasets,
                         nphysical_disks,
                         nnvme_disk_firmware,
+                        ndisk_bays,
                         nlast_reconciliation_disk_results,
                         nlast_reconciliation_dataset_results,
                         nlast_reconciliation_orphaned_datasets,
@@ -2843,6 +2887,7 @@ impl DataStore {
             "ndatasets" => ndatasets,
             "nphysical_disks" => nphysical_disks,
             "nnvme_disk_firmware" => nnvme_disk_firmware,
+            "ndisk_bays" => ndisk_bays,
             "nlast_reconciliation_disk_results" =>
                 nlast_reconciliation_disk_results,
             "nlast_reconciliation_dataset_results" =>
@@ -3235,6 +3280,47 @@ impl DataStore {
                 }
             }
             zpools
+        };
+
+        // Mapping of "Sled ID" -> "All disk bays reported by that sled"
+        let disk_bays: BTreeMap<
+            SledUuid,
+            Vec<nexus_types::inventory::DiskBay>,
+        > = {
+            use nexus_db_schema::schema::inv_disk_bay::dsl;
+
+            let mut bays = BTreeMap::<
+                SledUuid,
+                Vec<nexus_types::inventory::DiskBay>,
+            >::new();
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
+            while let Some(p) = paginator.next() {
+                let batch = paginated_multicolumn(
+                    dsl::inv_disk_bay,
+                    (dsl::sled_id, dsl::location),
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvDiskBay::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator = p.found_batch(&batch, &|row| {
+                    (row.sled_id, row.location.clone())
+                });
+                for row in batch {
+                    let sled_id = row.sled_id.into();
+                    let bay = nexus_types::inventory::DiskBay::try_from(row)
+                        .map_err(|e| Error::internal_error(&e.to_string()))?;
+                    bays.entry(sled_id).or_default().push(bay);
+                }
+            }
+            bays
         };
 
         // Mapping of "Sled ID" -> "All datasets reported by that sled"
@@ -4985,6 +5071,10 @@ impl DataStore {
                     .get(&sled_id)
                     .map(|disks| disks.to_vec())
                     .unwrap_or_default(),
+                disk_bays: disk_bays
+                    .get(&sled_id)
+                    .map(|bays| bays.to_vec())
+                    .unwrap_or_default(),
                 zpools: zpools
                     .get(sled_id.as_untyped_uuid())
                     .map(|zpools| zpools.to_vec())
@@ -6122,6 +6212,12 @@ mod test {
                 .unwrap();
             assert_eq!(0, count);
             let count = schema::inv_physical_disk::dsl::inv_physical_disk
+                .select(diesel::dsl::count_star())
+                .first_async::<i64>(&conn)
+                .await
+                .unwrap();
+            assert_eq!(0, count);
+            let count = schema::inv_disk_bay::dsl::inv_disk_bay
                 .select(diesel::dsl::count_star())
                 .first_async::<i64>(&conn)
                 .await

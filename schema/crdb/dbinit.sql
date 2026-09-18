@@ -4837,6 +4837,54 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_nvme_disk_firmware (
     PRIMARY KEY (inv_collection_id, sled_id, slot)
 );
 
+-- What a sled's hardware topology found behind one of its disk bays.
+CREATE TYPE IF NOT EXISTS omicron.public.inv_disk_bay_occupant AS ENUM (
+    -- Nothing is behind the bay (or the drive's PCIe link is down, which the
+    -- host OS cannot yet tell apart from an empty bay).
+    'empty',
+    -- An NVMe disk the sled manages; it also appears in `inv_physical_disk`.
+    'disk',
+    -- A device is attached but is not a usable disk: an NVMe controller with
+    -- no active namespace, or something that is not NVMe at all.
+    'device'
+);
+
+-- Every U.2 bay and M.2 socket of a sled's chassis, occupied or not, as the
+-- sled's hardware topology described it at collection time.
+CREATE TABLE IF NOT EXISTS omicron.public.inv_disk_bay (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+
+    -- unique id for this sled (should be foreign keys into `sled` table, though
+    -- it's conceivable a sled will report an id that we don't know about)
+    sled_id UUID NOT NULL,
+
+    -- The label printed on the chassis, e.g. "N3" or "M.2 East".
+    location STRING(63) NOT NULL,
+
+    -- Whether this is a U.2 bay or an M.2 socket.
+    kind omicron.public.physical_disk_kind NOT NULL,
+
+    occupant omicron.public.inv_disk_bay_occupant NOT NULL,
+
+    -- Set when occupant = 'disk'; matches (vendor, model, serial) of the
+    -- corresponding `inv_physical_disk` row.
+    disk_vendor STRING(63),
+    disk_model STRING(63),
+    disk_serial STRING(63),
+
+    -- Set when occupant = 'device', as far as the topology knows them.
+    device_driver STRING(63),
+    device_devfs_path TEXT,
+
+    -- PK consisting of:
+    -- - Which collection this was
+    -- - The sled reporting the bay
+    -- - The bay's chassis label
+    PRIMARY KEY (inv_collection_id, sled_id, location)
+);
+
 CREATE TYPE IF NOT EXISTS omicron.public.inv_zpool_health AS ENUM (
     -- The device is online and functioning.
     'online',
@@ -9535,7 +9583,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '302.0.0', NULL)
+    (TRUE, NOW(), NOW(), '303.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

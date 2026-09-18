@@ -67,6 +67,8 @@ use sled_agent_types::inventory::InstanceManagerStatus;
 use sled_agent_types::inventory::Inventory;
 use sled_agent_types::inventory::InventoryDataset;
 use sled_agent_types::inventory::InventoryDisk;
+use sled_agent_types::inventory::InventoryDiskBay;
+use sled_agent_types::inventory::InventoryDiskBayOccupant;
 use sled_agent_types::inventory::InventoryZpool;
 use sled_agent_types::inventory::ManifestBootInventory;
 use sled_agent_types::inventory::MupdateOverrideBootInventory;
@@ -1546,7 +1548,17 @@ impl Sled {
                         )],
                     })
                     .collect(),
-                disk_bays: vec![],
+                disk_bays: zpools
+                    .values()
+                    .enumerate()
+                    .map(|(i, disk)| InventoryDiskBay {
+                        location: format!("N{i}"),
+                        kind: DiskVariant::U2,
+                        occupant: InventoryDiskBayOccupant::Disk {
+                            identity: disk.disk_identity.clone(),
+                        },
+                    })
+                    .collect(),
                 zpools: zpools
                     .keys()
                     .map(|id| InventoryZpool {

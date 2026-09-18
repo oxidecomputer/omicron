@@ -35,7 +35,7 @@ use nexus_db_schema::schema::inv_zone_manifest_zone;
 use nexus_db_schema::schema::{
     hw_baseboard_id, inv_caboose, inv_clickhouse_keeper_membership,
     inv_cockroachdb_status, inv_collection, inv_collection_error, inv_dataset,
-    inv_fmd_host_case, inv_fmd_resource, inv_fmd_status,
+    inv_disk_bay, inv_fmd_host_case, inv_fmd_resource, inv_fmd_status,
     inv_host_phase_1_active_slot, inv_host_phase_1_flash_hash,
     inv_internal_dns, inv_last_reconciliation_dataset_result,
     inv_last_reconciliation_disk_result,
@@ -57,6 +57,7 @@ use nexus_types::inventory::{
     Caboose, CockroachStatus, Collection, InternalDnsGenerationStatus,
     NvmeFirmware, PowerState, RotPage, RotSlot, TimeSync,
 };
+use nexus_types::inventory::{DiskBay, DiskBayOccupant};
 use omicron_common::disk::DatasetName;
 use omicron_common::update::OmicronInstallManifestSource;
 use omicron_common::zpool_name::ZpoolName;
@@ -2473,6 +2474,111 @@ impl InvPhysicalDisk {
             variant: disk.variant.into(),
             location: disk.location,
         }
+    }
+}
+
+// See [`nexus_types::inventory::DiskBayOccupant`].
+impl_enum_type!(
+    InvDiskBayOccupantEnum:
+
+    #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
+    pub enum InvDiskBayOccupant;
+
+    // Enum values
+    Empty => b"empty"
+    Disk => b"disk"
+    Device => b"device"
+);
+
+/// See [`nexus_types::inventory::DiskBay`].
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_disk_bay)]
+pub struct InvDiskBay {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub sled_id: DbTypedUuid<SledKind>,
+    pub location: String,
+    pub kind: PhysicalDiskKind,
+    pub occupant: InvDiskBayOccupant,
+    pub disk_vendor: Option<String>,
+    pub disk_model: Option<String>,
+    pub disk_serial: Option<String>,
+    pub device_driver: Option<String>,
+    pub device_devfs_path: Option<String>,
+}
+
+impl InvDiskBay {
+    pub fn new(
+        inv_collection_id: CollectionUuid,
+        sled_id: SledUuid,
+        bay: &DiskBay,
+    ) -> Self {
+        let mut row = Self {
+            inv_collection_id: inv_collection_id.into(),
+            sled_id: sled_id.into(),
+            location: bay.location.clone(),
+            kind: bay.kind.into(),
+            occupant: InvDiskBayOccupant::Empty,
+            disk_vendor: None,
+            disk_model: None,
+            disk_serial: None,
+            device_driver: None,
+            device_devfs_path: None,
+        };
+        match &bay.occupant {
+            DiskBayOccupant::Empty => {}
+            DiskBayOccupant::Disk { identity } => {
+                row.occupant = InvDiskBayOccupant::Disk;
+                row.disk_vendor = Some(identity.vendor.clone());
+                row.disk_model = Some(identity.model.clone());
+                row.disk_serial = Some(identity.serial.clone());
+            }
+            DiskBayOccupant::Device { driver, devfs_path } => {
+                row.occupant = InvDiskBayOccupant::Device;
+                row.device_driver = driver.clone();
+                row.device_devfs_path = devfs_path.clone();
+            }
+        }
+        row
+    }
+}
+
+#[derive(Clone, Debug, Error)]
+#[error(
+    "disk bay {location} of sled {sled_id} holds a disk but its {column} \
+     is missing"
+)]
+pub struct InvDiskBayError {
+    sled_id: SledUuid,
+    location: String,
+    column: &'static str,
+}
+
+impl TryFrom<InvDiskBay> for DiskBay {
+    type Error = InvDiskBayError;
+
+    fn try_from(row: InvDiskBay) -> Result<Self, Self::Error> {
+        let occupant = match row.occupant {
+            InvDiskBayOccupant::Empty => DiskBayOccupant::Empty,
+            InvDiskBayOccupant::Disk => {
+                let missing = |column| InvDiskBayError {
+                    sled_id: row.sled_id.into(),
+                    location: row.location.clone(),
+                    column,
+                };
+                DiskBayOccupant::Disk {
+                    identity: DiskIdentity {
+                        vendor: row.disk_vendor.ok_or(missing("vendor"))?,
+                        model: row.disk_model.ok_or(missing("model"))?,
+                        serial: row.disk_serial.ok_or(missing("serial"))?,
+                    },
+                }
+            }
+            InvDiskBayOccupant::Device => DiskBayOccupant::Device {
+                driver: row.device_driver,
+                devfs_path: row.device_devfs_path,
+            },
+        };
+        Ok(DiskBay { location: row.location, kind: row.kind.into(), occupant })
     }
 }
 
