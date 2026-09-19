@@ -1873,12 +1873,13 @@ table! {
 }
 
 table! {
-    inv_power_shelf_psu (inv_collection_id, psc_baseboard_id, sp_component) {
+    inv_power_shelf_psu (inv_collection_id, psc_baseboard_id, location) {
         inv_collection_id -> Uuid,
         time_collected -> Timestamptz,
         source -> Text,
         psc_baseboard_id -> Uuid,
-        sp_component -> Text,
+        location -> crate::enums::InvPsuSlotEnum,
+        presence -> crate::enums::SpComponentPresenceEnum,
         device_type -> Text,
         mfr_id -> Nullable<Text>,
         mfr_model -> Nullable<Text>,

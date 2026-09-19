@@ -20,6 +20,7 @@ use nexus_types::inventory::Collection;
 use nexus_types::inventory::InternalDnsGenerationStatus;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageWhich;
+use nexus_types::inventory::SpComponentPresence;
 use nexus_types::inventory::SpType;
 use nexus_types::inventory::TimeSync;
 use omicron_cockroach_metrics::CockroachClusterAdminClient;
@@ -302,6 +303,71 @@ impl<'a> Collector<'a> {
                              {baseboard_id:?} {slot:?} {:?}: {error:#}",
                             client.baseurl(),
                         );
+                    }
+                }
+            }
+
+            // For power shelf controller SPs, collect an inventory of PSUs in
+            // the power shelf.
+            if matches!(sp.typ, SpType::Power) {
+                use nexus_types::inventory::PsuSlot;
+
+                let result = client
+                    .sp_component_list(&sp.typ, sp.slot)
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "MGS {:?}: SP {sp:?}: component list",
+                            client.baseurl()
+                        )
+                    });
+                match result {
+                    Ok(response) => {
+                        let components = response.into_inner().components;
+                        for component in components {
+                            // Is this a PSU?
+                            let id = component.component;
+                            let dev = component.device;
+                            let slot = match (
+                                PsuSlot::try_from(id.as_ref()),
+                                dev.as_ref(),
+                            ) {
+                                (Ok(slot), _) => slot,
+                                (Err(e), "mwocp68" | "mwocp67") => {
+                                    // well, huh! this thing is one of the
+                                    // hubris device types we believe represent
+                                    // PSUs, but its component ID doesn't match
+                                    // any of the ones we expect the PSUs to
+                                    // have! report an error and continue.
+                                    //
+                                    // TODO(eliza): error
+                                    continue;
+                                }
+                                (Err(_), _) => {
+                                    // not a PSU, continue.
+                                    continue;
+                                }
+                            };
+
+                            // If the PSU is present (or might be present), try
+                            // to read its identity.
+                            let presence = component.presence.into();
+                            let vpd = if presence
+                                != SpComponentPresence::NotPresent
+                            {
+                                let result = client
+                                    .sp_component_vpd_get(
+                                        &sp.typ, &sp.slot, &id,
+                                    )
+                                    .await;
+                                // TODO(eliza): the rest of this
+                            } else {
+                                Err("component not present")
+                            };
+                        }
+                    }
+                    Err(err) => {
+                        in_progress.found_error(InventoryError::from(err));
                     }
                 }
             }
