@@ -415,15 +415,40 @@ impl super::Nexus {
 
         let disk = self.datastore().disk_get(opctx, authz_disk.id()).await?;
 
-        let saga_params = sagas::disk_delete::Params {
-            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
-            project_id: project.id(),
-            disk,
-        };
+        match disk {
+            datastore::Disk::Crucible(_) => {
+                // For now, all Crucible related clean-up is done in the disk
+                // delete saga. Stay tuned!
 
-        self.sagas
-            .saga_execute::<sagas::disk_delete::SagaDiskDelete>(saga_params)
-            .await?;
+                let saga_params = sagas::disk_delete::Params {
+                    serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+                    project_id: project.id(),
+                    disk: disk.clone(),
+                };
+
+                self.sagas
+                    .saga_execute::<sagas::disk_delete::SagaDiskDelete>(
+                        saga_params,
+                    )
+                    .await?;
+            }
+
+            datastore::Disk::LocalStorage(_) => {
+                // Disks backed by local storage are marked for deletion and
+                // then cleaned up in a background task.
+
+                self.datastore()
+                    .delete_disk_and_update_provisioning_collection(
+                        opctx,
+                        &project,
+                        &disk,
+                        &[DiskState::Detached, DiskState::Faulted],
+                    )
+                    .await?;
+
+                self.background_tasks.task_local_storage_delete.activate();
+            }
+        }
 
         Ok(())
     }
