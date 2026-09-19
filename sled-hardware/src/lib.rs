@@ -29,27 +29,38 @@ pub mod underlay;
 /// Failure while probing for switch hardware at startup.
 #[derive(Debug, thiserror::Error)]
 pub enum SwitchDetectError {
-    #[error("failed to walk device tree: {0}")]
-    DevInfo(anyhow::Error),
+    #[error("failed to walk device tree")]
+    DevInfo(#[source] anyhow::Error),
 
-    #[error("{path}: {err}")]
-    Io {
+    #[error("{path} still busy after {attempts} open attempts")]
+    Busy { path: String, attempts: usize },
+
+    #[error("opening {path}")]
+    Open {
         path: String,
         #[source]
         err: std::io::Error,
     },
 
-    #[error("{path}: malformed Rversion: {reason}")]
-    Protocol { path: String, reason: String },
-}
+    #[error("writing Tversion to {path}")]
+    Write {
+        path: String,
+        #[source]
+        err: std::io::Error,
+    },
 
-/// What startup switch detection should look for.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SwitchProbe {
-    /// A physical sidecar ASIC, whichever kind is attached.
-    PhysicalAsic,
-    /// The propolis SoftNPU virtio 9p device.
-    SoftNpu,
+    #[error("reading Rversion from {path}")]
+    Read {
+        path: String,
+        #[source]
+        err: std::io::Error,
+    },
+
+    #[error("{path} did not answer Tversion within {after:?}")]
+    Timeout { path: String, after: std::time::Duration },
+
+    #[error("malformed Rversion from {path}: {reason}")]
+    Protocol { path: String, reason: String },
 }
 
 // The type of networking 'ASIC' the Dendrite service is expected to manage

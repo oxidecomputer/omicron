@@ -7,12 +7,11 @@
 use crate::SwitchDetectError;
 use crate::softnpu::{SOFTNPU_9P_VERSION, decode_rversion, encode_tversion};
 use illumos_devinfo::{DevInfo, Node};
-use slog::{Logger, debug, info, warn};
-use slog_error_chain::InlineErrorChain;
+use slog::{Logger, debug, info};
 use std::fs::OpenOptions;
 use std::io::{Read, Write};
 use std::os::unix::fs::OpenOptionsExt;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const VIRTIO_VENDOR_ID: i32 = 0x1af4;
 // Transitional and modern virtio 9p PCI device ids.
@@ -20,24 +19,24 @@ const VIRTIO_9P_DEVICE_IDS: [i32; 2] = [0x1009, 0x1049];
 const NINEP_MINOR: &str = "9p";
 const OPEN_ATTEMPTS: usize = 3;
 const OPEN_RETRY_DELAY: Duration = Duration::from_millis(500);
+// vio9p has no chpoll entry point; the reply is awaited with non-blocking
+// reads at this interval, until the deadline.
+const REPLY_POLL_INTERVAL: Duration = Duration::from_millis(50);
+const REPLY_DEADLINE: Duration = Duration::from_secs(5);
+/// A vio9p read returns one whole 9P message or EOVERFLOW without
+/// consuming it when the buffer is smaller than the message's own size
+/// field. The reply will always fit here.
 const REPLY_BUF_LEN: usize = 65536;
 
-enum Probe {
-    Version(String),
-    Busy,
-}
-
-/// Returns whether the propolis SoftNPU 9p device is attached.
+/// Returns whether the propolis SoftNPU 9p device is attached. The Tofino
+/// ASIC is detected by the hardware monitor.
 ///
-/// Every virtio 9p node with an attached driver is opened exclusively and
-/// asked for its 9P version. Only the propolis SoftNPU handler answers with
-/// `9P2000.P4`. A device that stays busy across retries, fails to open, or
-/// answers with anything other than an Rversion is logged and skipped. Only
-/// device tree failures are fatal.
-pub(super) fn find_softnpu_device(
-    log: &Logger,
-    devinfo: &mut DevInfo,
-) -> Result<bool, SwitchDetectError> {
+/// Each virtio 9p node is opened exclusively and sent a Tversion. Only the
+/// SoftNPU handler answers `9P2000.P4`; another version is another device.
+/// Busy, unopenable, or malformed replies are errors.
+pub fn find_softnpu_device(log: &Logger) -> Result<bool, SwitchDetectError> {
+    let mut devinfo =
+        DevInfo::new_force_load().map_err(SwitchDetectError::DevInfo)?;
     for node in devinfo.walk_node() {
         let node = node.map_err(SwitchDetectError::DevInfo)?;
         if probe_node(log, &node)? {
@@ -63,36 +62,18 @@ fn probe_node(
         );
         return Ok(false);
     };
-    match probe_version(&path) {
-        Ok(Probe::Version(version)) if version == SOFTNPU_9P_VERSION => {
-            info!(log, "found SoftNPU 9p device"; "path" => path);
-            Ok(true)
-        }
-        Ok(Probe::Version(version)) => {
-            debug!(
-                log,
-                "virtio 9p device is not SoftNPU";
-                "path" => path,
-                "version" => version,
-            );
-            Ok(false)
-        }
-        Ok(Probe::Busy) => {
-            warn!(log, "virtio 9p device busy; skipping"; "path" => path);
-            Ok(false)
-        }
-        Err(
-            e @ (SwitchDetectError::Io { .. }
-            | SwitchDetectError::Protocol { .. }),
-        ) => {
-            warn!(
-                log,
-                "virtio 9p device probe failed; skipping";
-                "error" => InlineErrorChain::new(&e),
-            );
-            Ok(false)
-        }
-        Err(e) => Err(e),
+    let version = probe_version(log, &path)?;
+    if version == SOFTNPU_9P_VERSION {
+        info!(log, "found SoftNPU 9p device"; "path" => path);
+        Ok(true)
+    } else {
+        debug!(
+            log,
+            "virtio 9p device is not SoftNPU";
+            "path" => path,
+            "version" => version,
+        );
+        Ok(false)
     }
 }
 
@@ -125,16 +106,27 @@ fn ninep_minor_path(
     Ok(None)
 }
 
-/// One Tversion/Rversion exchange over the vio9p character device.
+/// One Tversion/Rversion exchange over the vio9p character device, returning
+/// the version the device answered with.
 ///
 /// The driver permits a single exclusive open, so EBUSY means another
-/// consumer such as scadm or a 9p mount currently holds the device.
-fn probe_version(path: &str) -> Result<Probe, SwitchDetectError> {
+/// consumer such as scadm currently holds the device; retry briefly. No
+/// reply within `REPLY_DEADLINE` is `Timeout`.
+fn probe_version(
+    log: &Logger,
+    path: &str,
+) -> Result<String, SwitchDetectError> {
     for attempt in 1..=OPEN_ATTEMPTS {
+        info!(
+            log,
+            "probing virtio 9p device for SoftNPU";
+            "path" => path,
+            "attempt" => attempt,
+        );
         let mut file = match OpenOptions::new()
             .read(true)
             .write(true)
-            .custom_flags(libc::O_EXCL)
+            .custom_flags(libc::O_EXCL | libc::O_NONBLOCK)
             .open(path)
         {
             Ok(file) => file,
@@ -145,22 +137,43 @@ fn probe_version(path: &str) -> Result<Probe, SwitchDetectError> {
                 continue;
             }
             Err(err) => {
-                return Err(SwitchDetectError::Io {
+                return Err(SwitchDetectError::Open {
                     path: path.to_string(),
                     err,
                 });
             }
         };
-        let io = |err| SwitchDetectError::Io { path: path.to_string(), err };
-        file.write_all(&encode_tversion(SOFTNPU_9P_VERSION)).map_err(io)?;
+        file.write_all(&encode_tversion(SOFTNPU_9P_VERSION)).map_err(
+            |err| SwitchDetectError::Write { path: path.to_string(), err },
+        )?;
         let mut buf = vec![0u8; REPLY_BUF_LEN];
-        let n = file.read(&mut buf).map_err(io)?;
-        return decode_rversion(&buf[..n]).map(Probe::Version).map_err(
-            |reason| SwitchDetectError::Protocol {
-                path: path.to_string(),
-                reason,
-            },
-        );
+        let deadline = Instant::now() + REPLY_DEADLINE;
+        let n = loop {
+            match file.read(&mut buf) {
+                Ok(n) => break n,
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    if Instant::now() >= deadline {
+                        return Err(SwitchDetectError::Timeout {
+                            path: path.to_string(),
+                            after: REPLY_DEADLINE,
+                        });
+                    }
+                    std::thread::sleep(REPLY_POLL_INTERVAL);
+                }
+                Err(err) => {
+                    return Err(SwitchDetectError::Read {
+                        path: path.to_string(),
+                        err,
+                    });
+                }
+            }
+        };
+        return decode_rversion(&buf[..n]).map_err(|reason| {
+            SwitchDetectError::Protocol { path: path.to_string(), reason }
+        });
     }
-    Ok(Probe::Busy)
+    Err(SwitchDetectError::Busy {
+        path: path.to_string(),
+        attempts: OPEN_ATTEMPTS,
+    })
 }
