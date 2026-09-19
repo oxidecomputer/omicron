@@ -273,6 +273,35 @@ fn timeseries_key_for(
 // Timestamp format in the database
 const DATABASE_TIMESTAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S%.9f";
 
+/// Format `s` as a single-quoted ClickHouse string literal. Any user-provided
+/// string interpolated into a query must go through this function, or it could
+/// be used to inject arbitrary SQL.
+///
+/// Backslash and single quote are the only two bytes the ClickHouse lexer
+/// treats specially when finding the end of a single-quoted literal, so each
+/// is prefixed with a backslash and nothing else is touched. See `quotedString`
+/// in the lexer of the ClickHouse version pinned in `tools/clickhouse_version`:
+/// <https://github.com/ClickHouse/ClickHouse/blob/812b95e/src/Parsers/Lexer.cpp#L13-L45>
+///
+/// A backslash must be escaped even when no quote follows it, because
+/// ClickHouse decodes C-style escapes inside literals: `\n` becomes a newline,
+/// `\x41` becomes `A`, and `\N` becomes the empty string. The proptest
+/// `test_quoted_string_literal_against_clickhouse` checks the output of this
+/// function against a running ClickHouse.
+pub(crate) fn quoted_string_literal(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('\'');
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '\'' => out.push_str("\\'"),
+            _ => out.push(c),
+        }
+    }
+    out.push('\'');
+    out
+}
+
 // The name of the database storing all metric information.
 const DATABASE_NAME: &str = "oximeter";
 
