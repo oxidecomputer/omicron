@@ -5,7 +5,6 @@
 //! Tools for interacting with the control plane telemetry database.
 
 use crate::query::StringFieldSelector;
-use anyhow::Context as _;
 use chrono::DateTime;
 use chrono::Utc;
 pub use oximeter::DatumType;
@@ -21,10 +20,8 @@ pub use oximeter::schema::TimeseriesSchema;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-use slog::Logger;
 use std::collections::BTreeMap;
 use std::io;
-use std::net::{IpAddr, SocketAddr};
 use std::num::NonZeroU32;
 use std::path::PathBuf;
 use thiserror::Error;
@@ -51,6 +48,7 @@ pub use client::TestDbWrite;
 #[cfg(any(feature = "oxql", test))]
 pub use client::oxql::OxqlResult;
 pub use model::OXIMETER_VERSION;
+pub use native::connection::User;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -221,21 +219,6 @@ pub struct TimeseriesScanParams {
 pub struct TimeseriesPageSelector {
     pub params: TimeseriesScanParams,
     pub offset: NonZeroU32,
-}
-
-/// Create a client to the timeseries database, and ensure the database exists.
-pub async fn make_client(
-    address: IpAddr,
-    port: u16,
-    log: &Logger,
-) -> Result<Client, anyhow::Error> {
-    let client = Client::new(SocketAddr::new(address, port), &log);
-    // TODO https://github.com/oxidecomputer/omicron/issues/7488: There is a db being initialised here as well.
-    client
-        .init_single_node_db()
-        .await
-        .context("Failed to initialize timeseries database")?;
-    Ok(client)
 }
 
 // TODO-cleanup: Add the timeseries version in to the computation of the key.

@@ -4,7 +4,10 @@
 
 //! A prototype SQL shell directly to ClickHouse for testing the native client.
 
-use crate::native::{self, QueryResult, block::ValueArray};
+use crate::{
+    User,
+    native::{self, QueryResult, block::ValueArray},
+};
 use anyhow::Context as _;
 use crossterm::style::Stylize;
 use display_error_chain::DisplayErrorChain;
@@ -15,7 +18,7 @@ use tabled::{builder::Builder, settings::Style};
 /// Run the native SQL shell.
 pub async fn shell(addr: IpAddr, port: u16) -> anyhow::Result<()> {
     let addr = SocketAddr::new(addr, port);
-    let mut conn = native::Connection::new(addr)
+    let mut conn = native::Connection::new(addr, User::Admin)
         .await
         .context("Trying to connect to ClickHouse server")?;
 
@@ -66,7 +69,7 @@ pub async fn shell(addr: IpAddr, port: u16) -> anyhow::Result<()> {
                             "Error!".underlined().red(),
                             DisplayErrorChain::new(&e),
                         );
-                        conn = native::Connection::new(addr)
+                        conn = native::Connection::new(addr, User::Admin)
                             .await
                             .context("Trying to rebuild connection")?;
                     }

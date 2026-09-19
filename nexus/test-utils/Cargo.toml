@@ -49,6 +49,7 @@ omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
 oximeter.workspace = true
 oximeter-collector.workspace = true
+oximeter-db.workspace = true
 oximeter-producer.workspace = true
 oxnet.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.

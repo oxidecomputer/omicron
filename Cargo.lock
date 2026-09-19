@@ -8192,6 +8192,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oximeter",
  "oximeter-collector",
+ "oximeter-db",
  "oximeter-producer",
  "oxnet",
  "pq-sys",

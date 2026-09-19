@@ -1192,7 +1192,7 @@ mod tests {
         QueryAuthzScope, chunk_consistent_key_groups_impl,
     };
     use crate::oxql::ast::grammar::query_parser;
-    use crate::{Client, DATABASE_TIMESTAMP_FORMAT, DbWrite};
+    use crate::{Client, DATABASE_TIMESTAMP_FORMAT, DbWrite, User};
     use crate::{Metric, Target};
     use chrono::{DateTime, NaiveDate, Utc};
     use dropshot::test_util::LogContext;
@@ -1326,8 +1326,9 @@ mod tests {
         let db = ClickHouseDeployment::new_single_node(&logctx)
             .await
             .expect("Failed to start ClickHouse");
-        let client = Client::new(db.native_address().into(), &logctx.log);
-        client
+        let admin_client =
+            Client::new(User::Admin, db.native_address().into(), &logctx.log);
+        admin_client
             .init_single_node_db()
             .await
             .expect("Failed to init single-node oximeter database");
@@ -1338,10 +1339,12 @@ mod tests {
             .flatten()
             .cloned()
             .collect();
-        client
+        admin_client
             .insert_samples(&samples)
             .await
             .expect("Failed to insert test data");
+        let client =
+            Client::new(User::Writer, db.native_address().into(), &logctx.log);
         TestContext { logctx, clickhouse: db, client, test_data }
     }
 
@@ -1927,6 +1930,7 @@ mod tests {
             ..Default::default()
         };
         let client = Client::new_with_pool_policy(
+            User::Reader,
             Box::new(FixedResolver::new([ctx
                 .clickhouse
                 .native_address()
