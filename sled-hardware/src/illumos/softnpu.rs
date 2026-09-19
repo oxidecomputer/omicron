@@ -11,7 +11,7 @@ use slog::{Logger, debug, info};
 use std::fs::OpenOptions;
 use std::io::{Read, Write};
 use std::os::unix::fs::OpenOptionsExt;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const VIRTIO_VENDOR_ID: i32 = 0x1af4;
 // Transitional and modern virtio 9p PCI device ids.
@@ -19,6 +19,10 @@ const VIRTIO_9P_DEVICE_IDS: [i32; 2] = [0x1009, 0x1049];
 const NINEP_MINOR: &str = "9p";
 const OPEN_ATTEMPTS: usize = 3;
 const OPEN_RETRY_DELAY: Duration = Duration::from_millis(500);
+// vio9p has no chpoll entry point; the reply is awaited with non-blocking
+// reads at this interval, until the deadline.
+const REPLY_POLL_INTERVAL: Duration = Duration::from_millis(50);
+const REPLY_DEADLINE: Duration = Duration::from_secs(5);
 /// A vio9p read returns one whole 9P message or EOVERFLOW without
 /// consuming it when the buffer is smaller than the message's own size
 /// field. The reply will always fit here.
@@ -106,7 +110,8 @@ fn ninep_minor_path(
 /// the version the device answered with.
 ///
 /// The driver permits a single exclusive open, so EBUSY means another
-/// consumer such as scadm currently holds the device; retry briefly.
+/// consumer such as scadm currently holds the device; retry briefly. No
+/// reply within `REPLY_DEADLINE` is `Timeout`.
 fn probe_version(
     log: &Logger,
     path: &str,
@@ -121,7 +126,7 @@ fn probe_version(
         let mut file = match OpenOptions::new()
             .read(true)
             .write(true)
-            .custom_flags(libc::O_EXCL)
+            .custom_flags(libc::O_EXCL | libc::O_NONBLOCK)
             .open(path)
         {
             Ok(file) => file,
@@ -142,10 +147,27 @@ fn probe_version(
             |err| SwitchDetectError::Write { path: path.to_string(), err },
         )?;
         let mut buf = vec![0u8; REPLY_BUF_LEN];
-        let n = file.read(&mut buf).map_err(|err| SwitchDetectError::Read {
-            path: path.to_string(),
-            err,
-        })?;
+        let deadline = Instant::now() + REPLY_DEADLINE;
+        let n = loop {
+            match file.read(&mut buf) {
+                Ok(n) => break n,
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    if Instant::now() >= deadline {
+                        return Err(SwitchDetectError::Timeout {
+                            path: path.to_string(),
+                            after: REPLY_DEADLINE,
+                        });
+                    }
+                    std::thread::sleep(REPLY_POLL_INTERVAL);
+                }
+                Err(err) => {
+                    return Err(SwitchDetectError::Read {
+                        path: path.to_string(),
+                        err,
+                    });
+                }
+            }
+        };
         return decode_rversion(&buf[..n]).map_err(|reason| {
             SwitchDetectError::Protocol { path: path.to_string(), reason }
         });

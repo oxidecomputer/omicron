@@ -131,9 +131,6 @@ pub enum StartError {
     #[error("Failed to enable ipv6-forwarding")]
     EnableIpv6Forwarding(#[from] illumos_utils::ExecutionError),
 
-    #[error("Invalid sled mode configuration: {0}")]
-    SledModeConfig(&'static str),
-
     #[error("Failed to detect switch hardware")]
     DetectSwitch(#[source] sled_hardware::SwitchDetectError),
 

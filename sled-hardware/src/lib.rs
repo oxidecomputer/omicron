@@ -56,6 +56,9 @@ pub enum SwitchDetectError {
         err: std::io::Error,
     },
 
+    #[error("{path} did not answer Tversion within {after:?}")]
+    Timeout { path: String, after: std::time::Duration },
+
     #[error("malformed Rversion from {path}: {reason}")]
     Protocol { path: String, reason: String },
 }

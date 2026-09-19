@@ -471,16 +471,11 @@ mod test {
         // Stray keys are rejected rather than ignored.
         assert!(parse("kind = \"production\"\nfront_port_count = 1").is_err());
         assert!(
-            custom("scrimlet", "tofino_stub")
-                .map(|_| ())
-                .and(
-                    parse(
-                        "kind = \"custom\"\nsled_mode = \"scrimlet\"\n\
+            parse(
+                "kind = \"custom\"\nsled_mode = \"scrimlet\"\n\
                  switch = { kind = \"tofino_stub\", rear_port_count = 1 }"
-                    )
-                    .map(|_| ())
-                )
-                .is_err()
+            )
+            .is_err()
         );
     }
 

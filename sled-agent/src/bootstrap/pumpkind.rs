@@ -19,8 +19,8 @@ pub enum Error {
     #[error("Error administering service: {0}")]
     Adm(#[from] smf::AdmError),
 
-    #[error("Error detecting Oxide sled: {0}")]
-    Detect(anyhow::Error),
+    #[error("detecting Oxide sled")]
+    Detect(#[source] anyhow::Error),
 
     #[error("pumpkind manifest not installed at {0}")]
     ManifestMissing(&'static str),
