@@ -2443,11 +2443,18 @@ impl From<InvSvcEnabledNotOnlineState> for SvcEnabledNotOnlineState {
 pub struct InvPhysicalDisk {
     pub inv_collection_id: DbTypedUuid<CollectionKind>,
     pub sled_id: DbTypedUuid<SledKind>,
-    pub slot: i64,
+    /// See [`nexus_types::inventory::PhysicalDisk::pcie_slot`]. The column
+    /// was originally named `slot`, but we try to reference it as `pcie_slot`
+    /// to disambiguate it from `location`. It cannot be actually renamed,
+    /// however, because columns cannot be renamed idempotently.
+    #[diesel(column_name = slot)]
+    pub pcie_slot: i64,
     pub vendor: String,
     pub model: String,
     pub serial: String,
     pub variant: PhysicalDiskKind,
+    /// The location of the disk in the chassis, as identified by libtopo.
+    pub location: Option<String>,
 }
 
 impl InvPhysicalDisk {
@@ -2459,11 +2466,12 @@ impl InvPhysicalDisk {
         Self {
             inv_collection_id: inv_collection_id.into(),
             sled_id: sled_id.into(),
-            slot: disk.slot,
+            pcie_slot: disk.pcie_slot,
             vendor: disk.identity.vendor,
             model: disk.identity.model,
             serial: disk.identity.serial,
             variant: disk.variant.into(),
+            location: disk.location,
         }
     }
 }
@@ -2494,11 +2502,26 @@ pub enum InvNvmeDiskFirmwareError {
 pub struct InvNvmeDiskFirmware {
     inv_collection_id: DbTypedUuid<CollectionKind>,
     sled_id: DbTypedUuid<SledKind>,
-    slot: i64,
+    /// The PCIe slot number for the disk.
+    ///
+    /// Note that PCIe slots are specific to the board topology,
+    /// and are unrelated to NVMe firmware slots.
+    #[diesel(column_name = slot)]
+    pcie_slot: i64,
+    /// The NVMe firmware slot being used.
     active_slot: SqlU8,
+    /// The next NVMe firmware slot to be used after a reset.
     next_active_slot: Option<SqlU8>,
+    /// The number of NVMe firmware slots that are accessible.
     number_of_slots: SqlU8,
+    /// Returns true if the first firmware slot is locked-down
+    /// as read-only. (This is sometimes the case for locked-down
+    /// factory firmware slots).
     slot1_is_read_only: bool,
+    /// The per-slot version string list.
+    ///
+    /// NVMe slots are generally one-indexed, but this Vec is zero-indexed.
+    /// Be aware that NVMe slot N is stored in slot_firmware_versions[N - 1].
     slot_firmware_versions: Vec<Option<String>>,
 }
 
@@ -2506,7 +2529,7 @@ impl InvNvmeDiskFirmware {
     pub fn new(
         inv_collection_id: CollectionUuid,
         sled_id: SledUuid,
-        sled_slot: i64,
+        pcie_slot: i64,
         firmware: &NvmeFirmware,
     ) -> Result<Self, InvNvmeDiskFirmwareError> {
         // NB: We first validate that the data given to us from an NVMe disk
@@ -2580,7 +2603,7 @@ impl InvNvmeDiskFirmware {
         Ok(Self {
             inv_collection_id: inv_collection_id.into(),
             sled_id: sled_id.into(),
-            slot: sled_slot,
+            pcie_slot,
             active_slot: firmware.active_slot.into(),
             next_active_slot: firmware.next_active_slot.map(|nas| nas.into()),
             number_of_slots: firmware.number_of_slots.into(),
@@ -2622,8 +2645,8 @@ impl InvNvmeDiskFirmware {
         self.sled_id
     }
 
-    pub fn slot(&self) -> i64 {
-        self.slot
+    pub fn pcie_slot(&self) -> i64 {
+        self.pcie_slot
     }
 
     pub fn number_of_slots(&self) -> SqlU8 {

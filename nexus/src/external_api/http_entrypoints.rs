@@ -6903,7 +6903,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .into_iter()
                 .map(|d| UnadoptedPhysicalDisk {
                     sled_id: d.sled_id.into(),
-                    slot: d.slot,
+                    slot: d.pcie_slot,
                     variant: d.variant.into(),
                     disk_id: PhysicalDiskManufacturerIdentity {
                         vendor: d.vendor,
