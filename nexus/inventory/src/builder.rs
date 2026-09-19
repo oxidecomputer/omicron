@@ -25,6 +25,9 @@ use nexus_types::inventory::Collection;
 use nexus_types::inventory::HostPhase1ActiveSlot;
 use nexus_types::inventory::HostPhase1FlashHash;
 use nexus_types::inventory::InternalDnsGenerationStatus;
+use nexus_types::inventory::PowerShelf;
+use nexus_types::inventory::Psu;
+use nexus_types::inventory::PsuSlot;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageFound;
 use nexus_types::inventory::RotPageWhich;
@@ -124,6 +127,7 @@ pub struct CollectionBuilder {
         BTreeMap<CabooseWhich, BTreeMap<Arc<BaseboardId>, CabooseFound>>,
     rot_pages_found:
         BTreeMap<RotPageWhich, BTreeMap<Arc<BaseboardId>, RotPageFound>>,
+    power_shelves: IdOrdMap<PowerShelf>,
     sleds: IdOrdMap<SledAgent>,
     clickhouse_keeper_cluster_membership:
         BTreeSet<ClickhouseKeeperClusterMembership>,
@@ -159,6 +163,7 @@ impl CollectionBuilder {
             rots: BTreeMap::new(),
             cabooses_found: BTreeMap::new(),
             rot_pages_found: BTreeMap::new(),
+            power_shelves: IdOrdMap::new(),
             sleds: IdOrdMap::new(),
             clickhouse_keeper_cluster_membership: BTreeSet::new(),
             cockroach_status: BTreeMap::new(),
@@ -185,6 +190,7 @@ impl CollectionBuilder {
             rots: self.rots,
             cabooses_found: self.cabooses_found,
             rot_pages_found: self.rot_pages_found,
+            power_shelves: self.power_shelves,
             sled_agents: self.sleds,
             clickhouse_keeper_cluster_membership: self
                 .clickhouse_keeper_cluster_membership,
@@ -727,6 +733,39 @@ impl CollectionBuilder {
             .context(
                 "Internal DNS server reported generation status multiple times",
             )
+    }
+
+    /// Returns true if we already found a given PSU for the PSC with the
+    /// provided baseboard identity.
+    ///
+    /// This is used to avoid requesting it multiple times (from multiple MGS
+    /// instances).
+    pub fn found_psu_already(&self, psc: &BaseboardId, psu: PsuSlot) -> bool {
+        if let Some(shelf) = self.power_shelves.get(psc) {
+            shelf.psus.contains_key(&psu)
+        } else {
+            false
+        }
+    }
+
+    /// Record information about a power shelf PSU.
+    pub fn found_psu(
+        &mut self,
+        psc: &Arc<BaseboardId>,
+        sp_slot: u16,
+        psu: Psu,
+    ) -> Result<(), anyhow::Error> {
+        self.power_shelves
+            .entry(&psc)
+            .or_insert_with(|| PowerShelf {
+                psc_baseboard_id: psc.clone(),
+                slot: sp_slot,
+                psus: IdOrdMap::with_capacity(6),
+            })
+            .psus
+            .insert_unique(psu)
+            .map_err(|err| err.into_owned())
+            .context("PSC SP's inventory contained the same PSU multiple times")
     }
 
     /// Returns all zones of a kind from the ledgers of observed sleds

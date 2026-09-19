@@ -54,8 +54,8 @@ use nexus_db_schema::schema::{
 };
 use nexus_types::inventory::HostPhase1ActiveSlot;
 use nexus_types::inventory::{
-    Caboose, CockroachStatus, Collection, InternalDnsGenerationStatus,
-    NvmeFirmware, PowerState, RotPage, RotSlot, TimeSync,
+    self, Caboose, CockroachStatus, Collection, InternalDnsGenerationStatus,
+    NvmeFirmware, PowerState, PsuSlot, RotPage, RotSlot, TimeSync,
 };
 use omicron_common::disk::DatasetName;
 use omicron_common::update::OmicronInstallManifestSource;
@@ -2385,6 +2385,47 @@ impl From<InvFmdResource> for FmdResource {
     }
 }
 
+// See [`nexus_types::inventory::PsuSlot`].
+impl_enum_type!(
+    InvPsuSlotEnum:
+
+    #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
+    pub enum InvPsuSlot;
+
+    Psu0 => b"PSU0"
+    Psu1 => b"PSU1"
+    Psu2 => b"PSU2"
+    Psu3 => b"PSU3"
+    Psu4 => b"PSU4"
+    Psu5 => b"PSU5"
+);
+
+impl From<PsuSlot> for InvPsuSlot {
+    fn from(value: PsuSlot) -> Self {
+        match value {
+            PsuSlot::Psu0 => Self::Psu0,
+            PsuSlot::Psu1 => Self::Psu1,
+            PsuSlot::Psu2 => Self::Psu2,
+            PsuSlot::Psu3 => Self::Psu3,
+            PsuSlot::Psu4 => Self::Psu4,
+            PsuSlot::Psu5 => Self::Psu5,
+        }
+    }
+}
+
+impl From<InvPsuSlot> for PsuSlot {
+    fn from(value: InvPsuSlot) -> Self {
+        match value {
+            InvPsuSlot::Psu0 => Self::Psu0,
+            InvPsuSlot::Psu1 => Self::Psu1,
+            InvPsuSlot::Psu2 => Self::Psu2,
+            InvPsuSlot::Psu3 => Self::Psu3,
+            InvPsuSlot::Psu4 => Self::Psu4,
+            InvPsuSlot::Psu5 => Self::Psu5,
+        }
+    }
+}
+
 /// Represents a PSU observed in a PSC's inventory of the power shelf.
 ///
 /// Either all the VPD fields will be present and `vpd_error` will not be, or
@@ -2397,16 +2438,15 @@ pub struct InvPowerShelfPsu {
     pub source: String,
     /// Baseboard ID of the PSC.
     pub psc_baseboard_id: Uuid,
-    /// SP component ID, which can be used to index this PSU.
-    pub sp_component: String,
-    
+    pub location: InvPsuSlot,
+    pub presence: SpComponentPresence,
+
     /// Will probably be 'mwocp68' or 'mwocp67'; if it isn't, we have a new
     /// power shelf that nobody told me about!
     // XXX(eliza): perhaps this should be an enum?
     pub device_type: String,
 
     // PMBus VPD fields
-    
     pub mfr_id: Option<String>,
     pub mfr_model: Option<String>,
     pub mfr_revision: Option<String>,
@@ -2416,6 +2456,48 @@ pub struct InvPowerShelfPsu {
 
     /// present iff the VPD fields aren't, null otherwise.
     pub vpd_error: Option<String>,
+}
+
+// See [`gateway_types::component::SpComponentPresence`].
+impl_enum_type!(
+    SpComponentPresenceEnum:
+
+    #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
+    pub enum SpComponentPresence;
+
+    // Enum values
+    Present => b"present"
+    NotPresent => b"not_present"
+    Failed => b"failed"
+    Unavailable => b"unavailable"
+    Timeout => b"timeout"
+    Error => b"error"
+);
+
+impl From<inventory::SpComponentPresence> for SpComponentPresence {
+    fn from(value: inventory::SpComponentPresence) -> Self {
+        match value {
+            inventory::SpComponentPresence::Present => Self::Present,
+            inventory::SpComponentPresence::NotPresent => Self::NotPresent,
+            inventory::SpComponentPresence::Failed => Self::Failed,
+            inventory::SpComponentPresence::Unavailable => Self::Unavailable,
+            inventory::SpComponentPresence::Timeout => Self::Timeout,
+            inventory::SpComponentPresence::Error => Self::Error,
+        }
+    }
+}
+
+impl From<SpComponentPresence> for inventory::SpComponentPresence {
+    fn from(value: SpComponentPresence) -> Self {
+        match value {
+            SpComponentPresence::Present => Self::Present,
+            SpComponentPresence::NotPresent => Self::NotPresent,
+            SpComponentPresence::Failed => Self::Failed,
+            SpComponentPresence::Unavailable => Self::Unavailable,
+            SpComponentPresence::Timeout => Self::Timeout,
+            SpComponentPresence::Error => Self::Error,
+        }
+    }
 }
 
 // See [`sled_agent_types::inventory::SvcEnabledNotOnlineState`].

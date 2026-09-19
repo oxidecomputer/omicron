@@ -149,6 +149,12 @@ pub struct Collection {
     pub rot_pages_found:
         BTreeMap<RotPageWhich, BTreeMap<Arc<BaseboardId>, RotPageFound>>,
 
+    /// all power shelf PSUs found, keyed by the PSC's baseboard id, and then by
+    /// PSU slot in that power shelf.
+    ///
+    /// In practice, these will be inserted into the `inv_power_shelf` table.
+    pub power_shelves: IdOrdMap<PowerShelf>,
+
     /// Sled Agent information, by *sled* id
     pub sled_agents: IdOrdMap<SledAgent>,
 
@@ -415,6 +421,166 @@ pub struct ServiceProcessor {
     pub baseboard_revision: u32,
     pub hubris_archive: String,
     pub power_state: PowerState,
+}
+
+/// Describes a power shelf, as reported by its power shelf controller.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct PowerShelf {
+    /// The baseboard identity of the power shelf controller.
+    pub psc_baseboard_id: Arc<BaseboardId>,
+
+    /// Which power shelf (0 or 1) this is.
+    ///
+    /// This is a duplicate of the [`sp_slot`] field in the [`ServiceProcessor`]
+    /// entry for the PSC's baseboard ID, but I figured it was useful to have it
+    /// here, too, so you don't have to go look it up if all you need is to know
+    /// which power shelf it is.
+    pub slot: u16,
+
+    /// PSU slots reported by the power shelf controller.
+    pub psus: IdOrdMap<Psu>,
+}
+
+impl IdOrdItem for PowerShelf {
+    type Key<'a> = &'a BaseboardId;
+
+    fn key(&self) -> Self::Key<'_> {
+        &self.psc_baseboard_id
+    }
+
+    id_upcast!();
+}
+
+/// Identifies a PSU's slot in a power shelf.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Ord,
+    Eq,
+    PartialOrd,
+    PartialEq,
+    strum::EnumString,
+    strum::Display,
+    strum::IntoStaticStr,
+    serde_with::DeserializeFromStr,
+    serde_with::SerializeDisplay,
+)]
+#[strum(serialize_all = "UPPERCASE")]
+pub enum PsuSlot {
+    Psu0,
+    Psu1,
+    Psu2,
+    Psu3,
+    Psu4,
+    Psu5,
+}
+
+impl PsuSlot {
+    /// Returns the SP component ID for the PSU in this slot.
+    pub fn as_component_id(&self) -> &'static str {
+        <&'static str>::from(self)
+    }
+}
+
+/// Description of the presence or absence of a component, as reported by a SP.
+///
+/// The presence of some components may vary based on the power state of the
+/// sled (e.g., components that time out or appear unavailable if the sled is in
+/// A2 may become present when the sled moves to A0).
+///
+/// See also [`gateway_types::component::SpComponentPresence`].
+#[derive(
+    Clone, Copy, Debug, Ord, Eq, PartialOrd, PartialEq, Deserialize, Serialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum SpComponentPresence {
+    /// The component is present.
+    Present,
+    /// The component is not present.
+    NotPresent,
+    /// The component is present but in a failed or faulty state.
+    Failed,
+    /// The SP is unable to determine the presence of the component.
+    Unavailable,
+    /// The SP's attempt to determine the presence of the component timed out.
+    Timeout,
+    /// The SP's attempt to determine the presence of the component failed.
+    Error,
+}
+
+impl From<gateway_types::component::SpComponentPresence>
+    for SpComponentPresence
+{
+    fn from(value: gateway_types::component::SpComponentPresence) -> Self {
+        use gateway_types::component::SpComponentPresence as Gw;
+
+        match value {
+            Gw::Present => Self::Present,
+            Gw::NotPresent => Self::NotPresent,
+            Gw::Failed => Self::Failed,
+            Gw::Unavailable => Self::Unavailable,
+            Gw::Timeout => Self::Timeout,
+            Gw::Error => Self::Error,
+        }
+    }
+}
+
+impl From<SpComponentPresence>
+    for gateway_types::component::SpComponentPresence
+{
+    fn from(value: SpComponentPresence) -> Self {
+        match value {
+            SpComponentPresence::Present => Self::Present,
+            SpComponentPresence::NotPresent => Self::NotPresent,
+            SpComponentPresence::Failed => Self::Failed,
+            SpComponentPresence::Unavailable => Self::Unavailable,
+            SpComponentPresence::Timeout => Self::Timeout,
+            SpComponentPresence::Error => Self::Error,
+        }
+    }
+}
+
+/// Describes a power supply unit (PSU) observed in a power shelf.
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+pub struct Psu {
+    pub time_collected: DateTime<Utc>,
+    pub source: String,
+    pub slot: PsuSlot,
+    pub presence: SpComponentPresence,
+    pub device_type: String,
+    pub vpd: Result<PsuIdentity, String>,
+}
+
+impl IdOrdItem for Psu {
+    type Key<'a> = PsuSlot;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.slot
+    }
+
+    id_upcast!();
+}
+
+/// Describes the PMBus VPD reported by a power shelf PSU.
+///
+/// The combination of `mfr_model` and `mfr_serial` identifies the PSU. The
+/// `MFR_REVISION` field is used by Murata to represent the *firmware* revision
+/// of the PSU, rather than a hardware revision.
+#[derive(Clone, Debug, Eq, PartialOrd, PartialEq, Deserialize, Serialize)]
+pub struct PsuIdentity {
+    /// `MFR_ID` (PMBus command 0x99).
+    pub mfr_id: String,
+    /// `MFR_MODEL` (PMBus command 0x9A).
+    pub mfr_model: String,
+    /// `MFR_REVISION` (PMBus command 0x9B).
+    pub mfr_revision: String,
+    /// `MFR_LOCATION` (PMBus command 0x9C).
+    pub mfr_location: String,
+    /// `MFR_DATE` (PMBus command 0x9D).
+    pub mfr_date: String,
+    /// `MFR_SERIAL` (PMBus command 0x9E).
+    pub mfr_serial: String,
 }
 
 /// Describes the root of trust state found (from a service processor) during
