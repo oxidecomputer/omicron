@@ -2172,6 +2172,19 @@ dependencies = [
 [[package]]
 name = "crucible-client-types"
 version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/crucible?rev=6c986a9ff67da70c845f5c82c4dc0ba9b0f182fc#6c986a9ff67da70c845f5c82c4dc0ba9b0f182fc"
+dependencies = [
+ "base64 0.22.1",
+ "crucible-workspace-hack",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
+name = "crucible-client-types"
+version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/crucible?rev=ad8a31742adc45e925e63443a5b43c8e30604022#ad8a31742adc45e925e63443a5b43c8e30604022"
 dependencies = [
  "base64 0.22.1",
@@ -9812,7 +9825,7 @@ dependencies = [
  "clap",
  "clickhouse-admin-types",
  "crucible-agent-client",
- "crucible-client-types",
+ "crucible-client-types 0.1.0 (git+https://github.com/oxidecomputer/crucible?rev=6c986a9ff67da70c845f5c82c4dc0ba9b0f182fc)",
  "derive_more 0.99.20",
  "dice-verifier 0.3.0-pre0 (git+https://github.com/oxidecomputer/dice-util?rev=ff9f27aa0d6ef6fb64c349890b6e3c242ea3d8fc)",
  "display-error-chain",
@@ -12083,7 +12096,7 @@ name = "propolis-api-types-versions"
 version = "0.0.0"
 source = "git+https://github.com/oxidecomputer/propolis?rev=93e04e189a76f73b3764c6417928274b0f4df453#93e04e189a76f73b3764c6417928274b0f4df453"
 dependencies = [
- "crucible-client-types",
+ "crucible-client-types 0.1.0 (git+https://github.com/oxidecomputer/crucible?rev=ad8a31742adc45e925e63443a5b43c8e30604022)",
  "propolis_types",
  "schemars 0.8.22",
  "serde",
@@ -12098,7 +12111,7 @@ source = "git+https://github.com/oxidecomputer/propolis?rev=93e04e189a76f73b3764
 dependencies = [
  "async-trait",
  "base64 0.21.7",
- "crucible-client-types",
+ "crucible-client-types 0.1.0 (git+https://github.com/oxidecomputer/crucible?rev=ad8a31742adc45e925e63443a5b43c8e30604022)",
  "futures",
  "progenitor 0.14.0",
  "progenitor-client 0.14.0",
@@ -12152,7 +12165,7 @@ name = "propolis_api_types"
 version = "0.0.0"
 source = "git+https://github.com/oxidecomputer/propolis?rev=93e04e189a76f73b3764c6417928274b0f4df453#93e04e189a76f73b3764c6417928274b0f4df453"
 dependencies = [
- "crucible-client-types",
+ "crucible-client-types 0.1.0 (git+https://github.com/oxidecomputer/crucible?rev=ad8a31742adc45e925e63443a5b43c8e30604022)",
  "propolis-api-types-versions",
 ]
 
