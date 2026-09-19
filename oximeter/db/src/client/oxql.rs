@@ -1469,6 +1469,140 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_string_literals_are_escaped() {
+        let ctx = setup_oxql_test("test_string_literals_are_escaped").await;
+
+        // Unescaped \n and \x41 become a newline and 'A' in ClickHouse.
+        // A trailing backslash would escape the closing quote.
+        let weird_name = String::from(
+            "it's a \\n \\x41 weird\tname\n\0 with ünïcödé 日本\\",
+        );
+        let target = SomeTarget { name: weird_name.clone(), index: 1 };
+        let metric = SomeMetric { foo: 0, datum: Cumulative::new(1) };
+        let sample = Sample::new(&target, &metric).unwrap();
+        ctx.client
+            .insert_samples(&[sample])
+            .await
+            .expect("failed to insert samples");
+
+        // Backslashes and control characters need OxQL escapes too.
+        let query = concat!(
+            "get some_target:some_metric | filter name == ",
+            r#""it's a \\n \\x41 weird\tname\n\0 with ünïcödé 日本\\""#,
+        );
+        let result = ctx
+            .client
+            .oxql_query(query, QueryAuthzScope::Fleet)
+            .await
+            .expect("failed to run OxQL query");
+        assert_eq!(result.tables.len(), 1);
+        let table = result.tables.get(0).unwrap();
+        assert_eq!(table.n_timeseries(), 1);
+        let series = table.timeseries().next().unwrap();
+        assert_eq!(
+            series.fields.get("name").unwrap(),
+            &FieldValue::String(weird_name.into()),
+        );
+
+        ctx.cleanup_successful().await;
+    }
+
+    #[tokio::test]
+    async fn test_string_literal_cannot_inject_sql() {
+        let ctx =
+            setup_oxql_test("test_string_literal_cannot_inject_sql").await;
+
+        // The filter renders to SQL as `equals(name, '<value>')`. This value
+        // closes that literal and call, adds a predicate that is always true,
+        // and reopens a literal to consume the closing quote and paren that
+        // follow. Without escaping, it is valid SQL and matches every key for
+        // this timeseries. Rust filtering can hide extra SQL results, so check
+        // the keys returned by ClickHouse before running the full OxQL query.
+        let filter =
+            r#"filter name == "first-target') OR 1 = 1 OR equals(name, '""#;
+        let predicate = query_parser::filter(filter).unwrap();
+        let schema = ctx
+            .client
+            .schema_for_timeseries(
+                &TimeseriesName::try_from("some_target:some_metric").unwrap(),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        let field_query =
+            ctx.client.all_fields_query(&schema, Some(&predicate)).unwrap();
+        let (_, matching_keys) = ctx
+            .client
+            .select_matching_timeseries_info(&field_query, &schema)
+            .await
+            .expect("failed to query matching keys");
+        assert!(
+            matching_keys.is_empty(),
+            "unexpected matching keys: {matching_keys:?}",
+        );
+
+        let query = format!("get some_target:some_metric | {filter}");
+        let result = ctx
+            .client
+            .oxql_query(&query, QueryAuthzScope::Fleet)
+            .await
+            .expect("failed to run OxQL query");
+        assert_eq!(result.tables.len(), 1);
+        assert_eq!(result.tables.get(0).unwrap().n_timeseries(), 0);
+
+        ctx.cleanup_successful().await;
+    }
+
+    // ClickHouse decodes the C-style escapes it recognizes inside a string
+    // literal, so an unescaped `\b` reaches the regex engine as a backspace
+    // rather than a word boundary. Escapes it does not recognize, like `\d`,
+    // keep their backslash. Of the four names below, only a word-boundary `\b`
+    // matches exactly one.
+    #[tokio::test]
+    async fn test_regex_string_literals_are_escaped() {
+        let ctx =
+            setup_oxql_test("test_regex_string_literals_are_escaped").await;
+        let metric = SomeMetric { foo: 0, datum: Cumulative::new(1) };
+        let samples: Vec<_> =
+            ["it's foo", "it's foobar", "it's afoo", "it is foo"]
+                .into_iter()
+                .map(|name| {
+                    Sample::new(
+                        &SomeTarget { name: name.to_string(), index: 1 },
+                        &metric,
+                    )
+                    .unwrap()
+                })
+                .collect();
+        ctx.client.insert_samples(&samples).await.unwrap();
+
+        let filter = r#"filter name ~= "it's \\bfoo\\b""#;
+        let predicate = query_parser::filter(filter).unwrap();
+        let schema = TimeseriesSchema::from(&samples[0]);
+        let field_query =
+            ctx.client.all_fields_query(&schema, Some(&predicate)).unwrap();
+        let (_, matching_keys) = ctx
+            .client
+            .select_matching_timeseries_info(&field_query, &schema)
+            .await
+            .unwrap();
+        assert_eq!(matching_keys.len(), 1);
+        let (target, _) = matching_keys.values().next().unwrap();
+        let name = target.fields.iter().find(|f| f.name == "name").unwrap();
+        assert_eq!(name.value, FieldValue::from("it's foo"));
+
+        let query = format!("get some_target:some_metric | {filter}");
+        let result =
+            ctx.client.oxql_query(query, QueryAuthzScope::Fleet).await.unwrap();
+        assert_eq!(result.tables.len(), 1);
+        assert_eq!(result.tables[0].n_timeseries(), 1);
+        let series = result.tables[0].timeseries().next().unwrap();
+        assert_eq!(series.fields["name"], FieldValue::from("it's foo"));
+
+        ctx.cleanup_successful().await;
+    }
+
+    #[tokio::test]
     async fn test_get_entire_table() {
         let ctx = setup_oxql_test("test_get_entire_table").await;
         // We need _some_ filter here to avoid a provable full-table scan.

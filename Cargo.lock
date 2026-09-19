@@ -10654,6 +10654,7 @@ dependencies = [
  "oxql-types",
  "parse-display",
  "peg",
+ "proptest",
  "qorb",
  "quote",
  "rand 0.9.2",

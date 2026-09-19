@@ -2326,6 +2326,193 @@ mod tests {
         logctx.cleanup_successful();
     }
 
+    // The `select_timeseries_with` path renders field values into SQL
+    // through `query::field_as_db_str`, separately from OxQL. Check that
+    // a string full of quotes, backslashes, and control characters makes
+    // it through there too. The same string is used in the OxQL test
+    // `test_string_literals_are_escaped`.
+    #[tokio::test]
+    async fn test_client_select_timeseries_string_escaping() {
+        let logctx =
+            test_setup_log("test_client_select_timeseries_string_escaping");
+        let mut db =
+            ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
+        let client =
+            Client::new(User::Writer, db.native_address().into(), &logctx.log);
+        init_db(&db, &logctx.log).await;
+
+        #[derive(oximeter::Target)]
+        struct StringTarget {
+            name: String,
+        }
+        #[derive(oximeter::Metric)]
+        struct StringMetric {
+            datum: i64,
+        }
+
+        let name = "it's \\n \\x41\t\n\0日本\\";
+        let metric = StringMetric { datum: 1 };
+        let sample =
+            Sample::new(&StringTarget { name: name.to_string() }, &metric)
+                .unwrap();
+        let control = Sample::new(
+            &StringTarget { name: "ordinary".to_string() },
+            &metric,
+        )
+        .unwrap();
+        client.insert_samples(&[sample.clone(), control]).await.unwrap();
+
+        let criterion = format!("name=={name}");
+        let result = client
+            .select_timeseries_with(
+                &sample.timeseries_name,
+                &[&criterion],
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].target.fields[0].value, FieldValue::from(name));
+        assert_eq!(result[0].measurements, vec![sample.measurement]);
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    // Property test of `quoted_string_literal` against a running ClickHouse.
+    // Each batch of generated strings is quoted and sent as one query that
+    // returns the bytes ClickHouse decoded for each literal. Proptest's runner
+    // is synchronous, so this test builds its own runtime instead of using
+    // `#[tokio::test]`.
+    #[test]
+    fn test_quoted_string_literal_against_clickhouse() {
+        use crate::native::block::ValueArray;
+        use proptest::prelude::*;
+        use proptest::test_runner::Config;
+        use proptest::test_runner::TestCaseError;
+        use proptest::test_runner::TestRunner;
+
+        const BATCH_SIZE: usize = 64;
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        // The client's connection pool spawns tasks when it is created, so
+        // stay inside the runtime for the rest of the test.
+        let _guard = runtime.enter();
+        let logctx =
+            test_setup_log("test_quoted_string_literal_against_clickhouse");
+        let mut db = runtime
+            .block_on(ClickHouseDeployment::new_single_node(&logctx))
+            .unwrap();
+        let client =
+            Client::new(User::Reader, db.native_address().into(), &logctx.log);
+
+        let check = |inputs: Vec<String>| -> Result<(), TestCaseError> {
+            let literals: Vec<_> = inputs
+                .iter()
+                .map(|s| crate::quoted_string_literal(s))
+                .collect();
+            let sql = format!(
+                "SELECT arrayMap(x -> hex(x), [{}]) AS encoded",
+                literals.join(","),
+            );
+            let result = runtime
+                .block_on(async {
+                    let mut handle = client.claim_connection().await?;
+                    client.execute_with_block(&mut handle, &sql).await
+                })
+                .map_err(|e| TestCaseError::fail(e.to_string()))?;
+            let block = result.data.ok_or_else(|| {
+                TestCaseError::fail("query returned no block")
+            })?;
+            let ValueArray::Array { values, .. } =
+                &block.columns["encoded"].values
+            else {
+                return Err(TestCaseError::fail("expected an array column"));
+            };
+            let [ValueArray::String(actual)] = values.as_slice() else {
+                return Err(TestCaseError::fail(
+                    "expected exactly one array of hex strings",
+                ));
+            };
+            prop_assert_eq!(actual.len(), inputs.len());
+            for ((input, literal), actual) in
+                inputs.iter().zip(&literals).zip(actual)
+            {
+                let expected: String =
+                    input.bytes().map(|b| format!("{b:02X}")).collect();
+                prop_assert_eq!(
+                    actual,
+                    &expected,
+                    "ClickHouse decoded {:?} differently from input {:?}",
+                    literal,
+                    input,
+                );
+            }
+            Ok(())
+        };
+
+        // Fixed cases first: injection payloads, comment syntax, every ASCII
+        // character, and runs of backslashes before the characters that
+        // ClickHouse would otherwise treat as escape sequences.
+        let mut fixed: Vec<String> = vec![
+            String::new(),
+            "first-target') OR 1 = 1 OR equals(name, '".into(),
+            "'; SELECT 42; --".into(),
+            "/* */ -- ; \r\n".into(),
+            (0..=127u8).map(char::from).collect(),
+        ];
+        for n in 0..=8 {
+            for suffix in ["", "'", "''", "n", "x41", "N", "0"] {
+                fixed.push(format!("{}{suffix}", "\\".repeat(n)));
+            }
+        }
+
+        // Then random strings, half arbitrary Unicode and half drawn from
+        // characters that matter to the SQL lexer.
+        let unicode = prop::collection::vec(any::<char>(), 0..128)
+            .prop_map(String::from_iter);
+        let hostile = prop::collection::vec(
+            prop::sample::select(vec![
+                '\'', '\\', '"', '\0', '\n', '\r', '\t', ';', '-', '/', '*',
+                '(', ')', ' ', 'n', 'x', '4', '1', 'N', '0', 'é', '日',
+            ]),
+            0..128,
+        )
+        .prop_map(String::from_iter);
+        let batch =
+            prop::collection::vec(prop_oneof![unicode, hostile], BATCH_SIZE);
+        let mut runner = TestRunner::new(Config {
+            cases: 256,
+            source_file: Some(file!()),
+            ..Config::default()
+        });
+
+        // Stop the database before panicking on failure, so a failing run
+        // does not leak a ClickHouse process.
+        let outcome = fixed
+            .chunks(BATCH_SIZE)
+            .try_for_each(|chunk| {
+                check(chunk.to_vec())
+                    .map_err(|e| format!("fixed cases {chunk:?}: {e}"))
+            })
+            .and_then(|()| {
+                runner.run(&batch, check).map_err(|e| e.to_string())
+            });
+        runtime.block_on(db.cleanup()).unwrap();
+        if let Err(msg) = outcome {
+            panic!(
+                "ClickHouse decoded a literal differently from its input: {msg}"
+            );
+        }
+        logctx.cleanup_successful();
+    }
+
     async fn test_client_select_timeseries_one_impl(
         _: &ClickHouseDeployment,
         client: Client,
