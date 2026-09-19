@@ -938,3 +938,139 @@ impl ComponentIdSelector {
         self.sled.is_empty() && self.switch.is_empty() && self.psc.is_empty()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use maplit::btreemap;
+    use semver::Version;
+    use tufaceous_artifact::ArtifactVersion;
+    use wicket_common::{
+        artifact::ArtifactId,
+        inventory::{SpIdentifier, SpType},
+    };
+
+    fn non_empty_status() -> RackUpdateStatus {
+        RackUpdateStatus {
+            state: UpdateState::Failed,
+            system_version: Some(Version::new(1, 0, 0)),
+            artifacts: vec![
+                ArtifactId {
+                    tags: btreemap! {
+                        "kind".to_owned() => "zone".to_owned(),
+                        "zone-name".to_owned() => "nexus".to_owned(),
+                    },
+                    version: ArtifactVersion::new_const("1.0.0-nexus"),
+                },
+                ArtifactId {
+                    tags: btreemap! {
+                        "kind".to_owned() => "gimlet_sp".to_owned(),
+                    },
+                    version: ArtifactVersion::new_const("1.0.0"),
+                },
+            ],
+            components: vec![
+                ComponentUpdateStatus {
+                    id: SpIdentifier { typ: SpType::Sled, slot: 0 },
+                    state: UpdateState::Completed,
+                    step_index: Some(11),
+                    total_steps: Some(12),
+                    elapsed_secs: Some(754.5),
+                    exit_message: None,
+                },
+                ComponentUpdateStatus {
+                    id: SpIdentifier { typ: SpType::Sled, slot: 1 },
+                    state: UpdateState::Failed,
+                    step_index: Some(3),
+                    total_steps: Some(12),
+                    elapsed_secs: Some(62.25),
+                    exit_message: Some(ExitMessage {
+                        message: "Get host type: Unknown host type i86pc"
+                            .to_owned(),
+                        causes: vec![
+                            "unknown model string \"i86pc\"".to_owned(),
+                            "expected one of gimlet, cosmo".to_owned(),
+                        ],
+                    }),
+                },
+                ComponentUpdateStatus {
+                    id: SpIdentifier { typ: SpType::Switch, slot: 1 },
+                    state: UpdateState::InProgress,
+                    step_index: Some(2),
+                    total_steps: Some(9),
+                    elapsed_secs: Some(3661.0),
+                    exit_message: None,
+                },
+                ComponentUpdateStatus {
+                    id: SpIdentifier { typ: SpType::Power, slot: 0 },
+                    state: UpdateState::Aborted,
+                    step_index: Some(1),
+                    total_steps: Some(9),
+                    elapsed_secs: None,
+                    exit_message: Some(ExitMessage {
+                        message: "aborted by operator".to_owned(),
+                        causes: Vec::new(),
+                    }),
+                },
+                ComponentUpdateStatus {
+                    id: SpIdentifier { typ: SpType::Power, slot: 1 },
+                    state: UpdateState::NotStarted,
+                    step_index: None,
+                    total_steps: Some(9),
+                    elapsed_secs: None,
+                    exit_message: None,
+                },
+            ],
+            state_counts: UpdateStateCounts {
+                completed: 1,
+                failed: 1,
+                aborted: 1,
+                in_progress: 1,
+                not_started: 1,
+            },
+        }
+    }
+
+    // These snapshots test the JSON body and the human-readable table of
+    // `rack-update status`.
+
+    #[test]
+    fn status_json_non_empty() {
+        let json = serde_json::to_string_pretty(&non_empty_status())
+            .expect("status serialized to JSON");
+        expectorate::assert_contents(
+            "tests/output/rack-update-status.json",
+            &json,
+        );
+    }
+
+    #[test]
+    fn status_table_non_empty() {
+        let mut out = Vec::new();
+        write_status_table(&mut out, &non_empty_status())
+            .expect("status table written to a Vec");
+        expectorate::assert_contents(
+            "tests/output/rack-update-status-table.txt",
+            &String::from_utf8(out).expect("status table is valid UTF-8"),
+        );
+    }
+
+    #[test]
+    fn status_table_empty() {
+        let status = RackUpdateStatus {
+            state: UpdateState::NotStarted,
+            system_version: None,
+            artifacts: Vec::new(),
+            components: Vec::new(),
+            state_counts: UpdateStateCounts::default(),
+        };
+
+        let mut out = Vec::new();
+        write_status_table(&mut out, &status)
+            .expect("status table written to a Vec");
+        expectorate::assert_contents(
+            "tests/output/rack-update-status-table-empty.txt",
+            &String::from_utf8(out).expect("status table is valid UTF-8"),
+        );
+    }
+}
