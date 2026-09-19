@@ -3,7 +3,6 @@
 [db]
 batch_size = 1000
 batch_interval = 5 # In seconds
-replicated = true
 
 [log]
 level = "debug"

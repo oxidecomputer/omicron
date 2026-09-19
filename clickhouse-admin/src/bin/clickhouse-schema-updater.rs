@@ -12,6 +12,7 @@ use clap::Subcommand;
 use omicron_common::address::CLICKHOUSE_TCP_PORT;
 use oximeter_db::Client;
 use oximeter_db::OXIMETER_VERSION;
+use oximeter_db::User;
 use slog::Drain;
 use slog::Level;
 use slog::LevelFilter;
@@ -89,7 +90,7 @@ fn main() -> anyhow::Result<()> {
 async fn main_impl() -> anyhow::Result<()> {
     let args = Args::parse();
     let log = build_logger(args.log_level);
-    let client = Client::new(args.host, &log);
+    let client = Client::new(User::Admin, args.host, &log);
     let is_replicated = client.is_oximeter_cluster().await?;
     match args.cmd {
         Cmd::List => {
