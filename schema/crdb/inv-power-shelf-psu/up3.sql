@@ -11,8 +11,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_power_shelf_psu (
     -- baseboard of the power shelf controller which told us about this PSU
     -- (foreign key into `hw_baseboard_id` table)
     psc_baseboard_id UUID NOT NULL,
-    -- the SP-reported component ID of this PSU
-    sp_component TEXT NOT NULL,
+    -- which slot in the power shelf this record represents
+    location omicron.public.inv_psu_slot NOT NULL,
+    -- the SP-reported presence value for this PSU
+    presence omicron.public.sp_component_presence NOT NULL,
 
     -- device type reported by Hubris
     device_type TEXT NOT NULL,
@@ -49,7 +51,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_power_shelf_psu (
             AND mfr_date IS NULL
             AND mfr_serial IS NULL
         )
-    )
+    ),
 
-    PRIMARY KEY (inv_collection_id, psc_baseboard_id, sp_component)
+    PRIMARY KEY (inv_collection_id, psc_baseboard_id, location)
 );
