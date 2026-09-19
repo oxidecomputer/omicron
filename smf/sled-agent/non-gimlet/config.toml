@@ -1,18 +1,11 @@
 # Sled Agent Configuration
 
-# Identifies whether sled agent treats itself as a scrimlet or a gimlet.
-#
-# If this is set to "scrimlet", the sled agent treats itself as a scrimlet.
-# If this is set to "gimlet", the sled agent treats itself as a gimlet.
-# If this is set to "auto":
-# - On illumos, the sled automatically detects whether or not it is a scrimlet.
-# - On all other platforms, the sled assumes it is a gimlet.
-sled_mode = "scrimlet"
-
-# Identifies the revision of the sidecar that is attached, if one is attached.
-# TODO: This field should be removed once Gimlets have the ability to auto-detect
-# this information.
-sidecar_revision.soft_zone = { front_port_count = 1, rear_port_count = 1 }
+# One host running a SoftNPU zone; always a scrimlet. Other kinds:
+# "production" (Tofino, detected), "virtual" (propolis SoftNPU device,
+# detected, with port counts), and "custom" with an explicit sled_mode and
+# switch: "tofino_asic" or "tofino_stub" (optional sidecar_revision), or
+# "soft_npu_propolis_device" or "soft_npu_zone" (with port counts).
+deployment = { kind = "standalone", front_port_count = 1, rear_port_count = 1 }
 
 # Setting this to true causes sled-agent to always report that its time is
 # in-sync, rather than querying its NTP zone.
