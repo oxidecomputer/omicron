@@ -8,23 +8,26 @@ stderr:
 CASE: SP without a slot (violates the CHECK constraint)
 ---------------------------------------------
 stdout:
+/!\           reported by: <unknown>
 ---------------------------------------------
 stderr:
-Internal Error: the 'reporter_identity_validity' CHECK constraint should enforce that ereports with reporter='sp' have a non-NULL `slot`, but this ereport has slot_type=Sled and slot=None
+warning: failed to interpret reporter for ereport 12345678-1234-1234-1234-123456789abc:0x2a: Internal Error: the 'reporter_identity_validity' CHECK constraint should enforce that ereports with reporter='sp' have a non-NULL `slot`, but this ereport has slot_type=Sled and slot=None
 =============================================
 CASE: host OS without a sled ID (violates the CHECK constraint)
 ---------------------------------------------
 stdout:
+/!\           reported by: <unknown>
 ---------------------------------------------
 stderr:
-Internal Error: the 'reporter_identity_validity' CHECK constraint should enforce that ereports with reporter='host' have a non-NULL sled_id, but this ereport does not
+warning: failed to interpret reporter for ereport 12345678-1234-1234-1234-123456789abc:0x2a: Internal Error: the 'reporter_identity_validity' CHECK constraint should enforce that ereports with reporter='host' have a non-NULL sled_id, but this ereport does not
 =============================================
 CASE: host OS with a non-sled slot type (violates the CHECK constraint)
 ---------------------------------------------
 stdout:
+/!\           reported by: <unknown>
 ---------------------------------------------
 stderr:
-Internal Error: the 'reporter_identity_validity' CHECK constraint should  enforce that ereports with reporter='host' have slot_type='sled', but this ereport has slot_type=Switch
+warning: failed to interpret reporter for ereport 12345678-1234-1234-1234-123456789abc:0x2a: Internal Error: the 'reporter_identity_validity' CHECK constraint should  enforce that ereports with reporter='host' have slot_type='sled', but this ereport has slot_type=Switch
 =============================================
 CASE: host OS with a slot
 ---------------------------------------------
