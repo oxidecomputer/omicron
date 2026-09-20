@@ -6,6 +6,8 @@
 
 use crate::Omdb;
 use crate::check_allow_destructive::DestructiveOperationToken;
+use anyhow::Context as _;
+use anyhow::bail;
 use clap::ArgAction;
 use clap::Args;
 use clap::Subcommand;
@@ -188,12 +190,18 @@ async fn reconfigurator_config_show(
             // newlines.
             write!(indented, "{}", config.display()).unwrap();
         }
-        Err(err) => {
-            if err.status() == Some(StatusCode::NOT_FOUND) {
-                println!("No config specified");
-            } else {
-                eprintln!("error: {:#}", err)
+        Err(err) if err.status() == Some(StatusCode::NOT_FOUND) => {
+            match args.version {
+                ReconfiguratorConfigVersionOrCurrent::Current => {
+                    println!("No config specified");
+                }
+                ReconfiguratorConfigVersionOrCurrent::Version(version) => {
+                    bail!("no reconfigurator config with version {version}");
+                }
             }
+        }
+        Err(err) => {
+            return Err(err).context("retrieving reconfigurator config");
         }
     }
 
@@ -205,48 +213,48 @@ async fn reconfigurator_config_set(
     args: &ReconfiguratorConfigSetArgs,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
-    let (current_config, new_config) =
-        match client.reconfigurator_config_show_current().await {
-            Ok(config) => {
-                let Some(next_version) = config.version.checked_add(1) else {
-                    eprintln!(
-                        "ERROR: Failed to update config. Max version reached."
-                    );
-                    return Ok(());
+    let (current_config, new_config) = match client
+        .reconfigurator_config_show_current()
+        .await
+    {
+        Ok(config) => {
+            let Some(next_version) = config.version.checked_add(1) else {
+                bail!(
+                    "failed to update reconfigurator config: \
+                         max version reached"
+                );
+            };
+            let config = config.into_inner();
+            // Future fields should use the following pattern, and only update
+            // the values if a setting changed.
+            let Some(new_config) =
+                args.config.update_if_modified(&config.config, next_version)
+            else {
+                println!("no modifications made to current config values:");
+                let stdout = io::stdout();
+                let mut indented = IndentWriter::new("    ", stdout.lock());
+                // No need for writeln! here because .display() adds its own
+                // newlines.
+                write!(indented, "{}", config.display()).unwrap();
+                return Ok(());
+            };
+            (Some(config), new_config)
+        }
+        Err(err) => {
+            if err.status() == Some(StatusCode::NOT_FOUND) {
+                let default_config = ReconfiguratorConfig::default();
+                // In this initial case, the operator expects that we always set
+                // a config.
+                let new_config = ReconfiguratorConfigParam {
+                    version: 1,
+                    config: args.config.update(&default_config),
                 };
-                let config = config.into_inner();
-                // Future fields should use the following pattern, and only update
-                // the values if a setting changed.
-                let Some(new_config) = args
-                    .config
-                    .update_if_modified(&config.config, next_version)
-                else {
-                    println!("no modifications made to current config values:");
-                    let stdout = io::stdout();
-                    let mut indented = IndentWriter::new("    ", stdout.lock());
-                    // No need for writeln! here because .display() adds its own
-                    // newlines.
-                    write!(indented, "{}", config.display()).unwrap();
-                    return Ok(());
-                };
-                (Some(config), new_config)
+                (None, new_config)
+            } else {
+                return Err(err).context("retrieving reconfigurator config");
             }
-            Err(err) => {
-                if err.status() == Some(StatusCode::NOT_FOUND) {
-                    let default_config = ReconfiguratorConfig::default();
-                    // In this initial case, the operator expects that we always set
-                    // a config.
-                    let new_config = ReconfiguratorConfigParam {
-                        version: 1,
-                        config: args.config.update(&default_config),
-                    };
-                    (None, new_config)
-                } else {
-                    eprintln!("error: {:#}", err);
-                    return Ok(());
-                }
-            }
-        };
+        }
+    };
 
     client.reconfigurator_config_set(&new_config).await?;
     println!(
