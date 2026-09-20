@@ -1595,7 +1595,7 @@ dependencies = [
 [[package]]
 name = "client-common"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?branch=ry%2Fexternal-peers#26fcf262ba3be2af6156a5a010cd834e18ae42c7"
+source = "git+https://github.com/oxidecomputer/maghemite?branch=ry%2Fexternal-peers#23b7c04ee23d7303c1f56153fe48d8b04c194265"
 
 [[package]]
 name = "clipboard-win"
@@ -2631,7 +2631,7 @@ dependencies = [
 [[package]]
 name = "ddm-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?branch=ry%2Fexternal-peers#26fcf262ba3be2af6156a5a010cd834e18ae42c7"
+source = "git+https://github.com/oxidecomputer/maghemite?branch=ry%2Fexternal-peers#23b7c04ee23d7303c1f56153fe48d8b04c194265"
 dependencies = [
  "ddm-api-types-versions",
  "oxnet",
@@ -2645,7 +2645,7 @@ dependencies = [
 [[package]]
 name = "ddm-api-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?branch=ry%2Fexternal-peers#26fcf262ba3be2af6156a5a010cd834e18ae42c7"
+source = "git+https://github.com/oxidecomputer/maghemite?branch=ry%2Fexternal-peers#23b7c04ee23d7303c1f56153fe48d8b04c194265"
 dependencies = [
  "ddm-api-types-versions",
 ]
@@ -2653,7 +2653,7 @@ dependencies = [
 [[package]]
 name = "ddm-api-types-versions"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?branch=ry%2Fexternal-peers#26fcf262ba3be2af6156a5a010cd834e18ae42c7"
+source = "git+https://github.com/oxidecomputer/maghemite?branch=ry%2Fexternal-peers#23b7c04ee23d7303c1f56153fe48d8b04c194265"
 dependencies = [
  "ddm-protocol",
  "oxnet",
@@ -2666,7 +2666,7 @@ dependencies = [
 [[package]]
 name = "ddm-protocol"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?branch=ry%2Fexternal-peers#26fcf262ba3be2af6156a5a010cd834e18ae42c7"
+source = "git+https://github.com/oxidecomputer/maghemite?branch=ry%2Fexternal-peers#23b7c04ee23d7303c1f56153fe48d8b04c194265"
 dependencies = [
  "oxnet",
  "schemars 0.8.22",
@@ -6953,7 +6953,7 @@ dependencies = [
 [[package]]
 name = "mg-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?branch=ry%2Fexternal-peers#26fcf262ba3be2af6156a5a010cd834e18ae42c7"
+source = "git+https://github.com/oxidecomputer/maghemite?branch=ry%2Fexternal-peers#23b7c04ee23d7303c1f56153fe48d8b04c194265"
 dependencies = [
  "chrono",
  "client-common",
@@ -6973,7 +6973,7 @@ dependencies = [
 [[package]]
 name = "mg-api-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?branch=ry%2Fexternal-peers#26fcf262ba3be2af6156a5a010cd834e18ae42c7"
+source = "git+https://github.com/oxidecomputer/maghemite?branch=ry%2Fexternal-peers#23b7c04ee23d7303c1f56153fe48d8b04c194265"
 dependencies = [
  "mg-api-types-versions",
 ]
@@ -6981,7 +6981,7 @@ dependencies = [
 [[package]]
 name = "mg-api-types-versions"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?branch=ry%2Fexternal-peers#26fcf262ba3be2af6156a5a010cd834e18ae42c7"
+source = "git+https://github.com/oxidecomputer/maghemite?branch=ry%2Fexternal-peers#23b7c04ee23d7303c1f56153fe48d8b04c194265"
 dependencies = [
  "chrono",
  "nom 8.0.0",
