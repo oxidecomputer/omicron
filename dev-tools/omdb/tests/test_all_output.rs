@@ -21,8 +21,10 @@ use nexus_test_utils_macros::nexus_test;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::UnstableReconfiguratorState;
+use omicron_test_utils::dev::test_cmds::EXIT_FAILURE;
 use omicron_test_utils::dev::test_cmds::OutputSnapshot;
 use omicron_test_utils::dev::test_cmds::Redactor;
+use omicron_test_utils::dev::test_cmds::assert_exit_code;
 use omicron_test_utils::dev::test_cmds::path_to_executable;
 use omicron_test_utils::dev::test_cmds::run_command;
 use sled_agent_types::early_networking::SwitchSlot;
@@ -371,6 +373,9 @@ async fn test_omdb_success_cases() {
         &["nexus", "blueprints", "diff", &initial_blueprint_id],
         // reconfigurator config: show and set
         &["nexus", "reconfigurator-config", "show", "current"],
+        // An explicit version that does not exist is an error, unlike something
+        // like "current" on a rack that has never had a config.
+        &["nexus", "reconfigurator-config", "show", "4294967295"],
         &["nexus", "update-status"],
         &["nexus", "update-status", "--details"],
         // NOTE: Enabling the planner here _may_ cause Nexus to start creating
@@ -966,6 +971,46 @@ async fn do_run_extra<F>(
         redactor.do_redact(&stdout_text),
         redactor.do_redact(&stderr_text),
     );
+}
+
+#[test]
+fn test_omdb_unreachable_nexus_exits_nonzero() {
+    clear_omdb_env();
+    let cmd_path = path_to_executable(CMD_OMDB);
+    // Nothing can listen on port 1 (it is privileged and unassigned), so every
+    // request to this URL is refused immediately.
+    const UNREACHABLE_NEXUS: &str = "http://127.0.0.1:1/";
+
+    let invocations: &[(&[&str], &str)] = &[
+        (
+            &["nexus", "clickhouse-policy", "get"],
+            "Error: retrieving clickhouse policy",
+        ),
+        (
+            &["nexus", "oximeter-read-policy", "get"],
+            "Error: retrieving oximeter read policy",
+        ),
+        (
+            &["nexus", "reconfigurator-config", "show", "current"],
+            "Error: retrieving reconfigurator config",
+        ),
+    ];
+
+    for &(invocation, expected_error) in invocations {
+        let exec = Exec::cmd(&cmd_path)
+            .args(invocation)
+            .env("OMDB_NEXUS_URL", UNREACHABLE_NEXUS);
+        let (exit_status, stdout_text, stderr_text) = run_command(exec);
+        assert_exit_code(exit_status, EXIT_FAILURE, &stderr_text);
+        assert_eq!(
+            stdout_text, "",
+            "{invocation:?} should print nothing on stdout"
+        );
+        assert!(
+            stderr_text.lines().any(|line| line == expected_error),
+            "{invocation:?}: missing {expected_error:?} in stderr:\n{stderr_text}"
+        );
+    }
 }
 
 // We're testing behavior that can be affected by OMDB-related environment

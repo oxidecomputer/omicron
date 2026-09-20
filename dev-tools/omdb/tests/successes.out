@@ -2317,6 +2317,15 @@ Reconfigurator config:
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
 =============================================
+EXECUTING COMMAND: omdb ["nexus", "reconfigurator-config", "show", "4294967295"]
+termination: Exited(1)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+Error: no reconfigurator config with version 4294967295
+=============================================
 EXECUTING COMMAND: omdb ["nexus", "update-status"]
 termination: Exited(0)
 ---------------------------------------------
