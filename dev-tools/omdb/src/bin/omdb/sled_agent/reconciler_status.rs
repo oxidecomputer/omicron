@@ -899,3 +899,53 @@ impl fmt::Display for MgdStaticRouteReconcilerStatusDisplay<'_> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use omicron_uuid_kinds::OmicronZoneUuid;
+    use std::collections::BTreeMap;
+    use std::collections::BTreeSet;
+    use std::net::IpAddr;
+    use std::net::Ipv4Addr;
+    use std::time::Duration;
+
+    fn nat_entry(last_octet: u8) -> DpdNatReconcilerStatusNatEntry {
+        DpdNatReconcilerStatusNatEntry {
+            external_ip: IpAddr::V4(Ipv4Addr::new(192, 0, 2, last_octet)),
+            first_port: 0,
+            last_port: 16383,
+        }
+    }
+
+    #[test]
+    fn test_reconciliation_completed_status_display() {
+        let status = ReconciliationCompletedStatus {
+            activation_reason: ReconcilerActivationReason::Startup,
+            completed_at_time: chrono::DateTime::from_timestamp(0, 0)
+                .expect("the epoch is a valid timestamp"),
+            ran_for: Duration::from_millis(1500),
+            activation_count: 3,
+            status: LldpdReconcilerStatus::SkippedConfigUpToDate,
+        };
+        expectorate::assert_contents(
+            "tests/output/reconciliation-completed-status.txt",
+            &ReconciliationCompletedStatusDisplay(&status).to_string(),
+        );
+    }
+
+    #[test]
+    fn test_dpd_nat_reconciler_status_display() {
+        let status = DpdNatReconcilerStatus::Complete {
+            unchanged: BTreeSet::from([OmicronZoneUuid::nil()]),
+            removed: vec![nat_entry(1), nat_entry(3)],
+            remove_failures: Vec::new(),
+            created: BTreeMap::from([(OmicronZoneUuid::nil(), nat_entry(2))]),
+            create_failures: BTreeMap::new(),
+        };
+        expectorate::assert_contents(
+            "tests/output/dpd-nat-reconciler-status.txt",
+            &DpdNatReconcilerStatusDisplay(&status).to_string(),
+        );
+    }
+}

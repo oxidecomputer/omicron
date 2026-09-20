@@ -1,0 +1,7 @@
+reconciliation completed
+    zones unchanged:
+        * zone 00000000-0000-0000-0000-000000000000NAT entries removed
+        * 192.0.2.1 (ports 0-16383)
+        * 192.0.2.3 (ports 0-16383)NAT entries created
+        * zone 00000000-0000-0000-0000-000000000000: 192.0.2.2 (ports 0-16383)remove failures: none
+    create failures: none
