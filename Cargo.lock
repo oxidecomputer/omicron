@@ -9596,6 +9596,7 @@ dependencies = [
  "support-bundle-collection",
  "support-bundle-viewer",
  "supports-color 3.0.2",
+ "swrite",
  "tabled 0.15.0",
  "textwrap 0.16.2",
  "tokio",
