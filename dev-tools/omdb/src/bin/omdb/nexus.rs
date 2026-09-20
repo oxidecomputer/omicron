@@ -47,6 +47,7 @@ use nexus_lockstep_client::types::PhysicalDiskPath;
 use nexus_lockstep_client::types::SagaState;
 use nexus_lockstep_client::types::SledSelector;
 use nexus_saga_recovery::LastPass;
+use nexus_saga_recovery::LastPassSuccess;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::ClickhouseMode;
 use nexus_types::deployment::ClickhousePolicy;
@@ -129,6 +130,7 @@ use sled_hardware_types::BaseboardId;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::fmt;
 use std::fs::OpenOptions;
 use std::num::ParseIntError;
 use std::os::unix::fs::PermissionsExt;
@@ -2754,6 +2756,24 @@ fn print_task_region_snapshot_replacement_step(details: &serde_json::Value) {
     }
 }
 
+struct LastPassSuccessDisplay<'a>(&'a LastPassSuccess);
+
+impl std::fmt::Display for LastPassSuccessDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let LastPassSuccess { nfound, nrecovered, nfailed, nskipped, nremoved } =
+            self.0;
+        writeln!(
+            f,
+            "        found sagas: {nfound:3} \
+             (in-progress, assigned to this Nexus)"
+        )?;
+        writeln!(f, "        recovered:   {nrecovered:3} (successfully)")?;
+        writeln!(f, "        failed:      {nfailed:3}")?;
+        writeln!(f, "        skipped:     {nskipped:3} (already running)")?;
+        writeln!(f, "        removed:     {nremoved:3} (newly finished)")
+    }
+}
+
 fn print_task_saga_recovery(details: &serde_json::Value) {
     match serde_json::from_value::<nexus_saga_recovery::Report>(details.clone())
     {
@@ -2797,24 +2817,7 @@ fn print_task_saga_recovery(details: &serde_json::Value) {
                 }
                 LastPass::Success(success) => {
                     println!("    last pass:");
-                    println!(
-                        "        found sagas: {:3} \
-                        (in-progress, assigned to this Nexus)",
-                        success.nfound
-                    );
-                    println!(
-                        "        recovered:   {:3} (successfully)",
-                        success.nrecovered
-                    );
-                    println!("        failed:      {:3}", success.nfailed);
-                    println!(
-                        "        skipped:     {:3} (already running)",
-                        success.nskipped
-                    );
-                    println!(
-                        "        removed:     {:3} (newly finished)",
-                        success.nskipped
-                    );
+                    print!("{}", LastPassSuccessDisplay(&success));
                 }
             };
 
@@ -5926,4 +5929,24 @@ async fn cmd_nexus_support_bundles_inspect(
     };
 
     support_bundle_viewer::run_dashboard(accessor).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_last_pass_success_display_distinct_counts() {
+        let success = LastPassSuccess {
+            nfound: 5,
+            nrecovered: 4,
+            nfailed: 3,
+            nskipped: 2,
+            nremoved: 1,
+        };
+        expectorate::assert_contents(
+            "tests/output/saga-recovery-last-pass.txt",
+            &LastPassSuccessDisplay(&success).to_string(),
+        );
+    }
 }
