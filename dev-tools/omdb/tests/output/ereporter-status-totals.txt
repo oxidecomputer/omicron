@@ -1,0 +1,9 @@
+    total ereports received:     15
+      new ereports ingested:      9
+    total HTTP requests sent:    12
+      total collection errors:    3
+    total reporters:              5
+      contacted successfully:     3
+        with ereports:            2
+        without ereports:         3
+      with collection errors:     2
