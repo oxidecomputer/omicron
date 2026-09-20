@@ -399,7 +399,7 @@ impl Display for ReporterDisplay<'_> {
         use ereport_info_fields::*;
 
         match self.reporter {
-            None => Ok(()),
+            None => writeln!(f, "/!\\ {REPORTER:>WIDTH$}: <unknown>"),
             Some(Reporter::Sp { sp_type, slot }) => {
                 writeln!(
                     f,
@@ -426,13 +426,19 @@ impl Display for ReporterDisplay<'_> {
 }
 
 struct ReporterErrorDisplay<'a> {
+    restart_id: EreporterRestartUuid,
+    ena: Ena,
     err: &'a dyn Display,
 }
 
 impl Display for ReporterErrorDisplay<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let Self { err } = self;
-        writeln!(f, "{err}")
+        let Self { restart_id, ena, err } = self;
+        writeln!(
+            f,
+            "warning: failed to interpret reporter for ereport \
+             {restart_id}:{ena}: {err}"
+        )
     }
 }
 
@@ -446,7 +452,7 @@ impl Display for RackDisplay {
 
         match self.rack_id {
             Some(rack_id) => writeln!(f, "    {RACK_ID:>WIDTH$}: {rack_id}"),
-            None => Ok(()),
+            None => writeln!(f, "/!\\ {RACK_ID:>WIDTH$}: <unknown>"),
         }
     }
 }
@@ -536,7 +542,14 @@ async fn cmd_db_ereport_info(
         println!("    {COLLECTOR_ID:>WIDTH$}: {collector_id}");
         let reporter = Reporter::try_from(reporter);
         if let Err(err) = &reporter {
-            eprint!("{}", ReporterErrorDisplay { err });
+            eprint!(
+                "{}",
+                ReporterErrorDisplay {
+                    restart_id: restart_id.into(),
+                    ena,
+                    err
+                }
+            );
         }
         print!("{}", ReporterDisplay { reporter: reporter.as_ref().ok() });
         println!("    {RESTART_ID:>WIDTH$}: {restart_id}");
@@ -1017,7 +1030,13 @@ mod tests {
                     snapshot.push(
                         format_args!("CASE: {name}"),
                         stdout,
-                        ReporterErrorDisplay { err },
+                        ReporterErrorDisplay {
+                            restart_id: "12345678-1234-1234-1234-123456789abc"
+                                .parse()
+                                .unwrap(),
+                            ena: Ena(42),
+                            err,
+                        },
                     );
                 }
             }
