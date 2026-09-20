@@ -37,7 +37,7 @@ termination: Exited(0)
 stdout:
 GROUP    ZONE                         ver UPDATED              REASON                         
 internal control-plane.oxide.internal 1   <REDACTED_TIMESTAMP> rack setup                     
-external oxide-dev.test               2   <REDACTED_TIMESTAMP> create silo: "test-suite-silo" 
+external oxide-dev.test               3   <REDACTED_TIMESTAMP> test removed-names fetch limit 
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
@@ -56,6 +56,59 @@ changes:                    names added: 3, names removed: 0
 +  @                                                  NS   ns1.oxide-dev.test
 +  ns1                                                AAAA ::1
 +  test-suite-silo.sys                                A    127.0.0.1
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
+=============================================
+EXECUTING COMMAND: omdb ["db", "dns", "diff", "external", "2", "--fetch-limit", "2"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+DNS zone:                   oxide-dev.test (External)
+requested version:          2 (created at <REDACTED_TIMESTAMP>)
+version created by Nexus:   ..........<REDACTED_UUID>...........
+version created because:    create silo: "test-suite-silo"
+changes:                    names added: 2, names removed: 0
+
++  @                                                  NS   ns1.oxide-dev.test
++  ns1                                                AAAA ::1
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
+WARN: loading added names: found 2 items (the limit).  There may be more items that were ignored.  Consider overriding with --fetch-limit.
+=============================================
+EXECUTING COMMAND: omdb ["db", "dns", "diff", "external", "3", "--fetch-limit", "2"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+DNS zone:                   oxide-dev.test (External)
+requested version:          3 (created at <REDACTED_TIMESTAMP>)
+version created by Nexus:   test_omdb_success_cases
+version created because:    test removed-names fetch limit
+changes:                    names added: 0, names removed: 2
+
+-  @                                                  NS   ns1.oxide-dev.test
+-  ns1                                                AAAA ::1
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
+WARN: loading removed names: found 2 items (the limit).  There may be more items that were ignored.  Consider overriding with --fetch-limit.
+=============================================
+EXECUTING COMMAND: omdb ["db", "dns", "diff", "external", "3", "--fetch-limit", "3"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+DNS zone:                   oxide-dev.test (External)
+requested version:          3 (created at <REDACTED_TIMESTAMP>)
+version created by Nexus:   test_omdb_success_cases
+version created because:    test removed-names fetch limit
+changes:                    names added: 0, names removed: 2
+
+-  @                                                  NS   ns1.oxide-dev.test
+-  ns1                                                AAAA ::1
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
