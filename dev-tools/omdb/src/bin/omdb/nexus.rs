@@ -3667,9 +3667,6 @@ impl fmt::Display for EreporterStatusTotalsDisplay<'_> {
 }
 
 mod ereporter_status_fields {
-    pub const TOTAL_NEW_EREPORTS: &str = "new ereports ingested:";
-    pub const TOTAL_HTTP_REQUESTS: &str = "HTTP requests sent:";
-
     pub const EREPORTS_RECEIVED: &str = "total ereports received:";
     pub const NEW_EREPORTS: &str = "  new ereports ingested:";
     pub const HTTP_REQUESTS: &str = "total HTTP requests sent:";
@@ -3683,12 +3680,11 @@ mod ereporter_status_fields {
     pub const SPS_FOUND: &str = "SPs found via ignition:";
     pub const SPS_NOT_PRESENT: &str = "SPs not present:";
     pub const WIDTH: usize = super::const_max_len(&[
-        TOTAL_NEW_EREPORTS,
-        TOTAL_HTTP_REQUESTS,
         EREPORTS_RECEIVED,
         NEW_EREPORTS,
         HTTP_REQUESTS,
         ERRORS,
+        TOTAL_REPORTERS,
         REPORTERS_CONTACTED_SUCCESSFULLY,
         REPORTERS_WITH_EREPORTS,
         REPORTERS_WITHOUT_EREPORTS,
