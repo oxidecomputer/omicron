@@ -11,6 +11,9 @@ use dropshot::Method;
 use expectorate::assert_contents;
 use gateway_client::ClientInfo as _;
 use http::StatusCode;
+use nexus_db_model::DnsGroup;
+use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
 use nexus_test_utils::background::activate_background_task;
 use nexus_test_utils::background::run_blueprint_rendezvous;
 use nexus_test_utils::wait_for_producer;
@@ -256,6 +259,27 @@ async fn test_omdb_success_cases() {
     run_blueprint_rendezvous(&cptestctx.lockstep_client).await;
     run_blueprint_rendezvous(&cptestctx.lockstep_client).await;
 
+    // Update DNS to remove some names so that we can later verify the
+    // removed-names limit.
+    let datastore = cptestctx.server.server_context().nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.clone(), datastore.clone());
+    let mut update = DnsVersionUpdateBuilder::new(
+        DnsGroup::External,
+        "test removed-names fetch limit".to_string(),
+        "test_omdb_success_cases".to_string(),
+    );
+    update.remove_name("@".to_string()).unwrap();
+    update.remove_name("ns1".to_string()).unwrap();
+    datastore
+        .dns_update_from_version(
+            &opctx,
+            update,
+            nexus_db_model::Generation::try_from(2).unwrap(),
+        )
+        .await
+        .unwrap();
+
     let mut output = String::new();
 
     let invocations: &[&[&str]] = &[
@@ -277,6 +301,9 @@ async fn test_omdb_success_cases() {
         &["db", "disks", "list"],
         &["db", "dns", "show"],
         &["db", "dns", "diff", "external", "2"],
+        &["db", "dns", "diff", "external", "2", "--fetch-limit", "2"],
+        &["db", "dns", "diff", "external", "3", "--fetch-limit", "2"],
+        &["db", "dns", "diff", "external", "3", "--fetch-limit", "3"],
         &["db", "dns", "names", "external", "2"],
         &["db", "instances"],
         &["db", "sleds"],

@@ -5687,8 +5687,8 @@ async fn cmd_db_dns_diff(
             .select(DnsName::as_select())
             .load_async(&*datastore.pool_connection_for_tests().await?)
             .await
-            .context("loading added names")?;
-        check_limit(&added, limit, || "loading removed names");
+            .context("loading removed names")?;
+        check_limit(&removed, limit, || "loading removed names");
         println!(
             "changes:                    names added: {}, names removed: {}",
             added.len(),
