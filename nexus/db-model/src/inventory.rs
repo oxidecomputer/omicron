@@ -55,7 +55,7 @@ use nexus_db_schema::schema::{
 use nexus_types::inventory::HostPhase1ActiveSlot;
 use nexus_types::inventory::{
     self, Caboose, CockroachStatus, Collection, InternalDnsGenerationStatus,
-    NvmeFirmware, PowerState, PsuSlot, RotPage, RotSlot, TimeSync,
+    NvmeFirmware, PowerState, PsuDevice, PsuSlot, RotPage, RotSlot, TimeSync,
 };
 use omicron_common::disk::DatasetName;
 use omicron_common::update::OmicronInstallManifestSource;
@@ -2385,6 +2385,35 @@ impl From<InvFmdResource> for FmdResource {
     }
 }
 
+// See [`nexus_types::inventory::PsuDevice`].
+impl_enum_type!(
+    InvPsuDeviceEnum:
+
+    #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
+    pub enum InvPsuDevice;
+
+    Mwocp68 => b"mwocp68"
+    Mwocp67 => b"mwocp67"
+);
+
+impl From<PsuDevice> for InvPsuDevice {
+    fn from(value: PsuDevice) -> Self {
+        match value {
+            PsuDevice::Mwocp68 => Self::Mwocp68,
+            PsuDevice::Mwocp67 => Self::Mwocp67,
+        }
+    }
+}
+
+impl From<InvPsuDevice> for PsuDevice {
+    fn from(value: InvPsuDevice) -> Self {
+        match value {
+            InvPsuDevice::Mwocp68 => Self::Mwocp68,
+            InvPsuDevice::Mwocp67 => Self::Mwocp67,
+        }
+    }
+}
+
 // See [`nexus_types::inventory::PsuSlot`].
 impl_enum_type!(
     InvPsuSlotEnum:
@@ -2440,22 +2469,68 @@ pub struct InvPowerShelfPsu {
     pub psc_baseboard_id: Uuid,
     pub location: InvPsuSlot,
     pub presence: SpComponentPresence,
-
-    /// Will probably be 'mwocp68' or 'mwocp67'; if it isn't, we have a new
-    /// power shelf that nobody told me about!
-    // XXX(eliza): perhaps this should be an enum?
-    pub device_type: String,
+    pub device: InvPsuDevice,
 
     // PMBus VPD fields
     pub mfr_id: Option<String>,
     pub mfr_model: Option<String>,
-    pub mfr_revision: Option<String>,
+    pub firmware_rev: Option<String>,
     pub mfr_location: Option<String>,
     pub mfr_date: Option<String>,
     pub mfr_serial: Option<String>,
 
     /// present iff the VPD fields aren't, null otherwise.
     pub vpd_error: Option<String>,
+}
+
+impl TryFrom<InvPowerShelfPsu> for inventory::Psu {
+    type Error = anyhow::Error;
+
+    fn try_from(row: InvPowerShelfPsu) -> Result<Self> {
+        let time_collected = row.time_collected;
+        let slot = row.location.into();
+        let presence = row.presence.into();
+        let device = row.device.into();
+        let (vpd, source) = match row {
+            InvPowerShelfPsu {
+                source,
+                mfr_id: Some(mfr_id),
+                mfr_model: Some(mfr_model),
+                firmware_rev: Some(firmware_rev),
+                mfr_location: Some(mfr_location),
+                mfr_date: Some(mfr_date),
+                mfr_serial: Some(mfr_serial),
+                vpd_error: None,
+                ..
+            } => {
+                let vpd = inventory::PsuIdentity {
+                    mfr_id,
+                    mfr_model,
+                    firmware_rev,
+                    mfr_location,
+                    mfr_date,
+                    mfr_serial,
+                };
+                (Ok(vpd), source)
+            }
+            InvPowerShelfPsu {
+                source,
+                vpd_error: Some(error),
+                mfr_id: None,
+                mfr_model: None,
+                firmware_rev: None,
+                mfr_location: None,
+                mfr_date: None,
+                mfr_serial: None,
+                ..
+            } => (Err(error), source),
+            _ => bail!(
+                "inv_power_shelf_psu row violates vpd_result_valid constraint",
+            ),
+        };
+
+        Ok(Self { time_collected, source, slot, presence, device, vpd })
+    }
 }
 
 // See [`gateway_types::component::SpComponentPresence`].

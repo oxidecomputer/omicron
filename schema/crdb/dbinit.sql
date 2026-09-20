@@ -5589,6 +5589,12 @@ CREATE TYPE IF NOT EXISTS omicron.public.inv_psu_slot AS ENUM (
     'PSU5'
 );
 
+-- PSU device types, as reported by the power shelf controller.
+CREATE TYPE IF NOT EXISTS omicron.public.inv_psu_device AS ENUM (
+    'mwocp68',
+    'mwocp67'
+);
+
 -- inventory table for power supply units (PSUs) in a power shelf
 CREATE TABLE IF NOT EXISTS omicron.public.inv_power_shelf_psu (
     -- where this observation came from
@@ -5609,19 +5615,16 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_power_shelf_psu (
     -- the SP-reported presence value for this PSU.
     presence omicron.public.sp_component_presence NOT NULL,
 
-    -- device type reported by Hubris (the value of the 'device' field in the
-    -- SP's inventory response). this will be either 'mwocp68' or 'mwocp67',
-    -- unless we have added a new kind of rectifier and nobody told me about it.
-    --
-    -- TODO(eliza): perhaps this should be an enum as well?
-    device_type TEXT NOT NULL,
+    -- PSU device reported by Hubris (the value of the 'device' field in the SP's
+    -- inventory response).
+    device omicron.public.inv_psu_device NOT NULL,
 
     -- PMBus vital product data reported by the PSU. information reported by the
     -- PSU. these fields are present when the VPD was collected successfully,
     -- and are null if it was not.
     mfr_id TEXT,
     mfr_model TEXT,
-    mfr_revision TEXT,
+    firmware_rev TEXT,
     mfr_location TEXT,
     mfr_date TEXT,
     mfr_serial TEXT,
@@ -5635,7 +5638,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_power_shelf_psu (
             vpd_error IS NULL
             AND mfr_id IS NOT NULL
             AND mfr_model IS NOT NULL
-            AND mfr_revision IS NOT NULL
+            AND firmware_rev IS NOT NULL
             AND mfr_location IS NOT NULL
             AND mfr_date IS NOT NULL
             AND mfr_serial IS NOT NULL
@@ -5643,7 +5646,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_power_shelf_psu (
             vpd_error IS NOT NULL
             AND mfr_id IS NULL
             AND mfr_model IS NULL
-            AND mfr_revision IS NULL
+            AND firmware_rev IS NULL
             AND mfr_location IS NULL
             AND mfr_date IS NULL
             AND mfr_serial IS NULL

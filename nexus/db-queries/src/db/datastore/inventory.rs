@@ -60,6 +60,9 @@ use nexus_db_model::InvOmicronSledConfigZone;
 use nexus_db_model::InvOmicronSledConfigZoneExternalIp;
 use nexus_db_model::InvOmicronSledConfigZoneNic;
 use nexus_db_model::InvPhysicalDisk;
+use nexus_db_model::InvPowerShelfPsu;
+use nexus_db_model::InvPsuDevice;
+use nexus_db_model::InvPsuSlot;
 use nexus_db_model::InvRootOfTrust;
 use nexus_db_model::InvRotPage;
 use nexus_db_model::InvServiceProcessor;
@@ -73,6 +76,7 @@ use nexus_db_model::InvSvcEnabledNotOnlineService;
 use nexus_db_model::InvZpool;
 use nexus_db_model::RotImageError;
 use nexus_db_model::SledRole;
+use nexus_db_model::SpComponentPresence as DbSpComponentPresence;
 use nexus_db_model::SpType;
 use nexus_db_model::SqlU16;
 use nexus_db_model::SqlU32;
@@ -91,16 +95,22 @@ use nexus_db_schema::enums::HwM2SlotEnum;
 use nexus_db_schema::enums::HwPowerStateEnum;
 use nexus_db_schema::enums::HwRotSlotEnum;
 use nexus_db_schema::enums::InvConfigReconcilerStatusKindEnum;
+use nexus_db_schema::enums::InvPsuDeviceEnum;
+use nexus_db_schema::enums::InvPsuSlotEnum;
 use nexus_db_schema::enums::InvSledUpdateDispositionEnum;
 use nexus_db_schema::enums::InvZoneManifestSourceEnum;
 use nexus_db_schema::enums::RotImageErrorEnum;
 use nexus_db_schema::enums::RotPageWhichEnum;
 use nexus_db_schema::enums::SledRoleEnum;
+use nexus_db_schema::enums::SpComponentPresenceEnum;
 use nexus_db_schema::enums::SpTypeEnum;
 use nexus_types::inventory::CockroachStatus;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::InternalDnsGenerationStatus;
 use nexus_types::inventory::PhysicalDiskFirmware;
+use nexus_types::inventory::PowerShelf;
+use nexus_types::inventory::Psu;
+use nexus_types::inventory::PsuIdentity;
 use nexus_types::inventory::SledAgent;
 use nexus_types::inventory::TimeSync;
 use omicron_common::api::external::Error;
@@ -793,6 +803,156 @@ impl DataStore {
                         _hubris_archive_id,
                         _power_state,
                     ) = sp_dsl::inv_service_processor::all_columns();
+                }
+            }
+
+            // Insert rows for the PSUs reported by power shelf controllers.
+            {
+                use nexus_db_schema::schema::hw_baseboard_id::dsl as baseboard_dsl;
+                use nexus_db_schema::schema::inv_power_shelf_psu::dsl as psu_dsl;
+
+                for shelf in &collection.power_shelves {
+                    let PowerShelf {
+                        psc_baseboard_id,
+                        slot: _,
+                        psus,
+                    } = shelf;
+                    for psu in psus {
+                        let Psu {
+                            time_collected,
+                            source,
+                            slot,
+                            presence,
+                            device,
+                            vpd,
+                        } = psu;
+                        let (
+                            mfr_id,
+                            mfr_model,
+                            firmware_rev,
+                            mfr_location,
+                            mfr_date,
+                            mfr_serial,
+                            vpd_error,
+                        ) = match vpd {
+                            Ok(PsuIdentity {
+                                mfr_id,
+                                mfr_model,
+                                firmware_rev,
+                                mfr_location,
+                                mfr_date,
+                                mfr_serial,
+                            }) => (
+                                Some(mfr_id.clone()),
+                                Some(mfr_model.clone()),
+                                Some(firmware_rev.clone()),
+                                Some(mfr_location.clone()),
+                                Some(mfr_date.clone()),
+                                Some(mfr_serial.clone()),
+                                None,
+                            ),
+                            Err(error) => (
+                                None,
+                                None,
+                                None,
+                                None,
+                                None,
+                                None,
+                                Some(error.clone()),
+                            ),
+                        };
+                        let selection =
+                            nexus_db_schema::schema::hw_baseboard_id::table
+                                .select((
+                                    db_collection_id.into_sql::<
+                                        diesel::sql_types::Uuid,
+                                    >(),
+                                    time_collected.to_owned().into_sql::<
+                                        diesel::sql_types::Timestamptz,
+                                    >(),
+                                    source
+                                        .clone()
+                                        .into_sql::<diesel::sql_types::Text>(),
+                                    baseboard_dsl::id,
+                                    InvPsuSlot::from(*slot)
+                                        .into_sql::<InvPsuSlotEnum>(),
+                                    DbSpComponentPresence::from(*presence)
+                                        .into_sql::<SpComponentPresenceEnum>(),
+                                    InvPsuDevice::from(*device)
+                                        .into_sql::<InvPsuDeviceEnum>(),
+                                    mfr_id.into_sql::<Nullable<
+                                        diesel::sql_types::Text,
+                                    >>(),
+                                    mfr_model.into_sql::<Nullable<
+                                        diesel::sql_types::Text,
+                                    >>(),
+                                    firmware_rev.into_sql::<Nullable<
+                                        diesel::sql_types::Text,
+                                    >>(),
+                                    mfr_location.into_sql::<Nullable<
+                                        diesel::sql_types::Text,
+                                    >>(),
+                                    mfr_date.into_sql::<Nullable<
+                                        diesel::sql_types::Text,
+                                    >>(),
+                                    mfr_serial.into_sql::<Nullable<
+                                        diesel::sql_types::Text,
+                                    >>(),
+                                    vpd_error.into_sql::<Nullable<
+                                        diesel::sql_types::Text,
+                                    >>(),
+                                ))
+                                .filter(
+                                    baseboard_dsl::part_number.eq(
+                                        psc_baseboard_id.part_number.clone(),
+                                    ),
+                                )
+                                .filter(
+                                    baseboard_dsl::serial_number.eq(
+                                        psc_baseboard_id.serial_number.clone(),
+                                    ),
+                                );
+
+                        let _ = diesel::insert_into(
+                            nexus_db_schema::schema::inv_power_shelf_psu::table,
+                        )
+                        .values(selection)
+                        .into_columns((
+                            psu_dsl::inv_collection_id,
+                            psu_dsl::time_collected,
+                            psu_dsl::source,
+                            psu_dsl::psc_baseboard_id,
+                            psu_dsl::location,
+                            psu_dsl::presence,
+                            psu_dsl::device,
+                            psu_dsl::mfr_id,
+                            psu_dsl::mfr_model,
+                            psu_dsl::firmware_rev,
+                            psu_dsl::mfr_location,
+                            psu_dsl::mfr_date,
+                            psu_dsl::mfr_serial,
+                            psu_dsl::vpd_error,
+                        ))
+                        .execute_async(&conn)
+                        .await?;
+
+                        let (
+                            _inv_collection_id,
+                            _time_collected,
+                            _source,
+                            _psc_baseboard_id,
+                            _location,
+                            _presence,
+                            _device,
+                            _mfr_id,
+                            _mfr_model,
+                            _firmware_rev,
+                            _mfr_location,
+                            _mfr_date,
+                            _mfr_serial,
+                            _vpd_error,
+                        ) = psu_dsl::inv_power_shelf_psu::all_columns();
+                    }
                 }
             }
 
@@ -2311,6 +2471,7 @@ impl DataStore {
         struct NumRowsDeleted {
             ncollections: usize,
             nsps: usize,
+            npower_shelf_psus: usize,
             nhost_phase1_active_slots: usize,
             nhost_phase1_flash_hashes: usize,
             nrots: usize,
@@ -2355,6 +2516,7 @@ impl DataStore {
         let NumRowsDeleted {
             ncollections,
             nsps,
+            npower_shelf_psus,
             nhost_phase1_active_slots,
             nhost_phase1_flash_hashes,
             nrots,
@@ -2404,6 +2566,16 @@ impl DataStore {
                             dsl::inv_collection
                                 .filter(dsl::id.eq(db_collection_id)),
                         )
+                        .execute_async(&conn)
+                        .await?
+                    };
+
+                    // Remove rows for power shelf PSUs.
+                    let npower_shelf_psus = {
+                        use nexus_db_schema::schema::inv_power_shelf_psu::dsl;
+                        diesel::delete(dsl::inv_power_shelf_psu.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
                         .execute_async(&conn)
                         .await?
                     };
@@ -2784,6 +2956,7 @@ impl DataStore {
                     Ok(NumRowsDeleted {
                         ncollections,
                         nsps,
+                        npower_shelf_psus,
                         nhost_phase1_active_slots,
                         nhost_phase1_flash_hashes,
                         nrots,
@@ -2834,6 +3007,7 @@ impl DataStore {
             "collection_id" => collection_id.to_string(),
             "ncollections" => ncollections,
             "nsps" => nsps,
+            "npower_shelf_psus" => npower_shelf_psus,
             "nhost_phase1_active_slots" => nhost_phase1_active_slots,
             "nhost_phase1_flash_hashes" => nhost_phase1_flash_hashes,
             "nrots" => nrots,
@@ -3037,6 +3211,35 @@ impl DataStore {
                 }));
             }
             sps
+        };
+
+        let power_shelf_psu_rows: Vec<InvPowerShelfPsu> = {
+            use nexus_db_schema::schema::inv_power_shelf_psu::dsl;
+
+            let mut rows = Vec::new();
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
+            while let Some(p) = paginator.next() {
+                let batch = paginated_multicolumn(
+                    dsl::inv_power_shelf_psu,
+                    (dsl::psc_baseboard_id, dsl::location),
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvPowerShelfPsu::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator = p.found_batch(&batch, &|row| {
+                    (row.psc_baseboard_id, row.location)
+                });
+                rows.extend(batch);
+            }
+            rows
         };
 
         let rots: BTreeMap<_, _> = {
@@ -3377,6 +3580,7 @@ impl DataStore {
             .keys()
             .chain(rots.keys())
             .cloned()
+            .chain(power_shelf_psu_rows.iter().map(|psu| psu.psc_baseboard_id))
             .chain(sled_agent_rows.iter().filter_map(|s| s.hw_baseboard_id))
             .collect();
         // Fetch the corresponding baseboard records.
@@ -3440,6 +3644,53 @@ impl DataStore {
                     })
             })
             .collect::<Result<BTreeMap<_, _>, _>>()?;
+
+        let mut power_shelves = IdOrdMap::new();
+        for row in power_shelf_psu_rows {
+            let psc_baseboard_id = row.psc_baseboard_id;
+            let psc =
+                baseboards_by_id.get(&psc_baseboard_id).ok_or_else(|| {
+                    Error::internal_error(
+                        "missing PSC baseboard that we should have fetched",
+                    )
+                })?;
+            let sp = sps.get(psc.as_ref()).ok_or_else(|| {
+                Error::internal_error(format!(
+                    "missing SP entry for PSC baseboard {psc:?}"
+                ))
+            })?;
+            if sp.sp_type != nexus_types::inventory::SpType::Power {
+                return Err(Error::InternalError {
+                    internal_message: format!(
+                        "expected SP entry for baseboard {psc:?} to be a power \
+                        shelf controller, but found: {sp:?}"
+                    ),
+                });
+            }
+
+            let psu = nexus_types::inventory::Psu::try_from(row).map_err(
+                |error| Error::InternalError {
+                    internal_message: format!(
+                        "invalid PSU row for PSC {psc:?}: {error:#}",
+                    ),
+                },
+            )?;
+
+            power_shelves
+                .entry(psc.as_ref())
+                .or_insert_with(|| PowerShelf {
+                    psc_baseboard_id: psc.clone(),
+                    slot: sp.sp_slot,
+                    psus: IdOrdMap::with_capacity(6),
+                })
+                .psus
+                .insert_unique(psu)
+                .map_err(|error| Error::InternalError {
+                    internal_message: format!(
+                        "duplicate PSU row for power shelf {psc:?}: {error}",
+                    ),
+                })?;
+        }
 
         // Fetch the host phase 1 active slots found.
         let host_phase_1_active_slots = {
@@ -5147,6 +5398,7 @@ impl DataStore {
             rots,
             cabooses_found,
             rot_pages_found,
+            power_shelves,
             sled_agents,
             clickhouse_keeper_cluster_membership,
             cockroach_status,
@@ -6083,6 +6335,13 @@ mod test {
             assert_eq!(0, count);
             let count =
                 schema::inv_service_processor::dsl::inv_service_processor
+                    .select(diesel::dsl::count_star())
+                    .first_async::<i64>(&conn)
+                    .await
+                    .unwrap();
+            assert_eq!(0, count);
+            let count =
+                schema::inv_power_shelf_psu::dsl::inv_power_shelf_psu
                     .select(diesel::dsl::count_star())
                     .first_async::<i64>(&conn)
                     .await
