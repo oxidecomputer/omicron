@@ -41,35 +41,66 @@ pub(super) async fn cmd_network_config_reconciler_status(
         .await
         .context("failed to fetch reconciler status")?
         .into_inner();
-    println!("{}", ScrimletReconcilersStatusDisplay(&status));
+    let mut out = String::new();
+    write_block(&mut out, ScrimletReconcilersStatusDisplay(&status))
+        .expect("writing to a String always succeeds");
+    print!("{out}");
     Ok(())
 }
 
 // Indentation level for each sub-section.
 const INDENT: &str = "    ";
 
-// Helper for writing a sequence of lines where the last item does _not_ end in
-// a newline. This is used in many `Display` impls below to avoid extra blank
-// lines between sections.
-//
-// `write_one` should print each item without a trailing newline; this function
-// will add one for all items except the last.
+/// A `Write` wrapper which remembers whether the writer is at the start of a
+/// line.
+struct NewlineTerminated<W> {
+    inner: W,
+    at_line_start: bool,
+}
+
+impl<W: fmt::Write> NewlineTerminated<W> {
+    /// Create a new wrapper assuming the writer is already at a line start.
+    fn new(inner: W) -> Self {
+        Self { inner, at_line_start: true }
+    }
+
+    fn finish_line(&mut self) -> fmt::Result {
+        if self.at_line_start { Ok(()) } else { self.write_char('\n') }
+    }
+}
+
+impl<W: fmt::Write> fmt::Write for NewlineTerminated<W> {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        self.inner.write_str(s)?;
+        if !s.is_empty() {
+            self.at_line_start = s.ends_with('\n');
+        }
+        Ok(())
+    }
+}
+
+/// Write a nested `Display` adapter and leave exactly one newline after it,
+/// whether or not the adapter ended a line itself.
+fn write_block<W: fmt::Write>(f: W, block: impl fmt::Display) -> fmt::Result {
+    let mut f = NewlineTerminated::new(f);
+    write!(f, "{block}")?;
+    f.finish_line()
+}
+
+/// Write a sequence of items, each ending in exactly one newline.
 fn write_lines<W: fmt::Write, I, T, F>(
-    f: &mut W,
+    f: W,
     items: I,
     mut write_one: F,
 ) -> fmt::Result
 where
     I: IntoIterator<Item = T>,
-    F: FnMut(&mut W, T) -> fmt::Result,
+    F: FnMut(&mut NewlineTerminated<W>, T) -> fmt::Result,
 {
-    let mut first = true;
+    let mut f = NewlineTerminated::new(f);
     for item in items {
-        if !first {
-            writeln!(f)?;
-        }
-        first = false;
-        write_one(f, item)?;
+        write_one(&mut f, item)?;
+        f.finish_line()?;
     }
     Ok(())
 }
@@ -142,7 +173,13 @@ impl fmt::Display for ScrimletReconcilersStatusDisplay<'_> {
                 ];
                 write_lines(f, reconcilers, |f, (name, displayable)| {
                     writeln!(f, "{name} reconciler:")?;
-                    write!(IndentWriter::new(INDENT, f), "{displayable}")
+                    write_block(
+                        IndentWriter::new(INDENT, &mut *f),
+                        displayable,
+                    )?;
+                    // Add a blank line between the top-level sections,
+                    // including after the last one.
+                    writeln!(f)
                 })
             }
         }
@@ -166,18 +203,16 @@ where
     fn fmt(&self, mut f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let ReconcilerStatus { current_status, last_completion } = self.0;
         writeln!(f, "current status:")?;
-        writeln!(
+        write_block(
             IndentWriter::new(INDENT, &mut f),
-            "{}",
             ReconcilerCurrentStatusDisplay(&current_status),
         )?;
 
         if let Some(last_completion) = last_completion {
             writeln!(f, "last completion:")?;
-            writeln!(
+            write_block(
                 IndentWriter::new(INDENT, f),
-                "{}",
-                ReconciliationCompletedStatusDisplay(&last_completion)
+                ReconciliationCompletedStatusDisplay(&last_completion),
             )?;
         } else {
             writeln!(f, "last completion: none")?;
@@ -380,9 +415,8 @@ impl fmt::Display for DpdReconcilerStatusDisplay<'_> {
     fn fmt(&self, mut f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let DpdReconcilerStatus { port_settings_status, nat_status } = self.0;
         writeln!(f, "port settings:")?;
-        writeln!(
+        write_block(
             IndentWriter::new(INDENT, &mut f),
-            "{}",
             DpdPortReconcilerStatusDisplay(&port_settings_status),
         )?;
         writeln!(f, "NAT:")?;
@@ -443,12 +477,13 @@ impl fmt::Display for DpdPortReconcilerStatusDisplay<'_> {
                     writeln!(f, "clear failures: none")?;
                 } else {
                     writeln!(f, "clear failures:")?;
-                    let mut f = IndentWriter::new(INDENT, &mut f);
-                    for DpdPortOperationFailure { port_id, error } in
-                        clear_failures
-                    {
-                        writeln!(f, "* {port_id}: {error}")?;
-                    }
+                    write_lines(
+                        &mut IndentWriter::new(INDENT, &mut f),
+                        clear_failures,
+                        |f, DpdPortOperationFailure { port_id, error }| {
+                            write!(f, "* {port_id}: {error}")
+                        },
+                    )?;
                 }
                 if apply_failures.is_empty() {
                     write!(f, "apply failures: none")?;
@@ -609,16 +644,14 @@ impl fmt::Display for MgdReconcilerStatusDisplay<'_> {
             static_routes_status,
         } = self.0;
         writeln!(f, "static routes:")?;
-        writeln!(
+        write_block(
             IndentWriter::new(INDENT, &mut f),
-            "{}",
-            MgdStaticRouteReconcilerStatusDisplay(&static_routes_status)
+            MgdStaticRouteReconcilerStatusDisplay(&static_routes_status),
         )?;
         writeln!(f, "BGP:")?;
-        writeln!(
+        write_block(
             IndentWriter::new(INDENT, &mut f),
-            "{}",
-            MgdBgpReconcilerStatusDisplay(&bgp_status)
+            MgdBgpReconcilerStatusDisplay(&bgp_status),
         )?;
         writeln!(f, "BFD:")?;
         write!(
@@ -683,11 +716,13 @@ impl fmt::Display for MgdBfdReconcilerStatusDisplay<'_> {
                     writeln!(f, "remove failures: none")?;
                 } else {
                     writeln!(f, "remove failures:")?;
-                    let mut f = IndentWriter::new(INDENT, &mut f);
-                    for MgdBfdOperationFailure { peer, error } in remove_failure
-                    {
-                        writeln!(f, "* {peer}: {error}")?;
-                    }
+                    write_lines(
+                        &mut IndentWriter::new(INDENT, &mut f),
+                        remove_failure,
+                        |f, MgdBfdOperationFailure { peer, error }| {
+                            write!(f, "* {peer}: {error}")
+                        },
+                    )?;
                 }
                 if add_failure.is_empty() {
                     write!(f, "add failures: none")?;
@@ -788,10 +823,9 @@ impl fmt::Display for MgdBgpReconcilerStatusDisplay<'_> {
                 writeln!(f, "reconciliation completed")?;
                 let mut f = IndentWriter::new(INDENT, f);
                 writeln!(f, "did change max paths: {did_change_max_paths}")?;
-                writeln!(
-                    f,
-                    "{}",
-                    MgdBgpReconcilerStatusOpCountDisplay(&counts)
+                write_block(
+                    &mut f,
+                    MgdBgpReconcilerStatusOpCountDisplay(&counts),
                 )?;
                 if errors.is_empty() {
                     write!(f, "errors: none")?;
