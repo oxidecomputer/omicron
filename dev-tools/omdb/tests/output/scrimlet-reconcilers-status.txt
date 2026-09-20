@@ -1,0 +1,57 @@
+dpd reconciler:
+    current status:
+        idle
+    last completion:
+        activation reason: first execution on start
+        activation count: 1
+        completed at: 1970-01-01T00:00:00.000Z
+        ran for: 1.5s
+        detailed status:
+            port settings:
+                reconciliation completed
+                    clear failures: none
+                    apply failures:
+                        * qsfp0: no
+                        * qsfp1: nope
+            NAT:
+                reconciliation completed
+                    zones unchanged:
+                        * zone 00000000-0000-0000-0000-000000000000NAT entries removed:
+                        * 192.0.2.1 (ports 0-16383)
+                        * 192.0.2.3 (ports 0-16383)NAT entries created:
+                        * zone 00000000-0000-0000-0000-000000000000: 192.0.2.2 (ports 0-16383)remove failures: none
+                    create failures: none
+
+mgd reconciler:
+    current status:
+        idle
+    last completion:
+        activation reason: first execution on start
+        activation count: 1
+        completed at: 1970-01-01T00:00:00.000Z
+        ran for: 1.5s
+        detailed status:
+            static routes:
+                failed to generate reconciliation plan: nope
+            BGP:
+                failed to read current bgp config: no
+            BFD:
+                failed to read current bfd peers: never
+
+lldpd reconciler:
+    current status:
+        idle
+    last completion:
+        activation reason: first execution on start
+        activation count: 1
+        completed at: 1970-01-01T00:00:00.000Z
+        ran for: 1.5s
+        detailed status:
+            successfully reconciled 2 ports:
+                * qsfp0: Enabled
+                * qsfp1: Disabled
+
+uplinkd reconciler:
+    current status:
+        idle
+    last completion: none

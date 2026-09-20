@@ -904,6 +904,7 @@ impl fmt::Display for MgdStaticRouteReconcilerStatusDisplay<'_> {
 mod tests {
     use super::*;
     use omicron_uuid_kinds::OmicronZoneUuid;
+    use sled_agent_types::early_networking::LldpAdminStatus;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
     use std::net::IpAddr;
@@ -946,6 +947,116 @@ mod tests {
         expectorate::assert_contents(
             "tests/output/dpd-nat-reconciler-status.txt",
             &DpdNatReconcilerStatusDisplay(&status).to_string(),
+        );
+    }
+
+    #[test]
+    fn test_scrimlet_reconcilers_status_display() {
+        let status = ScrimletReconcilersStatus::Running {
+            dpd_reconciler: ReconcilerStatus {
+                current_status: ReconcilerCurrentStatus::Idle,
+                last_completion: Some(Box::new(
+                    ReconciliationCompletedStatus {
+                        activation_reason: ReconcilerActivationReason::Startup,
+                        completed_at_time: chrono::DateTime::from_timestamp(
+                            0, 0,
+                        )
+                        .expect("the epoch is a valid timestamp"),
+                        ran_for: Duration::from_millis(1500),
+                        activation_count: 1,
+                        status: DpdReconcilerStatus {
+                            port_settings_status:
+                                DpdPortReconcilerStatus::Complete {
+                                    unchanged: BTreeSet::new(),
+                                    cleared: BTreeSet::new(),
+                                    clear_failures: Vec::new(),
+                                    applied: BTreeSet::new(),
+                                    apply_failures: vec![
+                                        DpdPortOperationFailure {
+                                            port_id: "qsfp0".to_string(),
+                                            error: "no".to_string(),
+                                        },
+                                        DpdPortOperationFailure {
+                                            port_id: "qsfp1".to_string(),
+                                            error: "nope".to_string(),
+                                        },
+                                    ],
+                                },
+                            nat_status: DpdNatReconcilerStatus::Complete {
+                                unchanged: BTreeSet::from([
+                                    OmicronZoneUuid::nil(),
+                                ]),
+                                removed: vec![nat_entry(1), nat_entry(3)],
+                                remove_failures: Vec::new(),
+                                created: BTreeMap::from([(
+                                    OmicronZoneUuid::nil(),
+                                    nat_entry(2),
+                                )]),
+                                create_failures: BTreeMap::new(),
+                            },
+                        },
+                    },
+                )),
+            },
+            mgd_reconciler: ReconcilerStatus {
+                current_status: ReconcilerCurrentStatus::Idle,
+                last_completion: Some(Box::new(
+                    ReconciliationCompletedStatus {
+                        activation_reason: ReconcilerActivationReason::Startup,
+                        completed_at_time: chrono::DateTime::from_timestamp(
+                            0, 0,
+                        )
+                        .expect("the epoch is a valid timestamp"),
+                        ran_for: Duration::from_millis(1500),
+                        activation_count: 1,
+                        status: MgdReconcilerStatus {
+                            static_routes_status:
+                                MgdStaticRouteReconcilerStatus::FailedGeneratingPlan(
+                                    "nope".to_string(),
+                                ),
+                            bgp_status:
+                                MgdBgpReconcilerStatus::FailedReadingBgpConfig(
+                                    "no".to_string(),
+                                ),
+                            bfd_status:
+                                MgdBfdReconcilerStatus::FailedReadingBfdPeers(
+                                    "never".to_string(),
+                                ),
+                        },
+                    },
+                )),
+            },
+            uplinkd_reconciler: ReconcilerStatus {
+                current_status: ReconcilerCurrentStatus::Idle,
+                last_completion: None,
+            },
+            lldpd_reconciler: ReconcilerStatus {
+                current_status: ReconcilerCurrentStatus::Idle,
+                last_completion: Some(Box::new(
+                    ReconciliationCompletedStatus {
+                        activation_reason: ReconcilerActivationReason::Startup,
+                        completed_at_time: chrono::DateTime::from_timestamp(
+                            0, 0,
+                        )
+                        .expect("the epoch is a valid timestamp"),
+                        ran_for: Duration::from_millis(1500),
+                        activation_count: 1,
+                        status: LldpdReconcilerStatus::Reconciled {
+                            ports: BTreeMap::from([
+                                ("qsfp0".to_string(), LldpAdminStatus::Enabled),
+                                (
+                                    "qsfp1".to_string(),
+                                    LldpAdminStatus::Disabled,
+                                ),
+                            ]),
+                        },
+                    },
+                )),
+            },
+        };
+        expectorate::assert_contents(
+            "tests/output/scrimlet-reconcilers-status.txt",
+            &ScrimletReconcilersStatusDisplay(&status).to_string(),
         );
     }
 }
