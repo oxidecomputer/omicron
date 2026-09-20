@@ -265,7 +265,7 @@ where
             "completed at: {}",
             datetime_rfc3339_concise(completed_at_time)
         )?;
-        writeln!(f, "ran for {ran_for:?}")?;
+        writeln!(f, "ran for: {ran_for:?}")?;
         writeln!(f, "detailed status:")?;
         write!(IndentWriter::new(INDENT, f), "{}", status.display())
     }
@@ -519,7 +519,7 @@ impl fmt::Display for DpdNatReconcilerStatusDisplay<'_> {
                 if removed.is_empty() {
                     writeln!(f, "NAT entries removed: none")?;
                 } else {
-                    writeln!(f, "NAT entries removed")?;
+                    writeln!(f, "NAT entries removed:")?;
                     write_lines(
                         &mut IndentWriter::new(INDENT, &mut f),
                         removed,
@@ -533,7 +533,7 @@ impl fmt::Display for DpdNatReconcilerStatusDisplay<'_> {
                 if created.is_empty() {
                     writeln!(f, "NAT entries created: none")?;
                 } else {
-                    writeln!(f, "NAT entries created")?;
+                    writeln!(f, "NAT entries created:")?;
                     write_lines(
                         &mut IndentWriter::new(INDENT, &mut f),
                         created,
