@@ -1076,9 +1076,8 @@ mod test {
         }
 
         // All we really need to check here is that we're reporting the right
-        // SPs, RoTs, and cabooses.  The actual SP data, RoT data, and caboose
-        // data comes straight from MGS.  And proper handling of that data is
-        // tested in the builder.
+        // SPs, RoTs, and cabooses. The component data comes straight from MGS,
+        // and proper handling of that data is tested in the builder.
         swrite!(s, "\nSPs:\n");
         for (bb, _) in &collection.sps {
             swrite!(
@@ -1174,6 +1173,49 @@ mod test {
                 }
                 ConfigReconcilerInventoryStatus::Idle { .. } => {
                     swriteln!(s, "    reconciler task idle");
+                }
+            }
+        }
+
+        swrite!(s, "\npower shelves found:\n");
+        for shelf in &collection.power_shelves {
+            swriteln!(
+                s,
+                "    shelf {} PSC baseboard part {:?} serial {:?}",
+                shelf.slot,
+                shelf.psc_baseboard_id.part_number,
+                shelf.psc_baseboard_id.serial_number,
+            );
+            for psu in &shelf.psus {
+                swriteln!(
+                    s,
+                    "        {}: presence {:?} device {}",
+                    psu.slot,
+                    psu.presence,
+                    psu.device,
+                );
+                match &psu.vpd {
+                    Ok(nexus_types::inventory::PsuIdentity {
+                        mfr_id,
+                        mfr_model,
+                        firmware_rev,
+                        mfr_location,
+                        mfr_date,
+                        mfr_serial,
+                    }) => {
+                        swriteln!(
+                            s,
+                            "            VPD: mfr_model {mfr_model:?} \
+                              mfr_serial {mfr_serial:?} \
+                              firmware_rev {firmware_rev:?} \
+                              mfr_id {mfr_id:?} \
+                              mfr_location {mfr_location:?} \
+                              mfr_date {mfr_date:?}"
+                        );
+                    }
+                    Err(error) => {
+                        swriteln!(s, "            VPD: error: {error}");
+                    }
                 }
             }
         }

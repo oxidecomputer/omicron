@@ -101,5 +101,7 @@ rot pages found:
 
 sled agents found:
 
+power shelves found:
+
 errors:
 error: MGS "http://[100::1]:12345": listing ignition targets: Communication Error <<redacted>>
