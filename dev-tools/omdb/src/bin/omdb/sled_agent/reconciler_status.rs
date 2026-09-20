@@ -903,7 +903,10 @@ impl fmt::Display for MgdStaticRouteReconcilerStatusDisplay<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::DateTime;
+    use omicron_test_utils::dev::test_cmds::OutputSnapshot;
     use omicron_uuid_kinds::OmicronZoneUuid;
+    use sled_agent_types::early_networking::LldpAdminStatus;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
     use std::net::IpAddr;
@@ -947,5 +950,250 @@ mod tests {
             "tests/output/dpd-nat-reconciler-status.txt",
             &DpdNatReconcilerStatusDisplay(&status).to_string(),
         );
+    }
+
+    fn peer_ip(last_octet: u8) -> IpAddr {
+        IpAddr::V4(Ipv4Addr::new(198, 51, 100, last_octet))
+    }
+
+    fn port_failure(port_id: &str, error: &str) -> DpdPortOperationFailure {
+        DpdPortOperationFailure {
+            port_id: port_id.to_string(),
+            error: error.to_string(),
+        }
+    }
+
+    fn nat_failure(
+        last_octet: u8,
+        error: &str,
+    ) -> DpdNatReconcilerStatusNatEntryFailure {
+        DpdNatReconcilerStatusNatEntryFailure {
+            entry: nat_entry(last_octet),
+            error: error.to_string(),
+        }
+    }
+
+    fn bfd_failure(last_octet: u8, error: &str) -> MgdBfdOperationFailure {
+        MgdBfdOperationFailure {
+            peer: peer_ip(last_octet),
+            error: error.to_string(),
+        }
+    }
+
+    fn completed<T>(
+        status: T,
+    ) -> Option<Box<ReconciliationCompletedStatus<T>>> {
+        Some(Box::new(ReconciliationCompletedStatus {
+            activation_reason: ReconcilerActivationReason::Startup,
+            completed_at_time: DateTime::from_timestamp(0, 0)
+                .expect("the epoch is a valid timestamp"),
+            ran_for: Duration::from_millis(1500),
+            activation_count: 1,
+            status,
+        }))
+    }
+
+    fn populated_status() -> ScrimletReconcilersStatus {
+        ScrimletReconcilersStatus::Running {
+            dpd_reconciler: ReconcilerStatus {
+                current_status: ReconcilerCurrentStatus::Running(
+                    ReconcilerRunningStatus {
+                        activation_reason:
+                            ReconcilerActivationReason::PeriodicTimer,
+                        started_at_time: DateTime::from_timestamp(60, 0)
+                            .expect("one minute after the epoch is valid"),
+                        running_for: Duration::from_millis(250),
+                    },
+                ),
+                last_completion: completed(DpdReconcilerStatus {
+                    port_settings_status: DpdPortReconcilerStatus::Complete {
+                        unchanged: BTreeSet::from([
+                            "qsfp0".to_string(),
+                            "qsfp1".to_string(),
+                        ]),
+                        cleared: BTreeSet::from(["qsfp2".to_string()]),
+                        clear_failures: vec![
+                            port_failure("qsfp3", "clear failed"),
+                            port_failure("qsfp4", "clear failed again"),
+                        ],
+                        applied: BTreeSet::from(["qsfp5".to_string()]),
+                        apply_failures: vec![
+                            port_failure("qsfp6", "no"),
+                            port_failure("qsfp7", "nope"),
+                        ],
+                    },
+                    nat_status: DpdNatReconcilerStatus::Complete {
+                        unchanged: BTreeSet::from([
+                            OmicronZoneUuid::from_u128(1),
+                            OmicronZoneUuid::from_u128(2),
+                        ]),
+                        removed: vec![nat_entry(1), nat_entry(3)],
+                        remove_failures: vec![
+                            nat_failure(4, "remove failed"),
+                            nat_failure(5, "remove failed again"),
+                        ],
+                        created: BTreeMap::from([(
+                            OmicronZoneUuid::from_u128(3),
+                            nat_entry(2),
+                        )]),
+                        create_failures: BTreeMap::from([
+                            (
+                                OmicronZoneUuid::from_u128(4),
+                                nat_failure(6, "create failed"),
+                            ),
+                            (
+                                OmicronZoneUuid::from_u128(5),
+                                nat_failure(7, "create failed again"),
+                            ),
+                        ]),
+                    },
+                }),
+            },
+            mgd_reconciler: ReconcilerStatus {
+                current_status: ReconcilerCurrentStatus::Idle,
+                last_completion: completed(MgdReconcilerStatus {
+                    static_routes_status:
+                        MgdStaticRouteReconcilerStatus::Complete {
+                            unchanged: 4,
+                            delete_v4_result: Err("delete failed".to_string()),
+                            add_v4_result: Ok(2),
+                            delete_v6_result: Ok(3),
+                            add_v6_result: Ok(5),
+                        },
+                    bgp_status: MgdBgpReconcilerStatus::Complete {
+                        counts: MgdBgpReconcilerStatusOpCount {
+                            routers_created: 1,
+                            numbered_peers_updated: 2,
+                            numbered_peers_deleted: 1,
+                            ..Default::default()
+                        },
+                        did_change_max_paths: true,
+                        errors: vec![
+                            "bgp failed".to_string(),
+                            "bgp failed again".to_string(),
+                        ],
+                    },
+                    bfd_status: MgdBfdReconcilerStatus::Complete {
+                        unchanged: BTreeSet::from([peer_ip(1), peer_ip(2)]),
+                        remove_success: vec![peer_ip(3)],
+                        remove_failure: vec![
+                            bfd_failure(4, "remove failed"),
+                            bfd_failure(5, "remove failed again"),
+                        ],
+                        add_success: vec![peer_ip(6)],
+                        add_failure: vec![
+                            bfd_failure(7, "add failed"),
+                            bfd_failure(8, "add failed again"),
+                        ],
+                    },
+                }),
+            },
+            uplinkd_reconciler: ReconcilerStatus {
+                current_status: ReconcilerCurrentStatus::Idle,
+                last_completion: completed(
+                    UplinkdReconcilerStatus::Reconciled {
+                        ports: BTreeMap::from([
+                            (
+                                "qsfp0".to_string(),
+                                vec![
+                                    "192.0.2.10/24".to_string(),
+                                    "2001:db8::10/64".to_string(),
+                                ],
+                            ),
+                            (
+                                "qsfp1".to_string(),
+                                vec!["192.0.2.11/24".to_string()],
+                            ),
+                        ]),
+                    },
+                ),
+            },
+            lldpd_reconciler: ReconcilerStatus {
+                current_status: ReconcilerCurrentStatus::Idle,
+                last_completion: completed(LldpdReconcilerStatus::Reconciled {
+                    ports: BTreeMap::from([
+                        ("qsfp0".to_string(), LldpAdminStatus::Enabled),
+                        ("qsfp1".to_string(), LldpAdminStatus::Disabled),
+                    ]),
+                }),
+            },
+        }
+    }
+
+    fn empty_status() -> ScrimletReconcilersStatus {
+        ScrimletReconcilersStatus::Running {
+            dpd_reconciler: ReconcilerStatus {
+                current_status: ReconcilerCurrentStatus::Idle,
+                last_completion: completed(DpdReconcilerStatus {
+                    port_settings_status: DpdPortReconcilerStatus::Complete {
+                        unchanged: BTreeSet::new(),
+                        cleared: BTreeSet::new(),
+                        clear_failures: Vec::new(),
+                        applied: BTreeSet::new(),
+                        apply_failures: Vec::new(),
+                    },
+                    nat_status: DpdNatReconcilerStatus::Complete {
+                        unchanged: BTreeSet::new(),
+                        removed: Vec::new(),
+                        remove_failures: Vec::new(),
+                        created: BTreeMap::new(),
+                        create_failures: BTreeMap::new(),
+                    },
+                }),
+            },
+            mgd_reconciler: ReconcilerStatus {
+                current_status: ReconcilerCurrentStatus::Idle,
+                last_completion: completed(MgdReconcilerStatus {
+                    static_routes_status:
+                        MgdStaticRouteReconcilerStatus::Complete {
+                            unchanged: 0,
+                            delete_v4_result: Ok(0),
+                            add_v4_result: Ok(0),
+                            delete_v6_result: Ok(0),
+                            add_v6_result: Ok(0),
+                        },
+                    bgp_status: MgdBgpReconcilerStatus::Complete {
+                        counts: MgdBgpReconcilerStatusOpCount::default(),
+                        did_change_max_paths: false,
+                        errors: Vec::new(),
+                    },
+                    bfd_status: MgdBfdReconcilerStatus::Complete {
+                        unchanged: BTreeSet::new(),
+                        remove_success: Vec::new(),
+                        remove_failure: Vec::new(),
+                        add_success: Vec::new(),
+                        add_failure: Vec::new(),
+                    },
+                }),
+            },
+            uplinkd_reconciler: ReconcilerStatus {
+                current_status: ReconcilerCurrentStatus::Idle,
+                last_completion: None,
+            },
+            lldpd_reconciler: ReconcilerStatus {
+                current_status: ReconcilerCurrentStatus::Idle,
+                last_completion: completed(LldpdReconcilerStatus::Reconciled {
+                    ports: BTreeMap::new(),
+                }),
+            },
+        }
+    }
+
+    #[test]
+    fn test_scrimlet_reconcilers_status_display() {
+        let cases = [
+            ("all fields populated", populated_status()),
+            ("all fields empty", empty_status()),
+        ];
+        let mut snapshot = OutputSnapshot::new();
+        for (name, status) in cases {
+            snapshot.push(
+                format_args!("CASE: {name}"),
+                ScrimletReconcilersStatusDisplay(&status),
+                "",
+            );
+        }
+        snapshot
+            .assert_contents("tests/output/scrimlet-reconcilers-status.txt");
     }
 }
