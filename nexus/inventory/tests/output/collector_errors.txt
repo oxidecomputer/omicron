@@ -101,5 +101,7 @@ rot pages found:
 
 sled agents found:
 
+power shelves found:
+
 errors:
 error: MGS "http://[100::1]:12345": determining gateway's rack ID: Communication Error <<redacted>>
