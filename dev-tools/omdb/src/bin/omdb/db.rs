@@ -8184,7 +8184,7 @@ impl Display for VmmDisplay<'_> {
         }
         writeln!(f, "{indent}{CREATED:>width$}: {time_created}")?;
         if let Some(deleted) = time_deleted {
-            writeln!(f, "{indent}{DELETED:width$}: {deleted}")?;
+            writeln!(f, "{indent}{DELETED:>width$}: {deleted}")?;
         }
         writeln!(f, "{indent}{STATE:>width$}: {state}")?;
         if let Some(reason) = failure_reason {
