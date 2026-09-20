@@ -73,6 +73,7 @@ define_enums! {
     InstanceStateEnum => "instance_state_v2",
     InstanceIntendedStateEnum => "instance_intended_state",
     InvConfigReconcilerStatusKindEnum => "inv_config_reconciler_status_kind",
+    InvPsuDeviceEnum => "inv_psu_device",
     InvPsuSlotEnum => "inv_psu_slot",
     InvSledUpdateDispositionEnum => "inv_sled_update_disposition",
     InvSvcEnabledNotOnlineStateEnum => "inv_svc_enabled_not_online_state",
