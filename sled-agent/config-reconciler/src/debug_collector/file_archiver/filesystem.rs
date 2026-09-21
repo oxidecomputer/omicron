@@ -191,7 +191,9 @@ mod test {
     use super::FileLister;
     use super::Filename;
     use super::FilesystemLister;
-    use crate::debug_collector::file_archiver::test_helpers::TestDir;
+    use omicron_test_utils::dev::TestTempDir;
+    use omicron_test_utils::dev::test_setup_log;
+    use slog::Logger;
 
     #[test]
     fn test_filename() {
@@ -226,8 +228,8 @@ mod test {
     // Returns a temp dir containing a regular file ("regular.txt"), a
     // subdirectory ("subdir"), and a symlink ("link" -> "regular.txt"), to
     // allow verifying that listing functions filter by entry type.
-    fn setup_mixed_dir() -> TestDir {
-        let dir = TestDir::new();
+    fn setup_mixed_dir(log: &Logger) -> TestTempDir {
+        let dir = TestTempDir::new(log);
         std::fs::write(dir.path().join("regular.txt"), "contents")
             .expect("failed to write regular file");
         std::fs::create_dir(dir.path().join("subdir"))
@@ -240,7 +242,8 @@ mod test {
     /// Tests filtering on file type: regular files
     #[test]
     fn test_list_files_type_filtering() {
-        let dir = setup_mixed_dir();
+        let logctx = test_setup_log("lsit_files_type_filtering");
+        let dir = setup_mixed_dir(&logctx.log);
         let lister = FilesystemLister;
         let mut results: Vec<Filename> = lister
             .list_files(dir.path())
@@ -252,13 +255,15 @@ mod test {
             results,
             [Filename::try_from("regular.txt".to_owned()).unwrap()]
         );
-        dir.cleanup();
+        dir.cleanup_successful();
+        logctx.cleanup_successful();
     }
 
     /// Tests filtering on file type: directories
     #[test]
     fn test_list_directories_type_filtering() {
-        let dir = setup_mixed_dir();
+        let logctx = test_setup_log("list_directories_type_filtering");
+        let dir = setup_mixed_dir(&logctx.log);
         let lister = FilesystemLister;
         let mut results: Vec<Filename> = lister
             .list_directories(dir.path())
@@ -267,14 +272,16 @@ mod test {
             .collect();
         results.sort();
         assert_eq!(results, [Filename::try_from("subdir".to_owned()).unwrap()]);
-        dir.cleanup();
+        dir.cleanup_successful();
+        logctx.cleanup_successful();
     }
 
     /// Verifies that listing a non-existent directory produces an empty listing
     /// rather than an error.
     #[test]
     fn test_list_nonexistent_dir() {
-        let dir = TestDir::new();
+        let logctx = test_setup_log("list_nonexistent_dir");
+        let dir = TestTempDir::new(&logctx.log);
         let path = dir.path().join("nonexistent");
         let lister = FilesystemLister;
 
@@ -292,13 +299,15 @@ mod test {
              got: {results:?}",
         );
 
-        dir.cleanup();
+        dir.cleanup_successful();
+        logctx.cleanup_successful();
     }
 
     /// Verify basic behavior of `FilesystemLister::file_exists()`.
     #[test]
     fn test_file_exists() {
-        let dir = TestDir::new();
+        let logctx = test_setup_log("file_exists");
+        let dir = TestTempDir::new(&logctx.log);
         let file_path = dir.path().join("file.txt");
         std::fs::write(&file_path, "hello").expect("failed to write file");
         let lister = FilesystemLister;
@@ -311,18 +320,21 @@ mod test {
             !lister.file_exists(&nonexistent).expect("file_exists failed"),
             "expected false for nonexistent file",
         );
-        dir.cleanup();
+        dir.cleanup_successful();
+        logctx.cleanup_successful();
     }
 
     /// Verify basic behavior of `FilesystemLister::file_mtime()`.
     #[test]
     fn test_file_mtime() {
-        let dir = TestDir::new();
+        let logctx = test_setup_log("file_mtime");
+        let dir = TestTempDir::new(&logctx.log);
         let file_path = dir.path().join("file.txt");
         std::fs::write(&file_path, "hello").expect("failed to write file");
         let lister = FilesystemLister;
         let mtime = lister.file_mtime(&file_path).expect("file_mtime failed");
         assert!(mtime.is_some(), "expected Some mtime for existing file",);
-        dir.cleanup();
+        dir.cleanup_successful();
+        logctx.cleanup_successful();
     }
 }

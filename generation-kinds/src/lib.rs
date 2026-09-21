@@ -40,8 +40,15 @@ impl_typed_generation_kinds! {
     },
     kinds = {
         Alert = {},
+        ArtifactConfig = {},
+        InstanceState = {},
+        InstanceUpdater = {},
+        Nexus = {},
         SagaAdopt = {},
         SagaReassignment = {},
+        SledConfig = {},
         SupportBundle = {},
+        TargetRelease = {},
+        UpdateDisposition = {},
     },
 }

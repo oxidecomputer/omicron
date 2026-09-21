@@ -31,10 +31,6 @@ clickhouse-admin-types.workspace = true
 derive_more.workspace = true
 dice-verifier = { workspace = true, features = ["ipcc", "mock"] }
 display-error-chain.workspace = true
-# XXX NOTE this is due to https://github.com/oxidecomputer/omicron/issues/9704
-# This is the R20 dpd client
-# dpd-client.workspace = true
-dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "cc0c307c617f2988aafdca4e3bd35ea178b64801" }
 dropshot.workspace = true
 flate2.workspace = true
 flume.workspace = true
@@ -90,7 +86,6 @@ sled-agent-api.workspace = true
 sled-agent-bootstrap-common.workspace = true
 sled-agent-client.workspace = true
 sled-agent-config-reconciler.workspace = true
-sled-agent-early-networking.workspace = true
 sled-agent-health-monitor.workspace = true
 sled-agent-measurements.workspace = true
 sled-agent-multirack-join.workspace = true
@@ -155,11 +150,13 @@ hyper.workspace = true
 omicron-test-utils.workspace = true
 progenitor.workspace = true
 pretty_assertions.workspace = true
+proptest.workspace = true
 regress.workspace = true
 reqwest = { workspace = true, features = ["blocking"] }
 subprocess.workspace = true
 slog-async.workspace = true
 slog-term.workspace = true
+test-strategy.workspace = true
 tokio-stream.workspace = true
 tokio-util.workspace = true
 zfs-test-harness.workspace = true

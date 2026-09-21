@@ -49,6 +49,3 @@ scuffle = { workspace = true, features = ["testing"] }
 serde_json.workspace = true
 sled-agent-types = { workspace = true, features = ["testing"] }
 test-strategy.workspace = true
-
-[features]
-testing = []

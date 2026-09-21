@@ -1,4 +1,13 @@
 WITH
+  sled_bp_available
+    AS (
+      SELECT
+        1
+      FROM
+        rendezvous_sled_bp_availability
+      WHERE
+        sled_id = $1 AND bp_availability = 'available'
+    ),
   sled_has_space
     AS (
       SELECT
@@ -6,22 +15,22 @@ WITH
       FROM
         sled LEFT JOIN sled_resource_vmm ON sled_resource_vmm.sled_id = sled.id
       WHERE
-        sled.id = $1
+        sled.id = $2
         AND sled.time_deleted IS NULL
         AND sled.sled_policy = 'in_service'
         AND sled.sled_state = 'active'
       GROUP BY
         sled.id
       HAVING
-        COALESCE(sum(CAST(sled_resource_vmm.hardware_threads AS INT8)), 0) + $2
+        COALESCE(sum(CAST(sled_resource_vmm.hardware_threads AS INT8)), 0) + $3
         <= sled.usable_hardware_threads
-        AND COALESCE(sum(CAST(sled_resource_vmm.rss_ram AS INT8)), 0) + $3
+        AND COALESCE(sum(CAST(sled_resource_vmm.rss_ram AS INT8)), 0) + $4
           <= sled.usable_physical_ram
-        AND COALESCE(sum(CAST(sled_resource_vmm.reservoir_ram AS INT8)), 0) + $4
+        AND COALESCE(sum(CAST(sled_resource_vmm.reservoir_ram AS INT8)), 0) + $5
           <= sled.reservoir_size
     ),
   our_aa_groups
-    AS (SELECT group_id FROM anti_affinity_group_instance_membership WHERE instance_id = $5),
+    AS (SELECT group_id FROM anti_affinity_group_instance_membership WHERE instance_id = $6),
   other_aa_instances
     AS (
       SELECT
@@ -31,7 +40,7 @@ WITH
         JOIN our_aa_groups ON
             anti_affinity_group_instance_membership.group_id = our_aa_groups.group_id
       WHERE
-        instance_id != $6
+        instance_id != $7
     ),
   banned_instances
     AS (
@@ -54,7 +63,7 @@ WITH
         banned_instances
         JOIN sled_resource_vmm ON sled_resource_vmm.instance_id = banned_instances.instance_id
     ),
-  our_a_groups AS (SELECT group_id FROM affinity_group_instance_membership WHERE instance_id = $7),
+  our_a_groups AS (SELECT group_id FROM affinity_group_instance_membership WHERE instance_id = $8),
   other_a_instances
     AS (
       SELECT
@@ -63,7 +72,7 @@ WITH
         affinity_group_instance_membership
         JOIN our_a_groups ON affinity_group_instance_membership.group_id = our_a_groups.group_id
       WHERE
-        instance_id != $8
+        instance_id != $9
     ),
   required_instances
     AS (
@@ -91,10 +100,11 @@ WITH
       SELECT
         1
       WHERE
-        CAST(IF((EXISTS(SELECT 1 FROM sled_has_space)), 'TRUE', 'SLED_HAS_SPACE') AS BOOL)
+        CAST(IF((EXISTS(SELECT 1 FROM sled_bp_available)), 'TRUE', 'SLED_BP_AVAILABLE') AS BOOL)
+        AND CAST(IF((EXISTS(SELECT 1 FROM sled_has_space)), 'TRUE', 'SLED_HAS_SPACE') AS BOOL)
         AND CAST(
             IF(
-              (NOT (EXISTS(SELECT 1 FROM banned_sleds WHERE sled_id = $9))),
+              (NOT (EXISTS(SELECT 1 FROM banned_sleds WHERE sled_id = $10))),
               'TRUE',
               'BANNED_SLEDS'
             )
@@ -104,7 +114,7 @@ WITH
             IF(
               (
                 (
-                  EXISTS(SELECT 1 FROM required_sleds WHERE sled_id = $10)
+                  EXISTS(SELECT 1 FROM required_sleds WHERE sled_id = $11)
                   OR NOT EXISTS(SELECT 1 FROM required_sleds)
                 )
               ),
@@ -118,6 +128,6 @@ INSERT
 INTO
   sled_resource_vmm (id, sled_id, hardware_threads, rss_ram, reservoir_ram, instance_id, state)
 SELECT
-  $11, $12, $13, $14, $15, $16, $17
+  $12, $13, $14, $15, $16, $17, $18
 WHERE
   EXISTS(SELECT 1 FROM insert_valid)

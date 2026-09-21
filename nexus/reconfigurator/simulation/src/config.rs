@@ -8,7 +8,7 @@ use iddqd::IdOrdMap;
 use indexmap::IndexSet;
 use nexus_types::deployment::{Blueprint, BlueprintTarget};
 use omicron_common::api::external::Name;
-use omicron_generation_kinds::Generation;
+use omicron_generation_kinds::NexusGeneration;
 use omicron_uuid_kinds::OmicronZoneUuid;
 
 use crate::{
@@ -44,7 +44,7 @@ pub struct SimConfig {
 
     /// The Nexus generation to treat as the active set for the purposes of
     /// simulating handoff between updates.
-    active_nexus_zone_generation: Generation,
+    active_nexus_zone_generation: NexusGeneration,
 
     /// Explicit override for active nexus zones.
     /// When set, overrides generation-based inference.
@@ -64,7 +64,7 @@ impl SimConfig {
                 .collect(),
             external_dns_zone_name: String::from("oxide.example"),
             num_nexus: None,
-            active_nexus_zone_generation: Generation::new(),
+            active_nexus_zone_generation: NexusGeneration::new(),
             explicit_active_nexus_zones: None,
             explicit_not_yet_nexus_zones: None,
         }
@@ -86,7 +86,7 @@ impl SimConfig {
     }
 
     #[inline]
-    pub fn active_nexus_zone_generation(&self) -> Generation {
+    pub fn active_nexus_zone_generation(&self) -> NexusGeneration {
         self.active_nexus_zone_generation
     }
 
@@ -144,7 +144,7 @@ impl SimConfigBuilder {
     }
 
     #[inline]
-    pub fn active_nexus_zone_generation(&self) -> Generation {
+    pub fn active_nexus_zone_generation(&self) -> NexusGeneration {
         self.inner.config.active_nexus_zone_generation()
     }
 
@@ -204,7 +204,10 @@ impl SimConfigBuilder {
         self.log.push(SimConfigLogEntry::SetNumNexus(num_nexus));
     }
 
-    pub fn set_active_nexus_zone_generation(&mut self, generation: Generation) {
+    pub fn set_active_nexus_zone_generation(
+        &mut self,
+        generation: NexusGeneration,
+    ) {
         self.inner.set_active_nexus_zone_generation(generation);
         self.log
             .push(SimConfigLogEntry::SetActiveNexusZoneGeneration(generation));
@@ -244,7 +247,7 @@ pub enum SimConfigLogEntry {
     SetSiloNames(IndexSet<Name>),
     SetExternalDnsZoneName(String),
     SetNumNexus(u16),
-    SetActiveNexusZoneGeneration(Generation),
+    SetActiveNexusZoneGeneration(NexusGeneration),
     SetExplicitActiveNexusZones(Option<BTreeSet<OmicronZoneUuid>>),
     SetExplicitNotYetNexusZones(Option<BTreeSet<OmicronZoneUuid>>),
     Wipe,
@@ -326,7 +329,7 @@ pub struct LoadSerializedConfigResult {
     pub silo_names: Vec<Name>,
 
     /// The generation of active Nexus zones loaded.
-    pub active_nexus_generation: Generation,
+    pub active_nexus_generation: NexusGeneration,
 }
 
 impl fmt::Display for LoadSerializedConfigResult {
@@ -405,7 +408,7 @@ impl SimConfigBuilderInner {
                      generation from serialized state: \
                      {message} (using default of 1)"
                 ));
-                Generation::new()
+                NexusGeneration::new()
             }
         };
         self.set_active_nexus_zone_generation(active_nexus_generation);
@@ -445,7 +448,10 @@ impl SimConfigBuilderInner {
         self.config.num_nexus = Some(num_nexus);
     }
 
-    fn set_active_nexus_zone_generation(&mut self, generation: Generation) {
+    fn set_active_nexus_zone_generation(
+        &mut self,
+        generation: NexusGeneration,
+    ) {
         self.config.active_nexus_zone_generation = generation;
     }
 
@@ -472,14 +478,14 @@ fn determine_active_nexus_generation(
     active_nexus_zones: &BTreeSet<OmicronZoneUuid>,
     target_blueprint: &BlueprintTarget,
     all_blueprints: &IdOrdMap<Blueprint>,
-) -> Result<Generation, String> {
+) -> Result<NexusGeneration, String> {
     // Real systems always have at least one active Nexus zone, but our
     // simulated system has some cases where we have none at all. We'll never be
     // able to find the generation matching an empty set, but because this is a
     // weird edge case that only applies to simulation, it's also fine to
     // default to "the initial generation".
     if active_nexus_zones.is_empty() {
-        return Ok(Generation::new());
+        return Ok(NexusGeneration::new());
     }
 
     let Some(blueprint) = all_blueprints.get(&target_blueprint.target_id)

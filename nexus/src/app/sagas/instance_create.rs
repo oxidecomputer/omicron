@@ -27,6 +27,7 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::{Error, InternalContext};
+use omicron_generation_kinds::InstanceStateGeneration;
 use omicron_uuid_kinds::{
     AntiAffinityGroupUuid, GenericUuid, InstanceUuid, MulticastGroupUuid,
 };
@@ -772,6 +773,14 @@ async fn create_default_primary_network_interface(
         .vpc_subnet_name(&internal_default_name)
         .fetch()
         .await
+        .map_err(|error| match error {
+            Error::ObjectNotFound { .. } => Error::non_resourcetype_not_found(
+                "this project has no VPC or subnet named \"default\", so a \
+                 default network interface cannot be created; pass explicit \
+                 network interface parameters or create the VPC/subnet first",
+            ),
+            error => error,
+        })
         .map_err(saga_action_failed)?;
     let interface = db::model::IncompleteNetworkInterface::new_instance(
         *interface_id,
@@ -1446,9 +1455,11 @@ async fn sic_move_to_stopped(
     // of date.
     let new_state = db::model::InstanceRuntimeState {
         nexus_state: db::model::InstanceState::NoVmm,
-        generation: db::model::Generation::from(
-            instance_record.state_generation.next(),
-        ),
+        generation: InstanceStateGeneration::from(
+            instance_record.state_generation,
+        )
+        .next()
+        .into(),
         ..instance_record.runtime()
     };
 

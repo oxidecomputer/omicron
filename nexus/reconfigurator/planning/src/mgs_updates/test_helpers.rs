@@ -26,7 +26,7 @@ use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::SpType;
 use nexus_types::tuf_repo::TufRepoDescription;
-use omicron_generation_kinds::Generation;
+use omicron_generation_kinds::SledConfigGeneration;
 use omicron_uuid_kinds::SledUuid;
 use sled_agent_types::disk::M2Slot;
 use sled_agent_types::inventory::BootImageHeader;
@@ -36,6 +36,7 @@ use sled_agent_types::inventory::ConfigReconcilerInventory;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
 use sled_agent_types::inventory::FmdInventory;
 use sled_agent_types::inventory::HostPhase2DesiredSlots;
+use sled_agent_types::inventory::InstanceManagerStatus;
 use sled_agent_types::inventory::Inventory;
 use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
 use sled_agent_types::inventory::OmicronSledConfig;
@@ -1248,7 +1249,7 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                     )
                     .unwrap();
                 let fake_sled_config = OmicronSledConfig {
-                    generation: Generation::new(),
+                    generation: SledConfigGeneration::new(),
                     disks: IdOrdMap::new(),
                     datasets: IdOrdMap::new(),
                     zones: IdOrdMap::new(),
@@ -1321,6 +1322,8 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                             ledgered_sled_config: Some(fake_sled_config),
                             reconciler_status:
                                 ConfigReconcilerInventoryStatus::NotYetRun,
+                            instance_manager_status:
+                                InstanceManagerStatus::available(0),
                             file_source_resolver:
                                 OmicronFileSourceResolverInventory::new_fake(),
                             smf_services_enabled_not_online:

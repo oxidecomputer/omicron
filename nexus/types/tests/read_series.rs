@@ -23,6 +23,7 @@ use nexus_types::deployment::BlueprintSource;
 use nexus_types::deployment::ReconfiguratorStateInput;
 use nexus_types::deployment::UnstableReconfiguratorState;
 use omicron_test_utils::dev::test_setup_log;
+use omicron_uuid_kinds::BlueprintUuid;
 use reconfigurator_cli::test_utils::ReconfiguratorCliTestState;
 use slog_error_chain::InlineErrorChain;
 
@@ -169,6 +170,76 @@ fn overlapping_inputs_order_independent() {
             result.warnings,
         );
     }
+}
+
+/// Verifies that we show the warning about an intended blueprint being set when
+/// and only when we're supposed to.
+#[test]
+fn intended_blueprint_warning() {
+    // This follows an approach similar to
+    // `overlapping_inputs_order_independent()`.
+    let state = base_state("multi_load_intended_blueprint");
+    assert!(
+        state.blueprints.len() >= 2,
+        "base_state should have parent + planner-generated child"
+    );
+    let child_target = state.target_blueprint.target_id;
+    let child_blueprint = state
+        .blueprints
+        .iter()
+        .find(|b| b.id == child_target)
+        .expect("target blueprint present in state");
+    let parent_target = child_blueprint
+        .parent_blueprint_id
+        .expect("planner output has a parent blueprint");
+
+    // If the first state has the intended blueprint, that's not warning-worthy.
+    let mut state_a = state.clone();
+    state_a.target_blueprint.target_id = parent_target;
+    state_a.intended_target_blueprint = Some(child_target);
+    let mut state_b = state.clone();
+    state_b.target_blueprint.target_id = child_target;
+    let bytes_a = serialize(&state_a);
+    let bytes_b = serialize(&state_b);
+
+    let result = UnstableReconfiguratorState::read_series(vec![
+        input("b.out", &bytes_b),
+        input("a.out", &bytes_a),
+    ])
+    .unwrap_or_else(|err| panic!("read_series failed: {}", err_chain(&err)));
+    assert_eq!(result.latest, "b.out");
+    assert_eq!(state_b, result.state,);
+    assert!(
+        result.warnings.is_empty(),
+        "unexpected warnings: {:?}",
+        result.warnings,
+    );
+
+    // Now let's add a new state with an intended blueprint target in it.  Being
+    // the final one, this should generate a warning.
+    let bp3_id = BlueprintUuid::new_v4();
+    let mut bp3 = child_blueprint.clone();
+    bp3.id = bp3_id;
+    bp3.parent_blueprint_id = Some(child_target);
+    bp3.time_created = chrono::Utc::now();
+    let mut state_c = state_b.clone();
+    state_c.blueprints.insert_unique(bp3).expect("new id is unique");
+    state_c.intended_target_blueprint = Some(bp3_id);
+    let bytes_c = serialize(&state_c);
+
+    let result = UnstableReconfiguratorState::read_series(vec![
+        input("c.out", &bytes_c),
+        input("b.out", &bytes_b),
+        input("a.out", &bytes_a),
+    ])
+    .unwrap_or_else(|err| panic!("read_series failed: {}", err_chain(&err)));
+    assert_eq!(result.latest, "c.out");
+    assert_eq!(state_c, result.state,);
+    println!("warnings: {:?}", result.warnings);
+    assert_eq!(result.warnings.len(), 1);
+    assert!(
+        result.warnings[0].to_string().contains("intended_target_blueprint")
+    );
 }
 
 /// Verifies that with two inputs that share a collection id but differ in
@@ -413,8 +484,6 @@ fn target_missing_from_its_own_file() {
 /// regardless of the order in which inputs were passed.
 #[test]
 fn multiple_latest_candidates() {
-    use omicron_uuid_kinds::BlueprintUuid;
-
     let state = base_state("multi_load_multiple_latest_candidates");
 
     // B1 is the planner-generated blueprint from the base state.  It was the

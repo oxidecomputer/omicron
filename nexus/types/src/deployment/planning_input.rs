@@ -37,7 +37,7 @@ use omicron_common::address::Ipv6Range;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::policy::SINGLE_NODE_CLICKHOUSE_REDUNDANCY;
-use omicron_generation_kinds::Generation;
+use omicron_generation_kinds::{Generation, TargetReleaseGeneration};
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -936,6 +936,11 @@ pub enum SledFilter {
     QueryDuringInventory,
 
     /// Sleds on which reservations can be created.
+    ///
+    /// This only considers the status of the sled in the `sled` table. VMM
+    /// placement also requires the sled to be marked available in the
+    /// `rendezvous_sled_bp_availability` table, reflecting the blueprint's
+    /// update disposition for that sled (RFD 666).
     ReservationCreate,
 
     /// Sleds which should be sent OPTE V2P mappings and Routing rules.
@@ -1576,7 +1581,7 @@ impl OximeterReadPolicy {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TufRepoPolicy {
     /// The generation of the target release for the TUF repo.
-    pub target_release_generation: Generation,
+    pub target_release_generation: TargetReleaseGeneration,
 
     /// A description of the target release.
     pub description: TargetReleaseDescription,
@@ -1590,7 +1595,7 @@ impl TufRepoPolicy {
     #[inline]
     pub fn initial() -> Self {
         Self {
-            target_release_generation: Generation::new(),
+            target_release_generation: TargetReleaseGeneration::new(),
             description: TargetReleaseDescription::Initial,
         }
     }

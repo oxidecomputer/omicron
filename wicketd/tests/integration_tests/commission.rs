@@ -348,15 +348,15 @@ async fn test_commission_start_update() {
         &ctx,
         "sled 0 reached Running with a running step",
         |p| {
-            p.progress.state == UpdateState::Running
+            matches!(p.progress.state, UpdateState::Running { .. })
                 && p.progress.innermost_running_steps().next().is_some()
         },
     )
     .await;
-    assert_eq!(
+    assert!(
+        matches!(entry.progress.state, UpdateState::Running { .. }),
+        "sled 0 rolls up to Running: {:?}",
         entry.progress.state,
-        UpdateState::Running,
-        "sled 0 rolls up to Running",
     );
     assert!(
         !entry.progress.steps.is_empty(),

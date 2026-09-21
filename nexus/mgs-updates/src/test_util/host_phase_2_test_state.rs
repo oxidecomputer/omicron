@@ -207,7 +207,7 @@ mod api_impl {
     use omicron_common::api::internal::shared::{
         ResolvedVpcRouteSet, ResolvedVpcRouteState,
     };
-    use omicron_generation_kinds::Generation;
+    use omicron_generation_kinds::SledConfigGeneration;
     use sled_agent_types::artifact::ArtifactConfig;
     use sled_agent_types::artifact::ArtifactCopyFromDepotBody;
     use sled_agent_types::artifact::ArtifactCopyFromDepotResponse;
@@ -245,6 +245,7 @@ mod api_impl {
     use sled_agent_types::inventory::FmdInventory;
     use sled_agent_types::inventory::HostPhase2DesiredContents;
     use sled_agent_types::inventory::HostPhase2DesiredSlots;
+    use sled_agent_types::inventory::InstanceManagerStatus;
     use sled_agent_types::inventory::Inventory;
     use sled_agent_types::inventory::ManifestInventory;
     use sled_agent_types::inventory::MupdateOverrideInventory;
@@ -346,7 +347,7 @@ mod api_impl {
             // The rest of the inventory fields are irrelevant; fill them in
             // with something quasi-reasonable (or empty, if we can).
             let config = OmicronSledConfig {
-                generation: Generation::new(),
+                generation: SledConfigGeneration::new(),
                 disks: IdOrdMap::new(),
                 datasets: IdOrdMap::new(),
                 zones: IdOrdMap::new(),
@@ -385,6 +386,7 @@ mod api_impl {
                     remove_mupdate_override: None,
                     boot_partitions,
                 }),
+                instance_manager_status: InstanceManagerStatus::available(0),
                 fmd: Ok(FmdInventory::default()),
                 file_source_resolver: OmicronFileSourceResolverInventory {
                     zone_manifest: ManifestInventory {

@@ -354,18 +354,15 @@ async fn test_ip_pool_list_dedupe(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(ip_pools[1].identity.id, pool2.id());
 
     // create 3 silos and link
-    let silo1 =
-        create_silo(&client, "silo1", true, SiloIdentityMode::SamlJit).await;
+    let silo1 = create_silo(&client, "silo1", SiloIdentityMode::SamlJit).await;
     link_ip_pool(client, "pool1", &silo1.id(), false).await;
     // linking pool2 here only, just for variety
     link_ip_pool(client, "pool2", &silo1.id(), false).await;
 
-    let silo2 =
-        create_silo(&client, "silo2", true, SiloIdentityMode::SamlJit).await;
+    let silo2 = create_silo(&client, "silo2", SiloIdentityMode::SamlJit).await;
     link_ip_pool(client, "pool1", &silo2.id(), true).await;
 
-    let silo3 =
-        create_silo(&client, "silo3", true, SiloIdentityMode::SamlJit).await;
+    let silo3 = create_silo(&client, "silo3", SiloIdentityMode::SamlJit).await;
     link_ip_pool(client, "pool1", &silo3.id(), true).await;
 
     let ip_pools = get_ip_pools(&client, Some(IpPoolAssignment::Silos)).await;
@@ -424,8 +421,7 @@ async fn test_ip_pool_silo_link(cptestctx: &ControlPlaneTestContext) {
     let assocs_p0 = silos_for_pool(client, "p0").await;
     assert_eq!(assocs_p0.items.len(), 0);
 
-    let silo =
-        create_silo(&client, "my-silo", true, SiloIdentityMode::SamlJit).await;
+    let silo = create_silo(&client, "my-silo", SiloIdentityMode::SamlJit).await;
 
     let silo_pools = pools_for_silo(client, silo.name().as_str()).await;
     assert_eq!(silo_pools.len(), 0);
@@ -653,20 +649,17 @@ async fn test_ip_pool_silo_list_includes_non_discoverable(
     assert_eq!(silos_p0.items.len(), 0);
 
     let silo_disc =
-        create_silo(&client, "silo-disc", true, SiloIdentityMode::SamlJit)
-            .await;
+        create_silo(&client, "silo-disc", SiloIdentityMode::SamlJit).await;
     link_ip_pool(client, "p0", &silo_disc.id(), false).await;
 
-    let silo_non_disc =
-        create_silo(&client, "silo-non-disc", false, SiloIdentityMode::SamlJit)
-            .await;
-    link_ip_pool(client, "p0", &silo_non_disc.id(), false).await;
+    // The default silo is not discoverable
+    link_ip_pool(client, "p0", &DEFAULT_SILO.id(), false).await;
 
     let silos_p0 = silos_for_pool(client, "p0").await;
     assert_eq!(silos_p0.items.len(), 2);
     assert_eq!(
         silos_p0.items.iter().map(|link| link.silo_id).collect::<BTreeSet<_>>(),
-        BTreeSet::from([silo_disc.id(), silo_non_disc.id()]),
+        BTreeSet::from([silo_disc.id(), DEFAULT_SILO.id()]),
     );
 }
 
@@ -684,8 +677,7 @@ async fn test_ip_pool_update_default(cptestctx: &ControlPlaneTestContext) {
     let silos_p1 = silos_for_pool(client, "p1").await;
     assert_eq!(silos_p1.items.len(), 0);
 
-    let silo =
-        create_silo(&client, "my-silo", true, SiloIdentityMode::SamlJit).await;
+    let silo = create_silo(&client, "my-silo", SiloIdentityMode::SamlJit).await;
 
     // put 404s if link doesn't exist yet (is_default: true path)
     let params = IpPoolSiloUpdate { is_default: true };
@@ -836,8 +828,7 @@ async fn test_ip_pool_silos_pagination(cptestctx: &ControlPlaneTestContext) {
     let mut silo_ids = vec![];
     for i in 1..=8 {
         let name = format!("silo-{}", i);
-        let silo =
-            create_silo(&client, &name, true, SiloIdentityMode::SamlJit).await;
+        let silo = create_silo(&client, &name, SiloIdentityMode::SamlJit).await;
         silo_ids.push(silo.id());
         link_ip_pool(client, "p0", &silo.id(), false).await;
     }

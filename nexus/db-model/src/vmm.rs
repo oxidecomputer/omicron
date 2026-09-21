@@ -13,10 +13,12 @@
 //! sled agent or that sled agent will never update (like the sled ID).
 
 use super::{Generation, VmmState};
+use crate::typed_generation::DbTypedGeneration;
 use crate::typed_uuid::DbTypedUuid;
 use crate::{SqlU16, VmmCpuPlatform, VmmFailureReason};
 use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::vmm;
+use omicron_generation_kinds::UpdateDispositionGenerationKind;
 use omicron_uuid_kinds::*;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -73,8 +75,9 @@ pub struct Vmm {
     /// when it was started.
     pub cpu_platform: VmmCpuPlatform,
 
-    /// If this VMM is in the `Failed` state, this field describes why it
-    /// failed. This is `None` for VMMs that are not in the `Failed` state.
+    /// If this VMM is, or has ever been, in the `Failed` state, this field
+    /// describes why it failed. This is `None` for VMMs that have never been in
+    /// the `Failed` state.
     pub failure_reason: Option<VmmFailureReason>,
 
     /// The sled's `update_disposition` generation at which this VMM was marked
@@ -92,7 +95,8 @@ pub struct Vmm {
     /// debugging purposes. During the process to stop VMMs for an update, we
     /// only care if this field is stopped or not. THe field is NULL when its
     /// state has not been modified by an update.
-    pub stop_for_update_disposition_generation: Option<Generation>,
+    pub stop_for_update_disposition_generation:
+        Option<DbTypedGeneration<UpdateDispositionGenerationKind>>,
 }
 
 impl Vmm {

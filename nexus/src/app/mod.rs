@@ -36,6 +36,7 @@ use omicron_common::address::MGS_PORT;
 use omicron_common::address::UnderlaySubnets;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Error;
+use omicron_debug_dropbox::DebugDropbox;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::RackUuid;
 use oximeter_producer::Server as ProducerServer;
@@ -124,6 +125,7 @@ pub(crate) mod sagas;
 // TODO: When referring to API types, we should try to include
 // the prefix unless it is unambiguous.
 
+pub(crate) use self::deployment::BlueprintDebugAction;
 pub(crate) use self::deployment::SetTargetReleaseIntent;
 use crate::app::quiesce::NexusQuiesceHandle;
 pub(crate) use nexus_db_model::MAX_NICS_PER_INSTANCE;
@@ -182,6 +184,9 @@ pub const MAX_SSH_KEYS_PER_INSTANCE: u32 = 100;
 pub const CONTROL_PLANE_STORAGE_BUFFER: ByteCount =
     ByteCount::from_gibibytes_u32(250);
 
+/// Name of the Debug Dropbox producer for Reconfiguator
+pub const DEBUG_DROPBOX_PRODUCER_RECONFIGURATOR: &str = "reconfigurator";
+
 /// Manages an Oxide fleet -- the heart of the control plane
 pub struct Nexus {
     /// uuid for this nexus instance.
@@ -202,8 +207,14 @@ pub struct Nexus {
     /// saga execution coordinator (SEC)
     sagas: Arc<SagaExecutor>,
 
-    /// External dropshot servers
-    external_server: std::sync::Mutex<Option<DropshotServer>>,
+    /// External dropshot servers.
+    ///
+    /// The external API is always served on at least one external address, but
+    /// may be served on more to support IPv4 / IPv6 dual-stack deployments.
+    /// Servers are created, stored, and closed in the order they're defined in
+    /// the provided configuration, with the primary server first, then one
+    /// server for each additional address.
+    external_servers: std::sync::Mutex<Vec<DropshotServer>>,
 
     /// External dropshot server that listens on the internal network to allow
     /// connections from the tech port; see RFD 431.
@@ -273,6 +284,9 @@ pub struct Nexus {
     // https://github.com/oxidecomputer/omicron/issues/3732
     external_dns_servers: Vec<IpAddr>,
 
+    /// Configuration for external HTTP clients.
+    external_http_client_config: nexus_config::ExternalHttpClientConfig,
+
     /// Background task driver
     background_tasks_driver: OnceLock<background::Driver>,
 
@@ -317,6 +331,9 @@ pub struct Nexus {
     /// state of overall Nexus quiesce activity
     quiesce: NexusQuiesceHandle,
 
+    /// dropbox producer for Reconfigurator
+    debug_dropbox_reconfigurator: Arc<omicron_debug_dropbox::Producer>,
+
     /// the underlay subnets (rack and AZ), set once they have been loaded, or
     /// once the rack has been initialized (if RSS has not already finished when
     /// this Nexus process starts).
@@ -338,6 +355,7 @@ impl Nexus {
         producer_registry: &ProducerRegistry,
         config: &NexusConfig,
         authz: Arc<authz::Authz>,
+        debug_dropbox: DebugDropbox,
     ) -> Result<Arc<Nexus>, String> {
         let all_versions = config
             .pkg
@@ -440,12 +458,17 @@ impl Nexus {
                 let native_resolver =
                     qorb_resolver.for_service(ServiceName::OximeterReader);
                 oximeter_db::Client::new_with_resolver(
+                    oximeter_db::User::Reader,
                     native_resolver,
                     "nexus-oximeter-reader",
                     &log,
                 )
             }
-            Some(address) => oximeter_db::Client::new(*address, &log),
+            Some(address) => oximeter_db::Client::new(
+                oximeter_db::User::Reader,
+                *address,
+                &log,
+            ),
         };
 
         // TODO-cleanup We may want to make the populator a first-class
@@ -532,6 +555,18 @@ impl Nexus {
 
         let (sitrep_load_tx, sitrep_load_rx) = watch::channel(None);
 
+        let debug_dropbox_reconfigurator = Arc::new(
+            debug_dropbox
+                .initialize_producer(DEBUG_DROPBOX_PRODUCER_RECONFIGURATOR)
+                .await
+                .map_err(|message| {
+                    format!(
+                        "failed to create reconfigurator dropbox \
+                         producer: {message}"
+                    )
+                })?,
+        );
+
         let nexus = Nexus {
             id: config.deployment.id,
             rack_id,
@@ -539,7 +574,7 @@ impl Nexus {
             db_datastore: Arc::clone(&db_datastore),
             authz: Arc::clone(&authz),
             sagas,
-            external_server: std::sync::Mutex::new(None),
+            external_servers: std::sync::Mutex::new(vec![]),
             techport_external_server: std::sync::Mutex::new(None),
             internal_server: std::sync::Mutex::new(None),
             lockstep_server: std::sync::Mutex::new(None),
@@ -578,6 +613,10 @@ impl Nexus {
                 .deployment
                 .external_dns_servers
                 .clone(),
+            external_http_client_config: config
+                .deployment
+                .external_http_clients
+                .clone(),
             background_tasks_driver: OnceLock::new(),
             background_tasks,
             background_tasks_internal,
@@ -595,6 +634,7 @@ impl Nexus {
             update_status: UpdateStatusHandle::new(blueprint_load_rx),
             quiesce,
             sitrep_load_rx,
+            debug_dropbox_reconfigurator: debug_dropbox_reconfigurator.clone(),
             underlay_subnets,
         };
 
@@ -692,6 +732,7 @@ impl Nexus {
                     mgs_updates_tx,
                     blueprint_load_tx,
                     sitrep_load_tx,
+                    debug_dropbox_reconfigurator,
                     console_session_absolute_timeout,
                 },
             );
@@ -790,7 +831,7 @@ impl Nexus {
     // Called to hand off management of external servers to Nexus.
     pub(crate) async fn set_servers(
         &self,
-        external_server: DropshotServer,
+        external_servers: Vec<DropshotServer>,
         techport_external_server: DropshotServer,
         internal_server: DropshotServer,
         lockstep_server: DropshotServer,
@@ -800,7 +841,7 @@ impl Nexus {
         let _ = self.close_servers().await;
 
         // Insert the new servers.
-        self.external_server.lock().unwrap().replace(external_server);
+        *self.external_servers.lock().unwrap() = external_servers;
         self.techport_external_server
             .lock()
             .unwrap()
@@ -827,7 +868,8 @@ impl Nexus {
         // NOTE: All these take the lock and swap out of the option immediately,
         // because they are synchronous mutexes, which cannot be held across the
         // await point these `close()` methods expose.
-        let external_server = self.external_server.lock().unwrap().take();
+        let external_servers =
+            std::mem::take(&mut *self.external_servers.lock().unwrap());
         let mut res = Ok(());
 
         let extend_err =
@@ -841,7 +883,7 @@ impl Nexus {
                 }
             };
 
-        if let Some(server) = external_server {
+        for server in external_servers.into_iter() {
             extend_err(&mut res, server.close().await);
         }
         let techport_external_server =
@@ -888,14 +930,23 @@ impl Nexus {
         Ok(())
     }
 
-    pub(crate) fn get_external_server_address(
+    /// This returns all addresses for the external API servers.
+    ///
+    /// If the servers have not been started yet, then `None` is returned. If
+    /// they have been started, then `Some(_)` is returned, where the contained
+    /// vector has at least one element. `Some(vec![])`, with a contained empty
+    /// vector, is never returned.
+    pub(crate) fn get_all_external_server_addresses(
         &self,
-    ) -> Option<std::net::SocketAddr> {
-        self.external_server
+    ) -> Option<Vec<std::net::SocketAddr>> {
+        let addrs: Vec<_> = self
+            .external_servers
             .lock()
             .unwrap()
-            .as_ref()
+            .iter()
             .map(|server| server.local_addr())
+            .collect();
+        if addrs.is_empty() { None } else { Some(addrs) }
     }
 
     pub(crate) fn get_techport_server_address(

@@ -62,7 +62,7 @@ use nexus_types::external_api::sled::SledPolicy;
 use nexus_types::external_api::sled::SledState;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::SpType;
-use omicron_generation_kinds::Generation;
+use omicron_generation_kinds::{NexusGeneration, TargetReleaseGeneration};
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -297,7 +297,7 @@ impl<'a> Planner<'a> {
         // exactly 2.
         let target_release_generation_is_one =
             self.input.tuf_repo().target_release_generation
-                == Generation::from_u32(1);
+                == TargetReleaseGeneration::from_u32(1);
         let mut add = if add_update_blocked_reasons.is_empty()
             || target_release_generation_is_one
             || measurement_updates.all_sleds_updated()
@@ -1529,7 +1529,7 @@ impl<'a> Planner<'a> {
     fn determine_nexus_generation(
         &self,
         image_source: &BlueprintZoneImageSource,
-    ) -> Result<Generation, Error> {
+    ) -> Result<NexusGeneration, Error> {
         // If any other Nexus in the blueprint has the same image source,
         // use it. Otherwise, use the highest generation number + 1.
         let mut highest_seen_generation = None;
@@ -2621,7 +2621,9 @@ impl<'a> Planner<'a> {
         }
     }
 
-    fn lookup_current_nexus_generation(&self) -> Result<Generation, Error> {
+    fn lookup_current_nexus_generation(
+        &self,
+    ) -> Result<NexusGeneration, Error> {
         // Look up the active Nexus zone in the blueprint to get its generation.
         //
         // The Nexus generation is immutable, so it's fine (and easier in this

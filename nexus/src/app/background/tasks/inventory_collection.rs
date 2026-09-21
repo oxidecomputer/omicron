@@ -294,7 +294,11 @@ mod test {
 
         let resolver = internal_dns_resolver::Resolver::new_from_addrs(
             cptestctx.logctx.log.clone(),
-            &[cptestctx.internal_dns.dns_server.local_address()],
+            &cptestctx
+                .internal_dns
+                .dns_server
+                .local_addresses()
+                .collect::<Vec<_>>(),
         )
         .unwrap();
 
