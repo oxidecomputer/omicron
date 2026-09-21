@@ -249,44 +249,18 @@
              Exceptions: a few system tables ("tables", "columns", "databases", and some constant tables like "one", "contributors")
              are still accessible for everyone; and if there is a SHOW privilege (e.g. "SHOW USERS") granted the corresponding system
              table (i.e. "system.users") will be accessible. -->
-        <select_from_system_db_requires_grant>false</select_from_system_db_requires_grant>
+        <select_from_system_db_requires_grant>true</select_from_system_db_requires_grant>
 
         <!-- By default, for backward compatibility "SELECT * FROM information_schema.<table>" doesn't require any grants and can be
              executed by any user. You can change this behaviour by setting this to true.
              If it's set to true then this query requires "GRANT SELECT ON information_schema.<table>" just like as for ordinary tables. -->
-        <select_from_information_schema_requires_grant>false</select_from_information_schema_requires_grant>
+        <select_from_information_schema_requires_grant>true</select_from_information_schema_requires_grant>
     </access_control_improvements>
 
-    <profiles>
-        <default>
-            <load_balancing>random</load_balancing>
-        </default>
-
-    </profiles>
-
-    <users>
-        <default>
-            <password></password>
-            <networks>
-                <ip>::/0</ip>
-            </networks>
-            <profile>default</profile>
-            <quota>default</quota>
-        </default>
-    </users>
-
-    <quotas>
-        <default>
-            <interval>
-                <duration>3600</duration>
-                <queries>0</queries>
-                <errors>0</errors>
-                <result_rows>0</result_rows>
-                <read_rows>0</read_rows>
-                <execution_time>0</execution_time>
-            </interval>
-        </default>
-    </quotas>
+    <!-- Users, profiles, and quotas are defined in a shared file and merged in
+         via the `users_config` element. See that file for details. ClickHouse
+         requires these to live in the users config, not the main config. -->
+    <users_config>users-and-roles.xml</users_config>
 
     <!-- Default profile of settings. -->
     <default_profile>default</default_profile>

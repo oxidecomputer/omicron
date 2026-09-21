@@ -5,7 +5,9 @@
 //! OxQL shell implementation.
 
 use super::{list_timeseries, prepare_columns};
-use crate::{Client, OxqlResult, make_client, oxql::query::QueryAuthzScope};
+use crate::{Client, OxqlResult, oxql::query::QueryAuthzScope};
+use crate::{DbWrite as _, User};
+use anyhow::Context as _;
 use clap::Args;
 use crossterm::style::Stylize;
 use oxql_types::Table;
@@ -14,7 +16,7 @@ use reedline::DefaultPromptSegment;
 use reedline::Reedline;
 use reedline::Signal;
 use slog::Logger;
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr};
 
 /// Ouptut formats for printing the results of an OxQL query.
 #[derive(Clone, Copy, Debug, Default, clap::ValueEnum)]
@@ -217,7 +219,13 @@ async fn make_oxql_client(
     port: u16,
     log: &Logger,
 ) -> anyhow::Result<Client> {
-    let client = make_client(address, port, log).await?;
+    // Initialize DB, then use a lower-privileged client to query.
+    let addr = SocketAddr::new(address, port);
+    Client::new(User::Admin, addr, &log)
+        .init_single_node_db()
+        .await
+        .context("Failed to initialize timeseries database")?;
+    let client = Client::new(User::Reader, addr, &log);
 
     // Workaround to ensure the client has all available timeseries.
     let dummy = "foo:bar".parse().unwrap();

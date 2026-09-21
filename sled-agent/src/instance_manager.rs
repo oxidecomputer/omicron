@@ -26,6 +26,7 @@ use sled_agent_config_reconciler::UpdateDispositionReceiver;
 use sled_agent_types::attached_subnet::AttachedSubnet;
 use sled_agent_types::attached_subnet::AttachedSubnets;
 use sled_agent_types::instance::*;
+use sled_agent_types::inventory::InstanceManagerStatus;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
@@ -37,8 +38,6 @@ mod jobs;
 use self::jobs::CanEnsureVmm;
 use self::jobs::InstanceManagerJobsStatusReceiver;
 use self::jobs::Jobs;
-
-pub(crate) use self::jobs::InstanceManagerJobsStatus;
 
 // The depth of the request queue for the instance manager.
 const QUEUE_SIZE: usize = 256;
@@ -228,9 +227,9 @@ impl InstanceManager {
         })
     }
 
-    // TODO: Plumb this status through inventory. Part of omicron#11121.
-    #[allow(unused)]
-    pub fn jobs_status(&self) -> InstanceManagerJobsStatus {
+    pub fn status(&self) -> InstanceManagerStatus {
+        // For now, the only meaningful status we report to inventory is the
+        // status of our `jobs` map.
         self.jobs_status_rx.read()
     }
 

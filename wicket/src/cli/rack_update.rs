@@ -9,7 +9,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     io::{BufReader, Write},
-    net::SocketAddrV6,
     process::ExitCode,
     time::Duration,
 };
@@ -20,7 +19,7 @@ use crate::{
         ComponentId, CreateClearUpdateStateOptions, CreateStartUpdateOptions,
         parse_event_report_map,
     },
-    wicketd::create_wicketd_client,
+    wicketd::{WicketdAddrs, create_wicketd_client},
 };
 use anyhow::{Context, Result, anyhow, bail};
 use camino::Utf8PathBuf;
@@ -81,28 +80,26 @@ impl RackUpdateArgs {
     pub(crate) async fn exec(
         self,
         log: Logger,
-        wicketd_addr: SocketAddrV6,
+        addrs: WicketdAddrs,
         global_opts: GlobalOpts,
         output: CommandOutput<'_>,
     ) -> Result<ExitCode> {
         match self {
             RackUpdateArgs::Start(args) => {
-                args.exec(log, wicketd_addr, global_opts, output).await?;
+                args.exec(log, addrs, global_opts, output).await?;
                 Ok(ExitCode::SUCCESS)
             }
             RackUpdateArgs::Attach(args) => {
-                args.exec(log, wicketd_addr, global_opts, output).await?;
+                args.exec(log, addrs, global_opts, output).await?;
                 Ok(ExitCode::SUCCESS)
             }
-            RackUpdateArgs::Status(args) => {
-                args.exec(log, wicketd_addr, output).await
-            }
+            RackUpdateArgs::Status(args) => args.exec(log, addrs, output).await,
             RackUpdateArgs::Clear(args) => {
-                args.exec(log, wicketd_addr, global_opts, output).await?;
+                args.exec(log, addrs, global_opts, output).await?;
                 Ok(ExitCode::SUCCESS)
             }
             RackUpdateArgs::DebugDump(args) => {
-                args.exec(log, wicketd_addr).await?;
+                args.exec(log, addrs).await?;
                 Ok(ExitCode::SUCCESS)
             }
             RackUpdateArgs::DebugReplay(args) => {
@@ -141,11 +138,12 @@ impl StartRackUpdateArgs {
     async fn exec(
         self,
         log: Logger,
-        wicketd_addr: SocketAddrV6,
+        addrs: WicketdAddrs,
         global_opts: GlobalOpts,
         output: CommandOutput<'_>,
     ) -> Result<()> {
-        let client = create_wicketd_client(&log, wicketd_addr, WICKETD_TIMEOUT);
+        let client =
+            create_wicketd_client(&log, addrs.wicketd, WICKETD_TIMEOUT);
 
         let update_ids = self.component_ids.to_component_ids()?;
         let options = CreateStartUpdateOptions {
@@ -205,11 +203,12 @@ impl AttachArgs {
     async fn exec(
         self,
         log: Logger,
-        wicketd_addr: SocketAddrV6,
+        addrs: WicketdAddrs,
         global_opts: GlobalOpts,
         output: CommandOutput<'_>,
     ) -> Result<()> {
-        let client = create_wicketd_client(&log, wicketd_addr, WICKETD_TIMEOUT);
+        let client =
+            create_wicketd_client(&log, addrs.wicketd, WICKETD_TIMEOUT);
 
         let update_ids = self.component_ids.to_component_ids()?;
         do_attach_to_updates(log, client, update_ids, global_opts, output).await
@@ -352,7 +351,7 @@ impl StatusArgs {
     async fn exec(
         self,
         log: Logger,
-        wicketd_addr: SocketAddrV6,
+        addrs: WicketdAddrs,
         output: CommandOutput<'_>,
     ) -> Result<ExitCode> {
         // Read the artifact & event reports from wicketd, a file, or stdin.
@@ -370,7 +369,7 @@ impl StatusArgs {
             }
         } else {
             let client =
-                create_wicketd_client(&log, wicketd_addr, WICKETD_TIMEOUT);
+                create_wicketd_client(&log, addrs.wicketd, WICKETD_TIMEOUT);
             client
                 .get_artifacts_and_event_reports()
                 .await
@@ -651,11 +650,12 @@ impl ClearArgs {
     async fn exec(
         self,
         log: Logger,
-        wicketd_addr: SocketAddrV6,
+        addrs: WicketdAddrs,
         global_opts: GlobalOpts,
         output: CommandOutput<'_>,
     ) -> Result<()> {
-        let client = create_wicketd_client(&log, wicketd_addr, WICKETD_TIMEOUT);
+        let client =
+            create_wicketd_client(&log, addrs.wicketd, WICKETD_TIMEOUT);
 
         let update_ids = self.component_ids.to_component_ids()?;
         let response =
@@ -745,8 +745,9 @@ pub(crate) struct DumpArgs {
 }
 
 impl DumpArgs {
-    async fn exec(self, log: Logger, wicketd_addr: SocketAddrV6) -> Result<()> {
-        let client = create_wicketd_client(&log, wicketd_addr, WICKETD_TIMEOUT);
+    async fn exec(self, log: Logger, addrs: WicketdAddrs) -> Result<()> {
+        let client =
+            create_wicketd_client(&log, addrs.wicketd, WICKETD_TIMEOUT);
 
         let response = client
             .get_artifacts_and_event_reports()
@@ -935,5 +936,141 @@ impl ComponentIdSelector {
 
     fn is_empty(&self) -> bool {
         self.sled.is_empty() && self.switch.is_empty() && self.psc.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use maplit::btreemap;
+    use semver::Version;
+    use tufaceous_artifact::ArtifactVersion;
+    use wicket_common::{
+        artifact::ArtifactId,
+        inventory::{SpIdentifier, SpType},
+    };
+
+    fn non_empty_status() -> RackUpdateStatus {
+        RackUpdateStatus {
+            state: UpdateState::Failed,
+            system_version: Some(Version::new(1, 0, 0)),
+            artifacts: vec![
+                ArtifactId {
+                    tags: btreemap! {
+                        "kind".to_owned() => "zone".to_owned(),
+                        "zone-name".to_owned() => "nexus".to_owned(),
+                    },
+                    version: ArtifactVersion::new_const("1.0.0-nexus"),
+                },
+                ArtifactId {
+                    tags: btreemap! {
+                        "kind".to_owned() => "gimlet_sp".to_owned(),
+                    },
+                    version: ArtifactVersion::new_const("1.0.0"),
+                },
+            ],
+            components: vec![
+                ComponentUpdateStatus {
+                    id: SpIdentifier { typ: SpType::Sled, slot: 0 },
+                    state: UpdateState::Completed,
+                    step_index: Some(11),
+                    total_steps: Some(12),
+                    elapsed_secs: Some(754.5),
+                    exit_message: None,
+                },
+                ComponentUpdateStatus {
+                    id: SpIdentifier { typ: SpType::Sled, slot: 1 },
+                    state: UpdateState::Failed,
+                    step_index: Some(3),
+                    total_steps: Some(12),
+                    elapsed_secs: Some(62.25),
+                    exit_message: Some(ExitMessage {
+                        message: "Get host type: Unknown host type i86pc"
+                            .to_owned(),
+                        causes: vec![
+                            "unknown model string \"i86pc\"".to_owned(),
+                            "expected one of gimlet, cosmo".to_owned(),
+                        ],
+                    }),
+                },
+                ComponentUpdateStatus {
+                    id: SpIdentifier { typ: SpType::Switch, slot: 1 },
+                    state: UpdateState::InProgress,
+                    step_index: Some(2),
+                    total_steps: Some(9),
+                    elapsed_secs: Some(3661.0),
+                    exit_message: None,
+                },
+                ComponentUpdateStatus {
+                    id: SpIdentifier { typ: SpType::Power, slot: 0 },
+                    state: UpdateState::Aborted,
+                    step_index: Some(1),
+                    total_steps: Some(9),
+                    elapsed_secs: None,
+                    exit_message: Some(ExitMessage {
+                        message: "aborted by operator".to_owned(),
+                        causes: Vec::new(),
+                    }),
+                },
+                ComponentUpdateStatus {
+                    id: SpIdentifier { typ: SpType::Power, slot: 1 },
+                    state: UpdateState::NotStarted,
+                    step_index: None,
+                    total_steps: Some(9),
+                    elapsed_secs: None,
+                    exit_message: None,
+                },
+            ],
+            state_counts: UpdateStateCounts {
+                completed: 1,
+                failed: 1,
+                aborted: 1,
+                in_progress: 1,
+                not_started: 1,
+            },
+        }
+    }
+
+    // These snapshots test the JSON body and the human-readable table of
+    // `rack-update status`.
+
+    #[test]
+    fn status_json_non_empty() {
+        let json = serde_json::to_string_pretty(&non_empty_status())
+            .expect("status serialized to JSON");
+        expectorate::assert_contents(
+            "tests/output/rack-update-status.json",
+            &json,
+        );
+    }
+
+    #[test]
+    fn status_table_non_empty() {
+        let mut out = Vec::new();
+        write_status_table(&mut out, &non_empty_status())
+            .expect("status table written to a Vec");
+        expectorate::assert_contents(
+            "tests/output/rack-update-status-table.txt",
+            &String::from_utf8(out).expect("status table is valid UTF-8"),
+        );
+    }
+
+    #[test]
+    fn status_table_empty() {
+        let status = RackUpdateStatus {
+            state: UpdateState::NotStarted,
+            system_version: None,
+            artifacts: Vec::new(),
+            components: Vec::new(),
+            state_counts: UpdateStateCounts::default(),
+        };
+
+        let mut out = Vec::new();
+        write_status_table(&mut out, &status)
+            .expect("status table written to a Vec");
+        expectorate::assert_contents(
+            "tests/output/rack-update-status-table-empty.txt",
+            &String::from_utf8(out).expect("status table is valid UTF-8"),
+        );
     }
 }

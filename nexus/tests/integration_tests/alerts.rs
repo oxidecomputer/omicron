@@ -229,7 +229,7 @@ async fn test_alert_list_and_view(ctx: &ControlPlaneTestContext) {
     assert_eq!(view.identity.id, foo_bar_id.into_untyped_uuid());
     assert_eq!(view.class, "test.foo.bar");
     assert_eq!(view.version, 0);
-    assert_eq!(view.alert, serde_json::json!({ "sequence": 2 }));
+    assert_eq!(view.payload, serde_json::json!({ "sequence": 2 }));
 
     alert_list_expect_error(
         client,
