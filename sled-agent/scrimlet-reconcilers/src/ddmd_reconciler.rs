@@ -2,12 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Reconciler responsible for the set of interfaces `ddmd` runs DDM on within a
-//! scrimlet's switch zone.
+//! Reconciler responsible for informing ddmd in the scrimlet's switch zone
+//! about which external front ports should run DDM.
 //!
-//! Rear ports always carry DDM; front ports only do so when the rack network
-//! config marks them `allow_ddm_traffic`, which is how two racks peer over a
-//! sidecar interconnect.
+//! Rear ports always carry DDM traffic. This reconciler only syncs front port
+//! information based on user configuration.
 
 use crate::ScrimletReconcilersMode;
 use crate::reconciler_task::Reconciler;
@@ -56,8 +55,9 @@ impl Reconciler for DdmdReconciler {
             .map(|port| format!("tfport{}_0/ll", port.port))
             .collect();
 
-        // Unconditional: the endpoint is idempotent, and reapplying every pass
-        // means we recover on our own if ddmd restarts and loses its FSMs.
+        // Set which external ports should carry DDM traffic unconditionally.
+        // The endpoint is idempotent, and reapplying every pass allows recovery
+        // if ddmd restarts and loses its FSMs.
         let request = ExternalPeers { address_objects };
         match self.client.set_external_peers(&request).await {
             Ok(_) => {

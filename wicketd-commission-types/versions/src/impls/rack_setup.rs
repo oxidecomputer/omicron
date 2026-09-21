@@ -68,11 +68,9 @@ impl UserSpecifiedRackNetworkConfig {
         iter0.chain(iter1)
     }
 
-    /// Returns an iterator over every port -- (switch, port, config) triples --
-    /// as the uplink config used to program it on the switch.
+    /// Returns an iterator over every port.
     ///
-    /// Unlike [`Self::iter_uplinks`], this includes DDM ports, which are
-    /// expanded by [`UserSpecifiedPortConfig::to_uplink_port_config`].
+    /// Unlike [`Self::iter_uplinks`], this includes DDM ports.
     pub fn iter_port_configs(
         &self,
     ) -> impl Iterator<Item = (SwitchSlot, &str, Cow<'_, UplinkPortConfig>)>

@@ -26,7 +26,7 @@
 //! * Configuration of BFD within `mgd`
 //! * Configuration of static routes within `mgd`
 //! * Configuration of SMF properties for `uplinkd` and `lldpd`
-//! * Configuration of the interfaces `ddmd` runs DDM on
+//! * Configuration of the front ports that DDM runs on
 //!
 //! The specific configuration that should be applied comes from Nexus (or RSS,
 //! at rack setup time) and is sent to `sled-agent` via the bootstore.
