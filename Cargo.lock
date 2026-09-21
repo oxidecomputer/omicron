@@ -16236,7 +16236,7 @@ dependencies = [
 [[package]]
 name = "transceiver-controller"
 version = "0.1.1"
-source = "git+https://github.com/oxidecomputer/transceiver-control#11afc484d5957b13d3058e44db274aa720cea1c4"
+source = "git+https://github.com/oxidecomputer/transceiver-control#f33cf4d7e6f48ca8886ee6611a24782d7f29d6da"
 dependencies = [
  "anyhow",
  "clap",
@@ -16272,7 +16272,7 @@ dependencies = [
 [[package]]
 name = "transceiver-decode"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/transceiver-control#11afc484d5957b13d3058e44db274aa720cea1c4"
+source = "git+https://github.com/oxidecomputer/transceiver-control#f33cf4d7e6f48ca8886ee6611a24782d7f29d6da"
 dependencies = [
  "schemars 0.8.22",
  "serde",
@@ -16297,7 +16297,7 @@ dependencies = [
 [[package]]
 name = "transceiver-messages"
 version = "0.1.1"
-source = "git+https://github.com/oxidecomputer/transceiver-control#11afc484d5957b13d3058e44db274aa720cea1c4"
+source = "git+https://github.com/oxidecomputer/transceiver-control#f33cf4d7e6f48ca8886ee6611a24782d7f29d6da"
 dependencies = [
  "bitflags 2.11.0",
  "clap",
