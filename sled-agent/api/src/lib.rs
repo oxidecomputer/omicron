@@ -17,9 +17,8 @@ use omicron_common::api::internal::shared::{
     SledIdentifiers, VirtualNetworkInterfaceHost,
 };
 use sled_agent_types_versions::{
-    latest, v1, v11, v14, v18, v20, v22,
-    v24, v25, v26, v28, v29, v30, v31, v32, v33, v34, v37, v39, v40, v41, v42,
-    v43, v46, v47, v48, v49, v50, v51,
+    latest, v1, v11, v14, v18, v20, v22, v24, v25, v26, v28, v29, v30, v31,
+    v32, v33, v34, v37, v39, v40, v41, v42, v43, v46, v47, v48, v49, v50, v51,
 };
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 use slog_error_chain::InlineErrorChain;
