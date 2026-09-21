@@ -6,5 +6,5 @@
         PSU3 NotPresent mwocp68 -                 -            -              -         -            -        
         PSU4 Present    mwocp68 MWOCP68-3600-D-RM LL2115Q1001T 0762-0701-0000 Murata-PS China        2115     
         PSU5 NotPresent mwocp68 -                 -            -              -         -            -        
-    PSUs: VPD errors:
-      - PSU2: VPD error: test suite injected VPD read failure
+    PSU VPD errors:
+      - PSU2: test suite injected VPD read failure
