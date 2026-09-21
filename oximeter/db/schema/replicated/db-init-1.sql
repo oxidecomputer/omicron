@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_cumulativef64_local ON CLUSTER 
     datum Nullable(Float64)
 )
 ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/measurements_cumulativef64_local', '{replica}')
+PARTITION BY (toYYYYMMDD(timestamp))
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
 
