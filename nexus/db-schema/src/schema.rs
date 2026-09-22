@@ -923,6 +923,23 @@ allow_tables_to_appear_in_same_query!(silo_user, silo);
 allow_tables_to_appear_in_same_query!(role_assignment, silo_group_membership);
 
 table! {
+    federation_identity_provider (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        silo_id -> Uuid,
+        audience -> Text,
+        issuer -> Text,
+        verification_type -> Text,
+        discovery_url -> Nullable<Text>,
+        signing_keys -> Nullable<Jsonb>,
+    }
+}
+
+table! {
     identity_provider (silo_id, id) {
         id -> Uuid,
         name -> Text,

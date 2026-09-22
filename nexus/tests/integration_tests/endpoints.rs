@@ -1819,6 +1819,32 @@ pub static URL_USERS_DB_INIT: LazyLock<String> = LazyLock::new(|| {
 pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
     || {
         vec![
+            VerifyEndpoint {
+                url: "/v1/federation/inbound/identity-providers",
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Post(serde_json::json!({
+                        "name": "test-idp", "description": "test",
+                        "issuer": "https://issuer.example.com", "audience": "oxide",
+                        "verification_type": "oidc_discovery",
+                        "discovery_url": "https://issuer.example.com/.well-known/openid-configuration"
+                    })),
+                ],
+            },
+            VerifyEndpoint {
+                url: "/v1/federation/inbound/identity-providers/00000000-0000-0000-0000-000000000000",
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::GetNonexistent,
+                    AllowedMethod::Patch(
+                        serde_json::json!({"description": "updated"}),
+                    ),
+                    AllowedMethod::Delete,
+                ],
+            },
             // Global IAM policy
             VerifyEndpoint {
                 url: &SYSTEM_POLICY_URL,

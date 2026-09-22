@@ -6265,6 +6265,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "jsonwebtoken"
+version = "11.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e75fe14a82d81e5f5af639997db37d8b96045938a7ac6ab18cdbe1c7467e05e1"
+dependencies = [
+ "base64 0.22.1",
+ "getrandom 0.2.17",
+ "js-sys",
+ "serde",
+ "serde_json",
+ "signature 2.2.0",
+ "zeroize",
+]
+
+[[package]]
 name = "keccak"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7434,6 +7449,7 @@ dependencies = [
  "illumos-utils",
  "ipnetwork",
  "itertools 0.14.0",
+ "jsonwebtoken",
  "macaddr",
  "newtype_derive",
  "nexus-config",
@@ -7473,6 +7489,7 @@ dependencies = [
  "tokio",
  "trust-quorum-protocol",
  "tufaceous-artifact 0.2.0",
+ "url",
  "uuid",
 ]
 
@@ -10123,6 +10140,7 @@ dependencies = [
  "serde_with_macros 3.21.0",
  "sha2 0.10.9",
  "sha3 0.10.8",
+ "signature 2.2.0",
  "simd-adler32",
  "similar",
  "slab",
