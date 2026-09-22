@@ -290,6 +290,11 @@ system_networking_settings_view          GET      /v1/system/networking/settings
 
 API operations found with tag "system/silos"
 OPERATION ID                             METHOD   URL PATH
+federation_identity_provider_create      POST     /v1/federation/inbound/identity-providers
+federation_identity_provider_delete      DELETE   /v1/federation/inbound/identity-providers/{idp_id}
+federation_identity_provider_list        GET      /v1/federation/inbound/identity-providers
+federation_identity_provider_update      PATCH    /v1/federation/inbound/identity-providers/{idp_id}
+federation_identity_provider_view        GET      /v1/federation/inbound/identity-providers/{idp_id}
 local_idp_user_create                    POST     /v1/system/identity-providers/local/users
 local_idp_user_delete                    DELETE   /v1/system/identity-providers/local/users/{user_id}
 local_idp_user_set_password              POST     /v1/system/identity-providers/local/users/{user_id}/set-password

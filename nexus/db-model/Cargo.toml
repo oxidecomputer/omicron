@@ -23,6 +23,7 @@ iddqd.workspace = true
 ipnetwork.workspace = true
 itertools.workspace = true
 illumos-utils.workspace = true
+jsonwebtoken.workspace = true
 macaddr.workspace = true
 newtype_derive.workspace = true
 omicron-cockroach-metrics.workspace = true
@@ -48,6 +49,7 @@ strum.workspace = true
 thiserror.workspace = true
 trust-quorum-protocol.workspace = true
 tokio.workspace = true
+url.workspace = true
 uuid.workspace = true
 
 db-macros.workspace = true
