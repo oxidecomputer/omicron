@@ -890,6 +890,53 @@ impl AuthorizedResource for SiloFederationIdentityProviderList {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SiloFederationTrustPolicyList(Silo);
+
+impl SiloFederationTrustPolicyList {
+    pub fn new(silo: Silo) -> SiloFederationTrustPolicyList {
+        SiloFederationTrustPolicyList(silo)
+    }
+
+    pub fn silo(&self) -> &Silo {
+        &self.0
+    }
+}
+
+impl oso::PolarClass for SiloFederationTrustPolicyList {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        oso::Class::builder().with_equality_check().add_attribute_getter(
+            "silo",
+            |list: &SiloFederationTrustPolicyList| list.0.clone(),
+        )
+    }
+}
+
+impl AuthorizedResource for SiloFederationTrustPolicyList {
+    fn load_roles<'fut>(
+        &'fut self,
+        opctx: &'fut OpContext,
+        authn: &'fut authn::Context,
+        roleset: &'fut mut RoleSet,
+    ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
+        self.silo().load_roles(opctx, authn, roleset)
+    }
+
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        error
+    }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
+    }
+}
+
 /// Synthetic resource describing the list of Identity Providers associated with
 /// a Silo
 #[derive(Clone, Debug, Eq, PartialEq)]

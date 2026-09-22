@@ -117,6 +117,7 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
         QuiesceState::get_polar_class(),
         SiloCertificateList::get_polar_class(),
         SiloFederationIdentityProviderList::get_polar_class(),
+        SiloFederationTrustPolicyList::get_polar_class(),
         SiloGroupList::get_polar_class(),
         SiloImageList::get_polar_class(),
         SiloIdentityProviderList::get_polar_class(),

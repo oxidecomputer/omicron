@@ -112,3 +112,6 @@ pub mod v2026_09_15_00;
 
 #[path = "federation_identity_providers/mod.rs"]
 pub mod v2026_09_22_00;
+
+#[path = "federation_trust_policies/mod.rs"]
+pub mod v2026_09_22_01;
