@@ -77,6 +77,7 @@ pub(crate) mod external_endpoints;
 mod external_ip;
 mod external_subnet;
 mod federation_identity_provider;
+mod federation_trust_policy;
 mod iam;
 mod image;
 mod instance;
