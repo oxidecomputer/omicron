@@ -312,6 +312,8 @@ async fn make_silo(
     builder.new_resource(authz::SiloFederationIdentityProviderList::new(
         silo.clone(),
     ));
+    builder
+        .new_resource(authz::SiloFederationTrustPolicyList::new(silo.clone()));
 
     builder.new_resource(authz::SiloIdentityProviderList::new(silo.clone()));
     let idp_id = Uuid::new_v4();

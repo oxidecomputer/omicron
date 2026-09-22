@@ -1845,6 +1845,31 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                     AllowedMethod::Delete,
                 ],
             },
+            VerifyEndpoint {
+                url: "/v1/federation/inbound/trust-policies",
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Post(serde_json::json!({
+                        "name": "test-policy", "description": "test",
+                        "identity_provider": "test-idp", "grants": [],
+                        "policy": "assume(_claims);"
+                    })),
+                ],
+            },
+            VerifyEndpoint {
+                url: "/v1/federation/inbound/trust-policies/00000000-0000-0000-0000-000000000000",
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::GetNonexistent,
+                    AllowedMethod::Patch(
+                        serde_json::json!({"description": "updated"}),
+                    ),
+                    AllowedMethod::Delete,
+                ],
+            },
             // Global IAM policy
             VerifyEndpoint {
                 url: &SYSTEM_POLICY_URL,
