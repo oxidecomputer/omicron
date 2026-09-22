@@ -490,6 +490,10 @@ pub mod asset {
     pub use crate::v2025_11_20_00::asset::AssetIdentityMetadata;
 }
 
+pub mod federation {
+    pub use crate::v2026_09_22_00::federation::*;
+}
+
 pub mod identity_provider {
     pub use crate::v2025_11_20_00::identity_provider::DerEncodedKeyPair;
     pub use crate::v2025_11_20_00::identity_provider::IdentityProvider;

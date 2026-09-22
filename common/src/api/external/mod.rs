@@ -850,6 +850,7 @@ pub enum ResourceType {
     DeviceAuthRequest,
     Disk,
     ExternalSubnet,
+    FederationIdentityProvider,
     Fleet,
     FloatingIp,
     IdentityProvider,

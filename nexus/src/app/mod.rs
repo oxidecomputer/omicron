@@ -76,6 +76,7 @@ mod external_dns;
 pub(crate) mod external_endpoints;
 mod external_ip;
 mod external_subnet;
+mod federation_identity_provider;
 mod iam;
 mod image;
 mod instance;

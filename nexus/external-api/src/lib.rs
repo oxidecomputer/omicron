@@ -88,6 +88,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_09_22_00, FEDERATION_IDENTITY_PROVIDERS),
     (2026_09_15_00, REMOVE_SILO_DISCOVERABLE),
     (2026_09_11_00, ALERT_PAYLOAD),
     (2026_09_08_00, PROJECT_AND_VPC_CREATE_DEFAULTS),
@@ -827,6 +828,81 @@ pub trait NexusExternalApi {
             .await
             .map(|HttpResponseOk(u)| HttpResponseOk(u.into()))
     }
+
+    /// List inbound federation identity providers
+    #[endpoint {
+        method = GET,
+        path = "/v1/federation/inbound/identity-providers",
+        tags = ["system/silos"],
+        versions = VERSION_FEDERATION_IDENTITY_PROVIDERS..,
+    }]
+    async fn federation_identity_provider_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<latest::federation::FederationIdentityProvider>,
+        >,
+        HttpError,
+    >;
+
+    /// Create inbound federation identity provider
+    #[endpoint {
+        method = POST,
+        path = "/v1/federation/inbound/identity-providers",
+        tags = ["system/silos"],
+        versions = VERSION_FEDERATION_IDENTITY_PROVIDERS..,
+    }]
+    async fn federation_identity_provider_create(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<latest::federation::FederationIdentityProviderCreate>,
+    ) -> Result<
+        HttpResponseCreated<latest::federation::FederationIdentityProvider>,
+        HttpError,
+    >;
+
+    /// Fetch inbound federation identity provider
+    #[endpoint {
+        method = GET,
+        path = "/v1/federation/inbound/identity-providers/{idp_id}",
+        tags = ["system/silos"],
+        versions = VERSION_FEDERATION_IDENTITY_PROVIDERS..,
+    }]
+    async fn federation_identity_provider_view(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::federation::FederationIdentityProviderPath>,
+    ) -> Result<
+        HttpResponseOk<latest::federation::FederationIdentityProvider>,
+        HttpError,
+    >;
+
+    /// Update inbound federation identity provider
+    #[endpoint {
+        method = PATCH,
+        path = "/v1/federation/inbound/identity-providers/{idp_id}",
+        tags = ["system/silos"],
+        versions = VERSION_FEDERATION_IDENTITY_PROVIDERS..,
+    }]
+    async fn federation_identity_provider_update(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::federation::FederationIdentityProviderPath>,
+        body: TypedBody<latest::federation::FederationIdentityProviderUpdate>,
+    ) -> Result<
+        HttpResponseOk<latest::federation::FederationIdentityProvider>,
+        HttpError,
+    >;
+
+    /// Delete inbound federation identity provider
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/federation/inbound/identity-providers/{idp_id}",
+        tags = ["system/silos"],
+        versions = VERSION_FEDERATION_IDENTITY_PROVIDERS..,
+    }]
+    async fn federation_identity_provider_delete(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::federation::FederationIdentityProviderPath>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
 
     // Silo identity providers
 

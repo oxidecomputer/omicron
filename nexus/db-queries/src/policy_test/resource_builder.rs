@@ -354,6 +354,26 @@ impl DynAuthorizedResource for authz::SiloCertificateList {
     }
 }
 
+impl DynAuthorizedResource for authz::SiloFederationIdentityProviderList {
+    fn do_authorize<'a, 'b>(
+        &'a self,
+        opctx: &'b OpContext,
+        action: authz::Action,
+    ) -> BoxFuture<'a, Result<(), Error>>
+    where
+        'b: 'a,
+    {
+        opctx.authorize(action, self).boxed()
+    }
+
+    fn resource_name(&self) -> String {
+        format!(
+            "{}: federation identity provider list",
+            self.silo().resource_name()
+        )
+    }
+}
+
 impl DynAuthorizedResource for authz::SiloIdentityProviderList {
     fn do_authorize<'a, 'b>(
         &'a self,
