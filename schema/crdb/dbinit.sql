@@ -9515,6 +9515,34 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_config (
 );
 
 
+CREATE TABLE IF NOT EXISTS omicron.public.federation_identity_provider (
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    silo_id UUID NOT NULL,
+    audience STRING NOT NULL,
+    issuer STRING NOT NULL,
+    verification_type STRING NOT NULL,
+    signing_keys JSONB,
+    CONSTRAINT verification_configuration CHECK (
+        (verification_type = 'oidc_discovery'
+            AND signing_keys IS NULL)
+        OR (verification_type = 'static_jwks'
+            AND signing_keys IS NOT NULL)
+    )
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS federation_identity_provider_silo_name
+ON omicron.public.federation_identity_provider (silo_id, name)
+WHERE time_deleted IS NULL;
+
+CREATE INDEX IF NOT EXISTS federation_identity_provider_silo_id
+ON omicron.public.federation_identity_provider (silo_id, id)
+WHERE time_deleted IS NULL;
+
 -- Keep this at the end of file so that the database does not contain a version
 -- until it is fully populated.
 INSERT INTO omicron.public.db_metadata (
@@ -9524,7 +9552,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '302.0.0', NULL)
+    (TRUE, NOW(), NOW(), '303.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
