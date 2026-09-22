@@ -48,6 +48,7 @@ strum.workspace = true
 thiserror.workspace = true
 trust-quorum-protocol.workspace = true
 tokio.workspace = true
+url.workspace = true
 uuid.workspace = true
 
 db-macros.workspace = true
@@ -62,6 +63,7 @@ omicron-passwords.workspace = true
 sled-agent-client.workspace = true
 sled-agent-types.workspace = true
 omicron-workspace-hack.workspace = true
+openidconnect.workspace = true
 tufaceous-artifact.workspace = true
 
 [dev-dependencies]

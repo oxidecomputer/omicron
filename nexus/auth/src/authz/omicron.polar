@@ -933,3 +933,14 @@ resource SubnetPoolList {
 }
 has_relation(fleet: Fleet, "parent_fleet", subnet_pool_list: SubnetPoolList)
 	if subnet_pool_list.fleet = fleet;
+
+resource SiloFederationIdentityProviderList {
+    permissions = [ "read", "list_children", "create_child", "modify" ];
+    relations = { parent_silo: Silo };
+    "read" if "admin" on "parent_silo";
+    "list_children" if "admin" on "parent_silo";
+    "create_child" if "admin" on "parent_silo";
+    "modify" if "admin" on "parent_silo";
+}
+has_relation(silo: Silo, "parent_silo", collection: SiloFederationIdentityProviderList)
+    if collection.silo = silo;

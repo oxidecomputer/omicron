@@ -418,6 +418,27 @@ resource: Silo "silo1": silo image list
   internal-api                      ✘  ✘  ✔  ✘  ✘  ✘  ✔  ✘
   external-authn                    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
+resource: Silo "silo1": federation identity provider list
+
+  USER                              Q  R LC RP  M MP CC  D
+  fleet-admin                       ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  fleet-collaborator                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  fleet-viewer                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-admin                       ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  silo1-collaborator                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-limited-collaborator        ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-viewer                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-user-self                   ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-limited-collaborator  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                   !  !  !  !  !  !  !  !
+  scim                              ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  db-init                           ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  internal-api                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  external-authn                    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+
 resource: Silo "silo1": identity provider list
 
   USER                              Q  R LC RP  M MP CC  D
@@ -1592,6 +1613,27 @@ resource: Silo "silo2": silo image list
   scim                              ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   db-init                           ✘  ✘  ✔  ✘  ✘  ✘  ✔  ✘
   internal-api                      ✘  ✘  ✔  ✘  ✘  ✘  ✔  ✘
+  external-authn                    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+
+resource: Silo "silo2": federation identity provider list
+
+  USER                              Q  R LC RP  M MP CC  D
+  fleet-admin                       ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  fleet-collaborator                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  fleet-viewer                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-admin                       ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-collaborator                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-limited-collaborator        ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-viewer                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-user-self                   ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-limited-collaborator  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                   !  !  !  !  !  !  !  !
+  scim                              ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  db-init                           ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  internal-api                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   external-authn                    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: Silo "silo2": identity provider list

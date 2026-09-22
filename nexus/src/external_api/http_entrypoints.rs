@@ -42,11 +42,11 @@ use nexus_external_api::*;
 use nexus_types::authn::cookies::Cookies;
 use nexus_types::external_api::{
     affinity, alert, audit, certificate, console, device, disk, external_ip,
-    external_subnet, floating_ip, hardware, identity_provider, image, instance,
-    internet_gateway, ip_pool, metrics, multicast, networking, oxql,
-    path_params, policy, probe, project, rack, scim, silo, sled, snapshot,
-    ssh_key, subnet_pool, support_bundle, switch, system, system_networking,
-    timeseries, update, user, vpc,
+    external_subnet, federation, floating_ip, hardware, identity_provider,
+    image, instance, internet_gateway, ip_pool, metrics, multicast, networking,
+    oxql, path_params, policy, probe, project, rack, scim, silo, sled,
+    snapshot, ssh_key, subnet_pool, support_bundle, switch, system,
+    system_networking, timeseries, update, user, vpc,
 };
 // Type imports for API implementations (per RFD 619)
 use nexus_types::external_api::bfd::BfdStatus;
@@ -3916,6 +3916,122 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let group_lookup =
                 nexus.anti_affinity_group_lookup(&opctx, group_selector)?;
             nexus.anti_affinity_group_delete(&opctx, &group_lookup).await?;
+            Ok(HttpResponseDeleted())
+        })
+        .await
+    }
+
+    async fn federation_identity_provider_list(
+        rqctx: RequestContext<ApiContext>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<federation::FederationIdentityProvider>>,
+        HttpError,
+    > {
+        let apictx = rqctx.context();
+        let handler = async {
+            let query = query_params.into_inner();
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let scan_params = ScanByNameOrId::from_query(&query)?;
+            let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let providers = apictx
+                .context
+                .nexus
+                .federation_identity_provider_list(&opctx, &paginated_by)
+                .await?;
+            Ok(HttpResponseOk(ScanByNameOrId::results_page(
+                &query,
+                providers,
+                &marker_for_name_or_id,
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn federation_identity_provider_create(
+        rqctx: RequestContext<ApiContext>,
+        body: TypedBody<federation::FederationIdentityProviderCreate>,
+    ) -> Result<
+        HttpResponseCreated<federation::FederationIdentityProvider>,
+        HttpError,
+    > {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            Ok(HttpResponseCreated(
+                nexus
+                    .federation_identity_provider_create(
+                        &opctx,
+                        body.into_inner(),
+                    )
+                    .await?,
+            ))
+        })
+        .await
+    }
+
+    async fn federation_identity_provider_view(
+        rqctx: RequestContext<ApiContext>,
+        path: Path<federation::FederationIdentityProviderPath>,
+    ) -> Result<HttpResponseOk<federation::FederationIdentityProvider>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            Ok(HttpResponseOk(
+                apictx
+                    .context
+                    .nexus
+                    .federation_identity_provider_view(
+                        &opctx,
+                        path.into_inner().idp_id,
+                    )
+                    .await?,
+            ))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn federation_identity_provider_update(
+        rqctx: RequestContext<ApiContext>,
+        path: Path<federation::FederationIdentityProviderPath>,
+        body: TypedBody<federation::FederationIdentityProviderUpdate>,
+    ) -> Result<HttpResponseOk<federation::FederationIdentityProvider>, HttpError>
+    {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            Ok(HttpResponseOk(
+                nexus
+                    .federation_identity_provider_update(
+                        &opctx,
+                        path.into_inner().idp_id,
+                        body.into_inner(),
+                    )
+                    .await?,
+            ))
+        })
+        .await
+    }
+
+    async fn federation_identity_provider_delete(
+        rqctx: RequestContext<ApiContext>,
+        path: Path<federation::FederationIdentityProviderPath>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            nexus
+                .federation_identity_provider_delete(
+                    &opctx,
+                    path.into_inner().idp_id,
+                )
+                .await?;
             Ok(HttpResponseDeleted())
         })
         .await

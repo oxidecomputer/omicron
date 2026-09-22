@@ -18,6 +18,7 @@ pub mod device;
 pub mod disk;
 pub mod external_ip;
 pub mod external_subnet;
+pub mod federation;
 pub mod floating_ip;
 pub mod hardware;
 pub mod headers;
