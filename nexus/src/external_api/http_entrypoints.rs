@@ -4037,6 +4037,117 @@ impl NexusExternalApi for NexusExternalApiImpl {
         .await
     }
 
+    async fn federation_trust_policy_list(
+        rqctx: RequestContext<ApiContext>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<federation::FederationTrustPolicy>>,
+        HttpError,
+    > {
+        let apictx = rqctx.context();
+        let handler = async {
+            let query = query_params.into_inner();
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let scan_params = ScanByNameOrId::from_query(&query)?;
+            let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let policies = apictx
+                .context
+                .nexus
+                .federation_trust_policy_list(&opctx, &paginated_by)
+                .await?;
+            Ok(HttpResponseOk(ScanByNameOrId::results_page(
+                &query,
+                policies,
+                &marker_for_name_or_id,
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn federation_trust_policy_create(
+        rqctx: RequestContext<ApiContext>,
+        body: TypedBody<federation::FederationTrustPolicyCreate>,
+    ) -> Result<HttpResponseCreated<federation::FederationTrustPolicy>, HttpError>
+    {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            Ok(HttpResponseCreated(
+                nexus
+                    .federation_trust_policy_create(&opctx, body.into_inner())
+                    .await?,
+            ))
+        })
+        .await
+    }
+
+    async fn federation_trust_policy_view(
+        rqctx: RequestContext<ApiContext>,
+        path: Path<federation::FederationTrustPolicyPath>,
+    ) -> Result<HttpResponseOk<federation::FederationTrustPolicy>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            Ok(HttpResponseOk(
+                apictx
+                    .context
+                    .nexus
+                    .federation_trust_policy_view(
+                        &opctx,
+                        path.into_inner().policy_id,
+                    )
+                    .await?,
+            ))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn federation_trust_policy_update(
+        rqctx: RequestContext<ApiContext>,
+        path: Path<federation::FederationTrustPolicyPath>,
+        body: TypedBody<federation::FederationTrustPolicyUpdate>,
+    ) -> Result<HttpResponseOk<federation::FederationTrustPolicy>, HttpError>
+    {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            Ok(HttpResponseOk(
+                nexus
+                    .federation_trust_policy_update(
+                        &opctx,
+                        path.into_inner().policy_id,
+                        body.into_inner(),
+                    )
+                    .await?,
+            ))
+        })
+        .await
+    }
+
+    async fn federation_trust_policy_delete(
+        rqctx: RequestContext<ApiContext>,
+        path: Path<federation::FederationTrustPolicyPath>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            nexus
+                .federation_trust_policy_delete(
+                    &opctx,
+                    path.into_inner().policy_id,
+                )
+                .await?;
+            Ok(HttpResponseDeleted())
+        })
+        .await
+    }
+
     // Certificates
 
     async fn certificate_list(

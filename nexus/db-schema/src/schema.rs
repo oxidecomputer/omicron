@@ -923,6 +923,31 @@ allow_tables_to_appear_in_same_query!(silo_user, silo);
 allow_tables_to_appear_in_same_query!(role_assignment, silo_group_membership);
 
 table! {
+    federation_trust_policy (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        silo_id -> Uuid,
+        revision -> Int8,
+        idp_id -> Uuid,
+        policy -> Text,
+    }
+}
+
+table! {
+    federation_role_grant (id) {
+        id -> Uuid,
+        resource_kind -> Text,
+        resource_id -> Uuid,
+        role_name -> Text,
+        trust_policy_id -> Uuid,
+    }
+}
+
+table! {
     federation_identity_provider (id) {
         id -> Uuid,
         name -> Text,

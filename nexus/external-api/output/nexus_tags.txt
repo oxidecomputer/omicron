@@ -295,6 +295,11 @@ federation_identity_provider_delete      DELETE   /v1/federation/inbound/identit
 federation_identity_provider_list        GET      /v1/federation/inbound/identity-providers
 federation_identity_provider_update      PATCH    /v1/federation/inbound/identity-providers/{idp_id}
 federation_identity_provider_view        GET      /v1/federation/inbound/identity-providers/{idp_id}
+federation_trust_policy_create           POST     /v1/federation/inbound/trust-policies
+federation_trust_policy_delete           DELETE   /v1/federation/inbound/trust-policies/{policy_id}
+federation_trust_policy_list             GET      /v1/federation/inbound/trust-policies
+federation_trust_policy_update           PATCH    /v1/federation/inbound/trust-policies/{policy_id}
+federation_trust_policy_view             GET      /v1/federation/inbound/trust-policies/{policy_id}
 local_idp_user_create                    POST     /v1/system/identity-providers/local/users
 local_idp_user_delete                    DELETE   /v1/system/identity-providers/local/users/{user_id}
 local_idp_user_set_password              POST     /v1/system/identity-providers/local/users/{user_id}/set-password
