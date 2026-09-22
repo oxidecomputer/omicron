@@ -28,6 +28,7 @@ mod disks;
 mod external_ips;
 mod external_subnets;
 mod federation_identity_provider;
+mod federation_trust_policy;
 mod images;
 mod initialization;
 mod instances;

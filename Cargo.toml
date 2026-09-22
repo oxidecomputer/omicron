@@ -746,6 +746,7 @@ pem = "3.0"
 # false: petname = { workspace = true, default-features = false }.
 petname = { version = "2.0.2", default-features = false, features = ["default-rng", "default-words"] }
 petgraph = "0.8.2"
+polar-core = "0.27"
 port-file = { version = "0.1.0", features = ["tokio"] }
 postgres-protocol = "0.6.8"
 predicates = "3.1.3"

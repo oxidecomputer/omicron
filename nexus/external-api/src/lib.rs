@@ -88,6 +88,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_09_22_01, FEDERATION_TRUST_POLICIES),
     (2026_09_22_00, FEDERATION_IDENTITY_PROVIDERS),
     (2026_09_15_00, REMOVE_SILO_DISCOVERABLE),
     (2026_09_11_00, ALERT_PAYLOAD),
@@ -902,6 +903,79 @@ pub trait NexusExternalApi {
     async fn federation_identity_provider_delete(
         rqctx: RequestContext<Self::Context>,
         path: Path<latest::federation::FederationIdentityProviderPath>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// List inbound federation trust policies
+    #[endpoint {
+        method = GET,
+        path = "/v1/federation/inbound/trust-policies",
+        tags = ["system/silos"],
+        versions = VERSION_FEDERATION_TRUST_POLICIES..,
+    }]
+    async fn federation_trust_policy_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::federation::FederationTrustPolicy>>,
+        HttpError,
+    >;
+
+    /// Create inbound federation trust policy
+    #[endpoint {
+        method = POST,
+        path = "/v1/federation/inbound/trust-policies",
+        tags = ["system/silos"],
+        versions = VERSION_FEDERATION_TRUST_POLICIES..,
+    }]
+    async fn federation_trust_policy_create(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<latest::federation::FederationTrustPolicyCreate>,
+    ) -> Result<
+        HttpResponseCreated<latest::federation::FederationTrustPolicy>,
+        HttpError,
+    >;
+
+    /// Fetch inbound federation trust policy
+    #[endpoint {
+        method = GET,
+        path = "/v1/federation/inbound/trust-policies/{policy_id}",
+        tags = ["system/silos"],
+        versions = VERSION_FEDERATION_TRUST_POLICIES..,
+    }]
+    async fn federation_trust_policy_view(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::federation::FederationTrustPolicyPath>,
+    ) -> Result<
+        HttpResponseOk<latest::federation::FederationTrustPolicy>,
+        HttpError,
+    >;
+
+    /// Update inbound federation trust policy
+    #[endpoint {
+        method = PATCH,
+        path = "/v1/federation/inbound/trust-policies/{policy_id}",
+        tags = ["system/silos"],
+        versions = VERSION_FEDERATION_TRUST_POLICIES..,
+    }]
+    async fn federation_trust_policy_update(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::federation::FederationTrustPolicyPath>,
+        body: TypedBody<latest::federation::FederationTrustPolicyUpdate>,
+    ) -> Result<
+        HttpResponseOk<latest::federation::FederationTrustPolicy>,
+        HttpError,
+    >;
+
+    /// Delete inbound federation trust policy
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/federation/inbound/trust-policies/{policy_id}",
+        tags = ["system/silos"],
+        versions = VERSION_FEDERATION_TRUST_POLICIES..,
+    }]
+    async fn federation_trust_policy_delete(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::federation::FederationTrustPolicyPath>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
     // Silo identity providers

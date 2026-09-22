@@ -9515,6 +9515,39 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_config (
 );
 
 
+CREATE TABLE IF NOT EXISTS omicron.public.federation_trust_policy (
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    silo_id UUID NOT NULL,
+    revision INT8 NOT NULL DEFAULT 1,
+    idp_id UUID NOT NULL,
+    policy TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS federation_trust_policy_silo_name
+ON omicron.public.federation_trust_policy (silo_id, name)
+WHERE time_deleted IS NULL;
+
+CREATE INDEX IF NOT EXISTS federation_trust_policy_silo_id
+ON omicron.public.federation_trust_policy (silo_id, id)
+WHERE time_deleted IS NULL;
+
+CREATE TABLE IF NOT EXISTS omicron.public.federation_role_grant (
+    id UUID PRIMARY KEY,
+    resource_kind STRING NOT NULL,
+    resource_id UUID NOT NULL,
+    role_name STRING NOT NULL,
+    trust_policy_id UUID NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS federation_role_grant_policy_resource_role
+ON omicron.public.federation_role_grant
+(trust_policy_id, resource_kind, resource_id, role_name);
+
 CREATE TABLE IF NOT EXISTS omicron.public.federation_identity_provider (
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
@@ -9553,7 +9586,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '302.0.0', NULL)
+    (TRUE, NOW(), NOW(), '303.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
