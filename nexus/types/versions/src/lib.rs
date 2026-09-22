@@ -109,3 +109,6 @@ pub mod v2026_09_08_00;
 pub mod v2026_09_11_00;
 #[path = "remove_silo_discoverable/mod.rs"]
 pub mod v2026_09_15_00;
+
+#[path = "federation_identity_providers/mod.rs"]
+pub mod v2026_09_22_00;

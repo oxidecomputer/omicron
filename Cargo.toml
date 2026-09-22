@@ -613,6 +613,7 @@ internet-checksum = "0.2"
 ipnetwork = { version = "0.21", features = ["schemars", "serde"] }
 ispf = { git = "https://github.com/oxidecomputer/ispf" }
 jiff = "0.2.15"
+jsonwebtoken = { version = "11.1", default-features = false }
 key-manager = { path = "key-manager" }
 key-manager-types = { path = "key-manager/types" }
 kstat-rs = "0.2.5"
