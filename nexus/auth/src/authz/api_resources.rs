@@ -418,6 +418,51 @@ impl AuthorizedResource for ConsoleSessionList {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FederationSessionList;
+
+pub const FEDERATION_SESSION_LIST: FederationSessionList =
+    FederationSessionList {};
+
+impl oso::PolarClass for FederationSessionList {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        oso::Class::builder()
+            .with_equality_check()
+            .add_method(
+                "has_role",
+                |_: &FederationSessionList,
+                 _actor: AuthenticatedActor,
+                 _role: String| false,
+            )
+            .add_attribute_getter("fleet", |_| FLEET)
+    }
+}
+
+impl AuthorizedResource for FederationSessionList {
+    fn load_roles<'fut>(
+        &'fut self,
+        opctx: &'fut OpContext,
+        authn: &'fut authn::Context,
+        roleset: &'fut mut RoleSet,
+    ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
+        load_roles_for_resource_tree(&FLEET, opctx, authn, roleset).boxed()
+    }
+
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        error
+    }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
+    }
+}
+
 /// DnsConfig is a synthetic resource used for modeling access to the internal
 /// and external DNS configuration
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

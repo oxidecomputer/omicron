@@ -82,6 +82,7 @@ num-integer.workspace = true
 omicron-cockroach-metrics.workspace = true
 omicron-debug-dropbox.workspace = true
 omicron-generation-kinds.workspace = true
+openidconnect.workspace = true
 openssl.workspace = true
 oximeter-client.workspace = true
 oximeter-db = { workspace = true, default-features = false, features = [
@@ -98,6 +99,7 @@ progenitor-client.workspace = true
 progenitor-extras.workspace = true
 propolis-client.workspace = true
 qorb.workspace = true
+oso.workspace = true
 rand.workspace = true
 range-requests.workspace = true
 ref-cast.workspace = true
@@ -189,6 +191,7 @@ httpmock.workspace = true
 httptest.workspace = true
 hubtools.workspace = true
 hyper-rustls.workspace = true
+jsonwebtoken = { workspace = true, features = ["aws_lc_rs"] }
 nexus-background-task-interface = { workspace = true, features = ["testing"] }
 nexus-client.workspace = true
 nexus-db-queries = { workspace = true, features = ["testing"] }
