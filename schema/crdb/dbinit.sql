@@ -9555,6 +9555,20 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_config (
 );
 
 
+CREATE TABLE IF NOT EXISTS omicron.public.federation_session (
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_last_used TIMESTAMPTZ NOT NULL,
+    time_expires TIMESTAMPTZ NOT NULL,
+    trust_policy_id UUID NOT NULL,
+    trust_policy_revision INT8 NOT NULL,
+    jwt_claims JSONB NOT NULL,
+    token STRING(40) NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS federation_session_token
+ON omicron.public.federation_session (token);
+
 CREATE TABLE IF NOT EXISTS omicron.public.federation_trust_policy (
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
@@ -9625,7 +9639,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '308.0.0', NULL)
+    (TRUE, NOW(), NOW(), '309.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

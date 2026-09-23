@@ -115,3 +115,6 @@ pub mod v2026_09_22_00;
 
 #[path = "federation_trust_policies/mod.rs"]
 pub mod v2026_09_22_01;
+
+#[path = "federation_sessions/mod.rs"]
+pub mod v2026_09_23_00;

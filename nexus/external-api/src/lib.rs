@@ -88,6 +88,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_09_23_00, FEDERATION_SESSIONS),
     (2026_09_22_01, FEDERATION_TRUST_POLICIES),
     (2026_09_22_00, FEDERATION_IDENTITY_PROVIDERS),
     (2026_09_15_00, REMOVE_SILO_DISCOVERABLE),
@@ -829,6 +830,23 @@ pub trait NexusExternalApi {
             .await
             .map(|HttpResponseOk(u)| HttpResponseOk(u.into()))
     }
+
+    /// Exchange an identity-provider JWT for a federation token
+    #[endpoint {
+        method = POST,
+        path = "/v1/federation/inbound/token",
+        tags = ["system/silos"],
+        versions = VERSION_FEDERATION_SESSIONS..,
+    }]
+    async fn federation_token_create(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<latest::federation::FederationTokenRequest>,
+    ) -> Result<
+        HttpResponseHeaders<
+            HttpResponseCreated<latest::federation::FederationToken>,
+        >,
+        HttpError,
+    >;
 
     /// List inbound federation identity providers
     #[endpoint {

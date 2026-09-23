@@ -374,6 +374,9 @@ impl<'a> RequestBuilder<'a> {
             for header_name in headers.keys() {
                 ensure!(
                     allowed_headers.contains(header_name)
+                        || self
+                            .expected_response_headers
+                            .contains_key(header_name)
                         || (
                             // Dropshot adds `allow` headers to its 405 Method
                             // Not Allowed responses, per RFC 9110. If we expect

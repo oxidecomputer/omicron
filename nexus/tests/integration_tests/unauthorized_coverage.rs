@@ -14,6 +14,11 @@ use expectorate::assert_contents;
 #[test]
 fn test_unauthorized_coverage() {
     let mut api_operations = ApiOperations::new();
+    let federation = api_operations
+        .find("POST", super::federation_session::TOKEN_ENDPOINT)
+        .expect("federation endpoint tested by test_federation_token_exchange")
+        .clone();
+    api_operations.remove(&federation);
 
     // Go through each of the authz test cases and match each one against an
     // API operation.

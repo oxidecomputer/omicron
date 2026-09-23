@@ -307,6 +307,7 @@ impl_dyn_authorized_resource_for_resource!(authz::MulticastGroup);
 impl_dyn_authorized_resource_for_global!(authz::AlertClassList);
 impl_dyn_authorized_resource_for_global!(authz::BlueprintConfig);
 impl_dyn_authorized_resource_for_global!(authz::ConsoleSessionList);
+impl_dyn_authorized_resource_for_global!(authz::FederationSessionList);
 impl_dyn_authorized_resource_for_global!(authz::Database);
 impl_dyn_authorized_resource_for_global!(authz::DeviceAuthRequestList);
 impl_dyn_authorized_resource_for_global!(authz::DnsConfig);
