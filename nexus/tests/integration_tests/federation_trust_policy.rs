@@ -26,7 +26,7 @@ const URL: &str = "/v1/federation/inbound/trust-policies";
 const IDPS: &str = "/v1/federation/inbound/identity-providers";
 const POLICY: &str = "assume(claims) if claims.sub = \"builder\";";
 
-async fn request(
+pub(super) async fn request(
     client: &ClientTestContext,
     authn: AuthnMode,
     method: Method,
@@ -45,7 +45,7 @@ async fn request(
     .unwrap()
 }
 
-async fn silo_user(
+pub(super) async fn silo_user(
     client: &ClientTestContext,
     name: &str,
     role: SiloRole,

@@ -87,7 +87,9 @@ ipnet = { version = "2.12.0", features = ["serde"] }
 ipnetwork = { version = "0.21.1", features = ["schemars", "serde"] }
 itertools-3575ec1268b04181 = { package = "itertools", version = "0.15.0" }
 itertools-594e8ee84c453af0 = { package = "itertools", version = "0.13.0" }
+itertools-93f6ce9d446188ac = { package = "itertools", version = "0.10.5" }
 jiff = { version = "0.2.34", features = ["serde"] }
+jsonwebtoken = { version = "11.1.0", default-features = false, features = ["aws_lc_rs"] }
 lalrpop-util = { version = "0.19.12" }
 lazy_static = { version = "1.5.0", default-features = false, features = ["spin_no_std"] }
 libc = { version = "0.2.185", features = ["extra_traits"] }
@@ -248,7 +250,9 @@ ipnet = { version = "2.12.0", features = ["serde"] }
 ipnetwork = { version = "0.21.1", features = ["schemars", "serde"] }
 itertools-3575ec1268b04181 = { package = "itertools", version = "0.15.0" }
 itertools-594e8ee84c453af0 = { package = "itertools", version = "0.13.0" }
+itertools-93f6ce9d446188ac = { package = "itertools", version = "0.10.5" }
 jiff = { version = "0.2.34", features = ["serde"] }
+jsonwebtoken = { version = "11.1.0", default-features = false, features = ["aws_lc_rs"] }
 lalrpop-util = { version = "0.19.12" }
 lazy_static = { version = "1.5.0", default-features = false, features = ["spin_no_std"] }
 libc = { version = "0.2.185", features = ["extra_traits"] }
