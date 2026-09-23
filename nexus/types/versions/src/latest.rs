@@ -493,6 +493,7 @@ pub mod asset {
 pub mod federation {
     pub use crate::v2026_09_22_00::federation::*;
     pub use crate::v2026_09_22_01::federation::*;
+    pub use crate::v2026_09_23_00::federation::*;
 }
 
 pub mod identity_provider {

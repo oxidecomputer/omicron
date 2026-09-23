@@ -923,6 +923,20 @@ allow_tables_to_appear_in_same_query!(silo_user, silo);
 allow_tables_to_appear_in_same_query!(role_assignment, silo_group_membership);
 
 table! {
+    federation_session (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_last_used -> Timestamptz,
+        time_expires -> Timestamptz,
+        trust_policy_id -> Uuid,
+        trust_policy_revision -> Int8,
+        jwt_claims -> Jsonb,
+        audit_log_id -> Uuid,
+        token -> Text,
+    }
+}
+
+table! {
     federation_trust_policy (id) {
         id -> Uuid,
         name -> Text,

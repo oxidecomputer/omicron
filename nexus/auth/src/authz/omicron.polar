@@ -945,3 +945,11 @@ resource SiloFederationTrustPolicyList {
 }
 has_relation(silo: Silo, "parent_silo", collection: SiloFederationTrustPolicyList)
     if collection.silo = silo;
+
+resource FederationSessionList {
+    permissions = [ "create_child" ];
+    relations = { parent_fleet: Fleet };
+    "create_child" if "external-authenticator" on "parent_fleet";
+}
+has_relation(fleet: Fleet, "parent_fleet", collection: FederationSessionList)
+    if collection.fleet = fleet;
