@@ -936,6 +936,13 @@ table! {
     }
 }
 
+allow_tables_to_appear_in_same_query!(
+    federation_session,
+    federation_trust_policy,
+    federation_identity_provider,
+    silo,
+);
+
 table! {
     federation_trust_policy (id) {
         id -> Uuid,

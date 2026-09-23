@@ -74,6 +74,15 @@ pub struct Context {
 }
 
 impl Context {
+    pub fn federation_roles(&self) -> Option<&authz::RoleSet> {
+        match &self.kind {
+            Kind::Authenticated(details, ..) => {
+                details.federation_roles.as_ref()
+            }
+            Kind::Unauthenticated => None,
+        }
+    }
+
     /// Returns the authenticated actor, if any
     pub fn actor(&self) -> Option<&Actor> {
         self.actor_required().ok()
@@ -168,11 +177,13 @@ impl Context {
                 LookupType::ById(*silo_id),
             )),
             Actor::UserBuiltin { .. } => None,
-            Actor::Scim { silo_id } => Some(authz::Silo::new(
-                authz::FLEET,
-                *silo_id,
-                LookupType::ById(*silo_id),
-            )),
+            Actor::Scim { silo_id } | Actor::Federated { silo_id, .. } => {
+                Some(authz::Silo::new(
+                    authz::FLEET,
+                    *silo_id,
+                    LookupType::ById(*silo_id),
+                ))
+            }
         })
     }
 
@@ -255,6 +266,7 @@ impl Context {
                     actor: Actor::UserBuiltin { user_builtin_id },
                     device_token_expiration: None,
                     credential_id: None,
+                    federation_roles: None,
                 },
                 None,
             ),
@@ -275,6 +287,7 @@ impl Context {
                     },
                     device_token_expiration: None,
                     credential_id: None,
+                    federation_roles: None,
                 },
                 Some(SiloAuthnPolicy::try_from(&*DEFAULT_SILO).unwrap()),
             ),
@@ -306,6 +319,7 @@ impl Context {
                     actor: Actor::SiloUser { silo_user_id, silo_id },
                     device_token_expiration: None,
                     credential_id: None,
+                    federation_roles: None,
                 },
                 Some(silo_authn_policy),
             ),
@@ -322,6 +336,7 @@ impl Context {
                     actor: Actor::Scim { silo_id },
                     device_token_expiration: None,
                     credential_id: None,
+                    federation_roles: None,
                 },
                 // This should never be non-empty, we don't want the SCIM user
                 // to ever have associated roles.
@@ -453,6 +468,8 @@ pub struct Details {
     /// ID of the credential used to authenticate (session ID, access token ID,
     /// or SCIM token ID). Not set for spoof auth or built-in users.
     pub credential_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub federation_roles: Option<authz::RoleSet>,
 }
 
 /// Who is performing an operation
@@ -461,6 +478,7 @@ pub enum Actor {
     UserBuiltin { user_builtin_id: BuiltInUserUuid },
     SiloUser { silo_user_id: SiloUserUuid, silo_id: Uuid },
     Scim { silo_id: Uuid },
+    Federated { session_id: Uuid, silo_id: Uuid },
 }
 
 impl Actor {
@@ -468,7 +486,9 @@ impl Actor {
         match self {
             Actor::UserBuiltin { .. } => None,
             Actor::SiloUser { silo_id, .. } => Some(*silo_id),
-            Actor::Scim { silo_id } => Some(*silo_id),
+            Actor::Scim { silo_id } | Actor::Federated { silo_id, .. } => {
+                Some(*silo_id)
+            }
         }
     }
 
@@ -476,7 +496,7 @@ impl Actor {
         match self {
             Actor::UserBuiltin { .. } => None,
             Actor::SiloUser { silo_user_id, .. } => Some(*silo_user_id),
-            Actor::Scim { .. } => None,
+            Actor::Scim { .. } | Actor::Federated { .. } => None,
         }
     }
 
@@ -484,7 +504,7 @@ impl Actor {
         match self {
             Actor::UserBuiltin { user_builtin_id } => Some(*user_builtin_id),
             Actor::SiloUser { .. } => None,
-            Actor::Scim { .. } => None,
+            Actor::Scim { .. } | Actor::Federated { .. } => None,
         }
     }
 
@@ -505,7 +525,7 @@ impl Actor {
             )),
             // a role assignment for this Actor is invalid, they have a fixed
             // policy.
-            Actor::Scim { .. } => None,
+            Actor::Scim { .. } | Actor::Federated { .. } => None,
         }
     }
 }
@@ -520,6 +540,11 @@ impl std::fmt::Debug for Actor {
         // Do NOT include sensitive fields (e.g., private key or a bearer
         // token) in this output!
         match self {
+            Actor::Federated { session_id, silo_id } => f
+                .debug_struct("Actor::Federated")
+                .field("session_id", session_id)
+                .field("silo_id", silo_id)
+                .finish_non_exhaustive(),
             Actor::UserBuiltin { user_builtin_id } => f
                 .debug_struct("Actor::UserBuiltin")
                 .field("user_builtin_id", &user_builtin_id)

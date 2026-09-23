@@ -15,6 +15,7 @@ use slog::trace;
 use std::borrow::Borrow;
 use uuid::Uuid;
 
+pub mod federation;
 pub mod scim;
 pub mod session_cookie;
 pub mod spoof;
@@ -235,6 +236,7 @@ mod test {
             match self.next.load(Ordering::SeqCst) {
                 SKIP => SchemeResult::NotRequested,
                 OK => SchemeResult::Authenticated(authn::Details {
+                    federation_roles: None,
                     actor: self.actor,
                     device_token_expiration: None,
                     credential_id: None,

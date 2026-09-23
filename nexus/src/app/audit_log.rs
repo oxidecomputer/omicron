@@ -67,6 +67,13 @@ impl super::Nexus {
             Some(nexus_auth::authn::Actor::Scim { silo_id }) => {
                 AuditLogActor::Scim { silo_id: *silo_id }
             }
+            Some(nexus_auth::authn::Actor::Federated {
+                session_id,
+                silo_id,
+            }) => AuditLogActor::Federated {
+                session_id: *session_id,
+                silo_id: *silo_id,
+            },
             None => AuditLogActor::Unauthenticated,
         };
 
@@ -125,6 +132,7 @@ impl super::Nexus {
             // cause this method to be called with a built-in user
             AuditLogActor::UserBuiltin { .. }
             | AuditLogActor::SiloUser { .. }
+            | AuditLogActor::Federated { .. }
             | AuditLogActor::Scim { .. } => {
                 opctx.authn.scheme_used().map(Into::into)
             }
