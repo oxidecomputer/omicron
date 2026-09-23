@@ -26,6 +26,53 @@ const MAX_JWT_BYTES: usize = 32 * 1024;
 const MAX_METADATA_BYTES: usize = 1024 * 1024;
 
 impl super::Nexus {
+    pub(crate) async fn authenticate_federation_token(
+        &self,
+        opctx: &OpContext,
+        token: String,
+    ) -> Result<nexus_auth::authn::Details, nexus_auth::authn::Reason> {
+        use nexus_auth::{authn, authz};
+        use nexus_db_model::DatabaseString;
+        use nexus_types::external_api::federation::FederationRoleGrant;
+        use omicron_common::api::external::ResourceType;
+
+        let (session, silo_id, grants) = self
+            .datastore()
+            .federation_session_fetch_for_authn(opctx, token)
+            .await
+            .map_err(|source| authn::Reason::UnknownError { source })?
+            .ok_or_else(|| authn::Reason::UnknownActor {
+                actor: "federation session".to_owned(),
+            })?;
+        let mut roles = authz::RoleSet::new();
+        for grant in grants {
+            match FederationRoleGrant::try_from(grant)
+                .map_err(|source| authn::Reason::UnknownError { source })?
+            {
+                FederationRoleGrant::Silo { resource_id, role_name } => {
+                    roles.insert(
+                        ResourceType::Silo,
+                        resource_id,
+                        &role_name.to_database_string(),
+                    );
+                }
+                FederationRoleGrant::Project { resource_id, role_name } => {
+                    roles.insert(
+                        ResourceType::Project,
+                        resource_id,
+                        &role_name.to_database_string(),
+                    );
+                }
+            }
+        }
+        Ok(authn::Details {
+            actor: authn::Actor::Federated { session_id: session.id, silo_id },
+            credential_id: Some(session.id),
+            device_token_expiration: None,
+            federation_roles: Some(roles),
+        })
+    }
+
     pub(crate) async fn federation_token_create(
         &self,
         opctx: &OpContext,

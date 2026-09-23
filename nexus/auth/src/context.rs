@@ -133,6 +133,12 @@ impl OpContext {
             metadata.insert(String::from("actor"), format!("{:?}", actor));
 
             match &actor {
+                authn::Actor::Federated { session_id, silo_id } => log.new(o!(
+                    "authenticated" => true,
+                    "type" => "federated",
+                    "federation_session_id" => session_id.to_string(),
+                    "silo_id" => silo_id.to_string(),
+                )),
                 authn::Actor::SiloUser { silo_user_id, silo_id } => {
                     log.new(o!(
                         "authenticated" => true,

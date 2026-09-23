@@ -2,19 +2,20 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::DataStore;
+use super::{DataStore, RunnableQuery};
 use crate::authz;
 use crate::context::OpContext;
 use async_bb8_diesel::AsyncRunQueryDsl;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use diesel::prelude::*;
 use nexus_db_errors::{ErrorHandler, OptionalError, public_error_from_diesel};
 use nexus_db_model::{
-    FederationIdentityProvider, FederationSession, FederationTrustPolicy,
+    FederationIdentityProvider, FederationRoleGrant, FederationSession,
+    FederationTrustPolicy,
 };
 use nexus_db_schema::schema::{
-    federation_identity_provider, federation_session, federation_trust_policy,
-    silo,
+    federation_identity_provider, federation_role_grant, federation_session,
+    federation_trust_policy, silo,
 };
 use nexus_types::identity::Resource;
 use omicron_common::api::external::{Error, NameOrId};
@@ -28,6 +29,96 @@ pub struct FederationTrustPolicyConfig {
 }
 
 impl DataStore {
+    pub async fn federation_session_fetch_for_authn(
+        &self,
+        opctx: &OpContext,
+        token: String,
+    ) -> Result<
+        Option<(FederationSession, Uuid, Vec<FederationRoleGrant>)>,
+        Error,
+    > {
+        opctx
+            .authorize(
+                authz::Action::CreateChild,
+                &authz::FEDERATION_SESSION_LIST,
+            )
+            .await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        self.transaction_retry_wrapper("federation_session_fetch_for_authn")
+            .transaction(&conn, |conn| {
+                let token = token.clone();
+                async move {
+                    let now = Utc::now();
+                    let found = Self::federation_session_fetch_for_authn_query(
+                        token, now,
+                    )
+                    .get_result_async::<(FederationSession, Uuid)>(&conn)
+                    .await
+                    .optional()?;
+                    let Some((mut session, silo_id)) = found else {
+                        return Ok(None);
+                    };
+                    let grants = federation_role_grant::table
+                        .filter(
+                            federation_role_grant::trust_policy_id
+                                .eq(session.trust_policy_id),
+                        )
+                        .select(FederationRoleGrant::as_select())
+                        .load_async(&conn)
+                        .await?;
+                    diesel::update(
+                        federation_session::table
+                            .filter(federation_session::id.eq(session.id)),
+                    )
+                    .set(federation_session::time_last_used.eq(now))
+                    .execute_async(&conn)
+                    .await?;
+                    session.time_last_used = now;
+                    Ok(Some((session, silo_id, grants)))
+                }
+            })
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    fn federation_session_fetch_for_authn_query(
+        token: String,
+        now: DateTime<Utc>,
+    ) -> impl RunnableQuery<(FederationSession, Uuid)> + Send + use<> {
+        federation_session::table
+            .inner_join(
+                federation_trust_policy::table.on(federation_trust_policy::id
+                    .eq(federation_session::trust_policy_id)),
+            )
+            .inner_join(
+                federation_identity_provider::table.on(
+                    federation_identity_provider::id
+                        .eq(federation_trust_policy::idp_id)
+                        .and(
+                            federation_identity_provider::silo_id
+                                .eq(federation_trust_policy::silo_id),
+                        ),
+                ),
+            )
+            .inner_join(
+                silo::table.on(silo::id.eq(federation_trust_policy::silo_id)),
+            )
+            .filter(federation_session::token.eq(token))
+            .filter(federation_session::time_expires.gt(now))
+            .filter(
+                federation_session::trust_policy_revision
+                    .eq(federation_trust_policy::revision),
+            )
+            .filter(federation_trust_policy::time_deleted.is_null())
+            .filter(federation_identity_provider::time_deleted.is_null())
+            .filter(silo::time_deleted.is_null())
+            .select((
+                FederationSession::as_select(),
+                federation_trust_policy::silo_id,
+            ))
+            .limit(1)
+    }
+
     pub async fn federation_trust_policy_config(
         &self,
         opctx: &OpContext,
@@ -169,5 +260,24 @@ impl DataStore {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })
             })
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::db::raw_query_builder::expectorate_query_contents;
+
+    #[tokio::test]
+    async fn expectorate_federation_session_fetch_for_authn() {
+        let query = DataStore::federation_session_fetch_for_authn_query(
+            "test-token".to_owned(),
+            DateTime::from_timestamp(1_700_000_000, 0).unwrap(),
+        );
+        expectorate_query_contents(
+            query,
+            "tests/output/federation_session_fetch_for_authn.sql",
+        )
+        .await;
     }
 }

@@ -483,6 +483,10 @@ async fn sic_associate_ssh_keys(
         .internal_context("loading current user's ssh keys for new Instance")
         .map_err(saga_action_failed)?;
 
+    if matches!(actor, authn::Actor::Federated { .. }) {
+        return Ok(());
+    }
+
     let (.., authz_user) = LookupPath::new(&opctx, datastore)
         .silo_user_actor(&actor)
         .map_err(saga_action_failed)?

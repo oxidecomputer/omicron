@@ -152,6 +152,9 @@ impl ServerContext {
                     }
                     SchemeName::AccessToken => Box::new(HttpAuthnToken),
                     SchemeName::ScimToken => Box::new(HttpAuthnScimToken),
+                    SchemeName::FederationToken => Box::new(
+                        authn::external::federation::HttpAuthnFederationToken,
+                    ),
                 },
             )
             .collect();
@@ -513,6 +516,21 @@ impl authn::external::token::TokenContext for ServerContext {
     > {
         let opctx = self.nexus.opctx_external_authn();
         self.nexus.authenticate_token(opctx, token).await
+    }
+}
+
+#[async_trait]
+impl authn::external::federation::FederationTokenContext for ServerContext {
+    async fn authenticate_federation_token(
+        &self,
+        token: String,
+    ) -> Result<authn::Details, authn::Reason> {
+        self.nexus
+            .authenticate_federation_token(
+                self.nexus.opctx_external_authn(),
+                token,
+            )
+            .await
     }
 }
 
