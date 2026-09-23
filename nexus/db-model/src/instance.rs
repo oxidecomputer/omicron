@@ -150,8 +150,8 @@ pub struct Instance {
     pub enable_jumbo_frames: bool,
 
     // TODO
-    pub instance_shutdown_policy_action: InstanceShutdownAction,
-    pub instance_shutdown_policy_timeout: Option<u64>,
+    pub shutdown_policy_action: InstanceShutdownAction,
+    pub shutdown_policy_timeout: Option<u64>,
 }
 
 impl Instance {
@@ -569,13 +569,15 @@ impl InstanceAutoRestart {
     }
 }
 
-// TODO
-#[derive(Copy, Clone, Default, Debug, PartialEq, Eq)]
-pub enum InstanceShutdownAction {
-    HardOff,
-    #[default]
-    PowerButton,
-}
+// // TODO this actually should be in db-schema::enums, i think?
+// #[derive(
+//     Copy, Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize,
+// )]
+// pub enum InstanceShutdownAction {
+//     HardOff,
+//     #[default]
+//     PowerButton,
+// }
 
 #[derive(
     Copy,
@@ -589,10 +591,10 @@ pub enum InstanceShutdownAction {
 )]
 #[diesel(table_name = instance)]
 pub struct InstanceShutdownPolicy {
-    #[diesel(column_name = instance_shutdown_policy_action)]
+    #[diesel(column_name = shutdown_policy_action)]
     #[serde(default)]
     pub action: InstanceShutdownAction,
-    #[diesel(column_name = instance_shutdown_policy_timeout)]
+    #[diesel(column_name = shutdown_policy_timeout)]
     #[serde(default)]
     pub timeout_secs: Option<u64>,
 }
