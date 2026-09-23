@@ -63,13 +63,13 @@ pub mod alert {
 }
 
 pub mod audit {
-    pub use crate::v2025_11_20_00::audit::AuditLogEntryActor;
     pub use crate::v2025_11_20_00::audit::AuditLogEntryResult;
     pub use crate::v2025_11_20_00::audit::AuditLogParams;
+    pub use crate::v2026_09_23_01::audit::AuditLogEntryActor;
 
-    pub use crate::v2026_01_15_00::audit::AuthMethod;
+    pub use crate::v2026_09_23_01::audit::AuthMethod;
 
-    pub use crate::v2026_01_15_01::audit::AuditLogEntry;
+    pub use crate::v2026_09_23_01::audit::AuditLogEntry;
 }
 
 pub mod bfd {

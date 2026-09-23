@@ -26,6 +26,7 @@ pub enum SchemeName {
     AccessToken,
     /// SCIM token authentication (provisioning)
     ScimToken,
+    FederationToken,
     /// Spoof authentication (development/testing only)
     Spoof,
 }
@@ -37,6 +38,7 @@ impl SchemeName {
             SchemeName::SessionCookie => "session_cookie",
             SchemeName::AccessToken => "access_token",
             SchemeName::ScimToken => "scim_token",
+            SchemeName::FederationToken => "federation_token",
             SchemeName::Spoof => "spoof",
         }
     }
@@ -57,6 +59,7 @@ impl std::str::FromStr for SchemeName {
             "session_cookie" => Ok(SchemeName::SessionCookie),
             "access_token" => Ok(SchemeName::AccessToken),
             "scim_token" => Ok(SchemeName::ScimToken),
+            "federation_token" => Ok(SchemeName::FederationToken),
             _ => Err(anyhow!("unsupported authn scheme: {:?}", s)),
         }
     }

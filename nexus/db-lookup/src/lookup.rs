@@ -248,11 +248,11 @@ impl<'a> LookupPath<'a> {
                 SiloUser::PrimaryKey(Root { lookup_root: self }, *silo_user_id),
             ),
 
-            authn::Actor::UserBuiltin { .. } | authn::Actor::Scim { .. } => {
-                Err(Error::non_resourcetype_not_found(
-                    "could not find silo user",
-                ))
-            }
+            authn::Actor::UserBuiltin { .. }
+            | authn::Actor::Scim { .. }
+            | authn::Actor::Federated { .. } => Err(
+                Error::non_resourcetype_not_found("could not find silo user"),
+            ),
         }
     }
 

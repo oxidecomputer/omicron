@@ -72,6 +72,7 @@ where
                         actor,
                         device_token_expiration,
                         credential_id: Some(token_id),
+                        federation_roles: None,
                     })
                 }
             },

@@ -47,7 +47,7 @@ use uuid::Uuid;
 /// is contained within the set
 ///
 /// For more on roles, see dbinit.rs.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct RoleSet {
     roles: BTreeSet<(ResourceType, Uuid, String)>,
 }
@@ -70,7 +70,7 @@ impl RoleSet {
         ))
     }
 
-    fn insert(
+    pub fn insert(
         &mut self,
         resource_type: ResourceType,
         resource_id: Uuid,
@@ -147,6 +147,16 @@ async fn load_directly_attached_roles(
 ) -> Result<(), Error> {
     // If the user is authenticated ...
     if let Some(actor) = authn.actor() {
+        if let authn::Actor::Federated { .. } = actor {
+            if let Some(grants) = authn.federation_roles() {
+                for (kind, id, role) in &grants.roles {
+                    if *kind == resource_type && *id == resource_id {
+                        roleset.insert(*kind, *id, role);
+                    }
+                }
+            }
+            return Ok(());
+        }
         // ... then fetch all the roles for this user that are associated with
         // this resource.
         trace!(opctx.log, "loading roles";

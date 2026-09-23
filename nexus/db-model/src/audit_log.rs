@@ -23,6 +23,7 @@ pub enum AuditLogActor {
     UserBuiltin { user_builtin_id: BuiltInUserUuid },
     SiloUser { silo_user_id: SiloUserUuid, silo_id: Uuid },
     Scim { silo_id: Uuid },
+    Federated { session_id: Uuid, silo_id: Uuid },
     Unauthenticated,
 }
 
@@ -63,6 +64,7 @@ impl_enum_type!(
     SiloUser => b"silo_user"
     Unauthenticated => b"unauthenticated"
     Scim => b"scim"
+    Federated => b"federated"
 );
 
 impl_enum_type!(
@@ -107,6 +109,7 @@ impl_enum_type!(
     SessionCookie => b"session_cookie"
     AccessToken => b"access_token"
     ScimToken => b"scim_token"
+    FederationToken => b"federation_token"
     Spoof => b"spoof"
 );
 
@@ -118,6 +121,9 @@ impl From<AuditLogAuthMethod> for audit::AuthMethod {
             }
             AuditLogAuthMethod::AccessToken => audit::AuthMethod::AccessToken,
             AuditLogAuthMethod::ScimToken => audit::AuthMethod::ScimToken,
+            AuditLogAuthMethod::FederationToken => {
+                audit::AuthMethod::FederationToken
+            }
             AuditLogAuthMethod::Spoof => audit::AuthMethod::Spoof,
         }
     }
@@ -130,6 +136,7 @@ impl From<&nexus_types::authn::SchemeName> for AuditLogAuthMethod {
             SchemeName::SessionCookie => AuditLogAuthMethod::SessionCookie,
             SchemeName::AccessToken => AuditLogAuthMethod::AccessToken,
             SchemeName::ScimToken => AuditLogAuthMethod::ScimToken,
+            SchemeName::FederationToken => AuditLogAuthMethod::FederationToken,
             SchemeName::Spoof => AuditLogAuthMethod::Spoof,
         }
     }
@@ -185,6 +192,9 @@ impl From<AuditLogEntryInitParams> for AuditLogEntryInit {
         } = params;
 
         let (actor_id, actor_silo_id, actor_kind) = match actor {
+            AuditLogActor::Federated { session_id, silo_id } => {
+                (Some(session_id), Some(silo_id), AuditLogActorKind::Federated)
+            }
             AuditLogActor::UserBuiltin { user_builtin_id } => (
                 Some(user_builtin_id.into_untyped_uuid()),
                 None,
@@ -339,6 +349,20 @@ impl TryFrom<AuditLogEntry> for audit::AuditLogEntry {
             source_ip: entry.source_ip.ip(),
             user_agent: entry.user_agent,
             actor: match entry.actor_kind {
+                AuditLogActorKind::Federated => {
+                    audit::AuditLogEntryActor::Federated {
+                        session_id: entry.actor_id.ok_or_else(|| {
+                            Error::internal_error(
+                                "Federated actor missing actor_id",
+                            )
+                        })?,
+                        silo_id: entry.actor_silo_id.ok_or_else(|| {
+                            Error::internal_error(
+                                "Federated actor missing actor_silo_id",
+                            )
+                        })?,
+                    }
+                }
                 AuditLogActorKind::UserBuiltin => {
                     let user_builtin_id = entry.actor_id.ok_or_else(|| {
                         Error::internal_error(

@@ -118,3 +118,6 @@ pub mod v2026_09_22_01;
 
 #[path = "federation_sessions/mod.rs"]
 pub mod v2026_09_23_00;
+
+#[path = "federation_authentication/mod.rs"]
+pub mod v2026_09_23_01;

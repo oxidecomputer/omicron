@@ -182,6 +182,7 @@ where
         }
 
         SchemeResult::Authenticated(Details {
+            federation_roles: None,
             actor,
             device_token_expiration: None,
             credential_id: Some(session.id().into_untyped_uuid()),
