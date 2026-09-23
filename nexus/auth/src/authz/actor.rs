@@ -131,7 +131,8 @@ impl oso::PolarClass for AuthenticatedActor {
 
                     authn::Actor::UserBuiltin { .. } => true,
 
-                    authn::Actor::Scim { .. } => false,
+                    authn::Actor::Scim { .. }
+                    | authn::Actor::Federated { .. } => false,
                 }
             })
             // Like the "is_user" guard above but reversed, this guard is used
@@ -139,7 +140,8 @@ impl oso::PolarClass for AuthenticatedActor {
             // without the need for a role.
             .add_attribute_getter("is_scim_idp", |a: &AuthenticatedActor| {
                 match a.actor {
-                    authn::Actor::SiloUser { .. } => false,
+                    authn::Actor::SiloUser { .. }
+                    | authn::Actor::Federated { .. } => false,
 
                     authn::Actor::UserBuiltin { .. } => false,
 
@@ -149,6 +151,7 @@ impl oso::PolarClass for AuthenticatedActor {
             .add_attribute_getter("silo", |a: &AuthenticatedActor| {
                 match a.actor {
                     authn::Actor::SiloUser { silo_id, .. }
+                    | authn::Actor::Federated { silo_id, .. }
                     | authn::Actor::Scim { silo_id } => Some(super::Silo::new(
                         super::FLEET,
                         silo_id,
@@ -173,7 +176,8 @@ impl oso::PolarClass for AuthenticatedActor {
 
                     authn::Actor::UserBuiltin { .. } => false,
 
-                    authn::Actor::Scim { .. } => false,
+                    authn::Actor::Scim { .. }
+                    | authn::Actor::Federated { .. } => false,
                 },
             )
     }

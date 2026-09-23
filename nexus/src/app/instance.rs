@@ -307,6 +307,14 @@ async fn normalize_ssh_keys(
         .authn
         .actor_required()
         .internal_context("loading current user's ssh keys for new Instance")?;
+    if matches!(actor, authn::Actor::Federated { .. }) {
+        if ssh_public_keys.as_ref().is_some_and(|keys| !keys.is_empty()) {
+            return Err(Error::invalid_request(
+                "federated actors cannot select user-owned SSH keys",
+            ));
+        }
+        return Ok(Some(Vec::new()));
+    }
     let (.., authz_user) = LookupPath::new(opctx, datastore)
         .silo_user_actor(&actor)?
         .lookup_for(authz::Action::ListChildren)

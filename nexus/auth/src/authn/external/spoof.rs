@@ -110,6 +110,7 @@ where
                     Ok(silo_id) => {
                         let actor = Actor::SiloUser { silo_id, silo_user_id };
                         SchemeResult::Authenticated(Details {
+                            federation_roles: None,
                             actor,
                             device_token_expiration: None,
                             credential_id: None, // spoof auth has no real credential

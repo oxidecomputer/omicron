@@ -71,6 +71,7 @@ where
                     actor,
                     device_token_expiration: None,
                     credential_id: Some(token_id),
+                    federation_roles: None,
                 }),
             },
         }
