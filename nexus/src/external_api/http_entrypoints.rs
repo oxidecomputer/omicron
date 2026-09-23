@@ -3921,6 +3921,52 @@ impl NexusExternalApi for NexusExternalApiImpl {
         .await
     }
 
+    async fn federation_token_create(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<federation::FederationTokenRequest>,
+    ) -> Result<
+        HttpResponseHeaders<HttpResponseCreated<federation::FederationToken>>,
+        HttpError,
+    > {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx = nexus.opctx_external_authn();
+            let audit =
+                nexus.audit_log_entry_init_unauthed(opctx, &rqctx).await?;
+            let result = async {
+                let silo_id = nexus.endpoint_for_request(&rqctx)?.silo().id();
+                let token = nexus
+                    .federation_token_create(
+                        opctx,
+                        silo_id,
+                        body.into_inner(),
+                        audit.id,
+                    )
+                    .await?;
+                let mut response = HttpResponseHeaders::new_unnamed(
+                    HttpResponseCreated(token),
+                );
+                response
+                    .headers_mut()
+                    .insert(header::CACHE_CONTROL, "no-store".parse().unwrap());
+                response
+                    .headers_mut()
+                    .insert(header::PRAGMA, "no-cache".parse().unwrap());
+                Ok(response)
+            }
+            .await;
+            let _ =
+                nexus.audit_log_entry_complete(opctx, &audit, &result).await;
+            result
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     async fn federation_identity_provider_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedByNameOrId>,

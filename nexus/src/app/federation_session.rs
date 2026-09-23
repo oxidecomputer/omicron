@@ -1,0 +1,698 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use super::external_client::{ExternalClientBuilder, ExternalHttpClient};
+use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use chrono::Utc;
+use nexus_db_model::FederationIdentityProvider;
+use nexus_db_queries::context::OpContext;
+use nexus_types::external_api::federation::{
+    FederationToken, FederationTokenRequest,
+};
+use omicron_common::api::external::Error;
+use openidconnect::core::{
+    CoreIdToken, CoreIdTokenVerifier, CoreJsonWebKeySet,
+    CoreJwsSigningAlgorithm, CoreProviderMetadata,
+};
+use openidconnect::{ClientId, HttpRequest, HttpResponse, IssuerUrl, Nonce};
+use oso::{Oso, PolarValue, ToPolar};
+use serde_json::Value;
+use std::time::Duration;
+use uuid::Uuid;
+
+const MAX_JWT_BYTES: usize = 32 * 1024;
+const MAX_METADATA_BYTES: usize = 1024 * 1024;
+
+impl super::Nexus {
+    pub(crate) async fn federation_token_create(
+        &self,
+        opctx: &OpContext,
+        silo_id: Uuid,
+        params: FederationTokenRequest,
+        audit_log_id: Uuid,
+    ) -> Result<FederationToken, Error> {
+        if params.oidc_jwt.len() > MAX_JWT_BYTES {
+            return Err(Error::invalid_request(format!(
+                "OIDC token exceeds the {MAX_JWT_BYTES}-byte limit"
+            )));
+        }
+        let verified = self
+            .db_datastore
+            .federation_trust_policy_config(
+                opctx,
+                silo_id,
+                &params.trust_policy,
+            )
+            .await?;
+        let (keys, algorithms) = match verified
+            .identity_provider
+            .verification_type
+            .as_str()
+        {
+            "static_jwks" => (
+                verification_keys(
+                    verified
+                        .identity_provider
+                        .signing_keys
+                        .clone()
+                        .ok_or(Error::Forbidden)?,
+                )?,
+                None,
+            ),
+            "oidc_discovery" => {
+                let builder: ExternalClientBuilder =
+                    reqwest::ClientBuilder::new()
+                        .https_only(true)
+                        .connect_timeout(Duration::from_secs(5))
+                        .timeout(Duration::from_secs(10))
+                        .into();
+                let client = builder
+                    .redirect(reqwest::redirect::Policy::none())
+                    .build(
+                        &self.external_http_client_config,
+                        &self.external_resolver,
+                    )
+                    .map_err(|_| {
+                        Error::internal_error("building federation HTTP client")
+                    })?;
+                let (keys, algorithms) =
+                    discover_keys(&client, &verified.identity_provider).await?;
+                (keys, Some(algorithms))
+            }
+            _ => return Err(Error::Forbidden),
+        };
+        let provider = verified.identity_provider.clone();
+        let policy = verified.trust_policy.policy.clone();
+        let claims = tokio::task::spawn_blocking(move || {
+            let claims = verify_jwt(
+                &params.oidc_jwt,
+                &provider,
+                &keys,
+                algorithms.as_deref(),
+            )?;
+            evaluate_policy(&policy, &claims)?;
+            Ok::<_, Error>(claims)
+        })
+        .await
+        .map_err(|_| {
+            Error::internal_error("evaluating federation request")
+        })??;
+        let session = self
+            .db_datastore
+            .federation_session_create(opctx, &verified, claims, audit_log_id)
+            .await?;
+        Ok(FederationToken {
+            token: format!("oxide-federation-{}", session.token),
+            expires_at: session.time_expires,
+            revision: session.trust_policy_revision,
+        })
+    }
+}
+
+async fn discover_keys(
+    client: &ExternalHttpClient,
+    provider: &FederationIdentityProvider,
+) -> Result<(CoreJsonWebKeySet, Vec<CoreJwsSigningAlgorithm>), Error> {
+    let issuer = IssuerUrl::new(provider.issuer.clone())
+        .map_err(|_| Error::Forbidden)?;
+    let client = client.clone();
+    let http_client = move |request| {
+        let client = client.clone();
+        async move { fetch_oidc_response(&client, request).await }
+    };
+    let metadata = CoreProviderMetadata::discover_async(issuer, &http_client)
+        .await
+        .map_err(|_| Error::Forbidden)?;
+    Ok((
+        metadata.jwks().clone(),
+        metadata.id_token_signing_alg_values_supported().clone(),
+    ))
+}
+
+fn verification_keys(jwks: Value) -> Result<CoreJsonWebKeySet, Error> {
+    serde_json::from_value(jwks).map_err(|_| Error::Forbidden)
+}
+
+async fn fetch_oidc_response(
+    client: &ExternalHttpClient,
+    request: HttpRequest,
+) -> Result<HttpResponse, Error> {
+    let mut response = client
+        .execute(request.try_into().map_err(|_| Error::Forbidden)?)
+        .map_err(|_| Error::Forbidden)?
+        .await
+        .map_err(|_| Error::Forbidden)?;
+    if response.content_length().is_some_and(|n| n > MAX_METADATA_BYTES as u64)
+    {
+        return Err(Error::Forbidden);
+    }
+    let mut result = http::Response::builder()
+        .status(response.status())
+        .version(response.version());
+    *result.headers_mut().ok_or(Error::Forbidden)? = response.headers().clone();
+    let mut bytes = Vec::new();
+    while let Some(chunk) =
+        response.chunk().await.map_err(|_| Error::Forbidden)?
+    {
+        if chunk.len() > MAX_METADATA_BYTES - bytes.len() {
+            return Err(Error::Forbidden);
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    result.body(bytes).map_err(|_| Error::Forbidden)
+}
+
+fn verify_jwt(
+    token: &str,
+    provider: &FederationIdentityProvider,
+    keys: &CoreJsonWebKeySet,
+    advertised_algorithms: Option<&[CoreJwsSigningAlgorithm]>,
+) -> Result<Value, Error> {
+    let malformed = || Error::invalid_request("Malformed OIDC token");
+    let id_token: CoreIdToken = token.parse().map_err(|_| malformed())?;
+    let algorithm = id_token.signing_alg().map_err(|_| Error::Forbidden)?;
+    if advertised_algorithms.is_some_and(|algs| !algs.contains(algorithm)) {
+        return Err(Error::Forbidden);
+    }
+    let verifier = CoreIdTokenVerifier::new_public_client(
+        ClientId::new(provider.audience.clone()),
+        IssuerUrl::new(provider.issuer.clone())
+            .map_err(|_| Error::Forbidden)?,
+        keys.clone(),
+    )
+    .set_allowed_algs([CoreJwsSigningAlgorithm::RsaSsaPkcs1V15Sha256])
+    .set_issue_time_verifier_fn(|issued| {
+        if issued > Utc::now() + chrono::Duration::seconds(60) {
+            Err("token issued in the future".to_owned())
+        } else {
+            Ok(())
+        }
+    });
+    let registered = id_token
+        .claims(&verifier, |_: Option<&Nonce>| Ok(()))
+        .map_err(|_| Error::Forbidden)?;
+    if registered.expiration() <= registered.issue_time() {
+        return Err(Error::invalid_request(
+            "OIDC token expiration must be after its issue time",
+        ));
+    }
+    if registered.subject().as_str().is_empty()
+        || registered.subject().as_str().len() > 255
+        || !registered.subject().as_str().is_ascii()
+    {
+        return Err(Error::invalid_request("OIDC token subject is invalid"));
+    }
+    let payload = URL_SAFE_NO_PAD
+        .decode(token.split('.').nth(1).ok_or_else(malformed)?)
+        .map_err(|_| malformed())?;
+    let claims: Value =
+        serde_json::from_slice(&payload).map_err(|_| malformed())?;
+    if let Some(nbf) = claims.get("nbf") {
+        let nbf = nbf.as_i64().ok_or_else(|| {
+            Error::invalid_request(
+                "OIDC token nbf claim must be an integer timestamp",
+            )
+        })?;
+        if nbf > Utc::now().timestamp() {
+            return Err(Error::Forbidden);
+        }
+    }
+    Ok(claims)
+}
+
+fn evaluate_policy(policy: &str, claims: &Value) -> Result<(), Error> {
+    nexus_db_model::validate_federation_trust_policy(None, Some(policy), None)
+        .map_err(|_| Error::Forbidden)?;
+    let mut oso = Oso::new();
+    oso.load_str(policy).map_err(|_| Error::Forbidden)?;
+    let mut query = oso
+        .query_rule("assume", (polar_claims(claims)?,))
+        .map_err(|_| Error::Forbidden)?;
+    match query.next() {
+        Some(Ok(_)) => Ok(()),
+        _ => Err(Error::Forbidden),
+    }
+}
+
+fn polar_claims(value: &Value) -> Result<PolarValue, Error> {
+    Ok(match value {
+        Value::Null => Option::<PolarValue>::None.to_polar(),
+        Value::Bool(v) => PolarValue::Boolean(*v),
+        Value::String(v) => PolarValue::String(v.clone()),
+        Value::Number(v) => {
+            if let Some(v) = v.as_i64() {
+                PolarValue::Integer(v)
+            } else if v.is_f64() {
+                PolarValue::Float(v.as_f64().ok_or_else(|| {
+                    Error::invalid_request(
+                        "OIDC token contains a claim value unsupported by trust policies",
+                    )
+                })?)
+            } else {
+                return Err(Error::invalid_request(
+                    "OIDC token contains a claim value unsupported by trust policies",
+                ));
+            }
+        }
+        Value::Array(v) => PolarValue::List(
+            v.iter().map(polar_claims).collect::<Result<_, _>>()?,
+        ),
+        Value::Object(v) => PolarValue::Map(
+            v.iter()
+                .map(|(k, v)| Ok((k.clone(), polar_claims(v)?)))
+                .collect::<Result<_, Error>>()?,
+        ),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nexus_types::external_api::federation::{
+        FederationIdentityProviderCreate, FederationVerificationType,
+    };
+    use openidconnect::core::{
+        CoreGenderClaim, CoreJsonWebKeySet, CoreJweContentEncryptionAlgorithm,
+        CoreJwsSigningAlgorithm, CoreRsaPrivateSigningKey,
+    };
+    use openidconnect::{
+        AdditionalClaims, IdToken, JsonWebKeyId, PrivateSigningKey,
+    };
+    use serde::{Deserialize, Serialize};
+    use serde_json::json;
+
+    #[derive(Debug, Deserialize, Serialize)]
+    struct TestClaims(serde_json::Map<String, Value>);
+
+    impl AdditionalClaims for TestClaims {}
+
+    pub(super) fn signing_key() -> (CoreRsaPrivateSigningKey, Value) {
+        let pair = openssl::rsa::Rsa::generate(2048).unwrap();
+        let pem =
+            String::from_utf8(pair.private_key_to_pem().unwrap()).unwrap();
+        let key = CoreRsaPrivateSigningKey::from_pem(
+            &pem,
+            Some(JsonWebKeyId::new("test-key".into())),
+        )
+        .unwrap();
+        let keys = CoreJsonWebKeySet::new(vec![key.as_verification_key()]);
+        (key, serde_json::to_value(keys).unwrap())
+    }
+
+    pub(super) fn signed(
+        key: &CoreRsaPrivateSigningKey,
+        claims: &Value,
+        algorithm: CoreJwsSigningAlgorithm,
+    ) -> String {
+        IdToken::<
+            TestClaims,
+            CoreGenderClaim,
+            CoreJweContentEncryptionAlgorithm,
+            CoreJwsSigningAlgorithm,
+        >::new(
+            serde_json::from_value(claims.clone()).unwrap(),
+            key,
+            algorithm,
+            None,
+            None,
+        )
+        .unwrap()
+        .to_string()
+    }
+
+    fn claims() -> Value {
+        let now = Utc::now().timestamp();
+        json!({"iss": "https://issuer.example", "aud": ["oxide"], "sub": "builder",
+            "iat": now, "exp": now + 300, "azp": "requesting-service-account",
+            "my_idp": {"custom_claims": {"project_id": "project-123"}},
+            "groups": ["build", "deploy"], "optional": null})
+    }
+
+    #[test]
+    fn federation_verifier_configuration() {
+        let (key, jwks) = signing_key();
+        let provider = FederationIdentityProvider::new(
+            Uuid::new_v4(),
+            FederationIdentityProviderCreate {
+                name: "test".parse().unwrap(),
+                description: String::new(),
+                issuer: "https://issuer.example".into(),
+                audience: "oxide".into(),
+                verification_type: FederationVerificationType::StaticJwks,
+                signing_keys: Some(jwks.clone()),
+            },
+        )
+        .unwrap();
+        let keys = verification_keys(jwks.clone()).unwrap();
+        let algorithm = CoreJwsSigningAlgorithm::RsaSsaPkcs1V15Sha256;
+        let valid = claims();
+        let token = signed(&key, &valid, algorithm.clone());
+        assert_eq!(verify_jwt(&token, &provider, &keys, None).unwrap(), valid);
+        assert_eq!(
+            verify_jwt(&format!("{token} asdf"), &provider, &keys, None),
+            Err(Error::invalid_request("Malformed OIDC token")),
+        );
+        for (field, value, message) in [
+            ("sub", json!(""), "OIDC token subject is invalid"),
+            (
+                "nbf",
+                json!("tomorrow"),
+                "OIDC token nbf claim must be an integer timestamp",
+            ),
+        ] {
+            let mut claims = valid.clone();
+            claims[field] = value;
+            let token = signed(&key, &claims, algorithm.clone());
+            assert_eq!(
+                verify_jwt(&token, &provider, &keys, None),
+                Err(Error::invalid_request(message)),
+            );
+        }
+        let mut invalid_times = valid.clone();
+        invalid_times["iat"] = json!(Utc::now().timestamp() + 30);
+        invalid_times["exp"] = invalid_times["iat"].clone();
+        let invalid_times = signed(&key, &invalid_times, algorithm.clone());
+        assert_eq!(
+            verify_jwt(&invalid_times, &provider, &keys, None),
+            Err(Error::invalid_request(
+                "OIDC token expiration must be after its issue time",
+            )),
+        );
+        assert!(verify_jwt(&token, &provider, &keys, Some(&[])).is_err());
+        for (field, bad) in [
+            ("iss", json!("https://other.example")),
+            ("aud", json!("other")),
+            ("nbf", json!(Utc::now().timestamp() + 300)),
+            ("iat", json!(Utc::now().timestamp() + 300)),
+        ] {
+            let mut claims = valid.clone();
+            claims[field] = bad;
+            let token = signed(&key, &claims, algorithm.clone());
+            assert_eq!(
+                verify_jwt(&token, &provider, &keys, None),
+                Err(Error::Forbidden),
+                "{field}"
+            );
+        }
+        let mut other_algorithm_keys = jwks;
+        other_algorithm_keys["keys"][0]["alg"] = json!("RS384");
+        let other_algorithm_keys =
+            verification_keys(other_algorithm_keys).unwrap();
+        let algorithm = CoreJwsSigningAlgorithm::RsaSsaPkcs1V15Sha384;
+        let token = signed(&key, &valid, algorithm);
+        assert!(
+            verify_jwt(&token, &provider, &other_algorithm_keys, None).is_err()
+        );
+    }
+
+    #[test]
+    fn federation_polar_claims() {
+        let claims = claims();
+        assert_eq!(
+            polar_claims(&json!({"large": u64::MAX})).unwrap_err(),
+            Error::invalid_request(
+                "OIDC token contains a claim value unsupported by trust policies",
+            ),
+        );
+        assert!(evaluate_policy(r#"assume(claims) if claims.sub = "builder" and claims.my_idp.custom_claims.project_id = "project-123" and "build" in claims.groups and claims.optional = nil;"#, &claims).is_ok());
+        assert!(
+            evaluate_policy(
+                r#"assume(claims) if claims.sub = "other";"#,
+                &claims
+            )
+            .is_err()
+        );
+        assert!(
+            evaluate_policy(
+                "assume(claims) if claims.missing = true;",
+                &claims
+            )
+            .is_err()
+        );
+        assert!(
+            evaluate_policy(
+                "assume(claims) if missing_helper(claims);",
+                &claims
+            )
+            .is_err()
+        );
+        assert!(
+            evaluate_policy("assume(_claims); ?= assume({});", &claims)
+                .is_err()
+        );
+        assert!(evaluate_policy("assume(", &claims).is_err());
+        assert!(evaluate_policy("assume(_claims);", &claims).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod discovery_tests {
+    use super::super::{external_client::ExternalIpPolicy, external_dns};
+    use super::tests::{signed, signing_key};
+    use super::*;
+    use nexus_config::{ExternalHttpClientConfig, TreatLoopbackAsExternal};
+    use omicron_common::address::{
+        Ipv6Subnet, RACK_PREFIX_LENGTH, UnderlaySubnets,
+    };
+    use serde_json::json;
+    use std::collections::HashMap;
+    use std::io::{Read, Write};
+    use std::net::{IpAddr, Ipv4Addr, TcpListener};
+    use std::sync::{
+        Arc, OnceLock,
+        atomic::{AtomicBool, Ordering},
+    };
+
+    struct Server {
+        url: String,
+        cert: reqwest::Certificate,
+        stop: Arc<AtomicBool>,
+        thread: Option<std::thread::JoinHandle<()>>,
+    }
+
+    impl Server {
+        fn new(routes: impl FnOnce(&str) -> HashMap<String, String>) -> Self {
+            let cert =
+                rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()])
+                    .unwrap();
+            let cert_der = cert.serialize_der().unwrap();
+            let key = rustls::pki_types::PrivatePkcs8KeyDer::from(
+                cert.serialize_private_key_der(),
+            );
+            let config = rustls::ServerConfig::builder_with_provider(Arc::new(
+                rustls::crypto::aws_lc_rs::default_provider(),
+            ))
+            .with_safe_default_protocol_versions()
+            .unwrap()
+            .with_no_client_auth()
+            .with_single_cert(vec![cert_der.clone().into()], key.into())
+            .unwrap();
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let url = format!("https://{}", listener.local_addr().unwrap());
+            let routes = routes(&url);
+            let stop = Arc::new(AtomicBool::new(false));
+            let stopped = stop.clone();
+            let config = Arc::new(config);
+            let thread = std::thread::spawn(move || {
+                while !stopped.load(Ordering::Relaxed) {
+                    let (stream, _) = match listener.accept() {
+                        Ok(pair) => pair,
+                        Err(e)
+                            if e.kind() == std::io::ErrorKind::WouldBlock =>
+                        {
+                            std::thread::sleep(Duration::from_millis(10));
+                            continue;
+                        }
+                        Err(e) => panic!("{e}"),
+                    };
+                    stream.set_nonblocking(false).unwrap();
+                    stream
+                        .set_read_timeout(Some(Duration::from_secs(3)))
+                        .unwrap();
+                    stream
+                        .set_write_timeout(Some(Duration::from_secs(3)))
+                        .unwrap();
+                    let connection =
+                        rustls::ServerConnection::new(config.clone()).unwrap();
+                    let mut stream =
+                        rustls::StreamOwned::new(connection, stream);
+                    let mut request = Vec::new();
+                    let mut byte = [0; 1];
+                    while !request.ends_with(b"\r\n\r\n") {
+                        if stream.read_exact(&mut byte).is_err() {
+                            break;
+                        }
+                        request.push(byte[0]);
+                    }
+                    let text = String::from_utf8_lossy(&request);
+                    if let Some(path) = text.split_whitespace().nth(1) {
+                        if let Some(response) = routes.get(path) {
+                            let _ = stream.write_all(response.as_bytes());
+                            stream.conn.send_close_notify();
+                            let _ = stream.flush();
+                        }
+                    }
+                }
+            });
+            Self {
+                url,
+                cert: reqwest::Certificate::from_der(&cert_der).unwrap(),
+                stop,
+                thread: Some(thread),
+            }
+        }
+
+        fn client(&self) -> ExternalHttpClient {
+            let subnets =
+                UnderlaySubnets::new(Ipv6Subnet::<RACK_PREFIX_LENGTH>::from(
+                    nexus_test_utils::RACK_SUBNET
+                        .parse::<ipnetwork::Ipv6Network>()
+                        .unwrap(),
+                ));
+            let policy = ExternalIpPolicy::new(
+                Arc::new(OnceLock::from(subnets)),
+                TreatLoopbackAsExternal::YesForTestPurposesOnly,
+            );
+            let resolver = Arc::new(external_dns::Resolver::new(
+                &[IpAddr::V4(Ipv4Addr::LOCALHOST)],
+                policy,
+            ));
+            let builder: ExternalClientBuilder = reqwest::ClientBuilder::new()
+                .https_only(true)
+                .add_root_certificate(self.cert.clone())
+                .timeout(Duration::from_secs(3))
+                .into();
+            builder
+                .redirect(reqwest::redirect::Policy::none())
+                .build(
+                    &ExternalHttpClientConfig {
+                        interface: None,
+                        treat_loopback_as_external:
+                            TreatLoopbackAsExternal::YesForTestPurposesOnly,
+                    },
+                    &resolver,
+                )
+                .unwrap()
+        }
+    }
+
+    impl Drop for Server {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::Relaxed);
+            self.thread.take().unwrap().join().unwrap();
+        }
+    }
+
+    fn response(body: Value) -> String {
+        let body = body.to_string();
+        format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        )
+    }
+
+    fn metadata(issuer: &str, jwks_uri: String) -> Value {
+        json!({
+            "issuer": issuer,
+            "authorization_endpoint": format!("{issuer}/authorize"),
+            "jwks_uri": jwks_uri,
+            "response_types_supported": ["id_token"],
+            "subject_types_supported": ["public"],
+            "id_token_signing_alg_values_supported": ["RS256"],
+        })
+    }
+
+    #[tokio::test]
+    async fn federation_discovery_fetching() {
+        let (key, jwks) = signing_key();
+        let server = Server::new(|url| {
+            HashMap::from([
+                (
+                    "/.well-known/openid-configuration".into(),
+                    response(metadata(url, format!("{url}/keys"))),
+                ),
+                (
+                    "/wrong-issuer/.well-known/openid-configuration".into(),
+                    response(metadata(
+                        "https://other.example",
+                        format!("{url}/keys"),
+                    )),
+                ),
+                (
+                    "/redirect-keys/.well-known/openid-configuration".into(),
+                    response(metadata(
+                        &format!("{url}/redirect-keys"),
+                        format!("{url}/redirect"),
+                    )),
+                ),
+                ("/keys".into(), response(jwks)),
+                (
+                    "/redirect".into(),
+                    format!(
+                        "HTTP/1.1 302 Found\r\nLocation: {url}/keys\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    ),
+                ),
+                (
+                    "/redirect/.well-known/openid-configuration".into(),
+                    format!(
+                        "HTTP/1.1 302 Found\r\nLocation: {url}/.well-known/openid-configuration\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    ),
+                ),
+                (
+                    "/oversized/.well-known/openid-configuration".into(),
+                    response(json!({"data": "x".repeat(MAX_METADATA_BYTES)})),
+                ),
+                (
+                    "/chunked-oversized/.well-known/openid-configuration"
+                        .into(),
+                    format!(
+                        "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n{:x}\r\n{}\r\n0\r\n\r\n",
+                        MAX_METADATA_BYTES + 1,
+                        "x".repeat(MAX_METADATA_BYTES + 1)
+                    ),
+                ),
+            ])
+        });
+        let client = server.client();
+        let mut provider = FederationIdentityProvider::new(Uuid::new_v4(), nexus_types::external_api::federation::FederationIdentityProviderCreate {
+            name: "test".parse().unwrap(), description: String::new(), issuer: server.url.clone(), audience: "oxide".into(),
+            verification_type: nexus_types::external_api::federation::FederationVerificationType::OidcDiscovery,
+            signing_keys: None,
+        }).unwrap();
+        let (keys, algorithms) =
+            discover_keys(&client, &provider).await.unwrap();
+        let now = Utc::now().timestamp();
+        let claims = json!({"iss": server.url, "sub": "builder", "aud": ["oxide"], "iat": now, "exp": now + 60});
+        let jwt = signed(
+            &key,
+            &claims,
+            CoreJwsSigningAlgorithm::RsaSsaPkcs1V15Sha256,
+        );
+        assert_eq!(
+            verify_jwt(&jwt, &provider, &keys, Some(&algorithms)).unwrap(),
+            claims
+        );
+        for path in [
+            "wrong-issuer",
+            "redirect",
+            "redirect-keys",
+            "oversized",
+            "chunked-oversized",
+        ] {
+            provider.issuer = format!("{}/{path}", server.url);
+            assert!(discover_keys(&client, &provider).await.is_err(), "{path}");
+        }
+        for url in ["http://127.0.0.1/keys", "https://[fd00::1]/keys"] {
+            let request =
+                http::Request::builder().uri(url).body(Vec::new()).unwrap();
+            assert!(
+                fetch_oidc_response(&client, request).await.is_err(),
+                "{url}"
+            );
+        }
+    }
+}
