@@ -29,6 +29,7 @@ use nexus_types_versions::v2026_01_03_00;
 use nexus_types_versions::v2026_01_05_00;
 use nexus_types_versions::v2026_01_08_00;
 use nexus_types_versions::v2026_01_15_00;
+use nexus_types_versions::v2026_01_15_01;
 use nexus_types_versions::v2026_01_16_00;
 use nexus_types_versions::v2026_01_16_01;
 use nexus_types_versions::v2026_01_22_00;
@@ -88,6 +89,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_09_23_01, FEDERATION_AUTHENTICATION),
     (2026_09_23_00, FEDERATION_SESSIONS),
     (2026_09_22_01, FEDERATION_TRUST_POLICIES),
     (2026_09_22_00, FEDERATION_IDENTITY_PROVIDERS),
@@ -9216,7 +9218,7 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/audit-log",
         tags = ["system/audit-log"],
-        versions = VERSION_AUDIT_LOG_CREDENTIAL_ID..,
+        versions = VERSION_FEDERATION_AUTHENTICATION..,
     }]
     async fn audit_log_list(
         rqctx: RequestContext<Self::Context>,
@@ -9245,7 +9247,8 @@ pub trait NexusExternalApi {
         HttpResponseOk<ResultsPage<v2026_01_15_00::audit::AuditLogEntry>>,
         HttpError,
     > {
-        let page = Self::audit_log_list(rqctx, query_params).await?.0;
+        let page =
+            Self::audit_log_list_v2026_01_15_01(rqctx, query_params).await?.0;
         Ok(HttpResponseOk(ResultsPage {
             items: page.items.into_iter().map(Into::into).collect(),
             next_page: page.next_page,
@@ -9269,13 +9272,57 @@ pub trait NexusExternalApi {
         HttpResponseOk<ResultsPage<v2025_11_20_00::audit::AuditLogEntry>>,
         HttpError,
     > {
-        let page = Self::audit_log_list(rqctx, query_params).await?.0;
+        let page =
+            Self::audit_log_list_v2026_01_15_01(rqctx, query_params).await?.0;
         Ok(HttpResponseOk(ResultsPage {
             items: page
                 .items
                 .into_iter()
                 .map(|e| v2026_01_15_00::audit::AuditLogEntry::from(e).into())
                 .collect(),
+            next_page: page.next_page,
+        }))
+    }
+
+    /// View audit log
+    ///
+    /// A single item in the audit log represents both the beginning and
+    /// end of the logged operation (represented by `time_started` and
+    /// `time_completed`) so that clients do not have to find multiple entries
+    /// and match them up by request ID to get the full picture of an operation.
+    /// Because timestamps may not be unique, entries have also have a unique
+    /// `id` that can be used to deduplicate items fetched from overlapping
+    /// time intervals.
+    ///
+    /// Audit log entries are designed to be immutable: once you see an entry,
+    /// fetching it again will never get you a different result. The list is
+    /// ordered and filtered by `time_completed`, not `time_started`. If
+    /// you fetch the audit log for a time range that is fully in the past,
+    /// the resulting list is guaranteed to be complete, i.e., fetching the
+    /// same timespan again later will always produce the same set of entries.
+    #[endpoint {
+        operation_id = "audit_log_list",
+        method = GET,
+        path = "/v1/system/audit-log",
+        tags = ["system/audit-log"],
+        versions = VERSION_AUDIT_LOG_CREDENTIAL_ID..VERSION_FEDERATION_AUTHENTICATION,
+    }]
+    async fn audit_log_list_v2026_01_15_01(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByTimeAndId<latest::audit::AuditLogParams>,
+        >,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2026_01_15_01::audit::AuditLogEntry>>,
+        HttpError,
+    > {
+        let page = Self::audit_log_list(rqctx, query_params).await?.0;
+        Ok(HttpResponseOk(ResultsPage {
+            items: page
+                .items
+                .into_iter()
+                .map(TryInto::try_into)
+                .collect::<Result<_, _>>()?,
             next_page: page.next_page,
         }))
     }

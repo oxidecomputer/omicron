@@ -7259,7 +7259,8 @@ CREATE TYPE IF NOT EXISTS omicron.public.audit_log_actor_kind AS ENUM (
     'user_builtin',
     'silo_user',
     'unauthenticated',
-    'scim'
+    'scim',
+    'federated'
 );
 
 CREATE TYPE IF NOT EXISTS omicron.public.audit_log_result_kind AS ENUM (
@@ -7275,7 +7276,8 @@ CREATE TYPE IF NOT EXISTS omicron.public.audit_log_auth_method AS ENUM (
     'session_cookie',
     'access_token',
     'scim_token',
-    'spoof'
+    'spoof',
+    'federation_token'
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.audit_log (
@@ -7350,6 +7352,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.audit_log (
         OR
         -- For a scim actor: must have a actor_silo_id
         (actor_kind = 'scim' AND actor_id IS NULL AND actor_silo_id IS NOT NULL)
+        OR (actor_kind = 'federated' AND actor_id IS NOT NULL AND actor_silo_id IS NOT NULL)
         OR
         -- For unauthenticated: must not have actor_id or actor_silo_id
         (actor_kind = 'unauthenticated' AND actor_id IS NULL AND actor_silo_id IS NULL)
@@ -7367,7 +7370,7 @@ ALTER TABLE omicron.public.audit_log
 ADD CONSTRAINT IF NOT EXISTS auth_method_and_credential_id_consistent CHECK (
     (auth_method IS NULL AND credential_id IS NULL)
     OR (auth_method = 'spoof' AND credential_id IS NULL)
-    OR (auth_method IN ('session_cookie', 'access_token', 'scim_token')
+    OR (auth_method IN ('session_cookie', 'access_token', 'scim_token', 'federation_token')
         AND credential_id IS NOT NULL)
 ) NOT VALID;
 
@@ -9601,7 +9604,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '304.0.0', NULL)
+    (TRUE, NOW(), NOW(), '305.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
