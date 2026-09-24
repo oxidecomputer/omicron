@@ -1,6 +1,6 @@
 ---
 name: add-api-version
-description: Add a new version to a Dropshot HTTP API. Use when the user wants to make versioned changes to a Dropshot-managed HTTP API, such as adding, making changes to, or removing an API endpoint.
+description: Add, change, or remove an endpoint in a Dropshot-managed HTTP API (e.g. Nexus's external or internal API). Any such change requires adding a new API version.
 ---
 
 # Add API version
