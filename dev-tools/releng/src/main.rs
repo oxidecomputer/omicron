@@ -1197,6 +1197,8 @@ fn generate_version(commit: &str) -> Result<Version> {
     // Avoid bothering with "what does Cockroach mean by Unicode code points"
     // and just assume the version is entirely ASCII.
     ensure!(version_str.is_ascii(), "{version_str} is not ASCII");
+    // This becomes 128 in R24, but we still need to support uploading to older
+    // versions for a bit.
     ensure!(version_str.len() <= 64, "{version_str} is longer than 64 bytes");
 
     Ok(version)
