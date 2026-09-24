@@ -14,7 +14,6 @@ use super::maghemite;
 use super::pumpkind;
 use super::server::StartError;
 use crate::config::Config;
-use crate::config::SidecarRevision;
 use crate::ddm_reconciler::DdmReconciler;
 use crate::long_running_tasks::{
     LongRunningTaskHandles, LongRunningTaskResult, spawn_all_longrunning_tasks,
@@ -36,8 +35,6 @@ use illumos_utils::zone::Zones;
 use omicron_common::FileKv;
 use omicron_common::address::Ipv6Subnet;
 use sled_agent_config_reconciler::ConfigReconcilerSpawnToken;
-use sled_hardware::DendriteAsic;
-use sled_hardware::SledMode;
 use sled_hardware::underlay;
 use sled_hardware::underlay::BootstrapInterface;
 use slog::Drain;
@@ -116,7 +113,7 @@ impl BootstrapAgentStartup {
         BootstrapNetworking::enable_ipv6_forwarding().await?;
 
         // Are we a gimlet or scrimlet?
-        let sled_mode = sled_mode_from_config(&config)?;
+        let sled_mode = config.deployment.sled_mode(&log).await?;
 
         // Spawn all important long running tasks that live for the lifetime of
         // the process and are used by both the bootstrap agent and sled agent
@@ -141,7 +138,7 @@ impl BootstrapAgentStartup {
             ddm_reconciler,
             startup_networking,
             sled_mode,
-            config.sidecar_revision.clone(),
+            config.deployment.sidecar_revision(),
             config.switch_zone_maghemite_links.clone(),
             long_running_task_handles.zone_image_resolver.clone(),
         );
@@ -288,50 +285,6 @@ async fn ensure_zfs_ramdisk_dataset() -> Result<(), StartError> {
     })
     .await
     .map_err(StartError::EnsureZfsRamdiskDataset)
-}
-
-// Combine the `sled_mode` config with the build-time switch type to determine
-// the actual sled mode.
-fn sled_mode_from_config(config: &Config) -> Result<SledMode, StartError> {
-    use crate::config::SledMode as SledModeConfig;
-    let sled_mode = match config.sled_mode {
-        SledModeConfig::Auto => {
-            if !cfg!(feature = "switch-asic") {
-                return Err(StartError::IncorrectBuildPackaging(
-                    "sled-agent was not packaged with `switch-asic`",
-                ));
-            }
-            SledMode::Auto
-        }
-        SledModeConfig::Sled => SledMode::Sled,
-        SledModeConfig::Scrimlet => {
-            let asic = if cfg!(feature = "switch-asic") {
-                DendriteAsic::TofinoAsic
-            } else if cfg!(feature = "switch-stub") {
-                DendriteAsic::TofinoStub
-            } else if cfg!(feature = "switch-softnpu") {
-                match config.sidecar_revision {
-                    SidecarRevision::SoftZone(_) => DendriteAsic::SoftNpuZone,
-                    SidecarRevision::SoftPropolis(_) => {
-                        DendriteAsic::SoftNpuPropolisDevice
-                    }
-                    _ => {
-                        return Err(StartError::IncorrectBuildPackaging(
-                            "sled-agent configured to run on softnpu zone but dosen't \
-                         have a softnpu sidecar revision",
-                        ));
-                    }
-                }
-            } else {
-                return Err(StartError::IncorrectBuildPackaging(
-                    "sled-agent configured to run on scrimlet but wasn't \
-                        packaged with switch zone",
-                ));
-            };
-            SledMode::Scrimlet { asic }
-        }
-    };
-    Ok(sled_mode)
 }
 
 #[derive(Debug, Clone)]

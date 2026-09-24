@@ -23,7 +23,34 @@ cfg_if::cfg_if! {
 pub mod cleanup;
 pub mod disk;
 pub use disk::*;
+pub mod softnpu;
 pub mod underlay;
+
+/// Failure while probing for switch hardware at startup.
+#[derive(Debug, thiserror::Error)]
+pub enum SwitchDetectError {
+    #[error("failed to walk device tree: {0}")]
+    DevInfo(anyhow::Error),
+
+    #[error("{path}: {err}")]
+    Io {
+        path: String,
+        #[source]
+        err: std::io::Error,
+    },
+
+    #[error("{path}: malformed Rversion: {reason}")]
+    Protocol { path: String, reason: String },
+}
+
+/// What startup switch detection should look for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SwitchProbe {
+    /// A physical sidecar ASIC, whichever kind is attached.
+    PhysicalAsic,
+    /// The propolis SoftNPU virtio 9p device.
+    SoftNpu,
+}
 
 // The type of networking 'ASIC' the Dendrite service is expected to manage
 #[derive(
@@ -81,9 +108,10 @@ pub enum ExternalDisks {
 }
 
 /// Configuration for forcing a sled to run as a Scrimlet or compute Sled
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum SledMode {
-    /// Automatically detect whether to run as a compute sled or Scrimlet (w/ real Tofino ASIC)
+    /// Run as a compute sled unless a Tofino ASIC is present, in which case
+    /// run as a Scrimlet
     Auto,
     /// Force sled to run as a Gimlet
     Sled,
