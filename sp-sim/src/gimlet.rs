@@ -11,12 +11,12 @@ use crate::ereport;
 use crate::ereport::EreportState;
 use crate::helpers::rot_state_v2;
 use crate::sensors::Sensors;
-use crate::serial_number_padded;
 use crate::server;
 use crate::server::SimSpHandler;
 use crate::server::UdpServer;
 use crate::update::BaseboardKind;
 use crate::update::SimSpUpdate;
+use crate::vpd::BaseboardVpd;
 use crate::vpd::ComponentVpds;
 use anyhow::{Context, Result, anyhow, bail};
 use async_trait::async_trait;
@@ -236,6 +236,8 @@ impl Gimlet {
     ) -> Result<Self> {
         info!(log, "setting up simulated gimlet");
 
+        let baseboard_vpd =
+            BaseboardVpd::from_config(&gimlet.common, FAKE_GIMLET_MODEL)?;
         let attached_mgs = Arc::new(Mutex::new(None));
 
         let mut incoming_console_tx = HashMap::new();
@@ -405,6 +407,7 @@ impl Gimlet {
             ereport_servers,
             ereport_state,
             gimlet.common.clone(),
+            baseboard_vpd,
             attached_mgs,
             incoming_console_tx,
             power_state,
@@ -647,6 +650,7 @@ impl UdpTask {
         ereport_servers: Option<[UdpServer; 2]>,
         ereport_state: EreportState,
         common: SpCommonConfig,
+        baseboard_vpd: BaseboardVpd,
         attached_mgs: AttachedMgsSerialConsole,
         incoming_serial_console: HashMap<SpComponent, UnboundedSender<Vec<u8>>>,
         power_state: watch::Sender<GimletPowerState>,
@@ -658,6 +662,7 @@ impl UdpTask {
         let [udp0, udp1] = servers;
         let handler = Arc::new(TokioMutex::new(Handler::new(
             common,
+            baseboard_vpd,
             attached_mgs,
             incoming_serial_console,
             power_state,
@@ -782,6 +787,7 @@ impl UdpTask {
 struct Handler {
     log: Logger,
     common: SpCommonConfig,
+    baseboard_vpd: BaseboardVpd,
     // `SpHandler` wants `&'static str` references when describing components;
     // this is fine on the real SP where the strings are baked in at build time,
     // but awkward here where we read them in at runtime. We'll leak the strings
@@ -813,6 +819,7 @@ impl Handler {
     #[allow(clippy::too_many_arguments)]
     fn new(
         common: SpCommonConfig,
+        baseboard_vpd: BaseboardVpd,
         attached_mgs: AttachedMgsSerialConsole,
         incoming_serial_console: HashMap<SpComponent, UnboundedSender<Vec<u8>>>,
         power_state: watch::Sender<GimletPowerState>,
@@ -842,6 +849,7 @@ impl Handler {
         Self {
             log,
             common,
+            baseboard_vpd,
             sensors,
             component_vpds,
             leaked_component_device_strings,
@@ -859,15 +867,10 @@ impl Handler {
     }
 
     fn sp_state_impl(&self) -> SpStateV2 {
-        // Make the Baseboard a PC so that our testbeds work as expected.
-        let mut model = [0; 32];
-        model[..self.common.part_number.len()]
-            .copy_from_slice(self.common.part_number.as_bytes());
-
         SpStateV2 {
             hubris_archive_id: [0; 8],
-            serial_number: serial_number_padded(&self.common.serial_number),
-            model,
+            serial_number: self.baseboard_vpd.serial_number,
+            model: self.baseboard_vpd.part_number,
             revision: 0,
             base_mac_address: [0; 6],
             power_state: (*self.power_state.borrow()).into(),

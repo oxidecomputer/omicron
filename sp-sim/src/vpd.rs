@@ -2,10 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Runtime component VPD responses constructed from simulator configuration.
+//! Runtime baseboard and component VPD constructed from simulator
+//! configuration.
 
 use crate::config::ComponentVpdConfig;
 use crate::config::PmbusBlockConfig;
+use crate::config::SpCommonConfig;
 use crate::config::SpComponentConfig;
 
 use gateway_messages::SpComponent;
@@ -16,6 +18,50 @@ use anyhow::Context;
 use anyhow::anyhow;
 use anyhow::bail;
 use std::collections::HashMap;
+
+/// A simulated SP's baseboard identity, padded to the lengths of the
+/// corresponding fields in the [`gateway_messages::SpStateV2`] message.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct BaseboardVpd {
+    pub(crate) serial_number: [u8; Self::MAX_LEN],
+    pub(crate) part_number: [u8; Self::MAX_LEN],
+}
+
+impl BaseboardVpd {
+    const MAX_LEN: usize = 32;
+
+    /// Builds the baseboard VPD for a simulated SP from its config.
+    /// `default_part_number` is used if the config does not set a part number.
+    pub(crate) fn from_config(
+        config: &SpCommonConfig,
+        default_part_number: &str,
+    ) -> anyhow::Result<Self> {
+        fn padded(value: &str) -> anyhow::Result<[u8; BaseboardVpd::MAX_LEN]> {
+            let mut padded = [0; BaseboardVpd::MAX_LEN];
+            padded
+                .get_mut(..value.len())
+                .ok_or_else(|| {
+                    anyhow!(
+                        "{value:?} is {} bytes long, but must be at most \
+                         {} bytes",
+                        value.len(),
+                        BaseboardVpd::MAX_LEN,
+                    )
+                })?
+                .copy_from_slice(value.as_bytes());
+            Ok(padded)
+        }
+
+        let part_number =
+            config.part_number.as_deref().unwrap_or(default_part_number);
+        Ok(Self {
+            serial_number: padded(&config.serial_number)
+                .context("invalid simulated SP serial number")?,
+            part_number: padded(part_number)
+                .context("invalid simulated SP part number")?,
+        })
+    }
+}
 
 pub(crate) struct ComponentVpds {
     by_component: HashMap<SpComponent, ComponentVpd>,
