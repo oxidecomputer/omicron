@@ -8117,107 +8117,130 @@ fn prettyprint_vmm(
     sled_serial: Option<&str>,
     inst_id: bool,
 ) {
-    const ID: &'static str = "ID";
-    const CREATED: &'static str = "created at";
-    const DELETED: &'static str = "deleted at";
-    const UPDATED: &'static str = "updated at";
-    const INSTANCE_ID: &'static str = "instance ID";
-    const SLED_ID: &'static str = "sled ID";
-    const SLED_SERIAL: &'static str = "sled serial";
-    const CPU_PLATFORM: &'static str = "CPU platform";
-    const ADDRESS: &'static str = "propolis address";
-    const STATE: &'static str = "state";
-    const FAILURE_REASON: &'static str = "  failure reason";
-    const FAILURE_NOTE: &'static str = "  note";
-    const STOP_FOR_UPDATE: &'static str = "  marked to stop for sled update";
-    const WIDTH: usize = const_max_len(&[
-        ID,
-        CREATED,
-        DELETED,
-        UPDATED,
-        INSTANCE_ID,
-        SLED_ID,
-        SLED_SERIAL,
-        CPU_PLATFORM,
-        STATE,
-        ADDRESS,
-        FAILURE_REASON,
-        FAILURE_NOTE,
-        STOP_FOR_UPDATE,
-    ]);
+    print!("{}", VmmDisplay { indent, vmm, width, sled_serial, inst_id });
+}
 
-    let width = std::cmp::max(width, Some(WIDTH)).unwrap_or(WIDTH);
-    let Vmm {
-        id,
-        time_created,
-        time_deleted,
-        instance_id,
-        sled_id,
-        propolis_ip,
-        propolis_port,
-        cpu_platform,
-        state,
-        generation,
-        time_state_updated,
-        failure_reason,
-        stop_for_update_disposition_generation,
-    } = vmm;
+struct VmmDisplay<'a> {
+    indent: &'a str,
+    vmm: &'a Vmm,
+    width: Option<usize>,
+    sled_serial: Option<&'a str>,
+    inst_id: bool,
+}
 
-    println!("{indent}{ID:>width$}: {id}");
-    if inst_id {
-        println!("{indent}{INSTANCE_ID:>width$}: {instance_id}");
-    }
-    println!("{indent}{CREATED:>width$}: {time_created}");
-    if let Some(deleted) = time_deleted {
-        println!("{indent}{DELETED:width$}: {deleted}");
-    }
-    println!("{indent}{STATE:>width$}: {state}");
-    if let Some(reason) = failure_reason {
-        println!("{indent}{FAILURE_REASON:>width$}: {reason}");
+impl Display for VmmDisplay<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self { indent, vmm, width, sled_serial, inst_id } = *self;
+        const ID: &'static str = "ID";
+        const CREATED: &'static str = "created at";
+        const DELETED: &'static str = "deleted at";
+        const UPDATED: &'static str = "updated at";
+        const INSTANCE_ID: &'static str = "instance ID";
+        const SLED_ID: &'static str = "sled ID";
+        const SLED_SERIAL: &'static str = "sled serial";
+        const CPU_PLATFORM: &'static str = "CPU platform";
+        const ADDRESS: &'static str = "propolis address";
+        const STATE: &'static str = "state";
+        const FAILURE_REASON: &'static str = "  failure reason";
+        const FAILURE_NOTE: &'static str = "  note";
+        const STOP_FOR_UPDATE: &'static str =
+            "  marked to stop for sled update";
+        const WIDTH: usize = const_max_len(&[
+            ID,
+            CREATED,
+            DELETED,
+            UPDATED,
+            INSTANCE_ID,
+            SLED_ID,
+            SLED_SERIAL,
+            CPU_PLATFORM,
+            STATE,
+            ADDRESS,
+            FAILURE_REASON,
+            FAILURE_NOTE,
+            STOP_FOR_UPDATE,
+        ]);
 
-        if state == &db::model::VmmState::Failed {
-            println!(
-                "{indent}{FAILURE_NOTE:>width$}: {}",
-                reason.description()
-            );
-        } else {
-            println!(
-                "{:<width$}weird: VMMs should only have non-NULL failure \
-                     reasons if they are in the failed state",
+        let width = std::cmp::max(width, Some(WIDTH)).unwrap_or(WIDTH);
+        let Vmm {
+            id,
+            time_created,
+            time_deleted,
+            instance_id,
+            sled_id,
+            propolis_ip,
+            propolis_port,
+            cpu_platform,
+            state,
+            generation,
+            time_state_updated,
+            failure_reason,
+            stop_for_update_disposition_generation,
+        } = vmm;
+
+        writeln!(f, "{indent}{ID:>width$}: {id}")?;
+        if inst_id {
+            writeln!(f, "{indent}{INSTANCE_ID:>width$}: {instance_id}")?;
+        }
+        writeln!(f, "{indent}{CREATED:>width$}: {time_created}")?;
+        if let Some(deleted) = time_deleted {
+            writeln!(f, "{indent}{DELETED:width$}: {deleted}")?;
+        }
+        writeln!(f, "{indent}{STATE:>width$}: {state}")?;
+        if let Some(reason) = failure_reason {
+            writeln!(f, "{indent}{FAILURE_REASON:>width$}: {reason}")?;
+
+            if state == &db::model::VmmState::Failed {
+                writeln!(
+                    f,
+                    "{indent}{FAILURE_NOTE:>width$}: {}",
+                    reason.description()
+                )?;
+            } else {
+                writeln!(
+                    f,
+                    "{:<width$}weird: VMMs should only have non-NULL failure \
+                         reasons if they are in the failed state",
+                    "/!\\",
+                    width = indent.len(),
+                )?;
+            }
+        } else if state == &db::model::VmmState::Failed {
+            writeln!(
+                f,
+                "{:<width$}weird: VMMs in the 'failed' state should have a \
+                 non-NULL failure reason",
                 "/!\\",
                 width = indent.len(),
-            );
+            )?;
         }
-    } else if state == &db::model::VmmState::Failed {
-        println!(
-            "{:<width$}weird: VMMs in the 'failed' state should have a \
-             non-NULL failure reason",
-            "/!\\",
-            width = indent.len(),
-        );
-    }
-    if let Some(ud_generation) = stop_for_update_disposition_generation {
-        let u_g = UpdateDispositionGeneration::from(*ud_generation);
-        println!(
-            "{indent}{STOP_FOR_UPDATE:>width$}: update disposition generation {u_g}"
-        );
-    }
+        if let Some(ud_generation) = stop_for_update_disposition_generation {
+            let u_g = UpdateDispositionGeneration::from(*ud_generation);
+            writeln!(
+                f,
+                "{indent}{STOP_FOR_UPDATE:>width$}: update disposition generation {u_g}"
+            )?;
+        }
 
-    let g = u64::from(generation.0);
-    println!(
-        "{indent}{UPDATED:>width$}: {time_state_updated:?} (generation {g})"
-    );
+        let g = u64::from(generation.0);
+        writeln!(
+            f,
+            "{indent}{UPDATED:>width$}: {time_state_updated:?} (generation {g})"
+        )?;
 
-    println!(
-        "{indent}{ADDRESS:>width$}: {}:{}",
-        propolis_ip.ip(),
-        propolis_port.0
-    );
-    println!("{indent}{SLED_ID:>width$}: {sled_id}");
-    if let Some(serial) = sled_serial {
-        println!("{indent}{SLED_SERIAL:>width$}: {serial}");
+        writeln!(
+            f,
+            "{indent}{ADDRESS:>width$}: {}:{}",
+            propolis_ip.ip(),
+            propolis_port.0
+        )?;
+        writeln!(f, "{indent}{SLED_ID:>width$}: {sled_id}")?;
+        if let Some(serial) = sled_serial {
+            writeln!(f, "{indent}{SLED_SERIAL:>width$}: {serial}")?;
+        }
+        writeln!(f, "{indent}{CPU_PLATFORM:>width$}: {cpu_platform}")?;
+        Ok(())
     }
-    println!("{indent}{CPU_PLATFORM:>width$}: {cpu_platform}");
 }
 
 async fn cmd_db_vmm_list(
@@ -8646,4 +8669,70 @@ async fn cmd_db_trust_quorum_list_configs(
     println!("{}", table);
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use swrite::SWrite as _;
+    use swrite::swriteln;
+
+    fn epoch_vmm() -> Vmm {
+        let when = chrono::DateTime::from_timestamp(0, 0)
+            .expect("the epoch is a valid timestamp");
+        let mut vmm = Vmm::new(
+            PropolisUuid::nil(),
+            InstanceUuid::nil(),
+            SledUuid::nil(),
+            "127.0.0.1".parse().unwrap(),
+            12400,
+            db::model::VmmCpuPlatform::AmdMilan,
+        );
+        vmm.time_created = when;
+        vmm.time_state_updated = when;
+        vmm
+    }
+
+    #[test]
+    fn test_vmm_display() {
+        let mut failed = epoch_vmm();
+        failed.state = db::model::VmmState::Failed;
+        failed.stop_for_update_disposition_generation =
+            Some(db::model::to_db_typed_generation(
+                UpdateDispositionGeneration::from_u32(7),
+            ));
+
+        let mut running = epoch_vmm();
+        running.state = db::model::VmmState::Running;
+        running.failure_reason = Some(db::model::VmmFailureReason::SledOff);
+
+        let mut deleted = epoch_vmm();
+        deleted.time_deleted = Some(deleted.time_created);
+
+        let mut output = String::new();
+        for (name, vmm, sled_serial, inst_id) in [
+            ("failed without reason", &failed, None, false),
+            ("reason without failure", &running, None, false),
+            (
+                "deleted with instance and serial",
+                &deleted,
+                Some("BRM00000000"),
+                true,
+            ),
+        ] {
+            swriteln!(output, "=== {name} ===");
+            swriteln!(
+                output,
+                "{}",
+                VmmDisplay {
+                    indent: "    ",
+                    vmm,
+                    width: None,
+                    sled_serial,
+                    inst_id,
+                }
+            );
+        }
+        expectorate::assert_contents("tests/output/vmm-lines.txt", &output);
+    }
 }
