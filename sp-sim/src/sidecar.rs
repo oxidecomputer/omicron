@@ -13,12 +13,12 @@ use crate::ereport;
 use crate::ereport::EreportState;
 use crate::helpers::rot_state_v2;
 use crate::sensors::Sensors;
-use crate::serial_number_padded;
 use crate::server;
 use crate::server::SimSpHandler;
 use crate::server::UdpServer;
 use crate::update::BaseboardKind;
 use crate::update::SimSpUpdate;
+use crate::vpd::BaseboardVpd;
 use crate::vpd::ComponentVpds;
 use anyhow::Result;
 use async_trait::async_trait;
@@ -82,6 +82,10 @@ use tokio::task;
 use tokio::task::JoinHandle;
 
 pub const SIM_SIDECAR_BOARD: &str = "SimSidecarSp";
+
+/// Baseboard model reported by simulated Sidecars whose config does not set a
+/// part number.
+pub const FAKE_SIDECAR_MODEL: &str = "FAKE_SIM_SIDECAR";
 
 pub struct Sidecar {
     local_addrs: Option<[SocketAddrV6; 2]>,
@@ -212,6 +216,8 @@ impl Sidecar {
     ) -> Result<Self> {
         info!(log, "setting up simulated sidecar");
 
+        let baseboard_vpd =
+            BaseboardVpd::from_config(&sidecar.common, FAKE_SIDECAR_MODEL)?;
         let (commands, commands_rx) = mpsc::unbounded_channel();
 
         if let Some(network_config) = &sidecar.common.network_config {
@@ -247,14 +253,7 @@ impl Sidecar {
                 let mut cfg = sidecar.common.ereport_config.clone();
                 if cfg.restart.metadata.is_empty() {
                     let map = &mut cfg.restart.metadata;
-                    map.insert(
-                        "baseboard_part_number".to_string(),
-                        SIM_SIDECAR_BOARD.into(),
-                    );
-                    map.insert(
-                        "baseboard_serial_number".to_string(),
-                        sidecar.common.serial_number.clone().into(),
-                    );
+                    baseboard_vpd.populate_ereport_metadata(map);
                     map.insert(
                         "hubris_archive_id".to_string(),
                         "asdfasdfasdf".into(),
@@ -277,7 +276,7 @@ impl Sidecar {
                 ereport_servers,
                 ereport_state,
                 sidecar.common.components.clone(),
-                sidecar.common.serial_number.clone(),
+                baseboard_vpd,
                 FakeIgnition::new(&config.simulated_sps),
                 commands_rx,
                 log,
@@ -349,7 +348,7 @@ impl Inner {
         ereport_servers: Option<[UdpServer; 2]>,
         ereport_state: EreportState,
         components: Vec<SpComponentConfig>,
-        serial_number: String,
+        baseboard_vpd: BaseboardVpd,
         ignition: FakeIgnition,
         commands: mpsc::UnboundedReceiver<Command>,
         log: Logger,
@@ -359,7 +358,7 @@ impl Inner {
     ) -> (Self, Arc<TokioMutex<Handler>>, watch::Receiver<usize>) {
         let [udp0, udp1] = servers;
         let handler = Arc::new(TokioMutex::new(Handler::new(
-            serial_number,
+            baseboard_vpd,
             components,
             ignition,
             log,
@@ -505,7 +504,7 @@ struct Handler {
     sensors: Sensors,
     component_vpds: ComponentVpds,
 
-    serial_number: String,
+    baseboard_vpd: BaseboardVpd,
     ignition: FakeIgnition,
     power_state: PowerState,
     power_state_changes: Arc<AtomicUsize>,
@@ -525,7 +524,7 @@ struct Handler {
 
 impl Handler {
     fn new(
-        serial_number: String,
+        baseboard_vpd: BaseboardVpd,
         components: Vec<SpComponentConfig>,
         ignition: FakeIgnition,
         log: Logger,
@@ -558,7 +557,7 @@ impl Handler {
             component_vpds,
             leaked_component_device_strings,
             leaked_component_description_strings,
-            serial_number,
+            baseboard_vpd,
             ignition,
             power_state: PowerState::A2,
             power_state_changes,
@@ -571,15 +570,10 @@ impl Handler {
     }
 
     fn sp_state_impl(&self) -> SpStateV2 {
-        const FAKE_SIDECAR_MODEL: &[u8] = b"FAKE_SIM_SIDECAR";
-
-        let mut model = [0; 32];
-        model[..FAKE_SIDECAR_MODEL.len()].copy_from_slice(FAKE_SIDECAR_MODEL);
-
         SpStateV2 {
             hubris_archive_id: [0; 8],
-            serial_number: serial_number_padded(&self.serial_number),
-            model,
+            serial_number: self.baseboard_vpd.padded_serial_number(),
+            model: self.baseboard_vpd.padded_part_number(),
             revision: 0,
             base_mac_address: [0; 6],
             power_state: self.power_state,
