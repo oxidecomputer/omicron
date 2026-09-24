@@ -4955,7 +4955,7 @@ async fn cmd_nexus_clickhouse_policy_get(
                     Defaulting to single-node deployment"
                 );
             } else {
-                eprintln!("error: {:#}", err);
+                return Err(err).context("retrieving clickhouse policy");
             }
         }
         Ok(policy) => {
@@ -5065,7 +5065,6 @@ async fn cmd_nexus_clickhouse_policy_set(
                     time_created: now_db_precision(),
                 }
             } else {
-                eprintln!("error: {:#}", err);
                 return Err(err).context("retrieving clickhouse policy");
             }
         }
@@ -5101,7 +5100,7 @@ async fn cmd_nexus_oximeter_read_policy_get(
                     Defaulting to reading from a single-node"
                 );
             } else {
-                eprintln!("error: {:#}", err);
+                return Err(err).context("retrieving oximeter read policy");
             }
         }
         Ok(policy) => {
@@ -5142,7 +5141,6 @@ async fn cmd_nexus_oximeter_read_policy_set(
                     time_created: now_db_precision(),
                 }
             } else {
-                eprintln!("error: {:#}", err);
                 return Err(err).context("retrieving oximeter read policy");
             }
         }
