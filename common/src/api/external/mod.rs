@@ -855,6 +855,7 @@ pub enum ResourceType {
     IdentityProvider,
     Image,
     Instance,
+    InventoryCollection,
     InstanceNetworkInterface,
     InternetGateway,
     InternetGatewayIpAddress,
