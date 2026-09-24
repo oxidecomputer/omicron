@@ -24,7 +24,7 @@
                                   ID: 00000000-0000-0000-0000-000000000000
                          instance ID: 00000000-0000-0000-0000-000000000000
                           created at: 1970-01-01 00:00:00 UTC
-    deleted at                      : 1970-01-01 00:00:00 UTC
+                          deleted at: 1970-01-01 00:00:00 UTC
                                state: creating
                           updated at: 1970-01-01T00:00:00Z (generation 1)
                     propolis address: 127.0.0.1:12400
