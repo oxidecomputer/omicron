@@ -123,12 +123,26 @@ pub struct SledAgent {
     pub repo_depot: dropshot::HttpServer<ArtifactStore<SimArtifactStorage>>,
     pub log: Logger,
     health_monitor: HealthMonitorHandle,
+    /// synthetic zone log files served by the support-logs endpoints,
+    /// keyed by zone name
+    pub(super) support_logs: Mutex<HashMap<String, Vec<SimLogEntry>>>,
     /// Watch channel that sends the deserialized [`SystemNetworkingConfig`]
     /// whenever Nexus writes a new bootstore config. Present on all sim sleds;
     /// only scrimlet sleds subscribe to it via [`Self::start_scrimlet_reconcilers`].
     network_config_tx: watch::Sender<SystemNetworkingConfig>,
     /// Keeps the scrimlet reconcilers alive.
     scrimlet_reconcilers: ScrimletReconcilers,
+}
+
+/// A synthetic log file injected into the simulated sled-agent by tests,
+/// served back by the support-logs download endpoint.
+#[derive(Clone, Debug)]
+pub struct SimLogEntry {
+    /// The file's path within the zone's log zip.
+    pub filename: String,
+    pub contents: Vec<u8>,
+    /// The simulated file mtime that time-window filtering applies to.
+    pub mtime: chrono::DateTime<Utc>,
 }
 
 impl SledAgent {
@@ -225,9 +239,26 @@ impl SledAgent {
             log,
             bootstore_network_config,
             health_monitor,
+            support_logs: Mutex::new(HashMap::new()),
             network_config_tx,
             scrimlet_reconcilers,
         })
+    }
+
+    /// Injects a synthetic zone log file to be served by the support-logs
+    /// endpoints.
+    pub fn insert_support_log(&self, zone: &str, entry: SimLogEntry) {
+        self.support_logs
+            .lock()
+            .unwrap()
+            .entry(zone.to_string())
+            .or_default()
+            .push(entry);
+    }
+
+    /// Returns the names of zones with injected support logs.
+    pub(super) fn support_log_zones(&self) -> Vec<String> {
+        self.support_logs.lock().unwrap().keys().cloned().collect()
     }
 
     pub fn current_bootstore_network_config(&self) -> bootstore::NetworkConfig {

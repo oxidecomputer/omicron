@@ -18,6 +18,7 @@ use futures::future::Future;
 use nexus_db_model::Sled;
 use nexus_networking;
 use nexus_types::identity::Asset;
+use nexus_types::support_bundle::BundleTimeRange;
 use slog::error;
 use slog::info;
 use slog_error_chain::InlineErrorChain;
@@ -37,6 +38,7 @@ pub async fn spawn_query_all_sleds(
     else {
         return Ok(CollectionStepOutput::Skipped);
     };
+    let time_range = collection.data_selection().time_range().clone();
 
     let all_sleds = tokio::select! {
         _ = collection.cancelled() => return Ok(CollectionStepOutput::None),
@@ -54,12 +56,16 @@ pub async fn spawn_query_all_sleds(
         }
 
         let sled = sled.clone();
+        let time_range = time_range.clone();
         extra_steps.push(CollectionStep::new(
             format!("sled data for sled {}", sled.id()),
             Box::new({
                 move |collection, dir| {
                     async move {
-                        collect_data_from_sled(collection, sled, dir).await
+                        collect_data_from_sled(
+                            collection, sled, time_range, dir,
+                        )
+                        .await
                     }
                     .boxed()
                 }
@@ -74,6 +80,7 @@ pub async fn spawn_query_all_sleds(
 // be turned into a support bundle.
 //
 // - "sled" is the sled from which we should collect data.
+// - "time_range" bounds which zone logs are collected, by file mtime.
 // - "dir" is a directory where data can be stored, to be turned
 // into a bundle after collection completes.
 //
@@ -85,6 +92,7 @@ pub async fn spawn_query_all_sleds(
 async fn collect_data_from_sled(
     collection: &BundleCollection,
     sled: Sled,
+    time_range: BundleTimeRange,
     dir: &Utf8Path,
 ) -> anyhow::Result<CollectionStepOutput> {
     let (log, opctx, datastore) =
@@ -244,6 +252,7 @@ async fn collect_data_from_sled(
     // it can respond, so we cap the number of in-flight requests.
     let sled_client = &sled_client;
     let sled_path = &sled_path;
+    let time_range = &time_range;
     let mut log_futs = futures::stream::iter(zones)
         .map(|zone| async move {
             save_zone_log_zip_or_error(
@@ -251,6 +260,7 @@ async fn collect_data_from_sled(
                 sled_client,
                 &zone,
                 sled_path,
+                time_range,
                 cancellation_token,
             )
             .await
@@ -330,15 +340,23 @@ async fn save_zone_log_zip_or_error(
     client: &sled_agent_client::Client,
     zone: &str,
     path: &Utf8Path,
+    time_range: &BundleTimeRange,
     cancellation_token: &CancellationToken,
 ) -> anyhow::Result<()> {
-    // In the future when support bundle collection exposes tuning parameters
-    // this can turn into a collection parameter.
-    const DEFAULT_MAX_ROTATED_LOGS: u32 = 5;
+    // Bind with names so the positional Progenitor call below can't
+    // accidentally swap start and end: query parameters are supplied in
+    // alphabetical order, which is why "end time" comes before
+    // "start time".
+    let (start, end) = (time_range.start(), time_range.end());
 
     let download_result = tokio::select! {
         _ = cancellation_token.cancelled() => return Ok(()),
-        result = client.support_logs_download(zone, DEFAULT_MAX_ROTATED_LOGS) => result,
+        result = client.support_logs_download(
+            zone,
+            end.as_ref(),
+            None,
+            start.as_ref(),
+        ) => result,
     };
 
     match download_result {
