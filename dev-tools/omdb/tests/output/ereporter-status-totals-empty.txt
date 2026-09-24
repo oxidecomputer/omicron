@@ -1,0 +1,9 @@
+    total ereports received:      0
+      new ereports ingested:      0
+    total HTTP requests sent:     0
+      total collection errors:    0
+    total reporters:              0
+      contacted successfully:     0
+        with ereports:            0
+        without ereports:         0
+      with collection errors:     0
