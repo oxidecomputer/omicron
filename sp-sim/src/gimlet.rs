@@ -332,14 +332,8 @@ impl Gimlet {
 
             if cfg.restart.metadata.is_empty() {
                 let map = &mut cfg.restart.metadata;
-                map.insert(
-                    "baseboard_part_number".to_string(),
-                    SIM_GIMLET_BOARD.into(),
-                );
-                map.insert(
-                    "baseboard_serial_number".to_string(),
-                    gimlet.common.serial_number.clone().into(),
-                );
+
+                baseboard_vpd.populate_ereport_metadata(map);
                 map.insert("hubris_archive_id".to_string(), hubris_gitc.into());
                 map.insert("hubris_version".to_string(), hubris_vers.into());
             }
@@ -869,8 +863,8 @@ impl Handler {
     fn sp_state_impl(&self) -> SpStateV2 {
         SpStateV2 {
             hubris_archive_id: [0; 8],
-            serial_number: self.baseboard_vpd.serial_number,
-            model: self.baseboard_vpd.part_number,
+            serial_number: self.baseboard_vpd.padded_serial_number(),
+            model: self.baseboard_vpd.padded_part_number(),
             revision: 0,
             base_mac_address: [0; 6],
             power_state: (*self.power_state.borrow()).into(),

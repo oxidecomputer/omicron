@@ -19,12 +19,12 @@ use anyhow::anyhow;
 use anyhow::bail;
 use std::collections::HashMap;
 
-/// A simulated SP's baseboard identity, padded to the lengths of the
-/// corresponding fields in the [`gateway_messages::SpStateV2`] message.
-#[derive(Clone, Copy, Debug)]
+/// A simulated SP's baseboard identity, used to populate the identity fields in
+/// [`gateway_messages::SpStateV2`] and in ereport metadata.
+#[derive(Clone, Debug)]
 pub(crate) struct BaseboardVpd {
-    pub(crate) serial_number: [u8; Self::MAX_LEN],
-    pub(crate) part_number: [u8; Self::MAX_LEN],
+    serial_number: String,
+    part_number: String,
 }
 
 impl BaseboardVpd {
@@ -36,30 +36,64 @@ impl BaseboardVpd {
         config: &SpCommonConfig,
         default_part_number: &str,
     ) -> anyhow::Result<Self> {
-        fn padded(value: &str) -> anyhow::Result<[u8; BaseboardVpd::MAX_LEN]> {
-            let mut padded = [0; BaseboardVpd::MAX_LEN];
-            padded
-                .get_mut(..value.len())
-                .ok_or_else(|| {
-                    anyhow!(
-                        "{value:?} is {} bytes long, but must be at most \
-                         {} bytes",
-                        value.len(),
-                        BaseboardVpd::MAX_LEN,
-                    )
-                })?
-                .copy_from_slice(value.as_bytes());
-            Ok(padded)
+        fn check_len(value: &str) -> anyhow::Result<()> {
+            if value.len() > BaseboardVpd::MAX_LEN {
+                bail!(
+                    "{value:?} is {} bytes long, but must be at most {} bytes",
+                    value.len(),
+                    BaseboardVpd::MAX_LEN,
+                );
+            }
+            Ok(())
         }
 
-        let part_number =
-            config.part_number.as_deref().unwrap_or(default_part_number);
-        Ok(Self {
-            serial_number: padded(&config.serial_number)
-                .context("invalid simulated SP serial number")?,
-            part_number: padded(part_number)
-                .context("invalid simulated SP part number")?,
-        })
+        let serial_number = config.serial_number.clone();
+        let part_number = config
+            .part_number
+            .clone()
+            .unwrap_or_else(|| default_part_number.to_string());
+
+        check_len(&serial_number)
+            .context("invalid simulated SP serial number")?;
+        check_len(&part_number).context("invalid simulated SP part number")?;
+
+        Ok(Self { serial_number, part_number })
+    }
+
+    pub(crate) fn populate_ereport_metadata(
+        &self,
+        metadata: &mut toml::map::Map<String, toml::Value>,
+    ) {
+        metadata.insert(
+            "baseboard_serial_number".to_string(),
+            self.serial_number.clone().into(),
+        );
+        metadata.insert(
+            "baseboard_part_number".to_string(),
+            self.part_number.clone().into(),
+        );
+    }
+
+    /// Returns the serial number, NUL-padded for `SpStateV2::serial_number`.
+    pub(crate) fn padded_serial_number(&self) -> [u8; Self::MAX_LEN] {
+        Self::nul_padded(&self.serial_number)
+    }
+
+    /// Returns the part number, NUL-padded for `SpStateV2::model`.
+    pub(crate) fn padded_part_number(&self) -> [u8; Self::MAX_LEN] {
+        Self::nul_padded(&self.part_number)
+    }
+
+    fn nul_padded(value: &str) -> [u8; Self::MAX_LEN] {
+        let mut padded = [0; Self::MAX_LEN];
+        padded
+            .get_mut(..value.len())
+            .expect(
+                "`BaseboardVpd::from_config` checked that every value fits \
+                 in an `SpStateV2` field",
+            )
+            .copy_from_slice(value.as_bytes());
+        padded
     }
 }
 
