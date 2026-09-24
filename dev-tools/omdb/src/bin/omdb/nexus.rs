@@ -99,6 +99,7 @@ use nexus_types::internal_api::background::TufArtifactReplicationCounters;
 use nexus_types::internal_api::background::TufArtifactReplicationRequest;
 use nexus_types::internal_api::background::TufArtifactReplicationStatus;
 use nexus_types::internal_api::background::TufRepoPrunerStatus;
+use nexus_types::internal_api::background::WebhookRxDeliveryStatus;
 use nexus_types::internal_api::background::fm_rendezvous;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
@@ -3316,11 +3317,49 @@ fn print_task_alert_dispatcher(details: &serde_json::Value) {
         );
     }
 }
+
+#[derive(Debug, Default, Eq, PartialEq)]
+struct WebhookDeliveryTotals {
+    ok: usize,
+    already_delivered: usize,
+    in_progress: usize,
+    failed: usize,
+    errors: usize,
+}
+
+impl WebhookDeliveryTotals {
+    fn from_status<'a>(
+        by_rx: impl IntoIterator<Item = &'a WebhookRxDeliveryStatus>,
+    ) -> Self {
+        let mut totals = Self::default();
+        for status in by_rx {
+            let WebhookRxDeliveryStatus {
+                ready: _,
+                delivered_ok,
+                already_delivered,
+                in_progress,
+                failed_deliveries,
+                delivery_errors: _,
+                error: _,
+            } = status;
+            totals.ok += delivered_ok;
+            totals.already_delivered += already_delivered;
+            totals.in_progress += in_progress;
+            totals.failed += failed_deliveries.len();
+            totals.errors += rx_internal_errors(status);
+        }
+        totals
+    }
+}
+
+fn rx_internal_errors(status: &WebhookRxDeliveryStatus) -> usize {
+    status.delivery_errors.len() + if status.error.is_some() { 1 } else { 0 }
+}
+
 fn print_task_webhook_deliverator(details: &serde_json::Value) {
     use nexus_types::external_api::alert::WebhookDeliveryAttemptResult;
     use nexus_types::internal_api::background::WebhookDeliveratorStatus;
     use nexus_types::internal_api::background::WebhookDeliveryFailure;
-    use nexus_types::internal_api::background::WebhookRxDeliveryStatus;
 
     let WebhookDeliveratorStatus { by_rx, error } = match serde_json::from_value::<
         WebhookDeliveratorStatus,
@@ -3355,13 +3394,17 @@ fn print_task_webhook_deliverator(details: &serde_json::Value) {
     ]) + 1;
     const NUM_WIDTH: usize = 3;
 
-    let mut total_ok = 0;
-    let mut total_already_delivered = 0;
-    let mut total_in_progress = 0;
-    let mut total_failed = 0;
-    let mut total_errors = 0;
+    let WebhookDeliveryTotals {
+        ok: total_ok,
+        already_delivered: total_already_delivered,
+        in_progress: total_in_progress,
+        failed: total_failed,
+        errors: total_errors,
+    } = WebhookDeliveryTotals::from_status(by_rx.values());
     println!("    {RECEIVERS:<WIDTH$}{:>NUM_WIDTH$}", by_rx.len());
     for (rx_id, status) in by_rx {
+        let n_internal_errors = rx_internal_errors(&status);
+        let n_failed = status.failed_deliveries.len();
         let WebhookRxDeliveryStatus {
             ready,
             delivered_ok,
@@ -3393,11 +3436,6 @@ fn print_task_webhook_deliverator(details: &serde_json::Value) {
             already_delivered,
         );
         println!("      {IN_PROGRESS:<WIDTH$}{in_progress:>NUM_WIDTH$}");
-        total_ok += delivered_ok;
-        total_already_delivered += total_already_delivered;
-        total_in_progress += in_progress;
-        let n_failed = failed_deliveries.len();
-        total_failed += n_failed;
         println!("      {FAILED:<WIDTH$}{n_failed:>NUM_WIDTH$}");
         if n_failed > 0 {
             #[derive(Tabled)]
@@ -3438,10 +3476,7 @@ fn print_task_webhook_deliverator(details: &serde_json::Value) {
                 .to_string();
             println!("{}", textwrap::indent(&table.to_string(), "      "));
         }
-        let n_internal_errors =
-            delivery_errors.len() + if error.is_some() { 1 } else { 0 };
         if n_internal_errors > 0 {
-            total_errors += n_internal_errors;
             println!(
                 "{ERRICON}   {ERRORS:<WIDTH$}{:>NUM_WIDTH$}",
                 n_internal_errors,
@@ -5934,6 +5969,54 @@ async fn cmd_nexus_support_bundles_inspect(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nexus_types::external_api::alert::WebhookDeliveryAttemptResult;
+    use nexus_types::internal_api::background::WebhookDeliveryFailure;
+    use omicron_uuid_kinds::AlertUuid;
+    use omicron_uuid_kinds::WebhookDeliveryUuid;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn test_webhook_delivery_totals_distinct_counts() {
+        let failure = WebhookDeliveryFailure {
+            delivery_id: WebhookDeliveryUuid::nil(),
+            alert_id: AlertUuid::nil(),
+            attempt: 1,
+            result: WebhookDeliveryAttemptResult::FailedTimeout,
+            response_status: None,
+            response_duration: None,
+        };
+        let first = WebhookRxDeliveryStatus {
+            ready: 100,
+            delivered_ok: 1,
+            already_delivered: 2,
+            in_progress: 3,
+            failed_deliveries: vec![failure.clone()],
+            delivery_errors: BTreeMap::from([(
+                WebhookDeliveryUuid::nil(),
+                "error one".to_string(),
+            )]),
+            error: None,
+        };
+        let second = WebhookRxDeliveryStatus {
+            ready: 200,
+            delivered_ok: 10,
+            already_delivered: 20,
+            in_progress: 30,
+            failed_deliveries: vec![failure.clone(), failure],
+            delivery_errors: BTreeMap::new(),
+            error: Some("task error".to_string()),
+        };
+        assert_eq!(
+            WebhookDeliveryTotals::from_status([&first, &second]),
+            WebhookDeliveryTotals {
+                ok: 11,
+                already_delivered: 22,
+                in_progress: 33,
+                failed: 3,
+                errors: 2,
+            },
+        );
+    }
 
     #[test]
     fn test_last_pass_success_display_distinct_counts() {
