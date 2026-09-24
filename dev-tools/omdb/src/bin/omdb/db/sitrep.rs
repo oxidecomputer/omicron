@@ -271,16 +271,12 @@ pub(super) async fn cmd_db_sitrep(
             cmd_db_sitrep_history(opctx, datastore, fetch_opts, args).await
         }
         Commands::Info { sitrep, opts: ref args } => {
-            cmd_db_sitrep_show(
-                opctx, datastore, fetch_opts, args, sitrep, colored,
-            )
-            .await
+            cmd_db_sitrep_show(opctx, datastore, args, sitrep, colored).await
         }
         Commands::Current(ref args) => {
             cmd_db_sitrep_show(
                 opctx,
                 datastore,
-                fetch_opts,
                 args,
                 SitrepSelector::Current,
                 colored,
@@ -288,10 +284,7 @@ pub(super) async fn cmd_db_sitrep(
             .await
         }
         Commands::AnalysisReport(ref args) => {
-            cmd_db_sitrep_analysis_report(
-                opctx, datastore, fetch_opts, args, colored,
-            )
-            .await
+            cmd_db_sitrep_analysis_report(opctx, datastore, args, colored).await
         }
         Commands::Slippy { sitrep } => {
             cmd_db_sitrep_slippy(opctx, datastore, sitrep).await
@@ -375,7 +368,6 @@ pub(super) async fn cmd_db_sitrep_history(
 async fn cmd_db_sitrep_show(
     opctx: &OpContext,
     datastore: &DataStore,
-    _fetch_opts: &DbFetchOptions,
     opts: &ShowOptions,
     sitrep_selector: SitrepSelector,
     colored: bool,
@@ -560,7 +552,6 @@ async fn cmd_db_sitrep_slippy(
 async fn cmd_db_sitrep_analysis_report(
     opctx: &OpContext,
     datastore: &DataStore,
-    _fetch_opts: &DbFetchOptions,
     args: &AnalysisReportArgs,
     colored: bool,
 ) -> anyhow::Result<()> {
