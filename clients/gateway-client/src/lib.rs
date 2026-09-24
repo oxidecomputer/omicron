@@ -88,6 +88,7 @@ progenitor::generate_api!(
         Ena = ereport_types::Ena,
         Ereport = ereport_types::Ereport,
         Ereports = ereport_types::Ereports,
+        SpComponentPresence = gateway_types::component::SpComponentPresence,
         SpIdentifier = gateway_types::component::SpIdentifier,
         SpIgnition = gateway_types::ignition::SpIgnition,
         SpIgnitionSystemType = gateway_types::ignition::SpIgnitionSystemType,

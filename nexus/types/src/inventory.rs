@@ -10,12 +10,15 @@
 //! convenient to separate these concerns.)
 
 use crate::external_api::physical_disk::PhysicalDiskKind;
+use anyhow::Context;
 use chrono::DateTime;
 use chrono::Utc;
 use clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership;
 use daft::Diffable;
 pub use gateway_types::component::PowerState;
+pub use gateway_types::component::SpComponentPresence;
 pub use gateway_types::component::SpType;
+use gateway_types::component_vpd as gw_vpd;
 pub use gateway_types::rot::RotImageError;
 pub use gateway_types::rot::RotSlot;
 use iddqd::IdOrdItem;
@@ -148,6 +151,12 @@ pub struct Collection {
     #[serde_as(as = "BTreeMap<_, Vec<(_, _)>>")]
     pub rot_pages_found:
         BTreeMap<RotPageWhich, BTreeMap<Arc<BaseboardId>, RotPageFound>>,
+
+    /// all power shelf PSUs found, keyed by the PSC's baseboard id, and then by
+    /// PSU slot in that power shelf.
+    ///
+    /// In practice, these will be inserted into the `inv_power_shelf_psu` table.
+    pub power_shelves: IdOrdMap<PowerShelf>,
 
     /// Sled Agent information, by *sled* id
     pub sled_agents: IdOrdMap<SledAgent>,
@@ -415,6 +424,204 @@ pub struct ServiceProcessor {
     pub baseboard_revision: u32,
     pub hubris_archive: String,
     pub power_state: PowerState,
+}
+
+/// Describes a power shelf, as reported by its power shelf controller.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct PowerShelf {
+    /// The baseboard identity of the power shelf controller.
+    pub psc_baseboard_id: Arc<BaseboardId>,
+
+    /// Which power shelf (0 or 1) this is.
+    ///
+    /// This duplicates the [`ServiceProcessor::sp_slot`] in the
+    /// `ServiceProcessor` entry for the PSC's baseboard ID, but I figured it
+    /// would be useful to have it here, too, so you don't have to go look it up
+    /// if all you need is to know which power shelf it is.
+    pub slot: u16,
+
+    /// PSU slots reported by the power shelf controller.
+    pub psus: IdOrdMap<Psu>,
+}
+
+impl IdOrdItem for PowerShelf {
+    type Key<'a> = &'a BaseboardId;
+
+    fn key(&self) -> Self::Key<'_> {
+        &self.psc_baseboard_id
+    }
+
+    id_upcast!();
+}
+
+/// Identifies a PSU's slot in a power shelf.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Ord,
+    Eq,
+    PartialOrd,
+    PartialEq,
+    Hash,
+    strum::EnumString,
+    strum::Display,
+    strum::IntoStaticStr,
+    serde_with::DeserializeFromStr,
+    serde_with::SerializeDisplay,
+)]
+#[strum(serialize_all = "UPPERCASE")]
+pub enum PsuSlot {
+    Psu0,
+    Psu1,
+    Psu2,
+    Psu3,
+    Psu4,
+    Psu5,
+}
+
+impl PsuSlot {
+    /// Returns the SP component ID for the PSU in this slot.
+    pub fn as_component_id(&self) -> &'static str {
+        <&'static str>::from(self)
+    }
+}
+
+/// The model of a PSU in a power shelf's inventory. This is determined based on
+/// the `device` string returned by Hubris.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Ord,
+    Eq,
+    PartialOrd,
+    PartialEq,
+    strum::EnumString,
+    strum::Display,
+    strum::IntoStaticStr,
+    serde_with::DeserializeFromStr,
+    serde_with::SerializeDisplay,
+)]
+#[strum(serialize_all = "lowercase")]
+pub enum PsuDevice {
+    Mwocp67,
+    Mwocp68,
+    // If, some day, we are adding a new model of power shelf, you'll need to
+    // add that here!
+}
+
+impl PsuDevice {
+    /// Returns the Hubris device type for this PSU.
+    pub fn as_device_type(&self) -> &'static str {
+        <&'static str>::from(self)
+    }
+}
+
+/// Describes a power supply unit (PSU) observed in a power shelf.
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+pub struct Psu {
+    pub time_collected: DateTime<Utc>,
+    pub source: String,
+    pub slot: PsuSlot,
+    pub presence: SpComponentPresence,
+    pub device: PsuDevice,
+    pub vpd: Result<PsuIdentity, String>,
+}
+
+impl IdOrdItem for Psu {
+    type Key<'a> = PsuSlot;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.slot
+    }
+
+    id_upcast!();
+}
+
+/// The identity of a muRata PSU in the power shelf, as reported over PMBus.
+///
+/// The combination of `mfr_model` and `mfr_serial` identifies the PSU.
+#[derive(Clone, Debug, Eq, PartialOrd, PartialEq, Deserialize, Serialize)]
+pub struct PsuIdentity {
+    /// `MFR_ID` (PMBus command 0x99).
+    pub mfr_id: String,
+    /// `MFR_MODEL` (PMBus command 0x9A).
+    pub mfr_model: String,
+    /// `MFR_REVISION` (PMBus command 0x9B).
+    ///
+    /// Note that muRata uses this command to represent the *firmware revision*
+    /// of the PSU, rather than a hardware revision, so we rename this field to
+    /// keep that obvious.
+    pub firmware_rev: String,
+    /// `MFR_LOCATION` (PMBus command 0x9C).
+    pub mfr_location: String,
+    /// `MFR_DATE` (PMBus command 0x9D).
+    pub mfr_date: String,
+    /// `MFR_SERIAL` (PMBus command 0x9E).
+    pub mfr_serial: String,
+}
+
+impl TryFrom<gw_vpd::PmbusDevice> for PsuIdentity {
+    type Error = anyhow::Error;
+
+    fn try_from(vpd: gw_vpd::PmbusDevice) -> Result<Self, Self::Error> {
+        fn expect_string(
+            command: &'static str,
+            value: Option<Vec<u8>>,
+        ) -> Result<String, anyhow::Error> {
+            let value = value.ok_or_else(|| {
+                anyhow::anyhow!(
+                    "expected a value for the PMBus {command} command"
+                )
+            })?;
+            String::from_utf8(value).with_context(|| {
+                format!(
+                    "expected the response to the PMBus {command} command to \
+                     be a UTF-8 string",
+                )
+            })
+        }
+
+        let gw_vpd::PmbusDevice {
+            mfr_id,
+            mfr_model,
+            mfr_revision,
+            mfr_location,
+            mfr_date,
+            mfr_serial,
+            // muRata PSUs do not implement the IC_DEVICE_ID or IC_DEVICE_REV
+            // PMbus commands, and Hubris will not try to read them, but if
+            // we encounter them unexpectedly, just ignore them.
+            ic_device_id: _,
+            ic_device_rev: _,
+        } = vpd;
+
+        Ok(Self {
+            mfr_id: expect_string("MFR_ID", mfr_id)?,
+            mfr_model: expect_string("MFR_MODEL", mfr_model)?,
+            // muRata uses the PMBus `MFR_REVISION` command to represent the
+            // PSU's *firmware* revision, rather than a hardware revision. We
+            // rename it to `firmware_rev` here to make that clear.
+            firmware_rev: expect_string("MFR_REVISION", mfr_revision)?,
+            mfr_location: expect_string("MFR_LOCATION", mfr_location)?,
+            mfr_date: expect_string("MFR_DATE", mfr_date)?,
+            mfr_serial: expect_string("MFR_SERIAL", mfr_serial)?,
+        })
+    }
+}
+
+impl TryFrom<gw_vpd::ComponentVpd> for PsuIdentity {
+    type Error = anyhow::Error;
+
+    fn try_from(vpd: gw_vpd::ComponentVpd) -> Result<Self, Self::Error> {
+        match vpd {
+            gw_vpd::ComponentVpd::Pmbus(vpd) => Self::try_from(vpd),
+            other => Err(anyhow::anyhow!(
+                "expected a PSU to report PMBus VPD, but got {other:?} instead",
+            )),
+        }
+    }
 }
 
 /// Describes the root of trust state found (from a service processor) during

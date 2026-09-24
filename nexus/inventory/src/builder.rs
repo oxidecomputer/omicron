@@ -17,6 +17,7 @@ use cockroach_admin_types::node::InternalNodeId;
 use gateway_client::types::SpComponentCaboose;
 use gateway_types::component::SpState;
 use iddqd::IdOrdMap;
+use iddqd::id_ord_map;
 use nexus_types::inventory::Caboose;
 use nexus_types::inventory::CabooseFound;
 use nexus_types::inventory::CabooseWhich;
@@ -25,12 +26,16 @@ use nexus_types::inventory::Collection;
 use nexus_types::inventory::HostPhase1ActiveSlot;
 use nexus_types::inventory::HostPhase1FlashHash;
 use nexus_types::inventory::InternalDnsGenerationStatus;
+use nexus_types::inventory::PowerShelf;
+use nexus_types::inventory::Psu;
+use nexus_types::inventory::PsuSlot;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageFound;
 use nexus_types::inventory::RotPageWhich;
 use nexus_types::inventory::RotState;
 use nexus_types::inventory::ServiceProcessor;
 use nexus_types::inventory::SledAgent;
+use nexus_types::inventory::SpComponentPresence;
 use nexus_types::inventory::SpType;
 use nexus_types::inventory::TimeSync;
 use nexus_types::inventory::Zpool;
@@ -124,6 +129,7 @@ pub struct CollectionBuilder {
         BTreeMap<CabooseWhich, BTreeMap<Arc<BaseboardId>, CabooseFound>>,
     rot_pages_found:
         BTreeMap<RotPageWhich, BTreeMap<Arc<BaseboardId>, RotPageFound>>,
+    power_shelves: IdOrdMap<PowerShelf>,
     sleds: IdOrdMap<SledAgent>,
     clickhouse_keeper_cluster_membership:
         BTreeSet<ClickhouseKeeperClusterMembership>,
@@ -159,6 +165,7 @@ impl CollectionBuilder {
             rots: BTreeMap::new(),
             cabooses_found: BTreeMap::new(),
             rot_pages_found: BTreeMap::new(),
+            power_shelves: IdOrdMap::new(),
             sleds: IdOrdMap::new(),
             clickhouse_keeper_cluster_membership: BTreeSet::new(),
             cockroach_status: BTreeMap::new(),
@@ -185,6 +192,7 @@ impl CollectionBuilder {
             rots: self.rots,
             cabooses_found: self.cabooses_found,
             rot_pages_found: self.rot_pages_found,
+            power_shelves: self.power_shelves,
             sled_agents: self.sleds,
             clickhouse_keeper_cluster_membership: self
                 .clickhouse_keeper_cluster_membership,
@@ -729,6 +737,88 @@ impl CollectionBuilder {
             )
     }
 
+    /// Returns true if we already found a given PSU for the PSC with the
+    /// provided baseboard identity.
+    ///
+    /// This is used to avoid requesting it multiple times (from multiple MGS
+    /// instances).
+    pub fn found_psu_already(&self, psc: &BaseboardId, psu: PsuSlot) -> bool {
+        self.power_shelves
+            .get(psc)
+            .and_then(|shelf| shelf.psus.get(&psu))
+            .is_some_and(|psu| {
+                // well, so we found it...were we able to read its identity? if
+                // not, try again, provided that it's present.
+                psu.vpd.is_ok()
+                    || psu.presence == SpComponentPresence::NotPresent
+            })
+    }
+
+    /// Record information about a power shelf PSU.
+    ///
+    /// Returns `Ok(true)` if the PSU record was inserted or updated, such as if
+    /// we re-attempted to read the component's VPD after a previous error.
+    /// Returns `Ok(false)` if the record was not updated because the subsequent
+    /// VPD read also failed. Finally, this returns an error if the PSU was
+    /// already successfully inventoried or if the baseboard ID does not refer
+    /// to a power shelf controller SP.
+    pub fn found_psu(
+        &mut self,
+        psc: &BaseboardId,
+        sp_slot: u16,
+        psu: Psu,
+    ) -> Result<bool, anyhow::Error> {
+        let (psc, sp) = self.sps.get_key_value(psc).ok_or_else(|| {
+            anyhow::anyhow!("reporting PSU for unknown PSC baseboard {psc:?}")
+        })?;
+        // This really shouldn't happen, but we may as well check for it..
+        anyhow::ensure!(
+            sp.sp_type == SpType::Power && sp.sp_slot == sp_slot,
+            "reporting PSU for {psc:?} from power shelf {sp_slot} SP, but \
+             the recorded SP is {:?} slot {}",
+            sp.sp_type,
+            sp.sp_slot,
+        );
+
+        let psus_for_psc = &mut self
+            .power_shelves
+            .entry(psc.as_ref())
+            .or_insert_with(|| PowerShelf {
+                psc_baseboard_id: psc.clone(),
+                slot: sp_slot,
+                psus: IdOrdMap::with_capacity(6),
+            })
+            .psus;
+
+        let psu_slot = psu.slot;
+        match psus_for_psc.entry(psu_slot) {
+            // A previous attempt to collect this PSU's VPD failed, so we tried
+            // again. Overwrite it iff we successfully read the VPD.
+            id_ord_map::Entry::Occupied(mut previous)
+                if previous.get().vpd.is_err() =>
+            {
+                if psu.vpd.is_ok() {
+                    previous.insert(psu);
+                    Ok(true)
+                } else {
+                    Ok(false)
+                }
+            }
+            // First time we've seen this thing.
+            id_ord_map::Entry::Vacant(entry) => {
+                entry.insert(psu);
+                Ok(true)
+            }
+            // We've already found this PSU, and its VPD was read successfully
+            // or it was not present. We shouldn't have tried to collect it
+            // again!
+            id_ord_map::Entry::Occupied(_) => Err(anyhow::anyhow!(
+                "PSC {sp_slot} ({psc:?}) attempted to report PSU {psu_slot} \
+                 multiple times when the first collection succeeded"
+            )),
+        }
+    }
+
     /// Returns all zones of a kind from the ledgers of observed sleds
     pub fn ledgered_zones_of_kind(
         &self,
@@ -808,6 +898,7 @@ mod test {
         assert!(collection.cabooses.is_empty());
         assert!(collection.rot_pages.is_empty());
         assert!(collection.sps.is_empty());
+        assert!(collection.power_shelves.is_empty());
         assert!(collection.rots.is_empty());
         assert!(collection.cabooses_found.is_empty());
         assert!(collection.rot_pages_found.is_empty());
@@ -821,6 +912,7 @@ mod test {
     // about all kinds of valid data.  That includes exercising:
     //
     // - all three baseboard types (switch, sled, PSC)
+    // - successful and failed power shelf PSU VPD inventory
     // - various valid values for all fields (sources, slot numbers, power
     //   states, baseboard revisions, cabooses, etc.)
     // - some empty slots

@@ -7,6 +7,7 @@
 use crate::SledAgentEnumerator;
 use crate::builder::CollectionBuilder;
 use crate::builder::InventoryError;
+use crate::builder::now_db_precision;
 use anyhow::Context;
 use anyhow::anyhow;
 use clickhouse_admin_keeper_client::ClientInfo as _;
@@ -18,8 +19,12 @@ use itertools::Itertools;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::InternalDnsGenerationStatus;
+use nexus_types::inventory::Psu;
+use nexus_types::inventory::PsuDevice;
+use nexus_types::inventory::PsuIdentity;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageWhich;
+use nexus_types::inventory::SpComponentPresence;
 use nexus_types::inventory::SpType;
 use nexus_types::inventory::TimeSync;
 use omicron_cockroach_metrics::CockroachClusterAdminClient;
@@ -30,10 +35,13 @@ use sled_agent_types::disk::M2Slot;
 use sled_agent_types::inventory::Inventory;
 use sled_agent_types::inventory::OmicronZoneType;
 use sled_agent_types::inventory::ZoneKind;
+use sled_hardware_types::BaseboardId;
 use slog::Logger;
 use slog::o;
 use slog::{debug, error};
+use slog_error_chain::InlineErrorChain;
 use std::net::SocketAddrV6;
+use std::sync::Arc;
 use std::time::Duration;
 use strum::IntoEnumIterator;
 use tufaceous_artifact::ArtifactHash;
@@ -303,6 +311,22 @@ impl<'a> Collector<'a> {
                             client.baseurl(),
                         );
                     }
+                }
+            }
+
+            // For power shelf controller SPs, collect an inventory of PSUs in
+            // the power shelf.
+            if matches!(sp.typ, SpType::Power) {
+                if let Err(e) = collect_one_psc(
+                    &log,
+                    &client,
+                    in_progress,
+                    &baseboard_id,
+                    &sp,
+                )
+                .await
+                {
+                    in_progress.found_error(InventoryError::from(e));
                 }
             }
 
@@ -769,6 +793,159 @@ async fn collect_one_dns_generation(
     })
 }
 
+/// Collect inventory from one power shelf controller.
+async fn collect_one_psc(
+    log: &slog::Logger,
+    client: &gateway_client::Client,
+    in_progress: &mut CollectionBuilder,
+    psc_baseboard_id: &Arc<BaseboardId>,
+    sp: &gateway_types::component::SpIdentifier,
+) -> Result<(), anyhow::Error> {
+    use nexus_types::inventory::PsuSlot;
+
+    let components = client
+        .sp_component_list(&sp.typ, sp.slot)
+        .await
+        .with_context(|| {
+            format!(
+                "MGS {:?}: SP {sp:?} ({psc_baseboard_id:?}): component list",
+                client.baseurl()
+            )
+        })?
+        .into_inner()
+        .components;
+    let mut changed_psus = 0;
+    let mut total_psus = 0;
+    for component in components {
+        let id = &component.component;
+        let dev = &component.device;
+
+        // This component is a PSU if both the Hubris component ID and device
+        // type strings look PSU-like. If neither do, skip it quietly, and if
+        // one or the other are PSU-like but the other is unexpected, record
+        // an error.
+        let slot = id.parse::<PsuSlot>();
+        let device = dev.parse::<PsuDevice>();
+        let (slot, device) = match (slot, device) {
+            (Ok(slot), Ok(device)) => (slot, device),
+
+            // if neither the component ID nor the device type strings look
+            // PSU-ish, this is definitely not a PSU and we can quietly skip it.
+            (Err(_), Err(_)) => continue,
+
+            // well, hello there! this device has one of the hubris component
+            // IDs that represent PSUs, but it is not a 'mwocp68' or 'mwocp67'.
+            // did we add a new kind of power shelf but forget to update the
+            // 'PsuDevice' enum?
+            (Ok(_), Err(_)) => {
+                in_progress.found_error(InventoryError::from(anyhow!(
+                    "MGS {:?}: SP {sp:?} ({psc_baseboard_id:?}): component \
+                    {id:?} has a component ID that appears to be a PSU, but \
+                    has unknown device type {dev:?}. do we need to add support \
+                    for a new power shelf model?",
+                    client.baseurl(),
+                )));
+                continue;
+            }
+
+            // well, huh! this thing is one of the hubris device types we
+            // believe represent PSUs, but its component ID doesn't match any of
+            // the ones we expect the PSUs to have! report an error and
+            // continue.
+            (Err(_), Ok(_)) => {
+                in_progress.found_error(InventoryError::from(anyhow!(
+                    "MGS {:?}: SP {sp:?} ({psc_baseboard_id:?}): component \
+                    {id:?} has a device type ({dev:?}) that seems to be a PSU, \
+                    but has a component ID we don't know about",
+                    client.baseurl(),
+                )));
+                continue;
+            }
+        };
+
+        total_psus += 1;
+
+        // Okay, have we already inventoried this thing?
+        if in_progress.found_psu_already(&psc_baseboard_id, slot) {
+            continue;
+        }
+
+        // If the PSU is present (or might be present), try to read its
+        // identity.
+        let presence = component.presence;
+        let vpd = if presence != SpComponentPresence::NotPresent {
+            client
+                .sp_component_vpd_get(&sp.typ, sp.slot, &id)
+                .await
+                .with_context(|| {
+                    format!(
+                        "MGS {:?}: SP {sp:?} ({psc_baseboard_id:?}): reading \
+                        VPD for PSC component {id:?} (component is \
+                        {presence:?})",
+                        client.baseurl(),
+                    )
+                })
+                .and_then(|response| {
+                    PsuIdentity::try_from(response.into_inner())
+                })
+                .map_err(|error| {
+                    let error = InlineErrorChain::new(&*error);
+                    slog::warn!(
+                        log,
+                        "failed to read VPD identity for PSC component {id:?}";
+                        "error" => &error,
+                        "psc_baseboard_id" => ?psc_baseboard_id,
+                        "psc_slot" => %sp.slot,
+                        "psu_slot" => %slot,
+                        "psu_device" => ?device,
+                        "psu_presence" => ?presence,
+                        "mgs_url" => client.baseurl(),
+                    );
+                    error.to_string()
+                })
+        } else {
+            Err(String::from("component is not present"))
+        };
+
+        let psu = Psu {
+            time_collected: now_db_precision(),
+            source: client.baseurl().to_owned(),
+            slot,
+            presence,
+            device,
+            vpd,
+        };
+        match in_progress.found_psu(&psc_baseboard_id, sp.slot, psu) {
+            Ok(true) => changed_psus += 1,
+            Ok(false) => (), // unchanged after retrying VPD
+            Err(error) => {
+                error!(
+                    log,
+                    "error reporting power shelf PSU";
+                    "error" => InlineErrorChain::new(&*error),
+                    "psc_baseboard_id" => ?psc_baseboard_id,
+                    "psc_slot" => %sp.slot,
+                    "psu_slot" => %slot,
+                    "psu_device" => ?device,
+                    "psu_presence" => ?presence,
+                    "mgs_url" => client.baseurl(),
+                );
+            }
+        }
+    }
+
+    debug!(
+        log,
+        "found {total_psus} PSUs from power shelf controller \
+         ({changed_psus} new or updated)";
+        "psc_baseboard_id" => ?psc_baseboard_id,
+        "psc_slot" => %sp.slot,
+        "mgs_url" => client.baseurl(),
+    );
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod test {
     use super::Collector;
@@ -899,9 +1076,8 @@ mod test {
         }
 
         // All we really need to check here is that we're reporting the right
-        // SPs, RoTs, and cabooses.  The actual SP data, RoT data, and caboose
-        // data comes straight from MGS.  And proper handling of that data is
-        // tested in the builder.
+        // SPs, RoTs, and cabooses. The component data comes straight from MGS,
+        // and proper handling of that data is tested in the builder.
         swrite!(s, "\nSPs:\n");
         for (bb, _) in &collection.sps {
             swrite!(
@@ -997,6 +1173,49 @@ mod test {
                 }
                 ConfigReconcilerInventoryStatus::Idle { .. } => {
                     swriteln!(s, "    reconciler task idle");
+                }
+            }
+        }
+
+        swrite!(s, "\npower shelves found:\n");
+        for shelf in &collection.power_shelves {
+            swriteln!(
+                s,
+                "    shelf {} PSC baseboard part {:?} serial {:?}",
+                shelf.slot,
+                shelf.psc_baseboard_id.part_number,
+                shelf.psc_baseboard_id.serial_number,
+            );
+            for psu in &shelf.psus {
+                swriteln!(
+                    s,
+                    "        {}: presence {:?} device {}",
+                    psu.slot,
+                    psu.presence,
+                    psu.device,
+                );
+                match &psu.vpd {
+                    Ok(nexus_types::inventory::PsuIdentity {
+                        mfr_id,
+                        mfr_model,
+                        firmware_rev,
+                        mfr_location,
+                        mfr_date,
+                        mfr_serial,
+                    }) => {
+                        swriteln!(
+                            s,
+                            "            VPD: mfr_model {mfr_model:?} \
+                              mfr_serial {mfr_serial:?} \
+                              firmware_rev {firmware_rev:?} \
+                              mfr_id {mfr_id:?} \
+                              mfr_location {mfr_location:?} \
+                              mfr_date {mfr_date:?}"
+                        );
+                    }
+                    Err(error) => {
+                        swriteln!(s, "            VPD: error: {error}");
+                    }
                 }
             }
         }

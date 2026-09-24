@@ -5555,6 +5555,107 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_fmd_resource (
     PRIMARY KEY (inv_collection_id, sled_id, resource_id)
 );
 
+
+-- Description of the presence or absence of a component, as reported by a SP.
+--
+--  The presence of some components may vary based on the power state of the
+-- sled (e.g., components that time out or appear unavailable if the sled is in
+-- A2 may become present when the sled moves to A0).
+CREATE TYPE IF NOT EXISTS omicron.public.sp_component_presence AS ENUM (
+    -- The component is present.
+    'present',
+    -- The component is not present.
+    'not_present',
+    -- The component is present but in a failed or faulty state.
+    'failed',
+    -- The SP is unable to determine the presence of the component.
+    'unavailable',
+    -- The SP's attempt to determine the presence of the component timed out.
+    'timeout',
+    -- The SP's attempt to determine the presence of the component failed.
+    'error'
+);
+
+-- The location of a power supply unit (PSU) in a power shelf.
+--
+-- This is determined from the SP-reported component ID, and can be converted
+-- back into that value when requesting additional data from that SP.
+CREATE TYPE IF NOT EXISTS omicron.public.inv_psu_slot AS ENUM (
+    'PSU0',
+    'PSU1',
+    'PSU2',
+    'PSU3',
+    'PSU4',
+    'PSU5'
+);
+
+-- PSU device types, as reported by the power shelf controller.
+CREATE TYPE IF NOT EXISTS omicron.public.inv_psu_device AS ENUM (
+    'mwocp68',
+    'mwocp67'
+);
+
+-- inventory table for power supply units (PSUs) in a power shelf
+CREATE TABLE IF NOT EXISTS omicron.public.inv_power_shelf_psu (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+    -- when this observation was made
+    time_collected TIMESTAMPTZ NOT NULL,
+    -- which MGS instance reported this data
+    source TEXT NOT NULL,
+    -- baseboard of the power shelf controller which told us about this PSU
+    -- (foreign key into `hw_baseboard_id` table)
+    psc_baseboard_id UUID NOT NULL,
+
+    -- which slot in the power shelf this record represents. this is determined
+    -- based on the SP component ID reported by the SP's inventory response.
+    location omicron.public.inv_psu_slot NOT NULL,
+
+    -- the SP-reported presence value for this PSU.
+    presence omicron.public.sp_component_presence NOT NULL,
+
+    -- PSU device reported by Hubris (the value of the 'device' field in the SP's
+    -- inventory response).
+    device omicron.public.inv_psu_device NOT NULL,
+
+    -- PMBus vital product data reported by the PSU. information reported by the
+    -- PSU. these fields are present when the VPD was collected successfully,
+    -- and are null if it was not.
+    mfr_id TEXT,
+    mfr_model TEXT,
+    firmware_rev TEXT,
+    mfr_location TEXT,
+    mfr_date TEXT,
+    mfr_serial TEXT,
+
+    -- an error that occurred while reading PMBus VPD. this is NULL if the VPD
+    -- fields are present, and is present if the VPD is NULL.
+    vpd_error TEXT,
+
+    CONSTRAINT vpd_result_valid CHECK (
+        (
+            vpd_error IS NULL
+            AND mfr_id IS NOT NULL
+            AND mfr_model IS NOT NULL
+            AND firmware_rev IS NOT NULL
+            AND mfr_location IS NOT NULL
+            AND mfr_date IS NOT NULL
+            AND mfr_serial IS NOT NULL
+        ) OR (
+            vpd_error IS NOT NULL
+            AND mfr_id IS NULL
+            AND mfr_model IS NULL
+            AND firmware_rev IS NULL
+            AND mfr_location IS NULL
+            AND mfr_date IS NULL
+            AND mfr_serial IS NULL
+        )
+    ),
+
+    PRIMARY KEY (inv_collection_id, psc_baseboard_id, location)
+);
+
 /*
  * Various runtime configuration switches for reconfigurator
  *
@@ -9524,7 +9625,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '301.0.0', NULL)
+    (TRUE, NOW(), NOW(), '302.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

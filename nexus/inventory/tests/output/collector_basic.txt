@@ -128,4 +128,6 @@ sled agents found:
     result for zone 5125277f-0988-490b-ac01-3bba20cc8f07: Ok
     reconciler task idle
 
+power shelves found:
+
 errors:

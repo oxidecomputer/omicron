@@ -1873,6 +1873,25 @@ table! {
 }
 
 table! {
+    inv_power_shelf_psu (inv_collection_id, psc_baseboard_id, location) {
+        inv_collection_id -> Uuid,
+        time_collected -> Timestamptz,
+        source -> Text,
+        psc_baseboard_id -> Uuid,
+        location -> crate::enums::InvPsuSlotEnum,
+        presence -> crate::enums::SpComponentPresenceEnum,
+        device -> crate::enums::InvPsuDeviceEnum,
+        mfr_id -> Nullable<Text>,
+        mfr_model -> Nullable<Text>,
+        firmware_rev -> Nullable<Text>,
+        mfr_location -> Nullable<Text>,
+        mfr_date -> Nullable<Text>,
+        mfr_serial -> Nullable<Text>,
+        vpd_error -> Nullable<Text>,
+    }
+}
+
+table! {
     inv_sled_agent (inv_collection_id, sled_id) {
         inv_collection_id -> Uuid,
         time_collected -> Timestamptz,

@@ -18,8 +18,13 @@ use gateway_types::rot::RotState;
 use iddqd::id_ord_map;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::InternalDnsGenerationStatus;
+use nexus_types::inventory::Psu;
+use nexus_types::inventory::PsuDevice;
+use nexus_types::inventory::PsuIdentity;
+use nexus_types::inventory::PsuSlot;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageWhich;
+use nexus_types::inventory::SpComponentPresence;
 use nexus_types::inventory::SpType;
 use nexus_types::inventory::ZpoolName;
 use omicron_cockroach_metrics::MetricValue;
@@ -214,6 +219,37 @@ pub fn representative() -> Representative {
             },
         )
         .unwrap();
+
+    // a real PSC will always report 6 PSU slots, even if some are not present,
+    // so let's make sure to do that here for realism's sake.
+    let psus = [
+        (PsuSlot::Psu0, Some("LL2111Q9002T")),
+        (PsuSlot::Psu1, Some("LL2111Q9003T")),
+        (PsuSlot::Psu2, Some("LL2111Q9013T")),
+        (PsuSlot::Psu3, None),
+        (PsuSlot::Psu4, Some("LL2115Q1001T")),
+        (PsuSlot::Psu5, None),
+    ];
+    let psu_device = PsuDevice::Mwocp68;
+    for (slot, serial) in psus {
+        let presence = if serial.is_some() {
+            SpComponentPresence::Present
+        } else {
+            SpComponentPresence::NotPresent
+        };
+        let vpd = serial
+            .map(|serial| psu_identity(psu_device, serial))
+            .ok_or_else(|| String::from("component is not present"));
+        let psu = Psu {
+            time_collected: now_db_precision(),
+            source: String::from("fake MGS 1"),
+            slot,
+            presence,
+            device: psu_device,
+            vpd,
+        };
+        builder.found_psu(&psc_bb, 1, psu).unwrap();
+    }
 
     // a sled with no RoT state or other optional fields
     let sled3_bb = builder
@@ -816,6 +852,31 @@ pub fn rot_page(unique: &str) -> RotPage {
     use base64::Engine;
     RotPage {
         data_base64: base64::engine::general_purpose::STANDARD.encode(unique),
+    }
+}
+
+/// Constructs a realistic-looking PSU identity for a muRata PSU.
+pub fn psu_identity(device: PsuDevice, serial: impl ToString) -> PsuIdentity {
+    let mfr_model = match device {
+        PsuDevice::Mwocp68 => String::from("MWOCP68-3600-D-RM"),
+        PsuDevice::Mwocp67 => String::from("MWOCP67-5500-B-RM"),
+    };
+    let mfr_serial = serial.to_string();
+    // muRata's date fields are 4 digits, which also appear in the serial
+    // number; if the caller provided a serial number that looks like a real
+    // one, extract the date from that. otherwise, make something up i guess...
+    let mfr_date = mfr_serial
+        .get(2..6)
+        .filter(|date| date.chars().all(|c| c.is_numeric()))
+        .unwrap_or("2111")
+        .to_string();
+    PsuIdentity {
+        mfr_id: String::from("Murata-PS"),
+        mfr_model,
+        firmware_rev: String::from("0762-0701-0000"),
+        mfr_location: String::from("China"),
+        mfr_date,
+        mfr_serial,
     }
 }
 
