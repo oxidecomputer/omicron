@@ -15,6 +15,7 @@ impl ProducerDetails {
         let now = Utc::now();
         Self {
             id: info.id,
+            kind: info.kind,
             interval: info.interval,
             address: info.address,
             registered: now,

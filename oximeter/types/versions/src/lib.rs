@@ -35,3 +35,5 @@ pub mod latest;
 pub mod v1;
 #[path = "add_joules/mod.rs"]
 pub mod v2;
+#[path = "add_producer_kind/mod.rs"]
+pub mod v3;
