@@ -75,7 +75,7 @@ hashbrown-3575ec1268b04181 = { package = "hashbrown", version = "0.15.5" }
 hashbrown-9067fe90e8c1f593 = { package = "hashbrown", version = "0.17.0", default-features = false, features = ["default-hasher"] }
 hashbrown-986da7b5efc2b80e = { package = "hashbrown", version = "0.16.1" }
 hex = { version = "0.4.3", features = ["serde"] }
-hickory-proto = { version = "0.25.2", features = ["serde", "text-parsing"] }
+hickory-proto = { version = "0.25.2", default-features = false, features = ["serde", "text-parsing", "tokio"] }
 hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
 hybrid-array = { version = "0.4.13", default-features = false, features = ["alloc", "ctutils", "extra-sizes", "subtle", "zeroize"] }
 hyper = { version = "1.10.1", features = ["full"] }
@@ -235,7 +235,7 @@ hashbrown-9067fe90e8c1f593 = { package = "hashbrown", version = "0.17.0", defaul
 hashbrown-986da7b5efc2b80e = { package = "hashbrown", version = "0.16.1" }
 heck = { version = "0.4.1", features = ["unicode"] }
 hex = { version = "0.4.3", features = ["serde"] }
-hickory-proto = { version = "0.25.2", features = ["serde", "text-parsing"] }
+hickory-proto = { version = "0.25.2", default-features = false, features = ["serde", "text-parsing", "tokio"] }
 hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
 hybrid-array = { version = "0.4.13", default-features = false, features = ["alloc", "ctutils", "extra-sizes", "subtle", "zeroize"] }
 hyper = { version = "1.10.1", features = ["full"] }
