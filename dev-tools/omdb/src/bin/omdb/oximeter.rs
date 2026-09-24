@@ -6,8 +6,8 @@
 
 use crate::Omdb;
 use crate::helpers::CONNECTION_OPTIONS_HEADING;
+use crate::helpers::datetime_rfc3339_concise;
 use anyhow::Context;
-use chrono::SecondsFormat;
 use clap::Args;
 use clap::Subcommand;
 use futures::TryStreamExt;
@@ -18,6 +18,7 @@ use oximeter_client::types::ProducerDetails;
 use oximeter_client::types::ProducerEndpoint;
 use oximeter_client::types::SuccessfulCollection;
 use slog::Logger;
+use std::fmt;
 use std::net::SocketAddr;
 use std::time::Duration;
 use tabled::Table;
@@ -106,7 +107,7 @@ impl OximeterArgs {
             .await
             .context("failed to fetch producer details")?
             .into_inner();
-        print_producer_details(details);
+        print!("{}", ProducerDetailsDisplay(&details));
         Ok(())
     }
 
@@ -161,100 +162,111 @@ fn duration_to_humantime(d: &oximeter_client::types::Duration) -> String {
 
 const WIDTH: usize = 12;
 
-fn print_producer_details(details: ProducerDetails) {
-    println!();
-    println!("{:>WIDTH$}: {}", "ID", details.id);
-    println!("{:>WIDTH$}: {}", "Address", details.address);
-    println!(
-        "{:>WIDTH$}: {}",
-        "Registered",
-        details.registered.to_rfc3339_opts(SecondsFormat::Millis, true)
-    );
-    println!(
-        "{:>WIDTH$}: {}",
-        "Updated",
-        details.updated.to_rfc3339_opts(SecondsFormat::Millis, true)
-    );
-    println!(
-        "{:>WIDTH$}: {}",
-        "Interval",
-        duration_to_humantime(&details.interval)
-    );
-    println!("{:>WIDTH$}: {}", "Successes", details.n_collections);
-    println!("{:>WIDTH$}: {}", "Failures", details.n_failures);
-    println!();
-    print_last_success(details.last_success.as_ref());
-    println!();
-    print_last_failure(details.last_failure.as_ref());
-}
+struct ProducerDetailsDisplay<'a>(&'a ProducerDetails);
 
-fn print_last_success(maybe_success: Option<&SuccessfulCollection>) {
-    print!("{:>WIDTH$}: ", "Last success");
-    match maybe_success {
-        None => println!("None"),
-        Some(success) => {
-            println!();
-            println!(
-                "{:>WIDTH$}: {}",
-                "Started at",
-                success.started_at.to_rfc3339_opts(SecondsFormat::Millis, true)
-            );
-            println!(
-                "{:>WIDTH$}: {:?}",
-                "Queued for",
-                Duration::new(
-                    success.time_queued.secs,
-                    success.time_queued.nanos
-                )
-            );
-            println!(
-                "{:>WIDTH$}: {:?}",
-                "Duration",
-                Duration::new(
-                    success.time_collecting.secs,
-                    success.time_collecting.nanos
-                )
-            );
-            println!("{:>WIDTH$}: {}", "Samples", success.n_samples);
-        }
+impl fmt::Display for ProducerDetailsDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let details = self.0;
+        writeln!(f)?;
+        writeln!(f, "{:>WIDTH$}: {}", "ID", details.id)?;
+        writeln!(f, "{:>WIDTH$}: {}", "Address", details.address)?;
+        writeln!(
+            f,
+            "{:>WIDTH$}: {}",
+            "Registered",
+            datetime_rfc3339_concise(&details.registered)
+        )?;
+        writeln!(
+            f,
+            "{:>WIDTH$}: {}",
+            "Updated",
+            datetime_rfc3339_concise(&details.updated)
+        )?;
+        writeln!(
+            f,
+            "{:>WIDTH$}: {}",
+            "Interval",
+            duration_to_humantime(&details.interval)
+        )?;
+        writeln!(f, "{:>WIDTH$}: {}", "Successes", details.n_collections)?;
+        writeln!(f, "{:>WIDTH$}: {}", "Failures", details.n_failures)?;
+        writeln!(f)?;
+        write!(f, "{}", LastSuccessDisplay(details.last_success.as_ref()))?;
+        writeln!(f)?;
+        write!(f, "{}", LastFailureDisplay(details.last_failure.as_ref()))
     }
 }
 
-fn print_last_failure(maybe_failure: Option<&FailedCollection>) {
-    print!("{:>WIDTH$}: ", "Last failure");
-    match maybe_failure {
-        None => println!("None"),
-        Some(failure) => {
-            println!();
-            println!(
-                "{:>WIDTH$}: {}",
-                "Started at",
-                failure.started_at.to_rfc3339_opts(SecondsFormat::Millis, true)
-            );
-            println!(
-                "{:>WIDTH$}: {:?}",
-                "Queued for",
-                Duration::new(
-                    failure.time_queued.secs,
-                    failure.time_queued.nanos
-                )
-            );
-            println!(
-                "{:>WIDTH$}: {:?}",
-                "Duration",
-                Duration::new(
-                    failure.time_collecting.secs,
-                    failure.time_collecting.nanos
-                )
-            );
-            println!("{:>WIDTH$}: {}", "Reason", failure.reason);
-        }
+struct LastSuccessDisplay<'a>(Option<&'a SuccessfulCollection>);
+
+impl fmt::Display for LastSuccessDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Some(success) = self.0 else {
+            return writeln!(f, "{:>WIDTH$}: None", "Last success");
+        };
+        writeln!(f, "{:>WIDTH$}: ", "Last success")?;
+        writeln!(
+            f,
+            "{:>WIDTH$}: {}",
+            "Started at",
+            datetime_rfc3339_concise(&success.started_at)
+        )?;
+        writeln!(
+            f,
+            "{:>WIDTH$}: {:?}",
+            "Queued for",
+            Duration::new(success.time_queued.secs, success.time_queued.nanos)
+        )?;
+        writeln!(
+            f,
+            "{:>WIDTH$}: {:?}",
+            "Duration",
+            Duration::new(
+                success.time_collecting.secs,
+                success.time_collecting.nanos
+            )
+        )?;
+        writeln!(f, "{:>WIDTH$}: {}", "Samples", success.n_samples)
+    }
+}
+
+struct LastFailureDisplay<'a>(Option<&'a FailedCollection>);
+
+impl fmt::Display for LastFailureDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Some(failure) = self.0 else {
+            return writeln!(f, "{:>WIDTH$}: None", "Last failure");
+        };
+        writeln!(f, "{:>WIDTH$}: ", "Last failure")?;
+        writeln!(
+            f,
+            "{:>WIDTH$}: {}",
+            "Started at",
+            datetime_rfc3339_concise(&failure.started_at)
+        )?;
+        writeln!(
+            f,
+            "{:>WIDTH$}: {:?}",
+            "Queued for",
+            Duration::new(failure.time_queued.secs, failure.time_queued.nanos)
+        )?;
+        writeln!(
+            f,
+            "{:>WIDTH$}: {:?}",
+            "Duration",
+            Duration::new(
+                failure.time_collecting.secs,
+                failure.time_collecting.nanos
+            )
+        )?;
+        writeln!(f, "{:>WIDTH$}: {}", "Reason", failure.reason)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::print_producer_details;
+    use super::ProducerDetailsDisplay;
+    use chrono::DateTime;
     use chrono::Utc;
     use oximeter_client::types::FailedCollection;
     use oximeter_client::types::ProducerDetails;
@@ -262,52 +274,50 @@ mod tests {
     use std::time::Duration;
     use uuid::Uuid;
 
-    #[test]
-    fn test_print_producer_details_success_only() {
-        let now = Utc::now();
-        let details = ProducerDetails {
-            id: Uuid::new_v4(),
+    fn epoch() -> DateTime<Utc> {
+        DateTime::from_timestamp(0, 0).expect("the epoch is a valid timestamp")
+    }
+
+    fn producer_details() -> ProducerDetails {
+        ProducerDetails {
+            id: Uuid::nil(),
             address: "[::1]:12345".parse().unwrap(),
             interval: Duration::from_secs(10).into(),
             last_success: Some(SuccessfulCollection {
                 n_samples: 100,
-                started_at: now,
+                started_at: epoch(),
                 time_collecting: Duration::from_millis(100).into(),
                 time_queued: Duration::from_millis(10).into(),
             }),
             last_failure: None,
             n_collections: 1,
             n_failures: 0,
-            registered: now,
-            updated: now,
-        };
-        print_producer_details(details);
+            registered: epoch(),
+            updated: epoch(),
+        }
     }
 
     #[test]
-    fn test_print_producer_details_with_failure() {
-        let now = Utc::now();
-        let details = ProducerDetails {
-            id: Uuid::new_v4(),
-            interval: Duration::from_secs(10).into(),
-            address: "[::1]:12345".parse().unwrap(),
-            last_success: Some(SuccessfulCollection {
-                n_samples: 100,
-                started_at: now,
-                time_collecting: Duration::from_millis(100).into(),
-                time_queued: Duration::from_millis(10).into(),
-            }),
-            last_failure: Some(FailedCollection {
-                started_at: now,
-                time_collecting: Duration::from_millis(100).into(),
-                time_queued: Duration::from_millis(10).into(),
-                reason: String::from("unreachable"),
-            }),
-            n_collections: 1,
-            n_failures: 1,
-            registered: now,
-            updated: now,
-        };
-        print_producer_details(details);
+    fn test_producer_details_success_only() {
+        expectorate::assert_contents(
+            "tests/output/oximeter-producer-details-success-only.txt",
+            &ProducerDetailsDisplay(&producer_details()).to_string(),
+        );
+    }
+
+    #[test]
+    fn test_producer_details_with_failure() {
+        let mut details = producer_details();
+        details.last_failure = Some(FailedCollection {
+            started_at: epoch(),
+            time_collecting: Duration::from_millis(100).into(),
+            time_queued: Duration::from_millis(10).into(),
+            reason: String::from("unreachable"),
+        });
+        details.n_failures = 1;
+        expectorate::assert_contents(
+            "tests/output/oximeter-producer-details-with-failure.txt",
+            &ProducerDetailsDisplay(&details).to_string(),
+        );
     }
 }

@@ -1,0 +1,16 @@
+
+          ID: 00000000-0000-0000-0000-000000000000
+     Address: [::1]:12345
+  Registered: 1970-01-01T00:00:00.000Z
+     Updated: 1970-01-01T00:00:00.000Z
+    Interval: 10s
+   Successes: 1
+    Failures: 0
+
+Last success: 
+  Started at: 1970-01-01T00:00:00.000Z
+  Queued for: 10ms
+    Duration: 100ms
+     Samples: 100
+
+Last failure: None
