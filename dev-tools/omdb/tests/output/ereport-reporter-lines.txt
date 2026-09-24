@@ -1,0 +1,44 @@
+CASE: SP
+---------------------------------------------
+stdout:
+              reported by: Sled 3 (service processor)
+---------------------------------------------
+stderr:
+=============================================
+CASE: SP without a slot (violates the CHECK constraint)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+Internal Error: the 'reporter_identity_validity' CHECK constraint should enforce that ereports with reporter='sp' have a non-NULL `slot`, but this ereport has slot_type=Sled and slot=None
+=============================================
+CASE: host OS without a sled ID (violates the CHECK constraint)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+Internal Error: the 'reporter_identity_validity' CHECK constraint should enforce that ereports with reporter='host' have a non-NULL sled_id, but this ereport does not
+=============================================
+CASE: host OS with a non-sled slot type (violates the CHECK constraint)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+Internal Error: the 'reporter_identity_validity' CHECK constraint should  enforce that ereports with reporter='host' have slot_type='sled', but this ereport has slot_type=Switch
+=============================================
+CASE: host OS with a slot
+---------------------------------------------
+stdout:
+              reported by: sled 5 (host OS)
+                  sled ID: 00000000-0000-0000-0000-000000000000 (sled)
+---------------------------------------------
+stderr:
+=============================================
+CASE: host OS without a slot
+---------------------------------------------
+stdout:
+              reported by: <unknown sled slot> (host OS)
+                  sled ID: 00000000-0000-0000-0000-000000000000 (sled)
+---------------------------------------------
+stderr:
+=============================================

@@ -41,6 +41,7 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use std::collections::HashMap;
+use std::fmt::Display;
 use tabled::Tabled;
 use uuid::Uuid;
 
@@ -360,29 +361,20 @@ async fn cmd_db_ereport_list(
     Ok(())
 }
 
-async fn cmd_db_ereport_info(
-    datastore: &DataStore,
-    fetch_opts: &DbFetchOptions,
-    args: &InfoArgs,
-) -> anyhow::Result<()> {
-    let &InfoArgs { restart_id, ena, json, raw } = args;
-    let ereport_id = ereport_types::EreportId { restart_id, ena };
-    let conn = datastore.pool_connection_for_tests().await?;
-    let ereport = ereport_fetch(&conn, fetch_opts, ereport_id).await?;
-
-    const ENA: &str = "ENA";
-    const TIME_COLLECTED: &str = "collected at";
-    const TIME_DELETED: &str = "deleted at";
-    const COLLECTOR_ID: &str = "collected by";
-    const CLASS: &str = "class";
-    const REPORTER: &str = "reported by";
-    const RESTART_ID: &str = "restart ID";
-    const RACK_ID: &str = "rack ID";
-    const SLED_ID: &str = "  sled ID";
-    const PART_NUMBER: &str = "  part number";
-    const SERIAL_NUMBER: &str = "  serial number";
-    const MARKED_SEEN_IN: &str = "marked seen in sitrep";
-    const WIDTH: usize = const_max_len(&[
+mod ereport_info_fields {
+    pub const ENA: &str = "ENA";
+    pub const TIME_COLLECTED: &str = "collected at";
+    pub const TIME_DELETED: &str = "deleted at";
+    pub const COLLECTOR_ID: &str = "collected by";
+    pub const CLASS: &str = "class";
+    pub const REPORTER: &str = "reported by";
+    pub const RESTART_ID: &str = "restart ID";
+    pub const RACK_ID: &str = "rack ID";
+    pub const SLED_ID: &str = "  sled ID";
+    pub const PART_NUMBER: &str = "  part number";
+    pub const SERIAL_NUMBER: &str = "  serial number";
+    pub const MARKED_SEEN_IN: &str = "marked seen in sitrep";
+    pub const WIDTH: usize = super::const_max_len(&[
         ENA,
         CLASS,
         TIME_COLLECTED,
@@ -396,6 +388,96 @@ async fn cmd_db_ereport_info(
         SERIAL_NUMBER,
         MARKED_SEEN_IN,
     ]);
+}
+
+struct ReporterDisplay<'a> {
+    reporter: Option<&'a Reporter>,
+}
+
+impl Display for ReporterDisplay<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use ereport_info_fields::*;
+
+        match self.reporter {
+            None => Ok(()),
+            Some(Reporter::Sp { sp_type, slot }) => {
+                writeln!(
+                    f,
+                    "    {REPORTER:>WIDTH$}: {sp_type:?} {slot} \
+                     (service processor)"
+                )
+            }
+            Some(Reporter::HostOs { sled, slot }) => {
+                if let Some(slot) = slot {
+                    writeln!(
+                        f,
+                        "    {REPORTER:>WIDTH$}: sled {slot} (host OS)"
+                    )?;
+                } else {
+                    writeln!(
+                        f,
+                        "    {REPORTER:>WIDTH$}: <unknown sled slot> (host OS)"
+                    )?;
+                }
+                writeln!(f, "    {SLED_ID:>WIDTH$}: {sled:?}")
+            }
+        }
+    }
+}
+
+struct ReporterErrorDisplay<'a> {
+    err: &'a dyn Display,
+}
+
+impl Display for ReporterErrorDisplay<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self { err } = self;
+        writeln!(f, "{err}")
+    }
+}
+
+struct RackDisplay {
+    rack_id: Option<RackUuid>,
+}
+
+impl Display for RackDisplay {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use ereport_info_fields::*;
+
+        match self.rack_id {
+            Some(rack_id) => writeln!(f, "    {RACK_ID:>WIDTH$}: {rack_id}"),
+            None => Ok(()),
+        }
+    }
+}
+
+struct RackLookupErrorDisplay<'a> {
+    restart_id: EreporterRestartUuid,
+    err: &'a dyn Display,
+}
+
+impl Display for RackLookupErrorDisplay<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self { restart_id, err } = self;
+        writeln!(
+            f,
+            "error: failed to fetch ereporter_restart entry for \
+             {restart_id}: {err}"
+        )
+    }
+}
+
+async fn cmd_db_ereport_info(
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+    args: &InfoArgs,
+) -> anyhow::Result<()> {
+    let &InfoArgs { restart_id, ena, json, raw } = args;
+    let ereport_id = ereport_types::EreportId { restart_id, ena };
+    let conn = datastore.pool_connection_for_tests().await?;
+    let ereport = ereport_fetch(&conn, fetch_opts, ereport_id).await?;
+
+    use ereport_info_fields::*;
 
     if json && raw {
         let ereport = ereport.report;
@@ -452,25 +534,11 @@ async fn cmd_db_ereport_info(
         }
         println!("    {TIME_COLLECTED:>WIDTH$}: {time_collected}");
         println!("    {COLLECTOR_ID:>WIDTH$}: {collector_id}");
-        match Reporter::try_from(reporter) {
-            Err(err) => eprintln!("{err}"),
-            Ok(Reporter::Sp { sp_type, slot }) => {
-                println!(
-                    "    {REPORTER:>WIDTH$}: {sp_type:?} {slot} \
-                     (service processor)"
-                )
-            }
-            Ok(Reporter::HostOs { sled, slot }) => {
-                if let Some(slot) = slot {
-                    println!("    {REPORTER:>WIDTH$}: sled {slot} (host OS)");
-                } else {
-                    println!(
-                        "    {REPORTER:>WIDTH$}: <unknown sled slot> (host OS)"
-                    );
-                }
-                println!("    {SLED_ID:>WIDTH$}: {sled:?}")
-            }
+        let reporter = Reporter::try_from(reporter);
+        if let Err(err) = &reporter {
+            eprint!("{}", ReporterErrorDisplay { err });
         }
+        print!("{}", ReporterDisplay { reporter: reporter.as_ref().ok() });
         println!("    {RESTART_ID:>WIDTH$}: {restart_id}");
 
         // Grab the reporter entry so that we can print the rack ID.
@@ -479,17 +547,18 @@ async fn cmd_db_ereport_info(
             .select(db::model::EreporterRestart::as_select())
             .first_async(&*conn)
             .await;
-        match reporter {
-            Ok(reporter) => {
-                println!("    {RACK_ID:>WIDTH$}: {}", reporter.rack_id());
-            }
-            Err(err) => {
-                eprintln!(
-                    "error: failed to fetch ereporter_restart entry for \
-                     {restart_id}: {err}"
-                );
-            }
+        if let Err(err) = &reporter {
+            eprint!(
+                "{}",
+                RackLookupErrorDisplay { restart_id: restart_id.into(), err }
+            );
         }
+        print!(
+            "{}",
+            RackDisplay {
+                rack_id: reporter.as_ref().ok().map(|r| *r.rack_id())
+            }
+        );
 
         println!(
             "    {PART_NUMBER:>WIDTH$}: {}",
@@ -864,4 +933,122 @@ async fn fetch_known_classes_from_nexus(
         .await
         .context("calling Nexus fm_known_ereport_classes_list")?;
     Ok(resp.into_inner())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nexus_db_model::EreporterType;
+    use nexus_db_model::SpMgsSlot;
+    use nexus_db_model::SpType;
+    use nexus_db_model::SqlU16;
+    use omicron_test_utils::dev::test_cmds::OutputSnapshot;
+    use omicron_uuid_kinds::SledUuid;
+
+    #[test]
+    fn test_reporter_display() {
+        let slot = |n: u16| Some(SpMgsSlot::from(SqlU16::new(n)));
+        let reporters = [
+            (
+                "SP",
+                model::Reporter {
+                    reporter: EreporterType::Sp,
+                    sled_id: None,
+                    slot_type: SpType::Sled,
+                    slot: slot(3),
+                },
+            ),
+            (
+                "SP without a slot (violates the CHECK constraint)",
+                model::Reporter {
+                    reporter: EreporterType::Sp,
+                    sled_id: None,
+                    slot_type: SpType::Sled,
+                    slot: None,
+                },
+            ),
+            (
+                "host OS without a sled ID (violates the CHECK constraint)",
+                model::Reporter {
+                    reporter: EreporterType::Host,
+                    sled_id: None,
+                    slot_type: SpType::Sled,
+                    slot: slot(5),
+                },
+            ),
+            (
+                "host OS with a non-sled slot type (violates the CHECK constraint)",
+                model::Reporter {
+                    reporter: EreporterType::Host,
+                    sled_id: Some(SledUuid::nil().into()),
+                    slot_type: SpType::Switch,
+                    slot: slot(5),
+                },
+            ),
+            (
+                "host OS with a slot",
+                model::Reporter {
+                    reporter: EreporterType::Host,
+                    sled_id: Some(SledUuid::nil().into()),
+                    slot_type: SpType::Sled,
+                    slot: slot(5),
+                },
+            ),
+            (
+                "host OS without a slot",
+                model::Reporter {
+                    reporter: EreporterType::Host,
+                    sled_id: Some(SledUuid::nil().into()),
+                    slot_type: SpType::Sled,
+                    slot: None,
+                },
+            ),
+        ];
+
+        let mut snapshot = OutputSnapshot::new();
+        for (name, reporter) in reporters {
+            let reporter = Reporter::try_from(reporter);
+            let stdout = ReporterDisplay { reporter: reporter.as_ref().ok() };
+            match &reporter {
+                Ok(_) => {
+                    snapshot.push(format_args!("CASE: {name}"), stdout, "")
+                }
+                Err(err) => {
+                    snapshot.push(
+                        format_args!("CASE: {name}"),
+                        stdout,
+                        ReporterErrorDisplay { err },
+                    );
+                }
+            }
+        }
+        snapshot.assert_contents("tests/output/ereport-reporter-lines.txt");
+    }
+
+    #[test]
+    fn test_rack_display() {
+        let restart_id =
+            "12345678-1234-1234-1234-123456789abc".parse().unwrap();
+        let rack_id = "fedcba98-7654-3210-fedc-ba9876543210".parse().unwrap();
+        let mut snapshot = OutputSnapshot::new();
+        for (name, rack) in [
+            ("rack lookup succeeds", Ok(rack_id)),
+            ("rack lookup fails", Err(diesel::result::Error::NotFound)),
+        ] {
+            let stdout = RackDisplay { rack_id: rack.as_ref().ok().copied() };
+            match &rack {
+                Ok(_) => {
+                    snapshot.push(format_args!("CASE: {name}"), stdout, "")
+                }
+                Err(err) => {
+                    snapshot.push(
+                        format_args!("CASE: {name}"),
+                        stdout,
+                        RackLookupErrorDisplay { restart_id, err },
+                    );
+                }
+            }
+        }
+        snapshot.assert_contents("tests/output/ereport-rack-lines.txt");
+    }
 }
