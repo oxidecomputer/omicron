@@ -5334,7 +5334,7 @@ async fn cmd_db_instance_info(
             .with_context(ctx)?;
 
         if !past_migrations.is_empty() {
-            println!("\n{:=<80}\n", "== MIGRATION HISTORY");
+            println!("\n{:=<80}\n", "== MIGRATION HISTORY ");
 
             check_limit(&past_migrations, fetch_opts.fetch_limit, ctx);
 
