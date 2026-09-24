@@ -134,8 +134,11 @@ const METRIC_REQUEST_MAX_SIZE: usize = 10 * 1024 * 1024;
 
 /// Poll interval for requesting sensor readings from SPs.
 ///
-/// Bryan wants to try polling at 1Hz, so let's do that for now.
-const SP_POLL_INTERVAL: Duration = Duration::from_secs(1);
+/// Note: because each gateway polls each SP, and each gateway has an
+/// effectively random polling offset based on the time at which it happens to
+/// start, our coverage of sensor readings is effectively a bit higher than the
+/// configured polling interval.
+const SP_POLL_INTERVAL: Duration = Duration::from_secs(2);
 
 ///The interval at which we will ask Oximeter to collect our metric samples.
 ///
