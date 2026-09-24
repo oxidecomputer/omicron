@@ -22,7 +22,8 @@ cockroachdb settings:
     version::::::::::::   (none)
     preserve downgrade:   (not set)
 planner config:
-    disruption policy: terminate
+    disruption policy : terminate
+    sled reboot policy: immediate (no evacuation)
 
 
 > sled-list

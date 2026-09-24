@@ -2251,6 +2251,7 @@ table! {
         disruption_policy -> crate::enums::ReconfiguratorDisruptionPolicyEnum,
         blueprint_pruner_enabled -> Bool,
         blueprint_pruner_nkeep -> Int8,
+        sled_reboot_policy -> crate::enums::PlannerSledRebootPolicyEnum,
     }
 }
 

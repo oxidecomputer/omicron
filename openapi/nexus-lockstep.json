@@ -7642,11 +7642,44 @@
         "type": "object",
         "properties": {
           "disruption_policy": {
-            "$ref": "#/components/schemas/ReconfiguratorDisruptionPolicy"
+            "description": "Disruption policy applied to sleds being evacuated.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ReconfiguratorDisruptionPolicy"
+              }
+            ]
+          },
+          "sled_reboot_policy": {
+            "description": "Policy for how the planner schedules updates that will induce reboots on sleds.\n\nIf `sled_reboot_policy` is [`PlannerSledRebootPolicy::ImmediateNoEvacuation`], the planner will not mark sleds for evacuation at all, which means `disruption_policy` will be ignored.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PlannerSledRebootPolicy"
+              }
+            ]
           }
         },
         "required": [
-          "disruption_policy"
+          "disruption_policy",
+          "sled_reboot_policy"
+        ]
+      },
+      "PlannerSledRebootPolicy": {
+        "description": "Controls how the planner interacts with sleds that it needs to reboot to perform an update (e.g., of the SP or host OS).",
+        "oneOf": [
+          {
+            "description": "Reboot sleds without evacuating them first.\n\nThis results in the fastest update time, but is the most disruptive to instances on the sled: the sled will be rebooted out from under them.\n\nThis is currently the default, but we expect to change the default to `Evacuate` once all the supporting work to enable that is complete.",
+            "type": "string",
+            "enum": [
+              "immediate_no_evacuation"
+            ]
+          },
+          {
+            "description": "Evacuate sleds before rebooting.\n\nWith this policy, when the planner needs to schedule an update that will cause a sled to reboot, it will first mark the sled for evacuation and then wait for the sled to be fully evacuated before scheduling that update.",
+            "type": "string",
+            "enum": [
+              "evacuate"
+            ]
+          }
         ]
       },
       "PlanningAddOutOfEligibleSleds": {
@@ -9079,7 +9112,8 @@
           },
           "planner_config": {
             "default": {
-              "disruption_policy": "terminate"
+              "disruption_policy": "terminate",
+              "sled_reboot_policy": "immediate_no_evacuation"
             },
             "allOf": [
               {

@@ -19,22 +19,21 @@ pub struct ReconfiguratorConfig {
     pub disruption_policy: DbReconfiguratorDisruptionPolicy,
     pub blueprint_pruner_enabled: bool,
     pub blueprint_pruner_nkeep: SqlU32,
+    pub sled_reboot_policy: DbPlannerSledRebootPolicy,
 }
 
 impl From<deployment::ReconfiguratorConfigView> for ReconfiguratorConfig {
     fn from(value: deployment::ReconfiguratorConfigView) -> Self {
+        let planner_config = value.config.planner_config;
         Self {
             version: value.version.into(),
             planner_enabled: value.config.planner_enabled,
             time_modified: value.time_modified,
             tuf_repo_pruner_enabled: value.config.tuf_repo_pruner_enabled,
-            disruption_policy: value
-                .config
-                .planner_config
-                .disruption_policy
-                .into(),
+            disruption_policy: planner_config.disruption_policy.into(),
             blueprint_pruner_enabled: value.config.blueprint_pruner_enabled,
             blueprint_pruner_nkeep: value.config.blueprint_pruner_nkeep.into(),
+            sled_reboot_policy: planner_config.sled_reboot_policy.into(),
         }
     }
 }
@@ -47,6 +46,7 @@ impl From<ReconfiguratorConfig> for deployment::ReconfiguratorConfigView {
                 planner_enabled: value.planner_enabled,
                 planner_config: deployment::PlannerConfig {
                     disruption_policy: value.disruption_policy.into(),
+                    sled_reboot_policy: value.sled_reboot_policy.into(),
                 },
                 tuf_repo_pruner_enabled: value.tuf_repo_pruner_enabled,
                 blueprint_pruner_enabled: value.blueprint_pruner_enabled,
@@ -106,6 +106,49 @@ impl From<deployment::ReconfiguratorDisruptionPolicy>
             }
             deployment::ReconfiguratorDisruptionPolicy::MigrateOnly => {
                 DbReconfiguratorDisruptionPolicy::MigrateOnly
+            }
+        }
+    }
+}
+
+impl_enum_type!(
+    PlannerSledRebootPolicyEnum:
+
+    #[derive(
+        Copy,
+        Clone,
+        Debug,
+        PartialEq,
+        AsExpression,
+        FromSqlRow,
+    )]
+    pub enum DbPlannerSledRebootPolicy;
+
+    ImmediateNoEvacuation => b"immediate_no_evacuation"
+    Evacuate => b"evacuate"
+);
+
+impl From<DbPlannerSledRebootPolicy> for deployment::PlannerSledRebootPolicy {
+    fn from(value: DbPlannerSledRebootPolicy) -> Self {
+        match value {
+            DbPlannerSledRebootPolicy::ImmediateNoEvacuation => {
+                deployment::PlannerSledRebootPolicy::ImmediateNoEvacuation
+            }
+            DbPlannerSledRebootPolicy::Evacuate => {
+                deployment::PlannerSledRebootPolicy::Evacuate
+            }
+        }
+    }
+}
+
+impl From<deployment::PlannerSledRebootPolicy> for DbPlannerSledRebootPolicy {
+    fn from(value: deployment::PlannerSledRebootPolicy) -> Self {
+        match value {
+            deployment::PlannerSledRebootPolicy::ImmediateNoEvacuation => {
+                DbPlannerSledRebootPolicy::ImmediateNoEvacuation
+            }
+            deployment::PlannerSledRebootPolicy::Evacuate => {
+                DbPlannerSledRebootPolicy::Evacuate
             }
         }
     }

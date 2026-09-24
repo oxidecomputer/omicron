@@ -422,37 +422,46 @@ async fn cmd_reconfigurator_config_history(
         planner_enabled: String,
         tuf_repo_pruner_enabled: String,
         disruption_policy: String,
+        sled_reboot_policy: String,
         blueprint_pruner_enabled: String,
         blueprint_pruner_nkeep: String,
         time_modified: String,
     }
 
-    let rows: Vec<_> = history
-        .into_iter()
-        .map(|s| {
-            let ReconfiguratorConfigView {
-                version,
-                config:
-                    ReconfiguratorConfig {
-                        planner_enabled,
-                        planner_config: PlannerConfig { disruption_policy },
-                        tuf_repo_pruner_enabled,
-                        blueprint_pruner_enabled,
-                        blueprint_pruner_nkeep,
-                    },
-                time_modified,
-            } = s;
-            SwitchesRow {
-                version: version.to_string(),
-                planner_enabled: planner_enabled.to_string(),
-                tuf_repo_pruner_enabled: tuf_repo_pruner_enabled.to_string(),
-                disruption_policy: disruption_policy.to_string(),
-                blueprint_pruner_enabled: blueprint_pruner_enabled.to_string(),
-                blueprint_pruner_nkeep: blueprint_pruner_nkeep.to_string(),
-                time_modified: time_modified.to_string(),
-            }
-        })
-        .collect();
+    let rows: Vec<_> =
+        history
+            .into_iter()
+            .map(|s| {
+                let ReconfiguratorConfigView {
+                    version,
+                    config:
+                        ReconfiguratorConfig {
+                            planner_enabled,
+                            planner_config:
+                                PlannerConfig {
+                                    disruption_policy,
+                                    sled_reboot_policy,
+                                },
+                            tuf_repo_pruner_enabled,
+                            blueprint_pruner_enabled,
+                            blueprint_pruner_nkeep,
+                        },
+                    time_modified,
+                } = s;
+                SwitchesRow {
+                    version: version.to_string(),
+                    planner_enabled: planner_enabled.to_string(),
+                    tuf_repo_pruner_enabled: tuf_repo_pruner_enabled
+                        .to_string(),
+                    disruption_policy: disruption_policy.to_string(),
+                    sled_reboot_policy: sled_reboot_policy.to_string(),
+                    blueprint_pruner_enabled: blueprint_pruner_enabled
+                        .to_string(),
+                    blueprint_pruner_nkeep: blueprint_pruner_nkeep.to_string(),
+                    time_modified: time_modified.to_string(),
+                }
+            })
+            .collect();
 
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())
