@@ -88,22 +88,6 @@ pub const FAKE_GIMLET_MODEL: &str = "i86pc";
 type AttachedMgsSerialConsole =
     Arc<Mutex<Option<(SpComponent, Sender<SpPort>)>>>;
 
-/// Type of request most recently handled by a simulated SP.
-///
-/// Many request types are not covered by this enum. This only exists to enable
-/// certain particular tests.
-// If you need an additional request type to be reported by this enum, feel free
-// to add it and update the appropriate `Handler` function below (see
-// `update_status()`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SimSpHandledRequest {
-    /// The most recent request was for the update status of a component.
-    ComponentUpdateStatus(SpComponent),
-    /// The most recent request was some other type that is currently not
-    /// implemented in this tracker.
-    NotImplemented,
-}
-
 /// Current power state and, if in A0, which M2 slot was active at the time
 /// we transitioned to A0. (This represents what disk the OS would attempt to
 /// boot from, if we were a real SP connected to a real sled.)
@@ -131,7 +115,6 @@ pub struct Gimlet {
     inner_tasks: Vec<JoinHandle<()>>,
     responses_sent_count: Option<watch::Receiver<usize>>,
     power_state_changes: Arc<AtomicUsize>,
-    last_request_handled: Arc<Mutex<Option<SimSpHandledRequest>>>,
     power_state_rx: Option<watch::Receiver<GimletPowerState>>,
 }
 
@@ -259,7 +242,6 @@ impl Gimlet {
         let mut serial_console_addrs = HashMap::new();
         let mut inner_tasks = Vec::new();
         let (commands, commands_rx) = mpsc::unbounded_channel();
-        let last_request_handled = Arc::default();
 
         // Weird case - if we don't have any network config, we're only being
         // created to simulate an RoT, so go ahead and return without actually
@@ -273,7 +255,6 @@ impl Gimlet {
                 commands,
                 inner_tasks,
                 responses_sent_count: None,
-                last_request_handled,
                 power_state_rx: None,
                 power_state_changes: Arc::new(AtomicUsize::new(0)),
             });
@@ -428,7 +409,6 @@ impl Gimlet {
             incoming_console_tx,
             power_state,
             commands_rx,
-            Arc::clone(&last_request_handled),
             log,
             update_state,
             Arc::clone(&power_state_changes),
@@ -444,7 +424,6 @@ impl Gimlet {
             commands,
             inner_tasks,
             responses_sent_count: Some(responses_sent_count),
-            last_request_handled,
             power_state_rx: Some(power_state_rx),
             power_state_changes,
         })
@@ -456,10 +435,6 @@ impl Gimlet {
 
     pub fn serial_console_addr(&self, component: &str) -> Option<SocketAddrV6> {
         self.serial_console_addrs.get(component).copied()
-    }
-
-    pub fn last_request_handled(&self) -> Option<SimSpHandledRequest> {
-        *self.last_request_handled.lock().unwrap()
     }
 
     /// Set the policy for simulating host phase 1 flash hashing.
@@ -663,7 +638,6 @@ struct UdpTask {
     handler: Arc<TokioMutex<Handler>>,
     commands: mpsc::UnboundedReceiver<Command>,
     responses_sent_count: watch::Sender<usize>,
-    last_request_handled: Arc<Mutex<Option<SimSpHandledRequest>>>,
 }
 
 impl UdpTask {
@@ -677,7 +651,6 @@ impl UdpTask {
         incoming_serial_console: HashMap<SpComponent, UnboundedSender<Vec<u8>>>,
         power_state: watch::Sender<GimletPowerState>,
         commands: mpsc::UnboundedReceiver<Command>,
-        last_request_handled: Arc<Mutex<Option<SimSpHandledRequest>>>,
         log: Logger,
         update_state: SimSpUpdate,
         power_state_changes: Arc<AtomicUsize>,
@@ -703,7 +676,6 @@ impl UdpTask {
                 handler: Arc::clone(&handler),
                 commands,
                 responses_sent_count,
-                last_request_handled,
             },
             handler,
             responses_sent_count_rx,
@@ -734,27 +706,16 @@ impl UdpTask {
                 }
 
                 recv0 = self.udp0.recv_from(), if throttle_count > 0 => {
-                    let (result, handled_request) = {
-                        let mut handler = self.handler.lock().await;
-                        handler.last_request_handled = None;
-                        let result = server::handle_request(
-                            &mut *handler,
-                            recv0,
-                            &mut out_buf,
-                            responsiveness,
-                            SpPort::One,
-                        ).await?;
-                        (result,
-                         handler.last_request_handled.unwrap_or(
-                             SimSpHandledRequest::NotImplemented,
-                        ))
-                    };
-                    if let Some((resp, addr)) = result {
+                    if let Some((resp, addr)) = server::handle_request(
+                        &mut *self.handler.lock().await,
+                        recv0,
+                        &mut out_buf,
+                        responsiveness,
+                        SpPort::One,
+                    ).await? {
                         throttle_count -= 1;
                         self.udp0.send_to(resp, addr).await?;
                         self.responses_sent_count.send_modify(|n| *n += 1);
-                        *self.last_request_handled.lock().unwrap() =
-                            Some(handled_request);
                     }
                 }
 
@@ -839,8 +800,6 @@ struct Handler {
     sensors: Sensors,
     component_vpds: ComponentVpds,
 
-    last_request_handled: Option<SimSpHandledRequest>,
-
     // To simulate an SP reset, we should (after doing whatever housekeeping we
     // need to track the reset) intentionally _fail_ to respond to the request,
     // simulating a `-> !` function on the SP that triggers a reset. To provide
@@ -893,7 +852,6 @@ impl Handler {
             update_state,
             reset_pending: None,
             power_state,
-            last_request_handled: None,
             should_fail_to_respond_signal: None,
             sp_dumps,
             power_state_changes,
@@ -1257,8 +1215,6 @@ impl SpHandler for Handler {
             "received update status request";
             "component" => ?component,
         );
-        self.last_request_handled =
-            Some(SimSpHandledRequest::ComponentUpdateStatus(component));
         Ok(self.update_state.status())
     }
 
