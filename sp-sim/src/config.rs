@@ -362,8 +362,11 @@ pub struct EreportRestart {
     #[serde(default = "uuid::Uuid::new_v4")]
     pub restart_id: uuid::Uuid,
 
-    #[serde(skip_serializing_if = "toml::map::Map::is_empty", default)]
-    pub metadata: toml::map::Map<String, toml::Value>,
+    #[serde(
+        skip_serializing_if = "crate::ereport::Metadata::is_empty",
+        default
+    )]
+    pub metadata: crate::ereport::Metadata,
 }
 
 impl Default for EreportRestart {
