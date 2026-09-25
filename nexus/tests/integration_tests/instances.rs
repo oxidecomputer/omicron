@@ -832,6 +832,7 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
         Default::default(),
         None,
         Vec::new(),
+        None,
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -1124,6 +1125,7 @@ async fn test_instance_migrate_target_finishes_first(
         Default::default(),
         None,
         Vec::new(),
+        None,
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -1428,6 +1430,7 @@ async fn test_instance_migrate_v2p_and_routes(
         Default::default(),
         None,
         Vec::new(),
+        None,
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -1609,6 +1612,7 @@ async fn test_instance_migration_compatible_cpu_platforms(
         Default::default(),
         Some(InstanceCpuPlatform::AmdMilan),
         Vec::new(),
+        None,
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -1793,6 +1797,7 @@ async fn test_instance_migration_incompatible_cpu_platforms(
         Default::default(),
         Some(InstanceCpuPlatform::AmdTurin),
         Vec::new(),
+        None,
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -1882,6 +1887,7 @@ async fn test_instance_migration_unknown_sled_type(
         Default::default(),
         None,
         Vec::new(),
+        None,
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -2436,6 +2442,7 @@ async fn test_instance_failed_when_on_expunged_sled(
                 Some(auto_restart),
                 None,
                 Vec::new(),
+                None,
             )
             .await;
             let instance_id =
@@ -2787,6 +2794,7 @@ async fn make_forgotten_instance(
         Some(auto_restart),
         None,
         Vec::new(),
+        None,
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -3017,6 +3025,7 @@ async fn test_instance_metrics_with_migration(
         Default::default(),
         None,
         Vec::new(),
+        None,
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -4714,6 +4723,7 @@ async fn test_instance_update_network_interface_transit_ips(
         Default::default(),
         None,
         Vec::new(),
+        None,
     )
     .await;
 
@@ -8613,6 +8623,7 @@ async fn test_instance_attach_several_external_ips(
         Default::default(),
         None,
         Vec::new(),
+        None,
     )
     .await;
 
@@ -8862,6 +8873,7 @@ async fn test_instance_rejects_two_ephemeral_same_pool(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
     let error = object_create_error(
         client,
@@ -8900,6 +8912,7 @@ async fn create_instance_with_pool(
         Default::default(),
         None,
         Vec::new(),
+        None,
     )
     .await
 }
@@ -10341,6 +10354,7 @@ async fn can_create_instance_with_multiple_nics_and_ephemeral_ip(
         None,
         None,
         vec![],
+        None,
     )
     .await;
 }

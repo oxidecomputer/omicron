@@ -1,2 +1,2 @@
 ALTER TABLE omicron.public.instance
-  ADD COLUMN IF NOT EXISTS shutdown_policy_action omicron.public.instance_shutdown_action DEFAULT NULL;
+  ADD COLUMN IF NOT EXISTS shutdown_policy_action omicron.public.instance_shutdown_action NOT NULL default 'hard_off';
