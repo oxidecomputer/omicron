@@ -64,6 +64,7 @@ pub async fn database_batcher(
         log.new(slog::o!("component" => "database-inserter")),
         client,
         batch_rx,
+        sink_stats.clone(),
     ));
 
     // Spawn a timer for ensuring we periodically notify the inserter to
@@ -246,6 +247,7 @@ async fn database_inserter(
     log: Logger,
     client: Client,
     batch_rx: BatchReceiver<Sample>,
+    sink_stats: Arc<self_stats::CollectorSinkStats>,
 ) {
     loop {
         // Wait for a notification that there are samples to insert, and consume
@@ -278,6 +280,7 @@ async fn database_inserter(
                     "failed to insert some results into metric DB";
                     err,
                 );
+                sink_stats.insert_errors.lock().unwrap().increment();
             }
         }
     }
