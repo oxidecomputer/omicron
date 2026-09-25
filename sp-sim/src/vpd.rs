@@ -60,18 +60,14 @@ impl BaseboardVpd {
         Ok(Self { serial_number, part_number })
     }
 
-    pub(crate) fn populate_ereport_metadata(
-        &self,
-        metadata: &mut toml::map::Map<String, toml::Value>,
-    ) {
-        metadata.insert(
-            "baseboard_serial_number".to_string(),
-            self.serial_number.clone().into(),
-        );
-        metadata.insert(
-            "baseboard_part_number".to_string(),
-            self.part_number.clone().into(),
-        );
+    /// Returns the serial number as an `&str`, without NUL-padding.
+    pub(crate) fn serial_number(&self) -> &str {
+        &self.serial_number
+    }
+
+    /// Returns the part number as an `&str`, without NUL-padding.
+    pub(crate) fn part_number(&self) -> &str {
+        &self.part_number
     }
 
     /// Returns the serial number, NUL-padded for `SpStateV2::serial_number`.
