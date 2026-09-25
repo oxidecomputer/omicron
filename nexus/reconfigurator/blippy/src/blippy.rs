@@ -25,10 +25,12 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use sled_agent_types::disk::M2Slot;
+use std::cmp::Ordering;
 use std::collections::BTreeSet;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
+use std::ops::Deref;
 use tufaceous_artifact::ArtifactHash;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -128,22 +130,81 @@ impl fmt::Display for BlueprintKind {
     }
 }
 
+/// Wrapper for types that blippy wants to be able to order (for report note
+/// ordering stability) that aren't themselves orderable.
+///
+/// This type does not derive `PartialOrd + Ord`; instead, it's manually
+/// implemented below for any types `T` that we need.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlippyOrd<T>(pub T);
+
+impl<T> Deref for BlippyOrd<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<T: Clone> From<&'_ T> for BlippyOrd<T> {
+    fn from(value: &'_ T) -> Self {
+        Self(value.clone())
+    }
+}
+
+impl<T> From<T> for BlippyOrd<T> {
+    fn from(value: T) -> Self {
+        Self(value)
+    }
+}
+
+impl PartialOrd for BlippyOrd<BlueprintZoneConfig> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for BlippyOrd<BlueprintZoneConfig> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        // Order zone configs by _only_ their IDs. If we end up with two blippy
+        // notes that contain zone configs that have the same ID but different
+        // other contents, the order of the notes we emit may be unstable, but
+        // that'll be the least of our worries.
+        let Self(BlueprintZoneConfig {
+            id: self_id,
+            disposition: _,
+            filesystem_pool: _,
+            zone_type: _,
+            image_source: _,
+        }) = self;
+        let Self(BlueprintZoneConfig {
+            id: other_id,
+            disposition: _,
+            filesystem_pool: _,
+            zone_type: _,
+            image_source: _,
+        }) = other;
+
+        self_id.cmp(other_id)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SledKind {
     /// Two running zones have the same underlay IP address.
     DuplicateUnderlayIp {
-        zone1: BlueprintZoneConfig,
-        zone2: BlueprintZoneConfig,
+        zone1: BlippyOrd<BlueprintZoneConfig>,
+        zone2: BlippyOrd<BlueprintZoneConfig>,
     },
     /// A sled has a zone with an IP that isn't a member of its subnet.
     UnderlayIpOnWrongSubnet {
-        zone: BlueprintZoneConfig,
+        zone: BlippyOrd<BlueprintZoneConfig>,
         subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
     },
     /// A sled has a zone with an IP that is above the sled's overall "last
     /// allocated IP" value.
     UnderlayIpAboveLastAllocatedIp {
-        zone: BlueprintZoneConfig,
+        zone: BlippyOrd<BlueprintZoneConfig>,
         last_allocated_ip: Ipv6Addr,
     },
     /// Two sleds are using the same sled subnet.
@@ -154,37 +215,37 @@ pub enum SledKind {
     /// An internal DNS zone has an IP that is not one of the expected rack DNS
     /// subnets.
     InternalDnsZoneBadSubnet {
-        zone: BlueprintZoneConfig,
+        zone: BlippyOrd<BlueprintZoneConfig>,
         rack_dns_subnets: BTreeSet<DnsSubnet>,
     },
     /// Two running zones have the same external IP address.
     DuplicateExternalIp {
-        zone1: BlueprintZoneConfig,
-        zone2: BlueprintZoneConfig,
+        zone1: BlippyOrd<BlueprintZoneConfig>,
+        zone2: BlippyOrd<BlueprintZoneConfig>,
         ip: IpAddr,
     },
     /// Two running zones' NICs have the same IP address.
     DuplicateNicIp {
-        zone1: BlueprintZoneConfig,
-        zone2: BlueprintZoneConfig,
+        zone1: BlippyOrd<BlueprintZoneConfig>,
+        zone2: BlippyOrd<BlueprintZoneConfig>,
         ip: IpAddr,
     },
     /// Two running zones' NICs have the same MAC address.
     DuplicateNicMac {
-        zone1: BlueprintZoneConfig,
-        zone2: BlueprintZoneConfig,
+        zone1: BlippyOrd<BlueprintZoneConfig>,
+        zone2: BlippyOrd<BlueprintZoneConfig>,
         mac: MacAddr,
     },
     /// Two zones with the same durable dataset kind are on the same zpool.
     ZoneDurableDatasetCollision {
-        zone1: BlueprintZoneConfig,
-        zone2: BlueprintZoneConfig,
+        zone1: BlippyOrd<BlueprintZoneConfig>,
+        zone2: BlippyOrd<BlueprintZoneConfig>,
         zpool: ZpoolName,
     },
     /// Two zones with the same filesystem dataset kind are on the same zpool.
     ZoneFilesystemDatasetCollision {
-        zone1: BlueprintZoneConfig,
-        zone2: BlueprintZoneConfig,
+        zone1: BlippyOrd<BlueprintZoneConfig>,
+        zone2: BlippyOrd<BlueprintZoneConfig>,
         zpool: ZpoolName,
     },
     /// One zpool has two datasets of the same kind.
@@ -202,13 +263,13 @@ pub enum SledKind {
     /// A zpool is missing its LocalStorageUnencrypted dataset.
     ZpoolMissingLocalStorageUnencryptedDataset { zpool: ZpoolUuid },
     /// A zone's filesystem dataset is missing from `blueprint_datasets`.
-    ZoneMissingFilesystemDataset { zone: BlueprintZoneConfig },
+    ZoneMissingFilesystemDataset { zone: BlippyOrd<BlueprintZoneConfig> },
     /// A zone's durable dataset is missing from `blueprint_datasets`.
-    ZoneMissingDurableDataset { zone: BlueprintZoneConfig },
+    ZoneMissingDurableDataset { zone: BlippyOrd<BlueprintZoneConfig> },
     /// A zone's durable dataset and transient root dataset are on different
     /// zpools.
     ZoneWithDatasetsOnDifferentZpools {
-        zone: BlueprintZoneConfig,
+        zone: BlippyOrd<BlueprintZoneConfig>,
         durable_zpool: ZpoolName,
         transient_zpool: ZpoolName,
     },
@@ -229,7 +290,7 @@ pub enum SledKind {
     },
     MupdateOverrideWithArtifactZone {
         mupdate_override_id: MupdateOverrideUuid,
-        zone: BlueprintZoneConfig,
+        zone: BlippyOrd<BlueprintZoneConfig>,
         version: BlueprintArtifactVersion,
         hash: ArtifactHash,
     },
@@ -248,8 +309,8 @@ pub enum SledKind {
     },
     /// Nexus zones with the same generation have different image sources.
     NexusZoneGenerationImageSourceMismatch {
-        zone1: BlueprintZoneConfig,
-        zone2: BlueprintZoneConfig,
+        zone1: BlippyOrd<BlueprintZoneConfig>,
+        zone2: BlippyOrd<BlueprintZoneConfig>,
         generation: NexusGeneration,
     },
 }
