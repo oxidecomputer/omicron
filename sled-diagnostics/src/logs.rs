@@ -577,15 +577,24 @@ impl LogsHandle {
     /// them to a zip file.
     ///
     /// Files are filtered by `window` via oxlog's `date_range`, at file
-    /// granularity: no file containing in-window content is dropped, and a
-    /// file created before the window's end but modified after it is included
-    /// in full, so the output may contain data newer than the end bound. A
-    /// file whose `mtime` (the timestamp of its newest write) predates the
-    /// window's start contains no in-window content and is excluded; this
-    /// applies to current logs too, so a service that has written nothing
-    /// since before the window began contributes no files. Rotated logs are
-    /// additionally limited to `max_rotated` files when a count cap is
-    /// supplied.
+    /// granularity: a file created before the window's end but modified after
+    /// it is included in full, so the output may contain data newer than the
+    /// end bound. A file whose `mtime` (the timestamp of its newest write)
+    /// predates the window's start contains no in-window content and is
+    /// excluded; this applies to current logs too, so a service that has
+    /// written nothing since before the window began contributes no files.
+    /// Rotated logs are additionally limited to `max_rotated` files when a
+    /// count cap is supplied.
+    ///
+    /// Known limitation: rotated and archived SMF logs are copies (logadm
+    /// rotates them with copy-and-truncate, and archival copies them again),
+    /// so their creation time reflects when their content ended rather than
+    /// when it began. oxlog therefore effectively tests them by `mtime`
+    /// alone, and with an end bound, the rotated file straddling the end of
+    /// the window is dropped even though it contains in-window content. This
+    /// loses at most one rotation period of logs (currently 4 hours) per
+    /// service, and does not apply when the window has no end bound. See
+    /// <https://github.com/oxidecomputer/omicron/issues/11357>.
     ///
     /// Note that this log retrieval will automatically take and cleanup
     /// necessary zfs snapshots along the way.
