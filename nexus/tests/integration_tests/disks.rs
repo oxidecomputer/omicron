@@ -5,13 +5,18 @@
 //! Tests basic disk support in the API
 
 use super::instances::instance_wait_for_state;
+use async_bb8_diesel::AsyncRunQueryDsl;
+use diesel::prelude::*;
 use dropshot::HttpErrorResponseBody;
 use dropshot::test_util::ClientTestContext;
 use http::StatusCode;
 use http::method::Method;
 use nexus_config::RegionAllocationStrategy;
 use nexus_db_lookup::LookupPath;
+use nexus_db_model::LocalStorageUnencryptedDatasetAllocation;
 use nexus_db_model::PhysicalDiskPolicy;
+use nexus_db_model::to_db_typed_uuid;
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore;
 use nexus_db_queries::db::datastore::REGION_REDUNDANCY_THRESHOLD;
@@ -19,6 +24,7 @@ use nexus_db_queries::db::datastore::RegionAllocationFor;
 use nexus_db_queries::db::datastore::RegionAllocationParameters;
 use nexus_db_queries::db::fixed_data::FLEET_ID;
 use nexus_test_utils::SLED_AGENT_UUID;
+use nexus_test_utils::background::wait_for_all_local_storage_deletes_errors_ok;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
@@ -3167,12 +3173,12 @@ async fn test_read_only_disk_different_vcr(
 /// Test that deleting a local storage disk retries through transient sled
 /// agent errors.
 ///
-/// This exercises the retry loop in `sdd_delete_local_storage` by:
+/// This exercises the `local_storage_delete` background task by:
 ///
 /// 1. Creating a local storage disk and starting an instance with it.
 /// 2. Stopping the instance and detaching the disk.
 /// 3. Injecting transient 503 errors into the simulated sled agent.
-/// 4. Deleting the disk and verifying the saga retries and succeeds.
+/// 4. Deleting the disk and verifying the task retries and succeeds.
 ///
 /// Time is paused so that exponential backoff sleeps resolve quickly.
 #[nexus_test]
@@ -3243,34 +3249,20 @@ async fn test_delete_local_storage_disk_retries_on_transient_error(
     disk_post(client, &url_instance_detach_disk, local_disk_name.clone()).await;
 
     // Inject transient failures into local storage operations on the sled
-    // agent. The disk delete saga's `sdd_delete_local_storage` action will
+    // agent. The background task responsible for deleting local storage will
     // retry through these. 8 errors comfortably exceeds backon's default
     // max_times of 3 (catching the regression fixed by #9993), while keeping
     // virtual time low enough that background task timers don't cause excessive
     // real I/O during auto-advance.
     cptestctx.first_sled_agent().set_local_storage_error_count(8);
 
-    // Pausing the timer turns on Tokio's auto-advance behavior, making backoff
-    // sleeps resolve instantly.
-    tokio::time::pause();
-
-    // Delete the disk. This triggers the disk delete saga, which must retry
-    // in the face of injected errors.
+    // Delete the disk.
     let disk_url = get_disk_url("local-disk");
     NexusRequest::object_delete(client, &disk_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
-        .expect("disk delete should succeed after retrying transient errors");
-
-    tokio::time::resume();
-
-    assert_eq!(
-        cptestctx.first_sled_agent().local_storage_error_remaining(),
-        0,
-        "not all injected errors were consumed; \
-         the retry loop may not have been exercised"
-    );
+        .expect("disk delete should succeed");
 
     NexusRequest::new(
         RequestBuilder::new(client, Method::GET, &disk_url)
@@ -3280,6 +3272,317 @@ async fn test_delete_local_storage_disk_retries_on_transient_error(
     .execute()
     .await
     .expect("disk should no longer exist");
+
+    // Ensure the background task eventually deletes the local storage.
+
+    tokio::time::pause();
+
+    wait_for_all_local_storage_deletes_errors_ok(
+        &nexus.datastore(),
+        &cptestctx.lockstep_client,
+    )
+    .await;
+
+    tokio::time::resume();
+
+    assert_eq!(
+        cptestctx.first_sled_agent().local_storage_error_remaining(),
+        0,
+        "not all injected errors were consumed; \
+         the retry loop may not have been exercised"
+    );
+}
+
+/// Test that deleting a local storage disk succeeds even if the backing zpool
+/// is expunged
+#[nexus_test]
+async fn test_delete_local_disk_backed_by_expunged_zpool(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    DiskTest::new(&cptestctx).await;
+    create_project_and_pool(client).await;
+    let nexus = &cptestctx.server.server_context().nexus;
+
+    let local_disk_name: Name = "local-disk".parse().unwrap();
+    let instance_name = "local-disk-instance";
+
+    // Create a local storage disk.
+    let disks_url = get_disks_url();
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&disk::DiskCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: local_disk_name.clone(),
+                    description: "local storage disk".to_string(),
+                },
+                disk_backend: disk::DiskBackend::Local {},
+                size: ByteCount::from_gibibytes_u32(1),
+            }))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("created local storage disk");
+
+    // Create an instance with the local disk attached and start it. Starting
+    // the instance triggers `sled_reservation_create`, which allocates a
+    // dataset for the local storage disk. Without this allocation, the disk
+    // delete saga short-circuits and never reaches the retry loop.
+    let instance = create_instance_with(
+        client,
+        PROJECT_NAME,
+        instance_name,
+        &instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+        vec![instance::InstanceDiskAttachment::Attach(
+            instance::InstanceDiskAttach { name: local_disk_name.clone() },
+        )],
+        Vec::<instance::ExternalIpCreate>::new(),
+        true,
+        Default::default(),
+        None,
+        Vec::new(),
+    )
+    .await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+
+    // Simulate the instance transitioning to Running so the start saga
+    // completes (including local storage allocation).
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Running).await;
+
+    // Stop the instance.
+    set_instance_state(client, instance_name, "stop").await;
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
+
+    // Expunge the zpool backing the allocation
+
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    let allocations: Vec<_> = {
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        use nexus_db_schema::schema::local_storage_unencrypted_dataset_allocation::dsl;
+
+        dsl::local_storage_unencrypted_dataset_allocation
+            .filter(dsl::time_deleted.is_null())
+            .select(LocalStorageUnencryptedDatasetAllocation::as_select())
+            .load_async(&*conn)
+            .await
+            .unwrap()
+    };
+
+    assert_eq!(allocations.len(), 1);
+
+    let (.., db_zpool) = LookupPath::new(&opctx, datastore)
+        .zpool_id(allocations[0].pool_id().upcast())
+        .fetch()
+        .await
+        .unwrap();
+
+    datastore
+        .physical_disk_update_policy(
+            &opctx,
+            db_zpool.physical_disk_id(),
+            PhysicalDiskPolicy::Expunged,
+        )
+        .await
+        .unwrap();
+
+    // Detach the disk then delete it.
+
+    let url_instance_detach_disk =
+        get_disk_detach_url(&instance.identity.id.into());
+    disk_post(client, &url_instance_detach_disk, local_disk_name.clone()).await;
+
+    let disk_url = get_disk_url("local-disk");
+    NexusRequest::object_delete(client, &disk_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("disk delete should succeed");
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::GET, &disk_url)
+            .expect_status(Some(StatusCode::NOT_FOUND)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("disk should no longer exist");
+
+    // Ensure the background task eventually deletes the local storage.
+
+    wait_for_all_local_storage_deletes_errors_ok(
+        &datastore,
+        &cptestctx.lockstep_client,
+    )
+    .await;
+
+    // The allocation is only marked deleted after the sled-agent DELETE returns
+    // ok.
+
+    let allocation = {
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        use nexus_db_schema::schema::local_storage_unencrypted_dataset_allocation::dsl;
+
+        dsl::local_storage_unencrypted_dataset_allocation
+            .filter(dsl::id.eq(to_db_typed_uuid(allocations[0].id())))
+            .select(LocalStorageUnencryptedDatasetAllocation::as_select())
+            .get_result_async(&*conn)
+            .await
+            .unwrap()
+    };
+
+    assert!(allocation.time_deleted.is_some());
+}
+
+/// Test that deleting a local storage disk succeeds even if the backing sled is
+/// expunged
+#[nexus_test]
+async fn test_delete_local_disk_backed_by_expunged_sled(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    DiskTest::new(&cptestctx).await;
+    create_project_and_pool(client).await;
+    let nexus = &cptestctx.server.server_context().nexus;
+
+    let local_disk_name: Name = "local-disk".parse().unwrap();
+    let instance_name = "local-disk-instance";
+
+    // Create a local storage disk.
+    let disks_url = get_disks_url();
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&disk::DiskCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: local_disk_name.clone(),
+                    description: "local storage disk".to_string(),
+                },
+                disk_backend: disk::DiskBackend::Local {},
+                size: ByteCount::from_gibibytes_u32(1),
+            }))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("created local storage disk");
+
+    // Create an instance with the local disk attached and start it. Starting
+    // the instance triggers `sled_reservation_create`, which allocates a
+    // dataset for the local storage disk. Without this allocation, the disk
+    // delete saga short-circuits and never reaches the retry loop.
+    let instance = create_instance_with(
+        client,
+        PROJECT_NAME,
+        instance_name,
+        &instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+        vec![instance::InstanceDiskAttachment::Attach(
+            instance::InstanceDiskAttach { name: local_disk_name.clone() },
+        )],
+        Vec::<instance::ExternalIpCreate>::new(),
+        true,
+        Default::default(),
+        None,
+        Vec::new(),
+    )
+    .await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+
+    // Simulate the instance transitioning to Running so the start saga
+    // completes (including local storage allocation).
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Running).await;
+
+    // Stop the instance so we can detach and delete the disk.
+    set_instance_state(client, instance_name, "stop").await;
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
+
+    // Detach the disk.
+    let url_instance_detach_disk =
+        get_disk_detach_url(&instance.identity.id.into());
+    disk_post(client, &url_instance_detach_disk, local_disk_name.clone()).await;
+
+    // For the sled backing the allocation, set its sled policy to expunged
+
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    let allocations: Vec<_> = {
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        use nexus_db_schema::schema::local_storage_unencrypted_dataset_allocation::dsl;
+
+        dsl::local_storage_unencrypted_dataset_allocation
+            .filter(dsl::time_deleted.is_null())
+            .select(LocalStorageUnencryptedDatasetAllocation::as_select())
+            .load_async(&*conn)
+            .await
+            .unwrap()
+    };
+
+    assert_eq!(allocations.len(), 1);
+
+    let (.., authz_sled) = LookupPath::new(&opctx, datastore)
+        .sled_id(allocations[0].sled_id())
+        .lookup_for(authz::Action::Modify)
+        .await
+        .unwrap();
+
+    datastore.sled_set_policy_to_expunged(&opctx, &authz_sled).await.unwrap();
+
+    // Delete the disk
+
+    let disk_url = get_disk_url("local-disk");
+    NexusRequest::object_delete(client, &disk_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("disk delete should succeed");
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::GET, &disk_url)
+            .expect_status(Some(StatusCode::NOT_FOUND)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("disk should no longer exist");
+
+    // Ensure the background task eventually deletes the local storage.
+
+    wait_for_all_local_storage_deletes_errors_ok(
+        &datastore,
+        &cptestctx.lockstep_client,
+    )
+    .await;
+
+    // The allocation is only marked deleted after the sled-agent DELETE returns
+    // ok.
+
+    let allocation = {
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        use nexus_db_schema::schema::local_storage_unencrypted_dataset_allocation::dsl;
+
+        dsl::local_storage_unencrypted_dataset_allocation
+            .filter(dsl::id.eq(to_db_typed_uuid(allocations[0].id())))
+            .select(LocalStorageUnencryptedDatasetAllocation::as_select())
+            .get_result_async(&*conn)
+            .await
+            .unwrap()
+    };
+
+    assert!(allocation.time_deleted.is_some());
 }
 
 async fn disk_get(client: &ClientTestContext, disk_url: &str) -> Disk {
