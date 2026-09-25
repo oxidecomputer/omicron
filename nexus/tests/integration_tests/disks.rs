@@ -3223,6 +3223,7 @@ async fn test_delete_local_storage_disk_retries_on_transient_error(
         Default::default(),
         None,
         Vec::new(),
+        None,
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);

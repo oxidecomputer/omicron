@@ -259,6 +259,7 @@ pub async fn create_stopped_instance_record(
             anti_affinity_groups: Vec::new(),
             multicast_groups: Vec::new(),
             enable_jumbo_frames: false,
+            shutdown_policy: None,
         },
     );
 

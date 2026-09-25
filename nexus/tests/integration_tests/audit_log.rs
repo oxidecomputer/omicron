@@ -22,6 +22,7 @@ use nexus_types::external_api::device;
 use nexus_types::external_api::instance::{
     ExternalIpCreate, InstanceAutoRestartPolicy, InstanceCpuPlatform,
     InstanceDiskAttachment, InstanceNetworkInterfaceAttachment,
+    InstanceShutdownPolicy,
 };
 use nexus_types::external_api::policy;
 use nexus_types::external_api::project::ProjectCreate;
@@ -408,6 +409,7 @@ async fn test_audit_log_create_delete_ops(ctx: &ControlPlaneTestContext) {
         None::<InstanceAutoRestartPolicy>,
         None::<InstanceCpuPlatform>,
         Vec::new(),
+        None::<InstanceShutdownPolicy>,
     )
     .await;
     let _disk = create_disk(client, "test-project", "test-disk").await;

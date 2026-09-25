@@ -182,6 +182,7 @@ impl From<InstanceAndActiveVmm> for instance_types::Instance {
             },
             auto_restart_status,
             enable_jumbo_frames: value.instance.enable_jumbo_frames,
+            shutdown_policy: value.instance.shutdown_policy(),
         }
     }
 }
@@ -1074,6 +1075,8 @@ impl DataStore {
                     memory,
                     cpu_platform,
                     enable_jumbo_frames,
+                    shutdown_policy_action,
+                    shutdown_policy_timeout,
                 } = update.clone();
                 async move {
                     // Set the auto-restart policy.

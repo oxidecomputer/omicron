@@ -70,7 +70,7 @@ define_enums! {
     IdentityTypeEnum => "identity_type",
     InstanceAutoRestartPolicyEnum => "instance_auto_restart",
     InstanceCpuPlatformEnum => "instance_cpu_platform",
-    InstanceShutdownAction => "instance_shutdown_action",
+    InstanceShutdownActionEnum => "instance_shutdown_action",
     InstanceStateEnum => "instance_state_v2",
     InstanceIntendedStateEnum => "instance_intended_state",
     InvConfigReconcilerStatusKindEnum => "inv_config_reconciler_status_kind",

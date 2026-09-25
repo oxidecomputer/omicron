@@ -1477,12 +1477,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
      */
     intended_state omicron.public.instance_intended_state NOT NULL,
 
-    /* TODO: doc. note the above 'intended_state' has a 'guest_shutdown' already
-    so we may want this field's value to decide that gets set accordingly whenever
-    a stop request comes in */
-    shutdown_policy_action omicron.public.instance_shutdown_action,
-    shutdown_policy_timeout INTERVAL,
-
     /*
      * The required CPU platform for this instance. If set, the instance's VMs
      * may see additional features present in that platform, but in exchange
@@ -1504,9 +1498,25 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
      */
     enable_jumbo_frames BOOL NOT NULL,
 
+    /* TODO: doc. note the above 'intended_state' has a 'guest_shutdown' already
+    so we may want this field's value to decide that gets set accordingly whenever
+    a stop request comes in.  interval(0) means seconds */
+    shutdown_policy_action omicron.public.instance_shutdown_action NOT NULL,
+    shutdown_policy_timeout INTERVAL(0),
+
     CONSTRAINT vmm_iff_active_propolis CHECK (
         ((state = 'vmm') AND (active_propolis_id IS NOT NULL)) OR
         ((state != 'vmm') AND (active_propolis_id IS NULL))
+    ),
+    CONSTRAINT shutdown_policy_valid CHECK (
+        (
+            (shutdown_policy_action = 'power_button')
+            AND (shutdown_policy_timeout IS NOT NULL)
+            AND (shutdown_policy_timeout >= INTERVAL '1' SECOND)
+        ) OR (
+            (shutdown_policy_action = 'hard_off')
+            AND (shutdown_policy_timeout IS NULL)
+        )
     )
 );
 

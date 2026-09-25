@@ -7,10 +7,10 @@ use super::{
     ByteCount, Disk, ExternalIp, InstanceAutoRestartPolicy, InstanceCpuCount,
     InstanceCpuPlatform, InstanceState, Vmm, VmmState,
 };
-use crate::ExternalSubnet;
 use crate::collection::DatastoreAttachTargetConfig;
 use crate::serde_time_delta::optional_time_delta;
 use crate::typed_generation::DbTypedGeneration;
+use crate::{ExternalSubnet, impl_enum_type};
 use chrono::{DateTime, TimeDelta, Utc};
 use db_macros::Resource;
 use diesel::expression::{ValidGrouping, is_aggregate};
@@ -18,7 +18,9 @@ use diesel::pg;
 use diesel::prelude::*;
 use diesel::sql_types::{Bool, Nullable};
 use nexus_db_schema::schema::{disk, external_ip, external_subnet, instance};
-use nexus_types::external_api::instance as instance_types;
+use nexus_types::external_api::instance::{
+    self as instance_types, InstanceShutdownPolicy,
+};
 use omicron_generation_kinds::{
     InstanceStateGeneration, InstanceStateGenerationKind,
     InstanceUpdaterGeneration, InstanceUpdaterGenerationKind,
@@ -149,9 +151,9 @@ pub struct Instance {
     /// Changes to this field only take effect on the next instance restart.
     pub enable_jumbo_frames: bool,
 
-    // TODO
+    // TODO doc
     pub shutdown_policy_action: InstanceShutdownAction,
-    pub shutdown_policy_timeout: Option<u64>,
+    pub shutdown_policy_timeout: Option<TimeDelta>,
 }
 
 impl Instance {
@@ -202,6 +204,8 @@ impl Instance {
             intended_state,
             cpu_platform: params.cpu_platform.map(Into::into),
             enable_jumbo_frames: params.enable_jumbo_frames,
+            shutdown_policy_action: InstanceShutdownAction::HardOff,
+            shutdown_policy_timeout: None,
         }
     }
 
@@ -276,6 +280,20 @@ impl Instance {
         InstanceKarmicStatus {
             needs_reincarnation,
             can_reincarnate: self.auto_restart.can_reincarnate(&runtime),
+        }
+    }
+
+    pub fn shutdown_policy(&self) -> Option<InstanceShutdownPolicy> {
+        // return None if timeout NULL or negative (enforced by sql-side check)
+        let timeout_secs: u64 =
+            self.shutdown_policy_timeout?.num_seconds().try_into().ok()?;
+        match self.shutdown_policy_action {
+            InstanceShutdownAction::HardOff => {
+                Some(InstanceShutdownPolicy::HardOff)
+            }
+            InstanceShutdownAction::PowerButton => {
+                Some(InstanceShutdownPolicy::PowerButton { timeout_secs })
+            }
         }
     }
 }
@@ -569,34 +587,33 @@ impl InstanceAutoRestart {
     }
 }
 
-// // TODO this actually should be in db-schema::enums, i think?
-// #[derive(
-//     Copy, Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize,
-// )]
-// pub enum InstanceShutdownAction {
-//     HardOff,
-//     #[default]
-//     PowerButton,
-// }
+impl_enum_type!(
+    InstanceShutdownActionEnum:
 
-#[derive(
-    Copy,
-    Clone,
-    Debug,
-    Selectable,
-    Insertable,
-    Queryable,
-    Serialize,
-    Deserialize,
-)]
-#[diesel(table_name = instance)]
-pub struct InstanceShutdownPolicy {
-    #[diesel(column_name = shutdown_policy_action)]
-    #[serde(default)]
-    pub action: InstanceShutdownAction,
-    #[diesel(column_name = shutdown_policy_timeout)]
-    #[serde(default)]
-    pub timeout_secs: Option<u64>,
+    #[derive(
+        Clone,
+        Copy,
+        Debug,
+        AsExpression,
+        FromSqlRow,
+        PartialEq,
+        Eq,
+        Hash,
+        PartialOrd,
+        Ord,
+        Serialize,
+        Deserialize,
+    )]
+    pub enum InstanceShutdownAction;
+
+    HardOff => b"hard_off"
+    PowerButton => b"power_button"
+);
+
+impl Default for InstanceShutdownAction {
+    fn default() -> Self {
+        Self::HardOff
+    }
 }
 
 /// The parts of an Instance that can be directly updated after creation.
@@ -618,4 +635,7 @@ pub struct InstanceUpdate {
     pub cpu_platform: Option<InstanceCpuPlatform>,
 
     pub enable_jumbo_frames: bool,
+
+    pub shutdown_policy_action: InstanceShutdownAction,
+    pub shutdown_policy_timeout: Option<TimeDelta>,
 }

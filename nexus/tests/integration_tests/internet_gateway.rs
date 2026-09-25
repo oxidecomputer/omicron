@@ -677,6 +677,7 @@ async fn test_setup(c: &ClientTestContext) {
         None,
         None,
         Vec::new(),
+        None,
     )
     .await;
 

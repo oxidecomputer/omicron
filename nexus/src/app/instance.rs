@@ -573,6 +573,7 @@ impl super::Nexus {
             cpu_platform,
             multicast_groups,
             enable_jumbo_frames,
+            shutdown_policy,
         } = params;
 
         check_instance_cpu_memory_sizes(*ncpus, *memory)?;
@@ -617,6 +618,28 @@ impl super::Nexus {
         let memory = (*memory).into();
         let cpu_platform = cpu_platform.map(Into::into);
 
+        let (shutdown_policy_action, shutdown_policy_timeout) =
+            match shutdown_policy {
+                Some(instance::InstanceShutdownPolicy::HardOff) | None => {
+                    (nexus_db_model::InstanceShutdownAction::HardOff, None)
+                }
+                Some(instance::InstanceShutdownPolicy::PowerButton {
+                    timeout_secs,
+                }) => (
+                    nexus_db_model::InstanceShutdownAction::PowerButton,
+                    Some(chrono::TimeDelta::seconds(
+                        (*timeout_secs).try_into().map_err(|e| {
+                            Error::invalid_value(
+                                "shutdown_policy_timeout",
+                                format!(
+                                    "timeout value {timeout_secs} invalid: {e}"
+                                ),
+                            )
+                        })?,
+                    )),
+                ),
+            };
+
         let update = InstanceUpdate {
             boot_disk_id,
             auto_restart_policy,
@@ -624,6 +647,8 @@ impl super::Nexus {
             memory,
             cpu_platform,
             enable_jumbo_frames: *enable_jumbo_frames,
+            shutdown_policy_action,
+            shutdown_policy_timeout,
         };
 
         // Update the instance configuration

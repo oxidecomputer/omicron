@@ -899,6 +899,8 @@ pub async fn create_instance(
         None,
         // Multicast groups=
         Vec::<multicast::MulticastGroupJoinSpec>::new(),
+        // Shutdown policy=
+        None,
     )
     .await
 }
@@ -917,6 +919,7 @@ pub async fn create_instance_with(
     auto_restart_policy: Option<InstanceAutoRestartPolicy>,
     cpu_platform: Option<InstanceCpuPlatform>,
     multicast_groups: Vec<multicast::MulticastGroupJoinSpec>,
+    shutdown_policy: Option<instance::InstanceShutdownPolicy>,
 ) -> Instance {
     let url = format!("/v1/instances?project={}", project_name);
 
@@ -945,6 +948,7 @@ pub async fn create_instance_with(
             anti_affinity_groups: Vec::new(),
             multicast_groups,
             enable_jumbo_frames: false,
+            shutdown_policy,
         },
     )
     .await

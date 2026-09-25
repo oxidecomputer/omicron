@@ -29,7 +29,7 @@ pub enum InstanceShutdownPolicy {
     // instance is forcefully terminated
     HardOff,
     // sends PWRBTN_STS as described in ACPI ch. 4, instance hard terminated if not stopped after timeout
-    PowerButton { timeout_seconds: u64 },
+    PowerButton { timeout_secs: u64 },
 }
 
 /// View of an Instance
