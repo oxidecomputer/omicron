@@ -5,7 +5,6 @@
 //! Uplink-related types for the Sled Agent API.
 
 use super::early_networking::UplinkAddressConfig;
-use crate::v1;
 use crate::v1::early_networking::LldpPortConfig;
 use crate::v1::early_networking::TxEqConfig;
 use schemars::JsonSchema;
@@ -15,12 +14,6 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct SwitchPorts {
     pub uplinks: Vec<HostPortConfig>,
-}
-
-impl From<v1::uplink::SwitchPorts> for SwitchPorts {
-    fn from(value: v1::uplink::SwitchPorts) -> Self {
-        Self { uplinks: value.uplinks.into_iter().map(From::from).collect() }
-    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
@@ -35,15 +28,4 @@ pub struct HostPortConfig {
     pub lldp: Option<LldpPortConfig>,
 
     pub tx_eq: Option<TxEqConfig>,
-}
-
-impl From<v1::uplink::HostPortConfig> for HostPortConfig {
-    fn from(value: v1::uplink::HostPortConfig) -> Self {
-        Self {
-            port: value.port,
-            addrs: value.addrs.into_iter().map(From::from).collect(),
-            lldp: value.lldp,
-            tx_eq: value.tx_eq,
-        }
-    }
 }

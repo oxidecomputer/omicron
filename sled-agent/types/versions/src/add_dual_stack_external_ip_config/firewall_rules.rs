@@ -4,8 +4,8 @@
 
 //! Firewall rule types for version `ADD_DUAL_STACK_EXTERNAL_IP_CONFIG`.
 
+use crate::v10;
 use crate::v10::instance::ResolvedVpcFirewallRule;
-use crate::{v9, v10};
 use omicron_common::api::external;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -26,20 +26,5 @@ impl TryFrom<v10::firewall_rules::VpcFirewallRulesEnsureBody>
         v10: v10::firewall_rules::VpcFirewallRulesEnsureBody,
     ) -> Result<Self, Self::Error> {
         Ok(Self { vni: v10.vni, rules: v10.rules })
-    }
-}
-
-impl TryFrom<v9::firewall_rules::VpcFirewallRulesEnsureBody>
-    for VpcFirewallRulesEnsureBody
-{
-    type Error = external::Error;
-
-    fn try_from(
-        v9: v9::firewall_rules::VpcFirewallRulesEnsureBody,
-    ) -> Result<Self, Self::Error> {
-        // Chain through v10
-        let v10 =
-            v10::firewall_rules::VpcFirewallRulesEnsureBody::try_from(v9)?;
-        Self::try_from(v10)
     }
 }

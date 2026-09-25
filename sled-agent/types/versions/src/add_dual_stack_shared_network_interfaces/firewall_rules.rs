@@ -4,7 +4,6 @@
 
 //! Firewall rule types for version `ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES`.
 
-use crate::v9;
 use crate::v10::instance::ResolvedVpcFirewallRule;
 use omicron_common::api::external;
 use schemars::JsonSchema;
@@ -15,23 +14,4 @@ use serde::{Deserialize, Serialize};
 pub struct VpcFirewallRulesEnsureBody {
     pub vni: external::Vni,
     pub rules: Vec<ResolvedVpcFirewallRule>,
-}
-
-impl TryFrom<v9::firewall_rules::VpcFirewallRulesEnsureBody>
-    for VpcFirewallRulesEnsureBody
-{
-    type Error = external::Error;
-
-    fn try_from(
-        v9: v9::firewall_rules::VpcFirewallRulesEnsureBody,
-    ) -> Result<Self, Self::Error> {
-        Ok(Self {
-            vni: v9.vni,
-            rules: v9
-                .rules
-                .into_iter()
-                .map(TryInto::try_into)
-                .collect::<Result<_, _>>()?,
-        })
-    }
 }

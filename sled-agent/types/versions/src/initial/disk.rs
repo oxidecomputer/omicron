@@ -7,20 +7,12 @@
 use iddqd::IdOrdItem;
 use iddqd::id_upcast;
 use omicron_common::api::external::ByteCount;
-use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::disk::DatasetName;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-
-/// Path parameters for Disk requests.
-#[derive(Deserialize, JsonSchema)]
-pub struct DiskPathParam {
-    pub disk_id: Uuid,
-}
 
 /// Information about a zpool.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
@@ -45,26 +37,6 @@ pub struct Zpool {
 pub enum DiskVariant {
     U2,
     M2,
-}
-
-/// Sent from to a sled agent to establish the runtime state of a Disk
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct DiskEnsureBody {
-    /// Last runtime state of the Disk known to Nexus (used if the agent has
-    /// never seen this Disk before).
-    pub initial_runtime: DiskRuntimeState,
-    /// requested runtime state of the Disk
-    pub target: DiskStateRequested,
-}
-
-/// Used to request a Disk state change
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-#[serde(rename_all = "lowercase", tag = "state", content = "instance")]
-pub enum DiskStateRequested {
-    Detached,
-    Attached(Uuid),
-    Destroyed,
-    Faulted,
 }
 
 /// Describes an M.2 slot, often in the context of writing a system image to

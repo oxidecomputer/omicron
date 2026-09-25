@@ -3,23 +3,18 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::net::SocketAddrV6;
 
-use crate::v1::inventory::Baseboard;
 use chrono::{DateTime, Utc};
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use omicron_common::api::external;
-use omicron_common::api::external::ByteCount;
 use omicron_generation_kinds::Generation;
 use omicron_ledger::Ledgerable;
-use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::{DatasetUuid, OmicronZoneUuid};
 use omicron_uuid_kinds::{MupdateOverrideUuid, PhysicalDiskUuid};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use sled_hardware_types::SledCpuFamily;
 use std::time::Duration;
 
 use crate::v1;
@@ -27,9 +22,8 @@ use crate::v1::disk::DatasetConfig;
 use crate::v1::disk::OmicronPhysicalDiskConfig;
 use crate::v1::inventory::{
     BootPartitionContents, ConfigReconcilerInventoryResult,
-    HostPhase2DesiredSlots, InventoryDataset, InventoryDisk, InventoryZpool,
-    ManifestInventory, MupdateOverrideInventory, OrphanedDataset,
-    RemoveMupdateOverrideInventory, SledRole,
+    HostPhase2DesiredSlots, ManifestInventory, MupdateOverrideInventory,
+    OrphanedDataset, RemoveMupdateOverrideInventory,
 };
 use crate::v11::inventory::OmicronZoneConfig;
 use crate::v12;
@@ -39,58 +33,6 @@ use schemars::SchemaGenerator;
 use schemars::schema::{Schema, SchemaObject};
 use std::fmt;
 use tufaceous_artifact::ArtifactHash;
-
-/// Identity and basic status information about this sled agent
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
-pub struct Inventory {
-    pub sled_id: SledUuid,
-    pub sled_agent_address: SocketAddrV6,
-    pub sled_role: SledRole,
-    pub baseboard: Baseboard,
-    pub usable_hardware_threads: u32,
-    pub usable_physical_ram: ByteCount,
-    pub cpu_family: SledCpuFamily,
-    pub reservoir_size: ByteCount,
-    pub disks: Vec<InventoryDisk>,
-    pub zpools: Vec<InventoryZpool>,
-    pub datasets: Vec<InventoryDataset>,
-    pub ledgered_sled_config: Option<OmicronSledConfig>,
-    pub reconciler_status: ConfigReconcilerInventoryStatus,
-    pub last_reconciliation: Option<ConfigReconcilerInventory>,
-    pub file_source_resolver: OmicronFileSourceResolverInventory,
-    pub health_monitor: HealthMonitorInventory,
-}
-
-impl TryFrom<Inventory> for v12::inventory::Inventory {
-    type Error = external::Error;
-
-    fn try_from(value: Inventory) -> Result<Self, Self::Error> {
-        let ledgered_sled_config =
-            value.ledgered_sled_config.map(TryInto::try_into).transpose()?;
-        let last_reconciliation =
-            value.last_reconciliation.map(TryInto::try_into).transpose()?;
-        let zone_image_resolver = value.file_source_resolver.try_into()?;
-        let reconciler_status = value.reconciler_status.try_into()?;
-        Ok(Self {
-            sled_id: value.sled_id,
-            sled_agent_address: value.sled_agent_address,
-            sled_role: value.sled_role,
-            baseboard: value.baseboard,
-            usable_hardware_threads: value.usable_hardware_threads,
-            usable_physical_ram: value.usable_physical_ram,
-            cpu_family: value.cpu_family,
-            reservoir_size: value.reservoir_size,
-            disks: value.disks,
-            zpools: value.zpools,
-            datasets: value.datasets,
-            ledgered_sled_config,
-            reconciler_status,
-            last_reconciliation,
-            zone_image_resolver,
-            health_monitor: value.health_monitor,
-        })
-    }
-}
 
 /// Inventory representation of zone image resolver and measurement resolver
 /// status and health. Previously known as `ZoneImageResolverInventory`
