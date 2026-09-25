@@ -316,7 +316,7 @@ impl DataStore {
         //
         // If the caller supplies an explicit start bound, we'll use it, but
         // otherwise, we set a default bound to avoid collecting too much data.
-        data_selection.ensure_start_bound(
+        let start = data_selection.ensure_start_bound(
             omicron_common::now_db_precision(),
             BundleDataSelection::DEFAULT_LOOKBACK,
         );
@@ -366,6 +366,7 @@ impl DataStore {
                         &conn,
                         inserted.id.into(),
                         data_selection,
+                        start,
                     )
                     .await?;
 
@@ -774,11 +775,17 @@ impl DataStore {
     /// Decompose a [`BundleDataSelection`] into per-variant child table rows
     /// and insert them for the given bundle.
     ///
+    /// `start` is the time range's start bound, as returned by
+    /// [`BundleDataSelection::ensure_start_bound`]; it is passed separately
+    /// because the table requires one (start_time is NOT NULL).
+    ///
     /// [`BundleDataSelection`]: nexus_types::support_bundle::BundleDataSelection
+    /// [`BundleDataSelection::ensure_start_bound`]: nexus_types::support_bundle::BundleDataSelection::ensure_start_bound
     async fn support_bundle_data_selection_insert_on_conn(
         conn: &async_bb8_diesel::Connection<DbConnection>,
         bundle_id: SupportBundleUuid,
         data_selection: BundleDataSelection,
+        start: chrono::DateTime<chrono::Utc>,
     ) -> Result<(), DbError> {
         use crate::db::model::{
             DataSelectionFlags, Ereports, HostInfo, TimeRange,
@@ -801,16 +808,6 @@ impl DataStore {
             .execute_async(conn)
             .await?;
 
-        // Creation stamps a start bound before persisting, so a selection
-        // reaching this insert always carries a time range with a start
-        // (which the table requires: start_time is NOT NULL).
-        let Some(start) = data_selection.time_range().start() else {
-            return Err(DbError::QueryBuilderError(
-                "support bundle data selection reached persistence without \
-                 a start bound; bundle creation must stamp one first"
-                    .into(),
-            ));
-        };
         let end = data_selection.time_range().end();
         diesel::insert_into(
             time_range_dsl::support_bundle_data_selection_time_range,
