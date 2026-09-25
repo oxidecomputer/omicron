@@ -9,7 +9,7 @@
 //! that into a [`DiskBay`] per bay and, where the occupant is an NVMe disk
 //! with a namespace, an [`UnparsedDisk`] to manage. The pieces that need the
 //! platform (walking the topology, asking libnvme about a controller) live in
-//! the illumos module; the join between them, [`classify_bay`], is plain data
+//! the illumos module; the join between them, `classify_bay`, is plain data
 //! manipulation and is kept here so it can be tested anywhere.
 
 // The observed types below are only produced on illumos.

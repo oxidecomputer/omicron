@@ -185,7 +185,7 @@ impl RawSyntheticDisk {
 /// are "M.2 East" and "M.2 West".
 ///
 /// Real sleds have two M.2 sockets, but a test may number its disks with one
-/// counter across both variants, so a later M.2 is labelled "M.2 <ordinal>".
+/// counter across both variants, so a later M.2 is labelled `M.2 <ordinal>`.
 pub fn synthetic_disk_location(variant: DiskVariant, ordinal: i64) -> String {
     match variant {
         DiskVariant::U2 => format!("N{ordinal}"),
