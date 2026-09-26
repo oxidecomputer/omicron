@@ -8,16 +8,6 @@ progenitor::generate_api!(
     spec = "../../openapi/wicketd-commission/wicketd-commission-latest.json",
     interface = Positional,
     inner_type = slog::Logger,
-    pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
-        slog::debug!(log, "client request";
-            "method" => %request.method(),
-            "uri" => %request.url(),
-            "body" => ?&request.body(),
-        );
-    }),
-    post_hook = (|log: &slog::Logger, result: &Result<_, _>| {
-        slog::debug!(log, "client response"; "result" => ?result);
-    }),
     derives = [schemars::JsonSchema],
     crates = {
         "iddqd" = "*",
@@ -118,5 +108,29 @@ progenitor::generate_api!(
         UserSpecifiedUplinkAddressConfig = wicketd_commission_types_versions::latest::rack_setup::UserSpecifiedUplinkAddressConfig,
     },
 );
+
+impl progenitor::progenitor_client::ClientHooks<slog::Logger> for Client {
+    async fn pre<E>(
+        &self,
+        request: &mut reqwest::Request,
+        _info: &progenitor::progenitor_client::OperationInfo,
+    ) -> Result<(), progenitor::progenitor_client::Error<E>> {
+        slog::debug!(self.inner(), "client request";
+            "method" => %request.method(),
+            "uri" => %request.url(),
+            "body" => ?&request.body(),
+        );
+        Ok(())
+    }
+
+    async fn post<E>(
+        &self,
+        result: &reqwest::Result<reqwest::Response>,
+        _info: &progenitor::progenitor_client::OperationInfo,
+    ) -> Result<(), progenitor::progenitor_client::Error<E>> {
+        slog::debug!(self.inner(), "client response"; "result" => ?result);
+        Ok(())
+    }
+}
 
 pub type ClientError = crate::Error<crate::types::Error>;
