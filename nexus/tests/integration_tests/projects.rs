@@ -185,6 +185,7 @@ async fn test_project_deletion_with_instance(
             anti_affinity_groups: Vec::new(),
             multicast_groups: Vec::new(),
             enable_jumbo_frames: false,
+            shutdown_policy: None,
         },
     )
     .await;

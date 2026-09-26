@@ -282,6 +282,7 @@ async fn test_create_instance_with_bad_hostname_impl(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
     let mut body: serde_json::Value =
         serde_json::from_str(&serde_json::to_string(&params).unwrap()).unwrap();
@@ -392,6 +393,7 @@ async fn test_instances_create_reboot_halt(
                 anti_affinity_groups: Vec::new(),
                 multicast_groups: Vec::new(),
                 enable_jumbo_frames: false,
+                shutdown_policy: None,
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -2955,6 +2957,7 @@ async fn test_instances_create_stopped_start(
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
             enable_jumbo_frames: false,
+            shutdown_policy: None,
         },
     )
     .await;
@@ -3130,6 +3133,7 @@ async fn test_instance_using_image_from_other_project_fails(
                 anti_affinity_groups: Vec::new(),
                 multicast_groups: Vec::new(),
                 enable_jumbo_frames: false,
+                shutdown_policy: None,
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -3200,6 +3204,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
     let response = NexusRequest::objects_post(
         client,
@@ -3234,6 +3239,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
     let _ = NexusRequest::objects_post(
         client,
@@ -3391,6 +3397,7 @@ async fn test_instance_with_single_explicit_ip_address_impl(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
     let response = NexusRequest::objects_post(
         client,
@@ -3572,6 +3579,7 @@ async fn test_instance_with_new_custom_network_interfaces(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
     let response = NexusRequest::objects_post(
         client,
@@ -3705,6 +3713,7 @@ async fn test_instance_create_delete_network_interface(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
     let response = NexusRequest::objects_post(
         client,
@@ -3984,6 +3993,7 @@ async fn test_instance_update_network_interfaces(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
     let response = NexusRequest::objects_post(
         client,
@@ -4409,6 +4419,7 @@ async fn cannot_make_new_primary_nic_lacking_ip_stack_for_external_addresses(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
     let response = NexusRequest::objects_post(
         client,
@@ -4792,6 +4803,7 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
     let builder =
         RequestBuilder::new(client, http::Method::POST, &get_instances_url())
@@ -4869,6 +4881,7 @@ async fn test_attach_one_disk_to_instance(cptestctx: &ControlPlaneTestContext) {
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
 
     let builder =
@@ -4968,6 +4981,7 @@ async fn test_instance_create_attach_disks(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
 
     let builder =
@@ -5076,6 +5090,7 @@ async fn test_instance_create_attach_disks_undo(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
 
     let builder =
@@ -5164,6 +5179,7 @@ async fn test_attach_eight_disks_to_instance(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
 
     let builder =
@@ -5289,6 +5305,7 @@ async fn test_disk_attach_limit(cptestctx: &ControlPlaneTestContext) {
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
 
     let url_instances = format!("/v1/instances?project={}", project_name);
@@ -5395,6 +5412,7 @@ async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
 
     let builder =
@@ -5490,6 +5508,7 @@ async fn test_disks_detached_when_instance_destroyed(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
 
     let builder =
@@ -5589,6 +5608,7 @@ async fn test_disks_detached_when_instance_destroyed(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
 
     let builder =
@@ -5677,6 +5697,7 @@ async fn test_duplicate_disk_attach_requests_ok(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
 
     let builder =
@@ -5725,6 +5746,7 @@ async fn test_duplicate_disk_attach_requests_ok(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
 
     let builder =
@@ -5786,6 +5808,7 @@ async fn test_cannot_detach_boot_disk(cptestctx: &ControlPlaneTestContext) {
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
 
     let builder =
@@ -5850,6 +5873,7 @@ async fn test_cannot_detach_boot_disk(cptestctx: &ControlPlaneTestContext) {
             memory: ByteCount::from_gibibytes_u32(4),
             multicast_groups: None,
             enable_jumbo_frames: false,
+            shutdown_policy: None,
         },
     )
     .await;
@@ -5927,6 +5951,7 @@ async fn test_updating_running_instance_boot_disk_is_conflict(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
 
     let builder =
@@ -5960,6 +5985,7 @@ async fn test_updating_running_instance_boot_disk_is_conflict(
             memory: ByteCount::from_gibibytes_u32(4),
             multicast_groups: None,
             enable_jumbo_frames: false,
+            shutdown_policy: None,
         },
         http::StatusCode::CONFLICT,
     )
@@ -5983,6 +6009,7 @@ async fn test_updating_running_instance_boot_disk_is_conflict(
             memory: ByteCount::from_gibibytes_u32(4),
             multicast_groups: None,
             enable_jumbo_frames: false,
+            shutdown_policy: None,
         },
     )
     .await;
@@ -6008,6 +6035,7 @@ async fn test_updating_missing_instance_is_not_found(
             memory: ByteCount::from_gibibytes_u32(0),
             multicast_groups: None,
             enable_jumbo_frames: false,
+            shutdown_policy: None,
         },
         http::StatusCode::NOT_FOUND,
     )
@@ -6104,6 +6132,7 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
 
     let builder =
@@ -6132,6 +6161,7 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         memory: initial_memory,
         multicast_groups: None,
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
 
     // Resizing the instance immediately will error; the instance is running.
@@ -6325,6 +6355,7 @@ async fn test_auto_restart_policy_can_be_changed(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
 
     let builder =
@@ -6354,6 +6385,7 @@ async fn test_auto_restart_policy_can_be_changed(
                 memory: ByteCount::from_gibibytes_u32(4),
                 multicast_groups: None,
                 enable_jumbo_frames: false,
+                shutdown_policy: None,
             }),
         )
         .await;
@@ -6403,6 +6435,7 @@ async fn test_cpu_platform_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         anti_affinity_groups: Vec::new(),
         multicast_groups: vec![],
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
 
     let builder =
@@ -6432,6 +6465,7 @@ async fn test_cpu_platform_can_be_changed(cptestctx: &ControlPlaneTestContext) {
                 memory: ByteCount::from_gibibytes_u32(4),
                 multicast_groups: None,
                 enable_jumbo_frames: false,
+                shutdown_policy: None,
             }),
         )
         .await;
@@ -6482,6 +6516,7 @@ async fn test_enable_jumbo_frames_can_be_changed(
         multicast_groups: vec![],
         // Start out opted out.
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
 
     let builder =
@@ -6505,6 +6540,7 @@ async fn test_enable_jumbo_frames_can_be_changed(
         memory: ByteCount::from_gibibytes_u32(4),
         multicast_groups: None,
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
 
     // Without the fleet-wide opt-in, requesting `enable_jumbo_frames: true` is
@@ -6624,6 +6660,7 @@ async fn test_boot_disk_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
 
     let builder =
@@ -6653,6 +6690,7 @@ async fn test_boot_disk_can_be_changed(cptestctx: &ControlPlaneTestContext) {
             memory: ByteCount::from_gibibytes_u32(4),
             multicast_groups: None,
             enable_jumbo_frames: false,
+            shutdown_policy: None,
         },
     )
     .await;
@@ -6701,6 +6739,7 @@ async fn test_boot_disk_must_be_attached(cptestctx: &ControlPlaneTestContext) {
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
 
     let builder =
@@ -6727,6 +6766,7 @@ async fn test_boot_disk_must_be_attached(cptestctx: &ControlPlaneTestContext) {
             memory: ByteCount::from_gibibytes_u32(4),
             multicast_groups: None,
             enable_jumbo_frames: false,
+            shutdown_policy: None,
         },
         http::StatusCode::CONFLICT,
     )
@@ -6763,6 +6803,7 @@ async fn test_boot_disk_must_be_attached(cptestctx: &ControlPlaneTestContext) {
             memory: ByteCount::from_gibibytes_u32(4),
             multicast_groups: None,
             enable_jumbo_frames: false,
+            shutdown_policy: None,
         },
     )
     .await;
@@ -6803,6 +6844,7 @@ async fn test_instances_memory_rejected_less_than_min_memory_size(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
 
     let error = NexusRequest::new(
@@ -6860,6 +6902,7 @@ async fn test_instances_memory_not_divisible_by_min_memory_size(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
 
     let error = NexusRequest::new(
@@ -6917,6 +6960,7 @@ async fn test_instances_memory_greater_than_max_size(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
 
     let error = NexusRequest::new(
@@ -7027,6 +7071,7 @@ async fn test_instance_create_with_anti_affinity_groups(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: anti_affinity_groups_param,
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
 
     let builder =
@@ -7100,6 +7145,7 @@ async fn test_instance_create_with_duplicate_anti_affinity_groups(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: anti_affinity_groups_param,
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
 
     let builder =
@@ -7174,6 +7220,7 @@ async fn test_instance_create_with_anti_affinity_groups_that_do_not_exist(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: anti_affinity_groups_param,
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
 
     let error = object_create_error(
@@ -7261,6 +7308,7 @@ async fn test_instance_create_with_ssh_keys(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
 
     let builder =
@@ -7314,6 +7362,7 @@ async fn test_instance_create_with_ssh_keys(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
 
     let builder =
@@ -7366,6 +7415,7 @@ async fn test_instance_create_with_ssh_keys(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
 
     let builder =
@@ -7511,6 +7561,7 @@ async fn test_cannot_provision_instance_beyond_cpu_capacity(
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
             enable_jumbo_frames: false,
+            shutdown_policy: None,
         };
 
         let url_instances = get_instances_url();
@@ -7574,6 +7625,7 @@ async fn test_cannot_provision_instance_beyond_cpu_limit(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
     let url_instances = get_instances_url();
 
@@ -7633,6 +7685,7 @@ async fn test_cannot_provision_instance_beyond_ram_capacity(
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
             enable_jumbo_frames: false,
+            shutdown_policy: None,
         };
 
         let url_instances = get_instances_url();
@@ -7692,6 +7745,7 @@ async fn test_can_start_instance_with_cpu_platform(
         anti_affinity_groups: Vec::new(),
         multicast_groups: vec![],
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
     let url_instances = get_instances_url();
 
@@ -7734,6 +7788,7 @@ async fn test_can_start_instance_with_cpu_platform(
             memory: ByteCount::from_gibibytes_u32(4),
             multicast_groups: None,
             enable_jumbo_frames: false,
+            shutdown_policy: None,
         },
     )
     .await;
@@ -7788,6 +7843,7 @@ async fn test_can_start_instance_with_cpu_platform(
             memory: ByteCount::from_gibibytes_u32(4),
             multicast_groups: None,
             enable_jumbo_frames: false,
+            shutdown_policy: None,
         },
     )
     .await;
@@ -7837,6 +7893,7 @@ async fn test_cannot_start_instance_with_unsatisfiable_cpu_platform(
         anti_affinity_groups: Vec::new(),
         multicast_groups: vec![],
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
     let url_instances = get_instances_url();
 
@@ -8139,6 +8196,7 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
     let error = object_create_error(
         client,
@@ -8215,6 +8273,7 @@ async fn test_instance_ephemeral_ip_from_orphan_pool(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
 
     // instance create 404s
@@ -8283,6 +8342,7 @@ async fn test_instance_ephemeral_ip_no_default_pool_error(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
 
     let url = format!("/v1/instances?project={}", PROJECT_NAME);
@@ -8319,6 +8379,7 @@ async fn test_instance_ephemeral_ip_no_default_pool_error(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
     let error =
         object_create_error(client, &url, &body, StatusCode::NOT_FOUND).await;
@@ -8466,6 +8527,7 @@ async fn test_instance_rejects_three_ephemeral_ips(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
     let error = object_create_error(
         client,
@@ -8518,6 +8580,7 @@ async fn test_instance_rejects_two_ephemeral_auto_without_version(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
     let error = object_create_error(
         client,
@@ -8576,6 +8639,7 @@ async fn test_instance_rejects_two_ephemeral_auto_none_with_explicit(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
     let error = object_create_error(
         client,
@@ -8798,6 +8862,7 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
     let url_instances = format!("/v1/instances?project={}", PROJECT_NAME);
     NexusRequest::objects_post(client, &url_instances, &instance_params)
@@ -8984,6 +9049,7 @@ async fn test_instance_create_with_cross_project_subnet(
         auto_restart_policy: None,
         anti_affinity_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
 
     let instances_url_a = format!("/v1/instances?project={}", project_a_name);
@@ -9114,6 +9180,7 @@ async fn test_silo_limited_collaborator_cross_project_subnet(
         auto_restart_policy: None,
         anti_affinity_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
 
     let instances_url_a = format!("/v1/instances?project={}", project_a_name);
@@ -9182,6 +9249,7 @@ async fn test_silo_limited_collaborator_cross_project_subnet(
         auto_restart_policy: None,
         anti_affinity_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
 
     // Should get 404 Not Found because VPC/subnet lookups are scoped to the
@@ -9934,6 +10002,7 @@ async fn test_instance_with_max_disks(cptestctx: &ControlPlaneTestContext) {
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
 
     let instance: Instance =
