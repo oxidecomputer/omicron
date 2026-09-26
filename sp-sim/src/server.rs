@@ -190,3 +190,10 @@ pub(crate) trait SimSpHandler: SpHandler {
         signal: Box<dyn FnOnce() + Send>,
     );
 }
+
+pub(crate) trait SimSpHandler: SpHandler {
+    fn set_sp_should_fail_to_respond_signal(
+        &mut self,
+        signal: Box<dyn FnOnce() + Send>,
+    );
+}
