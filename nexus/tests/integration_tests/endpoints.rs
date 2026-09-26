@@ -795,6 +795,7 @@ pub static DEMO_INSTANCE_CREATE: LazyLock<instance::InstanceCreate> =
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     });
 pub static DEMO_STOPPED_INSTANCE_CREATE: LazyLock<instance::InstanceCreate> =
     LazyLock::new(|| instance::InstanceCreate {
@@ -822,6 +823,7 @@ pub static DEMO_STOPPED_INSTANCE_CREATE: LazyLock<instance::InstanceCreate> =
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     });
 pub static DEMO_INSTANCE_UPDATE: LazyLock<instance::InstanceUpdate> =
     LazyLock::new(|| instance::InstanceUpdate {
@@ -832,6 +834,7 @@ pub static DEMO_INSTANCE_UPDATE: LazyLock<instance::InstanceUpdate> =
         memory: ByteCount::from_gibibytes_u32(16),
         multicast_groups: None,
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     });
 
 // The instance needs a network interface, too.

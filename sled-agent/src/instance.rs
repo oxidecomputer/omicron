@@ -3523,7 +3523,7 @@ mod tests {
 
         // pretending we're InstanceManager::ensure_state, start our "instance"
         // (backed by fakes and propolis_mock_server)
-        inst.put_state(put_tx, VmmStateRequested::Running)
+        inst.put_state(put_tx, VmmStateRequested::Running, None)
             .expect("failed to send Instance::put_state");
 
         // even though we ignore this result at instance creation time in
@@ -3630,7 +3630,7 @@ mod tests {
 
             // pretending we're InstanceManager::ensure_state, try in vain
             // to start our "instance", but no propolis server is running
-            inst.put_state(put_tx, VmmStateRequested::Running)
+            inst.put_state(put_tx, VmmStateRequested::Running, None)
                 .expect("failed to send Instance::put_state");
 
             let timeout_fut = timeout(TIMEOUT_DURATION, put_rx);
@@ -3685,7 +3685,7 @@ mod tests {
 
         test_objects
             .instance_manager
-            .ensure_state(propolis_id, VmmStateRequested::Running)
+            .ensure_state(propolis_id, VmmStateRequested::Running, None)
             .await
             .unwrap();
 
@@ -3759,7 +3759,7 @@ mod tests {
 
         test_objects
             .instance_manager
-            .ensure_state(propolis_id, VmmStateRequested::Running)
+            .ensure_state(propolis_id, VmmStateRequested::Running, None)
             .await
             .unwrap();
 
@@ -3788,7 +3788,7 @@ mod tests {
         // Request the VMM stop
         test_objects
             .instance_manager
-            .ensure_state(propolis_id, VmmStateRequested::Stopped)
+            .ensure_state(propolis_id, VmmStateRequested::Stopped, None)
             .await
             .unwrap();
 

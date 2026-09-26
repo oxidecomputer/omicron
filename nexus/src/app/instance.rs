@@ -3213,6 +3213,7 @@ mod tests {
             anti_affinity_groups: Vec::new(),
             multicast_groups: Vec::new(),
             enable_jumbo_frames: false,
+            shutdown_policy: None,
         };
 
         let instance_id = InstanceUuid::from_untyped_uuid(Uuid::new_v4());
@@ -3370,6 +3371,7 @@ mod tests {
             anti_affinity_groups: Vec::new(),
             multicast_groups: Vec::new(),
             enable_jumbo_frames,
+            shutdown_policy: None,
         };
         let instance_id = InstanceUuid::from_untyped_uuid(Uuid::new_v4());
         let project_id = ProjectUuid::new_v4();

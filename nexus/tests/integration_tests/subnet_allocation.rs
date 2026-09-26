@@ -73,6 +73,7 @@ async fn create_instance_expect_failure(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: None,
     };
 
     NexusRequest::new(
