@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 pub mod config;
+mod device_descriptions;
 mod ereport;
 mod gimlet;
 mod helpers;

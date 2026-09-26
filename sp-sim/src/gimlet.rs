@@ -7,6 +7,7 @@ use crate::Responsiveness;
 use crate::SimulatedSp;
 use crate::config::GimletConfig;
 use crate::config::SpCommonConfig;
+use crate::device_descriptions::DeviceDescriptions;
 use crate::ereport;
 use crate::ereport::EreportState;
 use crate::helpers::rot_state_v2;
@@ -746,13 +747,7 @@ struct Handler {
     log: Logger,
     common: SpCommonConfig,
     baseboard_vpd: BaseboardVpd,
-    // `SpHandler` wants `&'static str` references when describing components;
-    // this is fine on the real SP where the strings are baked in at build time,
-    // but awkward here where we read them in at runtime. We'll leak the strings
-    // to conform to `SpHandler` rather than making it more complicated to ease
-    // our life as a simulator.
-    leaked_component_device_strings: Vec<&'static str>,
-    leaked_component_description_strings: Vec<&'static str>,
+    device_descriptions: DeviceDescriptions,
 
     attached_mgs: AttachedMgsSerialConsole,
     incoming_serial_console: HashMap<SpComponent, UnboundedSender<Vec<u8>>>,
@@ -785,21 +780,11 @@ impl Handler {
         update_state: SimSpUpdate,
         power_state_changes: Arc<AtomicUsize>,
     ) -> Self {
-        let components = common.components.clone();
-        let mut leaked_component_device_strings =
-            Vec::with_capacity(components.len());
-        let mut leaked_component_description_strings =
-            Vec::with_capacity(components.len());
-
-        for c in &components {
-            leaked_component_device_strings
-                .push(&*Box::leak(c.device.clone().into_boxed_str()));
-            leaked_component_description_strings
-                .push(&*Box::leak(c.description.clone().into_boxed_str()));
-        }
-
-        let sensors = Sensors::from_component_configs(&components);
-        let component_vpds = ComponentVpds::from_component_configs(&components)
+        let components = &common.components;
+        let device_descriptions =
+            DeviceDescriptions::from_component_configs(components);
+        let sensors = Sensors::from_component_configs(components);
+        let component_vpds = ComponentVpds::from_component_configs(components)
             .expect("component VPD configuration should be valid");
 
         let sp_dumps = HashMap::new();
@@ -810,8 +795,7 @@ impl Handler {
             baseboard_vpd,
             sensors,
             component_vpds,
-            leaked_component_device_strings,
-            leaked_component_description_strings,
+            device_descriptions,
             attached_mgs,
             incoming_serial_console,
             startup_options: StartupOptions::empty(),
@@ -1307,22 +1291,14 @@ impl SpHandler for Handler {
     }
 
     fn num_devices(&mut self) -> u32 {
-        self.common.components.len().try_into().unwrap()
+        self.device_descriptions.num_devices()
     }
 
     fn device_description(
         &mut self,
         index: BoundsChecked,
     ) -> DeviceDescription<'static> {
-        let index = index.0 as usize;
-        let c = &self.common.components[index];
-        DeviceDescription {
-            component: SpComponent::try_from(c.id.as_str()).unwrap(),
-            device: self.leaked_component_device_strings[index],
-            description: self.leaked_component_description_strings[index],
-            capabilities: c.capabilities(),
-            presence: c.presence,
-        }
+        self.device_descriptions.device_description(index)
     }
 
     fn num_component_details(

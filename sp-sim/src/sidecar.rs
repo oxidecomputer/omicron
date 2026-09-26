@@ -9,6 +9,7 @@ use crate::config::Config;
 use crate::config::SidecarConfig;
 use crate::config::SimulatedSpsConfig;
 use crate::config::SpComponentConfig;
+use crate::device_descriptions::DeviceDescriptions;
 use crate::ereport;
 use crate::ereport::EreportState;
 use crate::helpers::rot_state_v2;
@@ -487,15 +488,7 @@ impl Inner {
 
 struct Handler {
     log: Logger,
-    components: Vec<SpComponentConfig>,
-
-    // `SpHandler` wants `&'static str` references when describing components;
-    // this is fine on the real SP where the strings are baked in at build time,
-    // but awkward here where we read them in at runtime. We'll leak the strings
-    // to conform to `SpHandler` rather than making it more complicated to ease
-    // our life as a simulator.
-    leaked_component_device_strings: Vec<&'static str>,
-    leaked_component_description_strings: Vec<&'static str>,
+    device_descriptions: DeviceDescriptions,
     sensors: Sensors,
     component_vpds: ComponentVpds,
 
@@ -527,18 +520,8 @@ impl Handler {
         update_state: SimSpUpdate,
         power_state_changes: Arc<AtomicUsize>,
     ) -> Self {
-        let mut leaked_component_device_strings =
-            Vec::with_capacity(components.len());
-        let mut leaked_component_description_strings =
-            Vec::with_capacity(components.len());
-
-        for c in &components {
-            leaked_component_device_strings
-                .push(&*Box::leak(c.device.clone().into_boxed_str()));
-            leaked_component_description_strings
-                .push(&*Box::leak(c.description.clone().into_boxed_str()));
-        }
-
+        let device_descriptions =
+            DeviceDescriptions::from_component_configs(&components);
         let sensors = Sensors::from_component_configs(&components);
         let component_vpds = ComponentVpds::from_component_configs(&components)
             .expect("component VPD configuration should be valid");
@@ -547,11 +530,9 @@ impl Handler {
 
         Self {
             log,
-            components,
+            device_descriptions,
             sensors,
             component_vpds,
-            leaked_component_device_strings,
-            leaked_component_description_strings,
             baseboard_vpd,
             ignition,
             power_state: PowerState::A2,
@@ -983,22 +964,14 @@ impl SpHandler for Handler {
     }
 
     fn num_devices(&mut self) -> u32 {
-        self.components.len().try_into().unwrap()
+        self.device_descriptions.num_devices()
     }
 
     fn device_description(
         &mut self,
         index: BoundsChecked,
     ) -> DeviceDescription<'static> {
-        let index = index.0 as usize;
-        let c = &self.components[index];
-        DeviceDescription {
-            component: SpComponent::try_from(c.id.as_str()).unwrap(),
-            device: self.leaked_component_device_strings[index],
-            description: self.leaked_component_description_strings[index],
-            capabilities: c.capabilities(),
-            presence: c.presence,
-        }
+        self.device_descriptions.device_description(index)
     }
 
     fn num_component_details(
