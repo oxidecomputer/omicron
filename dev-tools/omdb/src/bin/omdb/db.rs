@@ -754,6 +754,11 @@ struct SledCapacityArgs {
     /// Show sleds that match the given filter
     #[clap(short = 'F', long, value_enum, default_value_t = SledFilter::InService)]
     filter: SledFilter,
+
+    /// Show the amount free and percentage free, rather than the amount used
+    /// and percentage used
+    #[clap(long)]
+    free: bool,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -4876,21 +4881,6 @@ async fn cmd_db_sled_capacity(
         usage.largest_pool_free = usage.largest_pool_free.max(free);
     }
 
-    #[derive(Tabled)]
-    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
-    struct SledCapacityRow {
-        serial: String,
-        id: String,
-        #[tabled(rename = "THREADS_USED")]
-        threads: String,
-        #[tabled(rename = "RESERVOIR_USED")]
-        reservoir: String,
-        #[tabled(rename = "STORAGE_USED")]
-        storage: String,
-        #[tabled(rename = "LARGEST_POOL_FREE")]
-        largest_pool: String,
-    }
-
     #[derive(Clone, Copy, Default)]
     struct Ratio {
         used: i64,
@@ -4912,27 +4902,35 @@ async fn cmd_db_sled_capacity(
         n.to_string()
     }
 
-    // Formats a column of ratios as "used / total (N%)", padding each part to
-    // the widest value in the column so they line up vertically.
+    // Formats a column of ratios as "amount / total (N%)", where the amount
+    // and percentage are either used or free depending on `show_free`. Each
+    // part is padded to the widest value in the column so they line up
+    // vertically.
     fn format_ratio_column(
         ratios: &[Ratio],
         fmt: fn(i64) -> String,
+        show_free: bool,
     ) -> Vec<String> {
-        let used: Vec<String> = ratios.iter().map(|r| fmt(r.used)).collect();
+        let amounts: Vec<i64> = ratios
+            .iter()
+            .map(|r| if show_free { r.total - r.used } else { r.used })
+            .collect();
+        let amount: Vec<String> = amounts.iter().map(|a| fmt(*a)).collect();
         let total: Vec<String> = ratios.iter().map(|r| fmt(r.total)).collect();
-        let used_width = used.iter().map(|s| s.len()).max().unwrap_or(0);
+        let amount_width = amount.iter().map(|s| s.len()).max().unwrap_or(0);
         let total_width = total.iter().map(|s| s.len()).max().unwrap_or(0);
         ratios
             .iter()
-            .zip(used.iter().zip(total.iter()))
-            .map(|(r, (used, total))| {
-                let used_pct = if r.total > 0 {
-                    format!("{:>5.1}%", r.used as f64 / r.total as f64 * 100.0)
+            .zip(amounts)
+            .zip(amount.iter().zip(total.iter()))
+            .map(|((r, a), (amount, total))| {
+                let pct = if r.total > 0 {
+                    format!("{:>5.1}%", a as f64 / r.total as f64 * 100.0)
                 } else {
                     format!("{:>6}", "-")
                 };
                 format!(
-                    "{used:>used_width$} / {total:>total_width$} ({used_pct})"
+                    "{amount:>amount_width$} / {total:>total_width$} ({pct})"
                 )
             })
             .collect()
@@ -4996,7 +4994,7 @@ async fn cmd_db_sled_capacity(
     // Format each column as a whole so that values line up.
     let column = |get: fn(&SledCapacity) -> Ratio, fmt: fn(i64) -> String| {
         let ratios: Vec<Ratio> = capacities.iter().map(get).collect();
-        format_ratio_column(&ratios, fmt)
+        format_ratio_column(&ratios, fmt, args.free)
     };
     let threads = column(|c| c.threads, count);
     let reservoir = column(|c| c.reservoir, gib);
@@ -5009,35 +5007,49 @@ async fn cmd_db_sled_capacity(
         largest_pool.iter().map(|s| s.len()).max().unwrap_or(0);
 
     let any_missing_inventory = capacities.iter().any(|c| c.missing_inventory);
-    let rows: Vec<SledCapacityRow> = capacities
+
+    // The column headers depend on whether we're showing used or free, so
+    // build the table by hand rather than deriving `Tabled`.
+    let kind = if args.free { "free" } else { "used" };
+    let suffix = kind.to_uppercase();
+    let mut builder = tabled::builder::Builder::new();
+    builder.push_record([
+        String::from("SERIAL"),
+        String::from("ID"),
+        format!("THREADS_{suffix}"),
+        format!("RESERVOIR_{suffix}"),
+        format!("STORAGE_{suffix}"),
+        String::from("LARGEST_POOL_FREE"),
+    ]);
+    for ((((c, threads), reservoir), mut storage), largest_pool) in capacities
         .into_iter()
         .zip(threads)
         .zip(reservoir)
         .zip(storage)
         .zip(largest_pool)
-        .map(|((((c, threads), reservoir), mut storage), largest_pool)| {
-            if c.missing_inventory {
-                storage.push_str(" *");
-            }
-            SledCapacityRow {
-                serial: c.serial,
-                id: c.id,
-                threads,
-                reservoir,
-                storage,
-                largest_pool: format!("{largest_pool:>largest_pool_width$}"),
-            }
-        })
-        .collect();
+    {
+        if c.missing_inventory {
+            storage.push_str(" *");
+        }
+        builder.push_record([
+            c.serial,
+            c.id,
+            threads,
+            reservoir,
+            storage,
+            format!("{largest_pool:>largest_pool_width$}"),
+        ]);
+    }
 
-    let table = tabled::Table::new(rows)
+    let table = builder
+        .build()
         .with(tabled::settings::Style::empty())
         .with(tabled::settings::Padding::new(1, 1, 0, 0))
         .to_string();
     println!("{}", table);
     println!(
         "(memory and storage values are in GiB, shown as \
-         used / total (% used))"
+         {kind} / total (% {kind}))"
     );
     if any_missing_inventory {
         println!(
