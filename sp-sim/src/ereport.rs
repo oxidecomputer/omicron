@@ -43,31 +43,28 @@ impl Metadata {
         vpd: &BaseboardVpd,
         update_state: &SimSpUpdate,
     ) {
-        fn get_caboose_thing(
-            update_state: &SimSpUpdate,
-            buf: &mut [u8],
-            thing: [u8; 4],
-        ) -> anyhow::Result<String> {
-            let len = update_state.get_component_caboose_value(
-                SpComponent::SP_ITSELF,
-                0,
-                thing,
-                buf,
-            )?;
-            Ok(std::str::from_utf8(&buf[..len])?.to_string())
-        }
-
         // see: https://github.com/oxidecomputer/hubris/blob/f6e5849734d4e7d965a2f1cd71ca4ed4b24532de/task/packrat/src/ereport.rs#L550-L570
         let caboose = {
-            let mut map = toml::Table::new();
             let mut buf = [0u8; 256];
-            let gitc = get_caboose_thing(update_state, &mut buf[..], *b"GITC")
+            let mut get_caboose_value_string =
+                |key: [u8; 4]| -> anyhow::Result<String> {
+                    let len = update_state.get_component_caboose_value(
+                        SpComponent::SP_ITSELF,
+                        0,
+                        key,
+                        &mut buf[..],
+                    )?;
+                    Ok(std::str::from_utf8(&buf[..len])?.to_string())
+                };
+
+            let mut map = toml::Table::new();
+            let gitc = get_caboose_value_string(*b"GITC")
                 .expect("SimUpdateState should provide a valid caboose GITC")
                 .into();
-            let vers = get_caboose_thing(update_state, &mut buf[..], *b"VERS")
+            let vers = get_caboose_value_string(*b"VERS")
                 .expect("SimUpdateState should provide a valid caboose VERS")
                 .into();
-            let bord = get_caboose_thing(update_state, &mut buf[..], *b"BORD")
+            let bord = get_caboose_value_string(*b"BORD")
                 .expect("SimUpdateState should provide a valid caboose BORD")
                 .into();
 
