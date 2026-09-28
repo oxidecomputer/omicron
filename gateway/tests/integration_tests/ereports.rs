@@ -63,7 +63,7 @@ mod sled0 {
 
     def_ereport! {
         LOSS: {
-            "baseboard_part_number": "SimGimletSp",
+            "baseboard_part_number": sp_sim::FAKE_GIMLET_MODEL,
             "baseboard_serial_number": "SimGimlet00",
             "hubris_archive_id": "ffffffff",
             "hubris_version": "0.0.2",
@@ -77,7 +77,7 @@ mod sled0 {
 
     def_ereport! {
         EREPORT_1: {
-            "baseboard_part_number": "SimGimletSp",
+            "baseboard_part_number": sp_sim::FAKE_GIMLET_MODEL,
             "baseboard_serial_number": "SimGimlet00",
             "hubris_archive_id": "ffffffff",
             "hubris_version": "0.0.2",
@@ -91,7 +91,7 @@ mod sled0 {
     }
     def_ereport! {
         EREPORT_2: {
-            "baseboard_part_number": "SimGimletSp",
+            "baseboard_part_number": sp_sim::FAKE_GIMLET_MODEL,
             "baseboard_serial_number": "SimGimlet00",
             "hubris_archive_id": "ffffffff",
             "hubris_version": "0.0.2",
@@ -114,7 +114,7 @@ mod sled0 {
     }
     def_ereport! {
         EREPORT_3: {
-            "baseboard_part_number": "SimGimletSp",
+            "baseboard_part_number": sp_sim::FAKE_GIMLET_MODEL,
             "baseboard_serial_number": "SimGimlet00",
             "hubris_archive_id": "ffffffff",
             "hubris_version": "0.0.2",
@@ -134,7 +134,7 @@ mod sled0 {
 
     def_ereport! {
         EREPORT_4: {
-            "baseboard_part_number": "SimGimletSp",
+            "baseboard_part_number": sp_sim::FAKE_GIMLET_MODEL,
             "baseboard_serial_number": "SimGimlet00",
             "hubris_archive_id": "ffffffff",
             "hubris_version": "0.0.2",
@@ -149,7 +149,7 @@ mod sled0 {
 
     def_ereport! {
         EREPORT_5: {
-            "baseboard_part_number": "SimGimletSp",
+            "baseboard_part_number": sp_sim::FAKE_GIMLET_MODEL,
             "baseboard_serial_number": "SimGimlet00",
             "hubris_archive_id": "ffffffff",
             "hubris_version": "0.0.2",
@@ -171,7 +171,7 @@ mod sled1 {
 
     def_ereport! {
         LOSS: {
-            "baseboard_part_number": "SimGimletSp",
+            "baseboard_part_number": sp_sim::FAKE_GIMLET_MODEL,
             "baseboard_serial_number": "SimGimlet01",
             "hubris_archive_id": "ffffffff",
             "hubris_version": "0.0.2",
@@ -185,7 +185,7 @@ mod sled1 {
 
     def_ereport! {
         EREPORT_1: {
-            "baseboard_part_number": "SimGimletSp",
+            "baseboard_part_number": sp_sim::FAKE_GIMLET_MODEL,
             "baseboard_serial_number": "SimGimlet01",
             "hubris_archive_id": "ffffffff",
             "hubris_version": "0.0.2",

@@ -2089,11 +2089,25 @@ pub async fn start_oximeter(
     native_port: u16,
     id: Uuid,
 ) -> Result<Oximeter, String> {
+    // In production, clickhouse-admin is responsible for constructing the
+    // database and tables for us. These tests start ClickHouse directly, so we
+    // have to do it ourselves. Use an admin client for that, then drop to a
+    // less-capable client after.
+    let native_address =
+        SocketAddr::new(Ipv6Addr::LOCALHOST.into(), native_port);
+    oximeter_db::Client::new(oximeter_db::User::Admin, native_address, &log)
+        .initialize_db_with_version(false, oximeter_db::OXIMETER_VERSION)
+        .await
+        .map_err(|e| {
+            format!(
+                "failed to init test ClickHouse: {}",
+                slog_error_chain::InlineErrorChain::new(&e),
+            )
+        })?;
     let db = oximeter_collector::DbConfig {
-        address: Some(SocketAddr::new(Ipv6Addr::LOCALHOST.into(), native_port)),
+        address: Some(native_address),
         batch_size: 10,
         batch_interval: 1,
-        replicated: false,
     };
     let config = oximeter_collector::Config {
         nexus_address: Some(nexus_address),

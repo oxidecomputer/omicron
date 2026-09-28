@@ -11,12 +11,12 @@ use crate::ereport;
 use crate::ereport::EreportState;
 use crate::helpers::rot_state_v2;
 use crate::sensors::Sensors;
-use crate::serial_number_padded;
 use crate::server;
 use crate::server::SimSpHandler;
 use crate::server::UdpServer;
 use crate::update::BaseboardKind;
 use crate::update::SimSpUpdate;
+use crate::vpd::BaseboardVpd;
 use crate::vpd::ComponentVpds;
 use anyhow::{Context, Result, anyhow, bail};
 use async_trait::async_trait;
@@ -88,22 +88,6 @@ pub const FAKE_GIMLET_MODEL: &str = "i86pc";
 type AttachedMgsSerialConsole =
     Arc<Mutex<Option<(SpComponent, Sender<SpPort>)>>>;
 
-/// Type of request most recently handled by a simulated SP.
-///
-/// Many request types are not covered by this enum. This only exists to enable
-/// certain particular tests.
-// If you need an additional request type to be reported by this enum, feel free
-// to add it and update the appropriate `Handler` function below (see
-// `update_status()`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SimSpHandledRequest {
-    /// The most recent request was for the update status of a component.
-    ComponentUpdateStatus(SpComponent),
-    /// The most recent request was some other type that is currently not
-    /// implemented in this tracker.
-    NotImplemented,
-}
-
 /// Current power state and, if in A0, which M2 slot was active at the time
 /// we transitioned to A0. (This represents what disk the OS would attempt to
 /// boot from, if we were a real SP connected to a real sled.)
@@ -131,7 +115,6 @@ pub struct Gimlet {
     inner_tasks: Vec<JoinHandle<()>>,
     responses_sent_count: Option<watch::Receiver<usize>>,
     power_state_changes: Arc<AtomicUsize>,
-    last_request_handled: Arc<Mutex<Option<SimSpHandledRequest>>>,
     power_state_rx: Option<watch::Receiver<GimletPowerState>>,
 }
 
@@ -253,13 +236,14 @@ impl Gimlet {
     ) -> Result<Self> {
         info!(log, "setting up simulated gimlet");
 
+        let baseboard_vpd =
+            BaseboardVpd::from_config(&gimlet.common, FAKE_GIMLET_MODEL)?;
         let attached_mgs = Arc::new(Mutex::new(None));
 
         let mut incoming_console_tx = HashMap::new();
         let mut serial_console_addrs = HashMap::new();
         let mut inner_tasks = Vec::new();
         let (commands, commands_rx) = mpsc::unbounded_channel();
-        let last_request_handled = Arc::default();
 
         // Weird case - if we don't have any network config, we're only being
         // created to simulate an RoT, so go ahead and return without actually
@@ -273,7 +257,6 @@ impl Gimlet {
                 commands,
                 inner_tasks,
                 responses_sent_count: None,
-                last_request_handled,
                 power_state_rx: None,
                 power_state_changes: Arc::new(AtomicUsize::new(0)),
             });
@@ -349,14 +332,8 @@ impl Gimlet {
 
             if cfg.restart.metadata.is_empty() {
                 let map = &mut cfg.restart.metadata;
-                map.insert(
-                    "baseboard_part_number".to_string(),
-                    SIM_GIMLET_BOARD.into(),
-                );
-                map.insert(
-                    "baseboard_serial_number".to_string(),
-                    gimlet.common.serial_number.clone().into(),
-                );
+
+                baseboard_vpd.populate_ereport_metadata(map);
                 map.insert("hubris_archive_id".to_string(), hubris_gitc.into());
                 map.insert("hubris_version".to_string(), hubris_vers.into());
             }
@@ -424,11 +401,11 @@ impl Gimlet {
             ereport_servers,
             ereport_state,
             gimlet.common.clone(),
+            baseboard_vpd,
             attached_mgs,
             incoming_console_tx,
             power_state,
             commands_rx,
-            Arc::clone(&last_request_handled),
             log,
             update_state,
             Arc::clone(&power_state_changes),
@@ -444,7 +421,6 @@ impl Gimlet {
             commands,
             inner_tasks,
             responses_sent_count: Some(responses_sent_count),
-            last_request_handled,
             power_state_rx: Some(power_state_rx),
             power_state_changes,
         })
@@ -456,10 +432,6 @@ impl Gimlet {
 
     pub fn serial_console_addr(&self, component: &str) -> Option<SocketAddrV6> {
         self.serial_console_addrs.get(component).copied()
-    }
-
-    pub fn last_request_handled(&self) -> Option<SimSpHandledRequest> {
-        *self.last_request_handled.lock().unwrap()
     }
 
     /// Set the policy for simulating host phase 1 flash hashing.
@@ -663,7 +635,6 @@ struct UdpTask {
     handler: Arc<TokioMutex<Handler>>,
     commands: mpsc::UnboundedReceiver<Command>,
     responses_sent_count: watch::Sender<usize>,
-    last_request_handled: Arc<Mutex<Option<SimSpHandledRequest>>>,
 }
 
 impl UdpTask {
@@ -673,11 +644,11 @@ impl UdpTask {
         ereport_servers: Option<[UdpServer; 2]>,
         ereport_state: EreportState,
         common: SpCommonConfig,
+        baseboard_vpd: BaseboardVpd,
         attached_mgs: AttachedMgsSerialConsole,
         incoming_serial_console: HashMap<SpComponent, UnboundedSender<Vec<u8>>>,
         power_state: watch::Sender<GimletPowerState>,
         commands: mpsc::UnboundedReceiver<Command>,
-        last_request_handled: Arc<Mutex<Option<SimSpHandledRequest>>>,
         log: Logger,
         update_state: SimSpUpdate,
         power_state_changes: Arc<AtomicUsize>,
@@ -685,6 +656,7 @@ impl UdpTask {
         let [udp0, udp1] = servers;
         let handler = Arc::new(TokioMutex::new(Handler::new(
             common,
+            baseboard_vpd,
             attached_mgs,
             incoming_serial_console,
             power_state,
@@ -703,7 +675,6 @@ impl UdpTask {
                 handler: Arc::clone(&handler),
                 commands,
                 responses_sent_count,
-                last_request_handled,
             },
             handler,
             responses_sent_count_rx,
@@ -734,27 +705,16 @@ impl UdpTask {
                 }
 
                 recv0 = self.udp0.recv_from(), if throttle_count > 0 => {
-                    let (result, handled_request) = {
-                        let mut handler = self.handler.lock().await;
-                        handler.last_request_handled = None;
-                        let result = server::handle_request(
-                            &mut *handler,
-                            recv0,
-                            &mut out_buf,
-                            responsiveness,
-                            SpPort::One,
-                        ).await?;
-                        (result,
-                         handler.last_request_handled.unwrap_or(
-                             SimSpHandledRequest::NotImplemented,
-                        ))
-                    };
-                    if let Some((resp, addr)) = result {
+                    if let Some((resp, addr)) = server::handle_request(
+                        &mut *self.handler.lock().await,
+                        recv0,
+                        &mut out_buf,
+                        responsiveness,
+                        SpPort::One,
+                    ).await? {
                         throttle_count -= 1;
                         self.udp0.send_to(resp, addr).await?;
                         self.responses_sent_count.send_modify(|n| *n += 1);
-                        *self.last_request_handled.lock().unwrap() =
-                            Some(handled_request);
                     }
                 }
 
@@ -821,6 +781,7 @@ impl UdpTask {
 struct Handler {
     log: Logger,
     common: SpCommonConfig,
+    baseboard_vpd: BaseboardVpd,
     // `SpHandler` wants `&'static str` references when describing components;
     // this is fine on the real SP where the strings are baked in at build time,
     // but awkward here where we read them in at runtime. We'll leak the strings
@@ -839,8 +800,6 @@ struct Handler {
     sensors: Sensors,
     component_vpds: ComponentVpds,
 
-    last_request_handled: Option<SimSpHandledRequest>,
-
     // To simulate an SP reset, we should (after doing whatever housekeeping we
     // need to track the reset) intentionally _fail_ to respond to the request,
     // simulating a `-> !` function on the SP that triggers a reset. To provide
@@ -854,6 +813,7 @@ impl Handler {
     #[allow(clippy::too_many_arguments)]
     fn new(
         common: SpCommonConfig,
+        baseboard_vpd: BaseboardVpd,
         attached_mgs: AttachedMgsSerialConsole,
         incoming_serial_console: HashMap<SpComponent, UnboundedSender<Vec<u8>>>,
         power_state: watch::Sender<GimletPowerState>,
@@ -883,6 +843,7 @@ impl Handler {
         Self {
             log,
             common,
+            baseboard_vpd,
             sensors,
             component_vpds,
             leaked_component_device_strings,
@@ -893,7 +854,6 @@ impl Handler {
             update_state,
             reset_pending: None,
             power_state,
-            last_request_handled: None,
             should_fail_to_respond_signal: None,
             sp_dumps,
             power_state_changes,
@@ -901,15 +861,10 @@ impl Handler {
     }
 
     fn sp_state_impl(&self) -> SpStateV2 {
-        // Make the Baseboard a PC so that our testbeds work as expected.
-        let mut model = [0; 32];
-        model[..self.common.part_number.len()]
-            .copy_from_slice(self.common.part_number.as_bytes());
-
         SpStateV2 {
             hubris_archive_id: [0; 8],
-            serial_number: serial_number_padded(&self.common.serial_number),
-            model,
+            serial_number: self.baseboard_vpd.padded_serial_number(),
+            model: self.baseboard_vpd.padded_part_number(),
             revision: 0,
             base_mac_address: [0; 6],
             power_state: (*self.power_state.borrow()).into(),
@@ -1257,8 +1212,6 @@ impl SpHandler for Handler {
             "received update status request";
             "component" => ?component,
         );
-        self.last_request_handled =
-            Some(SimSpHandledRequest::ComponentUpdateStatus(component));
         Ok(self.update_state.status())
     }
 
