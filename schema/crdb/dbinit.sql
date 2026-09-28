@@ -3128,7 +3128,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.tuf_repo (
     --
     -- Because the system version is embedded in the repo's artifacts.json,
     -- each system version is associated with exactly one checksum.
-    system_version STRING(64) NOT NULL,
+    system_version STRING(128) NOT NULL,
 
     -- For debugging only:
     -- Filename provided by the user.
@@ -9524,7 +9524,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '301.0.0', NULL)
+    (TRUE, NOW(), NOW(), '302.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
