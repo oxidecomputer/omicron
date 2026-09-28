@@ -38,7 +38,7 @@ pub(crate) struct EreportState {
 pub struct Metadata(toml::Table);
 
 impl Metadata {
-    fn populate_defaults(
+    pub(crate) fn populate_defaults(
         &mut self,
         vpd: &BaseboardVpd,
         update_state: &SimSpUpdate,
@@ -194,8 +194,10 @@ impl EreportState {
             "metadata" => ?metadata,
         );
         self.restart_id = RestartId::new(restart_id.as_u128());
-        // TODO(eliza): should we re-read the default metadata from the caboose
-        // if this is empty?
+        // N.B.: if the metadata map is empty here, we assume that the caller
+        // did that on purpose in order to test empty metadata. If the caller
+        // wanted to populate the metadata for the new restart, they would have
+        // provided values.
         self.meta = metadata.0;
         self.ereports.clear();
         // Initial loss record. This is used to indicate that the SP has
