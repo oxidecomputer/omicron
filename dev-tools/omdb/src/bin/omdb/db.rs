@@ -4895,72 +4895,170 @@ async fn cmd_db_sled_capacity(
         largest_pool: String,
     }
 
+    #[derive(Clone, Copy, Default)]
+    struct Ratio {
+        free: i64,
+        total: i64,
+    }
+
+    impl std::ops::AddAssign for Ratio {
+        fn add_assign(&mut self, other: Self) {
+            self.free += other.free;
+            self.total += other.total;
+        }
+    }
+
     fn gib(bytes: i64) -> String {
         format!("{:.1}", bytes as f64 / (1u64 << 30) as f64)
     }
-    fn free_of_total(free: i64, total: i64, fmt: fn(i64) -> String) -> String {
-        format!("{} / {}", fmt(free), fmt(total))
+
+    fn count(n: i64) -> String {
+        n.to_string()
     }
 
-    // Compile everything into a table.
-    let mut totals = (0i64, 0i64, 0i64, 0i64, 0i64, 0i64, 0i64, 0i64);
-    let mut any_missing_inventory = false;
-    let mut rows: Vec<SledCapacityRow> = sleds
+    // Formats a column of ratios as "free / total (N% used)", padding each
+    // part to the widest value in the column so they line up vertically.
+    fn format_ratio_column(
+        ratios: &[Ratio],
+        fmt: fn(i64) -> String,
+    ) -> Vec<String> {
+        let free: Vec<String> = ratios.iter().map(|r| fmt(r.free)).collect();
+        let total: Vec<String> = ratios.iter().map(|r| fmt(r.total)).collect();
+        let free_width = free.iter().map(|s| s.len()).max().unwrap_or(0);
+        let total_width = total.iter().map(|s| s.len()).max().unwrap_or(0);
+        ratios
+            .iter()
+            .zip(free.iter().zip(total.iter()))
+            .map(|(r, (free, total))| {
+                let used_pct = if r.total > 0 {
+                    format!(
+                        "{:>5.1}%",
+                        (r.total - r.free) as f64 / r.total as f64 * 100.0
+                    )
+                } else {
+                    format!("{:>6}", "-")
+                };
+                format!(
+                    "{free:>free_width$} / {total:>total_width$} ({used_pct})"
+                )
+            })
+            .collect()
+    }
+
+    // Gather the raw numbers for each sled, plus a totals row at the end.
+    struct SledCapacity {
+        serial: String,
+        id: String,
+        threads: Ratio,
+        ram: Ratio,
+        reservoir: Ratio,
+        storage: Ratio,
+        largest_pool_free: Option<i64>,
+        missing_inventory: bool,
+    }
+
+    let mut capacities: Vec<SledCapacity> = sleds
         .iter()
         .map(|sled| {
             let vmm = vmm_usage.remove(&sled.id()).unwrap_or_default();
+            let st = storage.remove(&sled.id()).unwrap_or_default();
             let threads_total =
                 i64::from(u32::from(sled.usable_hardware_threads));
             let ram_total = sled.usable_physical_ram.to_bytes() as i64;
             let reservoir_total = sled.reservoir_size.to_bytes() as i64;
-            let threads_free = threads_total - vmm.hardware_threads;
-            let ram_free = ram_total - vmm.rss_ram;
-            let reservoir_free = reservoir_total - vmm.reservoir_ram;
-            let st = storage.remove(&sled.id()).unwrap_or_default();
-
-            totals.0 += threads_free;
-            totals.1 += threads_total;
-            totals.2 += ram_free;
-            totals.3 += ram_total;
-            totals.4 += reservoir_free;
-            totals.5 += reservoir_total;
-            totals.6 += st.free;
-            totals.7 += st.total;
-
-            let mut storage_col = free_of_total(st.free, st.total, gib);
-            if st.pools_missing_inventory > 0 {
-                any_missing_inventory = true;
-                storage_col.push_str(" *");
-            }
-            SledCapacityRow {
+            SledCapacity {
                 serial: sled.serial_number().to_string(),
                 id: sled.id().to_string(),
-                threads: free_of_total(threads_free, threads_total, |t| {
-                    t.to_string()
-                }),
-                ram: free_of_total(ram_free, ram_total, gib),
-                reservoir: free_of_total(reservoir_free, reservoir_total, gib),
-                storage: storage_col,
-                largest_pool: gib(st.largest_pool_free),
+                threads: Ratio {
+                    free: threads_total - vmm.hardware_threads,
+                    total: threads_total,
+                },
+                ram: Ratio { free: ram_total - vmm.rss_ram, total: ram_total },
+                reservoir: Ratio {
+                    free: reservoir_total - vmm.reservoir_ram,
+                    total: reservoir_total,
+                },
+                storage: Ratio { free: st.free, total: st.total },
+                largest_pool_free: Some(st.largest_pool_free),
+                missing_inventory: st.pools_missing_inventory > 0,
             }
         })
         .collect();
-    rows.push(SledCapacityRow {
+
+    let mut totals = SledCapacity {
         serial: String::from("TOTAL"),
         id: String::new(),
-        threads: free_of_total(totals.0, totals.1, |t| t.to_string()),
-        ram: free_of_total(totals.2, totals.3, gib),
-        reservoir: free_of_total(totals.4, totals.5, gib),
-        storage: free_of_total(totals.6, totals.7, gib),
-        largest_pool: String::new(),
-    });
+        threads: Ratio::default(),
+        ram: Ratio::default(),
+        reservoir: Ratio::default(),
+        storage: Ratio::default(),
+        largest_pool_free: None,
+        missing_inventory: false,
+    };
+    for c in &capacities {
+        totals.threads += c.threads;
+        totals.ram += c.ram;
+        totals.reservoir += c.reservoir;
+        totals.storage += c.storage;
+    }
+    capacities.push(totals);
+
+    // Format each column as a whole so that values line up.
+    let column = |get: fn(&SledCapacity) -> Ratio, fmt: fn(i64) -> String| {
+        let ratios: Vec<Ratio> = capacities.iter().map(get).collect();
+        format_ratio_column(&ratios, fmt)
+    };
+    let threads = column(|c| c.threads, count);
+    let ram = column(|c| c.ram, gib);
+    let reservoir = column(|c| c.reservoir, gib);
+    let storage = column(|c| c.storage, gib);
+    let largest_pool: Vec<String> = capacities
+        .iter()
+        .map(|c| c.largest_pool_free.map(gib).unwrap_or_default())
+        .collect();
+    let largest_pool_width =
+        largest_pool.iter().map(|s| s.len()).max().unwrap_or(0);
+
+    let any_missing_inventory = capacities.iter().any(|c| c.missing_inventory);
+    let rows: Vec<SledCapacityRow> = capacities
+        .into_iter()
+        .zip(threads)
+        .zip(ram)
+        .zip(reservoir)
+        .zip(storage)
+        .zip(largest_pool)
+        .map(
+            |(
+                ((((c, threads), ram), reservoir), mut storage),
+                largest_pool,
+            )| {
+                if c.missing_inventory {
+                    storage.push_str(" *");
+                }
+                SledCapacityRow {
+                    serial: c.serial,
+                    id: c.id,
+                    threads,
+                    ram,
+                    reservoir,
+                    storage,
+                    largest_pool: format!(
+                        "{largest_pool:>largest_pool_width$}"
+                    ),
+                }
+            },
+        )
+        .collect();
 
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())
         .with(tabled::settings::Padding::new(1, 1, 0, 0))
         .to_string();
     println!("{}", table);
-    println!("(memory and storage values are in GiB, shown as free / total)");
+    println!(
+        "(memory and storage values are in GiB, shown as \
+         free / total (% used))"
+    );
     if any_missing_inventory {
         println!(
             "* some zpools on this sled have never been reported in an \
