@@ -110,6 +110,19 @@ impl UdpServer {
         })
     }
 
+    /// Binds one `UdpServer` for each of a simulated SP's two ports.
+    pub(crate) async fn bind_pair(
+        network_configs: &[NetworkConfig; 2],
+        log: &Logger,
+    ) -> Result<[Self; 2]> {
+        let (server0, server1) = future::try_join(
+            Self::new(&network_configs[0], log),
+            Self::new(&network_configs[1], log),
+        )
+        .await?;
+        Ok([server0, server1])
+    }
+
     pub(crate) fn socket(&self) -> &Arc<UdpSocket> {
         &self.sock
     }

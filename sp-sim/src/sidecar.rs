@@ -24,7 +24,6 @@ use crate::vpd::BaseboardVpd;
 use crate::vpd::ComponentVpds;
 use anyhow::Result;
 use async_trait::async_trait;
-use futures::future;
 use gateway_messages::CfpaPage;
 use gateway_messages::ComponentAction;
 use gateway_messages::ComponentActionResponse;
@@ -221,30 +220,18 @@ impl Sidecar {
 
         if let Some(network_config) = &sidecar.common.network_config {
             // bind to our two local "KSZ" ports
-            let servers = future::try_join(
-                UdpServer::new(&network_config[0], &log),
-                UdpServer::new(&network_config[1], &log),
-            )
-            .await?;
-
-            let servers = [servers.0, servers.1];
-            let local_addrs =
-                [servers[0].local_addr(), servers[1].local_addr()];
+            let servers = UdpServer::bind_pair(network_config, &log).await?;
+            let local_addrs = servers.each_ref().map(UdpServer::local_addr);
 
             let ereport_log = log.new(slog::o!("component" => "ereport-sim"));
             let (ereport_servers, ereport_addrs) =
                 match &sidecar.common.ereport_network_config {
                     Some(cfg) => {
-                        assert_eq!(cfg.len(), 2); // gimlet SP always has 2 ports
-
-                        let servers = future::try_join(
-                            UdpServer::new(&cfg[0], &ereport_log),
-                            UdpServer::new(&cfg[1], &ereport_log),
-                        )
-                        .await?;
+                        let servers =
+                            UdpServer::bind_pair(cfg, &ereport_log).await?;
                         let addrs =
-                            [servers.0.local_addr(), servers.1.local_addr()];
-                        (Some([servers.0, servers.1]), Some(addrs))
+                            servers.each_ref().map(UdpServer::local_addr);
+                        (Some(servers), Some(addrs))
                     }
                     None => (None, None),
                 };
