@@ -517,8 +517,10 @@ mod tests {
             "55e30cc7-a109-492f-aca9-735ed725df3c"
         ));
 
-        let sled0 =
-            ExpectedReporter { serial: "SimGimlet00", part: "SimGimletSp" };
+        let sled0 = ExpectedReporter {
+            serial: "SimGimlet00",
+            part: sp_sim::FAKE_GIMLET_MODEL,
+        };
         let sled0_ereports = [
             sled0.ereport(
                 1,
@@ -619,8 +621,10 @@ mod tests {
             ),
         ];
 
-        let sled1 =
-            ExpectedReporter { part: "SimGimletSp", serial: "SimGimlet01" };
+        let sled1 = ExpectedReporter {
+            part: sp_sim::FAKE_GIMLET_MODEL,
+            serial: "SimGimlet01",
+        };
         let sled1_ereports = [
             sled1.ereport(
                 1,
