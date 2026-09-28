@@ -4765,7 +4765,6 @@ async fn cmd_db_sled_capacity(
     #[derive(Default)]
     struct VmmUsage {
         hardware_threads: i64,
-        rss_ram: i64,
         reservoir_ram: i64,
     }
 
@@ -4789,7 +4788,6 @@ async fn cmd_db_sled_capacity(
             let usage = vmm_usage.entry(vmm.sled_id.into()).or_default();
             usage.hardware_threads +=
                 i64::from(u32::from(vmm.resources.hardware_threads));
-            usage.rss_ram += vmm.resources.rss_ram.to_bytes() as i64;
             usage.reservoir_ram +=
                 vmm.resources.reservoir_ram.to_bytes() as i64;
         }
@@ -4883,13 +4881,11 @@ async fn cmd_db_sled_capacity(
     struct SledCapacityRow {
         serial: String,
         id: String,
-        #[tabled(rename = "THREADS_FREE")]
+        #[tabled(rename = "THREADS_USED")]
         threads: String,
-        #[tabled(rename = "RAM_FREE")]
-        ram: String,
-        #[tabled(rename = "RESERVOIR_FREE")]
+        #[tabled(rename = "RESERVOIR_USED")]
         reservoir: String,
-        #[tabled(rename = "STORAGE_FREE")]
+        #[tabled(rename = "STORAGE_USED")]
         storage: String,
         #[tabled(rename = "LARGEST_POOL_FREE")]
         largest_pool: String,
@@ -4897,13 +4893,13 @@ async fn cmd_db_sled_capacity(
 
     #[derive(Clone, Copy, Default)]
     struct Ratio {
-        free: i64,
+        used: i64,
         total: i64,
     }
 
     impl std::ops::AddAssign for Ratio {
         fn add_assign(&mut self, other: Self) {
-            self.free += other.free;
+            self.used += other.used;
             self.total += other.total;
         }
     }
@@ -4916,30 +4912,27 @@ async fn cmd_db_sled_capacity(
         n.to_string()
     }
 
-    // Formats a column of ratios as "free / total (N% used)", padding each
-    // part to the widest value in the column so they line up vertically.
+    // Formats a column of ratios as "used / total (N%)", padding each part to
+    // the widest value in the column so they line up vertically.
     fn format_ratio_column(
         ratios: &[Ratio],
         fmt: fn(i64) -> String,
     ) -> Vec<String> {
-        let free: Vec<String> = ratios.iter().map(|r| fmt(r.free)).collect();
+        let used: Vec<String> = ratios.iter().map(|r| fmt(r.used)).collect();
         let total: Vec<String> = ratios.iter().map(|r| fmt(r.total)).collect();
-        let free_width = free.iter().map(|s| s.len()).max().unwrap_or(0);
+        let used_width = used.iter().map(|s| s.len()).max().unwrap_or(0);
         let total_width = total.iter().map(|s| s.len()).max().unwrap_or(0);
         ratios
             .iter()
-            .zip(free.iter().zip(total.iter()))
-            .map(|(r, (free, total))| {
+            .zip(used.iter().zip(total.iter()))
+            .map(|(r, (used, total))| {
                 let used_pct = if r.total > 0 {
-                    format!(
-                        "{:>5.1}%",
-                        (r.total - r.free) as f64 / r.total as f64 * 100.0
-                    )
+                    format!("{:>5.1}%", r.used as f64 / r.total as f64 * 100.0)
                 } else {
                     format!("{:>6}", "-")
                 };
                 format!(
-                    "{free:>free_width$} / {total:>total_width$} ({used_pct})"
+                    "{used:>used_width$} / {total:>total_width$} ({used_pct})"
                 )
             })
             .collect()
@@ -4950,7 +4943,6 @@ async fn cmd_db_sled_capacity(
         serial: String,
         id: String,
         threads: Ratio,
-        ram: Ratio,
         reservoir: Ratio,
         storage: Ratio,
         largest_pool_free: Option<i64>,
@@ -4964,21 +4956,21 @@ async fn cmd_db_sled_capacity(
             let st = storage.remove(&sled.id()).unwrap_or_default();
             let threads_total =
                 i64::from(u32::from(sled.usable_hardware_threads));
-            let ram_total = sled.usable_physical_ram.to_bytes() as i64;
             let reservoir_total = sled.reservoir_size.to_bytes() as i64;
             SledCapacity {
                 serial: sled.serial_number().to_string(),
                 id: sled.id().to_string(),
                 threads: Ratio {
-                    free: threads_total - vmm.hardware_threads,
+                    used: vmm.hardware_threads,
                     total: threads_total,
                 },
-                ram: Ratio { free: ram_total - vmm.rss_ram, total: ram_total },
                 reservoir: Ratio {
-                    free: reservoir_total - vmm.reservoir_ram,
+                    used: vmm.reservoir_ram,
                     total: reservoir_total,
                 },
-                storage: Ratio { free: st.free, total: st.total },
+                // Storage that is unavailable for allocation (including the
+                // control plane storage buffer) counts as used.
+                storage: Ratio { used: st.total - st.free, total: st.total },
                 largest_pool_free: Some(st.largest_pool_free),
                 missing_inventory: st.pools_missing_inventory > 0,
             }
@@ -4989,7 +4981,6 @@ async fn cmd_db_sled_capacity(
         serial: String::from("TOTAL"),
         id: String::new(),
         threads: Ratio::default(),
-        ram: Ratio::default(),
         reservoir: Ratio::default(),
         storage: Ratio::default(),
         largest_pool_free: None,
@@ -4997,7 +4988,6 @@ async fn cmd_db_sled_capacity(
     };
     for c in &capacities {
         totals.threads += c.threads;
-        totals.ram += c.ram;
         totals.reservoir += c.reservoir;
         totals.storage += c.storage;
     }
@@ -5009,7 +4999,6 @@ async fn cmd_db_sled_capacity(
         format_ratio_column(&ratios, fmt)
     };
     let threads = column(|c| c.threads, count);
-    let ram = column(|c| c.ram, gib);
     let reservoir = column(|c| c.reservoir, gib);
     let storage = column(|c| c.storage, gib);
     let largest_pool: Vec<String> = capacities
@@ -5023,31 +5012,22 @@ async fn cmd_db_sled_capacity(
     let rows: Vec<SledCapacityRow> = capacities
         .into_iter()
         .zip(threads)
-        .zip(ram)
         .zip(reservoir)
         .zip(storage)
         .zip(largest_pool)
-        .map(
-            |(
-                ((((c, threads), ram), reservoir), mut storage),
-                largest_pool,
-            )| {
-                if c.missing_inventory {
-                    storage.push_str(" *");
-                }
-                SledCapacityRow {
-                    serial: c.serial,
-                    id: c.id,
-                    threads,
-                    ram,
-                    reservoir,
-                    storage,
-                    largest_pool: format!(
-                        "{largest_pool:>largest_pool_width$}"
-                    ),
-                }
-            },
-        )
+        .map(|((((c, threads), reservoir), mut storage), largest_pool)| {
+            if c.missing_inventory {
+                storage.push_str(" *");
+            }
+            SledCapacityRow {
+                serial: c.serial,
+                id: c.id,
+                threads,
+                reservoir,
+                storage,
+                largest_pool: format!("{largest_pool:>largest_pool_width$}"),
+            }
+        })
         .collect();
 
     let table = tabled::Table::new(rows)
@@ -5057,7 +5037,7 @@ async fn cmd_db_sled_capacity(
     println!("{}", table);
     println!(
         "(memory and storage values are in GiB, shown as \
-         free / total (% used))"
+         used / total (% used))"
     );
     if any_missing_inventory {
         println!(
