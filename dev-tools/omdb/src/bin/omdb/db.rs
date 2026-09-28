@@ -134,7 +134,6 @@ use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::pagination::paginated;
 use nexus_db_queries::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
 use nexus_db_queries::db::queries::region_allocation;
-use nexus_db_schema::schema::vmm;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
 use nexus_types::deployment::BlueprintZoneDisposition;
@@ -4756,7 +4755,7 @@ async fn cmd_db_sled_capacity(
     let conn = datastore.pool_connection_for_tests().await?;
 
     let limit = fetch_opts.fetch_limit;
-    let sleds = conn
+    let sleds = datastore
         .sled_list(&opctx, &first_page(limit), args.filter)
         .await
         .context("listing sleds")?;
