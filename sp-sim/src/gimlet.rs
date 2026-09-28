@@ -290,54 +290,15 @@ impl Gimlet {
                 }
                 None => (None, None),
             };
-        let mut update_state = SimSpUpdate::new(
+        let update_state = SimSpUpdate::new(
             BaseboardKind::Gimlet,
             gimlet.common.no_stage0_caboose,
             phase1_hash_policy,
             gimlet.common.cabooses.clone(),
         );
         let ereport_state = {
-            let mut cfg = gimlet.common.ereport_config.clone();
-            let mut buf = [0u8; 256];
-            let hubris_gitc = {
-                let len = update_state
-                    .get_component_caboose_value(
-                        SpComponent::SP_ITSELF,
-                        0,
-                        *b"GITC",
-                        &mut buf,
-                    )
-                    .expect(
-                        "update state should tell us the caboose git commit",
-                    );
-                std::str::from_utf8(&buf[..len])
-                    .expect("update state GITC should be valid UTF-8")
-                    .to_string()
-            };
-            let hubris_vers = {
-                let len = update_state
-                    .get_component_caboose_value(
-                        SpComponent::SP_ITSELF,
-                        0,
-                        *b"VERS",
-                        &mut buf,
-                    )
-                    .expect(
-                        "update state should tell us the caboose git commit",
-                    );
-                std::str::from_utf8(&buf[..len])
-                    .expect("update state GITC should be valid UTF-8")
-                    .to_string()
-            };
-
-            if cfg.restart.metadata.is_empty() {
-                let map = &mut cfg.restart.metadata;
-
-                baseboard_vpd.populate_ereport_metadata(map);
-                map.insert("hubris_archive_id".to_string(), hubris_gitc.into());
-                map.insert("hubris_version".to_string(), hubris_vers.into());
-            }
-            EreportState::new(cfg, ereport_log)
+            let cfg = gimlet.common.ereport_config.clone();
+            EreportState::new(cfg, &baseboard_vpd, &update_state, ereport_log)
         };
 
         for component_config in &gimlet.common.components {

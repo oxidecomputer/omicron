@@ -249,18 +249,6 @@ impl Sidecar {
                     }
                     None => (None, None),
                 };
-            let ereport_state = {
-                let mut cfg = sidecar.common.ereport_config.clone();
-                if cfg.restart.metadata.is_empty() {
-                    let map = &mut cfg.restart.metadata;
-                    baseboard_vpd.populate_ereport_metadata(map);
-                    map.insert(
-                        "hubris_archive_id".to_string(),
-                        "asdfasdfasdf".into(),
-                    );
-                }
-                EreportState::new(cfg, ereport_log)
-            };
 
             let update_state = SimSpUpdate::new(
                 BaseboardKind::Sidecar,
@@ -269,6 +257,16 @@ impl Sidecar {
                 HostFlashHashPolicy::assume_already_hashed(),
                 sidecar.common.cabooses.clone(),
             );
+
+            let ereport_state = {
+                let cfg = sidecar.common.ereport_config.clone();
+                EreportState::new(
+                    cfg,
+                    &baseboard_vpd,
+                    &update_state,
+                    ereport_log,
+                )
+            };
 
             let power_state_changes = Arc::new(AtomicUsize::new(0));
             let (inner, handler, responses_sent_count) = Inner::new(
