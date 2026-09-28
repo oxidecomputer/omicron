@@ -290,7 +290,7 @@ impl Gimlet {
                 }
                 None => (None, None),
             };
-        let mut update_state = SimSpUpdate::new(
+        let update_state = SimSpUpdate::new(
             BaseboardKind::Gimlet,
             gimlet.common.no_stage0_caboose,
             phase1_hash_policy,
@@ -300,7 +300,7 @@ impl Gimlet {
             let mut cfg = gimlet.common.ereport_config.clone();
             cfg.restart
                 .metadata
-                .populate_if_empty(&baseboard_vpd, &mut update_state);
+                .populate_if_empty(&baseboard_vpd, &update_state);
             EreportState::new(cfg, ereport_log)
         };
 

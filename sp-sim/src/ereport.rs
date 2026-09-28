@@ -41,10 +41,10 @@ impl Metadata {
     pub(crate) fn populate_if_empty(
         &mut self,
         vpd: &BaseboardVpd,
-        update_state: &mut SimSpUpdate,
+        update_state: &SimSpUpdate,
     ) {
         fn get_caboose_thing(
-            update_state: &mut SimSpUpdate,
+            update_state: &SimSpUpdate,
             buf: &mut [u8],
             thing: [u8; 4],
         ) -> anyhow::Result<String> {

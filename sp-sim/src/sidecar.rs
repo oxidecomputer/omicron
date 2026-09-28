@@ -250,7 +250,7 @@ impl Sidecar {
                     None => (None, None),
                 };
 
-            let mut update_state = SimSpUpdate::new(
+            let update_state = SimSpUpdate::new(
                 BaseboardKind::Sidecar,
                 sidecar.common.no_stage0_caboose,
                 // sidecar doesn't have phase 1 flash; any policy is fine
@@ -261,7 +261,7 @@ impl Sidecar {
                 let mut cfg = sidecar.common.ereport_config.clone();
                 cfg.restart
                     .metadata
-                    .populate_if_empty(&baseboard_vpd, &mut update_state);
+                    .populate_if_empty(&baseboard_vpd, &update_state);
                 EreportState::new(cfg, ereport_log)
             };
 
