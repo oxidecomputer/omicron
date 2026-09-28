@@ -70,11 +70,9 @@ use slog::warn;
 use std::collections::HashMap;
 use std::iter;
 use std::net::SocketAddrV6;
-
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
-
 use tokio::sync::Mutex as TokioMutex;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
@@ -93,16 +91,16 @@ pub struct Sidecar {
     ereport_addrs: Option<[SocketAddrV6; 2]>,
     handler: Option<Arc<TokioMutex<Handler>>>,
     commands: mpsc::UnboundedSender<Command>,
-    inner_task: Option<JoinHandle<()>>,
+    udp_task: Option<JoinHandle<()>>,
     power_state_changes: Arc<AtomicUsize>,
     responses_sent_count: Option<watch::Receiver<usize>>,
 }
 
 impl Drop for Sidecar {
     fn drop(&mut self) {
-        if let Some(inner_task) = self.inner_task.as_ref() {
+        if let Some(udp_task) = self.udp_task.as_ref() {
             // default join handle drop behavior is to detach; we want to abort
-            inner_task.abort();
+            udp_task.abort();
         }
     }
 }
@@ -279,22 +277,22 @@ impl Sidecar {
                 update_state,
                 Arc::clone(&power_state_changes),
             )));
-            let (inner, responses_sent_count) = UdpTask::new(
+            let (udp_task, responses_sent_count) = UdpTask::new(
                 servers,
                 ereport_servers,
                 ereport_state,
                 Arc::clone(&handler),
                 commands_rx,
             );
-            let inner_task =
-                task::spawn(async move { inner.run().await.unwrap() });
+            let udp_task =
+                task::spawn(async move { udp_task.run().await.unwrap() });
 
             Ok(Self {
                 local_addrs: Some(local_addrs),
                 ereport_addrs,
                 handler: Some(handler),
                 commands,
-                inner_task: Some(inner_task),
+                udp_task: Some(udp_task),
                 responses_sent_count: Some(responses_sent_count),
                 power_state_changes,
             })
@@ -304,7 +302,7 @@ impl Sidecar {
                 ereport_addrs: None,
                 handler: None,
                 commands,
-                inner_task: None,
+                udp_task: None,
                 responses_sent_count: None,
                 power_state_changes: Arc::new(AtomicUsize::new(0)),
             })

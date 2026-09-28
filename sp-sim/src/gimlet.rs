@@ -367,7 +367,7 @@ impl Gimlet {
             update_state,
             Arc::clone(&power_state_changes),
         )));
-        let (inner, responses_sent_count) = UdpTask::new(
+        let (udp_task, responses_sent_count) = UdpTask::new(
             servers,
             ereport_servers,
             ereport_state,
@@ -375,7 +375,7 @@ impl Gimlet {
             commands_rx,
         );
         inner_tasks
-            .push(task::spawn(async move { inner.run().await.unwrap() }));
+            .push(task::spawn(async move { udp_task.run().await.unwrap() }));
 
         Ok(Self {
             local_addrs: Some(local_addrs),
