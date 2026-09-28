@@ -14,16 +14,16 @@ use crate::ereport;
 use crate::ereport::EreportState;
 use crate::helpers::rot_state_v2;
 use crate::sensors::Sensors;
-use crate::server;
+use crate::server::Command;
 use crate::server::SimSpHandler;
 use crate::server::UdpServer;
+use crate::server::UdpTask;
 use crate::update::BaseboardKind;
 use crate::update::SimSpUpdate;
 use crate::vpd::BaseboardVpd;
 use crate::vpd::ComponentVpds;
 use anyhow::Result;
 use async_trait::async_trait;
-use futures::Future;
 use futures::future;
 use gateway_messages::CfpaPage;
 use gateway_messages::ComponentAction;
@@ -70,11 +70,11 @@ use slog::warn;
 use std::collections::HashMap;
 use std::iter;
 use std::net::SocketAddrV6;
-use std::pin::Pin;
+
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
-use tokio::select;
+
 use tokio::sync::Mutex as TokioMutex;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
@@ -270,18 +270,21 @@ impl Sidecar {
             };
 
             let power_state_changes = Arc::new(AtomicUsize::new(0));
-            let (inner, handler, responses_sent_count) = Inner::new(
-                servers,
-                ereport_servers,
-                ereport_state,
-                sidecar.common.components.clone(),
+            let handler = Arc::new(TokioMutex::new(Handler::new(
                 baseboard_vpd,
+                sidecar.common.components.clone(),
                 FakeIgnition::new(&config.simulated_sps),
-                commands_rx,
                 log,
                 sidecar.common.old_rot_state,
                 update_state,
                 Arc::clone(&power_state_changes),
+            )));
+            let (inner, responses_sent_count) = UdpTask::new(
+                servers,
+                ereport_servers,
+                ereport_state,
+                Arc::clone(&handler),
+                commands_rx,
             );
             let inner_task =
                 task::spawn(async move { inner.run().await.unwrap() });
@@ -317,167 +320,6 @@ impl Sidecar {
             .ignition
             .state
             .clone()
-    }
-}
-
-#[derive(Debug)]
-enum Command {
-    SetResponsiveness(Responsiveness, oneshot::Sender<Ack>),
-    SetThrottler(Option<mpsc::UnboundedReceiver<usize>>, oneshot::Sender<Ack>),
-    Ereport(ereport::Command),
-}
-
-#[derive(Debug)]
-struct Ack;
-
-struct Inner {
-    handler: Arc<TokioMutex<Handler>>,
-    udp0: UdpServer,
-    udp1: UdpServer,
-    ereport0: Option<UdpServer>,
-    ereport1: Option<UdpServer>,
-    ereport_state: EreportState,
-    commands: mpsc::UnboundedReceiver<Command>,
-    responses_sent_count: watch::Sender<usize>,
-}
-
-impl Inner {
-    #[allow(clippy::too_many_arguments)]
-    fn new(
-        servers: [UdpServer; 2],
-        ereport_servers: Option<[UdpServer; 2]>,
-        ereport_state: EreportState,
-        components: Vec<SpComponentConfig>,
-        baseboard_vpd: BaseboardVpd,
-        ignition: FakeIgnition,
-        commands: mpsc::UnboundedReceiver<Command>,
-        log: Logger,
-        old_rot_state: bool,
-        update_state: SimSpUpdate,
-        power_state_changes: Arc<AtomicUsize>,
-    ) -> (Self, Arc<TokioMutex<Handler>>, watch::Receiver<usize>) {
-        let [udp0, udp1] = servers;
-        let handler = Arc::new(TokioMutex::new(Handler::new(
-            baseboard_vpd,
-            components,
-            ignition,
-            log,
-            old_rot_state,
-            update_state,
-            power_state_changes,
-        )));
-        let responses_sent_count = watch::Sender::new(0);
-        let responses_sent_count_rx = responses_sent_count.subscribe();
-        let (ereport0, ereport1) = match ereport_servers {
-            Some([e0, e1]) => (Some(e0), Some(e1)),
-            None => (None, None),
-        };
-        (
-            Self {
-                handler: Arc::clone(&handler),
-                ereport0,
-                ereport1,
-                ereport_state,
-                udp0,
-                udp1,
-                commands,
-                responses_sent_count,
-            },
-            handler,
-            responses_sent_count_rx,
-        )
-    }
-
-    async fn run(mut self) -> Result<()> {
-        let mut out_buf = [0; gateway_messages::MAX_SERIALIZED_SIZE];
-        let mut responsiveness = Responsiveness::Responsive;
-        let mut throttle_count = usize::MAX;
-        let mut throttler: Option<mpsc::UnboundedReceiver<usize>> = None;
-
-        loop {
-            let incr_throttle_count: Pin<
-                Box<dyn Future<Output = Option<usize>> + Send>,
-            > = if let Some(throttler) = throttler.as_mut() {
-                Box::pin(throttler.recv())
-            } else {
-                Box::pin(future::pending())
-            };
-            select! {
-                Some(n) = incr_throttle_count => {
-                    throttle_count = throttle_count.saturating_add(n);
-                }
-
-                recv0 = self.udp0.recv_from(), if throttle_count > 0 => {
-                    if let Some((resp, addr)) = server::handle_request(
-                        &mut *self.handler.lock().await,
-                        recv0,
-                        &mut out_buf,
-                        responsiveness,
-                        SpPort::One,
-                    ).await? {
-                        throttle_count -= 1;
-                        self.udp0.send_to(resp, addr).await?;
-                        self.responses_sent_count.send_modify(|n| *n += 1);
-                    }
-                }
-
-                recv1 = self.udp1.recv_from(), if throttle_count > 0 => {
-                    if let Some((resp, addr)) = server::handle_request(
-                        &mut *self.handler.lock().await,
-                        recv1,
-                        &mut out_buf,
-                        responsiveness,
-                        SpPort::Two,
-                    ).await? {
-                        throttle_count -= 1;
-                        self.udp1.send_to(resp, addr).await?;
-                        self.responses_sent_count.send_modify(|n| *n += 1);
-                    }
-                }
-
-                recv = ereport::recv_request(self.ereport0.as_mut()) => {
-                    let (req, addr, sock) = recv?;
-                    let rsp = self.ereport_state.handle_request(&req, addr, &mut out_buf);
-                    sock.send_to(rsp, addr).await?;
-                }
-
-                recv = ereport::recv_request(self.ereport1.as_mut()) => {
-                    let (req, addr, sock) = recv?;
-                    let rsp = self.ereport_state.handle_request(&req, addr, &mut out_buf);
-                    sock.send_to(rsp, addr).await?;
-                }
-
-                command = self.commands.recv() => {
-                    // if sending half is gone, we're about to be killed anyway
-                    let command = match command {
-                        Some(command) => command,
-                        None => return Ok(()),
-                    };
-
-                    match command {
-                        Command::SetResponsiveness(r, tx) => {
-                            responsiveness = r;
-                            tx.send(Ack)
-                                .map_err(|_| "receiving half died").unwrap();
-                        }
-                        Command::SetThrottler(thr, tx) => {
-                            throttler = thr;
-
-                            // Either immediately start throttling, or
-                            // immediately stop throttling.
-                            if throttler.is_some() {
-                                throttle_count = 0;
-                            } else {
-                                throttle_count = usize::MAX;
-                            }
-                            tx.send(Ack)
-                                .map_err(|_| "receiving half died").unwrap();
-                        }
-                        Command::Ereport(cmd) => self.ereport_state.handle_command(cmd),
-                    }
-                }
-            }
-        }
     }
 }
 
