@@ -309,18 +309,19 @@ impl Sidecar {
     }
 
     pub async fn current_ignition_state(&self) -> Vec<IgnitionState> {
-        let (tx, rx) = oneshot::channel();
-        self.commands
-            .send(Command::CurrentIgnitionState(tx))
-            .map_err(|_| "sidecar task died unexpectedly")
-            .unwrap();
-        rx.await.unwrap()
+        self.handler
+            .as_ref()
+            .expect("no network config provided when constructing sim sidecar")
+            .lock()
+            .await
+            .ignition
+            .state
+            .clone()
     }
 }
 
 #[derive(Debug)]
 enum Command {
-    CurrentIgnitionState(oneshot::Sender<Vec<IgnitionState>>),
     SetResponsiveness(Responsiveness, oneshot::Sender<Ack>),
     SetThrottler(Option<mpsc::UnboundedReceiver<usize>>, oneshot::Sender<Ack>),
     Ereport(ereport::Command),
@@ -454,15 +455,6 @@ impl Inner {
                     };
 
                     match command {
-                        Command::CurrentIgnitionState(tx) => {
-                            tx.send(self.handler
-                                .lock()
-                                .await
-                                .ignition
-                                .state
-                                .clone()
-                            ).map_err(|_| "receiving half died").unwrap();
-                        }
                         Command::SetResponsiveness(r, tx) => {
                             responsiveness = r;
                             tx.send(Ack)
