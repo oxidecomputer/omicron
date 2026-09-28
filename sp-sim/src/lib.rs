@@ -21,7 +21,7 @@ pub use gimlet::FAKE_GIMLET_MODEL;
 pub use gimlet::Gimlet;
 pub use gimlet::GimletPowerState;
 pub use gimlet::SIM_GIMLET_BOARD;
-pub use gimlet::SimSpHandledRequest;
+
 pub use server::logger;
 pub use sidecar::SIM_SIDECAR_BOARD;
 pub use sidecar::Sidecar;
