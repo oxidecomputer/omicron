@@ -38,7 +38,7 @@ pub(crate) struct EreportState {
 pub struct Metadata(toml::Table);
 
 impl Metadata {
-    pub(crate) fn populate_if_empty(
+    fn populate_defaults(
         &mut self,
         vpd: &BaseboardVpd,
         update_state: &SimSpUpdate,
@@ -55,10 +55,6 @@ impl Metadata {
                 buf,
             )?;
             Ok(std::str::from_utf8(&buf[..len])?.to_string())
-        }
-
-        if !self.is_empty() {
-            return;
         }
 
         // see: https://github.com/oxidecomputer/hubris/blob/f6e5849734d4e7d965a2f1cd71ca4ed4b24532de/task/packrat/src/ereport.rs#L550-L570
@@ -133,16 +129,29 @@ pub(crate) async fn recv_request(
 impl EreportState {
     pub(crate) fn new(
         EreportConfig { restart, ereports }: EreportConfig,
+        vpd: &BaseboardVpd,
+        update_state: &SimSpUpdate,
         log: slog::Logger,
     ) -> Self {
-        let EreportRestart { metadata: Metadata(meta), restart_id } = restart;
+        let EreportRestart { mut metadata, restart_id } = restart;
         slog::info!(
             log,
             "configuring sim ereports";
             "restart_id" => ?restart_id,
             "n_ereports" => ereports.len(),
-            "metadata" => ?meta,
+            "metadata" => ?metadata,
         );
+
+        if metadata.is_empty() {
+            metadata.populate_defaults(vpd, update_state);
+            slog::debug!(
+                log,
+                "sim ereport restart metadata is empty, using defaults";
+                "restart_id" => ?restart_id,
+                "n_ereports" => ereports.len(),
+                "metadata" => ?metadata,
+            );
+        }
 
         let ereports: VecDeque<_> =
             // The ereport queue always begins with an initial loss record. This
@@ -160,7 +169,7 @@ impl EreportState {
                 .collect();
         let restart_id = RestartId::new(restart_id.as_u128());
         let next_ena = Ena::new(ereports.len() as u64);
-        Self { ereports, next_ena, restart_id, meta, log }
+        Self { ereports, next_ena, restart_id, meta: metadata.0, log }
     }
 
     pub(crate) fn handle_command(&mut self, cmd: Command) {

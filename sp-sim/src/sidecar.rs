@@ -257,12 +257,15 @@ impl Sidecar {
                 HostFlashHashPolicy::assume_already_hashed(),
                 sidecar.common.cabooses.clone(),
             );
+
             let ereport_state = {
-                let mut cfg = sidecar.common.ereport_config.clone();
-                cfg.restart
-                    .metadata
-                    .populate_if_empty(&baseboard_vpd, &update_state);
-                EreportState::new(cfg, ereport_log)
+                let cfg = sidecar.common.ereport_config.clone();
+                EreportState::new(
+                    cfg,
+                    &baseboard_vpd,
+                    &update_state,
+                    ereport_log,
+                )
             };
 
             let power_state_changes = Arc::new(AtomicUsize::new(0));

@@ -297,11 +297,8 @@ impl Gimlet {
             gimlet.common.cabooses.clone(),
         );
         let ereport_state = {
-            let mut cfg = gimlet.common.ereport_config.clone();
-            cfg.restart
-                .metadata
-                .populate_if_empty(&baseboard_vpd, &update_state);
-            EreportState::new(cfg, ereport_log)
+            let cfg = gimlet.common.ereport_config.clone();
+            EreportState::new(cfg, &baseboard_vpd, &update_state, ereport_log)
         };
 
         for component_config in &gimlet.common.components {
