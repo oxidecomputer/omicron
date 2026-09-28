@@ -4769,24 +4769,30 @@ async fn cmd_db_sled_capacity(
         reservoir_ram: i64,
     }
 
-    // Gather all of the VMM resource reservations per sled. We are not
-    // paginating and any given rack should not have an outlandish number
-    // of sleds
+    // Gather all of the VMM resource reservations per sled.
     let mut vmm_usage: HashMap<SledUuid, VmmUsage> = HashMap::new();
-    let reservations = {
+    let mut paginator =
+        Paginator::new(SQL_BATCH_SIZE, dropshot::PaginationOrder::Ascending);
+    while let Some(p) = paginator.next() {
         use nexus_db_schema::schema::sled_resource_vmm::dsl;
-        dsl::sled_resource_vmm
-            .select(db::model::SledResourceVmm::as_select())
-            .load_async(&*conn)
-            .await
-            .context("fetching sled resource reservations")?
-    };
-    for vmm in reservations {
-        let usage = vmm_usage.entry(vmm.sled_id.into()).or_default();
-        usage.hardware_threads +=
-            i64::from(u32::from(vmm.resources.hardware_threads));
-        usage.rss_ram += vmm.resources.rss_ram.to_bytes() as i64;
-        usage.reservoir_ram += vmm.resources.reservoir_ram.to_bytes() as i64;
+        let batch =
+            paginated(dsl::sled_resource_vmm, dsl::id, &p.current_pagparams())
+                .select(db::model::SledResourceVmm::as_select())
+                .load_async(&*conn)
+                .await
+                .context("fetching sled resource reservations")?;
+        paginator =
+            p.found_batch(&batch, &|vmm: &db::model::SledResourceVmm| {
+                PropolisUuid::from(vmm.id).into_untyped_uuid()
+            });
+        for vmm in batch {
+            let usage = vmm_usage.entry(vmm.sled_id.into()).or_default();
+            usage.hardware_threads +=
+                i64::from(u32::from(vmm.resources.hardware_threads));
+            usage.rss_ram += vmm.resources.rss_ram.to_bytes() as i64;
+            usage.reservoir_ram +=
+                vmm.resources.reservoir_ram.to_bytes() as i64;
+        }
     }
 
     // We are intentionally calling potentially slow db methods here as we
@@ -4812,10 +4818,32 @@ async fn cmd_db_sled_capacity(
         }
     }
 
-    // We are trying to emulate disk allocation logic here
+    // Similar to above, if this becomes too slow or cause an impact on the db
+    // we can add filtering.
+    let zpools: Vec<_> = datastore
+        .zpool_list_all_external_batched(opctx)
+        .await?
+        .into_iter()
+        .filter(|(_, disk)| {
+            matches!(disk.disk_policy, db::model::PhysicalDiskPolicy::InService)
+                && matches!(
+                    disk.disk_state,
+                    db::model::PhysicalDiskState::Active
+                )
+        })
+        .map(|(zpool, _)| zpool)
+        .collect();
+
+    // We are trying to emulate disk allocation logic here: use the most
+    // recently reported size of each zpool from any inventory collection.
+    // Filtering on the known pool IDs lets this use the
+    // `inv_zpool_by_id_and_time` index instead of a full table scan.
+    let pool_ids: Vec<Uuid> =
+        zpools.iter().map(|z| z.id().into_untyped_uuid()).collect();
     let pool_total_size: HashMap<ZpoolUuid, i64> = {
         use nexus_db_schema::schema::inv_zpool::dsl;
         dsl::inv_zpool
+            .filter(dsl::id.eq_any(pool_ids))
             .distinct_on(dsl::id)
             .order_by((dsl::id, dsl::time_collected.desc()))
             .select((dsl::id, dsl::total_size))
@@ -4836,17 +4864,7 @@ async fn cmd_db_sled_capacity(
         pools_missing_inventory: usize,
     }
     let mut storage: HashMap<SledUuid, StorageUsage> = HashMap::new();
-
-    // Similar to above, if this becomes too slow or cause an impact on the db
-    // we can add filtering.
-    for (zpool, disk) in
-        datastore.zpool_list_all_external_batched(opctx).await?
-    {
-        if !matches!(disk.disk_policy, db::model::PhysicalDiskPolicy::InService)
-            || !matches!(disk.disk_state, db::model::PhysicalDiskState::Active)
-        {
-            continue;
-        }
+    for zpool in zpools {
         let usage = storage.entry(zpool.sled_id()).or_default();
         let Some(total) = pool_total_size.get(&zpool.id()) else {
             usage.pools_missing_inventory += 1;
