@@ -16,6 +16,7 @@ use crate::sensors::Sensors;
 use crate::server::SimSpHandler;
 use crate::server::UdpServer;
 use crate::sp;
+use crate::task_dumps::TaskDumps;
 use crate::update::BaseboardKind;
 use crate::update::SimSpUpdate;
 use crate::vpd::BaseboardVpd;
@@ -27,8 +28,6 @@ use gateway_messages::ComponentAction;
 use gateway_messages::ComponentActionResponse;
 use gateway_messages::ComponentDetails;
 use gateway_messages::DiscoverResponse;
-use gateway_messages::DumpCompression;
-use gateway_messages::DumpError;
 use gateway_messages::DumpSegment;
 use gateway_messages::DumpTask;
 use gateway_messages::HostBootfailPayloadData;
@@ -64,7 +63,6 @@ use slog::Logger;
 use slog::debug;
 use slog::info;
 use slog::warn;
-use std::collections::HashMap;
 use std::iter;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
@@ -241,7 +239,7 @@ struct Handler {
     // whatever result we return and fail to respond at all.
     should_fail_to_respond_signal: Option<Box<dyn FnOnce() + Send>>,
     old_rot_state: bool,
-    sp_dumps: HashMap<[u8; 16], u32>,
+    task_dumps: TaskDumps,
 }
 
 impl Handler {
@@ -259,8 +257,6 @@ impl Handler {
         let component_vpds = ComponentVpds::from_component_configs(&components)
             .expect("component VPD configuration should be valid");
 
-        let sp_dumps = HashMap::new();
-
         Self {
             log,
             device_descriptions,
@@ -274,7 +270,7 @@ impl Handler {
             reset_pending: None,
             should_fail_to_respond_signal: None,
             old_rot_state,
-            sp_dumps,
+            task_dumps: TaskDumps::default(),
         }
     }
 
@@ -984,7 +980,7 @@ impl SpHandler for Handler {
     }
 
     fn get_task_dump_count(&mut self) -> Result<u32, SpError> {
-        Ok(1)
+        self.task_dumps.get_task_dump_count()
     }
 
     fn task_dump_read_start(
@@ -992,15 +988,7 @@ impl SpHandler for Handler {
         index: u32,
         key: [u8; 16],
     ) -> Result<DumpTask, SpError> {
-        if index != 0 {
-            return Err(SpError::Dump(DumpError::BadIndex));
-        }
-
-        // Hubris allows clients to reuse existing keys.
-        // Overwrite any in-flight requests using this key.
-        self.sp_dumps.insert(key, 0);
-
-        Ok(DumpTask { time: 1, task: 0, compression: DumpCompression::Lzss })
+        self.task_dumps.task_dump_read_start(index, key)
     }
 
     fn task_dump_read_continue(
@@ -1009,36 +997,7 @@ impl SpHandler for Handler {
         seq: u32,
         buf: &mut [u8],
     ) -> Result<Option<DumpSegment>, SpError> {
-        let Some(expected_seq) = self.sp_dumps.get_mut(&key) else {
-            return Err(SpError::Dump(DumpError::BadKey));
-        };
-
-        if seq != *expected_seq {
-            return Err(SpError::Dump(DumpError::BadSequenceNumber));
-        }
-
-        const UNCOMPRESSED_MSG: &[u8] = b"my cool SP dump";
-        // "my cool SP dump" encoded with `lzss-cli e 6,4,0x20`
-        const COMPRESSED_MSG: &[u8] = &[
-            0xb6, 0xde, 0x64, 0x16, 0x3b, 0x7d, 0xbe, 0xd9, 0x20, 0xa9, 0xd4,
-            0x24, 0x16, 0x4b, 0xad, 0xb6, 0xe0,
-        ];
-        buf[..COMPRESSED_MSG.len()].copy_from_slice(COMPRESSED_MSG);
-
-        *expected_seq += 1;
-
-        match seq {
-            ..3 => Ok(Some(DumpSegment {
-                address: 1,
-                compressed_length: COMPRESSED_MSG.len() as u16,
-                uncompressed_length: UNCOMPRESSED_MSG.len() as u16,
-                seq,
-            })),
-            3.. => {
-                self.sp_dumps.remove(&key);
-                Ok(None)
-            }
-        }
+        self.task_dumps.task_dump_read_continue(key, seq, buf)
     }
 
     fn read_host_flash(

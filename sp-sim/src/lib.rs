@@ -11,6 +11,7 @@ mod sensors;
 mod server;
 mod sidecar;
 mod sp;
+mod task_dumps;
 mod update;
 mod vpd;
 
