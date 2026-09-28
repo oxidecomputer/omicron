@@ -26,6 +26,7 @@ use std::net::SocketAddrV6;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use tokio::net::UdpSocket;
 use tokio::select;
@@ -213,6 +214,12 @@ pub(crate) trait SimSpHandler: SpHandler {
         &mut self,
         signal: Box<dyn FnOnce() + Send>,
     );
+
+    /// Borrows the simulated SP handler's counter of power state changes.
+    ///
+    /// The simulated handler increments this every time the power state
+    /// changes.
+    fn power_state_changes(&self) -> &Arc<AtomicUsize>;
 }
 
 /// Commands sent from a simulated SP's handle to its [`UdpTask`].

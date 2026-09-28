@@ -8,14 +8,12 @@ use crate::SimulatedSp;
 use crate::config::GimletConfig;
 use crate::config::SpCommonConfig;
 use crate::device_descriptions::DeviceDescriptions;
-use crate::ereport;
 use crate::ereport::EreportState;
 use crate::helpers::rot_state_v2;
 use crate::sensors::Sensors;
-use crate::server::Command;
 use crate::server::SimSpHandler;
 use crate::server::UdpServer;
-use crate::server::UdpTask;
+use crate::sp;
 use crate::update::BaseboardKind;
 use crate::update::SimSpUpdate;
 use crate::vpd::BaseboardVpd;
@@ -69,9 +67,7 @@ use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tokio::select;
-use tokio::sync::Mutex as TokioMutex;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
-use tokio::sync::oneshot;
 use tokio::sync::watch;
 use tokio::task::{self, JoinHandle};
 
@@ -106,21 +102,16 @@ impl From<GimletPowerState> for PowerState {
 }
 
 pub struct Gimlet {
-    local_addrs: Option<[SocketAddrV6; 2]>,
-    ereport_addrs: Option<[SocketAddrV6; 2]>,
-    handler: Option<Arc<TokioMutex<Handler>>>,
+    sp: sp::Handle<Handler>,
     serial_console_addrs: HashMap<String, SocketAddrV6>,
-    commands: mpsc::UnboundedSender<Command>,
-    inner_tasks: Vec<JoinHandle<()>>,
-    responses_sent_count: Option<watch::Receiver<usize>>,
-    power_state_changes: Arc<AtomicUsize>,
+    serial_console_tasks: Vec<JoinHandle<()>>,
     power_state_rx: Option<watch::Receiver<GimletPowerState>>,
 }
 
 impl Drop for Gimlet {
     fn drop(&mut self) {
         // default join handle drop behavior is to detach; we want to abort
-        for task in &self.inner_tasks {
+        for task in &self.serial_console_tasks {
             task.abort();
         }
     }
@@ -129,101 +120,64 @@ impl Drop for Gimlet {
 #[async_trait]
 impl SimulatedSp for Gimlet {
     async fn state(&self) -> SpState {
-        SpState::from(
-            self.handler.as_ref().unwrap().lock().await.sp_state_impl(),
-        )
+        SpState::from(self.sp.handler().await.unwrap().sp_state_impl())
     }
 
     fn local_addr(&self, port: SpPort) -> Option<SocketAddrV6> {
-        let i = match port {
-            SpPort::One => 0,
-            SpPort::Two => 1,
-        };
-        self.local_addrs.map(|addrs| addrs[i])
+        self.sp.local_addr(port)
     }
 
     fn local_ereport_addr(&self, port: SpPort) -> Option<SocketAddrV6> {
-        let i = match port {
-            SpPort::One => 0,
-            SpPort::Two => 1,
-        };
-        self.ereport_addrs.map(|addrs| addrs[i])
+        self.sp.local_ereport_addr(port)
     }
 
     async fn set_responsiveness(&self, r: Responsiveness) {
-        let (tx, rx) = oneshot::channel();
-        if let Ok(()) = self.commands.send(Command::SetResponsiveness(r, tx)) {
-            rx.await.unwrap();
-        }
+        self.sp.set_responsiveness(r).await
     }
 
     async fn last_sp_update_data(&self) -> Option<Box<[u8]>> {
-        let handler = self.handler.as_ref()?;
-        let handler = handler.lock().await;
-        handler.update_state.last_sp_update_data()
+        self.sp.handler().await?.update_state.last_sp_update_data()
     }
 
     async fn last_rot_update_data(&self) -> Option<Box<[u8]>> {
-        let handler = self.handler.as_ref()?;
-        let handler = handler.lock().await;
-        handler.update_state.last_rot_update_data()
+        self.sp.handler().await?.update_state.last_rot_update_data()
     }
 
     async fn host_phase1_data(&self, slot: u16) -> Option<Vec<u8>> {
-        let handler = self.handler.as_ref()?;
-        let handler = handler.lock().await;
-        handler.update_state.host_phase1_data(slot)
+        self.sp.handler().await?.update_state.host_phase1_data(slot)
     }
 
     async fn current_update_status(&self) -> gateway_messages::UpdateStatus {
-        let Some(handler) = self.handler.as_ref() else {
+        let Some(handler) = self.sp.handler().await else {
             return gateway_messages::UpdateStatus::None;
         };
 
-        handler.lock().await.update_state.status()
+        handler.update_state.status()
     }
 
     fn power_state_changes(&self) -> usize {
-        self.power_state_changes.load(Ordering::Relaxed)
+        self.sp.power_state_changes()
     }
 
     fn responses_sent_count(&self) -> Option<watch::Receiver<usize>> {
-        self.responses_sent_count.clone()
+        self.sp.responses_sent_count()
     }
 
     async fn install_udp_accept_semaphore(
         &self,
     ) -> mpsc::UnboundedSender<usize> {
-        let (tx, rx) = mpsc::unbounded_channel();
-        let (resp_tx, resp_rx) = oneshot::channel();
-        if let Ok(()) =
-            self.commands.send(Command::SetThrottler(Some(rx), resp_tx))
-        {
-            resp_rx.await.unwrap();
-        }
-        tx
+        self.sp.install_udp_accept_semaphore().await
     }
 
     async fn ereport_restart(&self, restart: crate::config::EreportRestart) {
-        let (tx, rx) = oneshot::channel();
-        if self
-            .commands
-            .send(Command::Ereport(ereport::Command::Restart(restart, tx)))
-            .is_ok()
-        {
-            rx.await.unwrap();
-        }
+        self.sp.ereport_restart(restart).await
     }
 
     async fn ereport_append(
         &self,
         ereport: crate::config::Ereport,
     ) -> gateway_ereport_messages::Ena {
-        let (tx, rx) = oneshot::channel();
-        self.commands
-            .send(Command::Ereport(ereport::Command::Append(ereport, tx)))
-            .expect("simulated gimlet task has died");
-        rx.await.unwrap()
+        self.sp.ereport_append(ereport).await
     }
 }
 
@@ -241,23 +195,17 @@ impl Gimlet {
 
         let mut incoming_console_tx = HashMap::new();
         let mut serial_console_addrs = HashMap::new();
-        let mut inner_tasks = Vec::new();
-        let (commands, commands_rx) = mpsc::unbounded_channel();
+        let mut serial_console_tasks = Vec::new();
 
         // Weird case - if we don't have any network config, we're only being
         // created to simulate an RoT, so go ahead and return without actually
         // starting a simulated SP.
         let Some(network_config) = &gimlet.common.network_config else {
             return Ok(Self {
-                local_addrs: None,
-                ereport_addrs: None,
-                handler: None,
+                sp: sp::Handle::rot_only(),
                 serial_console_addrs,
-                commands,
-                inner_tasks,
-                responses_sent_count: None,
+                serial_console_tasks,
                 power_state_rx: None,
-                power_state_changes: Arc::new(AtomicUsize::new(0)),
             });
         };
 
@@ -265,16 +213,10 @@ impl Gimlet {
         let servers = UdpServer::bind_pair(network_config, &log).await?;
 
         let ereport_log = log.new(slog::o!("component" => "ereport-sim"));
-        let (ereport_servers, ereport_addrs) =
-            match &gimlet.common.ereport_network_config {
-                Some(cfg) => {
-                    let servers =
-                        UdpServer::bind_pair(cfg, &ereport_log).await?;
-                    let addrs = servers.each_ref().map(UdpServer::local_addr);
-                    (Some(servers), Some(addrs))
-                }
-                None => (None, None),
-            };
+        let ereport_servers = match &gimlet.common.ereport_network_config {
+            Some(cfg) => Some(UdpServer::bind_pair(cfg, &ereport_log).await?),
+            None => None,
+        };
         let update_state = SimSpUpdate::new(
             BaseboardKind::Gimlet,
             gimlet.common.no_stage0_caboose,
@@ -333,16 +275,14 @@ impl Gimlet {
                     Arc::clone(&attached_mgs),
                     log.new(slog::o!("serial-console" => id.to_string())),
                 );
-                inner_tasks.push(task::spawn(async move {
+                serial_console_tasks.push(task::spawn(async move {
                     serial_console.run().await
                 }));
             }
         }
-        let local_addrs = servers.each_ref().map(UdpServer::local_addr);
         let (power_state, power_state_rx) =
             watch::channel(GimletPowerState::A0(M2Slot::A));
-        let power_state_changes = Arc::new(AtomicUsize::new(0));
-        let handler = Arc::new(TokioMutex::new(Handler::new(
+        let handler = Handler::new(
             gimlet.common.clone(),
             baseboard_vpd,
             attached_mgs,
@@ -350,28 +290,15 @@ impl Gimlet {
             power_state,
             log,
             update_state,
-            Arc::clone(&power_state_changes),
-        )));
-        let (udp_task, responses_sent_count) = UdpTask::new(
-            servers,
-            ereport_servers,
-            ereport_state,
-            Arc::clone(&handler),
-            commands_rx,
         );
-        inner_tasks
-            .push(task::spawn(async move { udp_task.run().await.unwrap() }));
+        let sp =
+            sp::Handle::spawn(servers, ereport_servers, ereport_state, handler);
 
         Ok(Self {
-            local_addrs: Some(local_addrs),
-            ereport_addrs,
-            handler: Some(handler),
+            sp,
             serial_console_addrs,
-            commands,
-            inner_tasks,
-            responses_sent_count: Some(responses_sent_count),
+            serial_console_tasks,
             power_state_rx: Some(power_state_rx),
-            power_state_changes,
         })
     }
 
@@ -390,11 +317,10 @@ impl Gimlet {
     /// Panics if this `Gimlet` was created with only an RoT instead of a full
     /// SP + RoT complex.
     pub async fn set_phase1_hash_policy(&self, policy: HostFlashHashPolicy) {
-        self.handler
-            .as_ref()
-            .expect("gimlet was created with SP config")
-            .lock()
+        self.sp
+            .handler()
             .await
+            .expect("gimlet was created with SP config")
             .update_state
             .set_phase1_hash_policy(policy)
     }
@@ -594,7 +520,6 @@ struct Handler {
 }
 
 impl Handler {
-    #[allow(clippy::too_many_arguments)]
     fn new(
         common: SpCommonConfig,
         baseboard_vpd: BaseboardVpd,
@@ -603,7 +528,6 @@ impl Handler {
         power_state: watch::Sender<GimletPowerState>,
         log: Logger,
         update_state: SimSpUpdate,
-        power_state_changes: Arc<AtomicUsize>,
     ) -> Self {
         let components = &common.components;
         let device_descriptions =
@@ -629,7 +553,7 @@ impl Handler {
             power_state,
             should_fail_to_respond_signal: None,
             sp_dumps,
-            power_state_changes,
+            power_state_changes: Arc::new(AtomicUsize::new(0)),
         }
     }
 
@@ -1515,5 +1439,9 @@ impl SimSpHandler for Handler {
         signal: Box<dyn FnOnce() + Send>,
     ) {
         self.should_fail_to_respond_signal = Some(signal);
+    }
+
+    fn power_state_changes(&self) -> &Arc<AtomicUsize> {
+        &self.power_state_changes
     }
 }
