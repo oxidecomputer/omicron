@@ -34,6 +34,7 @@ use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid;
 use slog::Logger;
 use std::collections::BTreeMap;
+use std::io::Write;
 use std::num::NonZeroU32;
 use tabled::Tabled;
 
@@ -172,8 +173,11 @@ async fn cmd_reconfigurator_export(
         .write(true)
         .open(&output_path)
         .with_context(|| format!("open {:?}", output_path))?;
-    serde_json::to_writer_pretty(&file, &state)
+    // Serializing to an unbuffered file adds a huge amount of overhead.
+    let mut w = std::io::BufWriter::new(file);
+    serde_json::to_writer_pretty(&mut w, &state)
         .with_context(|| format!("write {:?}", output_path))?;
+    w.flush().with_context(|| format!("flush {:?}", output_path))?;
     eprintln!("done");
     Ok(state)
 }
