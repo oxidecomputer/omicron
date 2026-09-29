@@ -107,30 +107,17 @@ impl VmmState {
         self.to_nexus_state().exists_on_sled()
     }
 
-    /// Returns the states from which a VMM can still be stopped during sled
-    /// evacuation.
-    pub fn stoppable_states() -> Vec<Self> {
-        Self::ALL_STATES
-            .iter()
-            .copied()
-            .filter(|state| match state {
-                // A VMM in one of these states is on its way, or is already
-                // running, and can be stopped.
-                VmmState::Creating
-                | VmmState::Starting
-                | VmmState::Running
-                | VmmState::Rebooting => true,
-                // A VMM in one of these states is already stopping/stopped,
-                // migrating, or terminal, so there is nothing to stop.
-                VmmState::Stopping
-                | VmmState::Stopped
-                | VmmState::Migrating
-                | VmmState::Failed
-                | VmmState::Destroyed
-                | VmmState::SagaUnwound => false,
-            })
-            .collect()
-    }
+    /// The states in which a VMM should be stopped during sled evacuation.
+    pub const SHOULD_STOP_FOR_EVACUATION: &'static [Self] = &[
+        // A VMM in one of these states is on its way, or is already running,
+        // and can be stopped.
+        VmmState::Creating,
+        VmmState::Starting,
+        VmmState::Running,
+        VmmState::Rebooting,
+        // If it is not in one of these states, it is already stopping/stopped,
+        // migrating, or has terminated, so it does not need to be stopped.
+    ];
 }
 
 impl fmt::Display for VmmState {
@@ -460,6 +447,37 @@ mod tests {
                 exists_on_sled() method in nexus_types returns false, the \
                 state should be in NONEXISTENT_STATES, and vice versa",
             );
+        }
+    }
+
+    #[test]
+    fn test_should_stop_for_update_states_consistent() {
+        // This test exists to make sure that when a new state is added, we
+        // consider whether it is a state where reconfigurator should mark the
+        // VMM to be stopped for sled evacuation. More detailed information about
+        // the process of restarting instances during a live update can be found
+        // in RFD 739.
+        for state in VmmState::ALL_STATES.iter() {
+            match state {
+                VmmState::Creating
+                | VmmState::Starting
+                | VmmState::Running
+                | VmmState::Rebooting => {
+                    assert!(
+                        VmmState::SHOULD_STOP_FOR_EVACUATION.contains(state)
+                    );
+                }
+                VmmState::Failed
+                | VmmState::Stopping
+                | VmmState::Stopped
+                | VmmState::Migrating
+                | VmmState::Destroyed
+                | VmmState::SagaUnwound => {
+                    assert!(
+                        !VmmState::SHOULD_STOP_FOR_EVACUATION.contains(state)
+                    );
+                }
+            }
         }
     }
 }

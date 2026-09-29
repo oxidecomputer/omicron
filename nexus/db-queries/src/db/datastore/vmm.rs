@@ -158,9 +158,10 @@ impl DataStore {
     /// Marks VMMs sleds that are evacuating as needing to be stopped in order
     /// to update the sled.
     ///
-    /// VMMs that are already stopping/stopped, migrating or in a terminal state
-    /// do not need to be stopped, so they are left untouched. VMMs that are
-    /// already marked to be stopped by update are also excluded.
+    /// VMMs that are in the `Failed`, `Stopping`, `Stopped`, `Migrating`,
+    /// `Destroyed` or `SagaUnwound` states do not need to be stopped, so they
+    /// are left untouched. VMMs that are already marked to be stopped by update
+    /// are also excluded.
     ///
     /// The task to stop instances only needs to know whether a VMM should be
     /// stopped or not, so a boolean would be enough. But, we mark the VMMs
@@ -174,7 +175,7 @@ impl DataStore {
         let updated = diesel::update(dsl::vmm)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::stop_for_update_disposition_generation.is_null())
-            .filter(dsl::state.eq_any(DbVmmState::stoppable_states()))
+            .filter(dsl::state.eq_any(DbVmmState::SHOULD_STOP_FOR_EVACUATION))
             .filter(
                 dsl::sled_id.eq_any(
                     rz_dsl::rendezvous_sled_bp_availability
