@@ -250,6 +250,13 @@ pub struct GimletConfig {
     pub common: SpCommonConfig,
 }
 
+/// Configuration of a simulated power shelf controller SP
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct PscConfig {
+    #[serde(flatten)]
+    pub common: SpCommonConfig,
+}
+
 /// Configuration of a set of simulated SPs
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct SimulatedSpsConfig {
@@ -257,6 +264,9 @@ pub struct SimulatedSpsConfig {
     pub sidecar: Vec<SidecarConfig>,
     /// Simulated gimlet(s)
     pub gimlet: Vec<GimletConfig>,
+    /// Simulated power shelf controller(s)
+    #[serde(default)]
+    pub psc: Vec<PscConfig>,
 }
 
 /// Configuration for a sp-sim

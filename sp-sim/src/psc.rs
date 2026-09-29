@@ -5,9 +5,7 @@
 use crate::HostFlashHashPolicy;
 use crate::Responsiveness;
 use crate::SimulatedSp;
-use crate::config::Config;
-use crate::config::SidecarConfig;
-use crate::config::SimulatedSpsConfig;
+use crate::config::PscConfig;
 use crate::config::SpComponentConfig;
 use crate::device_descriptions::DeviceDescriptions;
 use crate::ereport::EreportState;
@@ -34,7 +32,6 @@ use gateway_messages::DumpTask;
 use gateway_messages::HostBootfailPayloadData;
 use gateway_messages::HostInfoRequest;
 use gateway_messages::HostPanicPayloadData;
-use gateway_messages::IgnitionCommand;
 use gateway_messages::IgnitionState;
 use gateway_messages::MgsError;
 use gateway_messages::MgsRequest;
@@ -42,6 +39,7 @@ use gateway_messages::MgsResponse;
 use gateway_messages::PmbusStatus;
 use gateway_messages::PowerRailName;
 use gateway_messages::PowerState;
+use gateway_messages::PowerStateTransition;
 use gateway_messages::PowerStateWithReason;
 use gateway_messages::RotBootInfo;
 use gateway_messages::RotRequest;
@@ -53,7 +51,6 @@ use gateway_messages::SpStateV2;
 use gateway_messages::StartupOptions;
 use gateway_messages::StateChangeReason;
 use gateway_messages::ignition;
-use gateway_messages::ignition::IgnitionError;
 use gateway_messages::ignition::LinkEvents;
 use gateway_messages::sp_impl::BoundsChecked;
 use gateway_messages::sp_impl::DeviceDescription;
@@ -68,22 +65,21 @@ use std::iter;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
-use std::sync::atomic::Ordering;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
 
-pub const SIM_SIDECAR_BOARD: &str = "SimSidecarSp";
+pub const SIM_PSC_BOARD: &str = "SimPscSp";
 
-/// Baseboard model reported by simulated Sidecars whose config does not set a
+/// Baseboard model reported by simulated PSCs whose config does not set a
 /// part number.
-pub const FAKE_SIDECAR_MODEL: &str = "FAKE_SIM_SIDECAR";
+pub const FAKE_PSC_MODEL: &str = "FAKE_SIM_PSC";
 
-pub struct Sidecar {
+pub struct Psc {
     sp: sp::Handle<Handler>,
 }
 
 #[async_trait]
-impl SimulatedSp for Sidecar {
+impl SimulatedSp for Psc {
     async fn state(&self) -> SpState {
         SpState::from(self.sp.handler().await.unwrap().sp_state_impl())
     }
@@ -109,7 +105,7 @@ impl SimulatedSp for Sidecar {
     }
 
     async fn host_phase1_data(&self, _slot: u16) -> Option<Vec<u8>> {
-        // sidecars do not have attached hosts
+        // PSCs do not have attached hosts
         None
     }
 
@@ -147,22 +143,18 @@ impl SimulatedSp for Sidecar {
     }
 }
 
-impl Sidecar {
-    pub async fn spawn(
-        config: &Config,
-        sidecar: &SidecarConfig,
-        log: Logger,
-    ) -> Result<Self> {
-        info!(log, "setting up simulated sidecar");
+impl Psc {
+    pub async fn spawn(psc: &PscConfig, log: Logger) -> Result<Self> {
+        info!(log, "setting up simulated PSC");
 
         let baseboard_vpd =
-            BaseboardVpd::from_config(&sidecar.common, FAKE_SIDECAR_MODEL)?;
-        if let Some(network_config) = &sidecar.common.network_config {
+            BaseboardVpd::from_config(&psc.common, FAKE_PSC_MODEL)?;
+        if let Some(network_config) = &psc.common.network_config {
             // bind to our two local "KSZ" ports
             let servers = UdpServer::bind_pair(network_config, &log).await?;
 
             let ereport_log = log.new(slog::o!("component" => "ereport-sim"));
-            let ereport_servers = match &sidecar.common.ereport_network_config {
+            let ereport_servers = match &psc.common.ereport_network_config {
                 Some(cfg) => {
                     Some(UdpServer::bind_pair(cfg, &ereport_log).await?)
                 }
@@ -170,15 +162,15 @@ impl Sidecar {
             };
 
             let update_state = SimSpUpdate::new(
-                BaseboardKind::Sidecar,
-                sidecar.common.no_stage0_caboose,
-                // sidecar doesn't have phase 1 flash; any policy is fine
+                BaseboardKind::Psc,
+                psc.common.no_stage0_caboose,
+                // PSC doesn't have phase 1 flash; any policy is fine
                 HostFlashHashPolicy::assume_already_hashed(),
-                sidecar.common.cabooses.clone(),
+                psc.common.cabooses.clone(),
             );
 
             let ereport_state = {
-                let cfg = sidecar.common.ereport_config.clone();
+                let cfg = psc.common.ereport_config.clone();
                 EreportState::new(
                     cfg,
                     &baseboard_vpd,
@@ -189,10 +181,9 @@ impl Sidecar {
 
             let handler = Handler::new(
                 baseboard_vpd,
-                sidecar.common.components.clone(),
-                FakeIgnition::new(&config.simulated_sps),
+                psc.common.components.clone(),
                 log,
-                sidecar.common.old_rot_state,
+                psc.common.old_rot_state,
                 update_state,
             );
             let sp = sp::Handle::spawn(
@@ -207,16 +198,6 @@ impl Sidecar {
             Ok(Self { sp: sp::Handle::rot_only() })
         }
     }
-
-    pub async fn current_ignition_state(&self) -> Vec<IgnitionState> {
-        self.sp
-            .handler()
-            .await
-            .expect("no network config provided when constructing sim sidecar")
-            .ignition
-            .state
-            .clone()
-    }
 }
 
 struct Handler {
@@ -226,8 +207,6 @@ struct Handler {
     component_vpds: ComponentVpds,
 
     baseboard_vpd: BaseboardVpd,
-    ignition: FakeIgnition,
-    power_state: PowerState,
     power_state_changes: Arc<AtomicUsize>,
 
     update_state: SimSpUpdate,
@@ -247,7 +226,6 @@ impl Handler {
     fn new(
         baseboard_vpd: BaseboardVpd,
         components: Vec<SpComponentConfig>,
-        ignition: FakeIgnition,
         log: Logger,
         old_rot_state: bool,
         update_state: SimSpUpdate,
@@ -264,8 +242,6 @@ impl Handler {
             sensors,
             component_vpds,
             baseboard_vpd,
-            ignition,
-            power_state: PowerState::A2,
             power_state_changes: Arc::new(AtomicUsize::new(0)),
             update_state,
             reset_pending: None,
@@ -282,16 +258,16 @@ impl Handler {
             model: self.baseboard_vpd.padded_part_number(),
             revision: 0,
             base_mac_address: [0; 6],
-            power_state: self.power_state,
+            // PSC is always in A2.
+            power_state: PowerState::A2,
             rot: Ok(rot_state_v2(self.update_state.rot_state())),
         }
     }
 }
 
 impl SpHandler for Handler {
-    type BulkIgnitionStateIter = iter::Skip<std::vec::IntoIter<IgnitionState>>;
-    type BulkIgnitionLinkEventsIter =
-        iter::Skip<std::vec::IntoIter<LinkEvents>>;
+    type BulkIgnitionStateIter = iter::Empty<IgnitionState>;
+    type BulkIgnitionLinkEventsIter = iter::Empty<LinkEvents>;
     type VLanId = SpPort;
 
     fn ensure_request_trusted(
@@ -323,62 +299,55 @@ impl SpHandler for Handler {
     }
 
     fn num_ignition_ports(&mut self) -> Result<u32, SpError> {
-        Ok(self.ignition.num_targets() as u32)
+        Err(SpError::RequestUnsupportedForSp)
     }
 
-    fn ignition_state(&mut self, target: u8) -> Result<IgnitionState, SpError> {
-        let state = self.ignition.get_target(target)?;
-        debug!(
+    fn ignition_state(
+        &mut self,
+        target: u8,
+    ) -> Result<gateway_messages::IgnitionState, SpError> {
+        warn!(
             &self.log,
-            "received ignition state request";
+            "received ignition state request; not supported by PSC";
             "target" => target,
-            "reply-state" => ?state,
         );
-        Ok(*state)
+        Err(SpError::RequestUnsupportedForSp)
     }
 
     fn bulk_ignition_state(
         &mut self,
         offset: u32,
     ) -> Result<Self::BulkIgnitionStateIter, SpError> {
-        debug!(
+        warn!(
             &self.log,
-            "received bulk ignition state request";
+            "received bulk ignition state request; not supported by PSC";
             "offset" => offset,
-            "state" => ?self.ignition.state,
         );
-        Ok(self.ignition.state.clone().into_iter().skip(offset as usize))
+        Err(SpError::RequestUnsupportedForSp)
     }
 
     fn ignition_link_events(
         &mut self,
         target: u8,
     ) -> Result<LinkEvents, SpError> {
-        // Check validity of `target`
-        _ = self.ignition.get_target(target)?;
-
-        let events = self.ignition.link_events[usize::from(target)];
-
-        debug!(
+        warn!(
             &self.log,
-            "received ignition link events request";
+            "received ignition link events request; not supported by PSC";
             "target" => target,
-            "events" => ?events,
         );
-
-        Ok(events)
+        Err(SpError::RequestUnsupportedForSp)
     }
 
     fn bulk_ignition_link_events(
         &mut self,
         offset: u32,
     ) -> Result<Self::BulkIgnitionLinkEventsIter, SpError> {
-        debug!(
+        warn!(
             &self.log,
-            "received bulk ignition link events request";
+            "received bulk ignition link events request; not supported by PSC";
             "offset" => offset,
         );
-        Ok(self.ignition.link_events.clone().into_iter().skip(offset as usize))
+        Err(SpError::RequestUnsupportedForSp)
     }
 
     /// If `target` is `None`, clear link events for all targets.
@@ -387,57 +356,27 @@ impl SpHandler for Handler {
         target: Option<u8>,
         transceiver_select: Option<ignition::TransceiverSelect>,
     ) -> Result<(), SpError> {
-        let targets = match target {
-            Some(t) => {
-                // Check validity
-                _ = self.ignition.get_target(t)?;
-                usize::from(t)..usize::from(t) + 1
-            }
-            None => 0..self.ignition.num_targets(),
-        };
-
-        for t in targets {
-            match transceiver_select {
-                Some(ignition::TransceiverSelect::Controller) => {
-                    self.ignition.link_events[t].controller =
-                        empty_transceiver_events();
-                }
-                Some(ignition::TransceiverSelect::TargetLink0) => {
-                    self.ignition.link_events[t].target_link0 =
-                        empty_transceiver_events();
-                }
-                Some(ignition::TransceiverSelect::TargetLink1) => {
-                    self.ignition.link_events[t].target_link1 =
-                        empty_transceiver_events();
-                }
-                None => {
-                    self.ignition.link_events[t] = empty_link_events();
-                }
-            }
-        }
-
-        debug!(
+        warn!(
             &self.log,
-            "cleared ignition link events";
+            "received clear ignition link events request; not supported by PSC";
             "target" => ?target,
             "transceiver_select" => ?transceiver_select,
         );
-        Ok(())
+        Err(SpError::RequestUnsupportedForSp)
     }
 
     fn ignition_command(
         &mut self,
         target: u8,
-        command: IgnitionCommand,
+        command: gateway_messages::IgnitionCommand,
     ) -> Result<(), SpError> {
-        self.ignition.command(target, command)?;
-        debug!(
+        warn!(
             &self.log,
-            "received ignition command; sending ack";
+            "received ignition command; not supported by PSC";
             "target" => target,
             "command" => ?command,
         );
-        Ok(())
+        Err(SpError::RequestUnsupportedForSp)
     }
 
     fn serial_console_attach(
@@ -446,7 +385,8 @@ impl SpHandler for Handler {
         _component: SpComponent,
     ) -> Result<(), SpError> {
         warn!(
-            &self.log, "received serial console attach; unsupported by sidecar";
+            &self.log,
+            "received serial console attach; unsupported by PSC";
             "sender" => ?sender,
         );
         Err(SpError::RequestUnsupportedForSp)
@@ -459,7 +399,8 @@ impl SpHandler for Handler {
         _data: &[u8],
     ) -> Result<u64, SpError> {
         warn!(
-            &self.log, "received serial console write; unsupported by sidecar";
+            &self.log,
+            "received serial console write; unsupported by PSC";
             "sender" => ?sender,
         );
         Err(SpError::RequestUnsupportedForSp)
@@ -471,7 +412,7 @@ impl SpHandler for Handler {
     ) -> Result<(), SpError> {
         warn!(
             &self.log,
-            "received serial console keepalive; unsupported by sidecar";
+            "received serial console keepalive; unsupported by PSC";
             "sender" => ?sender,
         );
         Err(SpError::RequestUnsupportedForSp)
@@ -482,7 +423,8 @@ impl SpHandler for Handler {
         sender: Sender<Self::VLanId>,
     ) -> Result<(), SpError> {
         warn!(
-            &self.log, "received serial console detach; unsupported by sidecar";
+            &self.log,
+            "received serial console detach; unsupported by PSC";
             "sender" => ?sender,
         );
         Err(SpError::RequestUnsupportedForSp)
@@ -494,7 +436,7 @@ impl SpHandler for Handler {
     ) -> Result<(), SpError> {
         warn!(
             &self.log,
-            "received serial console break; not supported by sidecar";
+            "received serial console break; not supported by PSC";
             "sender" => ?sender,
         );
         Err(SpError::RequestUnsupportedForSp)
@@ -503,7 +445,7 @@ impl SpHandler for Handler {
     fn send_host_nmi(&mut self) -> Result<(), SpError> {
         warn!(
             &self.log,
-            "received host NMI request; not supported by sidecar";
+            "received host NMI request; not supported by PSC";
         );
         Err(SpError::RequestUnsupportedForSp)
     }
@@ -511,7 +453,8 @@ impl SpHandler for Handler {
     fn sp_state(&mut self) -> Result<SpStateV2, SpError> {
         let state = self.sp_state_impl();
         debug!(
-            &self.log, "received state request";
+            &self.log,
+            "received state request";
             "reply-state" => ?state,
         );
         Ok(state)
@@ -582,19 +525,22 @@ impl SpHandler for Handler {
     ) -> Result<(), SpError> {
         debug!(
             &self.log,
-            "received update abort; not supported by simulated sidecar";
+            "received update abort";
             "component" => ?component,
             "id" => ?update_id,
         );
         self.update_state.abort(update_id)
     }
 
-    fn power_state(&mut self) -> Result<gateway_messages::PowerState, SpError> {
+    fn power_state(&mut self) -> Result<PowerState, SpError> {
+        // PSCs are always in A2.
+        let power_state = PowerState::A2;
         debug!(
-            &self.log, "received power state";
-            "power_state" => ?self.power_state,
+            &self.log,
+            "received power state";
+            "power_state" => ?power_state,
         );
-        Ok(self.power_state)
+        Ok(power_state)
     }
 
     fn power_state_with_reason(
@@ -603,13 +549,14 @@ impl SpHandler for Handler {
         let power_state = self.power_state()?;
 
         debug!(
-            &self.log, "received power state with reason";
+            &self.log,
+            "received power state with reason";
             "power_state" => ?power_state,
         );
 
         Ok(PowerStateWithReason {
             state: power_state,
-            reason: StateChangeReason::Other,
+            reason: StateChangeReason::InitialPowerOn,
             since: 1,
         })
     }
@@ -617,28 +564,15 @@ impl SpHandler for Handler {
     fn set_power_state(
         &mut self,
         sender: Sender<Self::VLanId>,
-        power_state: gateway_messages::PowerState,
-    ) -> Result<gateway_messages::PowerStateTransition, SpError> {
-        // NOTE(eliza): This is *currently* accurate to real life sidecar
-        // behavior, as the sidecar sequencer does not treat `set_power_state`
-        // calls with the current power state idempotently, the way the compute
-        // sled sequencer does.
-        // See: https://github.com/oxidecomputer/hubris/blob/13808140c49fdf8f1ce462184395d3b28212c217/task/control-plane-agent/src/mgs_sidecar.rs#L838-L840
-        let transition = gateway_messages::PowerStateTransition::Changed;
-        debug!(
-            &self.log, "received set power state";
-            "sender" => ?sender,
+        power_state: PowerState,
+    ) -> Result<PowerStateTransition, SpError> {
+        warn!(
+            &self.log,
+            "received set power state request; not supported by PSC";
             "power_state" => ?power_state,
-            "transition" => ?transition,
+            "sender" => ?sender,
         );
-        self.power_state = power_state;
-        match transition {
-            gateway_messages::PowerStateTransition::Changed => {
-                self.power_state_changes.fetch_add(1, Ordering::Relaxed);
-            }
-            gateway_messages::PowerStateTransition::Unchanged => (),
-        }
-        Ok(transition)
+        Err(SpError::RequestUnsupportedForSp)
     }
 
     fn reset_component_prepare(
@@ -646,7 +580,8 @@ impl SpHandler for Handler {
         component: SpComponent,
     ) -> Result<(), SpError> {
         debug!(
-            &self.log, "received reset prepare request";
+            &self.log,
+            "received reset prepare request";
             "component" => ?component,
         );
         if component == SpComponent::SP_ITSELF || component == SpComponent::ROT
@@ -663,7 +598,8 @@ impl SpHandler for Handler {
         component: SpComponent,
     ) -> Result<(), SpError> {
         debug!(
-            &self.log, "received sys-reset trigger request";
+            &self.log,
+            "received reset trigger request";
             "component" => ?component,
         );
         if component == SpComponent::SP_ITSELF {
@@ -710,10 +646,9 @@ impl SpHandler for Handler {
     ) -> Result<u32, SpError> {
         let num_sensor_details =
             self.sensors.num_component_details(&component).unwrap_or(0);
-        // TODO: here is where we might also handle port statuses, if we decide
-        // to simulate that later...
         debug!(
-            &self.log, "asked for number of component details";
+            &self.log,
+            "asked for number of component details";
             "component" => ?component,
             "num_details" => num_sensor_details
         );
@@ -728,7 +663,7 @@ impl SpHandler for Handler {
         let Some(sensor_details) =
             self.sensors.component_details(&component, index)
         else {
-            todo!("simulate port status details...");
+            unreachable!("all PSC component details are sensors");
         };
         debug!(
             &self.log, "asked for component details for a sensor";
@@ -744,7 +679,8 @@ impl SpHandler for Handler {
         component: SpComponent,
     ) -> Result<(), SpError> {
         warn!(
-            &self.log, "asked to clear status (not supported for sim components)";
+            &self.log,
+            "asked to clear status (not supported for sim components)";
             "component" => ?component,
         );
         Err(SpError::RequestUnsupportedForComponent)
@@ -754,8 +690,9 @@ impl SpHandler for Handler {
         &mut self,
         component: SpComponent,
     ) -> Result<u16, SpError> {
-        warn!(
-            &self.log, "asked for component active slot";
+        debug!(
+            &self.log,
+            "asked for component active slot";
             "component" => ?component,
         );
         self.update_state.component_get_active_slot(component)
@@ -767,8 +704,9 @@ impl SpHandler for Handler {
         slot: u16,
         persist: bool,
     ) -> Result<(), SpError> {
-        warn!(
-            &self.log, "asked to set component active slot";
+        debug!(
+            &self.log,
+            "asked to set component active slot";
             "component" => ?component,
             "slot" => slot,
             "persist" => persist,
@@ -781,7 +719,8 @@ impl SpHandler for Handler {
         component: SpComponent,
     ) -> std::result::Result<u16, SpError> {
         debug!(
-            &self.log, "asked for component persistent slot";
+            &self.log,
+            "asked for component persistent slot";
             "component" => ?component,
         );
         self.update_state.component_get_persistent_slot(component)
@@ -794,7 +733,8 @@ impl SpHandler for Handler {
         action: ComponentAction,
     ) -> Result<ComponentActionResponse, SpError> {
         warn!(
-            &self.log, "asked to perform component action (not supported for sim components)";
+            &self.log,
+            "asked to perform component action (not supported for sim components)";
             "sender" => ?sender,
             "component" => ?component,
             "action" => ?action,
@@ -804,7 +744,8 @@ impl SpHandler for Handler {
 
     fn get_startup_options(&mut self) -> Result<StartupOptions, SpError> {
         warn!(
-            &self.log, "asked for startup options (unsupported by sidecar)";
+            &self.log,
+            "asked for startup options (unsupported by PSC)";
         );
         Err(SpError::RequestUnsupportedForSp)
     }
@@ -814,7 +755,8 @@ impl SpHandler for Handler {
         startup_options: StartupOptions,
     ) -> Result<(), SpError> {
         warn!(
-            &self.log, "asked to set startup options (unsupported by sidecar)";
+            &self.log,
+            "asked to set startup options (unsupported by PSC)";
             "options" => ?startup_options,
         );
         Err(SpError::RequestUnsupportedForSp)
@@ -822,7 +764,8 @@ impl SpHandler for Handler {
 
     fn mgs_response_error(&mut self, message_id: u32, err: MgsError) {
         warn!(
-            &self.log, "received MGS error response";
+            &self.log,
+            "received MGS error response";
             "message_id" => message_id,
             "err" => ?err,
         );
@@ -837,7 +780,8 @@ impl SpHandler for Handler {
         data: &[u8],
     ) {
         debug!(
-            &self.log, "received host phase 2 data from MGS";
+            &self.log,
+            "received host phase 2 data from MGS (not supported by PSC)";
             "sender" => ?sender,
             "message_id" => message_id,
             "hash" => ?hash,
@@ -853,7 +797,7 @@ impl SpHandler for Handler {
     ) -> Result<(), SpError> {
         warn!(
             &self.log,
-            "received IPCC key/value; not supported by sidecar";
+            "received IPCC key/value; not supported by PSC";
             "key" => key,
             "value" => ?value,
         );
@@ -894,7 +838,7 @@ impl SpHandler for Handler {
         request: RotRequest,
         buf: &mut [u8],
     ) -> std::result::Result<RotResponse, SpError> {
-        read_dummy_rot_page(BaseboardKind::Sidecar, request, buf)
+        read_dummy_rot_page(BaseboardKind::Psc, request, buf)
     }
 
     fn vpd_lock_status_all(
@@ -910,7 +854,8 @@ impl SpHandler for Handler {
         _time_ms: u32,
     ) -> Result<(), SpError> {
         debug!(
-            &self.log, "received sys-reset trigger with wathcdog request";
+            &self.log,
+            "received reset trigger with watchdog request";
             "component" => ?component,
         );
         if component == SpComponent::SP_ITSELF {
@@ -1038,141 +983,5 @@ impl SimSpHandler for Handler {
 
     fn power_state_changes(&self) -> &Arc<AtomicUsize> {
         &self.power_state_changes
-    }
-}
-
-struct FakeIgnition {
-    state: Vec<IgnitionState>,
-    link_events: Vec<LinkEvents>,
-}
-
-fn empty_transceiver_events() -> ignition::TransceiverEvents {
-    ignition::TransceiverEvents {
-        encoding_error: false,
-        decoding_error: false,
-        ordered_set_invalid: false,
-        message_version_invalid: false,
-        message_type_invalid: false,
-        message_checksum_invalid: false,
-    }
-}
-
-fn empty_link_events() -> LinkEvents {
-    LinkEvents {
-        controller: empty_transceiver_events(),
-        target_link0: empty_transceiver_events(),
-        target_link1: empty_transceiver_events(),
-    }
-}
-
-fn initial_ignition_state(system_type: ignition::SystemType) -> IgnitionState {
-    fn valid_receiver() -> ignition::ReceiverStatus {
-        ignition::ReceiverStatus {
-            aligned: true,
-            locked: true,
-            polarity_inverted: false,
-        }
-    }
-    IgnitionState {
-        receiver: valid_receiver(),
-        target: Some(ignition::TargetState {
-            system_type,
-            power_state: ignition::SystemPowerState::On,
-            power_reset_in_progress: false,
-            faults: ignition::SystemFaults {
-                power_a3: false,
-                power_a2: false,
-                sp: false,
-                rot: false,
-            },
-            controller0_present: true,
-            controller1_present: false,
-            link0_receiver_status: valid_receiver(),
-            link1_receiver_status: valid_receiver(),
-        }),
-    }
-}
-
-impl FakeIgnition {
-    // Ignition always has 35 ports: 32 sleds, 2 psc, 1 sidecar (the other one)
-    const NUM_IGNITION_TARGETS: usize = 35;
-
-    fn new(config: &SimulatedSpsConfig) -> Self {
-        let mut state = Vec::new();
-
-        for _ in &config.sidecar {
-            state.push(initial_ignition_state(ignition::SystemType::Sidecar));
-        }
-        for _ in &config.gimlet {
-            state.push(initial_ignition_state(ignition::SystemType::Gimlet));
-        }
-        for _ in &config.psc {
-            state.push(initial_ignition_state(ignition::SystemType::Psc));
-        }
-
-        assert!(
-            state.len() <= Self::NUM_IGNITION_TARGETS,
-            "too many simulated SPs"
-        );
-        while state.len() < Self::NUM_IGNITION_TARGETS {
-            state.push(IgnitionState {
-                receiver: ignition::ReceiverStatus {
-                    aligned: false,
-                    locked: false,
-                    polarity_inverted: false,
-                },
-                target: None,
-            });
-        }
-
-        Self {
-            state,
-            link_events: vec![empty_link_events(); Self::NUM_IGNITION_TARGETS],
-        }
-    }
-
-    fn num_targets(&self) -> usize {
-        self.state.len()
-    }
-
-    fn get_target(&self, target: u8) -> Result<&IgnitionState, SpError> {
-        self.state
-            .get(usize::from(target))
-            .ok_or(SpError::Ignition(IgnitionError::InvalidPort))
-    }
-
-    fn get_target_mut(
-        &mut self,
-        target: u8,
-    ) -> Result<&mut IgnitionState, SpError> {
-        self.state
-            .get_mut(usize::from(target))
-            .ok_or(SpError::Ignition(IgnitionError::InvalidPort))
-    }
-
-    fn command(
-        &mut self,
-        target: u8,
-        command: IgnitionCommand,
-    ) -> Result<(), SpError> {
-        let target = self
-            .get_target_mut(target)?
-            .target
-            .as_mut()
-            .ok_or(SpError::Ignition(IgnitionError::NoTargetPresent))?;
-
-        match command {
-            IgnitionCommand::PowerOn | IgnitionCommand::PowerReset => {
-                target.power_state = ignition::SystemPowerState::On;
-            }
-            IgnitionCommand::PowerOff => {
-                target.power_state = ignition::SystemPowerState::Off;
-            }
-            IgnitionCommand::AlwaysTransmit { .. } => {
-                // This is only used in manufacturing; do nothing.
-            }
-        }
-
-        Ok(())
     }
 }
