@@ -7,16 +7,6 @@ progenitor::generate_api!(
     interface = Positional,
     inner_type = slog::Logger,
     derives = [schemars::JsonSchema, Clone, Eq, PartialEq],
-    pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
-        slog::debug!(log, "client request";
-            "method" => %request.method(),
-            "uri" => %request.url(),
-            "body" => ?&request.body(),
-        );
-    }),
-    post_hook = (|log: &slog::Logger, result: &Result<_, _>| {
-        slog::debug!(log, "client response"; "result" => ?result);
-    }),
     replace = {
         DnsConfig = internal_dns_types_versions::latest::config::DnsConfig,
         DnsConfigParams = internal_dns_types_versions::latest::config::DnsConfigParams,
@@ -25,6 +15,30 @@ progenitor::generate_api!(
         Srv = internal_dns_types_versions::latest::config::Srv,
     }
 );
+
+impl progenitor::progenitor_client::ClientHooks<slog::Logger> for Client {
+    async fn pre<E>(
+        &self,
+        request: &mut reqwest::Request,
+        _info: &progenitor::progenitor_client::OperationInfo,
+    ) -> Result<(), progenitor::progenitor_client::Error<E>> {
+        slog::debug!(self.inner(), "client request";
+            "method" => %request.method(),
+            "uri" => %request.url(),
+            "body" => ?&request.body(),
+        );
+        Ok(())
+    }
+
+    async fn post<E>(
+        &self,
+        result: &reqwest::Result<reqwest::Response>,
+        _info: &progenitor::progenitor_client::OperationInfo,
+    ) -> Result<(), progenitor::progenitor_client::Error<E>> {
+        slog::debug!(self.inner(), "client response"; "result" => ?result);
+        Ok(())
+    }
+}
 
 pub use internal_dns_types_versions::latest::config::{
     ERROR_CODE_BAD_UPDATE_GENERATION, ERROR_CODE_UPDATE_IN_PROGRESS,
