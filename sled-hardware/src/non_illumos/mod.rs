@@ -87,10 +87,9 @@ pub fn is_oxide_sled() -> anyhow::Result<bool> {
     Ok(false)
 }
 
-/// Probe for switch hardware. Nothing is attached off illumos.
-pub fn detect_switch_hardware(
+/// No-op for non-illumos systems.
+pub fn find_softnpu_device(
     _log: &Logger,
-    _probe: crate::SwitchProbe,
-) -> Result<Option<crate::DendriteAsic>, crate::SwitchDetectError> {
-    Ok(None)
+) -> Result<bool, crate::SwitchDetectError> {
+    Ok(false)
 }

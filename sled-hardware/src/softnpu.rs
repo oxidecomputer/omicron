@@ -55,6 +55,13 @@ pub fn decode_rversion(msg: &[u8]) -> Result<String, String> {
     if msg.len() < VERSION_OFFSET {
         return Err(format!("short reply ({} bytes)", msg.len()));
     }
+    let size = u32::from_le_bytes(msg[0..4].try_into().unwrap());
+    if usize::try_from(size).ok() != Some(msg.len()) {
+        return Err(format!(
+            "size field {size} does not match {} bytes read",
+            msg.len()
+        ));
+    }
     if msg[TYPE_OFFSET] != RVERSION {
         return Err(format!("unexpected message type {}", msg[TYPE_OFFSET]));
     }
@@ -122,6 +129,11 @@ mod tests {
 
         let mut msg = rversion(SOFTNPU_9P_VERSION.as_bytes(), NOTAG, MSIZE);
         msg.truncate(msg.len() - 1);
+        assert!(decode_rversion(&msg).is_err());
+
+        let mut msg = rversion(SOFTNPU_9P_VERSION.as_bytes(), NOTAG, MSIZE);
+        let wrong_size = msg.len() as u32 + 1;
+        msg[0..4].copy_from_slice(&wrong_size.to_le_bytes());
         assert!(decode_rversion(&msg).is_err());
     }
 

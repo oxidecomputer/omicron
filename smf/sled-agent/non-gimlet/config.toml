@@ -1,10 +1,28 @@
 # Sled Agent Configuration
 
-# One host running a SoftNPU zone; always a scrimlet. Other kinds:
-# "production" (Tofino, detected), "virtual" (propolis SoftNPU device,
-# detected, with port counts), and "custom" with an explicit sled_mode and
-# switch: "tofino_asic" or "tofino_stub" (optional sidecar_revision), or
-# "soft_npu_propolis_device" or "soft_npu_zone" (with port counts).
+# How this sled is deployed. One of:
+#
+#   kind = "production"
+#     Oxide rack. The hardware monitor detects the Tofino ASIC.
+#     Optional: sidecar_revision (default "b").
+#
+#   kind = "virtual"
+#     Propolis-hosted lab. A SoftNPU device, detected at startup, makes the
+#     sled a scrimlet. Requires front_port_count and rear_port_count.
+#
+#   kind = "standalone"
+#     One host running a SoftNPU zone. Always a scrimlet.
+#     Requires front_port_count and rear_port_count.
+#
+#   kind = "custom"
+#     Explicit sled_mode and switch table.
+#     sled_mode: "auto", "sled", or "scrimlet".
+#     switch.kind: "tofino_asic" or "tofino_stub" (optional sidecar_revision),
+#       "soft_npu_propolis_device" or "soft_npu_zone" (front_port_count and
+#       rear_port_count).
+#     "tofino_asic" and "soft_npu_propolis_device" are detected, so they take
+#       sled_mode "auto"; "tofino_stub" and "soft_npu_zone" are not, so they
+#       take "scrimlet". "sled" ignores the switch and never runs one.
 deployment = { kind = "standalone", front_port_count = 1, rear_port_count = 1 }
 
 # Setting this to true causes sled-agent to always report that its time is

@@ -74,7 +74,7 @@ impl BootstrapAgentStartup {
         let (config, log, startup_networking) =
             tokio::task::spawn_blocking(|| async move {
                 enable_mg_ddm(&config, &log).await?;
-                pumpkind::enable_pumpkind_service(&log)?;
+                pumpkind::enable_pumpkind_service(&log, &config.deployment)?;
                 ensure_zfs_key_directory_exists(&log)?;
 
                 let startup_networking =
