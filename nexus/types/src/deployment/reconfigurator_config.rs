@@ -241,8 +241,7 @@ impl fmt::Display for ReconfiguratorConfigDiffDisplay<'_, '_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let ReconfiguratorConfigDiff {
             planner_enabled,
-            planner_config:
-                PlannerConfigDiff { disruption_policy, sled_update_reboot_policy },
+            planner_config,
             tuf_repo_pruner_enabled,
             blueprint_pruner_enabled,
             blueprint_pruner_nkeep,
@@ -253,17 +252,17 @@ impl fmt::Display for ReconfiguratorConfigDiffDisplay<'_, '_> {
             vec![
                 diff_row!(tuf_repo_pruner_enabled, "tuf repo pruner enabled"),
                 diff_row!(planner_enabled, "planner enabled"),
-                diff_row!(disruption_policy, "disruption policy"),
-                diff_row!(
-                    sled_update_reboot_policy,
-                    "sled update reboot policy"
-                ),
                 diff_row!(blueprint_pruner_enabled, "blueprint pruner enabled"),
                 diff_row!(blueprint_pruner_nkeep, "blueprint pruner nkeep"),
             ],
         );
         // No need for writeln! here because KvList adds its own newlines.
         write!(f, "{list}")?;
+
+        // Also display the planner config. This prints its own `KvList`, so
+        // isn't aligned with the list we have above, which is kind of a bummer
+        // but not a huge deal.
+        write!(f, "{}", planner_config.display())?;
 
         Ok(())
     }
