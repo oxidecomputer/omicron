@@ -5,13 +5,37 @@
 //! A tool to show oxide related log file paths
 //!
 //! All data is based off of reading the filesystem
+//!
+//! # Dating log files
+//!
+//! Filtering by a [`DateRange`] needs the span of time in which each file's
+//! content was written (its [`LogAge`]). A file's own timestamps don't
+//! reliably give this span:
+//!
+//! - logadm(8) rotates SMF logs (and chrony's logs) by copying and then
+//!   truncating them, so a rotated file's creation time is when it was
+//!   copied, after its content was written;
+//! - sled-agent's debug collector copies rotated files again when archiving
+//!   them to a debug dataset, which resets their `mtime` to the time of
+//!   archival (it records the source's `mtime` in the archived file's name
+//!   instead);
+//! - truncation leaves a live log's creation time unchanged, so it can be
+//!   arbitrarily earlier than the live log's content.
+//!
+//! Instead, each file is placed in a *log*: the set of files that together
+//! hold one sequence of log output, such as all of one SMF service's files in
+//! one zone. Every rotation, whether by copying or by starting a new file,
+//! begins the new file after the previous one's last write, so a log's files
+//! don't overlap in time. Sorting a log's files by newest write (the *log
+//! order*) therefore bounds each file's oldest write by the newest write of
+//! the next-older file.
 
 use anyhow::Context;
 use camino::{Utf8DirEntry, Utf8Path, Utf8PathBuf};
 use glob::Pattern;
 use jiff::Timestamp;
 use rayon::prelude::*;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io;
 use uuid::Uuid;
 
@@ -78,7 +102,7 @@ pub struct Filter {
     pub show_empty: bool,
 
     /// Show a log file if its content may overlap this date range, judged
-    /// by its creation time and `mtime` (see [`LogFile::in_date_range`]).
+    /// by its [`LogAge`].
     pub date_range: Option<DateRange>,
 }
 
@@ -86,10 +110,10 @@ pub struct Filter {
 /// Both bounds are inclusive.
 #[derive(Copy, Clone, Debug)]
 pub struct DateRange {
-    /// The end of the range: files whose content begins after this are
+    /// The end of the range: files whose oldest write is after this are
     /// excluded.
     before: Timestamp,
-    /// The start of the range: files with `mtime`s earlier than this are
+    /// The start of the range: files whose newest write is before this are
     /// excluded.
     after: Timestamp,
 }
@@ -100,6 +124,29 @@ impl DateRange {
     }
 }
 
+/// The span of time in which a log file's content may have been written.
+///
+/// See the [module documentation](crate#dating-log-files) for how this is
+/// derived.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LogAge {
+    /// When the file was last written.
+    pub newest_write: Timestamp,
+    /// A time at or before the file's first line, or `None` if no bound is
+    /// known. This may be earlier than the first line (e.g., when a service
+    /// wrote nothing for a while after a rotation), but never later.
+    pub oldest_write: Option<Timestamp>,
+}
+
+impl LogAge {
+    /// Returns true if the file's content may overlap `date_range`
+    /// (inclusive on both ends).
+    pub fn overlaps(&self, date_range: &DateRange) -> bool {
+        self.oldest_write.is_none_or(|oldest| oldest <= date_range.before)
+            && self.newest_write >= date_range.after
+    }
+}
+
 /// Path and metadata about a logfile
 /// We use options for metadata as retrieval is fallible
 #[derive(Debug, Clone, Eq)]
@@ -107,11 +154,9 @@ pub struct LogFile {
     pub path: Utf8PathBuf,
     pub size: Option<u64>,
     pub modified: Option<Timestamp>,
-    /// The file's creation time (crtime), where available. Together with
-    /// `modified` this bounds the time span of the file's content. Only
-    /// populated where it can affect date-range filtering (see
-    /// [`LogFile::read_created`]).
-    pub created: Option<Timestamp>,
+    /// When the file's content may have been written. Populated whenever the
+    /// file's metadata is read, and `None` if its `mtime` could not be read.
+    pub age: Option<LogAge>,
 }
 
 impl LogFile {
@@ -125,80 +170,15 @@ impl LogFile {
         }
     }
 
-    /// Looks up the file's creation time, when it could change the result
-    /// of [`LogFile::in_date_range`] for `date_range`.
-    ///
-    /// The lookup is a separate getattrat(3C) call per file on illumos,
-    /// worth skipping where the `mtime` alone decides the span test.
-    pub fn read_created(&mut self, date_range: &DateRange) {
-        if self.created_affects_range(date_range) {
-            self.created = Self::created(&self.path);
-        }
-    }
-
-    /// Returns true when the creation time could change the result of
-    /// [`LogFile::in_date_range`]: only for a file whose `mtime` postdates
-    /// the end of the range. An `mtime` within the range proves overlap by
-    /// itself, and an `mtime` before the range excludes the file through
-    /// the start bound, which the creation time never weakens.
-    fn created_affects_range(&self, date_range: &DateRange) -> bool {
-        match self.modified {
-            Some(modified) => modified > date_range.before,
-            // Without an mtime the file is excluded outright.
-            None => false,
-        }
-    }
-
-    // illumos does not expose a file's creation time through stat(2); it is
-    // a system attribute (fsattr(7)) requiring a separate getattrat(3C)
-    // call.
-    #[cfg(target_os = "illumos")]
-    fn created(path: &Utf8Path) -> Option<Timestamp> {
-        crtime::crtime(path)
-    }
-
-    #[cfg(not(target_os = "illumos"))]
-    fn created(path: &Utf8Path) -> Option<Timestamp> {
-        // Not every filesystem records a creation time; a file without one
-        // is filtered by mtime alone.
-        std::fs::metadata(path)
-            .and_then(|metadata| metadata.created())
-            .ok()
-            .and_then(|created| created.try_into().ok())
-    }
-
     pub fn file_name_cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.path.file_name().cmp(&other.path.file_name())
     }
 
     /// Returns true if the file's content may overlap `date_range`
-    /// (inclusive on both ends).
-    ///
-    /// A file's content spans from its creation time to its `mtime` (the
-    /// time of its newest write), so it overlaps the range when
-    /// `created <= before && modified >= after`. This keeps a file whose
-    /// newest write postdates the range but which still holds lines from
-    /// within it, such as the current log of a service that has kept
-    /// writing past the end of the range.
-    ///
-    /// The creation time is trusted only when it is no later than the
-    /// `mtime`. A copied file's crtime is the time of the copy, after the
-    /// preserved `mtime` of its content; falling back to the `mtime` in
-    /// that case (and when crtime is unavailable) restores the historical
-    /// behavior of testing the `mtime` against both bounds.
+    /// (inclusive on both ends). A file without a known [`LogAge`] (e.g.,
+    /// one we failed to stat) is excluded.
     pub fn in_date_range(&self, date_range: &DateRange) -> bool {
-        let Some(modified) = self.modified else {
-            // We failed to stat the file, it probably doesn't exist anymore.
-            // Exclude from output.
-            return false;
-        };
-
-        let content_start = match self.created {
-            Some(created) if created <= modified => created,
-            _ => modified,
-        };
-
-        content_start <= date_range.before && modified >= date_range.after
+        self.age.is_some_and(|age| age.overlaps(date_range))
     }
 }
 
@@ -222,71 +202,7 @@ impl Ord for LogFile {
 
 impl LogFile {
     fn new(path: Utf8PathBuf) -> LogFile {
-        LogFile { path, size: None, modified: None, created: None }
-    }
-}
-
-/// Reading a file's creation time (crtime) on illumos.
-///
-/// crtime is a system attribute (fsattr(7)) rather than part of stat(2),
-/// retrieved with getattrat(3C) as an nvlist whose "crtime" entry holds a
-/// [seconds, nanoseconds] pair.
-#[cfg(target_os = "illumos")]
-mod crtime {
-    use camino::Utf8Path;
-    use illumos_nvpair::{NvList, NvValue};
-    use illumos_nvpair_sys::{nvlist_free, nvlist_t};
-    use jiff::Timestamp;
-    use std::ffi::{CString, c_char, c_int};
-
-    // See xattr_view_t in sys/attr.h. crtime lives in the read-write view
-    // (it is settable via setattrat(3C) on ZFS); the read-only view holds
-    // only fsid, generation, and similar.
-    const XATTR_VIEW_READWRITE: c_int = 1;
-
-    #[link(name = "c")]
-    unsafe extern "C" {
-        fn getattrat(
-            basefd: c_int,
-            view: c_int,
-            name: *const c_char,
-            nvl: *mut *mut nvlist_t,
-        ) -> c_int;
-    }
-
-    /// Returns the creation time of the file at `path`, or `None` if it
-    /// cannot be determined (missing file, a filesystem without system
-    /// attribute support, or an unexpected attribute shape).
-    pub(crate) fn crtime(path: &Utf8Path) -> Option<Timestamp> {
-        let name = CString::new(path.as_str()).ok()?;
-        let mut raw: *mut nvlist_t = std::ptr::null_mut();
-        let rc = unsafe {
-            getattrat(
-                libc::AT_FDCWD,
-                XATTR_VIEW_READWRITE,
-                name.as_ptr(),
-                &mut raw,
-            )
-        };
-        if rc != 0 || raw.is_null() {
-            return None;
-        }
-        // getattrat allocates the nvlist; deep-copy it into Rust, then
-        // free the C allocation whether or not the copy succeeded.
-        let nvlist = unsafe {
-            let copied = NvList::from_raw(raw);
-            nvlist_free(raw);
-            copied
-        }
-        .ok()?;
-        match nvlist.lookup("crtime") {
-            Some(NvValue::UInt64Array(parts)) if parts.len() == 2 => {
-                let seconds = i64::try_from(parts[0]).ok()?;
-                let nanoseconds = i32::try_from(parts[1]).ok()?;
-                Timestamp::new(seconds, nanoseconds).ok()
-            }
-            _ => None,
-        }
+        LogFile { path, size: None, modified: None, age: None }
     }
 }
 
@@ -445,46 +361,81 @@ impl Zones {
     }
 
     /// Return log files organized by service name
+    ///
+    /// Every file's [`LogAge`] is derived from all of the zone's files that
+    /// are loaded, so the date range is applied only after every directory
+    /// has been read: a log's files may be spread across the zone's primary
+    /// directory and several debug datasets.
     pub fn zone_logs(
         &self,
         zone: &str,
         filter: Filter,
     ) -> BTreeMap<ServiceName, SvcLogs> {
-        let mut output = BTreeMap::new();
+        let mut output: BTreeMap<ServiceName, SvcLogs> = BTreeMap::new();
         let Some(paths) = self.zones.get(zone) else {
             return BTreeMap::new();
         };
+
+        // Stat the files only if necessary.
+        let read_metadata = !filter.show_empty || filter.date_range.is_some();
+        let mut candidates = Vec::new();
+
         // Some rotated files exist in `paths.primary` that we track as
         // 'archived'. These files have not yet been migrated into the debug
         // directory.
         if filter.current || filter.archived {
             load_svc_logs(
-                paths.primary.clone(),
-                &mut output,
-                filter.show_empty,
-                filter.date_range,
+                &paths.primary,
+                SvcLogDir::Primary,
+                read_metadata,
+                &mut candidates,
             );
         }
 
         if filter.archived {
-            for dir in paths.debug.clone() {
+            for dir in &paths.debug {
                 load_svc_logs(
                     dir,
-                    &mut output,
-                    filter.show_empty,
-                    filter.date_range,
+                    SvcLogDir::Debug,
+                    read_metadata,
+                    &mut candidates,
                 );
             }
         }
         if filter.extra {
-            for (svc_name, dir) in paths.extra.clone() {
-                load_extra_logs(
+            for (svc_name, dir) in &paths.extra {
+                if load_extra_logs(
                     dir,
                     svc_name,
-                    &mut output,
-                    filter.show_empty,
-                    filter.date_range,
-                );
+                    read_metadata,
+                    &mut candidates,
+                ) {
+                    // Report the service even if it has no logs, as long as
+                    // its log directory exists.
+                    output.entry(svc_name.to_string()).or_default();
+                }
+            }
+        }
+
+        assign_ages(&mut candidates);
+
+        for candidate in candidates {
+            let Candidate { service, slot, file, .. } = candidate;
+            // Empty files are dated along with the rest of their log above:
+            // their newest writes still bound their neighbors' oldest writes.
+            if !filter.show_empty && file.size == Some(0) {
+                continue;
+            }
+            if let Some(date_range) = &filter.date_range {
+                if !file.in_date_range(date_range) {
+                    continue;
+                }
+            }
+            let svc_logs = output.entry(service).or_default();
+            match slot {
+                Slot::Current => svc_logs.current = Some(file),
+                Slot::Archived => svc_logs.archived.push(file),
+                Slot::Extra => svc_logs.extra.push(file),
             }
         }
 
@@ -549,13 +500,127 @@ pub fn oxide_smf_service_name_from_log_file_name(
     None
 }
 
-// Given a directory, find all oxide specific SMF service logs and return them
-// mapped to their inferred service name.
+/// Strips a trailing `.<digits>` suffix from `filename`, if it has one.
+///
+/// Returns the remaining name and the digits.
+fn split_numeric_suffix(filename: &str) -> (&str, Option<&str>) {
+    match filename.rsplit_once('.') {
+        Some((name, suffix))
+            if !suffix.is_empty()
+                && suffix.bytes().all(|b| b.is_ascii_digit()) =>
+        {
+            (name, Some(suffix))
+        }
+        _ => (filename, None),
+    }
+}
+
+/// Returns the name of the log that an SMF log file belongs to: its live
+/// file's name.
+///
+/// SMF log files are named `<service>.log` (live), `<service>.log.<N>`
+/// (rotated by logadm(8)), and `<service>.log.<epoch>` (archived by
+/// sled-agent's debug collector). Keying on the full live file name, rather
+/// than the service name, keeps the logs of separate instances of a service
+/// apart.
+fn smf_log_name(filename: &str) -> &str {
+    split_numeric_suffix(filename).0
+}
+
+/// Returns the name of the log that a file in an extra log directory belongs
+/// to, or `None` if the file doesn't follow the naming of the program that
+/// writes to the directory. Such a file is treated as a log of its own.
+///
+/// Files are grouped by the naming rules of the program that writes them,
+/// not by a guess that applies to every directory:
+///
+/// - CockroachDB names its log files
+///   `<prefix>.<host>.<user>.<timestamp>.<pid>.log`, and groups them into
+///   logs by `<prefix>`, which it constructs to never contain a `.` (see
+///   `FileNamePattern` and `normalizeFileName` in CockroachDB's
+///   `pkg/util/log`). It starts a new file on each rotation and on each
+///   restart. (`<prefix>.log` is a symlink to the current file, which is
+///   not grouped; see [`assign_ages`].)
+/// - chrony's logs are rotated by logadm(8), using the template
+///   `$file.$secs` and compression (see
+///   `smf/chrony-setup/etc/logadm.d/chrony.logadm.conf`): `<name>.log`
+///   (live) and `<name>.log.<secs>.gz` (rotated).
+fn extra_log_name(svc_name: &str, filename: &str) -> Option<String> {
+    match svc_name {
+        "cockroachdb" => {
+            let parts: Vec<&str> = filename.split('.').collect();
+            match parts.as_slice() {
+                [prefix, host, user, timestamp, pid, "log"]
+                    if [prefix, host, user, timestamp, pid]
+                        .iter()
+                        .all(|part| !part.is_empty())
+                        && pid.bytes().all(|b| b.is_ascii_digit()) =>
+                {
+                    Some(prefix.to_string())
+                }
+                _ => None,
+            }
+        }
+        "ntp" => {
+            let name = filename.strip_suffix(".gz").unwrap_or(filename);
+            let (name, _) = split_numeric_suffix(name);
+            name.ends_with(".log").then(|| name.to_string())
+        }
+        _ => None,
+    }
+}
+
+/// Returns the newest write of a file archived to a debug dataset.
+///
+/// The debug collector names archived log files `<name>.<epoch>`, where
+/// `<epoch>` is the source file's `mtime` (in seconds) when it was archived.
+/// The archived copy's own `mtime` is the time of archival.
+fn archived_newest_write(filename: &str) -> Option<Timestamp> {
+    let (_, epoch) = split_numeric_suffix(filename);
+    Timestamp::from_second(epoch?.parse().ok()?).ok()
+}
+
+/// Which kind of directory SMF log files are loaded from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SvcLogDir {
+    /// A zone's SMF log directory, holding live and rotated files.
+    Primary,
+    /// A debug dataset's directory of archived files for a zone.
+    Debug,
+}
+
+/// Where a file is reported in its service's [`SvcLogs`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Slot {
+    Current,
+    Archived,
+    Extra,
+}
+
+/// A log file found while loading a zone, before its age is assigned and
+/// the date range is applied.
+#[derive(Debug)]
+struct Candidate {
+    /// The service the file is reported under.
+    service: ServiceName,
+    slot: Slot,
+    /// The log the file belongs to within `service` (see [`smf_log_name`]
+    /// and [`extra_log_name`]), or `None` if it is a log of its own.
+    log_name: Option<String>,
+    /// For a symlink, the path it points to.
+    symlink_target: Option<Utf8PathBuf>,
+    /// The file's newest write, if its metadata was read. Not used for
+    /// symlinks, which take their target's age.
+    newest_write: Option<Timestamp>,
+    file: LogFile,
+}
+
+// Given a directory, find all oxide specific SMF service logs.
 fn load_svc_logs(
-    dir: Utf8PathBuf,
-    logs: &mut BTreeMap<ServiceName, SvcLogs>,
-    show_empty: bool,
-    date_range: Option<DateRange>,
+    dir: &Utf8Path,
+    kind: SvcLogDir,
+    read_metadata: bool,
+    candidates: &mut Vec<Candidate>,
 ) {
     let Ok(entries) = dir.read_dir_utf8() else {
         return;
@@ -567,93 +632,193 @@ fn load_svc_logs(
         let filename = entry.file_name();
 
         // Is this a log file we care about?
-        if is_oxide_smf_log_file(filename) {
-            let mut path = dir.clone();
-            path.push(filename);
-            let mut logfile = LogFile::new(path);
-
-            let Some(svc_name) =
-                oxide_smf_service_name_from_log_file_name(filename)
-            else {
-                // parsing failed
-                continue;
-            };
-
-            // Stat the file only if necessary.
-            if !show_empty || date_range.is_some() {
-                logfile.read_metadata(&entry);
-            }
-
-            if !show_empty {
-                if logfile.size == Some(0) {
-                    // skip 0 size files
-                    continue;
-                }
-            }
-
-            if let Some(date_range) = date_range {
-                logfile.read_created(&date_range);
-                if !logfile.in_date_range(&date_range) {
-                    continue;
-                }
-            }
-
-            let is_current = filename.ends_with(".log");
-
-            let svc_logs = logs.entry(svc_name.to_string()).or_default();
-
-            if is_current {
-                svc_logs.current = Some(logfile.clone());
-            } else {
-                svc_logs.archived.push(logfile.clone());
-            }
+        if !is_oxide_smf_log_file(filename) {
+            continue;
         }
+        let Some(svc_name) =
+            oxide_smf_service_name_from_log_file_name(filename)
+        else {
+            // parsing failed
+            continue;
+        };
+
+        let mut file = LogFile::new(dir.join(filename));
+        let mut log_name = Some(smf_log_name(filename).to_string());
+        let mut newest_write = None;
+        if read_metadata {
+            file.read_metadata(&entry);
+            newest_write = match kind {
+                SvcLogDir::Primary => file.modified,
+                SvcLogDir::Debug => match archived_newest_write(filename) {
+                    Some(newest_write) => Some(newest_write),
+                    None => {
+                        // Without the source's mtime in its name, only the
+                        // time of archival is known, which is later than
+                        // the file's newest write. That is safe for dating
+                        // this file alone (it can only widen its age), but
+                        // not as a bound on its neighbors', so keep it out
+                        // of the log.
+                        log_name = None;
+                        file.modified
+                    }
+                },
+            };
+        }
+
+        let slot = if filename.ends_with(".log") {
+            Slot::Current
+        } else {
+            Slot::Archived
+        };
+
+        candidates.push(Candidate {
+            service: svc_name.to_string(),
+            slot,
+            log_name,
+            symlink_target: None,
+            newest_write,
+            file,
+        });
     }
 }
 
 // Load any logs in non-standard paths. We grab all logs in `dir` and
 // don't filter based on filename prefix as in `load_svc_logs`.
+//
+// Returns false if `dir` could not be read.
 fn load_extra_logs(
-    dir: Utf8PathBuf,
+    dir: &Utf8Path,
     svc_name: &str,
-    logs: &mut BTreeMap<ServiceName, SvcLogs>,
-    show_empty: bool,
-    date_range: Option<DateRange>,
-) {
+    read_metadata: bool,
+    candidates: &mut Vec<Candidate>,
+) -> bool {
     let Ok(entries) = dir.read_dir_utf8() else {
-        return;
+        return false;
     };
-
-    let svc_logs = logs.entry(svc_name.to_string()).or_default();
 
     for entry in entries {
         let Ok(entry) = entry else {
             continue;
         };
         let filename = entry.file_name();
-        let mut path = dir.clone();
-        path.push(filename);
-        let mut logfile = LogFile::new(path);
+        let path = dir.join(filename);
+        let mut file = LogFile::new(path.clone());
 
-        // Stat the file only if necessary.
-        if !show_empty || date_range.is_some() {
-            logfile.read_metadata(&entry);
-        }
+        let is_symlink = entry.file_type().is_ok_and(|t| t.is_symlink());
+        // A relative symlink target is relative to the symlink's directory
+        // (an absolute one replaces `dir` entirely).
+        let symlink_target = is_symlink
+            .then(|| path.read_link_utf8().ok().map(|target| dir.join(target)))
+            .flatten();
 
-        if !show_empty {
-            if logfile.size == Some(0) {
-                // skip 0 size files
-                continue;
+        let mut newest_write = None;
+        if read_metadata {
+            file.read_metadata(&entry);
+            if !is_symlink {
+                newest_write = file.modified;
             }
         }
 
-        if let Some(date_range) = date_range {
-            logfile.read_created(&date_range);
-            if !logfile.in_date_range(&date_range) {
-                continue;
+        candidates.push(Candidate {
+            service: svc_name.to_string(),
+            slot: Slot::Extra,
+            log_name: if is_symlink {
+                None
+            } else {
+                extra_log_name(svc_name, filename)
+            },
+            symlink_target,
+            newest_write,
+            file,
+        });
+    }
+    true
+}
+
+/// Assigns each candidate's [`LogAge`].
+///
+/// - A file in a log takes the newest write of the next-older file in the
+///   log's order as its oldest write. Ties are skipped: of two files with
+///   the same newest write, either could be the older one, so each is bounded
+///   by the next strictly older file instead. The oldest file of a log has
+///   no known oldest write.
+/// - A file that is a log of its own has no known oldest write.
+/// - A symlink takes the age of the file it points to. Symlinks are kept out
+///   of log order: a symlink shares its target's newest write, and so could
+///   otherwise become its own target's next-older file. If the target isn't
+///   among the candidates, the symlink is dated by the target's `mtime`
+///   alone.
+fn assign_ages(candidates: &mut [Candidate]) {
+    // Group the files that are in a log by (service, log name).
+    let mut logs: BTreeMap<(&str, &str), Vec<(usize, Timestamp)>> =
+        BTreeMap::new();
+    for (i, candidate) in candidates.iter().enumerate() {
+        if let (Some(log_name), Some(newest_write)) =
+            (&candidate.log_name, candidate.newest_write)
+        {
+            logs.entry((&candidate.service, log_name))
+                .or_default()
+                .push((i, newest_write));
+        }
+    }
+
+    let mut ages: Vec<Option<LogAge>> = candidates
+        .iter()
+        .map(|candidate| {
+            candidate
+                .newest_write
+                .map(|newest_write| LogAge { newest_write, oldest_write: None })
+        })
+        .collect();
+
+    for mut files in logs.into_values() {
+        // Sort into log order: newest first.
+        files.sort_by_key(|&(_, newest_write)| std::cmp::Reverse(newest_write));
+        for (position, &(i, newest_write)) in files.iter().enumerate() {
+            let next_older = files[position + 1..]
+                .iter()
+                .map(|&(_, older)| older)
+                .find(|&older| older < newest_write);
+            if let Some(age) = &mut ages[i] {
+                age.oldest_write = next_older;
             }
         }
-        svc_logs.extra.push(logfile);
+    }
+
+    // Symlinks take their target's age.
+    let symlink_ages: Vec<(usize, Option<LogAge>)> = {
+        let ages_by_path: HashMap<&Utf8Path, LogAge> = candidates
+            .iter()
+            .zip(&ages)
+            .filter(|(candidate, _)| candidate.symlink_target.is_none())
+            .filter_map(|(candidate, age)| {
+                Some((candidate.file.path.as_path(), (*age)?))
+            })
+            .collect();
+        candidates
+            .iter()
+            .enumerate()
+            .filter_map(|(i, candidate)| {
+                let target = candidate.symlink_target.as_deref()?;
+                // Only date the symlink if its metadata was read.
+                candidate.file.modified?;
+                let age = ages_by_path.get(target).copied().or_else(|| {
+                    let modified = target.metadata().ok()?.modified().ok()?;
+                    Some(LogAge {
+                        newest_write: modified.try_into().ok()?,
+                        oldest_write: None,
+                    })
+                });
+                Some((i, age))
+            })
+            .collect()
+    };
+    for (i, age) in symlink_ages {
+        ages[i] = age;
+    }
+
+    for (candidate, age) in candidates.iter_mut().zip(ages) {
+        candidate.file.age = age;
     }
 }
 
@@ -741,13 +906,13 @@ mod tests {
                         path: "/bar/blah:default.log.1700000000".into(),
                         size: None,
                         modified: None,
-                        created: None,
+                        age: None,
                     },
                     LogFile {
                         path: "/foo/blah:default.log.1600000000".into(),
                         size: None,
                         modified: None,
-                        created: None,
+                        age: None,
                     },
                 ],
                 extra: vec![
@@ -757,13 +922,13 @@ mod tests {
                         path: "/foo/blah/sub.default.log1".into(),
                         size: None,
                         modified: None,
-                        created: None,
+                        age: None,
                     },
                     LogFile {
                         path: "/bar/blah/sub.default.log2".into(),
                         size: None,
                         modified: None,
-                        created: None,
+                        age: None,
                     },
                 ],
             },
@@ -784,230 +949,386 @@ mod tests {
         assert_eq!(svc_logs.extra[1].path, "/bar/blah/sub.default.log2");
     }
 
-    #[test]
-    fn test_daterange_filter() {
-        use super::{DateRange, LogFile};
-        use camino::Utf8PathBuf;
-        use jiff::Timestamp;
+    fn ts(s: &str) -> jiff::Timestamp {
+        s.parse().expect("test timestamp should be valid RFC 3339")
+    }
 
-        let old_log = LogFile {
-            path: Utf8PathBuf::from("old"),
-            size: None,
-            modified: Some("1950-01-01T00:00:00Z".parse().unwrap()),
-            created: None,
-        };
-        let new_log = LogFile {
-            path: Utf8PathBuf::from("new"),
-            size: None,
-            modified: Some("2050-01-01T00:00:00Z".parse().unwrap()),
-            created: None,
-        };
-        let matched_log = LogFile {
-            path: Utf8PathBuf::from("just_right"),
-            size: None,
-            modified: Some("2024-01-01T00:00:00Z".parse().unwrap()),
-            created: None,
-        };
-
-        let full_date_range = DateRange {
-            before: "2025-01-01T23:59:59Z".parse().unwrap(),
-            after: "1986-01-01T00:00:01Z".parse().unwrap(),
-        };
-
-        assert!(!old_log.in_date_range(&full_date_range));
-        assert!(!new_log.in_date_range(&full_date_range));
-        assert!(matched_log.in_date_range(&full_date_range));
-
-        // Range if '--after` is not set.
-        let min_after_date_range = DateRange {
-            before: "2025-01-01T23:59:59Z".parse().unwrap(),
-            after: Timestamp::MIN,
-        };
-
-        assert!(old_log.in_date_range(&min_after_date_range));
-        assert!(!new_log.in_date_range(&min_after_date_range));
-        assert!(matched_log.in_date_range(&min_after_date_range));
-
-        // Range if '--before` is not set.
-        let max_before_date_range = DateRange {
-            before: Timestamp::MAX,
-            after: "1986-01-01T00:00:01Z".parse().unwrap(),
-        };
-
-        assert!(!old_log.in_date_range(&max_before_date_range));
-        assert!(new_log.in_date_range(&max_before_date_range));
-        assert!(matched_log.in_date_range(&max_before_date_range));
+    fn range(after: &str, before: &str) -> super::DateRange {
+        super::DateRange::new(ts(before), ts(after))
     }
 
     #[test]
-    fn test_daterange_filter_content_span() {
-        use super::{DateRange, LogFile};
-        use camino::Utf8PathBuf;
+    fn test_log_age_overlaps() {
+        use super::LogAge;
 
-        let file = |created: Option<&str>, modified: &str| LogFile {
-            path: Utf8PathBuf::from("spanning"),
-            size: None,
-            modified: Some(modified.parse().unwrap()),
-            created: created.map(|c| c.parse().unwrap()),
-        };
-        let range = DateRange {
-            before: "2024-01-01T01:59:00Z".parse().unwrap(),
-            after: "2024-01-01T01:00:00Z".parse().unwrap(),
+        let window = range("2024-01-01T01:00:00Z", "2024-01-01T01:59:00Z");
+        let age = |oldest: Option<&str>, newest: &str| LogAge {
+            newest_write: ts(newest),
+            oldest_write: oldest.map(ts),
         };
 
-        // A file created before the end of the range whose mtime postdates
-        // it holds in-window content and is included, even though its mtime
-        // alone would exclude it. This is the shape of a current log that
-        // kept being written past the end of the range.
-        let spans_end =
-            file(Some("2024-01-01T01:00:00Z"), "2024-01-01T02:00:00Z");
-        assert!(spans_end.in_date_range(&range));
-
-        // Without a creation time the same mtime is excluded, preserving
-        // the mtime-only behavior.
-        let mtime_only = file(None, "2024-01-01T02:00:00Z");
-        assert!(!mtime_only.in_date_range(&range));
-
-        // A creation time later than the mtime is a copy timestamp, not a
-        // content bound: it must not pull an out-of-range file into the
-        // range. This is the shape of an old log recently copied into an
-        // archive with its mtime preserved.
-        let archived_copy =
-            file(Some("2024-06-01T00:00:00Z"), "2023-12-31T00:00:00Z");
-        assert!(!archived_copy.in_date_range(&range));
-
-        // But a copy's preserved mtime inside the range still matches.
-        let archived_copy_in_range =
-            file(Some("2024-06-01T00:00:00Z"), "2024-01-01T01:30:00Z");
-        assert!(archived_copy_in_range.in_date_range(&range));
-
-        // A file whose entire span predates the range stays excluded; a
-        // trusted creation time never weakens the start bound.
-        let too_old =
-            file(Some("2023-01-01T00:00:00Z"), "2023-06-01T00:00:00Z");
-        assert!(!too_old.in_date_range(&range));
-
-        // A file created after the range ends stays excluded.
-        let too_new =
-            file(Some("2024-01-01T02:00:00Z"), "2024-01-01T03:00:00Z");
-        assert!(!too_new.in_date_range(&range));
-
-        // Bounds are inclusive: a span touching the range only at its
-        // endpoints still matches.
-        let touches_end =
-            file(Some("2024-01-01T01:59:00Z"), "2024-01-01T03:00:00Z");
-        assert!(touches_end.in_date_range(&range));
-        let touches_start =
-            file(Some("2023-01-01T00:00:00Z"), "2024-01-01T01:00:00Z");
-        assert!(touches_start.in_date_range(&range));
+        // Content spanning the end of the window overlaps it.
+        assert!(
+            age(Some("2024-01-01T01:30:00Z"), "2024-01-01T03:00:00Z")
+                .overlaps(&window)
+        );
+        // Content spanning the whole window overlaps it.
+        assert!(
+            age(Some("2024-01-01T00:00:00Z"), "2024-01-01T03:00:00Z")
+                .overlaps(&window)
+        );
+        // Content entirely before or after the window doesn't.
+        assert!(
+            !age(Some("2023-01-01T00:00:00Z"), "2024-01-01T00:59:59Z")
+                .overlaps(&window)
+        );
+        assert!(
+            !age(Some("2024-01-01T02:00:00Z"), "2024-01-01T03:00:00Z")
+                .overlaps(&window)
+        );
+        // Without an oldest write, only the newest write limits a file.
+        assert!(age(None, "2024-01-01T03:00:00Z").overlaps(&window));
+        assert!(!age(None, "2024-01-01T00:59:59Z").overlaps(&window));
+        // Bounds are inclusive.
+        assert!(
+            age(Some("2024-01-01T01:59:00Z"), "2024-01-01T03:00:00Z")
+                .overlaps(&window)
+        );
+        assert!(
+            age(Some("2023-01-01T00:00:00Z"), "2024-01-01T01:00:00Z")
+                .overlaps(&window)
+        );
     }
 
     #[test]
-    fn test_created_lookup_gating() {
-        use super::{DateRange, LogFile};
-        use camino::Utf8PathBuf;
+    fn test_smf_log_name() {
+        use super::smf_log_name;
 
-        let range = DateRange {
-            before: "2024-01-01T01:59:00Z".parse().unwrap(),
-            after: "2024-01-01T01:00:00Z".parse().unwrap(),
-        };
-        let file = |modified: Option<&str>| LogFile {
-            path: Utf8PathBuf::from("gated"),
-            size: None,
-            modified: modified.map(|m| m.parse().unwrap()),
-            created: None,
-        };
-
-        // Only a file whose mtime postdates the end of the range needs its
-        // creation time looked up; everywhere else the mtime alone decides
-        // the span test.
-        let needs_lookup = file(Some("2024-01-01T02:00:00Z"));
-        assert!(needs_lookup.created_affects_range(&range));
-
-        let at_range_end = file(Some("2024-01-01T01:59:00Z"));
-        assert!(!at_range_end.created_affects_range(&range));
-        let in_range = file(Some("2024-01-01T01:30:00Z"));
-        assert!(!in_range.created_affects_range(&range));
-        let before_range = file(Some("2023-12-31T00:00:00Z"));
-        assert!(!before_range.created_affects_range(&range));
-        let no_mtime = file(None);
-        assert!(!no_mtime.created_affects_range(&range));
-
-        // Skipping the lookup never changes the outcome: where the gate
-        // says no, in_date_range answers the same with and without a
-        // creation time.
-        let early_creation: super::Timestamp =
-            "2023-01-01T00:00:00Z".parse().unwrap();
-
-        let mut in_range = in_range;
-        assert!(in_range.in_date_range(&range));
-        in_range.created = Some(early_creation);
-        assert!(in_range.in_date_range(&range));
-
-        let mut before_range = before_range;
-        assert!(!before_range.in_date_range(&range));
-        before_range.created = Some(early_creation);
-        assert!(!before_range.in_date_range(&range));
-    }
-}
-
-#[cfg(all(test, target_os = "illumos"))]
-mod illumos_tests {
-    use jiff::Timestamp;
-
-    /// Returns the filesystem name (statvfs `f_basetype`, e.g. "zfs" or
-    /// "tmpfs") for the filesystem holding `path`.
-    fn fs_basetype(path: &camino::Utf8Path) -> String {
-        let cpath = std::ffi::CString::new(path.as_str()).unwrap();
-        let mut vfs: libc::statvfs = unsafe { std::mem::zeroed() };
-        let rc = unsafe { libc::statvfs(cpath.as_ptr(), &mut vfs) };
-        assert_eq!(rc, 0, "statvfs({path}) failed");
-        let basetype =
-            unsafe { std::ffi::CStr::from_ptr(vfs.f_basetype.as_ptr()) };
-        basetype.to_string_lossy().into_owned()
+        for filename in [
+            "oxide-nexus:default.log",
+            "oxide-nexus:default.log.0",
+            "oxide-nexus:default.log.12",
+            "oxide-nexus:default.log.1790585101",
+        ] {
+            assert_eq!(smf_log_name(filename), "oxide-nexus:default.log");
+        }
+        // Separate instances of a service are separate logs.
+        assert_eq!(
+            smf_log_name("oxide-foo:instance2.log.0"),
+            "oxide-foo:instance2.log"
+        );
     }
 
     #[test]
-    fn test_crtime_of_new_file() {
-        // Create the file next to the source tree rather than in /tmp:
-        // /tmp is tmpfs, which answers getattrat(3C) with an empty
-        // attribute list, while the workspace checkout is normally on ZFS.
-        let dir = camino_tempfile::Builder::new()
-            .prefix("oxlog-crtime-test")
-            .tempdir_in(env!("CARGO_MANIFEST_DIR"))
-            .unwrap();
+    fn test_archived_newest_write() {
+        use super::archived_newest_write;
 
-        // crtime only exists on filesystems that record it. Skip rather
-        // than fail on an unusual checkout location. Note that probing
-        // pathconf(_PC_SATTR_ENABLED) instead would not work here: tmpfs
-        // reports system attribute support yet records no crtime.
-        let basetype = fs_basetype(dir.path());
-        if basetype != "zfs" {
-            eprintln!(
-                "skipping: tempdir is on {basetype}, which records no crtime"
+        assert_eq!(
+            archived_newest_write("oxide-nexus:default.log.1790585101"),
+            Some(jiff::Timestamp::from_second(1790585101).unwrap())
+        );
+        assert_eq!(archived_newest_write("oxide-nexus:default.log"), None);
+        assert_eq!(archived_newest_write("oxide-nexus:default.log.x1"), None);
+    }
+
+    #[test]
+    fn test_extra_log_name() {
+        use super::extra_log_name;
+
+        // CockroachDB log files, as named on a real system.
+        let zone = "oxzcockroachdb8bbea076-ff60-4330-8302-383e18140ef3";
+        assert_eq!(
+            extra_log_name(
+                "cockroachdb",
+                &format!(
+                    "cockroach.{zone}.root.2026-09-29T09_44_35Z.006190.log"
+                )
+            )
+            .as_deref(),
+            Some("cockroach")
+        );
+        assert_eq!(
+            extra_log_name(
+                "cockroachdb",
+                &format!(
+                    "cockroach-health.{zone}.root.2026-09-22T03_29_59Z.003419.log"
+                )
+            )
+            .as_deref(),
+            Some("cockroach-health")
+        );
+        // The symlinks to the current files, directories, and anything else
+        // that doesn't follow CockroachDB's naming are logs of their own.
+        for filename in [
+            "cockroach.log",
+            "cockroach-health.log",
+            "goroutine_dump",
+            "bogus.log",
+            "cockroach.a.b.c.notapid.log",
+            "cockroach..root.2026-09-29T09_44_35Z.006190.log",
+        ] {
+            assert_eq!(
+                extra_log_name("cockroachdb", filename),
+                None,
+                "{filename}"
             );
-            return;
         }
 
-        let path = dir.path().join("file.log");
-        std::fs::write(&path, b"hello").unwrap();
+        // chrony's logs, as rotated by logadm.
+        for filename in ["tracking.log", "tracking.log.1790705215.gz"] {
+            assert_eq!(
+                extra_log_name("ntp", filename).as_deref(),
+                Some("tracking.log"),
+                "{filename}"
+            );
+        }
+        assert_eq!(extra_log_name("ntp", "chrony.conf"), None);
 
-        let created =
-            super::crtime::crtime(&path).expect("crtime should be readable");
-        let modified: Timestamp = std::fs::metadata(&path)
-            .unwrap()
-            .modified()
-            .unwrap()
-            .try_into()
+        // Directories with no known naming rule.
+        assert_eq!(extra_log_name("dendrite", "zlog-cfg-cur"), None);
+        assert_eq!(extra_log_name("dendrite", "bf_drivers.log"), None);
+    }
+
+    /// Builds a candidate in `log_name` with the given newest write.
+    fn candidate(
+        path: &str,
+        log_name: Option<&str>,
+        newest_write: &str,
+    ) -> super::Candidate {
+        super::Candidate {
+            service: "svc".to_string(),
+            slot: super::Slot::Archived,
+            log_name: log_name.map(str::to_string),
+            symlink_target: None,
+            newest_write: Some(ts(newest_write)),
+            file: super::LogFile {
+                path: path.into(),
+                size: None,
+                modified: Some(ts(newest_write)),
+                age: None,
+            },
+        }
+    }
+
+    fn oldest_writes(candidates: &[super::Candidate]) -> Vec<Option<String>> {
+        candidates
+            .iter()
+            .map(|c| c.file.age.unwrap().oldest_write.map(|t| t.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn test_assign_ages_log_order() {
+        // One service's files, as in the example on
+        // https://github.com/oxidecomputer/omicron/issues/11357: a live file,
+        // a rotated file, and three archived files, in arbitrary order.
+        let log = Some("oxide-nexus:default.log");
+        let mut candidates = vec![
+            candidate("archived-b", log, "2026-09-28T03:59:57Z"),
+            candidate("live", log, "2026-09-28T12:02:10Z"),
+            candidate("archived-c", log, "2026-09-27T23:59:58Z"),
+            candidate("rotated", log, "2026-09-28T11:59:58Z"),
+            candidate("archived-a", log, "2026-09-28T07:59:59Z"),
+        ];
+        super::assign_ages(&mut candidates);
+
+        assert_eq!(
+            oldest_writes(&candidates),
+            vec![
+                Some("2026-09-27T23:59:58Z".to_string()),
+                Some("2026-09-28T11:59:58Z".to_string()),
+                None,
+                Some("2026-09-28T07:59:59Z".to_string()),
+                Some("2026-09-28T03:59:57Z".to_string()),
+            ]
+        );
+
+        // Only the archived file holding 05:00-06:00 overlaps it. Judged by
+        // their own timestamps, the live file would be included and that
+        // archived file excluded.
+        let window = range("2026-09-28T05:00:00Z", "2026-09-28T06:00:00Z");
+        let included: Vec<&str> = candidates
+            .iter()
+            .filter(|c| c.file.in_date_range(&window))
+            .map(|c| c.file.path.as_str())
+            .collect();
+        assert_eq!(included, vec!["archived-a"]);
+    }
+
+    #[test]
+    fn test_assign_ages_separate_logs() {
+        // Files of different logs never bound each other, even when their
+        // times interleave.
+        let mut candidates = vec![
+            candidate("a-new", Some("a"), "2026-09-28T12:00:00Z"),
+            candidate("b-new", Some("b"), "2026-09-28T11:00:00Z"),
+            candidate("a-old", Some("a"), "2026-09-28T10:00:00Z"),
+            candidate("b-old", Some("b"), "2026-09-28T09:00:00Z"),
+            // A file that is a log of its own.
+            candidate("alone", None, "2026-09-28T11:30:00Z"),
+        ];
+        super::assign_ages(&mut candidates);
+
+        assert_eq!(
+            oldest_writes(&candidates),
+            vec![
+                Some("2026-09-28T10:00:00Z".to_string()),
+                Some("2026-09-28T09:00:00Z".to_string()),
+                None,
+                None,
+                None,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_assign_ages_ties() {
+        // Of two files with the same newest write, either could be the older
+        // one, so both are bounded by the next strictly older file.
+        let log = Some("log");
+        let mut candidates = vec![
+            candidate("tie-1", log, "2026-09-28T12:00:00Z"),
+            candidate("tie-2", log, "2026-09-28T12:00:00Z"),
+            candidate("older", log, "2026-09-28T10:00:00Z"),
+        ];
+        super::assign_ages(&mut candidates);
+
+        assert_eq!(
+            oldest_writes(&candidates),
+            vec![
+                Some("2026-09-28T10:00:00Z".to_string()),
+                Some("2026-09-28T10:00:00Z".to_string()),
+                None,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_assign_ages_unknown_newest_write() {
+        // A file whose mtime couldn't be read has no age, and doesn't bound
+        // its neighbors.
+        let log = Some("log");
+        let mut unknown = candidate("unknown", log, "2026-09-28T11:00:00Z");
+        unknown.newest_write = None;
+        unknown.file.modified = None;
+        let mut candidates = vec![
+            candidate("newer", log, "2026-09-28T12:00:00Z"),
+            unknown,
+            candidate("older", log, "2026-09-28T10:00:00Z"),
+        ];
+        super::assign_ages(&mut candidates);
+
+        assert_eq!(
+            candidates[0].file.age.unwrap().oldest_write,
+            Some(ts("2026-09-28T10:00:00Z"))
+        );
+        assert_eq!(candidates[1].file.age, None);
+        assert_eq!(candidates[2].file.age.unwrap().oldest_write, None);
+    }
+
+    /// Creates `path` with some content and the given `mtime`.
+    fn create_file(path: &camino::Utf8Path, mtime: &str) {
+        let file = std::fs::File::create(path).unwrap();
+        std::io::Write::write_all(&mut &file, b"log line\n").unwrap();
+        file.set_modified(ts(mtime).into()).unwrap();
+    }
+
+    #[test]
+    fn test_zone_logs_date_range() {
+        use super::{Filter, Paths, Zones};
+        use std::collections::BTreeMap;
+
+        let dir = camino_tempfile::tempdir().unwrap();
+        let primary = dir.path().join("primary");
+        let debug = dir.path().join("debug");
+        let crdb = dir.path().join("crdb");
+        for d in [&primary, &debug, &crdb] {
+            std::fs::create_dir(d).unwrap();
+        }
+
+        // An SMF service's log. Archived files' own mtimes are the time of
+        // archival; their names hold their newest writes.
+        let svc = "oxide-nexus:default.log";
+        create_file(&primary.join(svc), "2026-09-28T12:02:10Z");
+        create_file(&primary.join(format!("{svc}.0")), "2026-09-28T11:59:58Z");
+        for (newest_write, archived_at) in [
+            ("2026-09-28T07:59:59Z", "2026-09-28T08:04:12Z"),
+            ("2026-09-28T03:59:57Z", "2026-09-28T04:03:40Z"),
+            ("2026-09-27T23:59:58Z", "2026-09-28T00:04:05Z"),
+        ] {
+            let epoch = ts(newest_write).as_second();
+            create_file(&debug.join(format!("{svc}.{epoch}")), archived_at);
+        }
+
+        // A CockroachDB log, with a symlink to its current file.
+        let zone = "oxzcockroachdb8bbea076-ff60-4330-8302-383e18140ef3";
+        let crdb_file = |ts: &str, pid: &str| {
+            format!("cockroach.{zone}.root.{ts}.{pid}.log")
+        };
+        let crdb_current = crdb_file("2026-09-28T04_00_00Z", "002000");
+        create_file(
+            &crdb.join(crdb_file("2026-09-27T00_00_00Z", "001000")),
+            "2026-09-28T03:00:00Z",
+        );
+        create_file(&crdb.join(&crdb_current), "2026-09-28T12:00:00Z");
+        std::os::unix::fs::symlink(&crdb_current, crdb.join("cockroach.log"))
             .unwrap();
 
-        // A freshly written file's creation time is at or before its
-        // mtime, and both are recent.
-        assert!(created <= modified, "created {created} > modified {modified}");
-        let age = Timestamp::now().as_second() - created.as_second();
-        assert!(age.abs() < 3600, "crtime is not recent: {created}");
+        let zones = Zones {
+            zones: BTreeMap::from([(
+                "oxz_test".to_string(),
+                Paths {
+                    primary: primary.clone(),
+                    debug: vec![debug.clone()],
+                    extra: vec![("cockroachdb", crdb.clone())],
+                },
+            )]),
+        };
+        let logs_in = |after: &str, before: &str| -> Vec<String> {
+            let logs = zones.zone_logs(
+                "oxz_test",
+                Filter {
+                    current: true,
+                    archived: true,
+                    extra: true,
+                    show_empty: false,
+                    date_range: Some(range(after, before)),
+                },
+            );
+            let mut files: Vec<String> = logs
+                .values()
+                .flat_map(|svc_logs| {
+                    svc_logs
+                        .current
+                        .iter()
+                        .chain(&svc_logs.archived)
+                        .chain(&svc_logs.extra)
+                })
+                .map(|f| f.path.file_name().unwrap().to_string())
+                .collect();
+            files.sort();
+            files
+        };
 
-        // A missing file yields None rather than an error.
-        assert!(super::crtime::crtime(&dir.path().join("absent")).is_none());
+        // 05:00-06:00 falls within the archived file with a newest write of
+        // 07:59:59, and within the current CockroachDB file (and so its
+        // symlink).
+        let archived =
+            format!("{svc}.{}", ts("2026-09-28T07:59:59Z").as_second());
+        let mut expected =
+            vec![archived, crdb_current.clone(), "cockroach.log".to_string()];
+        expected.sort();
+        assert_eq!(
+            logs_in("2026-09-28T05:00:00Z", "2026-09-28T06:00:00Z"),
+            expected
+        );
+
+        // 12:01-12:05 holds only the live SMF file: the symlink's own mtime
+        // (its creation, now) doesn't matter, and the CockroachDB files end
+        // before 12:01.
+        assert_eq!(
+            logs_in("2026-09-28T12:01:00Z", "2026-09-28T12:05:00Z"),
+            vec![svc.to_string()]
+        );
     }
 }
