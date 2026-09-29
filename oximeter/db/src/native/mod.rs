@@ -288,4 +288,18 @@ impl Error {
 pub mod errors {
     pub const UNKNOWN_TABLE: i32 = 60;
     pub const UNKNOWN_DATABASE: i32 = 81;
+    /// A write or DDL query was rejected because the user's profile is in
+    /// read-only mode (`readonly=1` or `readonly=2`), or a `SET` tried to lower
+    /// `readonly` itself.
+    pub const READONLY: i32 = 164;
+    /// A query was rejected because DDL is disabled, e.g. `SET allow_ddl=1` when
+    /// the profile sets `allow_ddl=0`, or a DDL statement from a user who holds
+    /// the DDL grant but whose profile forbids it.
+    pub const QUERY_IS_PROHIBITED: i32 = 392;
+    /// A `SET` was rejected because it violates a `<constraints>` bound, e.g.
+    /// changing a setting frozen with `<readonly/>` (such as
+    /// `max_execution_time`).
+    pub const SETTING_CONSTRAINT_VIOLATION: i32 = 452;
+    /// A query was rejected because the user lacks the required grant.
+    pub const ACCESS_DENIED: i32 = 497;
 }

@@ -28,7 +28,11 @@ pub static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
+<<<<<<< HEAD
         KnownVersion::new(302, "reconfigurator-config-sled-reboot-policy"),
+=======
+        KnownVersion::new(302, "longer-system-version"),
+>>>>>>> main
         KnownVersion::new(301, "vmm-failure-reason-if-failed"),
         KnownVersion::new(300, "inv-instance-manager-status"),
         KnownVersion::new(299, "blueprint-pruner-config"),

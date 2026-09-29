@@ -45,6 +45,7 @@ use oximeter_collector::Oximeter;
 use oximeter_producer::Server as ProducerServer;
 use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::inventory::SledCpuFamily;
+use sled_agent_types::inventory::SledRole;
 use slog::debug;
 use slog::info;
 use std::collections::BTreeMap;
@@ -340,6 +341,7 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
             sled_index,
             sim_mode,
             cpu_family,
+            SledRole::Gimlet,
             &self.first_sled_agent().simulated_upstairs,
         )
         .await
