@@ -2930,7 +2930,7 @@ fn print_task_vmm_mark_stop_for_update(details: &serde_json::Value) {
                 println!("    task explicitly disabled by config!");
             }
 
-            const MARKED: &str = "VMMs marked:";
+            const MARKED: &str = "VMMs marked to be stopped for an update:";
             const ERROR: &str = "error:";
             const WIDTH: usize = const_max_len(&[MARKED, ERROR]) + 1;
 
