@@ -734,7 +734,9 @@ async fn test_mgs_metrics(
             sp_sim_config.simulated_sps.gimlet.iter().map(|g| &g.common);
         let sidecar_configs =
             sp_sim_config.simulated_sps.sidecar.iter().map(|s| &s.common);
-        gimlet_configs.chain(sidecar_configs)
+        let psc_configs =
+            sp_sim_config.simulated_sps.psc.iter().map(|p| &p.common);
+        gimlet_configs.chain(sidecar_configs).chain(psc_configs)
     };
     // XXX(eliza): yes, this code is repetitive. We could probably make it a
     // little elss ugly with nested hash maps, but like...I already wrote it, so

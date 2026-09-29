@@ -93,7 +93,13 @@ async fn test_commission_inventory() {
     })
     .await;
 
-    assert_eq!(sps.len(), 4, "four simulated SPs");
+    // TODO(eliza): it would be cool if this test got the expected number of SPs
+    // by actually looking at the sp-sim config file, rather than hard-coding
+    // the number of SPs to one that *currently* matches the config file. that
+    // way, the next person who tries to add a new SP to the config file doen't
+    // have to increment this number again like i did..
+    const NSPS: usize = 5;
+    assert_eq!(sps.len(), NSPS, "{NSPS} simulated SPs");
 
     let sled0 = sps
         .get(&SpIdentifier { typ: SpType::Sled, slot: 0 })
@@ -155,8 +161,8 @@ async fn test_commission_inventory() {
     );
     assert_eq!(
         refreshed.sps.len(),
-        4,
-        "four simulated SPs after forced refresh"
+        5,
+        "{NSPS} simulated SPs after forced refresh"
     );
     assert!(
         refreshed.transceivers.is_empty(),
