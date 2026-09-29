@@ -22,13 +22,31 @@
 //! - truncation leaves a live log's creation time unchanged, so it can be
 //!   arbitrarily earlier than the live log's content.
 //!
-//! Instead, each file is placed in a *log*: the set of files that together
-//! hold one sequence of log output, such as all of one SMF service's files in
-//! one zone. Every rotation, whether by copying or by starting a new file,
-//! begins the new file after the previous one's last write, so a log's files
-//! don't overlap in time. Sorting a log's files by newest write (the *log
-//! order*) therefore bounds each file's oldest write by the newest write of
-//! the next-older file.
+//! Instead, files are dated by their *series*.
+//!
+//! ## Series
+//!
+//! In oxlog, a **series** is the set of files that, one after another, have
+//! held a single stream of log output. For example:
+//!
+//! - for one instance of an SMF service in one zone: its live file
+//!   `foo.log`, the rotated `foo.log.0` beside it, and the archived
+//!   `foo.log.<epoch>` files in each of the zone's debug datasets;
+//! - for one CockroachDB log: all of its `<prefix>.<...>.log` files.
+//!
+//! Which files form a series is decided by the naming rules of whatever
+//! writes each directory. A file that doesn't follow those rules is a series
+//! of its own.
+//!
+//! A series' files never overlap in time: each rotation, whether by copying
+//! or by starting a new file, begins the new file after the previous file's
+//! last write. So, with a series sorted by newest write:
+//!
+//! - a file's newest write is its `mtime`, except for archived files, whose
+//!   names record the `mtime` of the file they were copied from;
+//! - a file's oldest write is the newest write of the next-older file in its
+//!   series, which is at or before the file's first line;
+//! - the oldest file in a series has no known oldest write.
 
 use anyhow::Context;
 use camino::{Utf8DirEntry, Utf8Path, Utf8PathBuf};
@@ -364,7 +382,7 @@ impl Zones {
     ///
     /// Every file's [`LogAge`] is derived from all of the zone's files that
     /// are loaded, so the date range is applied only after every directory
-    /// has been read: a log's files may be spread across the zone's primary
+    /// has been read: a series' files may be spread across the zone's primary
     /// directory and several debug datasets.
     pub fn zone_logs(
         &self,
@@ -515,28 +533,28 @@ fn split_numeric_suffix(filename: &str) -> (&str, Option<&str>) {
     }
 }
 
-/// Returns the name of the log that an SMF log file belongs to: its live
+/// Returns the name of the series that an SMF log file belongs to: its live
 /// file's name.
 ///
 /// SMF log files are named `<service>.log` (live), `<service>.log.<N>`
 /// (rotated by logadm(8)), and `<service>.log.<epoch>` (archived by
 /// sled-agent's debug collector). Keying on the full live file name, rather
-/// than the service name, keeps the logs of separate instances of a service
-/// apart.
-fn smf_log_name(filename: &str) -> &str {
+/// than the service name, keeps the series of separate instances of a
+/// service apart.
+fn smf_series(filename: &str) -> &str {
     split_numeric_suffix(filename).0
 }
 
-/// Returns the name of the log that a file in an extra log directory belongs
-/// to, or `None` if the file doesn't follow the naming of the program that
-/// writes to the directory. Such a file is treated as a log of its own.
+/// Returns the name of the series that a file in an extra log directory
+/// belongs to, or `None` if the file doesn't follow the naming of the program
+/// that writes to the directory. Such a file is a series of its own.
 ///
 /// Files are grouped by the naming rules of the program that writes them,
 /// not by a guess that applies to every directory:
 ///
 /// - CockroachDB names its log files
-///   `<prefix>.<host>.<user>.<timestamp>.<pid>.log`, and groups them into
-///   logs by `<prefix>`, which it constructs to never contain a `.` (see
+///   `<prefix>.<host>.<user>.<timestamp>.<pid>.log`, one series per
+///   `<prefix>`, which it constructs to never contain a `.` (see
 ///   `FileNamePattern` and `normalizeFileName` in CockroachDB's
 ///   `pkg/util/log`). It starts a new file on each rotation and on each
 ///   restart. (`<prefix>.log` is a symlink to the current file, which is
@@ -545,7 +563,7 @@ fn smf_log_name(filename: &str) -> &str {
 ///   `$file.$secs` and compression (see
 ///   `smf/chrony-setup/etc/logadm.d/chrony.logadm.conf`): `<name>.log`
 ///   (live) and `<name>.log.<secs>.gz` (rotated).
-fn extra_log_name(svc_name: &str, filename: &str) -> Option<String> {
+fn extra_series(svc_name: &str, filename: &str) -> Option<String> {
     match svc_name {
         "cockroachdb" => {
             let parts: Vec<&str> = filename.split('.').collect();
@@ -604,9 +622,9 @@ struct Candidate {
     /// The service the file is reported under.
     service: ServiceName,
     slot: Slot,
-    /// The log the file belongs to within `service` (see [`smf_log_name`]
-    /// and [`extra_log_name`]), or `None` if it is a log of its own.
-    log_name: Option<String>,
+    /// The series the file belongs to within `service` (see [`smf_series`]
+    /// and [`extra_series`]), or `None` if it is a series of its own.
+    series: Option<String>,
     /// For a symlink, the path it points to.
     symlink_target: Option<Utf8PathBuf>,
     /// The file's newest write, if its metadata was read. Not used for
@@ -643,7 +661,7 @@ fn load_svc_logs(
         };
 
         let mut file = LogFile::new(dir.join(filename));
-        let mut log_name = Some(smf_log_name(filename).to_string());
+        let mut series = Some(smf_series(filename).to_string());
         let mut newest_write = None;
         if read_metadata {
             file.read_metadata(&entry);
@@ -656,9 +674,9 @@ fn load_svc_logs(
                         // time of archival is known, which is later than
                         // the file's newest write. That is safe for dating
                         // this file alone (it can only widen its age), but
-                        // not as a bound on its neighbors', so keep it out
-                        // of the log.
-                        log_name = None;
+                        // not as a bound on its neighbors', so make it a
+                        // series of its own.
+                        series = None;
                         file.modified
                     }
                 },
@@ -674,7 +692,7 @@ fn load_svc_logs(
         candidates.push(Candidate {
             service: svc_name.to_string(),
             slot,
-            log_name,
+            series,
             symlink_target: None,
             newest_write,
             file,
@@ -722,10 +740,10 @@ fn load_extra_logs(
         candidates.push(Candidate {
             service: svc_name.to_string(),
             slot: Slot::Extra,
-            log_name: if is_symlink {
+            series: if is_symlink {
                 None
             } else {
-                extra_log_name(svc_name, filename)
+                extra_series(svc_name, filename)
             },
             symlink_target,
             newest_write,
@@ -737,26 +755,26 @@ fn load_extra_logs(
 
 /// Assigns each candidate's [`LogAge`].
 ///
-/// - A file in a log takes the newest write of the next-older file in the
-///   log's order as its oldest write. Ties are skipped: of two files with
-///   the same newest write, either could be the older one, so each is bounded
-///   by the next strictly older file instead. The oldest file of a log has
-///   no known oldest write.
-/// - A file that is a log of its own has no known oldest write.
+/// - A file takes the newest write of the next-older file in its series as
+///   its oldest write. Ties are skipped: of two files with the same newest
+///   write, either could be the older one, so each is bounded by the next
+///   strictly older file instead. The oldest file of a series (including a
+///   file that is a series of its own) has no known oldest write.
 /// - A symlink takes the age of the file it points to. Symlinks are kept out
-///   of log order: a symlink shares its target's newest write, and so could
-///   otherwise become its own target's next-older file. If the target isn't
+///   of every series: a symlink shares its target's newest write, and so
+///   could otherwise become its own target's next-older file. If the target isn't
 ///   among the candidates, the symlink is dated by the target's `mtime`
 ///   alone.
 fn assign_ages(candidates: &mut [Candidate]) {
-    // Group the files that are in a log by (service, log name).
-    let mut logs: BTreeMap<(&str, &str), Vec<(usize, Timestamp)>> =
+    // Group the files that are in a series by (service, series).
+    let mut series: BTreeMap<(&str, &str), Vec<(usize, Timestamp)>> =
         BTreeMap::new();
     for (i, candidate) in candidates.iter().enumerate() {
-        if let (Some(log_name), Some(newest_write)) =
-            (&candidate.log_name, candidate.newest_write)
+        if let (Some(name), Some(newest_write)) =
+            (&candidate.series, candidate.newest_write)
         {
-            logs.entry((&candidate.service, log_name))
+            series
+                .entry((&candidate.service, name))
                 .or_default()
                 .push((i, newest_write));
         }
@@ -771,8 +789,8 @@ fn assign_ages(candidates: &mut [Candidate]) {
         })
         .collect();
 
-    for mut files in logs.into_values() {
-        // Sort into log order: newest first.
+    for mut files in series.into_values() {
+        // Sort the series newest first.
         files.sort_by_key(|&(_, newest_write)| std::cmp::Reverse(newest_write));
         for (position, &(i, newest_write)) in files.iter().enumerate() {
             let next_older = files[position + 1..]
@@ -1001,8 +1019,8 @@ mod tests {
     }
 
     #[test]
-    fn test_smf_log_name() {
-        use super::smf_log_name;
+    fn test_smf_series() {
+        use super::smf_series;
 
         for filename in [
             "oxide-nexus:default.log",
@@ -1010,11 +1028,11 @@ mod tests {
             "oxide-nexus:default.log.12",
             "oxide-nexus:default.log.1790585101",
         ] {
-            assert_eq!(smf_log_name(filename), "oxide-nexus:default.log");
+            assert_eq!(smf_series(filename), "oxide-nexus:default.log");
         }
-        // Separate instances of a service are separate logs.
+        // Separate instances of a service are separate series.
         assert_eq!(
-            smf_log_name("oxide-foo:instance2.log.0"),
+            smf_series("oxide-foo:instance2.log.0"),
             "oxide-foo:instance2.log"
         );
     }
@@ -1032,13 +1050,13 @@ mod tests {
     }
 
     #[test]
-    fn test_extra_log_name() {
-        use super::extra_log_name;
+    fn test_extra_series() {
+        use super::extra_series;
 
         // CockroachDB log files, as named on a real system.
         let zone = "oxzcockroachdb8bbea076-ff60-4330-8302-383e18140ef3";
         assert_eq!(
-            extra_log_name(
+            extra_series(
                 "cockroachdb",
                 &format!(
                     "cockroach.{zone}.root.2026-09-29T09_44_35Z.006190.log"
@@ -1048,7 +1066,7 @@ mod tests {
             Some("cockroach")
         );
         assert_eq!(
-            extra_log_name(
+            extra_series(
                 "cockroachdb",
                 &format!(
                     "cockroach-health.{zone}.root.2026-09-22T03_29_59Z.003419.log"
@@ -1058,7 +1076,7 @@ mod tests {
             Some("cockroach-health")
         );
         // The symlinks to the current files, directories, and anything else
-        // that doesn't follow CockroachDB's naming are logs of their own.
+        // that doesn't follow CockroachDB's naming are series of their own.
         for filename in [
             "cockroach.log",
             "cockroach-health.log",
@@ -1068,7 +1086,7 @@ mod tests {
             "cockroach..root.2026-09-29T09_44_35Z.006190.log",
         ] {
             assert_eq!(
-                extra_log_name("cockroachdb", filename),
+                extra_series("cockroachdb", filename),
                 None,
                 "{filename}"
             );
@@ -1077,28 +1095,28 @@ mod tests {
         // chrony's logs, as rotated by logadm.
         for filename in ["tracking.log", "tracking.log.1790705215.gz"] {
             assert_eq!(
-                extra_log_name("ntp", filename).as_deref(),
+                extra_series("ntp", filename).as_deref(),
                 Some("tracking.log"),
                 "{filename}"
             );
         }
-        assert_eq!(extra_log_name("ntp", "chrony.conf"), None);
+        assert_eq!(extra_series("ntp", "chrony.conf"), None);
 
         // Directories with no known naming rule.
-        assert_eq!(extra_log_name("dendrite", "zlog-cfg-cur"), None);
-        assert_eq!(extra_log_name("dendrite", "bf_drivers.log"), None);
+        assert_eq!(extra_series("dendrite", "zlog-cfg-cur"), None);
+        assert_eq!(extra_series("dendrite", "bf_drivers.log"), None);
     }
 
-    /// Builds a candidate in `log_name` with the given newest write.
+    /// Builds a candidate in `series` with the given newest write.
     fn candidate(
         path: &str,
-        log_name: Option<&str>,
+        series: Option<&str>,
         newest_write: &str,
     ) -> super::Candidate {
         super::Candidate {
             service: "svc".to_string(),
             slot: super::Slot::Archived,
-            log_name: log_name.map(str::to_string),
+            series: series.map(str::to_string),
             symlink_target: None,
             newest_write: Some(ts(newest_write)),
             file: super::LogFile {
@@ -1118,17 +1136,17 @@ mod tests {
     }
 
     #[test]
-    fn test_assign_ages_log_order() {
+    fn test_assign_ages_series_order() {
         // One service's files, as in the example on
         // https://github.com/oxidecomputer/omicron/issues/11357: a live file,
         // a rotated file, and three archived files, in arbitrary order.
-        let log = Some("oxide-nexus:default.log");
+        let series = Some("oxide-nexus:default.log");
         let mut candidates = vec![
-            candidate("archived-b", log, "2026-09-28T03:59:57Z"),
-            candidate("live", log, "2026-09-28T12:02:10Z"),
-            candidate("archived-c", log, "2026-09-27T23:59:58Z"),
-            candidate("rotated", log, "2026-09-28T11:59:58Z"),
-            candidate("archived-a", log, "2026-09-28T07:59:59Z"),
+            candidate("archived-b", series, "2026-09-28T03:59:57Z"),
+            candidate("live", series, "2026-09-28T12:02:10Z"),
+            candidate("archived-c", series, "2026-09-27T23:59:58Z"),
+            candidate("rotated", series, "2026-09-28T11:59:58Z"),
+            candidate("archived-a", series, "2026-09-28T07:59:59Z"),
         ];
         super::assign_ages(&mut candidates);
 
@@ -1156,15 +1174,15 @@ mod tests {
     }
 
     #[test]
-    fn test_assign_ages_separate_logs() {
-        // Files of different logs never bound each other, even when their
+    fn test_assign_ages_separate_series() {
+        // Files of different series never bound each other, even when their
         // times interleave.
         let mut candidates = vec![
             candidate("a-new", Some("a"), "2026-09-28T12:00:00Z"),
             candidate("b-new", Some("b"), "2026-09-28T11:00:00Z"),
             candidate("a-old", Some("a"), "2026-09-28T10:00:00Z"),
             candidate("b-old", Some("b"), "2026-09-28T09:00:00Z"),
-            // A file that is a log of its own.
+            // A file that is a series of its own.
             candidate("alone", None, "2026-09-28T11:30:00Z"),
         ];
         super::assign_ages(&mut candidates);
@@ -1185,11 +1203,11 @@ mod tests {
     fn test_assign_ages_ties() {
         // Of two files with the same newest write, either could be the older
         // one, so both are bounded by the next strictly older file.
-        let log = Some("log");
+        let series = Some("series");
         let mut candidates = vec![
-            candidate("tie-1", log, "2026-09-28T12:00:00Z"),
-            candidate("tie-2", log, "2026-09-28T12:00:00Z"),
-            candidate("older", log, "2026-09-28T10:00:00Z"),
+            candidate("tie-1", series, "2026-09-28T12:00:00Z"),
+            candidate("tie-2", series, "2026-09-28T12:00:00Z"),
+            candidate("older", series, "2026-09-28T10:00:00Z"),
         ];
         super::assign_ages(&mut candidates);
 
@@ -1207,14 +1225,14 @@ mod tests {
     fn test_assign_ages_unknown_newest_write() {
         // A file whose mtime couldn't be read has no age, and doesn't bound
         // its neighbors.
-        let log = Some("log");
-        let mut unknown = candidate("unknown", log, "2026-09-28T11:00:00Z");
+        let series = Some("series");
+        let mut unknown = candidate("unknown", series, "2026-09-28T11:00:00Z");
         unknown.newest_write = None;
         unknown.file.modified = None;
         let mut candidates = vec![
-            candidate("newer", log, "2026-09-28T12:00:00Z"),
+            candidate("newer", series, "2026-09-28T12:00:00Z"),
             unknown,
-            candidate("older", log, "2026-09-28T10:00:00Z"),
+            candidate("older", series, "2026-09-28T10:00:00Z"),
         ];
         super::assign_ages(&mut candidates);
 
@@ -1246,7 +1264,7 @@ mod tests {
             std::fs::create_dir(d).unwrap();
         }
 
-        // An SMF service's log. Archived files' own mtimes are the time of
+        // An SMF service's series. Archived files' own mtimes are the time of
         // archival; their names hold their newest writes.
         let svc = "oxide-nexus:default.log";
         create_file(&primary.join(svc), "2026-09-28T12:02:10Z");

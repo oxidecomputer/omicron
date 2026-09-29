@@ -46,16 +46,13 @@ enum Commands {
         filter: FilterArgs,
 
         /// Show log files that may have been written to before this
-        /// timestamp: files whose oldest write, bounded by the newest write
-        /// of the previous file of the same log, is before it. May be
-        /// absolute or relative, e.g. '2025-04-01T01:01:01', '-1 hour',
-        /// '3 days ago'
+        /// timestamp. May be absolute or relative, e.g.
+        /// '2025-04-01T01:01:01', '-1 hour', '3 days ago'
         #[arg(short = 'B', long, value_parser = parse_timestamp_now)]
         before: Option<Timestamp>,
 
-        /// Show log files last written after this timestamp (for archived
-        /// files, as recorded in their names). May be absolute or relative,
-        /// e.g. '2025-04-01T01:01:01', '-1 hour', '3 days ago'
+        /// Show log files written to after this timestamp. May be absolute
+        /// or relative, e.g. '2025-04-01T01:01:01', '-1 hour', '3 days ago'
         #[arg(short = 'A', long, value_parser = parse_timestamp_now)]
         after: Option<Timestamp>,
     },
