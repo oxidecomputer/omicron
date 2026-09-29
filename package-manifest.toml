@@ -148,10 +148,9 @@ output.type = "zone"
 service_name = "oximeter-collector"
 only_for_targets.image = "standard"
 source.type = "local"
-source.rust.binary_names = ["oximeter", "clickhouse-schema-updater"]
+source.rust.binary_names = ["oximeter"]
 source.rust.release = true
 source.paths = [
-  { from = "oximeter/db/schema", to = "/opt/oxide/oximeter/schema" },
   { from = "smf/oximeter/{{clickhouse-topology}}/config.toml", to = "/var/svc/manifest/site/oximeter/config.toml" },
   { from = "smf/oximeter/manifest.xml", to = "/var/svc/manifest/site/oximeter/manifest.xml" },
 ]
@@ -183,6 +182,7 @@ source.paths = [
   { from = "smf/clickhouse/manifest.xml", to = "/var/svc/manifest/site/clickhouse/manifest.xml" },
   { from = "smf/clickhouse/method_script.sh", to = "/opt/oxide/lib/svc/manifest/clickhouse.sh" },
   { from = "smf/clickhouse/config.xml", to = "/opt/oxide/clickhouse/config.xml" },
+  { from = "smf/clickhouse/users-and-roles.xml", to = "/opt/oxide/clickhouse/users-and-roles.xml" },
   { from = "smf/clickhouse-admin-single", to = "/var/svc/manifest/site/clickhouse-admin-single" },
 ]
 output.type = "zone"
@@ -252,12 +252,19 @@ setup_hint = "Run `cargo xtask download clickhouse` to download the necessary bi
 service_name = "omicron-clickhouse-admin"
 only_for_targets.image = "standard"
 source.type = "local"
-source.rust.binary_names = ["clickhouse-admin-keeper", "clickhouse-admin-server", "clickhouse-admin-single"]
+source.rust.binary_names = [
+    "clickhouse-admin-keeper",
+    "clickhouse-admin-server",
+    "clickhouse-admin-single",
+    "clickhouse-schema-updater"
+]
 source.rust.release = true
 # We specifically put the smf manifests with their corresponding container zones
 # so that both servers aren't started simultaneously
 # See [package.clickhouse_keeper_svc] and [package.clickhouse_server_svc]
-source.paths = []
+source.paths = [
+  { from = "oximeter/db/schema", to = "/opt/oxide/oximeter/schema" }
+]
 output.type = "zone"
 output.intermediate_only = true
 
@@ -605,8 +612,8 @@ source.type = "prebuilt"
 source.repo = "management-gateway-service"
 # In general, this commit should match the pinned revision of `gateway-sp-comms`
 # in `Cargo.toml`.
-source.commit = "6c0aca2545a73fd75536e149d29faa7108be5862"
-source.sha256 = "48748a5090ed9c7b4d61cc127d9c6959b228864b75a4ab111468dc22ae20d656"
+source.commit = "438cd185666d5f164548885873f0f5df9a38eed1"
+source.sha256 = "176fab5f1fdd892832d42f11fdef97734184d22400d7d76835c0d83981c25c4b"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -667,10 +674,10 @@ service_name = "propolis-server"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "propolis"
-source.commit = "046f74302e2ea09a75b0a6810645d42c7df6644a"
+source.commit = "93e04e189a76f73b3764c6417928274b0f4df453"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/propolis/image/<commit>/propolis-server.sha256.txt
-source.sha256 = "42a6096035caeccb5f3472a6418180a5c961e4eec870ccf55f55ec7153406268"
+source.sha256 = "2c249d7e23042b3b03b48c61c34c5c3af18776229894b56816b5bb56df9d2842"
 output.type = "zone"
 
 [package.mg-ddm-gz]
@@ -683,10 +690,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "ce015cde17a1ebc839ae482026d522cf0e369a3b"
+source.commit = "fc9563cea463926d1a7f57b9c920044246cc8b63"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm-gz.sha256.txt
-source.sha256 = "279cb103525d4a554082fbea11f7b841fc1515f337cf895849b5e7c0950b925d"
+source.sha256 = "4c908ba0b7b12568ce3860fe75f34678cdb54c44bc417dadf2feec8cbd26cd80"
 output.type = "tarball"
 
 [package.mg-ddm]
@@ -699,10 +706,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "ce015cde17a1ebc839ae482026d522cf0e369a3b"
+source.commit = "fc9563cea463926d1a7f57b9c920044246cc8b63"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "742d0bec146634695f40133b41f9da8a2de2bc36a905de0927c7515a6672e1ce"
+source.sha256 = "7109e1d4ab26bfd8880ae85b3007d4837a0c6459edd1346713f8e12e7dbbdb30"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -714,10 +721,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "ce015cde17a1ebc839ae482026d522cf0e369a3b"
+source.commit = "fc9563cea463926d1a7f57b9c920044246cc8b63"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mgd.sha256.txt
-source.sha256 = "a8ef9f24f794c9ac3c4e66b60e738d50aa1b22f86c7aa7baf7b07d300411ecde"
+source.sha256 = "7ef75ecf5cb9eafa290fa84f9c20e7418154046bb8c478558268672460ac9aed"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -765,8 +772,8 @@ only_for_targets.image = "standard"
 # the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "04a52a3240a26c58f03e1cf40353d67ff69d76b6"
-source.sha256 = "427937bc676d374bdbc76796da37ff1de1c21bcf593fa3317db23e86b4f29c68"
+source.commit = "247502812015b409d33240b836d5bf242817453d"
+source.sha256 = "e878b070c1a3ae26decaa9194d4d785c125f72864c95c14b020770da14fb0b1b"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -792,8 +799,8 @@ only_for_targets.image = "standard"
 # the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "04a52a3240a26c58f03e1cf40353d67ff69d76b6"
-source.sha256 = "7b51f10349486f57c431c6fb5f18e7597dba6def1c929227b7bee4f52703cbf6"
+source.commit = "247502812015b409d33240b836d5bf242817453d"
+source.sha256 = "3f383cfbfd4c0af2f4e56eca7bc6376412617f8b78de3d3465718adb0dd668a7"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -812,8 +819,8 @@ only_for_targets.image = "standard"
 # the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "04a52a3240a26c58f03e1cf40353d67ff69d76b6"
-source.sha256 = "eb2ee25b5a9c8bb28f17a8d8aaaa0a7bffaf00ee0cadd876baf5c8c85572ca68"
+source.commit = "247502812015b409d33240b836d5bf242817453d"
+source.sha256 = "df1d007e4f90f260a343e7231e6bff2ce61f9d1e73e17765365b8c9f95b2a3d0"
 output.type = "zone"
 output.intermediate_only = true
 

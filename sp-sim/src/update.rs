@@ -598,7 +598,7 @@ impl SimSpUpdate {
     }
 
     pub(crate) fn get_component_caboose_value(
-        &mut self,
+        &self,
         component: SpComponent,
         slot: u16,
         key: [u8; 4],

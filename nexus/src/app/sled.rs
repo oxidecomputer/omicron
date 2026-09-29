@@ -164,6 +164,10 @@ impl super::Nexus {
         // for the next periodic activation before they can be cleaned up.
         self.background_tasks.task_instance_watcher.activate();
 
+        // The blueprint planner is going to perform actions based on the
+        // expungement, so kick it off now.
+        self.background_tasks.task_blueprint_planner.activate();
+
         Ok(prev_policy)
     }
 

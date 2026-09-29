@@ -322,6 +322,7 @@ mod tests {
     use super::*;
     use chrono::Utc;
     use omicron_test_utils::dev::test_setup_log;
+    use oximeter_db::User;
     use proptest::prelude::*;
     use tokio::time::timeout;
 
@@ -440,7 +441,7 @@ mod tests {
         let log = &logctx.log;
 
         // Construct a database batcher with a dummy ClickHouse client.
-        let client = Client::new("[::1]:0".parse().unwrap(), log);
+        let client = Client::new(User::Writer, "[::1]:0".parse().unwrap(), log);
         let (tx, rx) = mpsc::channel(1);
         let sink_stats = Arc::new(self_stats::CollectorSinkStats::new(
             "test".into(),

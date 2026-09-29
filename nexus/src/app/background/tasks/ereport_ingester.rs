@@ -517,15 +517,20 @@ mod tests {
             "55e30cc7-a109-492f-aca9-735ed725df3c"
         ));
 
-        let sled0 =
-            ExpectedReporter { serial: "SimGimlet00", part: "SimGimletSp" };
+        let sled0 = ExpectedReporter {
+            serial: "SimGimlet00",
+            part: sp_sim::FAKE_GIMLET_MODEL,
+        };
         let sled0_ereports = [
             sled0.ereport(
                 1,
                 "ereport.data_loss.possible",
                 serde_json::json!({
-                    "hubris_archive_id": "ffffffff",
-                    "hubris_version": "0.0.2",
+                    "hubris_caboose": {
+                        "board": sp_sim::SIM_GIMLET_BOARD,
+                        "commit": "ffffffff",
+                        "version": "0.0.2",
+                    },
                     "hubris_task_name": "packrat",
                     "hubris_task_gen": 0,
                     "hubris_uptime_ms": 666,
@@ -537,8 +542,11 @@ mod tests {
                 2,
                 "gov.nasa.apollo.o2_tanks.stir.begin",
                 serde_json::json!({
-                    "hubris_archive_id": "ffffffff",
-                    "hubris_version": "0.0.2",
+                    "hubris_caboose": {
+                        "board": sp_sim::SIM_GIMLET_BOARD,
+                        "commit": "ffffffff",
+                        "version": "0.0.2",
+                    },
                     "hubris_task_name": "task_apollo_server",
                     "hubris_task_gen": 13,
                     "hubris_uptime_ms": 1233,
@@ -551,8 +559,11 @@ mod tests {
                 3,
                 "io.discovery.ae35.fault",
                 serde_json::json!({
-                    "hubris_archive_id": "ffffffff",
-                    "hubris_version": "0.0.2",
+                    "hubris_caboose": {
+                        "board": sp_sim::SIM_GIMLET_BOARD,
+                        "commit": "ffffffff",
+                        "version": "0.0.2",
+                    },
                     "hubris_task_name": "drv_ae35_server",
                     "hubris_task_gen": 1,
                     "hubris_uptime_ms": 1234,
@@ -574,8 +585,11 @@ mod tests {
                 4,
                 "gov.nasa.apollo.fault",
                 serde_json::json!({
-                    "hubris_archive_id": "ffffffff",
-                    "hubris_version": "0.0.2",
+                    "hubris_caboose": {
+                        "board": sp_sim::SIM_GIMLET_BOARD,
+                        "commit": "ffffffff",
+                        "version": "0.0.2",
+                    },
                     "hubris_task_name": "task_apollo_server",
                     "hubris_task_gen": 13,
                     "hubris_uptime_ms": 1237,
@@ -593,8 +607,11 @@ mod tests {
                 5,
                 "flagrant_error",
                 serde_json::json!({
-                    "hubris_archive_id": "ffffffff",
-                    "hubris_version": "0.0.2",
+                    "hubris_caboose": {
+                        "board": sp_sim::SIM_GIMLET_BOARD,
+                        "commit": "ffffffff",
+                        "version": "0.0.2",
+                    },
                     "hubris_task_name": "drv_thingy_server",
                     "hubris_task_gen": 2,
                     "hubris_uptime_ms": 1240,
@@ -607,8 +624,11 @@ mod tests {
                 6,
                 "overfull_hbox",
                 serde_json::json!({
-                    "hubris_archive_id": "ffffffff",
-                    "hubris_version": "0.0.2",
+                    "hubris_caboose": {
+                        "board": sp_sim::SIM_GIMLET_BOARD,
+                        "commit": "ffffffff",
+                        "version": "0.0.2",
+                    },
                     "hubris_task_name": "task_latex_server",
                     "hubris_task_gen": 1,
                     "hubris_uptime_ms": 1245,
@@ -619,15 +639,20 @@ mod tests {
             ),
         ];
 
-        let sled1 =
-            ExpectedReporter { part: "SimGimletSp", serial: "SimGimlet01" };
+        let sled1 = ExpectedReporter {
+            part: sp_sim::FAKE_GIMLET_MODEL,
+            serial: "SimGimlet01",
+        };
         let sled1_ereports = [
             sled1.ereport(
                 1,
                 "ereport.data_loss.possible",
                 serde_json::json!({
-                    "hubris_archive_id": "ffffffff",
-                    "hubris_version": "0.0.2",
+                    "hubris_caboose": {
+                        "board": sp_sim::SIM_GIMLET_BOARD,
+                        "commit": "ffffffff",
+                        "version": "0.0.2",
+                    },
                     "hubris_task_name": "packrat",
                     "hubris_task_gen": 0,
                     "hubris_uptime_ms": 666,
@@ -639,8 +664,11 @@ mod tests {
                 2,
                 "computer.oxide.gimlet.chassis_integrity.fault",
                 serde_json::json!({
-                    "hubris_archive_id": "ffffffff",
-                    "hubris_version": "0.0.2",
+                    "hubris_caboose": {
+                        "board": sp_sim::SIM_GIMLET_BOARD,
+                        "commit": "ffffffff",
+                        "version": "0.0.2",
+                    },
                     "hubris_task_name": "task_thermal_server",
                     "hubris_task_gen": 1,
                     "hubris_uptime_ms": 1233,
