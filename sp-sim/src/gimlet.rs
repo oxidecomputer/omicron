@@ -9,6 +9,8 @@ use crate::config::GimletConfig;
 use crate::config::SpCommonConfig;
 use crate::device_descriptions::DeviceDescriptions;
 use crate::ereport::EreportState;
+use crate::helpers::read_dummy_rot_page;
+use crate::helpers::rot_boot_info;
 use crate::helpers::rot_state_v2;
 use crate::sensors::Sensors;
 use crate::server::SimSpHandler;
@@ -21,7 +23,6 @@ use crate::vpd::BaseboardVpd;
 use crate::vpd::ComponentVpds;
 use anyhow::{Context, Result, anyhow, bail};
 use async_trait::async_trait;
-use gateway_messages::CfpaPage;
 use gateway_messages::ComponentAction;
 use gateway_messages::ComponentActionResponse;
 use gateway_messages::DumpSegment;
@@ -1239,15 +1240,7 @@ impl SpHandler for Handler {
         request: RotRequest,
         buf: &mut [u8],
     ) -> std::result::Result<RotResponse, SpError> {
-        let dummy_page = match request {
-            RotRequest::ReadCmpa => "gimlet-cmpa",
-            RotRequest::ReadCfpa(CfpaPage::Active) => "gimlet-cfpa-active",
-            RotRequest::ReadCfpa(CfpaPage::Inactive) => "gimlet-cfpa-inactive",
-            RotRequest::ReadCfpa(CfpaPage::Scratch) => "gimlet-cfpa-scratch",
-        };
-        buf[..dummy_page.len()].copy_from_slice(dummy_page.as_bytes());
-        buf[dummy_page.len()..].fill(0);
-        Ok(RotResponse::Ok)
+        read_dummy_rot_page(BaseboardKind::Gimlet, request, buf)
     }
 
     fn vpd_lock_status_all(
@@ -1314,19 +1307,11 @@ impl SpHandler for Handler {
         &mut self,
         version: u8,
     ) -> Result<RotBootInfo, SpError> {
-        if self.common.old_rot_state {
-            Err(SpError::RequestUnsupportedForSp)
-        } else {
-            match version {
-                0 => Err(SpError::Update(
-                    gateway_messages::UpdateError::VersionNotSupported,
-                )),
-                1 => Ok(RotBootInfo::V2(rot_state_v2(
-                    self.update_state.rot_state(),
-                ))),
-                _ => Ok(RotBootInfo::V3(self.update_state.rot_state())),
-            }
-        }
+        rot_boot_info(
+            self.update_state.rot_state(),
+            self.common.old_rot_state,
+            version,
+        )
     }
 
     fn get_task_dump_count(&mut self) -> Result<u32, SpError> {
