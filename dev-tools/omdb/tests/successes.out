@@ -2391,10 +2391,10 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 reconfigurator config updated to version 2:
-    tuf repo pruner enabled::   true (unchanged)
-*   planner enabled::::::::::   false -> true
-    blueprint pruner enabled:   true (unchanged)
-    blueprint pruner nkeep:::   1000 (unchanged)
+    tuf repo pruner enabled:::   true (unchanged)
+*   planner enabled:::::::::::   false -> true
+    blueprint pruner enabled::   true (unchanged)
+    blueprint pruner nkeep::::   1000 (unchanged)
     disruption policy:::::::::   terminate (unchanged)
     sled update reboot policy:   immediate (no evacuation) (unchanged)
 ---------------------------------------------
@@ -2406,10 +2406,10 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 reconfigurator config updated to version 3:
-    tuf repo pruner enabled::   true (unchanged)
-    planner enabled::::::::::   true (unchanged)
-    blueprint pruner enabled:   true (unchanged)
-    blueprint pruner nkeep:::   1000 (unchanged)
+    tuf repo pruner enabled:::   true (unchanged)
+    planner enabled:::::::::::   true (unchanged)
+    blueprint pruner enabled::   true (unchanged)
+    blueprint pruner nkeep::::   1000 (unchanged)
 *   disruption policy:::::::::   terminate -> live-migrate or terminate
     sled update reboot policy:   immediate (no evacuation) (unchanged)
 ---------------------------------------------
@@ -2421,10 +2421,10 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 reconfigurator config updated to version 4:
-    tuf repo pruner enabled::   true (unchanged)
-    planner enabled::::::::::   true (unchanged)
-    blueprint pruner enabled:   true (unchanged)
-    blueprint pruner nkeep:::   1000 (unchanged)
+    tuf repo pruner enabled:::   true (unchanged)
+    planner enabled:::::::::::   true (unchanged)
+    blueprint pruner enabled::   true (unchanged)
+    blueprint pruner nkeep::::   1000 (unchanged)
     disruption policy:::::::::   live-migrate or terminate (unchanged)
 *   sled update reboot policy:   immediate (no evacuation) -> evacuate
 ---------------------------------------------
