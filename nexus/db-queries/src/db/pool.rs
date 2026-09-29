@@ -39,11 +39,13 @@ const CFG_TCP_KEEPIDLE: Duration = Duration::from_secs(30);
 const CFG_TCP_KEEPINTVL: Duration = Duration::from_secs(10);
 const CFG_TCP_KEEPCNT: u32 = 12;
 
-/// Used for setting the behavior around saving backtraces in the [`Pool::claim`] method.
+/// Used for setting the behavior around saving backtraces in the
+/// [`Pool::claim`] method.
 ///
-/// This is normally set to `Capture`, but it may be useful to override this in the Nexus config
-/// during development and testing in certain non-illumos dev environments where capturing
-/// backtraces is expensive. See the corresponding flag in [`DeploymentConfig`] for more details.
+/// This is normally set to `Capture`, but it may be useful to override this in
+/// the Nexus config during development and testing in certain non-illumos dev
+/// environments where capturing backtraces is expensive. See the corresponding
+/// flag in [`DeploymentConfig`] for more details.
 ///
 /// [`DeploymentConfig`]: nexus_config::DeploymentConfig
 pub enum ClaimBacktraceSetting {
@@ -276,8 +278,8 @@ impl Pool {
     pub async fn claim(&self) -> Result<DataStoreConnection, Error> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let held_since = Utc::now();
-        // This is an escape hatch in case we ever encounter an unexpected pathological case where
-        // capturing backtraces is slow enough to be an issue:
+        // This is an ecape hatch for unusual non-production use cases where
+        // capturing backtraces might be slow enough to be an issue:
         let debug = match self.backtrace_setting {
             ClaimBacktraceSetting::Capture => {
                 Backtrace::force_capture().to_string()
