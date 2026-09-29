@@ -398,14 +398,17 @@ pub struct PlannerConfigDiffDisplay<'a, 'b> {
 
 impl fmt::Display for PlannerConfigDiffDisplay<'_, '_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let PlannerConfigDiff { disruption_policy, sled_reboot_policy } =
+        let PlannerConfigDiff { disruption_policy, sled_update_reboot_policy } =
             self.diff;
 
         let list = KvList::new(
             None,
             vec![
                 diff_row!(disruption_policy, "disruption policy"),
-                diff_row!(sled_reboot_policy, "sled reboot policy"),
+                diff_row!(
+                    sled_update_reboot_policy,
+                    "sled update reboot policy"
+                ),
             ],
         );
         // No need for writeln! here because KvList adds its own newlines.

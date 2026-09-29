@@ -32,18 +32,18 @@ use nexus_reconfigurator_simulation::{
 };
 use nexus_reconfigurator_simulation::{SimStateBuilder, SimTufRepoSource};
 use nexus_reconfigurator_simulation::{SimTufRepoDescription, Simulator};
+use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::BlueprintMeasurements;
 use nexus_types::deployment::BlueprintSledUpdateDispositionKind;
 use nexus_types::deployment::CockroachDbSettings;
+use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
+use nexus_types::deployment::SledUpdateRebootPolicy;
 use nexus_types::deployment::execution::blueprint_external_dns_config;
 use nexus_types::deployment::execution::blueprint_internal_dns_config;
 use nexus_types::deployment::{Blueprint, UnstableReconfiguratorState};
 use nexus_types::deployment::{BlueprintArtifactVersion, PendingMgsUpdate};
 use nexus_types::deployment::{BlueprintExpungedZoneAccessReason, execution};
-use nexus_types::deployment::{
-    BlueprintHostPhase2DesiredContents, PlannerConfig, PlannerSledRebootPolicy,
-};
 use nexus_types::deployment::{BlueprintSource, SledFilter};
 use nexus_types::deployment::{
     BlueprintZoneImageSource, PendingMgsUpdateDetails,
@@ -1662,7 +1662,7 @@ struct SetPlannerConfigArgs {
 struct PlannerConfigOpts {
     /// sled reboot policy
     #[clap(long)]
-    sled_reboot_policy: Option<PlannerSledRebootPolicyOpt>,
+    sled_update_reboot_policy: Option<SledUpdateRebootPolicyOpt>,
     /// disruption policy
     #[clap(long)]
     disruption_policy: Option<ReconfiguratorDisruptionPolicyOpt>,
@@ -1674,10 +1674,10 @@ impl PlannerConfigOpts {
         current: &PlannerConfig,
     ) -> Option<PlannerConfig> {
         let new = PlannerConfig {
-            sled_reboot_policy: self
-                .sled_reboot_policy
+            sled_update_reboot_policy: self
+                .sled_update_reboot_policy
                 .map(From::from)
-                .unwrap_or_else(|| current.sled_reboot_policy),
+                .unwrap_or_else(|| current.sled_update_reboot_policy),
             disruption_policy: self
                 .disruption_policy
                 .map(From::from)
@@ -1709,18 +1709,18 @@ impl From<ReconfiguratorDisruptionPolicyOpt>
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
-enum PlannerSledRebootPolicyOpt {
+enum SledUpdateRebootPolicyOpt {
     ImmediateNoEvacuation,
     Evacuate,
 }
 
-impl From<PlannerSledRebootPolicyOpt> for PlannerSledRebootPolicy {
-    fn from(value: PlannerSledRebootPolicyOpt) -> Self {
+impl From<SledUpdateRebootPolicyOpt> for SledUpdateRebootPolicy {
+    fn from(value: SledUpdateRebootPolicyOpt) -> Self {
         match value {
-            PlannerSledRebootPolicyOpt::ImmediateNoEvacuation => {
+            SledUpdateRebootPolicyOpt::ImmediateNoEvacuation => {
                 Self::ImmediateNoEvacuation
             }
-            PlannerSledRebootPolicyOpt::Evacuate => Self::Evacuate,
+            SledUpdateRebootPolicyOpt::Evacuate => Self::Evacuate,
         }
     }
 }
