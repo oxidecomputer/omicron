@@ -47,6 +47,7 @@ use nexus_lockstep_client::types::PhysicalDiskPath;
 use nexus_lockstep_client::types::SagaState;
 use nexus_lockstep_client::types::SledSelector;
 use nexus_saga_recovery::LastPass;
+use nexus_saga_recovery::LastPassSuccess;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::ClickhouseMode;
 use nexus_types::deployment::ClickhousePolicy;
@@ -59,8 +60,9 @@ use nexus_types::internal_api::background::AuditLogCleanupStatus;
 use nexus_types::internal_api::background::AuditLogTimeoutIncompleteStatus;
 use nexus_types::internal_api::background::BlueprintPlannerStatus;
 use nexus_types::internal_api::background::BlueprintPrunerStatus;
-use nexus_types::internal_api::background::BlueprintRendezvousStats;
 use nexus_types::internal_api::background::BlueprintRendezvousStatus;
+use nexus_types::internal_api::background::DatasetRendezvousOutcome;
+use nexus_types::internal_api::background::DatasetRendezvousStats;
 use nexus_types::internal_api::background::DatasetsRendezvousStats;
 use nexus_types::internal_api::background::EreporterStatus;
 use nexus_types::internal_api::background::FmAnalysisStatus;
@@ -84,6 +86,8 @@ use nexus_types::internal_api::background::ServiceFirewallRuleStatus;
 use nexus_types::internal_api::background::SessionCleanupStatus;
 use nexus_types::internal_api::background::SitrepGcStatus;
 use nexus_types::internal_api::background::SitrepLoadStatus;
+use nexus_types::internal_api::background::SledBlueprintAvailabilityRendezvousOutcome;
+use nexus_types::internal_api::background::SledBlueprintAvailabilityRendezvousStats;
 use nexus_types::internal_api::background::SupportBundleActivationReport;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionStepStatus;
@@ -95,6 +99,7 @@ use nexus_types::internal_api::background::TufArtifactReplicationCounters;
 use nexus_types::internal_api::background::TufArtifactReplicationRequest;
 use nexus_types::internal_api::background::TufArtifactReplicationStatus;
 use nexus_types::internal_api::background::TufRepoPrunerStatus;
+use nexus_types::internal_api::background::WebhookRxDeliveryStatus;
 use nexus_types::internal_api::background::fm_rendezvous;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
@@ -126,6 +131,7 @@ use sled_hardware_types::BaseboardId;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::fmt;
 use std::fs::OpenOptions;
 use std::num::ParseIntError;
 use std::os::unix::fs::PermissionsExt;
@@ -1700,80 +1706,53 @@ fn print_task_blueprint_rendezvous(details: &serde_json::Value) {
             error, details
         ),
         Ok(status) => {
-            println!("    target blueprint:     {}", status.blueprint_id);
-            println!(
-                "    inventory collection: {}",
-                status.inventory_collection_id
-            );
-
-            let BlueprintRendezvousStats {
-                debug_dataset,
-                crucible_dataset,
-                local_storage_dataset,
-                local_storage_unencrypted_dataset,
+            let BlueprintRendezvousStatus {
+                blueprint_id,
                 sled_blueprint_availability,
-            } = status.stats;
+                datasets,
+            } = status;
+            println!("    target blueprint:     {blueprint_id}");
 
-            print_datasets_rendezvous_stats(&debug_dataset, "debug_dataset");
+            match datasets {
+                DatasetRendezvousOutcome::NoInventoryCollection => {
+                    println!(
+                        "    inventory collection: none loaded yet; dataset \
+                         reconciliation skipped"
+                    );
+                }
+                DatasetRendezvousOutcome::Error {
+                    inventory_collection_id,
+                    error,
+                } => {
+                    println!(
+                        "    inventory collection: {inventory_collection_id}"
+                    );
+                    println!("    dataset reconciliation failed: {error}");
+                }
+                DatasetRendezvousOutcome::Reconciled {
+                    inventory_collection_id,
+                    stats,
+                } => {
+                    println!(
+                        "    inventory collection: {inventory_collection_id}"
+                    );
+                    print_dataset_rendezvous_stats(&stats);
+                }
+            }
 
-            // crucible datasets have a different number of rendezvous stats
-            println!("    crucible_dataset rendezvous counts:");
-            println!(
-                "        num_inserted:         {}",
-                crucible_dataset.num_inserted
-            );
-            println!(
-                "        num_already_exist:    {}",
-                crucible_dataset.num_already_exist
-            );
-            println!(
-                "        num_not_in_inventory: {}",
-                crucible_dataset.num_not_in_inventory
-            );
-
-            print_datasets_rendezvous_stats(
-                &local_storage_dataset,
-                "local_storage_dataset",
-            );
-
-            print_datasets_rendezvous_stats(
-                &local_storage_unencrypted_dataset,
-                "local_storage_unencrypted_dataset",
-            );
-
-            println!("    sled_blueprint_availability rendezvous counts:");
-            println!(
-                "        num_marked_available:                {}",
-                sled_blueprint_availability.num_marked_available
-            );
-            println!(
-                "        num_marked_unavailable:              {}",
-                sled_blueprint_availability.num_marked_unavailable
-            );
-            println!(
-                "        num_unchanged:                       {}",
-                sled_blueprint_availability.num_unchanged
-            );
-            println!(
-                "        num_invariant_violations:            {}",
-                sled_blueprint_availability.num_invariant_violations
-            );
-            println!(
-                "        num_decommissioned:                  {}",
-                sled_blueprint_availability.num_decommissioned
-            );
-            println!(
-                "        num_already_decommissioned:          {}",
-                sled_blueprint_availability.num_already_decommissioned
-            );
-            println!(
-                "        num_not_in_blueprint:                {}",
-                sled_blueprint_availability.num_not_in_blueprint
-            );
-            println!(
-                "        num_decommissioned_not_in_blueprint: {}",
-                sled_blueprint_availability.num_decommissioned_not_in_blueprint
-            );
+            match sled_blueprint_availability {
+                SledBlueprintAvailabilityRendezvousOutcome::Error(error) => {
+                    println!(
+                        "    sled_blueprint_availability reconciliation \
+                         failed: {error}"
+                    );
+                }
+                SledBlueprintAvailabilityRendezvousOutcome::Reconciled(
+                    stats,
+                ) => {
+                    print_sled_blueprint_availability_rendezvous_stats(&stats);
+                }
+            }
         }
     }
 }
@@ -1789,6 +1768,82 @@ fn print_task_blueprint_pruner(details: &serde_json::Value) {
             print!("{}", status);
         }
     }
+}
+
+fn print_dataset_rendezvous_stats(stats: &DatasetRendezvousStats) {
+    let DatasetRendezvousStats {
+        debug_dataset,
+        crucible_dataset,
+        local_storage_dataset,
+        local_storage_unencrypted_dataset,
+    } = stats;
+
+    print_datasets_rendezvous_stats(debug_dataset, "debug_dataset");
+
+    // crucible datasets have a different number of rendezvous stats
+    println!("    crucible_dataset rendezvous counts:");
+    println!("        num_inserted:         {}", crucible_dataset.num_inserted);
+    println!(
+        "        num_already_exist:    {}",
+        crucible_dataset.num_already_exist
+    );
+    println!(
+        "        num_not_in_inventory: {}",
+        crucible_dataset.num_not_in_inventory
+    );
+
+    print_datasets_rendezvous_stats(
+        local_storage_dataset,
+        "local_storage_dataset",
+    );
+
+    print_datasets_rendezvous_stats(
+        local_storage_unencrypted_dataset,
+        "local_storage_unencrypted_dataset",
+    );
+}
+
+fn print_sled_blueprint_availability_rendezvous_stats(
+    stats: &SledBlueprintAvailabilityRendezvousStats,
+) {
+    let SledBlueprintAvailabilityRendezvousStats {
+        num_marked_available,
+        num_marked_unavailable,
+        num_unchanged,
+        num_invariant_violations,
+        num_decommissioned,
+        num_already_decommissioned,
+        num_not_in_blueprint,
+        num_decommissioned_not_in_blueprint,
+    } = stats;
+
+    println!("    sled_blueprint_availability rendezvous counts:");
+    println!(
+        "        num_marked_available:                {num_marked_available}"
+    );
+    println!(
+        "        num_marked_unavailable:              \
+         {num_marked_unavailable}"
+    );
+    println!("        num_unchanged:                       {num_unchanged}");
+    println!(
+        "        num_invariant_violations:            \
+         {num_invariant_violations}"
+    );
+    println!(
+        "        num_decommissioned:                  {num_decommissioned}"
+    );
+    println!(
+        "        num_already_decommissioned:          \
+         {num_already_decommissioned}"
+    );
+    println!(
+        "        num_not_in_blueprint:                {num_not_in_blueprint}"
+    );
+    println!(
+        "        num_decommissioned_not_in_blueprint: \
+         {num_decommissioned_not_in_blueprint}"
+    );
 }
 
 fn print_task_dns_config(details: &serde_json::Value) {
@@ -2702,6 +2757,24 @@ fn print_task_region_snapshot_replacement_step(details: &serde_json::Value) {
     }
 }
 
+struct LastPassSuccessDisplay<'a>(&'a LastPassSuccess);
+
+impl std::fmt::Display for LastPassSuccessDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let LastPassSuccess { nfound, nrecovered, nfailed, nskipped, nremoved } =
+            self.0;
+        writeln!(
+            f,
+            "        found sagas: {nfound:3} \
+             (in-progress, assigned to this Nexus)"
+        )?;
+        writeln!(f, "        recovered:   {nrecovered:3} (successfully)")?;
+        writeln!(f, "        failed:      {nfailed:3}")?;
+        writeln!(f, "        skipped:     {nskipped:3} (already running)")?;
+        writeln!(f, "        removed:     {nremoved:3} (newly finished)")
+    }
+}
+
 fn print_task_saga_recovery(details: &serde_json::Value) {
     match serde_json::from_value::<nexus_saga_recovery::Report>(details.clone())
     {
@@ -2745,24 +2818,7 @@ fn print_task_saga_recovery(details: &serde_json::Value) {
                 }
                 LastPass::Success(success) => {
                     println!("    last pass:");
-                    println!(
-                        "        found sagas: {:3} \
-                        (in-progress, assigned to this Nexus)",
-                        success.nfound
-                    );
-                    println!(
-                        "        recovered:   {:3} (successfully)",
-                        success.nrecovered
-                    );
-                    println!("        failed:      {:3}", success.nfailed);
-                    println!(
-                        "        skipped:     {:3} (already running)",
-                        success.nskipped
-                    );
-                    println!(
-                        "        removed:     {:3} (newly finished)",
-                        success.nskipped
-                    );
+                    print!("{}", LastPassSuccessDisplay(&success));
                 }
             };
 
@@ -3261,11 +3317,49 @@ fn print_task_alert_dispatcher(details: &serde_json::Value) {
         );
     }
 }
+
+#[derive(Debug, Default, Eq, PartialEq)]
+struct WebhookDeliveryTotals {
+    ok: usize,
+    already_delivered: usize,
+    in_progress: usize,
+    failed: usize,
+    errors: usize,
+}
+
+impl WebhookDeliveryTotals {
+    fn from_status<'a>(
+        by_rx: impl IntoIterator<Item = &'a WebhookRxDeliveryStatus>,
+    ) -> Self {
+        let mut totals = Self::default();
+        for status in by_rx {
+            let WebhookRxDeliveryStatus {
+                ready: _,
+                delivered_ok,
+                already_delivered,
+                in_progress,
+                failed_deliveries,
+                delivery_errors: _,
+                error: _,
+            } = status;
+            totals.ok += delivered_ok;
+            totals.already_delivered += already_delivered;
+            totals.in_progress += in_progress;
+            totals.failed += failed_deliveries.len();
+            totals.errors += rx_internal_errors(status);
+        }
+        totals
+    }
+}
+
+fn rx_internal_errors(status: &WebhookRxDeliveryStatus) -> usize {
+    status.delivery_errors.len() + if status.error.is_some() { 1 } else { 0 }
+}
+
 fn print_task_webhook_deliverator(details: &serde_json::Value) {
     use nexus_types::external_api::alert::WebhookDeliveryAttemptResult;
     use nexus_types::internal_api::background::WebhookDeliveratorStatus;
     use nexus_types::internal_api::background::WebhookDeliveryFailure;
-    use nexus_types::internal_api::background::WebhookRxDeliveryStatus;
 
     let WebhookDeliveratorStatus { by_rx, error } = match serde_json::from_value::<
         WebhookDeliveratorStatus,
@@ -3300,13 +3394,17 @@ fn print_task_webhook_deliverator(details: &serde_json::Value) {
     ]) + 1;
     const NUM_WIDTH: usize = 3;
 
-    let mut total_ok = 0;
-    let mut total_already_delivered = 0;
-    let mut total_in_progress = 0;
-    let mut total_failed = 0;
-    let mut total_errors = 0;
+    let WebhookDeliveryTotals {
+        ok: total_ok,
+        already_delivered: total_already_delivered,
+        in_progress: total_in_progress,
+        failed: total_failed,
+        errors: total_errors,
+    } = WebhookDeliveryTotals::from_status(by_rx.values());
     println!("    {RECEIVERS:<WIDTH$}{:>NUM_WIDTH$}", by_rx.len());
     for (rx_id, status) in by_rx {
+        let n_internal_errors = rx_internal_errors(&status);
+        let n_failed = status.failed_deliveries.len();
         let WebhookRxDeliveryStatus {
             ready,
             delivered_ok,
@@ -3338,11 +3436,6 @@ fn print_task_webhook_deliverator(details: &serde_json::Value) {
             already_delivered,
         );
         println!("      {IN_PROGRESS:<WIDTH$}{in_progress:>NUM_WIDTH$}");
-        total_ok += delivered_ok;
-        total_already_delivered += total_already_delivered;
-        total_in_progress += in_progress;
-        let n_failed = failed_deliveries.len();
-        total_failed += n_failed;
         println!("      {FAILED:<WIDTH$}{n_failed:>NUM_WIDTH$}");
         if n_failed > 0 {
             #[derive(Tabled)]
@@ -3383,10 +3476,7 @@ fn print_task_webhook_deliverator(details: &serde_json::Value) {
                 .to_string();
             println!("{}", textwrap::indent(&table.to_string(), "      "));
         }
-        let n_internal_errors =
-            delivery_errors.len() + if error.is_some() { 1 } else { 0 };
         if n_internal_errors > 0 {
-            total_errors += n_internal_errors;
             println!(
                 "{ERRICON}   {ERRORS:<WIDTH$}{:>NUM_WIDTH$}",
                 n_internal_errors,
@@ -5874,4 +5964,72 @@ async fn cmd_nexus_support_bundles_inspect(
     };
 
     support_bundle_viewer::run_dashboard(accessor).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nexus_types::external_api::alert::WebhookDeliveryAttemptResult;
+    use nexus_types::internal_api::background::WebhookDeliveryFailure;
+    use omicron_uuid_kinds::AlertUuid;
+    use omicron_uuid_kinds::WebhookDeliveryUuid;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn test_webhook_delivery_totals_distinct_counts() {
+        let failure = WebhookDeliveryFailure {
+            delivery_id: WebhookDeliveryUuid::nil(),
+            alert_id: AlertUuid::nil(),
+            attempt: 1,
+            result: WebhookDeliveryAttemptResult::FailedTimeout,
+            response_status: None,
+            response_duration: None,
+        };
+        let first = WebhookRxDeliveryStatus {
+            ready: 100,
+            delivered_ok: 1,
+            already_delivered: 2,
+            in_progress: 3,
+            failed_deliveries: vec![failure.clone()],
+            delivery_errors: BTreeMap::from([(
+                WebhookDeliveryUuid::nil(),
+                "error one".to_string(),
+            )]),
+            error: None,
+        };
+        let second = WebhookRxDeliveryStatus {
+            ready: 200,
+            delivered_ok: 10,
+            already_delivered: 20,
+            in_progress: 30,
+            failed_deliveries: vec![failure.clone(), failure],
+            delivery_errors: BTreeMap::new(),
+            error: Some("task error".to_string()),
+        };
+        assert_eq!(
+            WebhookDeliveryTotals::from_status([&first, &second]),
+            WebhookDeliveryTotals {
+                ok: 11,
+                already_delivered: 22,
+                in_progress: 33,
+                failed: 3,
+                errors: 2,
+            },
+        );
+    }
+
+    #[test]
+    fn test_last_pass_success_display_distinct_counts() {
+        let success = LastPassSuccess {
+            nfound: 5,
+            nrecovered: 4,
+            nfailed: 3,
+            nskipped: 2,
+            nremoved: 1,
+        };
+        expectorate::assert_contents(
+            "tests/output/saga-recovery-last-pass.txt",
+            &LastPassSuccessDisplay(&success).to_string(),
+        );
+    }
 }

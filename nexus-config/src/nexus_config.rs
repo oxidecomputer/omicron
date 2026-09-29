@@ -1190,7 +1190,6 @@ mod test {
     use super::*;
 
     use nexus_types::deployment::PlannerConfig;
-    use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
     use omicron_common::address::{
         CLICKHOUSE_TCP_PORT, Ipv6Subnet, RACK_PREFIX_LENGTH,
     };
@@ -1516,7 +1515,6 @@ mod test {
                         planner_enabled: true,
                         planner_config: PlannerConfig::default(),
                         tuf_repo_pruner_enabled: false,
-                        disruption_policy: ReconfiguratorDisruptionPolicy::Terminate,
                         blueprint_pruner_enabled: false,
                         blueprint_pruner_nkeep: 137,
                     }),

@@ -1909,6 +1909,9 @@ table! {
         measurement_manifest_source -> Nullable<crate::enums::InvZoneManifestSourceEnum>,
         measurement_manifest_mupdate_id -> Nullable<Uuid>,
         measurement_manifest_boot_disk_error -> Nullable<Text>,
+
+        instance_manager_update_disposition -> Nullable<crate::enums::InvSledUpdateDispositionEnum>,
+        instance_manager_num_registered_vmms -> Int8,
     }
 }
 

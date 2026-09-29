@@ -73,7 +73,6 @@ impl Reconciler for LldpdReconciler {
     ) -> Self {
         let is_running_in_test_mode = match mode {
             ScrimletReconcilersMode::SwitchZone(_) => false,
-            #[cfg(any(test, feature = "testing"))]
             ScrimletReconcilersMode::Test { .. } => true,
         };
         Self { switch_slot, is_running_in_test_mode }

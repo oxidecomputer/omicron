@@ -37,7 +37,7 @@ termination: Exited(0)
 stdout:
 GROUP    ZONE                         ver UPDATED              REASON                         
 internal control-plane.oxide.internal 1   <REDACTED_TIMESTAMP> rack setup                     
-external oxide-dev.test               2   <REDACTED_TIMESTAMP> create silo: "test-suite-silo" 
+external oxide-dev.test               3   <REDACTED_TIMESTAMP> test removed-names fetch limit 
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
@@ -56,6 +56,59 @@ changes:                    names added: 3, names removed: 0
 +  @                                                  NS   ns1.oxide-dev.test
 +  ns1                                                AAAA ::1
 +  test-suite-silo.sys                                A    127.0.0.1
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
+=============================================
+EXECUTING COMMAND: omdb ["db", "dns", "diff", "external", "2", "--fetch-limit", "2"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+DNS zone:                   oxide-dev.test (External)
+requested version:          2 (created at <REDACTED_TIMESTAMP>)
+version created by Nexus:   ..........<REDACTED_UUID>...........
+version created because:    create silo: "test-suite-silo"
+changes:                    names added: 2, names removed: 0
+
++  @                                                  NS   ns1.oxide-dev.test
++  ns1                                                AAAA ::1
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
+WARN: loading added names: found 2 items (the limit).  There may be more items that were ignored.  Consider overriding with --fetch-limit.
+=============================================
+EXECUTING COMMAND: omdb ["db", "dns", "diff", "external", "3", "--fetch-limit", "2"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+DNS zone:                   oxide-dev.test (External)
+requested version:          3 (created at <REDACTED_TIMESTAMP>)
+version created by Nexus:   test_omdb_success_cases
+version created because:    test removed-names fetch limit
+changes:                    names added: 0, names removed: 2
+
+-  @                                                  NS   ns1.oxide-dev.test
+-  ns1                                                AAAA ::1
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
+WARN: loading removed names: found 2 items (the limit).  There may be more items that were ignored.  Consider overriding with --fetch-limit.
+=============================================
+EXECUTING COMMAND: omdb ["db", "dns", "diff", "external", "3", "--fetch-limit", "3"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+DNS zone:                   oxide-dev.test (External)
+requested version:          3 (created at <REDACTED_TIMESTAMP>)
+version created by Nexus:   test_omdb_success_cases
+version created because:    test removed-names fetch limit
+changes:                    names added: 0, names removed: 2
+
+-  @                                                  NS   ns1.oxide-dev.test
+-  ns1                                                AAAA ::1
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
@@ -169,6 +222,8 @@ SP DETAILS: type "Sled" slot 0
         dev-39       FAKE T6 temperature sensor               tmp451          Present  None   
         dev-46       CPU temperature sensor                   sbtsi           Present  None   
         dev-53       FAKE Fan controller                      max31790        Present  None   
+        fan-tray-vpd FAKE Fan tray VPD                        at24csw080      Present  None   
+        ibc          FAKE intermediate bus converter          bmr491          Present  None   
 
     CABOOSES: none found
 
@@ -203,6 +258,7 @@ SP DETAILS: type "Sled" slot 1
         dev-39       FAKE T6 temperature sensor               tmp451       Present  None   
         dev-46       CPU temperature sensor                   sbtsi        Present  None   
         dev-53       FAKE Fan controller                      max31790     Present  None   
+        ibc          FAKE intermediate bus converter          bmr491       Present  None   
 
     CABOOSES: none found
 
@@ -226,9 +282,10 @@ SP DETAILS: type "Switch" slot 0
 
     COMPONENTS
 
-        NAME  DESCRIPTION               DEVICE          PRESENCE SERIAL 
-        dev-0 FAKE temperature sensor 1 fake-tmp-sensor Present  None   
-        dev-1 FAKE temperature sensor 2 fake-tmp-sensor Failed   None   
+        NAME  DESCRIPTION                     DEVICE          PRESENCE SERIAL 
+        dev-0 FAKE temperature sensor 1       fake-tmp-sensor Present  None   
+        dev-1 FAKE temperature sensor 2       fake-tmp-sensor Failed   None   
+        ibc   FAKE intermediate bus converter bmr491          Present  None   
 
     CABOOSES: none found
 
@@ -250,7 +307,12 @@ SP DETAILS: type "Switch" slot 1
         Stage0 status                      VALID                                                            
         stage0next status                  VALID                                                            
 
-    COMPONENTS: none found
+    COMPONENTS
+
+        NAME DESCRIPTION                     DEVICE PRESENCE SERIAL 
+        ibc  FAKE intermediate bus converter bmr491 Present  None   
+
+    CABOOSES: none found
 
 ---------------------------------------------
 stderr:
@@ -2245,10 +2307,12 @@ Reconfigurator config:
     version: 1
     modified time: <REDACTED_TIMESTAMP>
     tuf repo pruner enabled: true
-    disruption policy: terminate
-    planner enabled: false
     blueprint pruner enabled: true
     blueprint pruner nkeep: 1000
+    planner enabled: false
+    planner config:
+        disruption policy: terminate
+
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
@@ -2357,10 +2421,12 @@ Reconfigurator config:
     version: 3
     modified time: <REDACTED_TIMESTAMP>
     tuf repo pruner enabled: true
-    disruption policy: live-migrate or terminate
-    planner enabled: true
     blueprint pruner enabled: true
     blueprint pruner nkeep: 1000
+    planner enabled: true
+    planner config:
+        disruption policy: live-migrate or terminate
+
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/

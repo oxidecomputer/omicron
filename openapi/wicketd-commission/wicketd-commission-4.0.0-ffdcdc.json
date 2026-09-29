@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "3.0.0"
+    "version": "4.0.0"
   },
   "paths": {
     "/bootstrap-sleds": {
@@ -3753,6 +3753,14 @@
             "description": "The update is currently running.",
             "type": "object",
             "properties": {
+              "elapsed": {
+                "description": "The time elapsed since the update started.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
               "state": {
                 "type": "string",
                 "enum": [
@@ -3761,6 +3769,7 @@
               }
             },
             "required": [
+              "elapsed",
               "state"
             ]
           },
@@ -3768,6 +3777,15 @@
             "description": "The update ran to completion.\n\nWhether individual steps performed work or were skipped (for example, because a component was already at its target version) is recorded in the per-step outcomes.",
             "type": "object",
             "properties": {
+              "elapsed": {
+                "nullable": true,
+                "description": "The time it took for the update to complete.\n\nAbsent when the update was interrupted, and completion was inferred rather than reported.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
               "state": {
                 "type": "string",
                 "enum": [
@@ -3783,6 +3801,15 @@
             "description": "The update failed.",
             "type": "object",
             "properties": {
+              "elapsed": {
+                "nullable": true,
+                "description": "The time it took for the update to fail.\n\nAbsent when the update was interrupted, and failure was inferred rather than reported.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
               "message": {
                 "description": "A human-readable description of the failure, combining the failed step and its error message (including any nested causes).",
                 "type": "string"
@@ -3803,6 +3830,15 @@
             "description": "The update was aborted.",
             "type": "object",
             "properties": {
+              "elapsed": {
+                "nullable": true,
+                "description": "The time it took for the update to abort.\n\nAbsent when the update was interrupted, and the abort was inferred rather than reported.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
               "message": {
                 "description": "A human-readable description of the abort, combining the aborted step and its message.",
                 "type": "string"

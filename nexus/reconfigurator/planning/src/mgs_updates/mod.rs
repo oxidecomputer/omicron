@@ -68,40 +68,6 @@ pub(crate) struct PlannedMgsUpdates {
     pub(crate) blocked_mgs_updates: Vec<BlockedMgsUpdate>,
 }
 
-impl PlannedMgsUpdates {
-    fn new() -> Self {
-        Self {
-            pending_updates: PendingMgsUpdates::new(),
-            pending_host_phase_2_changes: PendingHostPhase2Changes::empty(),
-            blocked_mgs_updates: Vec::new(),
-        }
-    }
-
-    fn add_pending_update(
-        &mut self,
-        pending_update: PendingMgsUpdate,
-    ) -> &mut Self {
-        self.pending_updates.insert(pending_update);
-        self
-    }
-
-    fn add_blocked_update(
-        &mut self,
-        blocked_update: BlockedMgsUpdate,
-    ) -> &mut Self {
-        self.blocked_mgs_updates.push(blocked_update);
-        self
-    }
-
-    fn set_pending_host_os_phase2_changes(
-        &mut self,
-        pending_host_os_phase2_changes: PendingHostPhase2Changes,
-    ) -> &mut Self {
-        self.pending_host_phase_2_changes = pending_host_os_phase2_changes;
-        self
-    }
-}
-
 /// Moral equivalent to `SpType`, but that includes additional information we
 /// need to make planning decisions.
 //
@@ -333,44 +299,36 @@ impl<'a> MgsUpdatePlanner<'a> {
                 };
             }
 
-            // `try_make_update` will always return at most a single update at a
-            // time. This means that this instance of `PlannedMgsUpdates`
-            // describes a single device update.
-            let PlannedMgsUpdates {
-                pending_updates: updates,
-                pending_host_phase_2_changes: mut host_phase_2,
-                blocked_mgs_updates: mut blocked_updates,
-            } = try_make_update(
+            match try_make_update(
                 log,
                 board,
                 inventory,
                 current_artifacts,
                 zone_safety_checks,
-            );
-
-            if let Some(update) = updates.into_iter().next() {
-                info!(log, "configuring MGS-driven update"; update);
-                pending_updates.insert(update.clone());
-            } else {
-                if blocked_updates.is_empty() && host_phase_2.is_empty() {
-                    info!(
-                        log,
-                        "skipping board for MGS-driven update \
-                         (no update necessary)";
-                        board.baseboard_id(),
-                    );
-                } else {
+            ) {
+                TryMakeUpdateResult::Update(update, mut host_phase_2) => {
+                    info!(log, "configuring MGS-driven update"; &update);
+                    pending_updates.insert(update);
+                    pending_host_phase_2_changes.append(&mut host_phase_2);
+                }
+                TryMakeUpdateResult::Blocked(reason) => {
                     info!(
                         log,
                         "skipping board for MGS-driven update \
                          (found issues)";
                         board.baseboard_id(),
                     );
+                    blocked_mgs_updates.push(reason);
+                }
+                TryMakeUpdateResult::NoChangesNeeded => {
+                    info!(
+                        log,
+                        "skipping board for MGS-driven update \
+                         (no update necessary)";
+                        board.baseboard_id(),
+                    );
                 }
             }
-
-            pending_host_phase_2_changes.append(&mut host_phase_2);
-            blocked_mgs_updates.append(&mut blocked_updates);
         }
 
         info!(log, "ran out of boards for MGS-driven update");
@@ -670,20 +628,25 @@ impl MgsUpdateOutcome {
     }
 }
 
+#[allow(clippy::large_enum_variant)]
+enum TryMakeUpdateResult {
+    /// An update should be scheduled for this board.
+    Update(PendingMgsUpdate, PendingHostPhase2Changes),
+    /// We want to update this board, but are blocked for the given reason.
+    Blocked(BlockedMgsUpdate),
+    /// This board is fully up to date.
+    NoChangesNeeded,
+}
+
 /// Determine if the given baseboard needs any MGS-driven update (e.g., update
-/// to its SP, RoT, etc.).  If so, returns the update and a set of changes that
-/// need to be made to sled configs related to host phase 2 images (this set
-/// will be empty if we made a non-host update).  If not, returns
-/// `NoUpdateNeeded`.
+/// to its SP, RoT, etc.).
 fn try_make_update(
     log: &slog::Logger,
     board: &UpdateableBoard,
     inventory: &Collection,
     current_artifacts: &TufRepoDescription,
     zone_safety_checks: &ZoneSafetyChecks,
-) -> PlannedMgsUpdates {
-    let mut pending_actions = PlannedMgsUpdates::new();
-
+) -> TryMakeUpdateResult {
     // We try MGS-driven update components in a hardcoded priority order until
     // any of them returns `Some`.  The order is described in RFD 565 section
     // "Update Sequence".
@@ -739,25 +702,24 @@ fn try_make_update(
                 update,
                 pending_host_os_phase2_changes,
             )) => {
-                pending_actions.add_pending_update(update);
-                // If update_attempt is a host OS update, stage the phase 2
-                // changes. For any other type, this set will be empty
-                pending_actions.set_pending_host_os_phase2_changes(
+                return TryMakeUpdateResult::Update(
+                    update,
                     pending_host_os_phase2_changes,
                 );
-                break;
             }
             Err(e) => {
-                pending_actions.add_blocked_update(BlockedMgsUpdate {
+                return TryMakeUpdateResult::Blocked(BlockedMgsUpdate {
                     baseboard_id: Arc::clone(board.baseboard_id()),
                     reason: e,
                 });
-                break;
             }
         }
     }
 
-    pending_actions
+    // If we made it through the loop above without returning early, then every
+    // component evaluated as `NoUpdateNeeded`; i.e., every component is running
+    // its current version.
+    TryMakeUpdateResult::NoChangesNeeded
 }
 
 #[cfg(test)]

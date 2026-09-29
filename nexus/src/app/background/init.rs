@@ -679,7 +679,13 @@ impl BackgroundTasksInitializer {
                 ),
             ),
             opctx: opctx.child(BTreeMap::new()),
-            watchers: vec![Box::new(inventory_load_watcher.clone())],
+            // A new target blueprint must reach the sled availability table
+            // promptly, even if inventory is stalled for whatever reason, so
+            // watch both channels.
+            watchers: vec![
+                Box::new(rx_blueprint.clone()),
+                Box::new(inventory_load_watcher.clone()),
+            ],
             activator: task_blueprint_rendezvous,
         });
 
@@ -1609,9 +1615,10 @@ pub mod test {
         let (_, new_dns_dropshot_server) = dns_server::start_servers(
             log.clone(),
             store,
-            &dns_server::dns_server::Config {
-                bind_address: "[::1]:0".parse().unwrap(),
-            },
+            &dns_server::dns_server::Config::new(vec![
+                "[::1]:0".parse().unwrap(),
+            ])
+            .expect("valid DNS configuration"),
             &dropshot::ConfigDropshot {
                 bind_address: "[::1]:0".parse().unwrap(),
                 default_request_body_max_bytes: 8 * 1024,

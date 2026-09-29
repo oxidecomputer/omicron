@@ -48,7 +48,6 @@ bind_addr = "[::1]:44411"
 id = "sp3-host-cpu"
 device = "sp3-host-cpu"
 description = "FAKE host cpu"
-capabilities = 0
 presence = "Present"
 serial_console = "[::1]:33312"
 
@@ -77,7 +76,6 @@ bind_addr = "[::1]:44421"
 id = "sp3-host-cpu"
 device = "sp3-host-cpu"
 description = "FAKE host cpu"
-capabilities = 0
 presence = "Present"
 serial_console = "[::1]:33322"
 

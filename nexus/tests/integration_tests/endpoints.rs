@@ -233,7 +233,6 @@ pub static DEMO_SILO_CREATE: LazyLock<silo::SiloCreate> =
             description: String::from(""),
         },
         quotas: silo::SiloQuotasCreate::arbitrarily_high_default(),
-        discoverable: true,
         identity_mode: silo::SiloIdentityMode::SamlJit,
         admin_group_name: None,
         tls_certificates: vec![],

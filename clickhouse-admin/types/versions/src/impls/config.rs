@@ -84,68 +84,18 @@ impl ReplicaConfig {
 {logger}
     <path>{data_path}</path>
 
-    <profiles>
-        <default>
-            <load_balancing>random</load_balancing>
-            <!--
-                Omit logs for fast queries. As of this writing, the vast
-                majority of clickhouse queries are INSERTS that succeed in
-                <5ms, and aren't operationally interesting. From a test rack:
-                    SELECT
-                        roundToExp2(greatest(query_duration_ms, 1)) AS bucket_start,
-                        bucket_start * 2 AS bucket_end,
-                        count() AS count,
-                        round((100 * count()) / (
-                            SELECT count()
-                            FROM system.query_log
-                        ), 4) AS pct
-                    FROM system.query_log
-                    GROUP BY bucket_start, bucket_end
-                    ORDER BY bucket_start ASC
-                        ┌─bucket_start─┬─bucket_end─┬───count─┬─────pct─┐
-                     1. │            1 │          2 │ 3590120 │ 62.6491 │
-                     2. │            2 │          4 │ 1206074 │ 21.0465 │
-                     3. │            4 │          8 │  298972 │  5.2172 │
-                     4. │            8 │         16 │  109739 │   1.915 │
-                     5. │           16 │         32 │  114881 │  2.0047 │
-                     6. │           32 │         64 │  121448 │  2.1193 │
-                     7. │           64 │        128 │  130456 │  2.2765 │
-                     8. │          128 │        256 │   87336 │  1.5241 │
-                     9. │          256 │        512 │   57767 │  1.0081 │
-                    10. │          512 │       1024 │   12327 │  0.2151 │
-                    11. │         1024 │       2048 │    1341 │  0.0234 │
-                    12. │         2048 │       4096 │      56 │   0.001 │
-                    13. │         4096 │       8192 │       1 │       0 │
-                        └──────────────┴────────────┴─────────┴─────────┘
-            -->
-            <log_queries_min_query_duration_ms>5</log_queries_min_query_duration_ms>
-        </default>
+    <!-- Require an explicit grant to read the `system` and `information_schema`
+    databases. Users can read them by default in ClickHouse 23.8, even without
+    an explicit grant. -->
+    <access_control_improvements>
+        <select_from_system_db_requires_grant>true</select_from_system_db_requires_grant>
+        <select_from_information_schema_requires_grant>true</select_from_information_schema_requires_grant>
+    </access_control_improvements>
 
-    </profiles>
-
-    <users>
-        <default>
-            <password></password>
-            <networks>
-                <ip>::/0</ip>
-            </networks>
-            <profile>default</profile>
-            <quota>default</quota>
-        </default>
-    </users>
-
-    <quotas>
-        <default>
-            <interval>
-                <duration>3600</duration>
-                <queries>0</queries>
-                <errors>0</errors>
-                <result_rows>0</result_rows>
-                <read_rows>0</read_rows>
-                <execution_time>0</execution_time>
-            </interval>
-        </default>
-    </quotas>
+    <!-- Users, profiles, and quotas are defined in a shared file and merged in
+         via the `users_config` element. See that file for details. ClickHouse
+         requires these to live in the users config, not the main config. -->
+    <users_config>users-and-roles.xml</users_config>
 
     <query_log>
         <database>system</database>
