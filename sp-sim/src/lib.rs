@@ -10,6 +10,7 @@ mod helpers;
 mod sensors;
 mod server;
 mod sidecar;
+mod sp;
 mod update;
 mod vpd;
 
