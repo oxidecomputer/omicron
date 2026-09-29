@@ -18,7 +18,6 @@ use omicron_common::disk::DatasetName;
 use sled_agent_types::disk::CompressionAlgorithm;
 use sled_agent_types::disk::DiskIdentity;
 use sled_agent_types::disk::DiskVariant;
-use sled_agent_types::disk::GzipLevel;
 use slog::{Logger, debug, info, warn};
 use slog_error_chain::InlineErrorChain;
 use std::process::Stdio;
@@ -46,7 +45,7 @@ pub const DEBUG_DATASET_QUOTA: ByteCount =
 pub const DUMP_DATASET_QUOTA: ByteCount = ByteCount::from_gibibytes_u32(100);
 // passed to zfs create -o compression=
 pub const DUMP_DATASET_COMPRESSION: CompressionAlgorithm =
-    CompressionAlgorithm::GzipN { level: GzipLevel::new::<9>() };
+    CompressionAlgorithm::Lz4;
 // TODO-correctness: This value of 40 GiB is a wild guess -- given TUF repo
 // sizes as of Sep 2025, it would be capable of storing about 16 distinct system
 // versions.
