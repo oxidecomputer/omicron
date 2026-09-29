@@ -80,7 +80,6 @@ pub enum ServiceName {
     InternalNtp,
     Mgd,
     Ddm,
-    Lldpd,
 }
 
 impl ServiceName {
@@ -124,7 +123,6 @@ impl ServiceName {
             ServiceName::InternalNtp => "internal-ntp",
             ServiceName::Mgd => "mgd",
             ServiceName::Ddm => "ddm",
-            ServiceName::Lldpd => "lldpd",
         }
     }
 
@@ -154,7 +152,6 @@ impl ServiceName {
             | ServiceName::CruciblePantry
             | ServiceName::BoundaryNtp
             | ServiceName::InternalNtp
-            | ServiceName::Lldpd
             | ServiceName::Mgd
             | ServiceName::Ddm => {
                 format!("_{}._tcp", self.service_kind())

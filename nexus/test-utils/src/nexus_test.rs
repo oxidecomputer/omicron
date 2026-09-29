@@ -126,7 +126,6 @@ pub struct ControlPlaneTestContext<N> {
     /// All dpd instances, whether currently running or not, indexed by switch
     /// slot.
     pub dendrite: RwLock<HashMap<SwitchSlot, dev::dendrite::DendriteInstance>>,
-    pub lldpd: HashMap<SwitchSlot, dev::lldp::LldpdInstance>,
     pub mgd: HashMap<SwitchSlot, dev::maghemite::MgdInstance>,
     pub ddm: HashMap<SwitchSlot, dev::maghemite::DdmInstance>,
     pub external_dns_zone_name: String,
@@ -348,9 +347,6 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         }
         for (_, mut ddm) in self.ddm {
             ddm.cleanup().await.unwrap();
-        }
-        for (_, mut lldpd) in self.lldpd {
-            lldpd.cleanup().await.unwrap();
         }
         self.debug_dropbox_dir.cleanup_successful();
         self.logctx.cleanup_successful();

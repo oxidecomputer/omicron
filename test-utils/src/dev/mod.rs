@@ -10,7 +10,6 @@ pub mod db;
 pub mod dendrite;
 pub mod dropbox;
 pub mod falcon;
-pub mod lldp;
 pub mod maghemite;
 pub mod poll;
 #[cfg(feature = "seed-gen")]

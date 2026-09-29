@@ -1769,7 +1769,6 @@ mod tests {
                 | ServiceName::ManagementGatewayService
                 | ServiceName::SwitchSledAgent
                 | ServiceName::Dendrite
-                | ServiceName::Lldpd
                 | ServiceName::Mgd
                 | ServiceName::Ddm => {
                     out.insert(service, Ok(()));

@@ -175,8 +175,6 @@ pub struct HostSwitchZonePorts {
     pub mgd: u16,
     /// Maghemite `ddmd` admin API port.
     pub ddm: u16,
-    /// LLDP  `lldpd` admin API port.
-    pub lldp: u16,
 }
 
 /// Describes a host of type "sled" in the control plane DNS zone
@@ -419,7 +417,6 @@ impl DnsConfigBuilder {
             mgs: mgs_port,
             mgd: mgd_port,
             ddm: ddm_port,
-            lldp: lldpd_port,
         } = ports;
         let zone = self.host_dendrite(sled_id, switch_zone_ip)?;
         self.service_backend_zone(ServiceName::Dendrite, &zone, dendrite_port)?;
@@ -429,8 +426,7 @@ impl DnsConfigBuilder {
             mgs_port,
         )?;
         self.service_backend_zone(ServiceName::Mgd, &zone, mgd_port)?;
-        self.service_backend_zone(ServiceName::Ddm, &zone, ddm_port)?;
-        self.service_backend_zone(ServiceName::Lldpd, &zone, lldpd_port)
+        self.service_backend_zone(ServiceName::Ddm, &zone, ddm_port)
     }
 
     /// Higher-level shorthand for adding a Nexus zone with both its internal
@@ -835,7 +831,6 @@ mod test {
         let mgs_port = 13;
         let mgd_port = 17;
         let ddm_port = 19;
-        let lldpd_port = 21;
 
         let mut builder = DnsConfigBuilder::new();
         builder
@@ -847,7 +842,6 @@ mod test {
                     mgs: mgs_port,
                     mgd: mgd_port,
                     ddm: ddm_port,
-                    lldp: lldpd_port,
                 },
             )
             .unwrap();
@@ -866,7 +860,6 @@ mod test {
             ("_mgs._tcp", mgs_port),
             ("_mgd._tcp", mgd_port),
             ("_ddm._tcp", ddm_port),
-            ("_lldpd._tcp", lldpd_port),
         ] {
             let records = by_name.get(expected_name).unwrap_or_else(|| {
                 panic!(

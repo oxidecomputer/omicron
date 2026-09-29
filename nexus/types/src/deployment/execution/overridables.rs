@@ -107,7 +107,6 @@ impl Overridables {
             mgs: self.mgs_port(sled_id),
             mgd: self.mgd_port(sled_id),
             ddm: self.ddm_port(sled_id),
-            lldp: self.lldpd_port(sled_id),
         }
     }
 

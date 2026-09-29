@@ -200,12 +200,6 @@ impl RunAllArgs {
                 location,
             );
         }
-        for (location, lldpd) in &cptestctx.lldpd {
-            println!(
-                "omicron-dev: lldp:                   http://[::1]:{} ({:?})",
-                lldpd.port, location,
-            );
-        }
         for (location, mgd) in &cptestctx.mgd {
             println!(
                 "omicron-dev: mgd api:                http://[::1]:{} ({:?})",
@@ -560,12 +554,6 @@ impl JborArgs {
                     "omicron-dev: dendrite:               http://[::1]:{} ({:?})",
                     dendrite.port(),
                     location,
-                );
-            }
-            for (location, lldpd) in &cptestctx.lldpd {
-                println!(
-                    "omicron-dev: lldp:                   http://[::1]:{} ({:?})",
-                    lldpd.port, location,
                 );
             }
             for (location, mgd) in &cptestctx.mgd {

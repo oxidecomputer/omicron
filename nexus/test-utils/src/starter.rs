@@ -29,7 +29,6 @@ use internal_dns_types::names::ServiceName;
 use nexus_config::Database;
 use nexus_config::DpdConfig;
 use nexus_config::InternalDns;
-use nexus_config::LldpdConfig;
 use nexus_config::MgdConfig;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_config::NexusConfig;
@@ -63,6 +62,7 @@ use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::external_api::sled::SledState;
 use nexus_types::internal_api::params::DnsConfigParams;
+use omicron_common::address::BGP_LISTEN_PORT;
 use omicron_common::address::DNS_OPTE_IPV4_SUBNET;
 use omicron_common::address::DNS_OPTE_IPV6_SUBNET;
 use omicron_common::address::Ipv6Subnet;
@@ -160,7 +160,6 @@ pub struct ControlPlaneStarter<'a, N: NexusServer> {
     pub gateway: BTreeMap<SwitchSlot, GatewayTestContext>,
     pub dendrite: RwLock<HashMap<SwitchSlot, dev::dendrite::DendriteInstance>>,
     pub mgd: HashMap<SwitchSlot, dev::maghemite::MgdInstance>,
-    pub lldpd: HashMap<SwitchSlot, dev::lldp::LldpdInstance>,
     pub ddm: HashMap<SwitchSlot, dev::maghemite::DdmInstance>,
 
     // NOTE: Only exists after starting Nexus, until external Nexus is
@@ -230,7 +229,6 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             producer: None,
             gateway: BTreeMap::new(),
             dendrite: RwLock::new(HashMap::new()),
-            lldpd: HashMap::new(),
             mgd: HashMap::new(),
             ddm: HashMap::new(),
             nexus_internal: None,
@@ -478,30 +476,6 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         self.config.pkg.dendrite.insert(switch_slot, config);
     }
 
-    pub async fn start_lldp(&mut self, switch_slot: SwitchSlot) {
-        let log = &self.logctx.log;
-        debug!(log, "Starting lldpd"; "switch_slot" => ?switch_slot);
-        let mgs_addr = self.gateway.get(&switch_slot).unwrap().address().into();
-
-        let dpd_port =
-            self.dendrite.read().unwrap().get(&switch_slot).unwrap().port();
-
-        // Set up an instance of lldpd
-        let lldpd =
-            dev::lldp::LldpdInstance::start(0, dpd_port, Some(mgs_addr))
-                .await
-                .unwrap();
-
-        let port = lldpd.port;
-        self.lldpd.insert(switch_slot, lldpd);
-        let address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, port, 0, 0);
-
-        debug!(log, "lldp port is {port}");
-
-        let config = LldpdConfig { address: std::net::SocketAddr::V6(address) };
-        self.config.pkg.lldpd.insert(switch_slot, config);
-    }
-
     pub async fn start_mgd(&mut self, switch_slot: SwitchSlot) {
         let log = &self.logctx.log;
         debug!(log, "Starting mgd"; "switch_slot" => ?switch_slot);
@@ -522,7 +496,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                     &[IpAddr::V4(ip)],
                 )
                 .expect("allocate loopback IP for mgd BGP dispatcher");
-                (SocketAddr::new(IpAddr::V4(ip), 1049), Some(alloc))
+                (SocketAddr::new(IpAddr::V4(ip), BGP_LISTEN_PORT), Some(alloc))
             }
             _ => (SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0).into(), None),
         };
@@ -591,7 +565,6 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                         .port(),
                     mgd: self.mgd.get(&switch_slot).unwrap().port,
                     ddm: self.ddm.get(&switch_slot).unwrap().port,
-                    lldp: self.lldpd.get(&switch_slot).unwrap().port,
                 },
             )
             .unwrap();
@@ -1398,7 +1371,6 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             logctx: self.logctx,
             gateway: self.gateway,
             dendrite: RwLock::new(self.dendrite.into_inner().unwrap()),
-            lldpd: self.lldpd,
             mgd: self.mgd,
             ddm: self.ddm,
             external_dns_zone_name: self.external_dns_zone_name.unwrap(),
@@ -1445,9 +1417,6 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         }
         for (_, mut ddm) in self.ddm {
             ddm.cleanup().await.unwrap();
-        }
-        for (_, mut lldpd) in self.lldpd {
-            lldpd.cleanup().await.unwrap();
         }
         self.debug_dropbox_dir.cleanup_successful();
         self.logctx.cleanup_successful();
@@ -1815,12 +1784,6 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
                     }),
                 ),
                 (
-                    "start_lldpd_switch0",
-                    Box::new(|builder| {
-                        builder.start_lldp(SwitchSlot::Switch0).boxed()
-                    }),
-                ),
-                (
                     "start_mgd_switch0",
                     Box::new(|builder| {
                         builder.start_mgd(SwitchSlot::Switch0).boxed()
@@ -1868,12 +1831,6 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
                         "start_dendrite_switch1",
                         Box::new(|builder| {
                             builder.start_dendrite(SwitchSlot::Switch1).boxed()
-                        }),
-                    ),
-                    (
-                        "start_lldpd_switch1",
-                        Box::new(|builder| {
-                            builder.start_lldp(SwitchSlot::Switch1).boxed()
                         }),
                     ),
                     (

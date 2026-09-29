@@ -232,7 +232,6 @@ retry xtask download \
     console \
     dendrite-stub \
     maghemite-mgd \
-    lldp \
     maghemite-ddmd \
     transceiver-control
 
@@ -244,7 +243,6 @@ expected_in_path=(
   'clickhouse'
   'dpd'
   'mgd'
-  'lldpd'
 )
 
 function show_hint
