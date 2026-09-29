@@ -22,31 +22,17 @@ use std::sync::Arc;
 
 pub struct VmmMarkStopForUpdate {
     datastore: Arc<DataStore>,
-    disable: bool,
 }
 
 impl VmmMarkStopForUpdate {
-    pub fn new(datastore: Arc<DataStore>, disable: bool) -> Self {
-        Self { datastore, disable }
+    pub fn new(datastore: Arc<DataStore>) -> Self {
+        Self { datastore }
     }
 
     pub(crate) async fn actually_activate(
         &mut self,
         opctx: &OpContext,
     ) -> VmmMarkStopForUpdateStatus {
-        // Something is malfunctioning. TURN THE TASK OFF!
-        if self.disable {
-            slog::info!(
-                &opctx.log,
-                "vmm mark-stop-for-update task disabled, doing nothing";
-            );
-            return VmmMarkStopForUpdateStatus {
-                disabled: true,
-                vmms_marked: 0,
-                error: None,
-            };
-        }
-
         let vmms_marked =
             match self.datastore.vmm_bulk_mark_stop_for_update(opctx).await {
                 Ok(count) => count,
@@ -211,14 +197,8 @@ mod tests {
             .await
             .expect("sled availability should be written");
 
-        // First, verify that a disabled task does nothing
-        let mut task = VmmMarkStopForUpdate::new(datastore.clone(), true);
-        let status = task.actually_activate(opctx).await;
-        assert_eq!(status.vmms_marked, 0);
-        assert!(status.error.is_none());
-
-        // Enable the task
-        let mut task = VmmMarkStopForUpdate::new(datastore.clone(), false);
+        // Create a new task
+        let mut task = VmmMarkStopForUpdate::new(datastore.clone());
 
         // The first activation marks the single eligible VMM at its sled's
         // update disposition generation.
