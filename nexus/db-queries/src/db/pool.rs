@@ -42,7 +42,7 @@ const CFG_TCP_KEEPCNT: u32 = 12;
 /// Used for setting the behavior around saving backtraces in the [`Pool::claim`] method.
 ///
 /// This is normally set to `Capture`, but it may be useful to override this in the Nexus config
-/// during development and testing in certain non-Illumos dev environments where capturing
+/// during development and testing in certain non-illumos dev environments where capturing
 /// backtraces is expensive. See the corresponding flag in [`DeploymentConfig`] for more details.
 ///
 /// [`DeploymentConfig`]: nexus_config::DeploymentConfig
