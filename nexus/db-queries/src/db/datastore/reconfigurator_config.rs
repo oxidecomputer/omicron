@@ -18,12 +18,12 @@ use diesel::sql_types;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
-use nexus_db_model::DbPlannerSledRebootPolicy;
 use nexus_db_model::DbReconfiguratorDisruptionPolicy;
+use nexus_db_model::DbSledUpdateRebootPolicy;
 use nexus_db_model::ReconfiguratorConfig as DbReconfiguratorConfig;
 use nexus_db_model::SqlU32;
-use nexus_db_schema::enums::PlannerSledRebootPolicyEnum;
 use nexus_db_schema::enums::ReconfiguratorDisruptionPolicyEnum;
+use nexus_db_schema::enums::SledUpdateRebootPolicyEnum;
 use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::ReconfiguratorConfig;
 use nexus_types::deployment::ReconfiguratorConfigParam;
@@ -159,7 +159,10 @@ impl DataStore {
                 ReconfiguratorConfig {
                     planner_enabled,
                     planner_config:
-                        PlannerConfig { disruption_policy, sled_reboot_policy },
+                        PlannerConfig {
+                            disruption_policy,
+                            sled_update_reboot_policy,
+                        },
                     tuf_repo_pruner_enabled,
                     blueprint_pruner_enabled,
                     blueprint_pruner_nkeep,
@@ -172,7 +175,7 @@ impl DataStore {
                 (version, planner_enabled, time_modified,
                  tuf_repo_pruner_enabled, disruption_policy,
                  blueprint_pruner_enabled, blueprint_pruner_nkeep,
-                 sled_reboot_policy)
+                 sled_update_reboot_policy)
               SELECT $1, $2, $3, $4, $5, $6, $7, $8
               WHERE $1 - 1 IN (
                   SELECT COALESCE(MAX(version), 0)
@@ -188,9 +191,9 @@ impl DataStore {
         )
         .bind::<sql_types::Bool, _>(blueprint_pruner_enabled)
         .bind::<sql_types::BigInt, SqlU32>(blueprint_pruner_nkeep.into())
-        .bind::<PlannerSledRebootPolicyEnum, _>(
-            DbPlannerSledRebootPolicy::from(sled_reboot_policy),
-        )
+        .bind::<SledUpdateRebootPolicyEnum, _>(DbSledUpdateRebootPolicy::from(
+            sled_update_reboot_policy,
+        ))
         .execute_async(conn)
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
@@ -201,8 +204,8 @@ mod tests {
     use super::*;
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_types::deployment::{
-        DEFAULT_BLUEPRINT_PRUNER_NKEEP, PlannerConfig, PlannerSledRebootPolicy,
-        ReconfiguratorConfig, ReconfiguratorDisruptionPolicy,
+        DEFAULT_BLUEPRINT_PRUNER_NKEEP, PlannerConfig, ReconfiguratorConfig,
+        ReconfiguratorDisruptionPolicy, SledUpdateRebootPolicy,
     };
     use omicron_test_utils::dev;
 
@@ -296,7 +299,7 @@ mod tests {
         let v4_planner_config = PlannerConfig {
             disruption_policy:
                 ReconfiguratorDisruptionPolicy::MigrateOrTerminate,
-            sled_reboot_policy: PlannerSledRebootPolicy::Evacuate,
+            sled_update_reboot_policy: SledUpdateRebootPolicy::Evacuate,
         };
         assert_ne!(v4_planner_config, PlannerConfig::default());
         switches.version = 4;

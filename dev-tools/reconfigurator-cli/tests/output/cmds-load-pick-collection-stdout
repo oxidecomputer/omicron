@@ -104,6 +104,6 @@ cockroachdb settings:
     preserve downgrade:   (not set)
 planner config:
     disruption policy : terminate
-    sled reboot policy: immediate (no evacuation)
+    sled update reboot policy: immediate (no evacuation)
 
 

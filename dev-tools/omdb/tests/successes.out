@@ -2312,7 +2312,7 @@ Reconfigurator config:
     planner enabled: false
     planner config:
         disruption policy : terminate
-        sled reboot policy: immediate (no evacuation)
+        sled update reboot policy: immediate (no evacuation)
 
 ---------------------------------------------
 stderr:
@@ -2391,12 +2391,12 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 reconfigurator config updated to version 2:
-    tuf repo pruner enabled::   true (unchanged)
-*   planner enabled::::::::::   false -> true
-    disruption policy::::::::   terminate (unchanged)
-    sled reboot policy:::::::   immediate (no evacuation) (unchanged)
-    blueprint pruner enabled:   true (unchanged)
-    blueprint pruner nkeep:::   1000 (unchanged)
+    tuf repo pruner enabled:::   true (unchanged)
+*   planner enabled:::::::::::   false -> true
+    disruption policy:::::::::   terminate (unchanged)
+    sled update reboot policy:   immediate (no evacuation) (unchanged)
+    blueprint pruner enabled::   true (unchanged)
+    blueprint pruner nkeep::::   1000 (unchanged)
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
@@ -2406,27 +2406,27 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 reconfigurator config updated to version 3:
-    tuf repo pruner enabled::   true (unchanged)
-    planner enabled::::::::::   true (unchanged)
-*   disruption policy::::::::   terminate -> live-migrate or terminate
-    sled reboot policy:::::::   immediate (no evacuation) (unchanged)
-    blueprint pruner enabled:   true (unchanged)
-    blueprint pruner nkeep:::   1000 (unchanged)
+    tuf repo pruner enabled:::   true (unchanged)
+    planner enabled:::::::::::   true (unchanged)
+*   disruption policy:::::::::   terminate -> live-migrate or terminate
+    sled update reboot policy:   immediate (no evacuation) (unchanged)
+    blueprint pruner enabled::   true (unchanged)
+    blueprint pruner nkeep::::   1000 (unchanged)
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
 =============================================
-EXECUTING COMMAND: omdb ["-w", "nexus", "reconfigurator-config", "set", "--sled-reboot-policy", "evacuate"]
+EXECUTING COMMAND: omdb ["-w", "nexus", "reconfigurator-config", "set", "--sled-update-reboot-policy", "evacuate"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
 reconfigurator config updated to version 4:
-    tuf repo pruner enabled::   true (unchanged)
-    planner enabled::::::::::   true (unchanged)
-    disruption policy::::::::   live-migrate or terminate (unchanged)
-*   sled reboot policy:::::::   immediate (no evacuation) -> evacuate
-    blueprint pruner enabled:   true (unchanged)
-    blueprint pruner nkeep:::   1000 (unchanged)
+    tuf repo pruner enabled:::   true (unchanged)
+    planner enabled:::::::::::   true (unchanged)
+    disruption policy:::::::::   live-migrate or terminate (unchanged)
+*   sled update reboot policy:   immediate (no evacuation) -> evacuate
+    blueprint pruner enabled::   true (unchanged)
+    blueprint pruner nkeep::::   1000 (unchanged)
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
@@ -2444,7 +2444,7 @@ Reconfigurator config:
     planner enabled: true
     planner config:
         disruption policy : live-migrate or terminate
-        sled reboot policy: evacuate
+        sled update reboot policy: evacuate
 
 ---------------------------------------------
 stderr:

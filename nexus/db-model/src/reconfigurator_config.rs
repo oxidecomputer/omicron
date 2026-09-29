@@ -19,7 +19,7 @@ pub struct ReconfiguratorConfig {
     pub disruption_policy: DbReconfiguratorDisruptionPolicy,
     pub blueprint_pruner_enabled: bool,
     pub blueprint_pruner_nkeep: SqlU32,
-    pub sled_reboot_policy: DbPlannerSledRebootPolicy,
+    pub sled_update_reboot_policy: DbSledUpdateRebootPolicy,
 }
 
 impl From<deployment::ReconfiguratorConfigView> for ReconfiguratorConfig {
@@ -33,7 +33,9 @@ impl From<deployment::ReconfiguratorConfigView> for ReconfiguratorConfig {
             disruption_policy: planner_config.disruption_policy.into(),
             blueprint_pruner_enabled: value.config.blueprint_pruner_enabled,
             blueprint_pruner_nkeep: value.config.blueprint_pruner_nkeep.into(),
-            sled_reboot_policy: planner_config.sled_reboot_policy.into(),
+            sled_update_reboot_policy: planner_config
+                .sled_update_reboot_policy
+                .into(),
         }
     }
 }
@@ -46,7 +48,9 @@ impl From<ReconfiguratorConfig> for deployment::ReconfiguratorConfigView {
                 planner_enabled: value.planner_enabled,
                 planner_config: deployment::PlannerConfig {
                     disruption_policy: value.disruption_policy.into(),
-                    sled_reboot_policy: value.sled_reboot_policy.into(),
+                    sled_update_reboot_policy: value
+                        .sled_update_reboot_policy
+                        .into(),
                 },
                 tuf_repo_pruner_enabled: value.tuf_repo_pruner_enabled,
                 blueprint_pruner_enabled: value.blueprint_pruner_enabled,
@@ -112,7 +116,7 @@ impl From<deployment::ReconfiguratorDisruptionPolicy>
 }
 
 impl_enum_type!(
-    PlannerSledRebootPolicyEnum:
+    SledUpdateRebootPolicyEnum:
 
     #[derive(
         Copy,
@@ -122,33 +126,33 @@ impl_enum_type!(
         AsExpression,
         FromSqlRow,
     )]
-    pub enum DbPlannerSledRebootPolicy;
+    pub enum DbSledUpdateRebootPolicy;
 
     ImmediateNoEvacuation => b"immediate_no_evacuation"
     Evacuate => b"evacuate"
 );
 
-impl From<DbPlannerSledRebootPolicy> for deployment::PlannerSledRebootPolicy {
-    fn from(value: DbPlannerSledRebootPolicy) -> Self {
+impl From<DbSledUpdateRebootPolicy> for deployment::SledUpdateRebootPolicy {
+    fn from(value: DbSledUpdateRebootPolicy) -> Self {
         match value {
-            DbPlannerSledRebootPolicy::ImmediateNoEvacuation => {
-                deployment::PlannerSledRebootPolicy::ImmediateNoEvacuation
+            DbSledUpdateRebootPolicy::ImmediateNoEvacuation => {
+                deployment::SledUpdateRebootPolicy::ImmediateNoEvacuation
             }
-            DbPlannerSledRebootPolicy::Evacuate => {
-                deployment::PlannerSledRebootPolicy::Evacuate
+            DbSledUpdateRebootPolicy::Evacuate => {
+                deployment::SledUpdateRebootPolicy::Evacuate
             }
         }
     }
 }
 
-impl From<deployment::PlannerSledRebootPolicy> for DbPlannerSledRebootPolicy {
-    fn from(value: deployment::PlannerSledRebootPolicy) -> Self {
+impl From<deployment::SledUpdateRebootPolicy> for DbSledUpdateRebootPolicy {
+    fn from(value: deployment::SledUpdateRebootPolicy) -> Self {
         match value {
-            deployment::PlannerSledRebootPolicy::ImmediateNoEvacuation => {
-                DbPlannerSledRebootPolicy::ImmediateNoEvacuation
+            deployment::SledUpdateRebootPolicy::ImmediateNoEvacuation => {
+                DbSledUpdateRebootPolicy::ImmediateNoEvacuation
             }
-            deployment::PlannerSledRebootPolicy::Evacuate => {
-                DbPlannerSledRebootPolicy::Evacuate
+            deployment::SledUpdateRebootPolicy::Evacuate => {
+                DbSledUpdateRebootPolicy::Evacuate
             }
         }
     }

@@ -14,10 +14,10 @@ use daft::Diffable;
 use http::StatusCode;
 use indent_write::io::IndentWriter;
 use nexus_types::deployment::PlannerConfig;
-use nexus_types::deployment::PlannerSledRebootPolicy;
 use nexus_types::deployment::ReconfiguratorConfig;
 use nexus_types::deployment::ReconfiguratorConfigParam;
 use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
+use nexus_types::deployment::SledUpdateRebootPolicy;
 use std::io;
 use std::io::Write;
 use std::num::ParseIntError;
@@ -60,7 +60,7 @@ pub struct ReconfiguratorConfigOpts {
     disruption_policy: Option<ReconfiguratorDisruptionPolicyOpt>,
 
     #[clap(long)]
-    sled_reboot_policy: Option<PlannerSledRebootPolicyOpt>,
+    sled_update_reboot_policy: Option<SledUpdateRebootPolicyOpt>,
 
     #[clap(long, action = ArgAction::Set)]
     blueprint_pruner_enabled: Option<bool>,
@@ -82,10 +82,12 @@ impl ReconfiguratorConfigOpts {
                     .disruption_policy
                     .map(|p| p.into())
                     .unwrap_or(current.planner_config.disruption_policy),
-                sled_reboot_policy: self
-                    .sled_reboot_policy
+                sled_update_reboot_policy: self
+                    .sled_update_reboot_policy
                     .map(|p| p.into())
-                    .unwrap_or(current.planner_config.sled_reboot_policy),
+                    .unwrap_or(
+                        current.planner_config.sled_update_reboot_policy,
+                    ),
             },
             tuf_repo_pruner_enabled: self
                 .tuf_repo_pruner_enabled
@@ -136,18 +138,18 @@ impl From<ReconfiguratorDisruptionPolicyOpt>
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
-pub enum PlannerSledRebootPolicyOpt {
+pub enum SledUpdateRebootPolicyOpt {
     ImmediateNoEvacuation,
     Evacuate,
 }
 
-impl From<PlannerSledRebootPolicyOpt> for PlannerSledRebootPolicy {
-    fn from(value: PlannerSledRebootPolicyOpt) -> Self {
+impl From<SledUpdateRebootPolicyOpt> for SledUpdateRebootPolicy {
+    fn from(value: SledUpdateRebootPolicyOpt) -> Self {
         match value {
-            PlannerSledRebootPolicyOpt::ImmediateNoEvacuation => {
+            SledUpdateRebootPolicyOpt::ImmediateNoEvacuation => {
                 Self::ImmediateNoEvacuation
             }
-            PlannerSledRebootPolicyOpt::Evacuate => Self::Evacuate,
+            SledUpdateRebootPolicyOpt::Evacuate => Self::Evacuate,
         }
     }
 }

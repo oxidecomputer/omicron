@@ -1190,8 +1190,8 @@ mod test {
     use super::*;
 
     use nexus_types::deployment::PlannerConfig;
-    use nexus_types::deployment::PlannerSledRebootPolicy;
     use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
+    use nexus_types::deployment::SledUpdateRebootPolicy;
     use omicron_common::address::{
         CLICKHOUSE_TCP_PORT, Ipv6Subnet, RACK_PREFIX_LENGTH,
     };
@@ -1338,7 +1338,7 @@ mod test {
             blueprint_pruner_enabled = false
             blueprint_pruner_nkeep = 137
             [initial_reconfigurator_config.planner_config]
-            sled_reboot_policy = "evacuate"
+            sled_update_reboot_policy = "evacuate"
             disruption_policy = "migrate_only"
             [background_tasks]
             dns_internal.period_secs_config = 1
@@ -1521,8 +1521,8 @@ mod test {
                         blueprint_pruner_enabled: false,
                         blueprint_pruner_nkeep: 137,
                         planner_config: PlannerConfig {
-                            sled_reboot_policy:
-                                PlannerSledRebootPolicy::Evacuate,
+                            sled_update_reboot_policy:
+                                SledUpdateRebootPolicy::Evacuate,
                             disruption_policy:
                                 ReconfiguratorDisruptionPolicy::MigrateOnly,
                         },

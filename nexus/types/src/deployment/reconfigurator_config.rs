@@ -242,7 +242,7 @@ impl fmt::Display for ReconfiguratorConfigDiffDisplay<'_, '_> {
         let ReconfiguratorConfigDiff {
             planner_enabled,
             planner_config:
-                PlannerConfigDiff { disruption_policy, sled_reboot_policy },
+                PlannerConfigDiff { disruption_policy, sled_update_reboot_policy },
             tuf_repo_pruner_enabled,
             blueprint_pruner_enabled,
             blueprint_pruner_nkeep,
@@ -254,7 +254,10 @@ impl fmt::Display for ReconfiguratorConfigDiffDisplay<'_, '_> {
                 diff_row!(tuf_repo_pruner_enabled, "tuf repo pruner enabled"),
                 diff_row!(planner_enabled, "planner enabled"),
                 diff_row!(disruption_policy, "disruption policy"),
-                diff_row!(sled_reboot_policy, "sled reboot policy"),
+                diff_row!(
+                    sled_update_reboot_policy,
+                    "sled update reboot policy"
+                ),
                 diff_row!(blueprint_pruner_enabled, "blueprint pruner enabled"),
                 diff_row!(blueprint_pruner_nkeep, "blueprint pruner nkeep"),
             ],
@@ -282,7 +285,7 @@ impl fmt::Display for ReconfiguratorConfigDiffDisplay<'_, '_> {
 )]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(test, derive(test_strategy::Arbitrary))]
-pub enum PlannerSledRebootPolicy {
+pub enum SledUpdateRebootPolicy {
     /// Reboot sleds without evacuating them first.
     ///
     /// This results in the fastest update time, but is the most disruptive to
@@ -309,7 +312,7 @@ pub enum PlannerSledRebootPolicy {
     Evacuate,
 }
 
-impl fmt::Display for PlannerSledRebootPolicy {
+impl fmt::Display for SledUpdateRebootPolicy {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::ImmediateNoEvacuation => {
@@ -339,19 +342,19 @@ pub struct PlannerConfig {
     /// Policy for how the planner schedules updates that will induce reboots on
     /// sleds.
     ///
-    /// If `sled_reboot_policy` is
-    /// [`PlannerSledRebootPolicy::ImmediateNoEvacuation`], the planner will not
+    /// If `sled_update_reboot_policy` is
+    /// [`SledUpdateRebootPolicy::ImmediateNoEvacuation`], the planner will not
     /// mark sleds for evacuation at all, which means `disruption_policy` will
     /// be ignored.
     //
     // We could combine this field with `disruption_policy` at the typesystem
     // level to make it clear that `disruption_policy` is only applicable for
-    // certain `sled_reboot_policy` values, but that's less ergonomic from an
-    // omdb perspective: in most cases we expect to be adjusting only one or the
-    // other of these, and if we want to temporarily disable evacuation, we'll
-    // almost certainly want to preserve the existing `disruption_policy`
-    // whenever we reenable it.
-    pub sled_reboot_policy: PlannerSledRebootPolicy,
+    // certain `sled_update_reboot_policy` values, but that's less ergonomic
+    // from an omdb perspective: in most cases we expect to be adjusting only
+    // one or the other of these, and if we want to temporarily disable
+    // evacuation, we'll almost certainly want to preserve the existing
+    // `disruption_policy` whenever we reenable it.
+    pub sled_update_reboot_policy: SledUpdateRebootPolicy,
 
     /// Disruption policy applied to sleds being evacuated.
     pub disruption_policy: ReconfiguratorDisruptionPolicy,
@@ -370,10 +373,15 @@ pub struct PlannerConfigDisplay<'a> {
 impl<'a> fmt::Display for PlannerConfigDisplay<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let Self {
-            config: PlannerConfig { disruption_policy, sled_reboot_policy },
+            config:
+                PlannerConfig { disruption_policy, sled_update_reboot_policy },
         } = self;
         writeln!(f, "    disruption policy : {}", disruption_policy)?;
-        writeln!(f, "    sled reboot policy: {}", sled_reboot_policy)?;
+        writeln!(
+            f,
+            "    sled update reboot policy: {}",
+            sled_update_reboot_policy
+        )?;
         Ok(())
     }
 }

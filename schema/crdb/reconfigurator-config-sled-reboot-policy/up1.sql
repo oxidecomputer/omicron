@@ -1,5 +1,5 @@
 CREATE TYPE IF NOT EXISTS
-omicron.public.reconfigurator_planner_sled_reboot_policy AS ENUM (
+omicron.public.sled_update_reboot_policy AS ENUM (
     'immediate_no_evacuation',
     'evacuate'
 );

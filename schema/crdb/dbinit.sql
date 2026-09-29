@@ -5561,7 +5561,7 @@ CREATE TYPE IF NOT EXISTS omicron.public.reconfigurator_disruption_policy AS ENU
     'migrate_only'
 );
 
-CREATE TYPE IF NOT EXISTS omicron.public.reconfigurator_planner_sled_reboot_policy AS ENUM (
+CREATE TYPE IF NOT EXISTS omicron.public.sled_update_reboot_policy AS ENUM (
     'immediate_no_evacuation',
     'evacuate'
 );
@@ -5598,7 +5598,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.reconfigurator_config (
     blueprint_pruner_nkeep INT8 NOT NULL,
 
     -- How the planner schedules updates that induce sled reboots
-    sled_reboot_policy omicron.public.reconfigurator_planner_sled_reboot_policy NOT NULL
+    sled_update_reboot_policy omicron.public.sled_update_reboot_policy NOT NULL
 );
 
 /*

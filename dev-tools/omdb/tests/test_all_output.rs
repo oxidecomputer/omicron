@@ -399,7 +399,7 @@ async fn test_omdb_success_cases() {
             "nexus",
             "reconfigurator-config",
             "set",
-            "--sled-reboot-policy",
+            "--sled-update-reboot-policy",
             "evacuate",
         ],
         &["nexus", "reconfigurator-config", "show", "current"],
