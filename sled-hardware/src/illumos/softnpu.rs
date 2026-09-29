@@ -143,20 +143,38 @@ fn probe_version(
                 });
             }
         };
-        file.write_all(&encode_tversion(SOFTNPU_9P_VERSION)).map_err(
-            |err| SwitchDetectError::Write { path: path.to_string(), err },
-        )?;
-        let mut buf = vec![0u8; REPLY_BUF_LEN];
+        // A non-blocking write returns EAGAIN while the driver's request
+        // pool is exhausted by unanswered requests.
         let deadline = Instant::now() + REPLY_DEADLINE;
+        let timeout = || SwitchDetectError::Timeout {
+            path: path.to_string(),
+            after: REPLY_DEADLINE,
+        };
+        let tversion = encode_tversion(SOFTNPU_9P_VERSION);
+        loop {
+            match file.write_all(&tversion) {
+                Ok(()) => break,
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    if Instant::now() >= deadline {
+                        return Err(timeout());
+                    }
+                    std::thread::sleep(REPLY_POLL_INTERVAL);
+                }
+                Err(err) => {
+                    return Err(SwitchDetectError::Write {
+                        path: path.to_string(),
+                        err,
+                    });
+                }
+            }
+        }
+        let mut buf = vec![0u8; REPLY_BUF_LEN];
         let n = loop {
             match file.read(&mut buf) {
                 Ok(n) => break n,
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                     if Instant::now() >= deadline {
-                        return Err(SwitchDetectError::Timeout {
-                            path: path.to_string(),
-                            after: REPLY_DEADLINE,
-                        });
+                        return Err(timeout());
                     }
                     std::thread::sleep(REPLY_POLL_INTERVAL);
                 }

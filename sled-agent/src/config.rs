@@ -89,15 +89,17 @@ impl Switch {
     }
 }
 
-/// How this sled is deployed: the role it is asked to take and the switch
-/// backend it runs when it is a scrimlet. Parsed from a [`DeploymentConfig`],
-/// which rejects combinations that cannot be resolved at startup, so every
-/// value of this type is one sled-agent knows what to do with.
+/// How this sled is deployed. Parsed from a [`DeploymentConfig`], which
+/// rejects combinations that cannot be resolved at startup.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(try_from = "DeploymentConfig")]
 pub struct Deployment {
-    sled_mode: SledRole,
+    /// The switch backend. Whether the sled becomes a scrimlet follows from
+    /// it: the detected backends decide at runtime, the fixed ones always do.
     switch: Switch,
+    /// `sled_mode = "sled"`: run as a compute sled whatever the switch says.
+    /// The switch then only decides `has_physical_asic`.
+    sled: bool,
 }
 
 /// The `deployment` table as written in the sled-agent config. The named
@@ -127,13 +129,13 @@ impl TryFrom<DeploymentConfig> for Deployment {
     type Error = String;
 
     fn try_from(config: DeploymentConfig) -> Result<Self, Self::Error> {
-        let (sled_mode, switch) = match config {
+        let (sled, switch) = match config {
             DeploymentConfig::Production { sidecar_revision } => {
-                (SledRole::Auto, Switch::TofinoAsic { sidecar_revision })
+                (false, Switch::TofinoAsic { sidecar_revision })
             }
             DeploymentConfig::Virtual { front_port_count, rear_port_count } => {
                 (
-                    SledRole::Auto,
+                    false,
                     Switch::SoftNpuPropolisDevice {
                         front_port_count,
                         rear_port_count,
@@ -144,7 +146,7 @@ impl TryFrom<DeploymentConfig> for Deployment {
                 front_port_count,
                 rear_port_count,
             } => (
-                SledRole::Scrimlet,
+                false,
                 Switch::SoftNpuZone { front_port_count, rear_port_count },
             ),
             DeploymentConfig::Custom { sled_mode, switch } => {
@@ -188,10 +190,10 @@ impl TryFrom<DeploymentConfig> for Deployment {
                         ));
                     }
                 }
-                (sled_mode, switch)
+                (sled_mode == SledRole::Sled, switch)
             }
         };
-        Ok(Self { sled_mode, switch })
+        Ok(Self { switch, sled })
     }
 }
 
@@ -202,13 +204,12 @@ impl Deployment {
         &self,
         log: &Logger,
     ) -> Result<SledMode, StartError> {
-        // Parsing leaves the detected backends with "auto" and the stub and
-        // zone backends with "scrimlet", so each arm below covers the only
-        // role it can carry.
-        match (self.sled_mode, &self.switch) {
-            (SledRole::Sled, _) => Ok(SledMode::Sled),
-            (_, Switch::TofinoAsic { .. }) => Ok(SledMode::Auto),
-            (_, Switch::SoftNpuPropolisDevice { .. }) => {
+        if self.sled {
+            return Ok(SledMode::Sled);
+        }
+        match &self.switch {
+            Switch::TofinoAsic { .. } => Ok(SledMode::Auto),
+            Switch::SoftNpuPropolisDevice { .. } => {
                 let log = log.clone();
                 // The probe touches devinfo and device nodes, so it may block.
                 let found = tokio::task::spawn_blocking(move || {
@@ -225,11 +226,10 @@ impl Deployment {
                     SledMode::Sled
                 })
             }
-            (
-                _,
-                switch @ (Switch::TofinoStub { .. }
-                | Switch::SoftNpuZone { .. }),
-            ) => Ok(SledMode::Scrimlet { asic: switch.asic() }),
+            switch @ (Switch::TofinoStub { .. }
+            | Switch::SoftNpuZone { .. }) => {
+                Ok(SledMode::Scrimlet { asic: switch.asic() })
+            }
         }
     }
 
@@ -418,7 +418,7 @@ mod test {
     #[test]
     fn named_kinds_normalize() {
         let d = parse("kind = \"production\"").unwrap();
-        assert_eq!(d.sled_mode, SledRole::Auto);
+        assert!(!d.sled);
         assert!(d.has_physical_asic());
         assert!(matches!(
             d.sidecar_revision(),
@@ -429,7 +429,7 @@ mod test {
             "kind = \"virtual\"\nfront_port_count = 2\nrear_port_count = 4",
         )
         .unwrap();
-        assert_eq!(d.sled_mode, SledRole::Auto);
+        assert!(!d.sled);
         assert!(!d.has_physical_asic());
         assert!(matches!(
             d.sidecar_revision(),
@@ -441,20 +441,20 @@ mod test {
             "kind = \"standalone\"\nfront_port_count = 1\nrear_port_count = 1",
         )
         .unwrap();
-        assert_eq!(d.sled_mode, SledRole::Scrimlet);
+        assert!(!d.sled);
         assert!(matches!(d.sidecar_revision(), SidecarRevision::SoftZone(_)));
     }
 
     #[test]
     fn custom_role_and_switch_combinations() {
-        // "sled" ignores hardware, so any switch is fine.
+        // "sled" ignores hardware, any switch is fine.
         for switch in [
             "tofino_asic",
             "tofino_stub",
             "soft_npu_propolis_device",
             "soft_npu_zone",
         ] {
-            assert!(custom("sled", switch).is_ok(), "sled + {switch}");
+            assert!(custom("sled", switch).unwrap().sled, "sled + {switch}");
         }
         // Detected backends take "auto", never "scrimlet".
         for switch in ["tofino_asic", "soft_npu_propolis_device"] {
