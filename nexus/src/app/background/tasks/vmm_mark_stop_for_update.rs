@@ -101,12 +101,15 @@ impl BackgroundTask for VmmMarkStopForUpdate {
 mod tests {
     use super::*;
     use chrono::Utc;
+    use iddqd::IdOrdMap;
     use nexus_db_model::ActiveSledBpAvailability;
     use nexus_db_model::Generation;
-    use nexus_db_model::RendezvousSledBpAvailabilityUpdate;
+    use nexus_db_model::SledBlueprintAvailabilityInput;
+    use nexus_db_model::SledBpAvailabilityState;
     use nexus_db_model::Vmm;
     use nexus_db_model::VmmCpuPlatform;
     use nexus_db_model::VmmState;
+    use nexus_db_queries::db::DataStore;
     use nexus_db_queries::db::pub_test_utils::TestDatabase;
     use omicron_generation_kinds::UpdateDispositionGeneration;
     use omicron_test_utils::dev;
@@ -184,29 +187,29 @@ mod tests {
                 .await;
 
         datastore
-            .rendezvous_sled_bp_availability_upsert(
+            .rendezvous_sled_bp_availability_write(
                 opctx,
-                RendezvousSledBpAvailabilityUpdate::new(
-                    sled_evacuating,
-                    ActiveSledBpAvailability::Unavailable,
-                    generation,
-                    blueprint_id,
-                ),
+                blueprint_id,
+                IdOrdMap::from_iter_unique([
+                    SledBlueprintAvailabilityInput {
+                        sled_id: sled_evacuating,
+                        state: SledBpAvailabilityState::Active {
+                            availability: ActiveSledBpAvailability::Unavailable,
+                            update_disposition_generation: generation,
+                        },
+                    },
+                    SledBlueprintAvailabilityInput {
+                        sled_id: sled_available,
+                        state: SledBpAvailabilityState::Active {
+                            availability: ActiveSledBpAvailability::Available,
+                            update_disposition_generation: generation,
+                        },
+                    },
+                ])
+                .expect("sled inputs are unique"),
             )
             .await
-            .expect("evacuating sled availability should upsert");
-        datastore
-            .rendezvous_sled_bp_availability_upsert(
-                opctx,
-                RendezvousSledBpAvailabilityUpdate::new(
-                    sled_available,
-                    ActiveSledBpAvailability::Available,
-                    generation,
-                    blueprint_id,
-                ),
-            )
-            .await
-            .expect("available sled availability should upsert");
+            .expect("sled availability should be written");
 
         // First, verify that a disabled task does nothing
         let mut task = VmmMarkStopForUpdate::new(datastore.clone(), true);

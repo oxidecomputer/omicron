@@ -547,8 +547,10 @@ mod tests {
     use crate::db::model::Migration;
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::pub_test_utils::helpers::create_vmm_for_instance;
+    use iddqd::IdOrdMap;
     use nexus_db_model::ActiveSledBpAvailability;
-    use nexus_db_model::RendezvousSledBpAvailabilityUpdate;
+    use nexus_db_model::SledBlueprintAvailabilityInput;
+    use nexus_db_model::SledBpAvailabilityState;
     use nexus_db_model::VmmCpuPlatform;
     use nexus_types::instance::VmmFailureReason;
     use nexus_types::instance::VmmState;
@@ -966,41 +968,36 @@ mod tests {
         assert_rows(&actual, &expected);
 
         datastore
-            .rendezvous_sled_bp_availability_upsert(
+            .rendezvous_sled_bp_availability_write(
                 opctx,
-                RendezvousSledBpAvailabilityUpdate::new(
-                    sled_a,
-                    ActiveSledBpAvailability::Unavailable,
-                    gen1,
-                    blueprint_id,
-                ),
+                blueprint_id,
+                IdOrdMap::from_iter_unique([
+                    SledBlueprintAvailabilityInput {
+                        sled_id: sled_a,
+                        state: SledBpAvailabilityState::Active {
+                            availability: ActiveSledBpAvailability::Unavailable,
+                            update_disposition_generation: gen1,
+                        },
+                    },
+                    SledBlueprintAvailabilityInput {
+                        sled_id: sled_b,
+                        state: SledBpAvailabilityState::Active {
+                            availability: ActiveSledBpAvailability::Unavailable,
+                            update_disposition_generation: gen2,
+                        },
+                    },
+                    SledBlueprintAvailabilityInput {
+                        sled_id: sled_c,
+                        state: SledBpAvailabilityState::Active {
+                            availability: ActiveSledBpAvailability::Available,
+                            update_disposition_generation: gen1,
+                        },
+                    },
+                ])
+                .expect("sled inputs are unique"),
             )
             .await
-            .expect("sled A availability should upsert");
-        datastore
-            .rendezvous_sled_bp_availability_upsert(
-                opctx,
-                RendezvousSledBpAvailabilityUpdate::new(
-                    sled_b,
-                    ActiveSledBpAvailability::Unavailable,
-                    gen2,
-                    blueprint_id,
-                ),
-            )
-            .await
-            .expect("sled B availability should upsert");
-        datastore
-            .rendezvous_sled_bp_availability_upsert(
-                opctx,
-                RendezvousSledBpAvailabilityUpdate::new(
-                    sled_c,
-                    ActiveSledBpAvailability::Available,
-                    gen1,
-                    blueprint_id,
-                ),
-            )
-            .await
-            .expect("sled C availability should upsert");
+            .expect("sled availability should be written");
 
         // Sleds A and B are both evacuating (`unavailable`), at different
         // generations, and sled C is available. In a single pass the stoppable
@@ -1060,17 +1057,20 @@ mod tests {
 
         // Now sled C evacuates too, moving from generation 1 to generation 2.
         datastore
-            .rendezvous_sled_bp_availability_upsert(
+            .rendezvous_sled_bp_availability_write(
                 opctx,
-                RendezvousSledBpAvailabilityUpdate::new(
-                    sled_c,
-                    ActiveSledBpAvailability::Unavailable,
-                    gen2,
-                    blueprint_id,
-                ),
+                blueprint_id,
+                IdOrdMap::from_iter_unique([SledBlueprintAvailabilityInput {
+                    sled_id: sled_c,
+                    state: SledBpAvailabilityState::Active {
+                        availability: ActiveSledBpAvailability::Unavailable,
+                        update_disposition_generation: gen2,
+                    },
+                }])
+                .expect("sled inputs are unique"),
             )
             .await
-            .expect("sled C availability should upsert");
+            .expect("sled availability should be written");
 
         // Run again. Only sled C's stoppable VMMs should change.
         let marked_c = datastore
@@ -1121,17 +1121,21 @@ mod tests {
         // Sled A finishes evacuating and becomes available again. Sled A's
         // original VMMs should stay marked at their original generation.
         datastore
-            .rendezvous_sled_bp_availability_upsert(
+            .rendezvous_sled_bp_availability_write(
                 opctx,
-                RendezvousSledBpAvailabilityUpdate::new(
-                    sled_a,
-                    ActiveSledBpAvailability::Available,
-                    UpdateDispositionGeneration::from(3),
-                    blueprint_id,
-                ),
+                blueprint_id,
+                IdOrdMap::from_iter_unique([SledBlueprintAvailabilityInput {
+                    sled_id: sled_a,
+                    state: SledBpAvailabilityState::Active {
+                        availability: ActiveSledBpAvailability::Available,
+                        update_disposition_generation:
+                            UpdateDispositionGeneration::from(3),
+                    },
+                }])
+                .expect("sled inputs are unique"),
             )
             .await
-            .expect("sled A availability should upsert");
+            .expect("sled availability should be written");
 
         let marked = datastore
             .vmm_bulk_mark_stop_for_update(&opctx)
@@ -1148,17 +1152,21 @@ mod tests {
         // Its already-marked VMMs are skipped, so they keep their original
         // generation rather than the new one the sled has.
         datastore
-            .rendezvous_sled_bp_availability_upsert(
+            .rendezvous_sled_bp_availability_write(
                 opctx,
-                RendezvousSledBpAvailabilityUpdate::new(
-                    sled_a,
-                    ActiveSledBpAvailability::Unavailable,
-                    UpdateDispositionGeneration::from(4),
-                    blueprint_id,
-                ),
+                blueprint_id,
+                IdOrdMap::from_iter_unique([SledBlueprintAvailabilityInput {
+                    sled_id: sled_a,
+                    state: SledBpAvailabilityState::Active {
+                        availability: ActiveSledBpAvailability::Unavailable,
+                        update_disposition_generation:
+                            UpdateDispositionGeneration::from(4),
+                    },
+                }])
+                .expect("sled inputs are unique"),
             )
             .await
-            .expect("sled A unavailability should upsert");
+            .expect("sled availability should be written");
 
         let marked = datastore
             .vmm_bulk_mark_stop_for_update(&opctx)
