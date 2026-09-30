@@ -95,8 +95,8 @@ pub struct SpCommonConfig {
     pub ereport_network_config: Option<[NetworkConfig; 2]>,
     /// Fake part number.
     ///
-    /// If this is not provided, this defaults to `FAKE_GIMLET_MODEL` or
-    /// `FAKE_SIDECAR_MODEL`, depending on the board.
+    /// If this is not provided, this defaults to `a suitable value depending
+    /// on the board.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub part_number: Option<String>,
     /// Fake serial number
