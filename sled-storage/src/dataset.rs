@@ -63,7 +63,8 @@ pub const U2_DEBUG_DATASET: &'static str = "crypt/debug";
 /// The files written here are already compressed, so this dataset uses lz4
 /// rather than the debug dataset's gzip-9: gzip-9 spends significant CPU on
 /// data it cannot shrink, while lz4 gives up quickly. This dataset is not part
-/// of the blueprint; sled-agent creates it when it sets up each U.2.
+/// of the blueprint; sled-agent creates it when it sets up each U.2, and does
+/// not use a U.2 on which it cannot be created.
 pub const U2_DEBUG_SCRATCH_DATASET_NAME: &'static str = "support-logs-tmp";
 const U2_DEBUG_SCRATCH_DATASET_COMPRESSION: CompressionAlgorithm =
     CompressionAlgorithm::Lz4;
@@ -327,83 +328,71 @@ pub(crate) async fn ensure_zpool_has_datasets(
     };
 
     for dataset in datasets.into_iter() {
-        let mountpoint =
-            zpool_name.dataset_mountpoint(&mount_config.root, dataset.name);
-        let name = &format!("{}/{}", zpool_name, dataset.name);
-
-        let encryption_details = None;
-        let size_details = Some(SizeDetails {
-            quota: dataset.quota,
-            reservation: None,
-            compression: dataset.compression,
-        });
-        Zfs::ensure_dataset(zfs::DatasetEnsureArgs {
-            name,
-            mountpoint: Mountpoint(mountpoint),
-            can_mount: zfs::CanMount::On,
-            zoned,
-            encryption_details,
-            size_details,
-            id: None,
-            additional_options: None,
-        })
-        .await
-        .inspect_err(|err| {
-            warn!(
-                log,
-                "Failed to ensure dataset";
-                "name" => ?name,
-                "err" => InlineErrorChain::new(&err),
-            );
-        })?;
+        ensure_zpool_dataset(
+            log,
+            mount_config,
+            zpool_name,
+            dataset.name,
+            dataset.quota,
+            dataset.compression,
+        )
+        .await?;
     }
 
     if matches!(zpool_name.kind().into(), DiskVariant::U2) {
-        ensure_debug_scratch_dataset(log, mount_config, zpool_name).await;
+        ensure_zpool_dataset(
+            log,
+            mount_config,
+            zpool_name,
+            &format!("{U2_DEBUG_DATASET}/{U2_DEBUG_SCRATCH_DATASET_NAME}"),
+            None,
+            U2_DEBUG_SCRATCH_DATASET_COMPRESSION,
+        )
+        .await?;
     }
 
     info!(log, "Finished ensuring zpool has datasets"; "zpool" => ?zpool_name, "disk_identity" => ?disk_identity);
     Ok(())
 }
 
-/// Ensures that [`U2_DEBUG_SCRATCH_DATASET_NAME`] exists within the U.2's
-/// debug dataset.
+/// Ensures that `dataset` exists within `zpool_name` with the given quota and
+/// compression, logging any failure before returning it.
 ///
-/// Failure is logged rather than returned: support bundle log collection falls
-/// back to the debug dataset itself when the scratch dataset is missing, so
-/// it is not worth failing disk setup over.
-async fn ensure_debug_scratch_dataset(
+/// This does not configure encryption: datasets within [`CRYPT_DATASET`]
+/// inherit it from there.
+async fn ensure_zpool_dataset(
     log: &Logger,
     mount_config: &MountConfig,
     zpool_name: &ZpoolName,
-) {
-    let dataset = format!("{U2_DEBUG_DATASET}/{U2_DEBUG_SCRATCH_DATASET_NAME}");
-    let mountpoint =
-        zpool_name.dataset_mountpoint(&mount_config.root, &dataset);
+    dataset: &str,
+    quota: Option<ByteCount>,
+    compression: CompressionAlgorithm,
+) -> Result<(), zfs::EnsureDatasetError> {
+    let mountpoint = zpool_name.dataset_mountpoint(&mount_config.root, dataset);
     let name = format!("{zpool_name}/{dataset}");
-    let result = Zfs::ensure_dataset(zfs::DatasetEnsureArgs {
+    Zfs::ensure_dataset(zfs::DatasetEnsureArgs {
         name: &name,
         mountpoint: Mountpoint(mountpoint),
         can_mount: zfs::CanMount::On,
         zoned: false,
         encryption_details: None,
         size_details: Some(SizeDetails {
-            quota: None,
+            quota,
             reservation: None,
-            compression: U2_DEBUG_SCRATCH_DATASET_COMPRESSION,
+            compression,
         }),
         id: None,
         additional_options: None,
     })
-    .await;
-    if let Err(err) = result {
+    .await
+    .inspect_err(|err| {
         warn!(
             log,
-            "Failed to ensure debug scratch dataset";
+            "Failed to ensure dataset";
             "name" => &name,
             InlineErrorChain::new(&err),
         );
-    }
+    })
 }
 
 #[derive(Debug, thiserror::Error)]

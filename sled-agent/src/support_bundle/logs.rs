@@ -34,6 +34,13 @@ pub enum Error {
     #[error("No storage found for temporary file storage")]
     MissingStorage,
 
+    #[error("Failed to create temporary file in {path}")]
+    TempFile {
+        path: camino::Utf8PathBuf,
+        #[source]
+        err: std::io::Error,
+    },
+
     #[error(transparent)]
     Range(#[from] range_requests::Error),
 }
@@ -82,7 +89,8 @@ impl<'a> SupportBundleLogs<'a> {
         Z: Into<String>,
     {
         let dataset_path = self.dataset_for_temporary_storage().await?;
-        let mut tempfile = tempfile_in(dataset_path)?;
+        let mut tempfile = tempfile_in(&dataset_path)
+            .map_err(|err| Error::TempFile { path: dataset_path, err })?;
 
         let log = self.log.clone();
         let zone = zone.into();
@@ -125,8 +133,8 @@ impl<'a> SupportBundleLogs<'a> {
     /// for temporary storage to assemble a zip file made up of all of the
     /// discovered zone's logs.
     ///
-    /// Returns the debug scratch dataset on that device, or the debug dataset
-    /// itself if the scratch dataset does not exist.
+    /// Returns the debug scratch dataset on that device, which sled-agent
+    /// creates when it sets up each U.2.
     async fn dataset_for_temporary_storage(
         &self,
     ) -> Result<camino::Utf8PathBuf, Error> {
@@ -171,30 +179,18 @@ impl<'a> SupportBundleLogs<'a> {
             .collect()
             .await;
 
-        let debug_path = storage_paths_to_size
+        // Use the scratch dataset within the debug dataset, rather than the
+        // debug dataset itself. The zip file is already compressed, and the
+        // debug dataset's gzip-9 compression would spend CPU trying to
+        // compress it again.
+        storage_paths_to_size
             .into_iter()
             .flatten()
             .max_by_key(|(_, size)| *size)
-            .map(|(dataset_path, _)| dataset_path)
-            .ok_or(Error::MissingStorage)?;
-
-        // Prefer the scratch dataset within the debug dataset. The zip file is
-        // already compressed, and the debug dataset's gzip-9 compression would
-        // spend CPU trying to compress it again.
-        let scratch_path = debug_path.join(U2_DEBUG_SCRATCH_DATASET_NAME);
-        match tokio::fs::try_exists(&scratch_path).await {
-            Ok(true) => Ok(scratch_path),
-            result => {
-                warn!(
-                    &self.log,
-                    "debug scratch dataset unavailable, using the debug \
-                    dataset for temporary storage";
-                    "scratch_path" => %scratch_path,
-                    "result" => ?result,
-                );
-                Ok(debug_path)
-            }
-        }
+            .map(|(debug_path, _)| {
+                debug_path.join(U2_DEBUG_SCRATCH_DATASET_NAME)
+            })
+            .ok_or(Error::MissingStorage)
     }
 }
 
