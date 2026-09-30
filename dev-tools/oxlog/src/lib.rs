@@ -672,8 +672,8 @@ struct UndatedLogFile {
     series: Option<String>,
     /// For a symlink, the path it points to.
     symlink_target: Option<Utf8PathBuf>,
-    /// The file's newest write, if its metadata was read. Not used for
-    /// symlinks, which take their target's age.
+    /// The file's newest write, if its metadata was read successfully. Not
+    /// used for symlinks, which take their target's age.
     newest_write: Option<Timestamp>,
     path: Utf8PathBuf,
     size: Option<u64>,
@@ -698,6 +698,46 @@ struct DatedLogFile {
     service: ServiceName,
     kind: LogKind,
     file: LogFile,
+}
+
+/// An SMF log file's newest write, as determined when it is loaded.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NewestWrite {
+    /// The file couldn't be stat'd (most likely because it was removed after
+    /// its directory was read), so it has no age.
+    Unknown,
+    /// The file's newest write, which can bound the oldest writes of its
+    /// neighbors in its series.
+    InSeries(Timestamp),
+    /// A time at or after the file's newest write. That is safe for dating
+    /// the file alone (it can only widen the file's age), but not as a bound
+    /// on its neighbors', so the file is a series of its own.
+    Alone(Timestamp),
+}
+
+/// Determines an SMF log file's newest write from its name and `modified`,
+/// the `mtime` from its stat (`None` if the stat failed).
+fn svc_log_newest_write(
+    svc_log_dir: SvcLogDir,
+    filename: &str,
+    modified: Option<Timestamp>,
+) -> NewestWrite {
+    let Some(modified) = modified else {
+        return NewestWrite::Unknown;
+    };
+    match svc_log_dir {
+        SvcLogDir::Primary => NewestWrite::InSeries(modified),
+        SvcLogDir::Debug => match epoch_from_filename(filename) {
+            // The debug collector names archived files `<name>.<epoch>`,
+            // where `<epoch>` is the source file's `mtime` when it was
+            // archived: the archived file's newest write. (The copy's own
+            // `mtime` is the time of archival.)
+            Some(epoch) => NewestWrite::InSeries(epoch),
+            // Without the source's mtime in its name, only the time of
+            // archival is known, which is later than the file's newest write.
+            None => NewestWrite::Alone(modified),
+        },
+    }
 }
 
 // Given a directory, find all oxide specific SMF service logs.
@@ -732,27 +772,14 @@ fn load_svc_logs(
         let mut newest_write = None;
         if read_metadata {
             file.read_metadata(&entry);
-            newest_write = match svc_log_dir {
-                SvcLogDir::Primary => file.modified,
-                SvcLogDir::Debug => match epoch_from_filename(filename) {
-                    // The debug collector names archived files
-                    // `<name>.<epoch>`, where `<epoch>` is the source file's
-                    // `mtime` when it was archived: the archived file's
-                    // newest write. (The copy's own `mtime` is the time of
-                    // archival.)
-                    Some(newest_write) => Some(newest_write),
-                    None => {
-                        // Without the source's mtime in its name, only the
-                        // time of archival is known, which is later than
-                        // the file's newest write. That is safe for dating
-                        // this file alone (it can only widen its age), but
-                        // not as a bound on its neighbors', so make it a
-                        // series of its own.
-                        series = None;
-                        file.modified
-                    }
-                },
-            };
+            match svc_log_newest_write(svc_log_dir, filename, file.modified) {
+                NewestWrite::Unknown => {}
+                NewestWrite::InSeries(t) => newest_write = Some(t),
+                NewestWrite::Alone(t) => {
+                    newest_write = Some(t);
+                    series = None;
+                }
+            }
         }
 
         let kind = if filename.ends_with(".log") {
@@ -1182,6 +1209,53 @@ mod tests {
         // No naming rule is known for dendrite's directory.
         assert_eq!(ExtraLogDir::Dendrite.series("zlog-cfg-cur"), None);
         assert_eq!(ExtraLogDir::Dendrite.series("bf_drivers.log"), None);
+    }
+
+    #[test]
+    fn test_svc_log_newest_write() {
+        use super::{NewestWrite, SvcLogDir, svc_log_newest_write};
+
+        let mtime = ts("2026-09-28T08:04:12Z");
+        let epoch = ts("2026-09-28T07:59:59Z");
+        let archived = format!("oxide-nexus:default.log.{}", epoch.as_second());
+
+        // In the zone, a file's mtime is its newest write.
+        assert_eq!(
+            svc_log_newest_write(
+                SvcLogDir::Primary,
+                "oxide-nexus:default.log.0",
+                Some(mtime)
+            ),
+            NewestWrite::InSeries(mtime)
+        );
+        // An archived file's name records its newest write; its own mtime is
+        // the time of archival.
+        assert_eq!(
+            svc_log_newest_write(SvcLogDir::Debug, &archived, Some(mtime)),
+            NewestWrite::InSeries(epoch)
+        );
+        // Without one in its name, only the time of archival is known.
+        assert_eq!(
+            svc_log_newest_write(
+                SvcLogDir::Debug,
+                "oxide-nexus:default.log",
+                Some(mtime)
+            ),
+            NewestWrite::Alone(mtime)
+        );
+        // A file that couldn't be stat'd has no newest write, even if its
+        // name records one.
+        for (dir, filename) in [
+            (SvcLogDir::Primary, "oxide-nexus:default.log.0"),
+            (SvcLogDir::Debug, archived.as_str()),
+            (SvcLogDir::Debug, "oxide-nexus:default.log"),
+        ] {
+            assert_eq!(
+                svc_log_newest_write(dir, filename, None),
+                NewestWrite::Unknown,
+                "{filename}"
+            );
+        }
     }
 
     /// Builds an undated file in `series` with the given newest write.
