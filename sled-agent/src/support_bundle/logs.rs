@@ -10,6 +10,7 @@ use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use range_requests::make_get_response;
 use sled_agent_config_reconciler::AvailableDatasetsReceiver;
+use sled_storage::dataset::U2_DEBUG_SCRATCH_DATASET_NAME;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use tokio::io::AsyncSeekExt;
@@ -123,6 +124,9 @@ impl<'a> SupportBundleLogs<'a> {
     /// Attempt to find a U.2 device with the most available free space
     /// for temporary storage to assemble a zip file made up of all of the
     /// discovered zone's logs.
+    ///
+    /// Returns the debug scratch dataset on that device, or the debug dataset
+    /// itself if the scratch dataset does not exist.
     async fn dataset_for_temporary_storage(
         &self,
     ) -> Result<camino::Utf8PathBuf, Error> {
@@ -167,11 +171,76 @@ impl<'a> SupportBundleLogs<'a> {
             .collect()
             .await;
 
-        storage_paths_to_size
+        let debug_path = storage_paths_to_size
             .into_iter()
             .flatten()
             .max_by_key(|(_, size)| *size)
             .map(|(dataset_path, _)| dataset_path)
-            .ok_or(Error::MissingStorage)
+            .ok_or(Error::MissingStorage)?;
+
+        // Prefer the scratch dataset within the debug dataset. The zip file is
+        // already compressed, and the debug dataset's gzip-9 compression would
+        // spend CPU trying to compress it again.
+        let scratch_path = debug_path.join(U2_DEBUG_SCRATCH_DATASET_NAME);
+        match tokio::fs::try_exists(&scratch_path).await {
+            Ok(true) => Ok(scratch_path),
+            result => {
+                warn!(
+                    &self.log,
+                    "debug scratch dataset unavailable, using the debug \
+                    dataset for temporary storage";
+                    "scratch_path" => %scratch_path,
+                    "result" => ?result,
+                );
+                Ok(debug_path)
+            }
+        }
+    }
+}
+
+#[cfg(all(target_os = "illumos", test))]
+mod illumos_tests {
+    use super::*;
+    use illumos_utils::zfs::Zfs;
+    use omicron_test_utils::dev::test_setup_log;
+    use sled_storage::dataset::U2_DEBUG_DATASET;
+    use zfs_test_harness::ZfsTestHarness;
+
+    #[tokio::test]
+    async fn temporary_storage_uses_debug_scratch_dataset() {
+        let logctx =
+            test_setup_log("temporary_storage_uses_debug_scratch_dataset");
+        let log = &logctx.log;
+
+        // Setting up a U.2 creates the scratch dataset within its debug
+        // dataset, using lz4 compression.
+        let mut harness = ZfsTestHarness::new(log.clone());
+        harness.add_external_disks(1).await;
+        let zpool = *harness.all_external_zpools().next().unwrap();
+        let scratch_dataset =
+            format!("{U2_DEBUG_DATASET}/{U2_DEBUG_SCRATCH_DATASET_NAME}");
+        let compression = Zfs::get_value(
+            &format!("{zpool}/{scratch_dataset}"),
+            "compression",
+        )
+        .await
+        .expect("Should have been able to read compression");
+        assert_eq!(compression, "lz4");
+
+        // Log collection picks the scratch dataset for its temporary files.
+        let root = &harness.mount_config().root;
+        let available_datasets_rx = AvailableDatasetsReceiver::fake_static(
+            std::iter::once((zpool, zpool.dataset_mountpoint(root, ""))),
+        );
+        let logs = SupportBundleLogs::new(log, available_datasets_rx);
+        let path = logs
+            .dataset_for_temporary_storage()
+            .await
+            .expect("Should have found temporary storage");
+        assert_eq!(path, zpool.dataset_mountpoint(root, &scratch_dataset));
+        tempfile_in(&path).expect("Should be able to create a tempfile");
+
+        harness.cleanup();
+        logctx.cleanup_successful();
     }
 }
