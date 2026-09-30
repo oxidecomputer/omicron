@@ -17,7 +17,9 @@
 //!   hashing + per-chunk `try_clone` / `seek`.
 //!
 //! [`prepare_zone_log_zip`] runs earlier, during collection, on each zone's
-//! log zip as it arrives from a sled agent.
+//! log zip as it arrives from a sled agent. It marks the zip so that the
+//! bundle copies its entries without decompressing them; see
+//! [`MERGE_ZIP_SUFFIX`].
 
 use ::zip::ZipWriter;
 use ::zip::write::FullFileOptions;
@@ -25,9 +27,21 @@ use anyhow::Context;
 use anyhow::Result;
 use camino::Utf8DirEntry;
 use camino::Utf8Path;
+use camino::Utf8PathBuf;
 use camino_tempfile::Utf8TempDir;
 use camino_tempfile::tempfile_in;
+use std::collections::BTreeSet;
 use std::io::Write;
+
+/// Suffix of a file, within a collected bundle directory, whose zip entries
+/// are merged into the bundle.
+///
+/// The file itself is not added to the bundle. Instead, each of its entries is
+/// copied into the bundle, still compressed, under the directory that contains
+/// the file. For example, an entry named `svc/current/svc.log` within
+/// `logs/zone/logs.merge.zip` becomes `logs/zone/svc/current/svc.log` in the
+/// bundle.
+pub const MERGE_ZIP_SUFFIX: &str = ".merge.zip";
 
 /// Write a bundle zip into a seekable destination. Produces a standard
 /// zip (no data descriptors).
@@ -59,20 +73,23 @@ pub fn bundle_to_zipfile(
 /// Prepare a zone's log zip, downloaded from a sled agent to `zip_path`, for
 /// inclusion in the bundle.
 ///
-/// The zip's contents are extracted into the directory containing it, and the
-/// zip itself is removed.
+/// The zip is renamed to end in [`MERGE_ZIP_SUFFIX`], so that its entries are
+/// copied into the bundle without being decompressed. It is first checked to
+/// be a readable zip; if it is not, it keeps its name and an error is
+/// returned.
 pub fn prepare_zone_log_zip(zip_path: &Utf8Path) -> Result<()> {
-    let output_dir = zip_path
-        .parent()
-        .with_context(|| format!("log zip has no parent: {zip_path}"))?;
     let file = std::fs::File::open(zip_path)
         .with_context(|| format!("failed to open zip file: {zip_path}"))?;
-    let mut archive = ::zip::ZipArchive::new(file)?;
-    archive.extract(output_dir).with_context(|| {
-        format!("failed to extract log zip file to: {output_dir}")
-    })?;
-    std::fs::remove_file(zip_path).with_context(|| {
-        format!("failed to remove extracted log zip file: {zip_path}")
+    ::zip::ZipArchive::new(file)
+        .with_context(|| format!("failed to read log zip file: {zip_path}"))?;
+
+    let file_stem = zip_path
+        .file_stem()
+        .with_context(|| format!("log zip has no file name: {zip_path}"))?;
+    let merge_path =
+        zip_path.with_file_name(format!("{file_stem}{MERGE_ZIP_SUFFIX}"));
+    std::fs::rename(zip_path, &merge_path).with_context(|| {
+        format!("failed to rename log zip file to: {merge_path}")
     })?;
     Ok(())
 }
@@ -81,13 +98,22 @@ fn write_zip<W: Write + std::io::Seek>(
     dir: &Utf8TempDir,
     mut zip: ZipWriter<W>,
 ) -> Result<()> {
-    recursively_add_directory_to_zipfile(&mut zip, dir.path(), dir.path())?;
+    let mut names = BTreeSet::new();
+    recursively_add_directory_to_zipfile(
+        &mut zip,
+        &mut names,
+        dir.path(),
+        dir.path(),
+    )?;
     zip.finish()?;
     Ok(())
 }
 
+/// Adds the contents of `dir_path` to `zip`, recording the name of each entry
+/// added in `names`.
 fn recursively_add_directory_to_zipfile<W: Write + std::io::Seek>(
     zip: &mut ZipWriter<W>,
+    names: &mut BTreeSet<String>,
     root_path: &Utf8Path,
     dir_path: &Utf8Path,
 ) -> Result<()> {
@@ -104,7 +130,15 @@ fn recursively_add_directory_to_zipfile<W: Write + std::io::Seek>(
         let dst = entry.path().strip_prefix(root_path)?;
 
         let file_type = entry.file_type()?;
-        if file_type.is_file() {
+        if file_type.is_file() && entry.file_name().ends_with(MERGE_ZIP_SUFFIX)
+        {
+            let dst_dir = dst.parent().unwrap_or(Utf8Path::new(""));
+            merge_zip_entries(zip, names, entry.path(), dst_dir)?;
+        } else if file_type.is_file() {
+            // A merged zip may already have added an entry of this name.
+            if !names.insert(dst.to_string()) {
+                continue;
+            }
             let src = entry.path();
 
             let zip_time = entry
@@ -128,9 +162,68 @@ fn recursively_add_directory_to_zipfile<W: Write + std::io::Seek>(
             std::io::copy(&mut file, zip)?;
         }
         if file_type.is_dir() {
-            let opts = FullFileOptions::default();
-            zip.add_directory_from_path(dst, opts)?;
-            recursively_add_directory_to_zipfile(zip, root_path, entry.path())?;
+            if names.insert(format!("{dst}/")) {
+                let opts = FullFileOptions::default();
+                zip.add_directory_from_path(dst, opts)?;
+            }
+            recursively_add_directory_to_zipfile(
+                zip,
+                names,
+                root_path,
+                entry.path(),
+            )?;
+        }
+    }
+    Ok(())
+}
+
+/// Copies each entry of the zip at `src` into `zip` under `dst_dir`, without
+/// decompressing it.
+///
+/// Directory entries are added for any directories between `dst_dir` and each
+/// copied entry. Entries are skipped if their names would place them outside
+/// of `dst_dir`, or if an entry of the same name is already in the bundle.
+fn merge_zip_entries<W: Write + std::io::Seek>(
+    zip: &mut ZipWriter<W>,
+    names: &mut BTreeSet<String>,
+    src: &Utf8Path,
+    dst_dir: &Utf8Path,
+) -> Result<()> {
+    let file = std::fs::File::open(src)
+        .with_context(|| format!("failed to open zip file: {src}"))?;
+    let mut archive = ::zip::ZipArchive::new(file)
+        .with_context(|| format!("failed to read zip file: {src}"))?;
+    for i in 0..archive.len() {
+        let entry = archive.by_index_raw(i)?;
+        let Some(relative) = entry
+            .enclosed_name()
+            .and_then(|path| Utf8PathBuf::try_from(path).ok())
+            .filter(|path| !path.as_str().is_empty())
+        else {
+            continue;
+        };
+        let path = dst_dir.join(&relative);
+
+        // Add the directories leading to this entry, from the outermost in.
+        let mut dirs: Vec<_> = path
+            .ancestors()
+            .skip(1)
+            .take(relative.components().count() - 1)
+            .collect();
+        if entry.is_dir() {
+            dirs.insert(0, &path);
+        }
+        for dir in dirs.into_iter().rev() {
+            if names.insert(format!("{dir}/")) {
+                zip.add_directory_from_path(dir, FullFileOptions::default())?;
+            }
+        }
+        if entry.is_dir() {
+            continue;
+        }
+
+        if names.insert(path.to_string()) {
+            zip.raw_copy_file_rename(entry, path.as_str())?;
         }
     }
     Ok(())
@@ -241,5 +334,149 @@ mod test {
         let zipfile = bundle_to_zipfile(&dir, tempdir_for_zip.path()).unwrap();
         let archive = ::zip::read::ZipArchive::new(zipfile).unwrap();
         assert_expected_entries(archive);
+    }
+
+    /// Builds a zip whose entries are zstd-compressed, like the log zips from
+    /// sled agents. Names are used as-is, without sanitizing them.
+    fn zstd_zip(entries: &[(&str, &str)]) -> Vec<u8> {
+        let options = FullFileOptions::default()
+            .compression_method(::zip::CompressionMethod::Zstd);
+        let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
+        for (name, contents) in entries {
+            zip.start_file(*name, options.clone()).unwrap();
+            zip.write_all(contents.as_bytes()).unwrap();
+        }
+        zip.finish().unwrap().into_inner()
+    }
+
+    /// Zips `dir` with both the seekable and the streaming writer.
+    fn bundle_both_ways(dir: &Utf8TempDir) -> [Vec<u8>; 2] {
+        let mut seekable = Cursor::new(Vec::new());
+        bundle_to_writer(dir, &mut seekable).unwrap();
+        let mut streamed = Vec::new();
+        bundle_to_stream(dir, &mut streamed).unwrap();
+        [seekable.into_inner(), streamed]
+    }
+
+    fn read_entry(
+        archive: &mut ::zip::read::ZipArchive<Cursor<Vec<u8>>>,
+        name: &str,
+    ) -> (::zip::CompressionMethod, String) {
+        let mut entry = archive.by_name(name).unwrap();
+        let mut contents = String::new();
+        std::io::Read::read_to_string(&mut entry, &mut contents).unwrap();
+        (entry.compression(), contents)
+    }
+
+    // Ensure that the entries of a merge zip are copied into the bundle,
+    // still compressed, under the directory containing the merge zip.
+    #[test]
+    fn test_merge_zip_entries() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("file-a"), "plain data").unwrap();
+        let zone_dir = dir.path().join("logs/zone-a");
+        std::fs::create_dir_all(&zone_dir).unwrap();
+        std::fs::write(
+            zone_dir.join(format!("logs{MERGE_ZIP_SUFFIX}")),
+            zstd_zip(&[
+                ("svc/current/svc.log", "current data"),
+                ("svc/archive/svc.log.1", "archived data"),
+            ]),
+        )
+        .unwrap();
+
+        for buf in bundle_both_ways(&dir) {
+            let mut archive =
+                ::zip::read::ZipArchive::new(Cursor::new(buf)).unwrap();
+            let names: Vec<_> = archive.file_names().collect();
+            assert_eq!(
+                names,
+                [
+                    "file-a",
+                    "logs/",
+                    "logs/zone-a/",
+                    "logs/zone-a/svc/",
+                    "logs/zone-a/svc/current/",
+                    "logs/zone-a/svc/current/svc.log",
+                    "logs/zone-a/svc/archive/",
+                    "logs/zone-a/svc/archive/svc.log.1",
+                ]
+            );
+            assert_eq!(
+                read_entry(&mut archive, "file-a"),
+                (::zip::CompressionMethod::Deflated, "plain data".to_string())
+            );
+            assert_eq!(
+                read_entry(&mut archive, "logs/zone-a/svc/current/svc.log"),
+                (::zip::CompressionMethod::Zstd, "current data".to_string())
+            );
+            assert_eq!(
+                read_entry(&mut archive, "logs/zone-a/svc/archive/svc.log.1"),
+                (::zip::CompressionMethod::Zstd, "archived data".to_string())
+            );
+        }
+    }
+
+    // Ensure that merging skips entries that would escape the merge zip's
+    // directory, and entries whose names are already in the bundle, rather
+    // than failing to build the bundle.
+    #[test]
+    fn test_merge_zip_skips_unsafe_and_duplicate_entries() {
+        let dir = tempdir().unwrap();
+        let zone_dir = dir.path().join("logs/zone-a");
+        std::fs::create_dir_all(zone_dir.join("svc/current")).unwrap();
+        std::fs::write(
+            zone_dir.join(format!("logs{MERGE_ZIP_SUFFIX}")),
+            zstd_zip(&[
+                ("../../escape.log", "escaped data"),
+                ("svc/current/svc.log", "merged data"),
+            ]),
+        )
+        .unwrap();
+        // The directory walk reaches this file after the merge zip, which has
+        // already added an entry of the same name.
+        std::fs::write(zone_dir.join("svc/current/svc.log"), "on-disk data")
+            .unwrap();
+
+        for buf in bundle_both_ways(&dir) {
+            let mut archive =
+                ::zip::read::ZipArchive::new(Cursor::new(buf)).unwrap();
+            let names: Vec<_> = archive.file_names().collect();
+            assert_eq!(
+                names,
+                [
+                    "logs/",
+                    "logs/zone-a/",
+                    "logs/zone-a/svc/",
+                    "logs/zone-a/svc/current/",
+                    "logs/zone-a/svc/current/svc.log",
+                ]
+            );
+            assert_eq!(
+                read_entry(&mut archive, "logs/zone-a/svc/current/svc.log"),
+                (::zip::CompressionMethod::Zstd, "merged data".to_string())
+            );
+        }
+    }
+
+    // Ensure that preparing a zone's log zip marks it for merging, and leaves
+    // a file that is not a zip alone.
+    #[test]
+    fn test_prepare_zone_log_zip() {
+        let dir = tempdir().unwrap();
+        let zip_path = dir.path().join("logs.zip");
+        let merge_path = dir.path().join(format!("logs{MERGE_ZIP_SUFFIX}"));
+
+        std::fs::write(&zip_path, zstd_zip(&[("svc.log", "data")])).unwrap();
+        prepare_zone_log_zip(&zip_path).unwrap();
+        assert!(!zip_path.exists());
+        assert!(merge_path.exists());
+        std::fs::remove_file(&merge_path).unwrap();
+
+        std::fs::write(&zip_path, "not a zip").unwrap();
+        prepare_zone_log_zip(&zip_path)
+            .expect_err("preparing a file that is not a zip should fail");
+        assert!(zip_path.exists());
+        assert!(!merge_path.exists());
     }
 }
