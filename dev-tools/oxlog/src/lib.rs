@@ -271,7 +271,7 @@ pub struct Paths {
 
     /// Links to directories containing extra files such as cockroachdb logs
     /// that reside outside our SMF log and debug service log paths.
-    pub extra: Vec<(&'static str, Utf8PathBuf)>,
+    pub extra: Vec<(ExtraLogDir, Utf8PathBuf)>,
 }
 
 pub struct Zones {
@@ -299,7 +299,7 @@ impl Zones {
                 primary: Utf8PathBuf::from("/zone/oxz_switch/root/var/svc/log"),
                 debug: vec![],
                 extra: vec![(
-                    "dendrite",
+                    ExtraLogDir::Dendrite,
                     "/zone/oxz_switch/root/var/dendrite".into(),
                 )],
             },
@@ -333,7 +333,7 @@ impl Zones {
                     let mut dir = zones_path.clone();
                     dir.push(zone);
                     dir.push("root/data/logs");
-                    paths.extra.push(("cockroachdb", dir));
+                    paths.extra.push((ExtraLogDir::Cockroachdb, dir));
                 }
 
                 // Grab the chrony logs that are not apart of the standard SMF
@@ -342,7 +342,7 @@ impl Zones {
                     let mut dir = zones_path.clone();
                     dir.push(zone);
                     dir.push("root/var/log/chrony");
-                    paths.extra.push(("ntp", dir));
+                    paths.extra.push((ExtraLogDir::Ntp, dir));
                 }
 
                 zones.insert(zone.to_string(), paths);
@@ -423,18 +423,21 @@ impl Zones {
             }
         }
         if filter.extra {
-            for (svc_name, dir) in &paths.extra {
-                if let Ok(files) = load_extra_logs(dir, svc_name, read_metadata)
+            for &(extra_dir, ref dir) in &paths.extra {
+                if let Ok(files) =
+                    load_extra_logs(dir, extra_dir, read_metadata)
                 {
                     // Report the service even if it has no logs, as long as
                     // its log directory exists.
-                    output.entry(svc_name.to_string()).or_default();
+                    output
+                        .entry(extra_dir.service_name().to_string())
+                        .or_default();
                     undated.extend(files);
                 }
             }
         }
 
-        for DatedLogFile { service, slot, file } in date_files(undated) {
+        for DatedLogFile { service, kind, file } in date_files(undated) {
             // Empty files are dated along with the rest of their series:
             // their newest writes still bound their neighbors' oldest writes.
             if !filter.show_empty && file.size == Some(0) {
@@ -446,10 +449,10 @@ impl Zones {
                 }
             }
             let svc_logs = output.entry(service).or_default();
-            match slot {
-                Slot::Current => svc_logs.current = Some(file),
-                Slot::Archived => svc_logs.archived.push(file),
-                Slot::Extra => svc_logs.extra.push(file),
+            match kind {
+                LogKind::Current => svc_logs.current = Some(file),
+                LogKind::Archived => svc_logs.archived.push(file),
+                LogKind::Extra => svc_logs.extra.push(file),
             }
         }
 
@@ -541,55 +544,80 @@ fn smf_series(filename: &str) -> &str {
     split_numeric_suffix(filename).0
 }
 
-/// Returns the name of the series that a file in an extra log directory
-/// belongs to, or `None` if the file doesn't follow the naming of the program
-/// that writes to the directory. Such a file is a series of its own.
+/// A directory of log files kept outside SMF's log directories.
 ///
-/// Files are grouped by the naming rules of the program that writes them,
-/// not by a guess that applies to every directory:
-///
-/// - CockroachDB names its log files
-///   `<prefix>.<host>.<user>.<timestamp>.<pid>.log`, one series per
-///   `<prefix>`, which it constructs to never contain a `.` (see
-///   `FileNamePattern` and `normalizeFileName` in CockroachDB's
-///   `pkg/util/log`). It starts a new file on each rotation and on each
-///   restart. (`<prefix>.log` is a symlink to the current file, which is
-///   not grouped; see [`date_files`].)
-/// - chrony's logs are rotated by logadm(8), using the template
-///   `$file.$secs` and compression (see
-///   `smf/chrony-setup/etc/logadm.d/chrony.logadm.conf`): `<name>.log`
-///   (live) and `<name>.log.<secs>.gz` (rotated).
-fn extra_series(svc_name: &str, filename: &str) -> Option<String> {
-    match svc_name {
-        "cockroachdb" => {
-            let parts: Vec<&str> = filename.split('.').collect();
-            match parts.as_slice() {
-                [prefix, host, user, timestamp, pid, "log"]
-                    if [prefix, host, user, timestamp, pid]
-                        .iter()
-                        .all(|part| !part.is_empty())
-                        && pid.bytes().all(|b| b.is_ascii_digit()) =>
-                {
-                    Some(prefix.to_string())
+/// Each directory's files are grouped into [series](crate#series) by the
+/// naming rules of whatever names them, not by a guess that applies to every
+/// directory.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExtraLogDir {
+    /// CockroachDB's own logs (`/data/logs` in a CockroachDB zone).
+    ///
+    /// CockroachDB names its log files
+    /// `<prefix>.<host>.<user>.<timestamp>.<pid>.log`, one series per
+    /// `<prefix>`, which it constructs to never contain a `.` (see
+    /// `FileNamePattern` and `normalizeFileName` in CockroachDB's
+    /// `pkg/util/log`). It starts a new file on each rotation and on each
+    /// restart. (`<prefix>.log` is a symlink to the current file; it takes
+    /// its target's age rather than being part of a series.)
+    Cockroachdb,
+    /// chrony's logs (`/var/log/chrony` in an NTP zone), reported under the
+    /// `ntp` service.
+    ///
+    /// logadm(8) rotates them using the template `$file.$secs` and
+    /// compression (see `smf/chrony-setup/etc/logadm.d/chrony.logadm.conf`):
+    /// `<name>.log` (live) and `<name>.log.<secs>.gz` (rotated), one series
+    /// per `<name>.log`.
+    Ntp,
+    /// dpd's driver logs (`/var/dendrite` in the switch zone).
+    ///
+    /// No naming rule is known, so every file is a series of its own.
+    Dendrite,
+}
+
+impl ExtraLogDir {
+    /// The service the directory's files are reported under, alongside that
+    /// service's SMF logs: the name oxlog derives from its SMF log file (see
+    /// [`oxide_smf_service_name_from_log_file_name`]).
+    pub fn service_name(self) -> &'static str {
+        match self {
+            Self::Cockroachdb => "cockroachdb",
+            Self::Ntp => "ntp",
+            Self::Dendrite => "dendrite",
+        }
+    }
+
+    /// Returns the name of the series that a file in this directory belongs
+    /// to, or `None` if the file doesn't follow the directory's naming rules
+    /// and is a series of its own.
+    fn series(self, filename: &str) -> Option<&str> {
+        match self {
+            Self::Cockroachdb => {
+                let parts: Vec<&str> = filename.split('.').collect();
+                match parts.as_slice() {
+                    [prefix, host, user, timestamp, pid, "log"]
+                        if [prefix, host, user, timestamp, pid]
+                            .iter()
+                            .all(|part| !part.is_empty())
+                            && pid.bytes().all(|b| b.is_ascii_digit()) =>
+                    {
+                        Some(prefix)
+                    }
+                    _ => None,
                 }
-                _ => None,
             }
+            Self::Ntp => {
+                let name = filename.strip_suffix(".gz").unwrap_or(filename);
+                let (name, _) = split_numeric_suffix(name);
+                name.ends_with(".log").then_some(name)
+            }
+            Self::Dendrite => None,
         }
-        "ntp" => {
-            let name = filename.strip_suffix(".gz").unwrap_or(filename);
-            let (name, _) = split_numeric_suffix(name);
-            name.ends_with(".log").then(|| name.to_string())
-        }
-        _ => None,
     }
 }
 
-/// Returns the newest write of a file archived to a debug dataset.
-///
-/// The debug collector names archived log files `<name>.<epoch>`, where
-/// `<epoch>` is the source file's `mtime` (in seconds) when it was archived.
-/// The archived copy's own `mtime` is the time of archival.
-fn archived_newest_write(filename: &str) -> Option<Timestamp> {
+/// Parses a trailing `.<seconds>` suffix of `filename` as a Unix timestamp.
+fn epoch_from_filename(filename: &str) -> Option<Timestamp> {
     let (_, epoch) = split_numeric_suffix(filename);
     Timestamp::from_second(epoch?.parse().ok()?).ok()
 }
@@ -603,11 +631,16 @@ enum SvcLogDir {
     Debug,
 }
 
-/// Where a file is reported in its service's [`SvcLogs`].
+/// Which of a service's kinds of logs (see [`SvcLogs`]) a file is reported
+/// as. These are the same kinds that [`Filter`] selects.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Slot {
+enum LogKind {
+    /// Reported in [`SvcLogs::current`].
     Current,
+    /// Reported in [`SvcLogs::archived`]: rotated files, whether still in
+    /// the zone or archived to a debug dataset.
     Archived,
+    /// Reported in [`SvcLogs::extra`].
     Extra,
 }
 
@@ -616,9 +649,9 @@ enum Slot {
 struct UndatedLogFile {
     /// The service the file is reported under.
     service: ServiceName,
-    slot: Slot,
+    kind: LogKind,
     /// The series the file belongs to within `service` (see [`smf_series`]
-    /// and [`extra_series`]), or `None` if it is a series of its own.
+    /// and [`ExtraLogDir::series`]), or `None` if it is a series of its own.
     series: Option<String>,
     /// For a symlink, the path it points to.
     symlink_target: Option<Utf8PathBuf>,
@@ -632,10 +665,10 @@ struct UndatedLogFile {
 
 impl UndatedLogFile {
     fn into_dated(self, age: Option<LogAge>) -> DatedLogFile {
-        let UndatedLogFile { service, slot, path, size, modified, .. } = self;
+        let UndatedLogFile { service, kind, path, size, modified, .. } = self;
         DatedLogFile {
             service,
-            slot,
+            kind,
             file: LogFile { path, size, modified, age },
         }
     }
@@ -646,7 +679,7 @@ impl UndatedLogFile {
 struct DatedLogFile {
     /// The service the file is reported under.
     service: ServiceName,
-    slot: Slot,
+    kind: LogKind,
     file: LogFile,
 }
 
@@ -656,7 +689,7 @@ struct DatedLogFile {
 // read are skipped.
 fn load_svc_logs(
     dir: &Utf8Path,
-    kind: SvcLogDir,
+    svc_log_dir: SvcLogDir,
     read_metadata: bool,
 ) -> io::Result<Vec<UndatedLogFile>> {
     let mut undated = Vec::new();
@@ -682,9 +715,14 @@ fn load_svc_logs(
         let mut newest_write = None;
         if read_metadata {
             file.read_metadata(&entry);
-            newest_write = match kind {
+            newest_write = match svc_log_dir {
                 SvcLogDir::Primary => file.modified,
-                SvcLogDir::Debug => match archived_newest_write(filename) {
+                SvcLogDir::Debug => match epoch_from_filename(filename) {
+                    // The debug collector names archived files
+                    // `<name>.<epoch>`, where `<epoch>` is the source file's
+                    // `mtime` when it was archived: the archived file's
+                    // newest write. (The copy's own `mtime` is the time of
+                    // archival.)
                     Some(newest_write) => Some(newest_write),
                     None => {
                         // Without the source's mtime in its name, only the
@@ -700,16 +738,16 @@ fn load_svc_logs(
             };
         }
 
-        let slot = if filename.ends_with(".log") {
-            Slot::Current
+        let kind = if filename.ends_with(".log") {
+            LogKind::Current
         } else {
-            Slot::Archived
+            LogKind::Archived
         };
 
         let LogFile { path, size, modified, .. } = file;
         undated.push(UndatedLogFile {
             service: svc_name.to_string(),
-            slot,
+            kind,
             series,
             symlink_target: None,
             newest_write,
@@ -728,7 +766,7 @@ fn load_svc_logs(
 // read are skipped.
 fn load_extra_logs(
     dir: &Utf8Path,
-    svc_name: &str,
+    extra_dir: ExtraLogDir,
     read_metadata: bool,
 ) -> io::Result<Vec<UndatedLogFile>> {
     let mut undated = Vec::new();
@@ -757,12 +795,12 @@ fn load_extra_logs(
 
         let LogFile { path, size, modified, .. } = file;
         undated.push(UndatedLogFile {
-            service: svc_name.to_string(),
-            slot: Slot::Extra,
+            service: extra_dir.service_name().to_string(),
+            kind: LogKind::Extra,
             series: if is_symlink {
                 None
             } else {
-                extra_series(svc_name, filename)
+                extra_dir.series(filename).map(str::to_string)
             },
             symlink_target,
             newest_write,
@@ -1063,41 +1101,34 @@ mod tests {
     }
 
     #[test]
-    fn test_archived_newest_write() {
-        use super::archived_newest_write;
+    fn test_epoch_from_filename() {
+        use super::epoch_from_filename;
 
         assert_eq!(
-            archived_newest_write("oxide-nexus:default.log.1790585101"),
+            epoch_from_filename("oxide-nexus:default.log.1790585101"),
             Some(jiff::Timestamp::from_second(1790585101).unwrap())
         );
-        assert_eq!(archived_newest_write("oxide-nexus:default.log"), None);
-        assert_eq!(archived_newest_write("oxide-nexus:default.log.x1"), None);
+        assert_eq!(epoch_from_filename("oxide-nexus:default.log"), None);
+        assert_eq!(epoch_from_filename("oxide-nexus:default.log.x1"), None);
     }
 
     #[test]
-    fn test_extra_series() {
-        use super::extra_series;
+    fn test_extra_log_dir_series() {
+        use super::ExtraLogDir;
 
         // CockroachDB log files, as named on a real system.
         let zone = "oxzcockroachdb8bbea076-ff60-4330-8302-383e18140ef3";
+        let crdb = ExtraLogDir::Cockroachdb;
         assert_eq!(
-            extra_series(
-                "cockroachdb",
-                &format!(
-                    "cockroach.{zone}.root.2026-09-29T09_44_35Z.006190.log"
-                )
-            )
-            .as_deref(),
+            crdb.series(&format!(
+                "cockroach.{zone}.root.2026-09-29T09_44_35Z.006190.log"
+            )),
             Some("cockroach")
         );
         assert_eq!(
-            extra_series(
-                "cockroachdb",
-                &format!(
-                    "cockroach-health.{zone}.root.2026-09-22T03_29_59Z.003419.log"
-                )
-            )
-            .as_deref(),
+            crdb.series(&format!(
+                "cockroach-health.{zone}.root.2026-09-22T03_29_59Z.003419.log"
+            )),
             Some("cockroach-health")
         );
         // The symlinks to the current files, directories, and anything else
@@ -1110,26 +1141,22 @@ mod tests {
             "cockroach.a.b.c.notapid.log",
             "cockroach..root.2026-09-29T09_44_35Z.006190.log",
         ] {
-            assert_eq!(
-                extra_series("cockroachdb", filename),
-                None,
-                "{filename}"
-            );
+            assert_eq!(crdb.series(filename), None, "{filename}");
         }
 
         // chrony's logs, as rotated by logadm.
         for filename in ["tracking.log", "tracking.log.1790705215.gz"] {
             assert_eq!(
-                extra_series("ntp", filename).as_deref(),
+                ExtraLogDir::Ntp.series(filename),
                 Some("tracking.log"),
                 "{filename}"
             );
         }
-        assert_eq!(extra_series("ntp", "chrony.conf"), None);
+        assert_eq!(ExtraLogDir::Ntp.series("chrony.conf"), None);
 
-        // Directories with no known naming rule.
-        assert_eq!(extra_series("dendrite", "zlog-cfg-cur"), None);
-        assert_eq!(extra_series("dendrite", "bf_drivers.log"), None);
+        // No naming rule is known for dendrite's directory.
+        assert_eq!(ExtraLogDir::Dendrite.series("zlog-cfg-cur"), None);
+        assert_eq!(ExtraLogDir::Dendrite.series("bf_drivers.log"), None);
     }
 
     /// Builds an undated file in `series` with the given newest write.
@@ -1140,7 +1167,7 @@ mod tests {
     ) -> super::UndatedLogFile {
         super::UndatedLogFile {
             service: "svc".to_string(),
-            slot: super::Slot::Archived,
+            kind: super::LogKind::Archived,
             series: series.map(str::to_string),
             symlink_target: None,
             newest_write: Some(ts(newest_write)),
@@ -1271,7 +1298,7 @@ mod tests {
 
     #[test]
     fn test_zone_logs_date_range() {
-        use super::{Filter, Paths, Zones};
+        use super::{ExtraLogDir, Filter, Paths, Zones};
         use std::collections::BTreeMap;
 
         let dir = camino_tempfile::tempdir().unwrap();
@@ -1316,7 +1343,7 @@ mod tests {
                 Paths {
                     primary: primary.clone(),
                     debug: vec![debug.clone()],
-                    extra: vec![("cockroachdb", crdb.clone())],
+                    extra: vec![(ExtraLogDir::Cockroachdb, crdb.clone())],
                 },
             )]),
         };
