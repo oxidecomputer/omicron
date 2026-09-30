@@ -849,8 +849,8 @@ slog-term = "2.9.1"
 smf = "0.2"
 socket2 = { version = "0.5", features = ["all"] }
 sp-sim = { path = "sp-sim" }
-sprockets-tls = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "a233079e04d9688454486c452b694587a28c5257" }
-sprockets-tls-test-utils = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "a233079e04d9688454486c452b694587a28c5257" }
+sprockets-tls = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "02c7e5414d97c0c85d629cb76d1f6beab73d960e" }
+sprockets-tls-test-utils = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "02c7e5414d97c0c85d629cb76d1f6beab73d960e" }
 sqlformat = "0.3.5"
 sqlparser = { version = "0.61.0", features = [ "visitor" ] }
 static_assertions = "1.1.0"
