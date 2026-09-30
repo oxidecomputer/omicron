@@ -41,6 +41,7 @@ members = [
     "dev-tools/db-dev",
     "dev-tools/downloader",
     "dev-tools/dropshot-apis",
+    "dev-tools/fm-sim",
     "dev-tools/ls-apis",
     "dev-tools/mgs-dev",
     "dev-tools/omdb",
@@ -107,6 +108,7 @@ members = [
     "nexus/external-api",
     "nexus/fm",
     "nexus/fm/preparation",
+    "nexus/fm/simulation",
     "nexus/fm/slippy",
     "nexus/internal-api",
     "nexus/inventory",
@@ -240,6 +242,7 @@ default-members = [
     "dev-tools/db-dev",
     "dev-tools/downloader",
     "dev-tools/dropshot-apis",
+    "dev-tools/fm-sim",
     "dev-tools/ls-apis",
     "dev-tools/mgs-dev",
     "dev-tools/omdb",
@@ -308,6 +311,7 @@ default-members = [
     "nexus/external-api",
     "nexus/fm",
     "nexus/fm/preparation",
+    "nexus/fm/simulation",
     "nexus/fm/slippy",
     "nexus/internal-api",
     "nexus/inventory",
@@ -663,6 +667,7 @@ nexus-db-schema = { path = "nexus/db-schema" }
 nexus-defaults = { path = "nexus/defaults" }
 nexus-external-api = { path = "nexus/external-api" }
 nexus-fm = { path = "nexus/fm" }
+nexus-fm-simulation = { path = "nexus/fm/simulation" }
 nexus-fm-slippy = { path = "nexus/fm/slippy" }
 nexus-fm-preparation = { path = "nexus/fm/preparation" }
 nexus-inventory = { path = "nexus/inventory" }

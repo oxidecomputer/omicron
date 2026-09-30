@@ -1,0 +1,38 @@
+[package]
+name = "fm-sim"
+version = "0.1.0"
+edition.workspace = true
+license = "MPL-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+camino.workspace = true
+chrono.workspace = true
+clap.workspace = true
+humantime.workspace = true
+nexus-fm-simulation.workspace = true
+omicron-repl-utils.workspace = true
+omicron-workspace-hack.workspace = true
+shell-words.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+assert_matches.workspace = true
+camino-tempfile.workspace = true
+datatest-stable.workspace = true
+expectorate.workspace = true
+omicron-test-utils.workspace = true
+subprocess.workspace = true
+
+# Disable doc builds by default for our binaries to work around issue
+# rust-lang/cargo#8373. These docs would not be very useful anyway.
+[[bin]]
+name = "fm-sim"
+doc = false
+
+[[test]]
+name = "test-scripts"
+harness = false
