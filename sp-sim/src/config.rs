@@ -95,8 +95,8 @@ pub struct SpCommonConfig {
     pub ereport_network_config: Option<[NetworkConfig; 2]>,
     /// Fake part number.
     ///
-    /// If this is not provided, this defaults to `FAKE_GIMLET_MODEL` or
-    /// `FAKE_SIDECAR_MODEL`, depending on the board.
+    /// If this is not provided, this defaults to `a suitable value depending
+    /// on the board.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub part_number: Option<String>,
     /// Fake serial number
@@ -250,6 +250,13 @@ pub struct GimletConfig {
     pub common: SpCommonConfig,
 }
 
+/// Configuration of a simulated power shelf controller SP
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct PscConfig {
+    #[serde(flatten)]
+    pub common: SpCommonConfig,
+}
+
 /// Configuration of a set of simulated SPs
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct SimulatedSpsConfig {
@@ -257,6 +264,9 @@ pub struct SimulatedSpsConfig {
     pub sidecar: Vec<SidecarConfig>,
     /// Simulated gimlet(s)
     pub gimlet: Vec<GimletConfig>,
+    /// Simulated power shelf controller(s)
+    #[serde(default)]
+    pub psc: Vec<PscConfig>,
 }
 
 /// Configuration for a sp-sim
@@ -362,8 +372,11 @@ pub struct EreportRestart {
     #[serde(default = "uuid::Uuid::new_v4")]
     pub restart_id: uuid::Uuid,
 
-    #[serde(skip_serializing_if = "toml::map::Map::is_empty", default)]
-    pub metadata: toml::map::Map<String, toml::Value>,
+    #[serde(
+        skip_serializing_if = "crate::ereport::Metadata::is_empty",
+        default
+    )]
+    pub metadata: crate::ereport::Metadata,
 }
 
 impl Default for EreportRestart {

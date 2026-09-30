@@ -456,6 +456,8 @@ mod tests {
 
     #[nexus_test(server = crate::Server)]
     async fn test_sp_ereport_ingestion(cptestctx: &ControlPlaneTestContext) {
+        let n_sps = cptestctx.num_sps();
+
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
         let opctx = OpContext::for_tests(
@@ -486,11 +488,11 @@ mod tests {
         dbg!(&activation1);
         assert_eq!(
             activation1.sps.len(),
-            4,
-            "ereports from 4 SPs should be observed: {:?}",
+            n_sps,
+            "ereports from {n_sps} SPs should be observed: {:?}",
             activation1.sps,
         );
-        assert_eq!(activation1.sps_found, 4);
+        assert_eq!(activation1.sps_found, n_sps);
         fm_analysis_activator
             .assert_activated("fm analysis task should be activated");
 
@@ -526,8 +528,11 @@ mod tests {
                 1,
                 "ereport.data_loss.possible",
                 serde_json::json!({
-                    "hubris_archive_id": "ffffffff",
-                    "hubris_version": "0.0.2",
+                    "hubris_caboose": {
+                        "board": sp_sim::SIM_GIMLET_BOARD,
+                        "commit": "ffffffff",
+                        "version": "0.0.2",
+                    },
                     "hubris_task_name": "packrat",
                     "hubris_task_gen": 0,
                     "hubris_uptime_ms": 666,
@@ -539,8 +544,11 @@ mod tests {
                 2,
                 "gov.nasa.apollo.o2_tanks.stir.begin",
                 serde_json::json!({
-                    "hubris_archive_id": "ffffffff",
-                    "hubris_version": "0.0.2",
+                    "hubris_caboose": {
+                        "board": sp_sim::SIM_GIMLET_BOARD,
+                        "commit": "ffffffff",
+                        "version": "0.0.2",
+                    },
                     "hubris_task_name": "task_apollo_server",
                     "hubris_task_gen": 13,
                     "hubris_uptime_ms": 1233,
@@ -553,8 +561,11 @@ mod tests {
                 3,
                 "io.discovery.ae35.fault",
                 serde_json::json!({
-                    "hubris_archive_id": "ffffffff",
-                    "hubris_version": "0.0.2",
+                    "hubris_caboose": {
+                        "board": sp_sim::SIM_GIMLET_BOARD,
+                        "commit": "ffffffff",
+                        "version": "0.0.2",
+                    },
                     "hubris_task_name": "drv_ae35_server",
                     "hubris_task_gen": 1,
                     "hubris_uptime_ms": 1234,
@@ -576,8 +587,11 @@ mod tests {
                 4,
                 "gov.nasa.apollo.fault",
                 serde_json::json!({
-                    "hubris_archive_id": "ffffffff",
-                    "hubris_version": "0.0.2",
+                    "hubris_caboose": {
+                        "board": sp_sim::SIM_GIMLET_BOARD,
+                        "commit": "ffffffff",
+                        "version": "0.0.2",
+                    },
                     "hubris_task_name": "task_apollo_server",
                     "hubris_task_gen": 13,
                     "hubris_uptime_ms": 1237,
@@ -595,8 +609,11 @@ mod tests {
                 5,
                 "flagrant_error",
                 serde_json::json!({
-                    "hubris_archive_id": "ffffffff",
-                    "hubris_version": "0.0.2",
+                    "hubris_caboose": {
+                        "board": sp_sim::SIM_GIMLET_BOARD,
+                        "commit": "ffffffff",
+                        "version": "0.0.2",
+                    },
                     "hubris_task_name": "drv_thingy_server",
                     "hubris_task_gen": 2,
                     "hubris_uptime_ms": 1240,
@@ -609,8 +626,11 @@ mod tests {
                 6,
                 "overfull_hbox",
                 serde_json::json!({
-                    "hubris_archive_id": "ffffffff",
-                    "hubris_version": "0.0.2",
+                    "hubris_caboose": {
+                        "board": sp_sim::SIM_GIMLET_BOARD,
+                        "commit": "ffffffff",
+                        "version": "0.0.2",
+                    },
                     "hubris_task_name": "task_latex_server",
                     "hubris_task_gen": 1,
                     "hubris_uptime_ms": 1245,
@@ -630,8 +650,11 @@ mod tests {
                 1,
                 "ereport.data_loss.possible",
                 serde_json::json!({
-                    "hubris_archive_id": "ffffffff",
-                    "hubris_version": "0.0.2",
+                    "hubris_caboose": {
+                        "board": sp_sim::SIM_GIMLET_BOARD,
+                        "commit": "ffffffff",
+                        "version": "0.0.2",
+                    },
                     "hubris_task_name": "packrat",
                     "hubris_task_gen": 0,
                     "hubris_uptime_ms": 666,
@@ -643,8 +666,11 @@ mod tests {
                 2,
                 "computer.oxide.gimlet.chassis_integrity.fault",
                 serde_json::json!({
-                    "hubris_archive_id": "ffffffff",
-                    "hubris_version": "0.0.2",
+                    "hubris_caboose": {
+                        "board": sp_sim::SIM_GIMLET_BOARD,
+                        "commit": "ffffffff",
+                        "version": "0.0.2",
+                    },
                     "hubris_task_name": "task_thermal_server",
                     "hubris_task_gen": 1,
                     "hubris_uptime_ms": 1233,
@@ -696,13 +722,13 @@ mod tests {
              have been ingested",
         );
         assert_eq!(
-            activation2.sps_found, 4,
-            "4 present SPs should have been found via ignition",
+            activation2.sps_found, n_sps,
+            "{n_sps} present SPs should have been found via ignition",
         );
         assert_eq!(
             activation2.sps.len(),
-            4,
-            "all 4 SPs should be reported in the status, even when no new \
+            n_sps,
+            "all {n_sps} SPs should be reported in the status, even when no new \
              ereports were observed: {:?}",
             activation2.sps,
         );

@@ -919,7 +919,7 @@ impl SystemDescription {
     }
 
     /// Get the planner's configuration.
-    pub fn get_planner_config(&self) -> PlannerConfig {
+    pub fn planner_config(&self) -> PlannerConfig {
         self.planner_config
     }
 
