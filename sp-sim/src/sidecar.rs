@@ -10,28 +10,25 @@ use crate::config::SidecarConfig;
 use crate::config::SimulatedSpsConfig;
 use crate::config::SpComponentConfig;
 use crate::device_descriptions::DeviceDescriptions;
-use crate::ereport;
 use crate::ereport::EreportState;
+use crate::helpers::read_dummy_rot_page;
+use crate::helpers::rot_boot_info;
 use crate::helpers::rot_state_v2;
 use crate::sensors::Sensors;
-use crate::server::Command;
 use crate::server::SimSpHandler;
 use crate::server::UdpServer;
-use crate::server::UdpTask;
+use crate::sp;
+use crate::task_dumps::TaskDumps;
 use crate::update::BaseboardKind;
 use crate::update::SimSpUpdate;
 use crate::vpd::BaseboardVpd;
 use crate::vpd::ComponentVpds;
 use anyhow::Result;
 use async_trait::async_trait;
-use futures::future;
-use gateway_messages::CfpaPage;
 use gateway_messages::ComponentAction;
 use gateway_messages::ComponentActionResponse;
 use gateway_messages::ComponentDetails;
 use gateway_messages::DiscoverResponse;
-use gateway_messages::DumpCompression;
-use gateway_messages::DumpError;
 use gateway_messages::DumpSegment;
 use gateway_messages::DumpTask;
 use gateway_messages::HostBootfailPayloadData;
@@ -67,18 +64,13 @@ use slog::Logger;
 use slog::debug;
 use slog::info;
 use slog::warn;
-use std::collections::HashMap;
 use std::iter;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
-use tokio::sync::Mutex as TokioMutex;
 use tokio::sync::mpsc;
-use tokio::sync::oneshot;
 use tokio::sync::watch;
-use tokio::task;
-use tokio::task::JoinHandle;
 
 pub const SIM_SIDECAR_BOARD: &str = "SimSidecarSp";
 
@@ -87,67 +79,33 @@ pub const SIM_SIDECAR_BOARD: &str = "SimSidecarSp";
 pub const FAKE_SIDECAR_MODEL: &str = "FAKE_SIM_SIDECAR";
 
 pub struct Sidecar {
-    local_addrs: Option<[SocketAddrV6; 2]>,
-    ereport_addrs: Option<[SocketAddrV6; 2]>,
-    handler: Option<Arc<TokioMutex<Handler>>>,
-    commands: mpsc::UnboundedSender<Command>,
-    udp_task: Option<JoinHandle<()>>,
-    power_state_changes: Arc<AtomicUsize>,
-    responses_sent_count: Option<watch::Receiver<usize>>,
-}
-
-impl Drop for Sidecar {
-    fn drop(&mut self) {
-        if let Some(udp_task) = self.udp_task.as_ref() {
-            // default join handle drop behavior is to detach; we want to abort
-            udp_task.abort();
-        }
-    }
+    sp: sp::Handle<Handler>,
 }
 
 #[async_trait]
 impl SimulatedSp for Sidecar {
     async fn state(&self) -> SpState {
-        SpState::from(
-            self.handler.as_ref().unwrap().lock().await.sp_state_impl(),
-        )
+        SpState::from(self.sp.handler().await.unwrap().sp_state_impl())
     }
 
     fn local_addr(&self, port: SpPort) -> Option<SocketAddrV6> {
-        let i = match port {
-            SpPort::One => 0,
-            SpPort::Two => 1,
-        };
-        self.local_addrs.map(|addrs| addrs[i])
+        self.sp.local_addr(port)
     }
 
     fn local_ereport_addr(&self, port: SpPort) -> Option<SocketAddrV6> {
-        let i = match port {
-            SpPort::One => 0,
-            SpPort::Two => 1,
-        };
-        self.ereport_addrs.map(|addrs| addrs[i])
+        self.sp.local_ereport_addr(port)
     }
 
     async fn set_responsiveness(&self, r: Responsiveness) {
-        let (tx, rx) = oneshot::channel();
-        self.commands
-            .send(Command::SetResponsiveness(r, tx))
-            .map_err(|_| "sidecar task died unexpectedly")
-            .unwrap();
-        rx.await.unwrap();
+        self.sp.set_responsiveness(r).await
     }
 
     async fn last_sp_update_data(&self) -> Option<Box<[u8]>> {
-        let handler = self.handler.as_ref()?;
-        let handler = handler.lock().await;
-        handler.update_state.last_sp_update_data()
+        self.sp.handler().await?.update_state.last_sp_update_data()
     }
 
     async fn last_rot_update_data(&self) -> Option<Box<[u8]>> {
-        let handler = self.handler.as_ref()?;
-        let handler = handler.lock().await;
-        handler.update_state.last_rot_update_data()
+        self.sp.handler().await?.update_state.last_rot_update_data()
     }
 
     async fn host_phase1_data(&self, _slot: u16) -> Option<Vec<u8>> {
@@ -156,54 +114,36 @@ impl SimulatedSp for Sidecar {
     }
 
     async fn current_update_status(&self) -> gateway_messages::UpdateStatus {
-        let Some(handler) = self.handler.as_ref() else {
+        let Some(handler) = self.sp.handler().await else {
             return gateway_messages::UpdateStatus::None;
         };
 
-        handler.lock().await.update_state.status()
+        handler.update_state.status()
     }
 
     fn power_state_changes(&self) -> usize {
-        self.power_state_changes.load(Ordering::Relaxed)
+        self.sp.power_state_changes()
     }
 
     fn responses_sent_count(&self) -> Option<watch::Receiver<usize>> {
-        self.responses_sent_count.clone()
+        self.sp.responses_sent_count()
     }
 
     async fn install_udp_accept_semaphore(
         &self,
     ) -> mpsc::UnboundedSender<usize> {
-        let (tx, rx) = mpsc::unbounded_channel();
-        let (resp_tx, resp_rx) = oneshot::channel();
-        if let Ok(()) =
-            self.commands.send(Command::SetThrottler(Some(rx), resp_tx))
-        {
-            resp_rx.await.unwrap();
-        }
-        tx
+        self.sp.install_udp_accept_semaphore().await
     }
 
     async fn ereport_restart(&self, restart: crate::config::EreportRestart) {
-        let (tx, rx) = oneshot::channel();
-        if self
-            .commands
-            .send(Command::Ereport(ereport::Command::Restart(restart, tx)))
-            .is_ok()
-        {
-            rx.await.unwrap();
-        }
+        self.sp.ereport_restart(restart).await
     }
 
     async fn ereport_append(
         &self,
         ereport: crate::config::Ereport,
     ) -> gateway_ereport_messages::Ena {
-        let (tx, rx) = oneshot::channel();
-        self.commands
-            .send(Command::Ereport(ereport::Command::Append(ereport, tx)))
-            .expect("simulated sidecar task has died");
-        rx.await.unwrap()
+        self.sp.ereport_append(ereport).await
     }
 }
 
@@ -217,37 +157,17 @@ impl Sidecar {
 
         let baseboard_vpd =
             BaseboardVpd::from_config(&sidecar.common, FAKE_SIDECAR_MODEL)?;
-        let (commands, commands_rx) = mpsc::unbounded_channel();
-
         if let Some(network_config) = &sidecar.common.network_config {
             // bind to our two local "KSZ" ports
-            let servers = future::try_join(
-                UdpServer::new(&network_config[0], &log),
-                UdpServer::new(&network_config[1], &log),
-            )
-            .await?;
-
-            let servers = [servers.0, servers.1];
-            let local_addrs =
-                [servers[0].local_addr(), servers[1].local_addr()];
+            let servers = UdpServer::bind_pair(network_config, &log).await?;
 
             let ereport_log = log.new(slog::o!("component" => "ereport-sim"));
-            let (ereport_servers, ereport_addrs) =
-                match &sidecar.common.ereport_network_config {
-                    Some(cfg) => {
-                        assert_eq!(cfg.len(), 2); // gimlet SP always has 2 ports
-
-                        let servers = future::try_join(
-                            UdpServer::new(&cfg[0], &ereport_log),
-                            UdpServer::new(&cfg[1], &ereport_log),
-                        )
-                        .await?;
-                        let addrs =
-                            [servers.0.local_addr(), servers.1.local_addr()];
-                        (Some([servers.0, servers.1]), Some(addrs))
-                    }
-                    None => (None, None),
-                };
+            let ereport_servers = match &sidecar.common.ereport_network_config {
+                Some(cfg) => {
+                    Some(UdpServer::bind_pair(cfg, &ereport_log).await?)
+                }
+                None => None,
+            };
 
             let update_state = SimSpUpdate::new(
                 BaseboardKind::Sidecar,
@@ -267,54 +187,32 @@ impl Sidecar {
                 )
             };
 
-            let power_state_changes = Arc::new(AtomicUsize::new(0));
-            let handler = Arc::new(TokioMutex::new(Handler::new(
+            let handler = Handler::new(
                 baseboard_vpd,
                 sidecar.common.components.clone(),
                 FakeIgnition::new(&config.simulated_sps),
                 log,
                 sidecar.common.old_rot_state,
                 update_state,
-                Arc::clone(&power_state_changes),
-            )));
-            let (udp_task, responses_sent_count) = UdpTask::new(
+            );
+            let sp = sp::Handle::spawn(
                 servers,
                 ereport_servers,
                 ereport_state,
-                Arc::clone(&handler),
-                commands_rx,
+                handler,
             );
-            let udp_task =
-                task::spawn(async move { udp_task.run().await.unwrap() });
 
-            Ok(Self {
-                local_addrs: Some(local_addrs),
-                ereport_addrs,
-                handler: Some(handler),
-                commands,
-                udp_task: Some(udp_task),
-                responses_sent_count: Some(responses_sent_count),
-                power_state_changes,
-            })
+            Ok(Self { sp })
         } else {
-            Ok(Self {
-                local_addrs: None,
-                ereport_addrs: None,
-                handler: None,
-                commands,
-                udp_task: None,
-                responses_sent_count: None,
-                power_state_changes: Arc::new(AtomicUsize::new(0)),
-            })
+            Ok(Self { sp: sp::Handle::rot_only() })
         }
     }
 
     pub async fn current_ignition_state(&self) -> Vec<IgnitionState> {
-        self.handler
-            .as_ref()
-            .expect("no network config provided when constructing sim sidecar")
-            .lock()
+        self.sp
+            .handler()
             .await
+            .expect("no network config provided when constructing sim sidecar")
             .ignition
             .state
             .clone()
@@ -342,7 +240,7 @@ struct Handler {
     // whatever result we return and fail to respond at all.
     should_fail_to_respond_signal: Option<Box<dyn FnOnce() + Send>>,
     old_rot_state: bool,
-    sp_dumps: HashMap<[u8; 16], u32>,
+    task_dumps: TaskDumps,
 }
 
 impl Handler {
@@ -353,15 +251,12 @@ impl Handler {
         log: Logger,
         old_rot_state: bool,
         update_state: SimSpUpdate,
-        power_state_changes: Arc<AtomicUsize>,
     ) -> Self {
         let device_descriptions =
             DeviceDescriptions::from_component_configs(&components);
         let sensors = Sensors::from_component_configs(&components);
         let component_vpds = ComponentVpds::from_component_configs(&components)
             .expect("component VPD configuration should be valid");
-
-        let sp_dumps = HashMap::new();
 
         Self {
             log,
@@ -371,12 +266,12 @@ impl Handler {
             baseboard_vpd,
             ignition,
             power_state: PowerState::A2,
-            power_state_changes,
+            power_state_changes: Arc::new(AtomicUsize::new(0)),
             update_state,
             reset_pending: None,
             should_fail_to_respond_signal: None,
             old_rot_state,
-            sp_dumps,
+            task_dumps: TaskDumps::default(),
         }
     }
 
@@ -999,15 +894,7 @@ impl SpHandler for Handler {
         request: RotRequest,
         buf: &mut [u8],
     ) -> std::result::Result<RotResponse, SpError> {
-        let dummy_page = match request {
-            RotRequest::ReadCmpa => "sidecar-cmpa",
-            RotRequest::ReadCfpa(CfpaPage::Active) => "sidecar-cfpa-active",
-            RotRequest::ReadCfpa(CfpaPage::Inactive) => "sidecar-cfpa-inactive",
-            RotRequest::ReadCfpa(CfpaPage::Scratch) => "sidecar-cfpa-scratch",
-        };
-        buf[..dummy_page.len()].copy_from_slice(dummy_page.as_bytes());
-        buf[dummy_page.len()..].fill(0);
-        Ok(RotResponse::Ok)
+        read_dummy_rot_page(BaseboardKind::Sidecar, request, buf)
     }
 
     fn vpd_lock_status_all(
@@ -1070,23 +957,15 @@ impl SpHandler for Handler {
         &mut self,
         version: u8,
     ) -> Result<RotBootInfo, SpError> {
-        if self.old_rot_state {
-            Err(SpError::RequestUnsupportedForSp)
-        } else {
-            match version {
-                0 => Err(SpError::Update(
-                    gateway_messages::UpdateError::VersionNotSupported,
-                )),
-                1 => Ok(RotBootInfo::V2(rot_state_v2(
-                    self.update_state.rot_state(),
-                ))),
-                _ => Ok(RotBootInfo::V3(self.update_state.rot_state())),
-            }
-        }
+        rot_boot_info(
+            self.update_state.rot_state(),
+            self.old_rot_state,
+            version,
+        )
     }
 
     fn get_task_dump_count(&mut self) -> Result<u32, SpError> {
-        Ok(1)
+        self.task_dumps.get_task_dump_count()
     }
 
     fn task_dump_read_start(
@@ -1094,15 +973,7 @@ impl SpHandler for Handler {
         index: u32,
         key: [u8; 16],
     ) -> Result<DumpTask, SpError> {
-        if index != 0 {
-            return Err(SpError::Dump(DumpError::BadIndex));
-        }
-
-        // Hubris allows clients to reuse existing keys.
-        // Overwrite any in-flight requests using this key.
-        self.sp_dumps.insert(key, 0);
-
-        Ok(DumpTask { time: 1, task: 0, compression: DumpCompression::Lzss })
+        self.task_dumps.task_dump_read_start(index, key)
     }
 
     fn task_dump_read_continue(
@@ -1111,36 +982,7 @@ impl SpHandler for Handler {
         seq: u32,
         buf: &mut [u8],
     ) -> Result<Option<DumpSegment>, SpError> {
-        let Some(expected_seq) = self.sp_dumps.get_mut(&key) else {
-            return Err(SpError::Dump(DumpError::BadKey));
-        };
-
-        if seq != *expected_seq {
-            return Err(SpError::Dump(DumpError::BadSequenceNumber));
-        }
-
-        const UNCOMPRESSED_MSG: &[u8] = b"my cool SP dump";
-        // "my cool SP dump" encoded with `lzss-cli e 6,4,0x20`
-        const COMPRESSED_MSG: &[u8] = &[
-            0xb6, 0xde, 0x64, 0x16, 0x3b, 0x7d, 0xbe, 0xd9, 0x20, 0xa9, 0xd4,
-            0x24, 0x16, 0x4b, 0xad, 0xb6, 0xe0,
-        ];
-        buf[..COMPRESSED_MSG.len()].copy_from_slice(COMPRESSED_MSG);
-
-        *expected_seq += 1;
-
-        match seq {
-            ..3 => Ok(Some(DumpSegment {
-                address: 1,
-                compressed_length: COMPRESSED_MSG.len() as u16,
-                uncompressed_length: UNCOMPRESSED_MSG.len() as u16,
-                seq,
-            })),
-            3.. => {
-                self.sp_dumps.remove(&key);
-                Ok(None)
-            }
-        }
+        self.task_dumps.task_dump_read_continue(key, seq, buf)
     }
 
     fn read_host_flash(
@@ -1192,6 +1034,10 @@ impl SimSpHandler for Handler {
         signal: Box<dyn FnOnce() + Send>,
     ) {
         self.should_fail_to_respond_signal = Some(signal);
+    }
+
+    fn power_state_changes(&self) -> &Arc<AtomicUsize> {
+        &self.power_state_changes
     }
 }
 

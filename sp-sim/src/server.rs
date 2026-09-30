@@ -26,6 +26,7 @@ use std::net::SocketAddrV6;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use tokio::net::UdpSocket;
 use tokio::select;
@@ -108,6 +109,19 @@ impl UdpServer {
             local_addr,
             buf: [0; gateway_messages::MAX_SERIALIZED_SIZE],
         })
+    }
+
+    /// Binds one `UdpServer` for each of a simulated SP's two ports.
+    pub(crate) async fn bind_pair(
+        network_configs: &[NetworkConfig; 2],
+        log: &Logger,
+    ) -> Result<[Self; 2]> {
+        let (server0, server1) = future::try_join(
+            Self::new(&network_configs[0], log),
+            Self::new(&network_configs[1], log),
+        )
+        .await?;
+        Ok([server0, server1])
     }
 
     pub(crate) fn socket(&self) -> &Arc<UdpSocket> {
@@ -200,6 +214,12 @@ pub(crate) trait SimSpHandler: SpHandler {
         &mut self,
         signal: Box<dyn FnOnce() + Send>,
     );
+
+    /// Borrows the simulated SP handler's counter of power state changes.
+    ///
+    /// The simulated handler increments this every time the power state
+    /// changes.
+    fn power_state_changes(&self) -> &Arc<AtomicUsize>;
 }
 
 /// Commands sent from a simulated SP's handle to its [`UdpTask`].

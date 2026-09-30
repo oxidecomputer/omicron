@@ -96,6 +96,7 @@ strum.workspace = true
 support-bundle-collection.workspace = true
 support-bundle-viewer.workspace = true
 supports-color.workspace = true
+swrite.workspace = true
 tabled.workspace = true
 textwrap.workspace = true
 tokio = { workspace = true, features = ["full"] }

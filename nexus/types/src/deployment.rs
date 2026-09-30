@@ -176,6 +176,7 @@ pub use reconfigurator_config::ReconfiguratorConfigParam;
 pub use reconfigurator_config::ReconfiguratorConfigView;
 pub use reconfigurator_config::ReconfiguratorConfigViewDisplay;
 pub use reconfigurator_config::ReconfiguratorDisruptionPolicy;
+pub use reconfigurator_config::SledUpdateRebootPolicy;
 use sled_hardware_types::BaseboardId;
 pub use zone_type::BlueprintZoneType;
 pub use zone_type::DurableDataset;
