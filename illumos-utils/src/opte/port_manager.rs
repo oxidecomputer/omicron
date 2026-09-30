@@ -4,6 +4,8 @@
 
 //! Manager for all OPTE ports on a Helios system
 
+use super::AttachedSubnetKind;
+use crate::destructor::Destructor;
 use crate::dladm::OPTE_LINK_PREFIX;
 use crate::opte::AttachedSubnet;
 use crate::opte::EnsureAttachedSubnetResult;
@@ -13,6 +15,7 @@ use crate::opte::Handle;
 use crate::opte::Port;
 use crate::opte::Vni;
 use crate::opte::opte_firewall_rules;
+use crate::opte::port::PortName;
 use ipnetwork::Ipv4Network;
 use ipnetwork::Ipv6Network;
 use macaddr::MacAddr6;
@@ -78,8 +81,6 @@ use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use uuid::Uuid;
 
-use super::AttachedSubnetKind;
-
 /// Stored routes (and usage count) for a given VPC/subnet.
 #[derive(Debug, Default, Clone)]
 struct RouteSet {
@@ -104,7 +105,6 @@ pub struct MulticastGroupCfg {
     pub sources: Vec<IpAddr>,
 }
 
-#[derive(Debug)]
 struct PortManagerInner {
     log: Logger,
 
@@ -126,6 +126,9 @@ struct PortManagerInner {
     ///
     /// IGW IDs are specific to the VPC of each NIC.
     eip_gateways: Mutex<HashMap<Uuid, HashMap<IpAddr, HashSet<Uuid>>>>,
+
+    /// The destructor that will actually delete OPTE ports for us.
+    destructor: Destructor<PortName>,
 }
 
 impl PortManagerInner {
@@ -337,7 +340,7 @@ fn build_external_ipv6_config(
 }
 
 /// The port manager controls all OPTE ports on a single host.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct PortManager {
     inner: Arc<PortManagerInner>,
 }
@@ -352,6 +355,7 @@ impl PortManager {
             ports: Mutex::new(BTreeMap::new()),
             routes: Mutex::new(Default::default()),
             eip_gateways: Mutex::new(Default::default()),
+            destructor: Destructor::new(),
         });
 
         Self { inner }
@@ -359,6 +363,11 @@ impl PortManager {
 
     pub fn underlay_ip(&self) -> &Ipv6Addr {
         &self.inner.underlay_ip
+    }
+
+    #[cfg(test)]
+    pub fn contains(&self, key: &(Uuid, NetworkInterfaceKind)) -> bool {
+        self.inner.ports.lock().unwrap().get(key).is_some()
     }
 
     /// Create an OPTE port
@@ -402,8 +411,8 @@ impl PortManager {
         // - create the port
         // - add both to the PortManager's map
         //
-        // The Port object's drop implementation will clean up both of those, if
-        // any of the remaining fallible operations fail.
+        // The PortTicket object's drop implementation will clean up the port
+        // itself, if any of the remaining fallible operations fail.
         let port_name = self.inner.next_port_name();
         debug!(
             self.inner.log,
@@ -424,6 +433,7 @@ impl PortManager {
                 mac,
                 nic.slot,
                 vni,
+                self.inner.destructor.clone(),
             );
 
             // NOTE: We may add external IPs below, which can fail. If that
@@ -1204,12 +1214,13 @@ impl PortTicket {
             remove_key(&mut routes, key);
         }
         drop(routes);
+
         debug!(
             self.manager.log,
-            "Removed OPTE port from manager";
+            "Removed OPTE port from manager, queued for deletion";
             "id" => ?&self.id,
             "kind" => ?&self.kind,
-            "port" => ?&port,
+            "port_name" => port.name(),
         );
         Ok(())
     }

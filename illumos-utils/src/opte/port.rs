@@ -4,9 +4,12 @@
 
 //! A single port on the OPTE virtual switch.
 
+use crate::destructor::Deletable;
+use crate::destructor::Destructor;
 use crate::opte::Gateway;
 use crate::opte::Handle;
 use crate::opte::Vni;
+use anyhow::Context as _;
 use macaddr::MacAddr6;
 use omicron_common::api::external;
 use omicron_common::api::internal::shared::PrivateIpConfig;
@@ -36,35 +39,22 @@ pub struct PortData {
     gateway: Gateway,
 }
 
-#[derive(Debug)]
-struct PortInner(PortData);
+struct PortInner {
+    data: PortData,
+    destructor: Destructor<PortName>,
+}
+
+impl Drop for PortInner {
+    fn drop(&mut self) {
+        self.destructor.enqueue_destroy(PortName(self.data.name.clone()));
+    }
+}
 
 impl core::ops::Deref for PortInner {
     type Target = PortData;
 
     fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl Drop for PortInner {
-    fn drop(&mut self) {
-        let err = match Handle::new() {
-            Ok(hdl) => {
-                if let Err(e) = hdl.delete_xde(&self.name) {
-                    e
-                } else {
-                    return;
-                }
-            }
-            Err(e) => e,
-        };
-        eprintln!(
-            "WARNING: Failed to delete the xde device. It must be deleted \
-            out of band, and it will not be possible to recreate the xde \
-            device until then. Error: {:?}",
-            err,
-        );
+        &self.data
     }
 }
 
@@ -73,22 +63,36 @@ impl Drop for PortInner {
 ///
 /// Note that the type is clonable and refers to the same underlying port on the
 /// system.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Port {
     inner: Arc<PortInner>,
 }
 
+impl std::fmt::Debug for Port {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Port")
+            .field("name", &self.inner.name)
+            .field("ip", &self.inner.ip)
+            .field("mac", &self.inner.mac)
+            .field("slot", &self.inner.slot)
+            .field("vni", &self.inner.vni)
+            .field("gateway", &self.inner.gateway)
+            .finish()
+    }
+}
+
 impl Port {
-    pub fn new(
+    pub(super) fn new(
         name: String,
         ip: PrivateIpConfig,
         mac: MacAddr6,
         slot: u8,
         vni: Vni,
+        destructor: Destructor<PortName>,
     ) -> Self {
         let gateway = Gateway::from_ip_config(&ip);
         let data = PortData { name, ip, mac, slot, vni, gateway };
-        Self { inner: Arc::new(PortInner(data)) }
+        Self { inner: Arc::new(PortInner { data, destructor }) }
     }
 
     /// Return the VPC-private IPv4 address, if it exists.
@@ -164,9 +168,148 @@ impl Port {
     }
 }
 
+#[cfg(test)]
+static TEST_DELETE_COUNT: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+#[cfg(test)]
+const DELETE_ATTEMPTS_IN_TESTS: u64 = 3;
+
+pub(super) struct PortName(String);
+
+impl PortName {
+    #[cfg(test)]
+    fn maybe_fail_delete_in_tests(&self) -> Result<(), anyhow::Error> {
+        let count = TEST_DELETE_COUNT
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if count < DELETE_ATTEMPTS_IN_TESTS {
+            anyhow::bail!("pretending to fail deletion in tests, call {count}");
+        }
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl Deletable for PortName {
+    async fn delete(&self) -> Result<(), anyhow::Error> {
+        #[cfg(test)]
+        self.maybe_fail_delete_in_tests()?;
+
+        let hdl = Handle::new().context("creating handle to OPTE driver")?;
+        hdl.delete_xde(&self.0).context("deleting XDE device").map(|_| ())
+    }
+}
+
 /// An OPTE port, along with its control plane metadata.
 pub struct PortInfo {
     pub port: Port,
     pub nic_id: Uuid,
     pub nic_kind: NetworkInterfaceKind,
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::opte::PortCreateParams;
+    use crate::opte::PortManager;
+    use crate::opte::port::DELETE_ATTEMPTS_IN_TESTS;
+    use crate::opte::port::TEST_DELETE_COUNT;
+    use macaddr::MacAddr6;
+    use omicron_common::api::external::MacAddr;
+    use omicron_common::api::external::Vni;
+    use omicron_common::api::internal::shared::PrivateIpConfig;
+    use omicron_common::api::internal::shared::PrivateIpv4Config;
+    use omicron_test_utils::dev;
+    use oxide_vpc::api::DhcpCfg;
+    use oxnet::Ipv4Net;
+    use sled_agent_types::instance::ExternalIpConfig;
+    use sled_agent_types::inventory::NetworkInterface;
+    use sled_agent_types::inventory::NetworkInterfaceKind;
+    use std::net::Ipv4Addr;
+    use std::net::Ipv6Addr;
+    use std::sync::atomic::Ordering;
+    use std::time::Duration;
+    use uuid::Uuid;
+
+    #[tokio::test]
+    async fn test_drop_enqueues_destroy() {
+        crate::opte::Handle::new()
+            .unwrap()
+            .set_xde_underlay("foo0", "foo1")
+            .unwrap();
+        let logctx = dev::test_setup_log("test_drop_enqueues_destroy");
+        let manager = PortManager::new(logctx.log.clone(), Ipv6Addr::LOCALHOST);
+        let id = Uuid::new_v4();
+        let kind = NetworkInterfaceKind::Instance { id: Uuid::new_v4() };
+        let key = (id, kind);
+        let (port, ticket) = manager
+            .create_port(PortCreateParams {
+                nic: &NetworkInterface {
+                    id,
+                    kind,
+                    name: "net0".parse().unwrap(),
+                    ip_config: PrivateIpConfig::V4(
+                        PrivateIpv4Config::new(
+                            Ipv4Addr::new(10, 0, 0, 5),
+                            Ipv4Net::new(Ipv4Addr::new(10, 0, 0, 0), 24)
+                                .unwrap(),
+                        )
+                        .unwrap(),
+                    ),
+                    mac: MacAddr(MacAddr6::new(
+                        0xa8, 0x40, 0x25, 0x01, 0x01, 0x01,
+                    )),
+                    vni: Vni::try_from(7).unwrap(),
+                    primary: true,
+                    slot: 0,
+                },
+                external_ips: &ExternalIpConfig { v4: None, v6: None },
+                firewall_rules: &[],
+                dhcp_config: DhcpCfg {
+                    hostname: None,
+                    host_domain: None,
+                    domain_search_list: vec![],
+                    dns4_servers: vec![],
+                    dns6_servers: vec![],
+                },
+                attached_subnets: vec![],
+                mtu: None,
+            })
+            .unwrap();
+
+        // We should have no destructor calls
+        assert_eq!(TEST_DELETE_COUNT.load(Ordering::Relaxed), 0);
+
+        // Dropping the ticket should remove the port from the map, but nothing
+        // else.
+        drop(ticket);
+        assert!(!manager.contains(&key));
+        assert_eq!(TEST_DELETE_COUNT.load(Ordering::Relaxed), 0);
+
+        // Dropping the port should eventually actually delete the thing.
+        drop(port);
+
+        dev::poll::wait_for_condition(
+            || async {
+                if TEST_DELETE_COUNT.load(Ordering::Relaxed)
+                    == DELETE_ATTEMPTS_IN_TESTS
+                {
+                    Ok(())
+                } else {
+                    Err(dev::poll::CondCheckError::<()>::NotYet {
+                        status: None,
+                    })
+                }
+            },
+            &Duration::from_millis(100),
+            &Duration::from_secs(10),
+        )
+        .await
+        .expect("Should have deleted the port eventually");
+
+        // We should have attempted to delete the port as many times as it
+        // takes.
+        assert_eq!(
+            TEST_DELETE_COUNT.load(Ordering::Relaxed),
+            DELETE_ATTEMPTS_IN_TESTS
+        );
+    }
 }
