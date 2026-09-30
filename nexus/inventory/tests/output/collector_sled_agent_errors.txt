@@ -125,6 +125,19 @@ sled agents found:
     reconciler task idle
 
 power shelves found:
+    shelf 0 PSC baseboard part "FAKE_SIM_PSC" serial "SimPsc0"
+        PSU0: presence Present device mwocp68
+            VPD: mfr_model "MWOCP68-3600-D-RM" mfr_serial "LL2216RB000H" firmware_rev "0762-0701-0000" mfr_id "Murata-PS" mfr_location "China" mfr_date "2216"
+        PSU1: presence Present device mwocp68
+            VPD: mfr_model "MWOCP68-3600-D-RM" mfr_serial "LL2216RB003E" firmware_rev "0762-0701-0000" mfr_id "Murata-PS" mfr_location "China" mfr_date "2216"
+        PSU2: presence Present device mwocp68
+            VPD: mfr_model "MWOCP68-3600-D-RM" mfr_serial "LL2216RB000C" firmware_rev "0762-0701-0000" mfr_id "Murata-PS" mfr_location "China" mfr_date "2216"
+        PSU3: presence Present device mwocp68
+            VPD: mfr_model "MWOCP68-3600-D-RM" mfr_serial "LL2216RB000D" firmware_rev "0762-0701-0000" mfr_id "Murata-PS" mfr_location "China" mfr_date "2216"
+        PSU4: presence Present device mwocp68
+            VPD: mfr_model "MWOCP68-3600-D-RM" mfr_serial "LL2216RB000E" firmware_rev "0762-0701-0000" mfr_id "Murata-PS" mfr_location "China" mfr_date "2216"
+        PSU5: presence Present device mwocp68
+            VPD: mfr_model "MWOCP68-3600-D-RM" mfr_serial "LL2216RB000F" firmware_rev "0762-0701-0000" mfr_id "Murata-PS" mfr_location "China" mfr_date "2216"
 
 errors:
 error: Sled Agent "http://[100::1]:45678": inventory: Communication Error <<redacted>>
