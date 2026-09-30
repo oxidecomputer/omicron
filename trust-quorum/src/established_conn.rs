@@ -17,7 +17,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf, split};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::task;
-use tokio::time::{Instant, MissedTickBehavior, interval};
+use tokio::time::{Instant, MissedTickBehavior, interval, timeout};
 
 /// Max buffer size of a connection
 const CONN_BUF_SIZE: usize = 1024 * 1024;
@@ -28,11 +28,17 @@ const FRAME_HEADER_SIZE: usize = 4;
 /// Maximum allowed serialized message (frame) size
 const MAX_FRAME_SIZE: usize = CONN_BUF_SIZE - FRAME_HEADER_SIZE;
 
-/// The number of serialized messages to queue for writing before closing the socket.
-/// This means the remote side is very slow.
+/// The number of serialized messages to queue for writing before closing the
+/// socket.
 ///
-/// TODO: Alternatively we could drop the oldest message.
-const MSG_WRITE_QUEUE_CAPACITY: usize = 5;
+/// This means the remote side is very slow, and closing a socket is very
+/// reasonable since our message frequency is very low.
+///
+/// Because we flush after every message, a stalled socket backs up into this
+/// queue rather than being absorbed by rustls' internal buffer. At one ping
+/// per second, this keeps the tolerance for a stalled peer roughly in line with
+/// `INACTIVITY_TIMEOUT`.
+const MSG_WRITE_QUEUE_CAPACITY: usize = 10;
 
 // Timing parameters for keeping the connection healthy
 const PING_INTERVAL: Duration = Duration::from_secs(1);
@@ -40,6 +46,13 @@ const PING_INTERVAL: Duration = Duration::from_secs(1);
 /// The time limit for not receiving a complete message from a peer.
 /// The connection is shutdown after this time.
 const INACTIVITY_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// How long to wait for a graceful TLS shutdown before abandoning the socket.
+///
+/// `shutdown` flushes buffered records and sends `close_notify`, which cannot
+/// complete if the peer has stopped reading. Without a bound, this task would
+/// never exit.
+const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// An error from within an `EstablishedConn` that triggers connection close
 ///
@@ -93,6 +106,48 @@ pub struct EstablishedConn {
 
     // The current serialized message being written if there is one
     current_write: Cursor<Vec<u8>>,
+
+    // Bytes have been written to the TLS stream, but may not have reached the
+    // socket yet because they are stored in an encrypted TLS buffer inside
+    // rustls.
+    //
+    // This lives here rather than inside the write future so that it survives
+    // `select!` cancellation and the flush is never lost.
+    needs_flush: bool,
+}
+
+/// What `write_or_flush` accomplished
+enum WriteProgress {
+    Wrote,
+    Flushed,
+}
+
+/// Make progress on the write side of the connection.
+///
+/// Writing takes priority over flushing so that a partially written message is
+/// finished before the flush is attempted. `run` refuses to start another
+/// message while a flush is owed, so this bounds unflushed data to a single
+/// message no matter how fast the main task queues them.
+///
+/// Flushing after every message protects against starvation due to changes
+/// in rustls internal flush behavior. We were unlikely to see an issue with
+/// starvation even with a change in rustls because of the infrequency of
+/// message sends, but we err on the safe side and make any overload visible in
+/// our application level queue.
+async fn write_or_flush(
+    writer: &mut WriteHalf<sprockets_tls::Stream<TcpStream>>,
+    current_write: &mut Cursor<Vec<u8>>,
+    needs_flush: bool,
+) -> Result<WriteProgress, std::io::Error> {
+    if current_write.has_remaining() {
+        writer.write_buf(current_write).await?;
+        Ok(WriteProgress::Wrote)
+    } else if needs_flush {
+        writer.flush().await?;
+        Ok(WriteProgress::Flushed)
+    } else {
+        std::future::pending().await
+    }
 }
 
 impl EstablishedConn {
@@ -119,6 +174,7 @@ impl EstablishedConn {
             last_received_msg: Instant::now(),
             write_queue: VecDeque::with_capacity(MSG_WRITE_QUEUE_CAPACITY),
             current_write: Cursor::new(Vec::new()),
+            needs_flush: false,
         }
     }
 
@@ -130,12 +186,23 @@ impl EstablishedConn {
         //
         // Continuously process messages until the connection closes
         loop {
-            if !self.current_write.has_remaining() {
+            // Don't start another message while a flush is owed. Writing has
+            // priority over flushing, so without this a steady stream of
+            // outgoing messages would starve the flush indefinitely.
+            //
+            // That may not matter because rustls internally flushes if a new
+            // write comes in  while data is sitting in an internal buffer.
+            // However, we want to protect against unexpected changes in rustls
+            // and make any queuing visible to the application code in this
+            // file.
+            if !self.current_write.has_remaining() && !self.needs_flush {
                 if let Some(buf) = self.write_queue.pop_front() {
                     self.current_write = Cursor::new(buf);
                 }
             }
 
+            // This select! is not subject to futurelock because we never await
+            // inside a handler.
             let res = tokio::select! {
                 _ = interval.tick() => {
                     self.ping()
@@ -146,10 +213,12 @@ impl EstablishedConn {
                 res = self.reader.read(&mut self.read_buf[self.total_read..]) => {
                     self.on_read(res)
                 }
-                res = self.writer.write_buf(&mut self.current_write),
-                   if self.current_write.has_remaining() =>
-                {
-                   self.check_write_result(res)
+                res = write_or_flush(
+                    &mut self.writer,
+                    &mut self.current_write,
+                    self.needs_flush,
+                ) => {
+                    self.on_write_progress(res)
                 }
             };
 
@@ -162,7 +231,13 @@ impl EstablishedConn {
     }
 
     async fn close(&mut self) {
-        let _ = self.writer.shutdown().await;
+        if timeout(SHUTDOWN_TIMEOUT, self.writer.shutdown()).await.is_err() {
+            warn!(
+                self.log,
+                "Timed out shutting down connection cleanly";
+                "peer_id" => %self.peer_id
+            );
+        }
     }
 
     fn on_read(
@@ -274,23 +349,22 @@ impl EstablishedConn {
         }
     }
 
-    fn check_write_result(
+    fn on_write_progress(
         &mut self,
-        res: Result<usize, std::io::Error>,
+        res: Result<WriteProgress, std::io::Error>,
     ) -> Result<(), ConnErr> {
-        match res {
-            Ok(_) => {
+        match res.map_err(ConnErr::FailedWrite)? {
+            WriteProgress::Wrote => {
+                self.needs_flush = true;
                 if !self.current_write.has_remaining() {
                     self.current_write = Cursor::new(Vec::new());
                 }
-                Ok(())
             }
-            Err(e) => {
-                // We need to shut down the writer - returning an error here
-                // will cause our caller (`run()`) to stop, which will do so.
-                Err(ConnErr::FailedWrite(e))
+            WriteProgress::Flushed => {
+                self.needs_flush = false;
             }
         }
+        Ok(())
     }
 
     fn on_msg_from_main(&mut self, msg: MainToConnMsg) -> Result<(), ConnErr> {
