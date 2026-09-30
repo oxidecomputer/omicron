@@ -37,15 +37,15 @@ impl VmmMarkStopForUpdate {
             match self.datastore.vmm_bulk_mark_stop_for_update(opctx).await {
                 Ok(count) => count,
                 Err(err) => {
+                    let err = InlineErrorChain::new(&err);
                     slog::error!(
                         &opctx.log,
                         "failed to mark VMMs to stop for a sled update";
                         &err,
                     );
                     return VmmMarkStopForUpdateStatus {
-                        disabled: false,
                         vmms_marked: 0,
-                        error: Some(InlineErrorChain::new(&err).to_string()),
+                        error: Some(err.to_string()),
                     };
                 }
             };
@@ -62,7 +62,7 @@ impl VmmMarkStopForUpdate {
             );
         }
 
-        VmmMarkStopForUpdateStatus { disabled: false, vmms_marked, error: None }
+        VmmMarkStopForUpdateStatus { vmms_marked, error: None }
     }
 }
 
