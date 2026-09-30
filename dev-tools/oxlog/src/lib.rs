@@ -569,9 +569,15 @@ pub enum ExtraLogDir {
     /// `<name>.log` (live) and `<name>.log.<secs>.gz` (rotated), one series
     /// per `<name>.log`.
     Ntp,
-    /// dpd's driver logs (`/var/dendrite` in the switch zone).
+    /// dpd's working directory (`/var/dendrite` in the switch zone).
     ///
-    /// No naming rule is known, so every file is a series of its own.
+    /// This holds no logs: dpd sends the Tofino SDE's driver logs to its own
+    /// SMF log (as `"unit":"bf-sde"`), not to the zlog file its configuration
+    /// here names. So no naming rule is applied, and any file here is a
+    /// series of its own.
+    //
+    // TODO(https://github.com/oxidecomputer/omicron/issues/11390): oxlog
+    // likely doesn't need to list this directory at all.
     Dendrite,
 }
 
