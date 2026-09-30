@@ -1242,6 +1242,80 @@ mod tests {
         logctx.cleanup_successful();
     }
 
+    #[tokio::test]
+    async fn test_vmm_bulk_mark_stop_for_update_drains_multiple_batches() {
+        let logctx = dev::test_setup_log(
+            "test_vmm_bulk_mark_stop_for_update_drains_multiple_batches",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let sled_id = SledUuid::new_v4();
+
+        // Seed more than one batch of eligible VMMs so the method must loop over
+        // multiple batches.
+        let vmm_count = usize::try_from(SQL_BATCH_SIZE.get()).unwrap() + 1;
+        let vmms: Vec<Vmm> = (0..vmm_count)
+            .map(|_| Vmm {
+                id: Uuid::new_v4(),
+                time_created: Utc::now(),
+                time_deleted: None,
+                instance_id: Uuid::new_v4(),
+                sled_id: sled_id.into(),
+                propolis_ip: "10.1.9.32".parse().unwrap(),
+                propolis_port: 420.into(),
+                cpu_platform: VmmCpuPlatform::SledDefault,
+                time_state_updated: Utc::now(),
+                generation: Generation::new(),
+                state: DbVmmState::Running,
+                failure_reason: None,
+                stop_for_update_disposition_generation: None,
+            })
+            .collect();
+        diesel::insert_into(dsl::vmm)
+            .values(vmms)
+            .execute_async(
+                &*datastore.pool_connection_for_tests().await.unwrap(),
+            )
+            .await
+            .expect("bulk insert VMMs");
+
+        datastore
+            .rendezvous_sled_bp_availability_write(
+                opctx,
+                BlueprintUuid::new_v4(),
+                IdOrdMap::from_iter_unique([SledBlueprintAvailabilityInput {
+                    sled_id,
+                    state: SledBpAvailabilityState::Active {
+                        availability: ActiveSledBpAvailability::Unavailable,
+                        update_disposition_generation:
+                            UpdateDispositionGeneration::from(1),
+                    },
+                }])
+                .expect("sled inputs are unique"),
+            )
+            .await
+            .expect("sled availability should be written");
+
+        // The number of marked VMMs is the same as the initial amount of VMMs that
+        // were inserted
+        let marked = datastore
+            .vmm_bulk_mark_stop_for_update(opctx)
+            .await
+            .expect("bulk mark should succeed");
+        assert_eq!(marked, vmm_count);
+
+        // If we run again no rows should be marked
+        let marked = datastore
+            .vmm_bulk_mark_stop_for_update(opctx)
+            .await
+            .expect("bulk mark should succeed");
+        assert_eq!(marked, 0);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
     async fn mark_failed_no_such_instance(
         opctx: &OpContext,
         datastore: &DataStore,
