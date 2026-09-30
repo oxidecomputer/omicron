@@ -95,7 +95,7 @@ fn recursively_add_directory_to_zipfile<W: Write + std::io::Seek>(
 
             let opts = FullFileOptions::default()
                 .last_modified_time(zip_time)
-                .compression_method(::zip::CompressionMethod::Deflated)
+                .compression_method(compression_method_for(src))
                 .large_file(true);
 
             zip.start_file_from_path(dst, opts)?;
@@ -109,6 +109,18 @@ fn recursively_add_directory_to_zipfile<W: Write + std::io::Seek>(
         }
     }
     Ok(())
+}
+
+/// Chooses how to compress a file within the bundle.
+///
+/// Files that are already compressed, such as the SP task dump zips, are
+/// stored as-is: deflating them again costs CPU and does not make them
+/// smaller.
+fn compression_method_for(path: &Utf8Path) -> ::zip::CompressionMethod {
+    match path.extension() {
+        Some("zip" | "gz" | "zst") => ::zip::CompressionMethod::Stored,
+        _ => ::zip::CompressionMethod::Deflated,
+    }
 }
 
 #[cfg(test)]
@@ -159,6 +171,40 @@ mod test {
         bundle_to_stream(&dir, &mut buf).unwrap();
         let archive = ::zip::read::ZipArchive::new(Cursor::new(buf)).unwrap();
         assert_expected_entries(archive);
+    }
+
+    // Ensure that already-compressed files are stored without being deflated
+    // again, and that everything else is still deflated.
+    #[test]
+    fn test_compressed_files_are_stored() {
+        let dir = tempdir().unwrap();
+        for name in ["dump-0.zip", "fake.gz", "fake.zst", "plain.txt"] {
+            std::fs::write(dir.path().join(name), "not really compressed")
+                .unwrap();
+        }
+
+        let mut seekable = Cursor::new(Vec::new());
+        bundle_to_writer(&dir, &mut seekable).unwrap();
+        let mut streamed: Vec<u8> = Vec::new();
+        bundle_to_stream(&dir, &mut streamed).unwrap();
+
+        for buf in [seekable.into_inner(), streamed] {
+            let mut archive =
+                ::zip::read::ZipArchive::new(Cursor::new(buf)).unwrap();
+            for (name, expected) in [
+                ("dump-0.zip", ::zip::CompressionMethod::Stored),
+                ("fake.gz", ::zip::CompressionMethod::Stored),
+                ("fake.zst", ::zip::CompressionMethod::Stored),
+                ("plain.txt", ::zip::CompressionMethod::Deflated),
+            ] {
+                let mut entry = archive.by_name(name).unwrap();
+                assert_eq!(entry.compression(), expected, "{name}");
+                let mut contents = String::new();
+                std::io::Read::read_to_string(&mut entry, &mut contents)
+                    .unwrap();
+                assert_eq!(contents, "not really compressed", "{name}");
+            }
+        }
     }
 
     // Ensure that the tempfile-returning convenience still works for the
