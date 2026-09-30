@@ -488,6 +488,34 @@ impl DataStore {
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
+
+    /// TODO-K: Fix comment, Lists VMMs that have been marked as needing to be
+    /// stopped in order to update their sled, that have not been deleted, and
+    /// that are still in a state from which they need to be stopped. VMMs that
+    /// are already stopping, stopped, or destroyed are excluded.
+    pub async fn vmm_list_marked_stop_for_update(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<Vmm> {
+        paginated(dsl::vmm, dsl::id, pagparams)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::stop_for_update_disposition_generation.is_not_null())
+            // TODO-K: change to DbVmmState::SHOULD_STOP_FOR_EVACUATION once
+            // that branch is merged
+            .filter(dsl::state.eq_any(&[
+                // A VMM in one of these states is on its way, or is already running,
+                // and can be stopped.
+                DbVmmState::Creating,
+                DbVmmState::Starting,
+                DbVmmState::Running,
+                DbVmmState::Rebooting,
+            ]))
+            .select(Vmm::as_select())
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
 }
 
 #[cfg(test)]

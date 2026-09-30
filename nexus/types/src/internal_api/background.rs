@@ -106,6 +106,16 @@ pub struct AbandonedVmmReaperStatus {
     pub errors: Vec<String>,
 }
 
+/// The status of a `vmm_stop_for_update` background task activation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct VmmStopForUpdateStatus {
+    /// Number of VMMs stopped in this activation, keyed by the sled they were
+    /// running on.
+    pub vmms_stopped_by_sled: BTreeMap<SledUuid, usize>,
+    /// Error encountered during this activation, if any.
+    pub error: Option<String>,
+}
+
 /// The status of an `instance_updater` background task activation.
 #[derive(Serialize, Deserialize, Default, Debug, PartialEq, Eq)]
 pub struct InstanceUpdaterStatus {

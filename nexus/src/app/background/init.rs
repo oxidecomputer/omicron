@@ -147,6 +147,7 @@ use super::tasks::vpc_routes;
 use super::tasks::webhook_deliverator;
 use crate::Nexus;
 use crate::app::background::tasks::populate_switch_ports;
+use crate::app::background::tasks::vmm_stop_for_update;
 use crate::app::external_client::ExternalHttpClient;
 use crate::app::oximeter::PRODUCER_LEASE_DURATION;
 use crate::app::quiesce::NexusQuiesceHandle;
@@ -253,6 +254,7 @@ impl BackgroundTasksInitializer {
             task_instance_reincarnation: Activator::new(),
             task_service_firewall_propagation: Activator::new(),
             task_abandoned_vmm_reaper: Activator::new(),
+            task_vmm_stop_for_update: Activator::new(),
             task_audit_log_cleanup: Activator::new(),
             task_audit_log_timeout_incomplete: Activator::new(),
             task_vpc_route_manager: Activator::new(),
@@ -351,6 +353,7 @@ impl BackgroundTasksInitializer {
             task_instance_reincarnation,
             task_service_firewall_propagation,
             task_abandoned_vmm_reaper,
+            task_vmm_stop_for_update,
             task_vpc_route_manager,
             task_saga_recovery,
             task_lookup_region_port,
@@ -893,6 +896,27 @@ impl BackgroundTasksInitializer {
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
             activator: task_abandoned_vmm_reaper,
+        });
+
+        // Background task: stop VMMs that are marked to be stopped for a sled
+        // update.
+        //
+        // TODO-K: This task is meant to be activated by the
+        // `vmm_mark_stop_for_update` task whenever that task marks one or more
+        // VMMs. Once that task lands, pass `task_vmm_stop_for_update.clone()`
+        // to `VmmMarkStopForUpdate::new()` and have it call `.activate()` when
+        // it marks at least one VMM.
+        driver.register(TaskDefinition {
+            name: "vmm_stop_for_update",
+            description: "stops VMMs that are marked to be stopped for a sled \
+                update",
+            period: config.vmm_stop_for_update.period_secs,
+            task_impl: Box::new(vmm_stop_for_update::VmmStopForUpdate::new(
+                datastore.clone(),
+            )),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_vmm_stop_for_update,
         });
 
         // Background task: saga recovery

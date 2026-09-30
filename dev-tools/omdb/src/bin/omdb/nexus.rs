@@ -1295,6 +1295,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         "abandoned_vmm_reaper" => {
             print_task_abandoned_vmm_reaper(details);
         }
+        "vmm_stop_for_update" => {
+            print_task_vmm_stop_for_update(details);
+        }
         "attached_subnet_manager" => {
             print_task_attached_subnet_manager_status(details);
         }
@@ -1502,6 +1505,31 @@ fn print_task_abandoned_vmm_reaper(details: &serde_json::Value) {
                 "    {SLED_RESERVATIONS_DELETED:<WIDTH$}{:>NUM_WIDTH$}",
                 sled_reservations_deleted,
             );
+        }
+    };
+}
+
+fn print_task_vmm_stop_for_update(details: &serde_json::Value) {
+    use nexus_types::internal_api::background::VmmStopForUpdateStatus;
+
+    match serde_json::from_value::<VmmStopForUpdateStatus>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(VmmStopForUpdateStatus { vmms_stopped_by_sled, error }) => {
+            const STOPPED: &str = "VMMs stopped:";
+            const ERROR: &str = "error:";
+            const WIDTH: usize = const_max_len(&[STOPPED, ERROR]) + 1;
+
+            let total: usize = vmms_stopped_by_sled.values().sum();
+            println!("    {STOPPED:<WIDTH$}{total} total");
+            for (sled_id, count) in vmms_stopped_by_sled {
+                println!("      sled_id={sled_id} n_stopped={count}");
+            }
+            if let Some(error) = error {
+                println!("    {ERROR:<WIDTH$}{error}");
+            }
         }
     };
 }
