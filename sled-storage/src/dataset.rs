@@ -63,11 +63,16 @@ pub const U2_DEBUG_DATASET: &'static str = "crypt/debug";
 /// The files written here are already compressed, so this dataset uses lz4
 /// rather than the debug dataset's gzip-9: gzip-9 spends significant CPU on
 /// data it cannot shrink, while lz4 gives up quickly. This dataset is not part
-/// of the blueprint; sled-agent creates it when it sets up each U.2, and does
-/// not use a U.2 on which it cannot be created.
+/// of the blueprint; sled-agent creates it along with the other
+/// [`U2_EXPECTED_DATASETS`] when it sets up each U.2.
 pub const U2_DEBUG_SCRATCH_DATASET_NAME: &'static str = "support-logs-tmp";
-const U2_DEBUG_SCRATCH_DATASET_COMPRESSION: CompressionAlgorithm =
-    CompressionAlgorithm::Lz4;
+
+/// The path of [`U2_DEBUG_SCRATCH_DATASET_NAME`] within a U.2's zpool.
+pub const U2_DEBUG_SCRATCH_DATASET: &'static str = const_format::concatcp!(
+    U2_DEBUG_DATASET,
+    "/",
+    U2_DEBUG_SCRATCH_DATASET_NAME
+);
 
 pub const LOCAL_STORAGE_DATASET: &'static str = "crypt/local_storage";
 
@@ -78,7 +83,11 @@ pub const LOCAL_STORAGE_UNENCRYPTED_DATASET: &'static str =
 // This is the root dataset for all U.2 drives. Encryption is inherited.
 pub const CRYPT_DATASET: &'static str = "crypt";
 
-pub const U2_EXPECTED_DATASET_COUNT: usize = 2;
+pub const U2_EXPECTED_DATASET_COUNT: usize = 3;
+/// Datasets that sled-agent creates on each U.2, in order.
+///
+/// RSS adds each of these to the initial blueprint, except for
+/// [`U2_DEBUG_SCRATCH_DATASET`], which is not part of the blueprint.
 pub const U2_EXPECTED_DATASETS: [ExpectedDataset; U2_EXPECTED_DATASET_COUNT] = [
     // Stores filesystems for zones
     ExpectedDataset::new(ZONE_DATASET),
@@ -87,6 +96,10 @@ pub const U2_EXPECTED_DATASETS: [ExpectedDataset; U2_EXPECTED_DATASET_COUNT] = [
     ExpectedDataset::new(DUMP_DATASET)
         .quota(DUMP_DATASET_QUOTA)
         .compression(DUMP_DATASET_COMPRESSION),
+    // Temporary files for support bundle log collection. This must follow its
+    // parent, DUMP_DATASET.
+    ExpectedDataset::new(U2_DEBUG_SCRATCH_DATASET)
+        .compression(CompressionAlgorithm::Lz4),
 ];
 
 const M2_EXPECTED_DATASET_COUNT: usize = 7;
@@ -328,71 +341,38 @@ pub(crate) async fn ensure_zpool_has_datasets(
     };
 
     for dataset in datasets.into_iter() {
-        ensure_zpool_dataset(
-            log,
-            mount_config,
-            zpool_name,
-            dataset.name,
-            dataset.quota,
-            dataset.compression,
-        )
-        .await?;
-    }
+        let mountpoint =
+            zpool_name.dataset_mountpoint(&mount_config.root, dataset.name);
+        let name = &format!("{}/{}", zpool_name, dataset.name);
 
-    if matches!(zpool_name.kind().into(), DiskVariant::U2) {
-        ensure_zpool_dataset(
-            log,
-            mount_config,
-            zpool_name,
-            &format!("{U2_DEBUG_DATASET}/{U2_DEBUG_SCRATCH_DATASET_NAME}"),
-            None,
-            U2_DEBUG_SCRATCH_DATASET_COMPRESSION,
-        )
-        .await?;
+        let encryption_details = None;
+        let size_details = Some(SizeDetails {
+            quota: dataset.quota,
+            reservation: None,
+            compression: dataset.compression,
+        });
+        Zfs::ensure_dataset(zfs::DatasetEnsureArgs {
+            name,
+            mountpoint: Mountpoint(mountpoint),
+            can_mount: zfs::CanMount::On,
+            zoned,
+            encryption_details,
+            size_details,
+            id: None,
+            additional_options: None,
+        })
+        .await
+        .inspect_err(|err| {
+            warn!(
+                log,
+                "Failed to ensure dataset";
+                "name" => ?name,
+                "err" => InlineErrorChain::new(&err),
+            );
+        })?;
     }
-
     info!(log, "Finished ensuring zpool has datasets"; "zpool" => ?zpool_name, "disk_identity" => ?disk_identity);
     Ok(())
-}
-
-/// Ensures that `dataset` exists within `zpool_name` with the given quota and
-/// compression, logging any failure before returning it.
-///
-/// This does not configure encryption: datasets within [`CRYPT_DATASET`]
-/// inherit it from there.
-async fn ensure_zpool_dataset(
-    log: &Logger,
-    mount_config: &MountConfig,
-    zpool_name: &ZpoolName,
-    dataset: &str,
-    quota: Option<ByteCount>,
-    compression: CompressionAlgorithm,
-) -> Result<(), zfs::EnsureDatasetError> {
-    let mountpoint = zpool_name.dataset_mountpoint(&mount_config.root, dataset);
-    let name = format!("{zpool_name}/{dataset}");
-    Zfs::ensure_dataset(zfs::DatasetEnsureArgs {
-        name: &name,
-        mountpoint: Mountpoint(mountpoint),
-        can_mount: zfs::CanMount::On,
-        zoned: false,
-        encryption_details: None,
-        size_details: Some(SizeDetails {
-            quota,
-            reservation: None,
-            compression,
-        }),
-        id: None,
-        additional_options: None,
-    })
-    .await
-    .inspect_err(|err| {
-        warn!(
-            log,
-            "Failed to ensure dataset";
-            "name" => &name,
-            InlineErrorChain::new(&err),
-        );
-    })
 }
 
 #[derive(Debug, thiserror::Error)]

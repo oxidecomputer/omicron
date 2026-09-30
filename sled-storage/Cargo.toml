@@ -12,6 +12,7 @@ async-trait.workspace = true
 camino.workspace = true
 camino-tempfile.workspace = true
 cfg-if.workspace = true
+const_format.workspace = true
 debug-ignore.workspace = true
 derive_more.workspace = true
 glob.workspace = true

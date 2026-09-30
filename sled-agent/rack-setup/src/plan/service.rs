@@ -408,6 +408,11 @@ impl ServicePlan {
                         sled_storage::dataset::U2_DEBUG_DATASET => {
                             DatasetKind::Debug
                         }
+                        // Sled-agent creates this within the debug dataset on
+                        // each U.2, but it is not part of the blueprint.
+                        sled_storage::dataset::U2_DEBUG_SCRATCH_DATASET => {
+                            continue;
+                        }
                         _ => {
                             return Err(PlanError::UnexpectedDataset(
                                 name.to_string(),
