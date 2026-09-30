@@ -350,7 +350,6 @@ impl SpHandler for Handler {
         Err(SpError::RequestUnsupportedForSp)
     }
 
-    /// If `target` is `None`, clear link events for all targets.
     fn clear_ignition_link_events(
         &mut self,
         target: Option<u8>,
