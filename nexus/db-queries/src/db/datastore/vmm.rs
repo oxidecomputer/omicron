@@ -6,6 +6,7 @@
 
 use super::DataStore;
 use crate::context::OpContext;
+use crate::db::datastore::SQL_BATCH_SIZE;
 use crate::db::model;
 use crate::db::model::Vmm;
 use crate::db::model::VmmState as DbVmmState;
@@ -172,37 +173,72 @@ impl DataStore {
     ) -> UpdateResult<usize> {
         use nexus_db_schema::schema::rendezvous_sled_bp_availability::dsl as rz_dsl;
 
-        let updated = diesel::update(dsl::vmm)
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::stop_for_update_disposition_generation.is_null())
-            .filter(dsl::state.eq_any(DbVmmState::SHOULD_STOP_FOR_EVACUATION))
-            .filter(
-                dsl::sled_id.eq_any(
-                    rz_dsl::rendezvous_sled_bp_availability
-                        .filter(
-                            rz_dsl::bp_availability
-                                .eq(model::DbSledBpAvailability::Unavailable),
-                        )
-                        .select(rz_dsl::sled_id),
-                ),
-            )
-            .set(
-                dsl::stop_for_update_disposition_generation.eq(
-                    rz_dsl::rendezvous_sled_bp_availability
-                        .filter(rz_dsl::sled_id.eq(dsl::sled_id))
-                        .filter(
-                            rz_dsl::bp_availability
-                                .eq(model::DbSledBpAvailability::Unavailable),
-                        )
-                        .select(rz_dsl::update_disposition_generation)
-                        .single_value(),
-                ),
-            )
-            .execute_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        let conn = self.pool_connection_authorized(opctx).await?;
 
-        Ok(updated)
+        // We loop until a batch marks nothing, so a backlog larger than one
+        // batch is drained in a single call. Each newly marked VMM's generation
+        // is no longer NULL, so it drops out of the next batch's filter.
+        let mut marked_total = 0;
+        loop {
+            // Diesel's ValidSubselect doesn't allow a subquery from the same
+            // table being updated, so we alias the `vmm` table for the subquery
+            let vmm_sub =
+                diesel::alias!(nexus_db_schema::schema::vmm as vmm_sub);
+
+            // Diesel (and CockroachDB) don't support LIMIT on an UPDATE, so we
+            // select a bounded batch of VMM ids and update those
+            let batch =
+                vmm_sub
+                    .filter(vmm_sub.field(vmm::time_deleted).is_null())
+                    .filter(
+                        vmm_sub
+                            .field(vmm::stop_for_update_disposition_generation)
+                            .is_null(),
+                    )
+                    .filter(
+                        vmm_sub
+                            .field(vmm::state)
+                            .eq_any(DbVmmState::SHOULD_STOP_FOR_EVACUATION),
+                    )
+                    .filter(
+                        vmm_sub.field(vmm::sled_id).eq_any(
+                            rz_dsl::rendezvous_sled_bp_availability
+                                .filter(rz_dsl::bp_availability.eq(
+                                    model::DbSledBpAvailability::Unavailable,
+                                ))
+                                .select(rz_dsl::sled_id),
+                        ),
+                    )
+                    .limit(i64::from(SQL_BATCH_SIZE.get()))
+                    .select(vmm_sub.field(vmm::id));
+
+            let marked =
+                diesel::update(dsl::vmm)
+                    .filter(dsl::id.eq_any(batch))
+                    .set(
+                        dsl::stop_for_update_disposition_generation.eq(
+                            rz_dsl::rendezvous_sled_bp_availability
+                                .filter(rz_dsl::sled_id.eq(dsl::sled_id))
+                                .filter(rz_dsl::bp_availability.eq(
+                                    model::DbSledBpAvailability::Unavailable,
+                                ))
+                                .select(rz_dsl::update_disposition_generation)
+                                .single_value(),
+                        ),
+                    )
+                    .execute_async(&*conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                    })?;
+
+            marked_total += marked;
+            if marked == 0 {
+                break;
+            }
+        }
+
+        Ok(marked_total)
     }
 
     pub async fn vmm_fetch(
