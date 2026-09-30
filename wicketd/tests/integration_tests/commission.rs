@@ -161,7 +161,7 @@ async fn test_commission_inventory() {
     );
     assert_eq!(
         refreshed.sps.len(),
-        5,
+        NSPS,
         "{NSPS} simulated SPs after forced refresh"
     );
     assert!(

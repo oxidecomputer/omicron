@@ -767,7 +767,7 @@ async fn test_mgs_metrics(
         // multiple readings of the same sensor kind with the same sensor name.
         // Oximeter will collapse these to a single timeseries with multiple
         // data points. So, to determine how many timeserieses to expect, we
-        // have to count the number of *unique component-id + sensor name pairs+
+        // have to count the number of *unique component-id + sensor name pairs*
         // for that sensor type, rather than just the total number of unique
         // sensors defined in the config. See also:
         // https://github.com/oxidecomputer/hubris/issues/2634
