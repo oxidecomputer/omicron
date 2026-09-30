@@ -553,13 +553,30 @@ fn smf_series(filename: &str) -> &str {
 pub enum ExtraLogDir {
     /// CockroachDB's own logs (`/data/logs` in a CockroachDB zone).
     ///
-    /// CockroachDB names its log files
-    /// `<prefix>.<host>.<user>.<timestamp>.<pid>.log`, one series per
-    /// `<prefix>`, which it constructs to never contain a `.` (see
-    /// `FileNamePattern` and `normalizeFileName` in CockroachDB's
-    /// `pkg/util/log`). It starts a new file on each rotation and on each
-    /// restart. (`<prefix>.log` is a symlink to the current file; it takes
-    /// its target's age rather than being part of a series.)
+    /// CockroachDB writes several logs here, each as a sequence of files that
+    /// it starts anew on each rotation and on each restart. For example (with
+    /// the host, `oxzcockroachdb<zone ID>`, abbreviated):
+    ///
+    /// ```text
+    /// cockroach.log                    (symlink to the current file)
+    /// cockroach.oxzcockroachdb….root.2026-09-28T20_25_39Z.016211.log
+    /// cockroach.oxzcockroachdb….root.2026-09-29T09_44_35Z.006190.log
+    /// cockroach-health.log             (symlink to the current file)
+    /// cockroach-health.oxzcockroachdb….root.2026-09-22T03_29_59Z.003419.log
+    /// cockroach-health.oxzcockroachdb….root.2026-09-22T03_44_19Z.015495.log
+    /// goroutine_dump/
+    /// ```
+    ///
+    /// Files are named `<prefix>.<...>.log`, one series per `<prefix>`
+    /// (`cockroach`, `cockroach-health`, ...). Only the prefix is relied on:
+    /// CockroachDB constructs it to never contain a `.`, and groups its own
+    /// files by it (see `FileNamePattern` and `normalizeFileName` in
+    /// CockroachDB's `pkg/util/log`). What comes between it and `.log`
+    /// (currently the host, user, timestamp, and pid) may change.
+    ///
+    /// `<prefix>.log` is a symlink to the current file; it takes its target's
+    /// age rather than being part of a series. Anything else, like the
+    /// `goroutine_dump` directory, is a series of its own.
     Cockroachdb,
     /// chrony's logs (`/var/log/chrony` in an NTP zone), reported under the
     /// `ntp` service.
@@ -599,18 +616,12 @@ impl ExtraLogDir {
     fn series(self, filename: &str) -> Option<&str> {
         match self {
             Self::Cockroachdb => {
-                let parts: Vec<&str> = filename.split('.').collect();
-                match parts.as_slice() {
-                    [prefix, host, user, timestamp, pid, "log"]
-                        if [prefix, host, user, timestamp, pid]
-                            .iter()
-                            .all(|part| !part.is_empty())
-                            && pid.bytes().all(|b| b.is_ascii_digit()) =>
-                    {
-                        Some(prefix)
-                    }
-                    _ => None,
-                }
+                // `<prefix>.<...>.log`. Requiring something between the prefix
+                // and `.log` excludes `<prefix>.log`, the current file's
+                // symlink.
+                let (prefix, rest) = filename.split_once('.')?;
+                let middle = rest.strip_suffix(".log")?;
+                (!prefix.is_empty() && !middle.is_empty()).then_some(prefix)
             }
             Self::Ntp => {
                 let name = filename.strip_suffix(".gz").unwrap_or(filename);
@@ -1137,15 +1148,23 @@ mod tests {
             )),
             Some("cockroach-health")
         );
+        // Only the prefix matters: what comes between it and `.log` may
+        // change in future versions of CockroachDB.
+        for filename in [
+            "cockroach.host.log",
+            "cockroach.host.root.2026-09-29T09_44_35Z.log",
+            "cockroach.host.root.2026-09-29T09_44_35Z.006190.extra.log",
+        ] {
+            assert_eq!(crdb.series(filename), Some("cockroach"), "{filename}");
+        }
         // The symlinks to the current files, directories, and anything else
         // that doesn't follow CockroachDB's naming are series of their own.
         for filename in [
             "cockroach.log",
             "cockroach-health.log",
             "goroutine_dump",
-            "bogus.log",
-            "cockroach.a.b.c.notapid.log",
-            "cockroach..root.2026-09-29T09_44_35Z.006190.log",
+            ".host.root.log",
+            "cockroach.host.root.txt",
         ] {
             assert_eq!(crdb.series(filename), None, "{filename}");
         }
