@@ -99,6 +99,7 @@ use nexus_types::internal_api::background::TufArtifactReplicationCounters;
 use nexus_types::internal_api::background::TufArtifactReplicationRequest;
 use nexus_types::internal_api::background::TufArtifactReplicationStatus;
 use nexus_types::internal_api::background::TufRepoPrunerStatus;
+use nexus_types::internal_api::background::VmmMarkStopForUpdateStatus;
 use nexus_types::internal_api::background::WebhookRxDeliveryStatus;
 use nexus_types::internal_api::background::fm_rendezvous;
 use omicron_uuid_kinds::BlueprintUuid;
@@ -1435,6 +1436,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         }
         "switch_port_config_manager" => {
             print_task_switch_port_settings_manager(details);
+        }
+        "vmm_mark_stop_for_update" => {
+            print_task_vmm_mark_stop_for_update(details);
         }
         _ => {
             println!(
@@ -2909,6 +2913,28 @@ fn print_task_audit_log_cleanup(details: &serde_json::Value) {
                 status.max_deleted_per_activation
             );
             if let Some(error) = &status.error {
+                println!("    {ERROR:<WIDTH$}{error}");
+            }
+        }
+    };
+}
+
+fn print_task_vmm_mark_stop_for_update(details: &serde_json::Value) {
+    match serde_json::from_value::<VmmMarkStopForUpdateStatus>(details.clone())
+    {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(status) => {
+            let VmmMarkStopForUpdateStatus { vmms_marked, error } = status;
+
+            const MARKED: &str = "VMMs marked to be stopped for an update:";
+            const ERROR: &str = "error:";
+            const WIDTH: usize = const_max_len(&[MARKED, ERROR]) + 1;
+
+            println!("    {MARKED:<WIDTH$}{}", vmms_marked);
+            if let Some(error) = &error {
                 println!("    {ERROR:<WIDTH$}{error}");
             }
         }

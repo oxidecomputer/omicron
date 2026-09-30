@@ -218,6 +218,9 @@ audit_log_cleanup.period_secs = 600
 audit_log_cleanup.retention_days = 90
 audit_log_cleanup.max_deleted_per_activation = 10000
 populate_switch_ports.period_secs = 30
+# This task reads from the blueprint rendezvous table directly, so it doesn't
+# need to run more often
+vmm_mark_stop_for_update.period_secs = 300
 
 [default_region_allocation_strategy]
 # allocate region on 3 random distinct zpools, on 3 random distinct sleds.
