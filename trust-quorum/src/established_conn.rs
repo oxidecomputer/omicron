@@ -31,9 +31,6 @@ const MAX_FRAME_SIZE: usize = CONN_BUF_SIZE - FRAME_HEADER_SIZE;
 /// The number of serialized messages to queue for writing before closing the
 /// socket.
 ///
-/// This means the remote side is very slow, and closing a socket is very
-/// reasonable since our message frequency is very low.
-///
 /// Because we flush after every message, a stalled socket backs up into this
 /// queue rather than being absorbed by rustls' internal buffer. At one ping
 /// per second, this keeps the tolerance for a stalled peer roughly in line with
@@ -107,19 +104,12 @@ pub struct EstablishedConn {
     // The current serialized message being written if there is one
     current_write: Cursor<Vec<u8>>,
 
-    // Bytes have been written to the TLS stream, but may not have reached the
-    // socket yet because they are stored in an encrypted TLS buffer inside
-    // rustls.
+    // Bytes may be buffered and not written onto the socket yet. Once we've
+    // written an entire message we want to ensure it's put on the wire.
     //
     // This lives here rather than inside the write future so that it survives
     // `select!` cancellation and the flush is never lost.
     needs_flush: bool,
-}
-
-/// What `write_or_flush` accomplished
-enum WriteProgress {
-    Wrote,
-    Flushed,
 }
 
 /// Make progress on the write side of the connection.
@@ -137,15 +127,22 @@ enum WriteProgress {
 async fn write_or_flush(
     writer: &mut WriteHalf<sprockets_tls::Stream<TcpStream>>,
     current_write: &mut Cursor<Vec<u8>>,
-    needs_flush: bool,
-) -> Result<WriteProgress, std::io::Error> {
+    needs_flush: &mut bool,
+) -> Result<(), std::io::Error> {
     if current_write.has_remaining() {
         writer.write_buf(current_write).await?;
-        Ok(WriteProgress::Wrote)
-    } else if needs_flush {
+        if !current_write.has_remaining() {
+            *needs_flush = true;
+            *current_write = Cursor::new(Vec::new());
+        }
+        Ok(())
+    } else if *needs_flush {
         writer.flush().await?;
-        Ok(WriteProgress::Flushed)
+        *needs_flush = false;
+        Ok(())
     } else {
+        // This method is one branch of a `select!` and we want to disable it if
+        // there is nothing to do.
         std::future::pending().await
     }
 }
@@ -216,9 +213,9 @@ impl EstablishedConn {
                 res = write_or_flush(
                     &mut self.writer,
                     &mut self.current_write,
-                    self.needs_flush,
+                    &mut self.needs_flush,
                 ) => {
-                    self.on_write_progress(res)
+                    res.map_err(ConnErr::FailedWrite)
                 }
             };
 
@@ -347,24 +344,6 @@ impl EstablishedConn {
                 }
             }
         }
-    }
-
-    fn on_write_progress(
-        &mut self,
-        res: Result<WriteProgress, std::io::Error>,
-    ) -> Result<(), ConnErr> {
-        match res.map_err(ConnErr::FailedWrite)? {
-            WriteProgress::Wrote => {
-                self.needs_flush = true;
-                if !self.current_write.has_remaining() {
-                    self.current_write = Cursor::new(Vec::new());
-                }
-            }
-            WriteProgress::Flushed => {
-                self.needs_flush = false;
-            }
-        }
-        Ok(())
     }
 
     fn on_msg_from_main(&mut self, msg: MainToConnMsg) -> Result<(), ConnErr> {
