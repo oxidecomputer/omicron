@@ -22,7 +22,8 @@ cockroachdb settings:
     version::::::::::::   (none)
     preserve downgrade:   (not set)
 planner config:
-    (no current planner configs)
+    disruption policy : terminate
+    sled update reboot policy: immediate (no evacuation)
 
 
 
@@ -83,7 +84,8 @@ cockroachdb settings:
     version::::::::::::   (none)
     preserve downgrade:   (not set)
 planner config:
-    (no current planner configs)
+    disruption policy : terminate
+    sled update reboot policy: immediate (no evacuation)
 
 
 
@@ -714,6 +716,7 @@ LEDGERED SLED CONFIG
         all datasets reconciled successfully
         all zones reconciled successfully
     reconciler task status: idle (finished at <REDACTED_TIMESTAMP> after running for <REDACTED_DURATION>s)
+    instance manager status: available (0 registered VMMs)
     reference measurements:
         (measurement set is empty)
     fmd:
@@ -912,6 +915,7 @@ LEDGERED SLED CONFIG
         all datasets reconciled successfully
         all zones reconciled successfully
     reconciler task status: idle (finished at <REDACTED_TIMESTAMP> after running for <REDACTED_DURATION>s)
+    instance manager status: available (0 registered VMMs)
     reference measurements:
         (measurement set is empty)
     fmd:
@@ -1110,6 +1114,7 @@ LEDGERED SLED CONFIG
         all datasets reconciled successfully
         all zones reconciled successfully
     reconciler task status: idle (finished at <REDACTED_TIMESTAMP> after running for <REDACTED_DURATION>s)
+    instance manager status: available (0 registered VMMs)
     reference measurements:
         (measurement set is empty)
     fmd:
@@ -1192,7 +1197,8 @@ cockroachdb settings:
     version::::::::::::   (none)
     preserve downgrade:   (not set)
 planner config:
-    (no current planner configs)
+    disruption policy : terminate
+    sled update reboot policy: immediate (no evacuation)
 
 
 
@@ -1219,7 +1225,8 @@ cockroachdb settings:
     version::::::::::::   (none)
     preserve downgrade:   (not set)
 planner config:
-    (no current planner configs)
+    disruption policy : terminate
+    sled update reboot policy: immediate (no evacuation)
 
 
 > load saved.out --collection-id 61f451b3-2121-4ed6-91c7-a550054f6c21
@@ -1283,7 +1290,8 @@ cockroachdb settings:
     version::::::::::::   (none)
     preserve downgrade:   (not set)
 planner config:
-    (no current planner configs)
+    disruption policy : terminate
+    sled update reboot policy: immediate (no evacuation)
 
 
 

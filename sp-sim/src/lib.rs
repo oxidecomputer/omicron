@@ -3,13 +3,17 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 pub mod config;
+mod device_descriptions;
 mod ereport;
 mod gimlet;
 mod helpers;
 mod sensors;
 mod server;
 mod sidecar;
+mod sp;
+mod task_dumps;
 mod update;
+mod vpd;
 
 pub use anyhow::Result;
 use async_trait::async_trait;
@@ -20,8 +24,8 @@ pub use gimlet::FAKE_GIMLET_MODEL;
 pub use gimlet::Gimlet;
 pub use gimlet::GimletPowerState;
 pub use gimlet::SIM_GIMLET_BOARD;
-pub use gimlet::SimSpHandledRequest;
 pub use server::logger;
+pub use sidecar::FAKE_SIDECAR_MODEL;
 pub use sidecar::SIM_SIDECAR_BOARD;
 pub use sidecar::Sidecar;
 pub use slog::Logger;
@@ -124,17 +128,6 @@ pub trait SimulatedSp {
         &self,
         restart: config::Ereport,
     ) -> gateway_ereport_messages::Ena;
-}
-
-// Helper function to pad a simulated serial number (stored as a `String`) to
-// the appropriate size for returning in the SpState message.
-fn serial_number_padded(serial_number: &str) -> [u8; 32] {
-    let mut padded = [0; 32];
-    padded
-        .get_mut(0..serial_number.len())
-        .expect("simulated serial number too long")
-        .copy_from_slice(serial_number.as_bytes());
-    padded
 }
 
 pub struct SimRack {

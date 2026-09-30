@@ -160,12 +160,6 @@ pub struct DbConfig {
     /// Interval on which to insert data into the database, regardless of the number of collected
     /// samples. Value is in seconds.
     pub batch_interval: u64,
-
-    // TODO (https://github.com/oxidecomputer/omicron/issues/4148): This field
-    // should be removed if single node functionality is removed.
-    /// Whether ClickHouse is running as a replicated cluster or
-    /// single-node server.
-    pub replicated: bool,
 }
 
 impl DbConfig {
@@ -177,16 +171,12 @@ impl DbConfig {
     /// ClickHouse.
     pub const DEFAULT_BATCH_INTERVAL: u64 = 5;
 
-    /// Default ClickHouse topology.
-    pub const DEFAULT_REPLICATED: bool = false;
-
     // Construct config with an address, using the defaults for other fields
     fn with_address(address: SocketAddr) -> Self {
         Self {
             address: Some(address),
             batch_size: Self::DEFAULT_BATCH_SIZE,
             batch_interval: Self::DEFAULT_BATCH_INTERVAL,
-            replicated: Self::DEFAULT_REPLICATED,
         }
     }
 }
@@ -343,7 +333,6 @@ impl Oximeter {
                     resolver,
                     cluster_resolver,
                     &log,
-                    config.db.replicated,
                 )
                 .await?,
             ))

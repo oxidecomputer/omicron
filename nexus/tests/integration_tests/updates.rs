@@ -1039,7 +1039,12 @@ async fn test_repo_list() -> Result<()> {
 async fn test_request_without_api_version(cptestctx: &ControlPlaneTestContext) {
     // We can't use cptestctx.external_client directly since it always sets the
     // header. Instead, construct a NexusRequest by hand.
-    let server_addr = cptestctx.server.get_http_server_external_address();
+    let server_addr = cptestctx
+        .server
+        .get_all_http_server_external_addresses()
+        .into_iter()
+        .next()
+        .expect("Should have >= 1 external API address");
     let test_cx =
         ClientTestContext::new(server_addr, cptestctx.logctx.log.clone());
 
@@ -1209,9 +1214,9 @@ async fn test_debug_files(cptestctx: &ControlPlaneTestContext) {
 
     // We need to wait until there's a new target blueprint.  As usual, we wait
     // for the thing we care about rather than waiting precisely for one more
-    // activation of the background task.  That's because there's other
-    // asynchrony involved here (e.g., the updated reconfigurator config needs
-    // to be loaded, too).
+    // activation of the background task.  Expunging the sled activates the
+    // planner, but there's also other asynchrony involved here (e.g., the
+    // updated reconfigurator config needs to be loaded, too).
     let bp4_id = wait_for_condition(
         || async {
             let target = datastore

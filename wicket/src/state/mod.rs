@@ -11,9 +11,7 @@ mod status;
 mod update;
 
 pub use force_update::ForceUpdateState;
-pub use inventory::{
-    ALL_COMPONENT_IDS, Component, ComponentId, Inventory, ParsableComponentId,
-};
+pub use inventory::{ALL_COMPONENT_IDS, Component, ComponentId, Inventory};
 pub use rack::{KnightRiderMode, RackState};
 pub use status::ServiceStatus;
 pub use update::{

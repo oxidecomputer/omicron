@@ -165,7 +165,11 @@ impl RunAllArgs {
         );
         println!(
             "omicron-dev: internal DNS:           {}",
-            cptestctx.internal_dns.dns_server.local_address()
+            cptestctx
+                .internal_dns
+                .dns_server
+                .sole_local_address()
+                .context("Expected exactly 1 internal DNS address")?,
         );
         println!(
             "omicron-dev: external DNS name:      {}",
@@ -175,17 +179,16 @@ impl RunAllArgs {
             "omicron-dev: external DNS HTTP:      http://{}",
             cptestctx.external_dns.dropshot_server.local_addr()
         );
-        println!(
-            "omicron-dev: external DNS:           {}",
-            cptestctx.external_dns.dns_server.local_address()
-        );
-        println!(
-            "omicron-dev:   e.g. `dig @{} -p {} {}.sys.{}`",
-            cptestctx.external_dns.dns_server.local_address().ip(),
-            cptestctx.external_dns.dns_server.local_address().port(),
-            cptestctx.silo_name,
-            cptestctx.external_dns_zone_name,
-        );
+        for addr in cptestctx.external_dns.dns_server.local_addresses() {
+            println!("omicron-dev: external DNS:           {}", addr,);
+            println!(
+                "omicron-dev:   e.g. `dig @{} -p {} {}.sys.{}`",
+                addr.ip(),
+                addr.port(),
+                cptestctx.silo_name,
+                cptestctx.external_dns_zone_name,
+            );
+        }
         for (switch_slot, gateway) in &cptestctx.gateway {
             println!(
                 "omicron-dev: management gateway:     {} ({:?})",
@@ -519,7 +522,11 @@ impl JborArgs {
             );
             println!(
                 "omicron-dev: internal DNS:           {}",
-                cptestctx.internal_dns.dns_server.local_address()
+                cptestctx
+                    .internal_dns
+                    .dns_server
+                    .sole_local_address()
+                    .context("Expected exactly 1 internal DNS address")?
             );
             println!(
                 "omicron-dev: external DNS name:      {}",
@@ -529,17 +536,16 @@ impl JborArgs {
                 "omicron-dev: external DNS HTTP:      http://{}",
                 cptestctx.external_dns.dropshot_server.local_addr()
             );
-            println!(
-                "omicron-dev: external DNS:           {}",
-                cptestctx.external_dns.dns_server.local_address()
-            );
-            println!(
-                "omicron-dev:   e.g. `dig @{} -p {} {}.sys.{}`",
-                cptestctx.external_dns.dns_server.local_address().ip(),
-                cptestctx.external_dns.dns_server.local_address().port(),
-                cptestctx.silo_name,
-                cptestctx.external_dns_zone_name,
-            );
+            for addr in cptestctx.external_dns.dns_server.local_addresses() {
+                println!("omicron-dev: external DNS:           {}", addr,);
+                println!(
+                    "omicron-dev:   e.g. `dig @{} -p {} {}.sys.{}`",
+                    addr.ip(),
+                    addr.port(),
+                    cptestctx.silo_name,
+                    cptestctx.external_dns_zone_name,
+                );
+            }
             for (location, gateway) in &cptestctx.gateway {
                 println!(
                     "omicron-dev: management gateway:     {} ({:?})",

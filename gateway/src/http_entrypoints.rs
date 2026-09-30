@@ -41,6 +41,7 @@ use gateway_types::component::SpComponentList;
 use gateway_types::component::SpIdentifier;
 use gateway_types::component::SpState;
 use gateway_types::component_details::SpComponentDetails;
+use gateway_types::component_vpd::ComponentVpd;
 use gateway_types::host::ComponentFirmwareHashStatus;
 use gateway_types::host::HostStartupOptions;
 use gateway_types::ignition::PathSpIgnitionCommand;
@@ -703,6 +704,33 @@ impl GatewayApi for GatewayImpl {
             })?;
 
             Ok(HttpResponseUpdatedNoContent {})
+        };
+        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
+    }
+
+    async fn sp_component_vpd_get(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<PathSpComponent>,
+    ) -> Result<HttpResponseOk<ComponentVpd>, HttpError> {
+        let apictx = rqctx.context();
+
+        let PathSpComponent { sp, component } = path.into_inner();
+        let sp_id = sp.into();
+        let handler = async {
+            let sp = apictx.mgmt_switch.sp(sp_id)?;
+            let component = component_from_str(&component)?;
+            let vpd = sp.component_vpd(component).await.map_err(|err| {
+                SpCommsError::SpCommunicationFailed { sp: sp_id, err }
+            })?;
+            let vpd = vpd.try_into().map_err(|err| {
+                http_err_with_message(
+                    dropshot::ErrorStatusCode::INTERNAL_SERVER_ERROR,
+                    "InvalidComponentVpd",
+                    format!("invalid VPD returned by SP: {err}"),
+                )
+            })?;
+
+            Ok(HttpResponseOk(vpd))
         };
         apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }

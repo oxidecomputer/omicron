@@ -546,6 +546,36 @@ async fn test_project_timeseries_query(
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].timeseries.len(), 0);
 
+    // Check that a string literal cannot inject SQL through either query
+    // endpoint. The response body can't tell us whether the injection worked:
+    // no real `state` value equals the payload string, so Rust-side filtering
+    // leaves zero timeseries in the response no matter what. Instead we look at
+    // the query summaries, which list each SQL query OxQL ran.
+    let body = timeseries::TimeseriesQuery {
+        query: format!(
+            r#"{q1} | filter state == "success') OR 1 = 1 OR equals(state, '""#,
+        ),
+        include_summaries: true,
+    };
+    for url in
+        ["/v1/timeseries/query?project=project1", "/v1/system/timeseries/query"]
+    {
+        let request = RequestBuilder::new(client, Method::POST, url)
+            .body(Some(&body))
+            .expect_status(Some(StatusCode::OK));
+        let result = NexusRequest::new(request)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute_and_parse_unwrap::<oxql::OxqlQueryResult>()
+            .await;
+        assert_eq!(result.tables.len(), 1);
+        assert_eq!(result.tables[0].timeseries.len(), 0);
+        // OxQL first queries the fields tables for matching timeseries and
+        // only runs a second query for measurements if any matched. Exactly
+        // one summary means the SQL matched nothing. Two would mean the
+        // injected `OR 1 = 1` took effect.
+        assert_eq!(result.query_summaries.unwrap().len(), 1);
+    }
+
     // now let's test it with group_by
     let q4 = &format!(
         "{} | align mean_within(1m) | group_by [instance_id], sum",

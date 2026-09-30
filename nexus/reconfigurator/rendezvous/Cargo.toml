@@ -19,6 +19,7 @@ omicron-uuid-kinds.workspace = true
 serde.workspace = true
 sled-agent-types.workspace = true
 slog.workspace = true
+slog-error-chain.workspace = true
 
 # See omicron-rpaths for more about the "pq-sys" dependency.  This is needed
 # because we use the database in the test suite, though it doesn't appear to
