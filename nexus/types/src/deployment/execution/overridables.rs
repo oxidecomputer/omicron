@@ -6,7 +6,6 @@ use internal_dns_types::config::HostSwitchZonePorts;
 use omicron_common::address::DDMD_PORT;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::LLDP_PORT;
 use omicron_common::address::MGD_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::address::SLED_PREFIX_LENGTH;
@@ -36,8 +35,6 @@ pub struct Overridables {
     pub ddm_ports: BTreeMap<SledUuid, u16>,
     /// map: sled id -> IP address of the sled's switch zone
     pub switch_zone_ips: BTreeMap<SledUuid, Ipv6Addr>,
-    /// map: sled id -> TCP port on which that sled's LLDP is listening
-    pub lldpd_ports: BTreeMap<SledUuid, u16>,
 }
 
 pub static DEFAULT: LazyLock<Overridables> =
@@ -72,16 +69,6 @@ impl Overridables {
     /// Returns the TCP port on which this sled's MGD is listening
     pub fn mgd_port(&self, sled_id: SledUuid) -> u16 {
         self.mgd_ports.get(&sled_id).copied().unwrap_or(MGD_PORT)
-    }
-
-    /// Specify the TCP port on which this sled's LLDP is listening
-    pub fn override_lldpd_port(&mut self, sled_id: SledUuid, port: u16) {
-        self.lldpd_ports.insert(sled_id, port);
-    }
-
-    /// Returns the TCP port on which this sled's LLDP is listening
-    pub fn lldpd_port(&self, sled_id: SledUuid) -> u16 {
-        self.lldpd_ports.get(&sled_id).copied().unwrap_or(LLDP_PORT)
     }
 
     /// Specify the TCP port on which this sled's DDM is listening
