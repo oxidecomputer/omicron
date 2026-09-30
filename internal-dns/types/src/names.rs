@@ -71,9 +71,6 @@ pub enum ServiceName {
     Dendrite,
     CruciblePantry,
     SledAgent(SledUuid),
-    /// Sled Agent that is managing a sled connected to a switch. Used for
-    /// identifying which sled-agents should receive bootstore updates from
-    /// Nexus.
     SwitchSledAgent,
     Crucible(OmicronZoneUuid),
     BoundaryNtp,
