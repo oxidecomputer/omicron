@@ -191,7 +191,7 @@ impl EstablishedConn {
             // outgoing messages would starve the flush indefinitely.
             //
             // That may not matter because rustls internally flushes if a new
-            // write comes in  while data is sitting in an internal buffer.
+            // write comes in while data is sitting in an internal buffer.
             // However, we want to protect against unexpected changes in rustls
             // and make any queuing visible to the application code in this
             // file.
