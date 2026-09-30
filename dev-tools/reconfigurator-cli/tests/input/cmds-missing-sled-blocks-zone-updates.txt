@@ -42,7 +42,7 @@ sled-set serial1 omicron-config latest
 inventory-generate
 
 # Set the planner config to perform sled evacuation.
-set planner-config --sled-reboot-policy evacuate
+set planner-config --sled-update-reboot-policy evacuate
 
 # Setup is now done -- create another TUF repository which will act as the
 # target release being updated to.

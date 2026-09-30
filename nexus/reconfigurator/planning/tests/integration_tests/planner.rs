@@ -39,9 +39,9 @@ use nexus_types::deployment::OmicronZoneExternalSnatIpv6;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::PlannerConfig;
-use nexus_types::deployment::PlannerSledRebootPolicy;
 use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
 use nexus_types::deployment::SledDisk;
+use nexus_types::deployment::SledUpdateRebootPolicy;
 use nexus_types::deployment::TargetReleaseDescription;
 use nexus_types::deployment::ZoneRunningStatus;
 use nexus_types::deployment::blueprint_zone_type;
@@ -5534,7 +5534,7 @@ fn test_zone_update_ordering_respects_dependency_dag() {
     // Ensure the simulator is set to evacuate sleds.
     sim.change_description("set planner config to evacuate sleds", |desc| {
         desc.set_planner_config(PlannerConfig {
-            sled_reboot_policy: PlannerSledRebootPolicy::Evacuate,
+            sled_update_reboot_policy: SledUpdateRebootPolicy::Evacuate,
             disruption_policy: ReconfiguratorDisruptionPolicy::default(),
         });
         Ok(())

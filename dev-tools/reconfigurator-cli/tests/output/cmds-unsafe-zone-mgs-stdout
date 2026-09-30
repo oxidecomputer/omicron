@@ -1197,10 +1197,10 @@ INTERNAL DNS STATUS
 
 
 > # Set the planner config to perform sled evacuation.
-> set planner-config --sled-reboot-policy evacuate
+> set planner-config --sled-update-reboot-policy evacuate
 planner config updated:
-    disruption policy::   terminate (unchanged)
-*   sled reboot policy:   immediate (no evacuation) -> evacuate
+    disruption policy:::::::::   terminate (unchanged)
+*   sled update reboot policy:   immediate (no evacuation) -> evacuate
 
 
 
@@ -1505,7 +1505,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * zone updates waiting on reference measurement changes
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
@@ -1957,7 +1957,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 pending MGS update:
   * 913-0000019:serial0: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
@@ -2020,7 +2020,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 pending MGS update:
   * 913-0000019:serial0: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
@@ -2092,7 +2092,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 pending MGS update:
   * 913-0000019:serial0: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
@@ -2175,7 +2175,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 blocked MGS update:
   * 913-0000019:serial0: failed to plan an SP update: sled contains zones that are unsafe to shut down: "427ec88f-f467-42fa-9bbb-66a91a36103c: only 2/2 internal DNS zones are synchronized; require at least 3"
@@ -2334,7 +2334,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 pending MGS update:
   * 913-0000019:serial1: Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion })
@@ -2528,7 +2528,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 2 blocked MGS updates:
   * 913-0000019:serial0: failed to plan a Host OS update: sled contains zones that are unsafe to shut down: "427ec88f-f467-42fa-9bbb-66a91a36103c: only 2/3 internal DNS zones are synchronized; require at least 3"

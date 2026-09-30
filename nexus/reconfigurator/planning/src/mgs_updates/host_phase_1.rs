@@ -506,8 +506,8 @@ mod tests {
     use nexus_types::deployment::PendingMgsUpdateHostPhase1Details;
     use nexus_types::deployment::PendingMgsUpdates;
     use nexus_types::deployment::PlannerConfig;
-    use nexus_types::deployment::PlannerSledRebootPolicy;
     use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
+    use nexus_types::deployment::SledUpdateRebootPolicy;
     use nexus_types::deployment::TargetReleaseDescription;
     use nexus_types::inventory::SpType;
     use omicron_generation_kinds::SledConfigGeneration;
@@ -531,7 +531,7 @@ mod tests {
             SledConfigGeneration::new(),
         )]);
         let planner_config = PlannerConfig {
-            sled_reboot_policy: PlannerSledRebootPolicy::Evacuate,
+            sled_update_reboot_policy: SledUpdateRebootPolicy::Evacuate,
             disruption_policy: ReconfiguratorDisruptionPolicy::default(),
         };
 

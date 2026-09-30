@@ -1318,10 +1318,10 @@ eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51 0       <REDACTED_TIMESTAMP>
 
 
 > # Set the planner config to perform sled evacuation.
-> set planner-config --sled-reboot-policy evacuate
+> set planner-config --sled-update-reboot-policy evacuate
 planner config updated:
-    disruption policy::   terminate (unchanged)
-*   sled reboot policy:   immediate (no evacuation) -> evacuate
+    disruption policy:::::::::   terminate (unchanged)
+*   sled update reboot policy:   immediate (no evacuation) -> evacuate
 
 
 
@@ -1341,7 +1341,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * zone updates waiting on reference measurement changes
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
@@ -1641,7 +1641,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 pending MGS update:
   * 913-0000019:serial0: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
@@ -1706,7 +1706,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 pending MGS update:
   * 913-0000019:serial0: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
@@ -1773,7 +1773,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 pending MGS update:
   * 913-0000019:serial0: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
@@ -1850,7 +1850,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 sled changed update disposition:
   * 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: evacuating (terminate)
@@ -1990,7 +1990,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 blocked MGS update:
   * 913-0000019:serial0: cannot update SP until sled is evacuated: waiting for ledgered sled config generation to be 5 (currently 4)
@@ -2059,7 +2059,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 blocked MGS update:
   * 913-0000019:serial0: cannot update SP until sled is evacuated: instance manager still has 5 registered VMMs
@@ -2123,7 +2123,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 pending MGS update:
   * 913-0000019:serial0: Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion })
@@ -2200,7 +2200,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 pending MGS update:
   * 913-0000019:serial0: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash(HexArray(0101010101010101010101010101010101010101010101010101010101010101)), expected_active_phase_2_hash: ArtifactHash(HexArray(0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a)), expected_inactive_phase_1_hash: ArtifactHash(HexArray(0202020202020202020202020202020202020202020202020202020202020202)), expected_inactive_phase_2_hash: ArtifactHash(HexArray(c2a8af75d6907ef138d033dc3be1fcbf7d7a78a87aee04796caf283a6bb0952d)), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
@@ -2340,7 +2340,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 pending MGS update:
   * 913-0000019:serial0: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash(HexArray(0101010101010101010101010101010101010101010101010101010101010101)), expected_active_phase_2_hash: ArtifactHash(HexArray(0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a)), expected_inactive_phase_1_hash: ArtifactHash(HexArray(0202020202020202020202020202020202020202020202020202020202020202)), expected_inactive_phase_2_hash: ArtifactHash(HexArray(c2a8af75d6907ef138d033dc3be1fcbf7d7a78a87aee04796caf283a6bb0952d)), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
@@ -2405,7 +2405,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 pending MGS update:
   * 913-0000019:serial0: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash(HexArray(0101010101010101010101010101010101010101010101010101010101010101)), expected_active_phase_2_hash: ArtifactHash(HexArray(0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a)), expected_inactive_phase_1_hash: ArtifactHash(HexArray(0202020202020202020202020202020202020202020202020202020202020202)), expected_inactive_phase_2_hash: ArtifactHash(HexArray(c2a8af75d6907ef138d033dc3be1fcbf7d7a78a87aee04796caf283a6bb0952d)), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
@@ -2469,7 +2469,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 pending MGS update:
   * 913-0000019:serial0: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash(HexArray(0101010101010101010101010101010101010101010101010101010101010101)), expected_active_phase_2_hash: ArtifactHash(HexArray(0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a)), expected_inactive_phase_1_hash: ArtifactHash(HexArray(0202020202020202020202020202020202020202020202020202020202020202)), expected_inactive_phase_2_hash: ArtifactHash(HexArray(c2a8af75d6907ef138d033dc3be1fcbf7d7a78a87aee04796caf283a6bb0952d)), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
@@ -2536,7 +2536,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 pending MGS update:
   * 913-0000019:serial1: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
@@ -2699,7 +2699,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 pending MGS update:
   * 913-0000019:serial1: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: Version(ArtifactVersion("0.5.0")) })
@@ -2772,7 +2772,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 pending MGS update:
   * 913-0000019:serial1: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
@@ -2849,7 +2849,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 pending MGS update:
   * 913-0000019:serial1: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: Version(ArtifactVersion("0.5.0")), expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
@@ -2923,7 +2923,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 sled changed update disposition:
   * 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: evacuating (terminate)
@@ -3072,7 +3072,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 pending MGS update:
   * 913-0000019:serial1: Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion })
@@ -3147,7 +3147,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 pending MGS update:
   * 913-0000019:serial1: Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: Version(ArtifactVersion("0.5.0")) })
@@ -3221,7 +3221,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 pending MGS update:
   * 913-0000019:serial1: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash(HexArray(0101010101010101010101010101010101010101010101010101010101010101)), expected_active_phase_2_hash: ArtifactHash(HexArray(0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a)), expected_inactive_phase_1_hash: ArtifactHash(HexArray(0202020202020202020202020202020202020202020202020202020202020202)), expected_inactive_phase_2_hash: ArtifactHash(HexArray(c2a8af75d6907ef138d033dc3be1fcbf7d7a78a87aee04796caf283a6bb0952d)), sled_agent_address: [fd00:1122:3344:102::1]:12345 })
@@ -3380,7 +3380,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 pending MGS update:
   * 913-0000019:serial1: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash(HexArray(0101010101010101010101010101010101010101010101010101010101010101)), expected_active_phase_2_hash: ArtifactHash(HexArray(0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a)), expected_inactive_phase_1_hash: ArtifactHash(HexArray(ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff)), expected_inactive_phase_2_hash: ArtifactHash(HexArray(c2a8af75d6907ef138d033dc3be1fcbf7d7a78a87aee04796caf283a6bb0952d)), sled_agent_address: [fd00:1122:3344:102::1]:12345 })
@@ -3459,7 +3459,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 pending MGS update:
   * 913-0000019:serial2: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
@@ -3619,7 +3619,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 pending MGS update:
   * 913-0000019:serial2: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
@@ -3695,7 +3695,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 pending MGS update:
   * 913-0000019:serial2: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: Version(ArtifactVersion("1.0.0")), expected_persistent_boot_preference: B, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
@@ -3773,7 +3773,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 pending MGS update:
   * 913-0000019:serial2: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: B, version: ArtifactVersion("1.1.0") }, expected_inactive_version: Version(ArtifactVersion("0.0.2")), expected_persistent_boot_preference: B, expected_pending_persistent_boot_preference: Some(B), expected_transient_boot_preference: None })
@@ -3848,7 +3848,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 pending MGS update:
   * 913-0000019:serial2: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: B, version: ArtifactVersion("1.1.0") }, expected_inactive_version: Version(ArtifactVersion("0.0.2")), expected_persistent_boot_preference: B, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: Some(B) })
@@ -3921,7 +3921,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 sled changed update disposition:
   * d81c6a84-79b8-4958-ae41-ea46c9b19763: evacuating (terminate)
@@ -4066,7 +4066,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 pending MGS update:
   * 913-0000019:serial2: Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion })
@@ -4137,7 +4137,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 pending MGS update:
   * 913-0000019:serial2: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash(HexArray(0101010101010101010101010101010101010101010101010101010101010101)), expected_active_phase_2_hash: ArtifactHash(HexArray(0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a)), expected_inactive_phase_1_hash: ArtifactHash(HexArray(0202020202020202020202020202020202020202020202020202020202020202)), expected_inactive_phase_2_hash: ArtifactHash(HexArray(c2a8af75d6907ef138d033dc3be1fcbf7d7a78a87aee04796caf283a6bb0952d)), sled_agent_address: [fd00:1122:3344:103::1]:12345 })
@@ -4291,7 +4291,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 sled changed update disposition:
   * d81c6a84-79b8-4958-ae41-ea46c9b19763: available
@@ -4440,7 +4440,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 out-of-date zone updated in-place:
   * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone 353b3b65-20f7-48c3-88f7-495bd5d31545 (clickhouse)
@@ -4582,7 +4582,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 out-of-date zone expunged:
   * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone 62620961-fc4a-481e-968b-f5acbac0dc63 (internal_ntp)
@@ -4738,7 +4738,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * waiting for NTP zones to appear in inventory on sleds: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 * sleds getting NTP zones and which have other services already, making them eligible for discretionary zones: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
@@ -4889,7 +4889,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 out-of-date zone expunged:
   * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone 6c3ae381-04f7-41ea-b0ac-74db387dbc3a (external_dns)
@@ -5055,7 +5055,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * discretionary zones placed:
   * external_dns zone on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c from source artifact: version 1.0.0
@@ -5222,7 +5222,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 out-of-date zone updated in-place:
   * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone 86a22a56-0168-453d-9df1-cb2a7c64b5d3 (crucible)
@@ -5367,7 +5367,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 out-of-date zone expunged:
   * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone 99e2f30b-3174-40bf-a78a-90da8abba8ca (internal_dns)
@@ -5536,7 +5536,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * discretionary zones placed:
   * internal_dns zone on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c from source artifact: version 1.0.0
@@ -5706,7 +5706,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 out-of-date zone expunged:
   * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone ad6a3a03-8d0f-4504-99a4-cbf73d69b973 (crucible_pantry)
@@ -5863,7 +5863,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * discretionary zones placed:
   * crucible_pantry zone on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c from source artifact: version 1.0.0
@@ -6021,7 +6021,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 out-of-date zone updated in-place:
   * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone bd354eef-d8a6-4165-9124-283fb5e46d77 (crucible)
@@ -6171,7 +6171,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 out-of-date zone updated in-place:
   * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone e2fdefe7-95b2-4fd2-ae37-56929a06d58c (crucible)
@@ -6324,7 +6324,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 out-of-date zone updated in-place:
   * sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, zone 058fd5f9-60a8-4e11-9302-15172782e17d (crucible)
@@ -6462,7 +6462,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 out-of-date zone expunged:
   * sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, zone 427ec88f-f467-42fa-9bbb-66a91a36103c (internal_dns)
@@ -6620,7 +6620,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * discretionary zones placed:
   * internal_dns zone on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 from source artifact: version 1.0.0
@@ -6779,7 +6779,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 out-of-date zone updated in-place:
   * sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, zone 5199c033-4cf9-4ab6-8ae7-566bd7606363 (crucible)
@@ -6919,7 +6919,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 out-of-date zone expunged:
   * sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, zone 6444f8a5-6465-4f0b-a549-1993c113569c (internal_ntp)
@@ -7069,7 +7069,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * waiting for NTP zones to appear in inventory on sleds: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 * sleds getting NTP zones and which have other services already, making them eligible for discretionary zones: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
@@ -7220,7 +7220,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 out-of-date zone expunged:
   * sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, zone 803bfb63-c246-41db-b0da-d3b87ddfc63d (external_dns)
@@ -7383,7 +7383,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * discretionary zones placed:
   * external_dns zone on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 from source artifact: version 1.0.0
@@ -7547,7 +7547,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 out-of-date zone expunged:
   * sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, zone ba4994a8-23f9-4b1a-a84f-a08d74591389 (crucible_pantry)
@@ -7701,7 +7701,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * discretionary zones placed:
   * crucible_pantry zone on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 from source artifact: version 1.0.0
@@ -7856,7 +7856,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 out-of-date zone updated in-place:
   * sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, zone dfac80b4-a887-430a-ae87-a4e065dba787 (crucible)
@@ -8006,7 +8006,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 out-of-date zone updated in-place:
   * sled d81c6a84-79b8-4958-ae41-ea46c9b19763, zone 694bd14f-cb24-4be4-bb19-876e79cda2c8 (crucible)
@@ -8144,7 +8144,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 out-of-date zone expunged:
   * sled d81c6a84-79b8-4958-ae41-ea46c9b19763, zone 75b220ba-a0f4-4872-8202-dc7c87f062d0 (crucible_pantry)
@@ -8290,7 +8290,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * discretionary zones placed:
   * crucible_pantry zone on sled d81c6a84-79b8-4958-ae41-ea46c9b19763 from source artifact: version 1.0.0
@@ -8437,7 +8437,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 out-of-date zone updated in-place:
   * sled d81c6a84-79b8-4958-ae41-ea46c9b19763, zone 7c252b64-c5af-4ec1-989e-9a03f3b0f111 (crucible)
@@ -8576,7 +8576,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 out-of-date zone expunged:
   * sled d81c6a84-79b8-4958-ae41-ea46c9b19763, zone ea5b4030-b52f-44b2-8d70-45f15f987d01 (internal_dns)
@@ -8733,7 +8733,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * discretionary zones placed:
   * internal_dns zone on sled d81c6a84-79b8-4958-ae41-ea46c9b19763 from source artifact: version 1.0.0
@@ -8891,7 +8891,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 out-of-date zone expunged:
   * sled d81c6a84-79b8-4958-ae41-ea46c9b19763, zone f10a4fb9-759f-4a65-b25e-5794ad2d07d8 (internal_ntp)
@@ -9043,7 +9043,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * waiting for NTP zones to appear in inventory on sleds: d81c6a84-79b8-4958-ae41-ea46c9b19763
 * sleds getting NTP zones and which have other services already, making them eligible for discretionary zones: d81c6a84-79b8-4958-ae41-ea46c9b19763
@@ -9196,7 +9196,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 out-of-date zone updated in-place:
   * sled d81c6a84-79b8-4958-ae41-ea46c9b19763, zone f55647d4-5500-4ad3-893a-df45bd50d622 (crucible)
@@ -9340,7 +9340,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 out-of-date zone expunged:
   * sled d81c6a84-79b8-4958-ae41-ea46c9b19763, zone f6ec9c67-946a-4da3-98d5-581f72ce8bf0 (external_dns)
@@ -9502,7 +9502,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * discretionary zones placed:
   * external_dns zone on sled d81c6a84-79b8-4958-ae41-ea46c9b19763 from source artifact: version 1.0.0
@@ -9668,7 +9668,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * discretionary zones placed:
   * nexus zone on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c from source artifact: version 1.0.0
@@ -10004,7 +10004,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 3 remaining out-of-date zones
 * 3 zones waiting to be expunged:
@@ -10096,7 +10096,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 3 remaining out-of-date zones
 * 3 zones waiting to be expunged:
@@ -10157,7 +10157,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * discretionary zones placed:
   * nexus zone on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 from source artifact: version 0.0.1
@@ -10312,7 +10312,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 out-of-date zone expunged:
   * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone 466a9f29-62bf-4e63-924a-b9efdb86afec (nexus)
@@ -10547,7 +10547,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 out-of-date zone expunged:
   * sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, zone e71e19bb-c952-489e-b684-97f5c255bd63 (nexus)
@@ -10689,7 +10689,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 out-of-date zone expunged:
   * sled d81c6a84-79b8-4958-ae41-ea46c9b19763, zone 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6 (nexus)

@@ -26,7 +26,7 @@ use nexus_types::deployment::PendingMgsUpdateRotDetails;
 use nexus_types::deployment::PendingMgsUpdateSpDetails;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::PlannerConfig;
-use nexus_types::deployment::PlannerSledRebootPolicy;
+use nexus_types::deployment::SledUpdateRebootPolicy;
 use nexus_types::deployment::TargetReleaseDescription;
 use nexus_types::deployment::planning_report::BlockedMgsUpdate;
 use nexus_types::deployment::planning_report::FailedMgsUpdateReason;
@@ -373,7 +373,7 @@ impl<'a> MgsUpdatePlanner<'a> {
                 current_artifacts,
                 zone_safety_checks,
                 evacuating_sleds,
-                planner_config.sled_reboot_policy,
+                planner_config.sled_update_reboot_policy,
             ) {
                 TryMakeUpdateResult::Update(update, mut host_phase_2) => {
                     info!(log, "configuring MGS-driven update"; &update);
@@ -763,7 +763,7 @@ fn try_make_update(
     current_artifacts: &TufRepoDescription,
     zone_safety_checks: &ZoneSafetyChecks,
     evacuating_sleds: &EvacuatingSleds,
-    sled_reboot_policy: PlannerSledRebootPolicy,
+    sled_update_reboot_policy: SledUpdateRebootPolicy,
 ) -> TryMakeUpdateResult {
     // We try MGS-driven update components in a hardcoded priority order until
     // any of them returns `Some`.  The order is described in RFD 565 section
@@ -828,7 +828,7 @@ fn try_make_update(
                     component,
                     inventory,
                     evacuating_sleds,
-                    sled_reboot_policy,
+                    sled_update_reboot_policy,
                     update,
                     pending_host_os_phase2_changes,
                 );
@@ -864,7 +864,7 @@ fn schedule_update_if_allowed_by_reboot_policy(
     component: MgsUpdateComponent,
     inventory: &Collection,
     evacuating_sleds: &EvacuatingSleds,
-    sled_reboot_policy: PlannerSledRebootPolicy,
+    sled_update_reboot_policy: SledUpdateRebootPolicy,
     update: PendingMgsUpdate,
     host_phase2: PendingHostPhase2Changes,
 ) -> TryMakeUpdateResult {
@@ -883,11 +883,11 @@ fn schedule_update_if_allowed_by_reboot_policy(
 
     // If our policy is "update immediately", just return the update. Otherwise,
     // fall through to the remaining checks.
-    match sled_reboot_policy {
-        PlannerSledRebootPolicy::ImmediateNoEvacuation => {
+    match sled_update_reboot_policy {
+        SledUpdateRebootPolicy::ImmediateNoEvacuation => {
             return TryMakeUpdateResult::Update(update, host_phase2);
         }
-        PlannerSledRebootPolicy::Evacuate => (),
+        SledUpdateRebootPolicy::Evacuate => (),
     }
 
     // We now know that:
@@ -954,8 +954,8 @@ mod test {
     use nexus_types::deployment::PendingMgsUpdateSpDetails;
     use nexus_types::deployment::PendingMgsUpdates;
     use nexus_types::deployment::PlannerConfig;
-    use nexus_types::deployment::PlannerSledRebootPolicy;
     use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
+    use nexus_types::deployment::SledUpdateRebootPolicy;
     use nexus_types::deployment::TargetReleaseDescription;
     use nexus_types::deployment::planning_report::BlockedMgsUpdate;
     use nexus_types::deployment::planning_report::FailedHostOsUpdateReason;
@@ -1378,7 +1378,7 @@ mod test {
         let nmax_updates = 1;
         let impossible_update_policy = ImpossibleUpdatePolicy::Reevaluate;
         let planner_config = PlannerConfig {
-            sled_reboot_policy: PlannerSledRebootPolicy::Evacuate,
+            sled_update_reboot_policy: SledUpdateRebootPolicy::Evacuate,
             disruption_policy: ReconfiguratorDisruptionPolicy::MigrateOnly,
         };
 
@@ -1763,7 +1763,7 @@ mod test {
         let all_sleds_evacuating = test_boards.all_sleds_evacuating();
         let impossible_update_policy = ImpossibleUpdatePolicy::Reevaluate;
         let planner_config = PlannerConfig {
-            sled_reboot_policy: PlannerSledRebootPolicy::Evacuate,
+            sled_update_reboot_policy: SledUpdateRebootPolicy::Evacuate,
             disruption_policy: ReconfiguratorDisruptionPolicy::default(),
         };
 
@@ -2200,7 +2200,7 @@ mod test {
         let repo = test_boards.tuf_repo();
         let sled_0_id = test_boards.sled_id(0).expect("have sled 0");
         let planner_config = PlannerConfig {
-            sled_reboot_policy: PlannerSledRebootPolicy::Evacuate,
+            sled_update_reboot_policy: SledUpdateRebootPolicy::Evacuate,
             disruption_policy: ReconfiguratorDisruptionPolicy::default(),
         };
 
@@ -2289,7 +2289,7 @@ mod test {
         let sled_0_id = test_boards.sled_id(0).expect("have sled 0");
         let sled_1_id = test_boards.sled_id(1).expect("have sled 1");
         let planner_config = PlannerConfig {
-            sled_reboot_policy: PlannerSledRebootPolicy::Evacuate,
+            sled_update_reboot_policy: SledUpdateRebootPolicy::Evacuate,
             disruption_policy: ReconfiguratorDisruptionPolicy::default(),
         };
 
@@ -2365,7 +2365,7 @@ mod test {
         let sled_0_serial =
             test_boards.sled_serial_number(sled_0_id).expect("have sled 0");
         let planner_config = PlannerConfig {
-            sled_reboot_policy: PlannerSledRebootPolicy::Evacuate,
+            sled_update_reboot_policy: SledUpdateRebootPolicy::Evacuate,
             disruption_policy: ReconfiguratorDisruptionPolicy::default(),
         };
 
@@ -2468,7 +2468,7 @@ mod test {
             SledConfigGeneration::new(),
         )]);
         let planner_config = PlannerConfig {
-            sled_reboot_policy: PlannerSledRebootPolicy::Evacuate,
+            sled_update_reboot_policy: SledUpdateRebootPolicy::Evacuate,
             disruption_policy: ReconfiguratorDisruptionPolicy::default(),
         };
 

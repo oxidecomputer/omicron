@@ -355,10 +355,10 @@ generated inventory collection b1bda47d-2c19-4fba-96e3-d9df28db7436 from configu
 
 
 > # Set the planner config to perform sled evacuation.
-> set planner-config --sled-reboot-policy evacuate
+> set planner-config --sled-update-reboot-policy evacuate
 planner config updated:
-    disruption policy::   terminate (unchanged)
-*   sled reboot policy:   immediate (no evacuation) -> evacuate
+    disruption policy:::::::::   terminate (unchanged)
+*   sled update reboot policy:   immediate (no evacuation) -> evacuate
 
 
 
@@ -386,7 +386,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * zone updates waiting on reference measurement changes
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
@@ -616,7 +616,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 pending MGS update:
   * 913-0000019:serial0: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
@@ -686,7 +686,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 pending MGS update:
   * 913-0000019:serial0: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
@@ -755,7 +755,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 sled changed update disposition:
   * 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: evacuating (terminate)
@@ -900,7 +900,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 pending MGS update:
   * 913-0000019:serial0: Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion })
@@ -968,7 +968,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * 1 pending MGS update:
   * 913-0000019:serial0: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash(HexArray(0101010101010101010101010101010101010101010101010101010101010101)), expected_active_phase_2_hash: ArtifactHash(HexArray(0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a)), expected_inactive_phase_1_hash: ArtifactHash(HexArray(0202020202020202020202020202020202020202020202020202020202020202)), expected_inactive_phase_2_hash: ArtifactHash(HexArray(c2a8af75d6907ef138d033dc3be1fcbf7d7a78a87aee04796caf283a6bb0952d)), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
@@ -1134,7 +1134,7 @@ blueprint source: planner with report:
 planning report:
 planner config:
     disruption policy : terminate
-    sled reboot policy: evacuate
+    sled update reboot policy: evacuate
 
 * waiting for NTP zones to appear in inventory on sleds: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 * zone updates waiting on reference measurement changes
