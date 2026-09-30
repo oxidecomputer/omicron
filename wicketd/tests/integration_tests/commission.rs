@@ -160,7 +160,7 @@ async fn test_commission_inventory() {
         "{n_sps} simulated SPs after forced refresh"
     );
     assert!(
-        refreshed.transceivers.is_empty(),'d
+        refreshed.transceivers.is_empty(),
         "the test harness has no switch transceiver interface, so the \
          transceiver inventory is never read: {:?}",
         refreshed.transceivers,
