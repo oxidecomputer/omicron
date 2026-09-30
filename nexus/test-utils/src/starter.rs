@@ -190,7 +190,6 @@ pub struct ControlPlaneStarter<'a, N: NexusServer> {
     pub mgd_bgp_loopback:
         Option<Arc<Mutex<loopback_ip_mgr::LoopbackIpManager>>>,
     pub mgd_bgp_addrs: BTreeMap<SwitchSlot, Ipv4Addr>,
-    scrimlet_sled_ids: BTreeSet<SledUuid>,
 
     debug_dropbox_dir: TestTempDir,
 }
@@ -248,7 +247,6 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             )),
             mgd_bgp_loopback: None,
             mgd_bgp_addrs: BTreeMap::new(),
-            scrimlet_sled_ids: BTreeSet::new(),
             debug_dropbox_dir,
         }
     }
@@ -567,8 +565,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                     ddm: self.ddm.get(&switch_slot).unwrap().port,
                 },
             )
-            .unwrap();
-        self.scrimlet_sled_ids.insert(sled_id);
+            .unwrap()
     }
 
     pub async fn start_oximeter(&mut self) {
@@ -981,7 +978,6 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         let nexus_address =
             self.nexus_internal_addr.expect("Must launch Nexus first");
 
-        let is_scrimlet = self.scrimlet_sled_ids.contains(&sled_id);
         let sled_agent = start_sled_agent(
             self.logctx.log.new(o!(
                 "component" => "omicron_sled_agent::sim::Server",
@@ -991,7 +987,6 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             sled_id,
             sled_index,
             sim_mode,
-            is_scrimlet,
             &self.simulated_upstairs,
         )
         .await
@@ -1114,7 +1109,6 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             sled_id,
             sled_index,
             sim_mode,
-            false,
             &self.simulated_upstairs,
         )
         .await
@@ -1960,7 +1954,6 @@ pub async fn start_sled_agent(
     id: SledUuid,
     sled_index: u16,
     sim_mode: sim::SimMode,
-    is_scrimlet: bool,
     simulated_upstairs: &Arc<sim::SimulatedUpstairs>,
 ) -> Result<sim::Server, String> {
     // Generate a baseboard serial number that matches the SP configuration
@@ -1975,7 +1968,6 @@ pub async fn start_sled_agent(
         sim::ZpoolConfig::None,
         SledCpuFamily::AmdMilan,
         Some(baseboard_serial),
-        is_scrimlet,
     );
     start_sled_agent_with_config(log, &config, sled_index, simulated_upstairs)
         .await

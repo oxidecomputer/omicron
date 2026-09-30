@@ -1767,7 +1767,6 @@ mod tests {
                 | ServiceName::OximeterReader
                 | ServiceName::RepoDepot
                 | ServiceName::ManagementGatewayService
-                | ServiceName::SwitchSledAgent
                 | ServiceName::Dendrite
                 | ServiceName::Mgd
                 | ServiceName::Ddm => {
