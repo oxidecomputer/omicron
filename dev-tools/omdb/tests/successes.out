@@ -2393,10 +2393,10 @@ stdout:
 reconfigurator config updated to version 2:
     tuf repo pruner enabled:::   true (unchanged)
 *   planner enabled:::::::::::   false -> true
-    disruption policy:::::::::   terminate (unchanged)
-    sled update reboot policy:   immediate (no evacuation) (unchanged)
     blueprint pruner enabled::   true (unchanged)
     blueprint pruner nkeep::::   1000 (unchanged)
+    disruption policy:::::::::   terminate (unchanged)
+    sled update reboot policy:   immediate (no evacuation) (unchanged)
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
@@ -2408,10 +2408,10 @@ stdout:
 reconfigurator config updated to version 3:
     tuf repo pruner enabled:::   true (unchanged)
     planner enabled:::::::::::   true (unchanged)
-*   disruption policy:::::::::   terminate -> live-migrate or terminate
-    sled update reboot policy:   immediate (no evacuation) (unchanged)
     blueprint pruner enabled::   true (unchanged)
     blueprint pruner nkeep::::   1000 (unchanged)
+*   disruption policy:::::::::   terminate -> live-migrate or terminate
+    sled update reboot policy:   immediate (no evacuation) (unchanged)
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
@@ -2423,10 +2423,10 @@ stdout:
 reconfigurator config updated to version 4:
     tuf repo pruner enabled:::   true (unchanged)
     planner enabled:::::::::::   true (unchanged)
-    disruption policy:::::::::   live-migrate or terminate (unchanged)
-*   sled update reboot policy:   immediate (no evacuation) -> evacuate
     blueprint pruner enabled::   true (unchanged)
     blueprint pruner nkeep::::   1000 (unchanged)
+    disruption policy:::::::::   live-migrate or terminate (unchanged)
+*   sled update reboot policy:   immediate (no evacuation) -> evacuate
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
