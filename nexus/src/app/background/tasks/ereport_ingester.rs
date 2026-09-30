@@ -456,13 +456,7 @@ mod tests {
 
     #[nexus_test(server = crate::Server)]
     async fn test_sp_ereport_ingestion(cptestctx: &ControlPlaneTestContext) {
-        // TODO(eliza): it would be cool if this test got the expected number of
-        // SPs by actually looking at the sp-sim config file, rather than
-        // hard-coding the number of SPs to one that *currently* matches the
-        // config file. that way, the next person who tries to add a new SP to
-        // the config file doen't have to increment this number again like i
-        // did...
-        const NSPS: usize = 5;
+        let n_sps = cptestctx.num_sps();
 
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
@@ -494,11 +488,11 @@ mod tests {
         dbg!(&activation1);
         assert_eq!(
             activation1.sps.len(),
-            NSPS,
-            "ereports from {NSPS} SPs should be observed: {:?}",
+            n_sps,
+            "ereports from {n_sps} SPs should be observed: {:?}",
             activation1.sps,
         );
-        assert_eq!(activation1.sps_found, NSPS);
+        assert_eq!(activation1.sps_found, n_sps);
         fm_analysis_activator
             .assert_activated("fm analysis task should be activated");
 
@@ -728,13 +722,13 @@ mod tests {
              have been ingested",
         );
         assert_eq!(
-            activation2.sps_found, NSPS,
-            "{NSPS} present SPs should have been found via ignition",
+            activation2.sps_found, n_sps,
+            "{n_sps} present SPs should have been found via ignition",
         );
         assert_eq!(
             activation2.sps.len(),
-            NSPS,
-            "all {NSPS} SPs should be reported in the status, even when no new \
+            n_sps,
+            "all {n_sps} SPs should be reported in the status, even when no new \
              ereports were observed: {:?}",
             activation2.sps,
         );

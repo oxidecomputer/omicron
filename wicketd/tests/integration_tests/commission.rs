@@ -78,6 +78,7 @@ async fn test_commission_inventory() {
     let gateway =
         gateway_setup::test_setup("test_commission_inventory", SpPort::One)
             .await;
+    let n_sps = gateway.simrack.num_sps();
     let ctx = WicketdTestContext::setup(gateway).await;
 
     // Wait for MGS inventory, ignition, and cabooses.
@@ -93,13 +94,7 @@ async fn test_commission_inventory() {
     })
     .await;
 
-    // TODO(eliza): it would be cool if this test got the expected number of SPs
-    // by actually looking at the sp-sim config file, rather than hard-coding
-    // the number of SPs to one that *currently* matches the config file. that
-    // way, the next person who tries to add a new SP to the config file doen't
-    // have to increment this number again like i did..
-    const NSPS: usize = 5;
-    assert_eq!(sps.len(), NSPS, "{NSPS} simulated SPs");
+    assert_eq!(sps.len(), n_sps, "{n_sps} simulated SPs");
 
     let sled0 = sps
         .get(&SpIdentifier { typ: SpType::Sled, slot: 0 })
@@ -161,11 +156,11 @@ async fn test_commission_inventory() {
     );
     assert_eq!(
         refreshed.sps.len(),
-        NSPS,
-        "{NSPS} simulated SPs after forced refresh"
+        n_sps,
+        "{n_sps} simulated SPs after forced refresh"
     );
     assert!(
-        refreshed.transceivers.is_empty(),
+        refreshed.transceivers.is_empty(),'d
         "the test harness has no switch transceiver interface, so the \
          transceiver inventory is never read: {:?}",
         refreshed.transceivers,

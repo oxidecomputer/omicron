@@ -22,6 +22,7 @@ use wicketd_client::types::{GetInventoryParams, GetInventoryResponse};
 async fn test_inventory() {
     let gateway =
         gateway_setup::test_setup("test_inventory", SpPort::One).await;
+    let n_sps = gateway.simrack.num_sps();
     let wicketd_testctx = WicketdTestContext::setup(gateway).await;
     let params = GetInventoryParams { force_refresh: Vec::new() };
 
@@ -83,14 +84,7 @@ async fn test_inventory() {
 
     info!(wicketd_testctx.log(), "inventory returned"; "inventory" => ?inventory);
 
-    // 5 SPs attached to the inventory.
-    //
-    // TODO(eliza): it would be cool if this test got the expected number of SPs
-    // by actually looking at the sp-sim config file, rather than hard-coding
-    // the number of SPs to one that *currently* matches the config file. that
-    // way, the next person who tries to add a new SP to the config file doen't
-    // have to increment this number again like i did...
-    assert_eq!(inventory.sps.len(), 5);
+    assert_eq!(inventory.sps.len(), n_sps);
 
     // Test CLI with JSON output
     {

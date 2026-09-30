@@ -186,4 +186,9 @@ impl SimRack {
         // one, and panic if that's wrong.
         &self.sidecars[0]
     }
+
+    /// Returns the total number of SPs in the simulated rack.
+    pub fn num_sps(&self) -> usize {
+        self.gimlets.len() + self.pscs.len() + self.sidecars.len()
+    }
 }
