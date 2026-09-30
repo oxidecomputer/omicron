@@ -150,9 +150,8 @@ impl DateRange {
 pub struct LogAge {
     /// When the file was last written.
     pub newest_write: Timestamp,
-    /// A time at or before the file's first line, or `None` if no bound is
-    /// known. This may be earlier than the first line (e.g., when a service
-    /// wrote nothing for a while after a rotation), but never later.
+    /// A time at or before the file's first write, or `None` if no bound is
+    /// known. This may be earlier than the first write, but not later.
     pub oldest_write: Option<Timestamp>,
 }
 
@@ -396,50 +395,47 @@ impl Zones {
 
         // Stat the files only if necessary.
         let read_metadata = !filter.show_empty || filter.date_range.is_some();
-        let mut candidates = Vec::new();
+        let mut undated = Vec::new();
 
         // Some rotated files exist in `paths.primary` that we track as
         // 'archived'. These files have not yet been migrated into the debug
         // directory.
+        //
+        // A directory that is missing or can't be read just has no logs to
+        // report.
         if filter.current || filter.archived {
-            load_svc_logs(
-                &paths.primary,
-                SvcLogDir::Primary,
-                read_metadata,
-                &mut candidates,
+            undated.extend(
+                load_svc_logs(
+                    &paths.primary,
+                    SvcLogDir::Primary,
+                    read_metadata,
+                )
+                .unwrap_or_default(),
             );
         }
 
         if filter.archived {
             for dir in &paths.debug {
-                load_svc_logs(
-                    dir,
-                    SvcLogDir::Debug,
-                    read_metadata,
-                    &mut candidates,
+                undated.extend(
+                    load_svc_logs(dir, SvcLogDir::Debug, read_metadata)
+                        .unwrap_or_default(),
                 );
             }
         }
         if filter.extra {
             for (svc_name, dir) in &paths.extra {
-                if load_extra_logs(
-                    dir,
-                    svc_name,
-                    read_metadata,
-                    &mut candidates,
-                ) {
+                if let Ok(files) = load_extra_logs(dir, svc_name, read_metadata)
+                {
                     // Report the service even if it has no logs, as long as
                     // its log directory exists.
                     output.entry(svc_name.to_string()).or_default();
+                    undated.extend(files);
                 }
             }
         }
 
-        assign_ages(&mut candidates);
-
-        for candidate in candidates {
-            let Candidate { service, slot, file, .. } = candidate;
-            // Empty files are dated along with the rest of their log above:
+        for DatedLogFile { service, slot, file } in date_files(undated) {
+            // Empty files are dated along with the rest of their series:
             // their newest writes still bound their neighbors' oldest writes.
             if !filter.show_empty && file.size == Some(0) {
                 continue;
@@ -558,7 +554,7 @@ fn smf_series(filename: &str) -> &str {
 ///   `FileNamePattern` and `normalizeFileName` in CockroachDB's
 ///   `pkg/util/log`). It starts a new file on each rotation and on each
 ///   restart. (`<prefix>.log` is a symlink to the current file, which is
-///   not grouped; see [`assign_ages`].)
+///   not grouped; see [`date_files`].)
 /// - chrony's logs are rotated by logadm(8), using the template
 ///   `$file.$secs` and compression (see
 ///   `smf/chrony-setup/etc/logadm.d/chrony.logadm.conf`): `<name>.log`
@@ -615,10 +611,9 @@ enum Slot {
     Extra,
 }
 
-/// A log file found while loading a zone, before its age is assigned and
-/// the date range is applied.
+/// A log file found while loading a zone, before it is dated.
 #[derive(Debug)]
-struct Candidate {
+struct UndatedLogFile {
     /// The service the file is reported under.
     service: ServiceName,
     slot: Slot,
@@ -630,20 +625,42 @@ struct Candidate {
     /// The file's newest write, if its metadata was read. Not used for
     /// symlinks, which take their target's age.
     newest_write: Option<Timestamp>,
+    path: Utf8PathBuf,
+    size: Option<u64>,
+    modified: Option<Timestamp>,
+}
+
+impl UndatedLogFile {
+    fn into_dated(self, age: Option<LogAge>) -> DatedLogFile {
+        let UndatedLogFile { service, slot, path, size, modified, .. } = self;
+        DatedLogFile {
+            service,
+            slot,
+            file: LogFile { path, size, modified, age },
+        }
+    }
+}
+
+/// A log file with its age assigned, ready for date filtering.
+#[derive(Debug)]
+struct DatedLogFile {
+    /// The service the file is reported under.
+    service: ServiceName,
+    slot: Slot,
     file: LogFile,
 }
 
 // Given a directory, find all oxide specific SMF service logs.
+//
+// Returns an error only if `dir` itself can't be read; entries that can't be
+// read are skipped.
 fn load_svc_logs(
     dir: &Utf8Path,
     kind: SvcLogDir,
     read_metadata: bool,
-    candidates: &mut Vec<Candidate>,
-) {
-    let Ok(entries) = dir.read_dir_utf8() else {
-        return;
-    };
-    for entry in entries {
+) -> io::Result<Vec<UndatedLogFile>> {
+    let mut undated = Vec::new();
+    for entry in dir.read_dir_utf8()? {
         let Ok(entry) = entry else {
             continue;
         };
@@ -689,38 +706,38 @@ fn load_svc_logs(
             Slot::Archived
         };
 
-        candidates.push(Candidate {
+        let LogFile { path, size, modified, .. } = file;
+        undated.push(UndatedLogFile {
             service: svc_name.to_string(),
             slot,
             series,
             symlink_target: None,
             newest_write,
-            file,
+            path,
+            size,
+            modified,
         });
     }
+    Ok(undated)
 }
 
 // Load any logs in non-standard paths. We grab all logs in `dir` and
 // don't filter based on filename prefix as in `load_svc_logs`.
 //
-// Returns false if `dir` could not be read.
+// Returns an error only if `dir` itself can't be read; entries that can't be
+// read are skipped.
 fn load_extra_logs(
     dir: &Utf8Path,
     svc_name: &str,
     read_metadata: bool,
-    candidates: &mut Vec<Candidate>,
-) -> bool {
-    let Ok(entries) = dir.read_dir_utf8() else {
-        return false;
-    };
-
-    for entry in entries {
+) -> io::Result<Vec<UndatedLogFile>> {
+    let mut undated = Vec::new();
+    for entry in dir.read_dir_utf8()? {
         let Ok(entry) = entry else {
             continue;
         };
         let filename = entry.file_name();
         let path = dir.join(filename);
-        let mut file = LogFile::new(path.clone());
 
         let is_symlink = entry.file_type().is_ok_and(|t| t.is_symlink());
         // A relative symlink target is relative to the symlink's directory
@@ -729,6 +746,7 @@ fn load_extra_logs(
             .then(|| path.read_link_utf8().ok().map(|target| dir.join(target)))
             .flatten();
 
+        let mut file = LogFile::new(path);
         let mut newest_write = None;
         if read_metadata {
             file.read_metadata(&entry);
@@ -737,7 +755,8 @@ fn load_extra_logs(
             }
         }
 
-        candidates.push(Candidate {
+        let LogFile { path, size, modified, .. } = file;
+        undated.push(UndatedLogFile {
             service: svc_name.to_string(),
             slot: Slot::Extra,
             series: if is_symlink {
@@ -747,13 +766,17 @@ fn load_extra_logs(
             },
             symlink_target,
             newest_write,
-            file,
+            path,
+            size,
+            modified,
         });
     }
-    true
+    Ok(undated)
 }
 
-/// Assigns each candidate's [`LogAge`].
+/// Dates each file by its series (see the [module
+/// documentation](crate#series)), returning one [`DatedLogFile`] per input,
+/// in the same order.
 ///
 /// - A file takes the newest write of the next-older file in its series as
 ///   its oldest write. Ties are skipped: of two files with the same newest
@@ -762,38 +785,40 @@ fn load_extra_logs(
 ///   file that is a series of its own) has no known oldest write.
 /// - A symlink takes the age of the file it points to. Symlinks are kept out
 ///   of every series: a symlink shares its target's newest write, and so
-///   could otherwise become its own target's next-older file. If the target isn't
-///   among the candidates, the symlink is dated by the target's `mtime`
+///   could otherwise become its own target's next-older file. If the target
+///   isn't among `files`, the symlink is dated by the target's `mtime`
 ///   alone.
-fn assign_ages(candidates: &mut [Candidate]) {
+/// - A file whose newest write is unknown (e.g., one we failed to stat) has
+///   no age.
+fn date_files(files: Vec<UndatedLogFile>) -> Vec<DatedLogFile> {
     // Group the files that are in a series by (service, series).
     let mut series: BTreeMap<(&str, &str), Vec<(usize, Timestamp)>> =
         BTreeMap::new();
-    for (i, candidate) in candidates.iter().enumerate() {
+    for (i, file) in files.iter().enumerate() {
         if let (Some(name), Some(newest_write)) =
-            (&candidate.series, candidate.newest_write)
+            (&file.series, file.newest_write)
         {
             series
-                .entry((&candidate.service, name))
+                .entry((&file.service, name))
                 .or_default()
                 .push((i, newest_write));
         }
     }
 
-    let mut ages: Vec<Option<LogAge>> = candidates
+    let mut ages: Vec<Option<LogAge>> = files
         .iter()
-        .map(|candidate| {
-            candidate
-                .newest_write
+        .map(|file| {
+            file.newest_write
                 .map(|newest_write| LogAge { newest_write, oldest_write: None })
         })
         .collect();
 
-    for mut files in series.into_values() {
+    for mut members in series.into_values() {
         // Sort the series newest first.
-        files.sort_by_key(|&(_, newest_write)| std::cmp::Reverse(newest_write));
-        for (position, &(i, newest_write)) in files.iter().enumerate() {
-            let next_older = files[position + 1..]
+        members
+            .sort_by_key(|&(_, newest_write)| std::cmp::Reverse(newest_write));
+        for (position, &(i, newest_write)) in members.iter().enumerate() {
+            let next_older = members[position + 1..]
                 .iter()
                 .map(|&(_, older)| older)
                 .find(|&older| older < newest_write);
@@ -805,21 +830,19 @@ fn assign_ages(candidates: &mut [Candidate]) {
 
     // Symlinks take their target's age.
     let symlink_ages: Vec<(usize, Option<LogAge>)> = {
-        let ages_by_path: HashMap<&Utf8Path, LogAge> = candidates
+        let ages_by_path: HashMap<&Utf8Path, LogAge> = files
             .iter()
             .zip(&ages)
-            .filter(|(candidate, _)| candidate.symlink_target.is_none())
-            .filter_map(|(candidate, age)| {
-                Some((candidate.file.path.as_path(), (*age)?))
-            })
+            .filter(|(file, _)| file.symlink_target.is_none())
+            .filter_map(|(file, age)| Some((file.path.as_path(), (*age)?)))
             .collect();
-        candidates
+        files
             .iter()
             .enumerate()
-            .filter_map(|(i, candidate)| {
-                let target = candidate.symlink_target.as_deref()?;
+            .filter_map(|(i, file)| {
+                let target = file.symlink_target.as_deref()?;
                 // Only date the symlink if its metadata was read.
-                candidate.file.modified?;
+                file.modified?;
                 let age = ages_by_path.get(target).copied().or_else(|| {
                     let modified = target.metadata().ok()?.modified().ok()?;
                     Some(LogAge {
@@ -835,9 +858,11 @@ fn assign_ages(candidates: &mut [Candidate]) {
         ages[i] = age;
     }
 
-    for (candidate, age) in candidates.iter_mut().zip(ages) {
-        candidate.file.age = age;
-    }
+    files
+        .into_iter()
+        .zip(ages)
+        .map(|(file, age)| file.into_dated(age))
+        .collect()
 }
 
 #[cfg(test)]
@@ -1107,51 +1132,47 @@ mod tests {
         assert_eq!(extra_series("dendrite", "bf_drivers.log"), None);
     }
 
-    /// Builds a candidate in `series` with the given newest write.
-    fn candidate(
+    /// Builds an undated file in `series` with the given newest write.
+    fn undated(
         path: &str,
         series: Option<&str>,
         newest_write: &str,
-    ) -> super::Candidate {
-        super::Candidate {
+    ) -> super::UndatedLogFile {
+        super::UndatedLogFile {
             service: "svc".to_string(),
             slot: super::Slot::Archived,
             series: series.map(str::to_string),
             symlink_target: None,
             newest_write: Some(ts(newest_write)),
-            file: super::LogFile {
-                path: path.into(),
-                size: None,
-                modified: Some(ts(newest_write)),
-                age: None,
-            },
+            path: path.into(),
+            size: None,
+            modified: Some(ts(newest_write)),
         }
     }
 
-    fn oldest_writes(candidates: &[super::Candidate]) -> Vec<Option<String>> {
-        candidates
+    fn oldest_writes(dated: &[super::DatedLogFile]) -> Vec<Option<String>> {
+        dated
             .iter()
-            .map(|c| c.file.age.unwrap().oldest_write.map(|t| t.to_string()))
+            .map(|d| d.file.age.unwrap().oldest_write.map(|t| t.to_string()))
             .collect()
     }
 
     #[test]
-    fn test_assign_ages_series_order() {
+    fn test_date_files_series_order() {
         // One service's files, as in the example on
         // https://github.com/oxidecomputer/omicron/issues/11357: a live file,
         // a rotated file, and three archived files, in arbitrary order.
         let series = Some("oxide-nexus:default.log");
-        let mut candidates = vec![
-            candidate("archived-b", series, "2026-09-28T03:59:57Z"),
-            candidate("live", series, "2026-09-28T12:02:10Z"),
-            candidate("archived-c", series, "2026-09-27T23:59:58Z"),
-            candidate("rotated", series, "2026-09-28T11:59:58Z"),
-            candidate("archived-a", series, "2026-09-28T07:59:59Z"),
-        ];
-        super::assign_ages(&mut candidates);
+        let dated = super::date_files(vec![
+            undated("archived-b", series, "2026-09-28T03:59:57Z"),
+            undated("live", series, "2026-09-28T12:02:10Z"),
+            undated("archived-c", series, "2026-09-27T23:59:58Z"),
+            undated("rotated", series, "2026-09-28T11:59:58Z"),
+            undated("archived-a", series, "2026-09-28T07:59:59Z"),
+        ]);
 
         assert_eq!(
-            oldest_writes(&candidates),
+            oldest_writes(&dated),
             vec![
                 Some("2026-09-27T23:59:58Z".to_string()),
                 Some("2026-09-28T11:59:58Z".to_string()),
@@ -1165,30 +1186,29 @@ mod tests {
         // their own timestamps, the live file would be included and that
         // archived file excluded.
         let window = range("2026-09-28T05:00:00Z", "2026-09-28T06:00:00Z");
-        let included: Vec<&str> = candidates
+        let included: Vec<&str> = dated
             .iter()
-            .filter(|c| c.file.in_date_range(&window))
-            .map(|c| c.file.path.as_str())
+            .filter(|d| d.file.in_date_range(&window))
+            .map(|d| d.file.path.as_str())
             .collect();
         assert_eq!(included, vec!["archived-a"]);
     }
 
     #[test]
-    fn test_assign_ages_separate_series() {
+    fn test_date_files_separate_series() {
         // Files of different series never bound each other, even when their
         // times interleave.
-        let mut candidates = vec![
-            candidate("a-new", Some("a"), "2026-09-28T12:00:00Z"),
-            candidate("b-new", Some("b"), "2026-09-28T11:00:00Z"),
-            candidate("a-old", Some("a"), "2026-09-28T10:00:00Z"),
-            candidate("b-old", Some("b"), "2026-09-28T09:00:00Z"),
+        let dated = super::date_files(vec![
+            undated("a-new", Some("a"), "2026-09-28T12:00:00Z"),
+            undated("b-new", Some("b"), "2026-09-28T11:00:00Z"),
+            undated("a-old", Some("a"), "2026-09-28T10:00:00Z"),
+            undated("b-old", Some("b"), "2026-09-28T09:00:00Z"),
             // A file that is a series of its own.
-            candidate("alone", None, "2026-09-28T11:30:00Z"),
-        ];
-        super::assign_ages(&mut candidates);
+            undated("alone", None, "2026-09-28T11:30:00Z"),
+        ]);
 
         assert_eq!(
-            oldest_writes(&candidates),
+            oldest_writes(&dated),
             vec![
                 Some("2026-09-28T10:00:00Z".to_string()),
                 Some("2026-09-28T09:00:00Z".to_string()),
@@ -1200,19 +1220,18 @@ mod tests {
     }
 
     #[test]
-    fn test_assign_ages_ties() {
+    fn test_date_files_ties() {
         // Of two files with the same newest write, either could be the older
         // one, so both are bounded by the next strictly older file.
         let series = Some("series");
-        let mut candidates = vec![
-            candidate("tie-1", series, "2026-09-28T12:00:00Z"),
-            candidate("tie-2", series, "2026-09-28T12:00:00Z"),
-            candidate("older", series, "2026-09-28T10:00:00Z"),
-        ];
-        super::assign_ages(&mut candidates);
+        let dated = super::date_files(vec![
+            undated("tie-1", series, "2026-09-28T12:00:00Z"),
+            undated("tie-2", series, "2026-09-28T12:00:00Z"),
+            undated("older", series, "2026-09-28T10:00:00Z"),
+        ]);
 
         assert_eq!(
-            oldest_writes(&candidates),
+            oldest_writes(&dated),
             vec![
                 Some("2026-09-28T10:00:00Z".to_string()),
                 Some("2026-09-28T10:00:00Z".to_string()),
@@ -1222,26 +1241,25 @@ mod tests {
     }
 
     #[test]
-    fn test_assign_ages_unknown_newest_write() {
+    fn test_date_files_unknown_newest_write() {
         // A file whose mtime couldn't be read has no age, and doesn't bound
         // its neighbors.
         let series = Some("series");
-        let mut unknown = candidate("unknown", series, "2026-09-28T11:00:00Z");
+        let mut unknown = undated("unknown", series, "2026-09-28T11:00:00Z");
         unknown.newest_write = None;
-        unknown.file.modified = None;
-        let mut candidates = vec![
-            candidate("newer", series, "2026-09-28T12:00:00Z"),
+        unknown.modified = None;
+        let dated = super::date_files(vec![
+            undated("newer", series, "2026-09-28T12:00:00Z"),
             unknown,
-            candidate("older", series, "2026-09-28T10:00:00Z"),
-        ];
-        super::assign_ages(&mut candidates);
+            undated("older", series, "2026-09-28T10:00:00Z"),
+        ]);
 
         assert_eq!(
-            candidates[0].file.age.unwrap().oldest_write,
+            dated[0].file.age.unwrap().oldest_write,
             Some(ts("2026-09-28T10:00:00Z"))
         );
-        assert_eq!(candidates[1].file.age, None);
-        assert_eq!(candidates[2].file.age.unwrap().oldest_write, None);
+        assert_eq!(dated[1].file.age, None);
+        assert_eq!(dated[2].file.age.unwrap().oldest_write, None);
     }
 
     /// Creates `path` with some content and the given `mtime`.
