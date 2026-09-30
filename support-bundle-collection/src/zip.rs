@@ -15,9 +15,13 @@
 //!   and delegates to [`bundle_to_writer`]. Retained for Nexus's
 //!   chunked-upload path, which needs an owned seekable `File` for
 //!   hashing + per-chunk `try_clone` / `seek`.
+//!
+//! [`prepare_zone_log_zip`] runs earlier, during collection, on each zone's
+//! log zip as it arrives from a sled agent.
 
 use ::zip::ZipWriter;
 use ::zip::write::FullFileOptions;
+use anyhow::Context;
 use anyhow::Result;
 use camino::Utf8DirEntry;
 use camino::Utf8Path;
@@ -50,6 +54,27 @@ pub fn bundle_to_zipfile(
     let mut tempfile = tempfile_in(tempdir)?;
     bundle_to_writer(dir, &mut tempfile)?;
     Ok(tempfile)
+}
+
+/// Prepare a zone's log zip, downloaded from a sled agent to `zip_path`, for
+/// inclusion in the bundle.
+///
+/// The zip's contents are extracted into the directory containing it, and the
+/// zip itself is removed.
+pub fn prepare_zone_log_zip(zip_path: &Utf8Path) -> Result<()> {
+    let output_dir = zip_path
+        .parent()
+        .with_context(|| format!("log zip has no parent: {zip_path}"))?;
+    let file = std::fs::File::open(zip_path)
+        .with_context(|| format!("failed to open zip file: {zip_path}"))?;
+    let mut archive = ::zip::ZipArchive::new(file)?;
+    archive.extract(output_dir).with_context(|| {
+        format!("failed to extract log zip file to: {output_dir}")
+    })?;
+    std::fs::remove_file(zip_path).with_context(|| {
+        format!("failed to remove extracted log zip file: {zip_path}")
+    })?;
+    Ok(())
 }
 
 fn write_zip<W: Write + std::io::Seek>(

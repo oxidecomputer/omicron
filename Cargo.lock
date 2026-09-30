@@ -15487,6 +15487,7 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "chrono",
+ "criterion",
  "dropshot",
  "futures",
  "gateway-client",

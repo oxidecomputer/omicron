@@ -8,6 +8,7 @@ use crate::cache::Cache;
 use crate::collection::BundleCollection;
 use crate::step::CollectionStep;
 use crate::step::CollectionStepOutput;
+use crate::zip::prepare_zone_log_zip;
 
 use anyhow::Context;
 use anyhow::bail;
@@ -247,7 +248,6 @@ async fn collect_data_from_sled(
     let mut log_futs = futures::stream::iter(zones)
         .map(|zone| async move {
             save_zone_log_zip_or_error(
-                log,
                 sled_client,
                 &zone,
                 sled_path,
@@ -318,7 +318,7 @@ where
     Ok(())
 }
 
-// Download and extract zone logs from a sled-agent.
+// Download zone logs from a sled-agent and prepare them for the bundle.
 //
 // # Cancel safety
 //
@@ -326,7 +326,6 @@ where
 // The initial HTTP download is cancel-safe and uses `select!` internally.
 // All filesystem operations after the download must not be dropped.
 async fn save_zone_log_zip_or_error(
-    logger: &slog::Logger,
     client: &sled_agent_client::Client,
     zone: &str,
     path: &Utf8Path,
@@ -365,27 +364,14 @@ async fn save_zone_log_zip_or_error(
             let _nbytes = tokio::io::copy(&mut reader, &mut file).await?;
             file.flush().await?;
 
-            // Unzip the log file into the same directory.
-            let zip_path = zipfile_path.clone();
             tokio::task::spawn_blocking(move || {
-                extract_zip_file(&output_dir, &zip_path)
+                prepare_zone_log_zip(&zipfile_path)
             })
             .await
             .map_err(|join_error| {
                 anyhow::anyhow!(join_error)
-                    .context("unzipping support bundle logs zip panicked")
+                    .context("preparing support bundle logs zip panicked")
             })??;
-
-            // Clean up the zip file that was written to disk.
-            if let Err(e) = tokio::fs::remove_file(&zipfile_path).await {
-                error!(
-                    logger,
-                    "failed to cleanup temporary logs zip file";
-                    InlineErrorChain::new(&e),
-                    "file" => %zipfile_path,
-
-                );
-            }
         }
         Err(err) => {
             let err_string = InlineErrorChain::new(&err).to_string();
@@ -394,18 +380,5 @@ async fn save_zone_log_zip_or_error(
         }
     };
 
-    Ok(())
-}
-
-fn extract_zip_file(
-    output_dir: &Utf8Path,
-    zip_file: &Utf8Path,
-) -> Result<(), anyhow::Error> {
-    let mut zip = std::fs::File::open(&zip_file)
-        .with_context(|| format!("failed to open zip file: {zip_file}"))?;
-    let mut archive = zip::ZipArchive::new(&mut zip)?;
-    archive.extract(&output_dir).with_context(|| {
-        format!("failed to extract log zip file to: {output_dir}")
-    })?;
     Ok(())
 }
