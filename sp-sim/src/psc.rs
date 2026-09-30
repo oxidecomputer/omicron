@@ -12,6 +12,7 @@ use crate::ereport::EreportState;
 use crate::helpers::read_dummy_rot_page;
 use crate::helpers::rot_boot_info;
 use crate::helpers::rot_state_v2;
+use crate::pmbus_rails::PmbusRails;
 use crate::sensors::Sensors;
 use crate::server::SimSpHandler;
 use crate::server::UdpServer;
@@ -205,6 +206,7 @@ struct Handler {
     device_descriptions: DeviceDescriptions,
     sensors: Sensors,
     component_vpds: ComponentVpds,
+    pmbus_rails: PmbusRails,
 
     baseboard_vpd: BaseboardVpd,
     power_state_changes: Arc<AtomicUsize>,
@@ -235,12 +237,20 @@ impl Handler {
         let sensors = Sensors::from_component_configs(&components);
         let component_vpds = ComponentVpds::from_component_configs(&components)
             .expect("component VPD configuration should be valid");
+        let pmbus_rails = match PmbusRails::from_component_configs(&components)
+        {
+            Ok(rails) => rails,
+            Err(e) => {
+                panic!("invalid PMBus rail configuration for PSC SP: {e}");
+            }
+        };
 
         Self {
             log,
             device_descriptions,
             sensors,
             component_vpds,
+            pmbus_rails,
             baseboard_vpd,
             power_state_changes: Arc::new(AtomicUsize::new(0)),
             update_state,
@@ -948,9 +958,9 @@ impl SpHandler for Handler {
 
     fn get_pmbus_status(
         &mut self,
-        _rail: &PowerRailName,
+        rail: &PowerRailName,
     ) -> Result<PmbusStatus, SpError> {
-        Err(SpError::RequestUnsupportedForSp)
+        self.pmbus_rails.pmbus_status(rail)
     }
 
     fn get_host_panic_payload(
