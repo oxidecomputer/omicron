@@ -71,7 +71,6 @@ pub enum ServiceName {
     Dendrite,
     CruciblePantry,
     SledAgent(SledUuid),
-    SwitchSledAgent,
     Crucible(OmicronZoneUuid),
     BoundaryNtp,
     InternalNtp,
@@ -114,7 +113,6 @@ impl ServiceName {
             ServiceName::Dendrite => "dendrite",
             ServiceName::CruciblePantry => "crucible-pantry",
             ServiceName::SledAgent(_) => "sledagent",
-            ServiceName::SwitchSledAgent => "switch-sledagent",
             ServiceName::Crucible(_) => "crucible",
             ServiceName::BoundaryNtp => "boundary-ntp",
             ServiceName::InternalNtp => "internal-ntp",
@@ -143,7 +141,6 @@ impl ServiceName {
             | ServiceName::Oximeter
             | ServiceName::OximeterReader
             | ServiceName::ManagementGatewayService
-            | ServiceName::SwitchSledAgent
             | ServiceName::RepoDepot
             | ServiceName::Dendrite
             | ServiceName::CruciblePantry
