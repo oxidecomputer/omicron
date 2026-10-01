@@ -95,8 +95,8 @@ pub struct SpCommonConfig {
     pub ereport_network_config: Option<[NetworkConfig; 2]>,
     /// Fake part number.
     ///
-    /// If this is not provided, this defaults to `FAKE_GIMLET_MODEL` or
-    /// `FAKE_SIDECAR_MODEL`, depending on the board.
+    /// If this is not provided, this defaults to `a suitable value depending
+    /// on the board.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub part_number: Option<String>,
     /// Fake serial number
@@ -146,6 +146,10 @@ pub struct SpComponentConfig {
 
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub sensors: Vec<SensorConfig>,
+
+    /// Simulated PMBus rail statuses.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty", default)]
+    pub pmbus_rails: BTreeMap<String, PmbusStatusConfig>,
 }
 
 impl SpComponentConfig {
@@ -177,8 +181,11 @@ impl SpComponentConfig {
             capabilities |= DeviceCapabilities::HAS_SERIAL_CONSOLE;
         }
 
-        // TODO(eliza): when we add support for configuring simulated PMBus
-        // status responses, add the IS_PMBUS bit here too.
+        // If this component has simulated PMBus rails, add the corresponding
+        // capability.
+        if !self.pmbus_rails.is_empty() {
+            capabilities |= DeviceCapabilities::IS_PMBUS;
+        }
 
         capabilities
     }
@@ -250,6 +257,13 @@ pub struct GimletConfig {
     pub common: SpCommonConfig,
 }
 
+/// Configuration of a simulated power shelf controller SP
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct PscConfig {
+    #[serde(flatten)]
+    pub common: SpCommonConfig,
+}
+
 /// Configuration of a set of simulated SPs
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct SimulatedSpsConfig {
@@ -257,6 +271,9 @@ pub struct SimulatedSpsConfig {
     pub sidecar: Vec<SidecarConfig>,
     /// Simulated gimlet(s)
     pub gimlet: Vec<GimletConfig>,
+    /// Simulated power shelf controller(s)
+    #[serde(default)]
+    pub psc: Vec<PscConfig>,
 }
 
 /// Configuration for a sp-sim
@@ -276,6 +293,30 @@ pub struct SensorConfig {
 
     #[serde(flatten)]
     pub state: sensors::SensorState,
+}
+
+/// Configuration for a component's simulated PMBus rail status.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct PmbusStatusConfig {
+    pub status_word: u16,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub status_vout: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub status_iout: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub status_temperature: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub status_cml: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub status_other: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub status_input: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub status_mfr_specific: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub status_fans_1_2: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub status_fans_3_4: Option<u8>,
 }
 
 impl Config {
