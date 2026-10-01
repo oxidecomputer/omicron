@@ -126,9 +126,7 @@ uuid.workspace = true
 walkdir.workspace = true
 x509-cert.workspace = true
 zeroize.workspace = true
-# Support bundles may contain zstd-compressed log entries, from the log zips
-# of older sled agents.
-zip = { workspace = true, features = ["zstd"] }
+zip.workspace = true
 zone.workspace = true
 
 # Only used by the simulated sled agent.

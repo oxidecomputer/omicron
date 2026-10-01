@@ -40,8 +40,7 @@ slog-error-chain.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 uuid.workspace = true
-# Log zips from older sled agents use zstd-compressed entries.
-zip = { workspace = true, features = ["zstd"] }
+zip.workspace = true
 
 omicron-workspace-hack.workspace = true
 

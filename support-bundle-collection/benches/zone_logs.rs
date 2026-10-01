@@ -6,9 +6,9 @@
 //! support bundle.
 //!
 //! Setup builds one zip per zone the way sled-diagnostics does, with one
-//! stored entry per log file holding that log as a zstd file. Each iteration then places those zips
-//! in a fresh collection directory as though they had just been downloaded,
-//! and writes the bundle with [`bundle_to_writer`].
+//! stored entry per log file holding that log as a zstd file. Each iteration
+//! then places those zips in a fresh collection directory as though they had
+//! just been downloaded, and writes the bundle with [`bundle_to_writer`].
 //!
 //! The uncompressed logs total 100 MiB by default; set `ZONE_LOGS_BENCH_MIB`
 //! to change that.

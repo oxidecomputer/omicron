@@ -372,7 +372,7 @@ async fn save_zone_log_zip_or_error(
 // The path of a zone's log zip within its logs directory.
 //
 // The name marks the zip for merging, so that the bundle includes its entries,
-// still compressed, rather than the zip itself.
+// as-is, rather than the zip itself.
 fn zone_log_zip_path(output_dir: &Utf8Path) -> Utf8PathBuf {
     output_dir.join(format!("logs{MERGE_ZIP_SUFFIX}"))
 }

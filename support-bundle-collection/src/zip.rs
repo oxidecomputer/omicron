@@ -21,8 +21,8 @@
 //! The bundle mirrors the collected directory: each file and directory
 //! within it becomes an entry of the same relative path, with one exception.
 //! A file whose name ends in [`MERGE_ZIP_SUFFIX`] is expanded in place: the
-//! file itself is not added, and its entries are copied, still compressed,
-//! under the directory that contains it. The collected directory therefore
+//! file itself is not added, and its entries are copied as-is, without being
+//! decompressed, under the directory that contains it. The collected directory therefore
 //! does not match the bundle's layout exactly.
 //!
 //! Merged entries may collide with each other or with files on disk. The
@@ -50,8 +50,8 @@ use std::io::Write;
 /// are merged into the bundle.
 ///
 /// The file itself is not added to the bundle. Instead, each of its entries is
-/// copied into the bundle, still compressed, under the directory that contains
-/// the file. For example, an entry named `svc/current/svc.log` within
+/// copied into the bundle as-is, without being decompressed, under the
+/// directory that contains the file. For example, an entry named `svc/current/svc.log` within
 /// `logs/zone/logs.merge.zip` becomes `logs/zone/svc/current/svc.log` in the
 /// bundle.
 pub const MERGE_ZIP_SUFFIX: &str = ".merge.zip";
@@ -451,11 +451,12 @@ mod test {
         assert_expected_entries(archive);
     }
 
-    /// Builds a zip whose entries are zstd-compressed, like the log zips from
-    /// older sled agents. Names are used as-is, without sanitizing them.
-    fn zstd_zip(entries: &[(&str, &str)]) -> Vec<u8> {
+    /// Builds a zip whose entries are stored without zip compression, like
+    /// the log zips from sled agents. Names are used as-is, without sanitizing
+    /// them.
+    fn stored_zip(entries: &[(&str, &str)]) -> Vec<u8> {
         let options = FullFileOptions::default()
-            .compression_method(::zip::CompressionMethod::Zstd);
+            .compression_method(::zip::CompressionMethod::Stored);
         let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
         for (name, contents) in entries {
             zip.start_file(*name, options.clone()).unwrap();
@@ -484,7 +485,7 @@ mod test {
     }
 
     // Ensure that the entries of a merge zip are copied into the bundle,
-    // still compressed, under the directory containing the merge zip.
+    // as-is, under the directory containing the merge zip.
     #[test]
     fn test_merge_zip_entries() {
         let dir = tempdir().unwrap();
@@ -493,7 +494,7 @@ mod test {
         std::fs::create_dir_all(&zone_dir).unwrap();
         std::fs::write(
             zone_dir.join(format!("logs{MERGE_ZIP_SUFFIX}")),
-            zstd_zip(&[
+            stored_zip(&[
                 ("svc/current/svc.log", "current data"),
                 ("svc/archive/svc.log.1", "archived data"),
             ]),
@@ -523,11 +524,11 @@ mod test {
             );
             assert_eq!(
                 read_entry(&mut archive, "logs/zone-a/svc/current/svc.log"),
-                (::zip::CompressionMethod::Zstd, "current data".to_string())
+                (::zip::CompressionMethod::Stored, "current data".to_string())
             );
             assert_eq!(
                 read_entry(&mut archive, "logs/zone-a/svc/archive/svc.log.1"),
-                (::zip::CompressionMethod::Zstd, "archived data".to_string())
+                (::zip::CompressionMethod::Stored, "archived data".to_string())
             );
         }
     }
@@ -583,7 +584,7 @@ mod test {
         std::fs::create_dir_all(zone_dir.join("svc/current")).unwrap();
         std::fs::write(
             zone_dir.join(format!("logs{MERGE_ZIP_SUFFIX}")),
-            zstd_zip(&[
+            stored_zip(&[
                 ("../../escape.log", "escaped data"),
                 ("svc/current/svc.log", "merged data"),
             ]),
@@ -611,7 +612,7 @@ mod test {
             );
             assert_eq!(
                 read_entry(&mut archive, "logs/zone-a/svc/current/svc.log"),
-                (::zip::CompressionMethod::Zstd, "merged data".to_string())
+                (::zip::CompressionMethod::Stored, "merged data".to_string())
             );
             let (_, err) =
                 read_entry(&mut archive, "logs/zone-a/logs.merge.zip.err");
@@ -636,7 +637,7 @@ mod test {
         .unwrap();
         std::fs::write(
             zone_b.join(format!("logs{MERGE_ZIP_SUFFIX}")),
-            zstd_zip(&[("svc.log", "zone b data")]),
+            stored_zip(&[("svc.log", "zone b data")]),
         )
         .unwrap();
 
@@ -669,7 +670,7 @@ mod test {
     // and one whose data would extend past the end of the zip.
     #[test]
     fn test_merge_zip_damaged_entries() {
-        let mut merge_zip = zstd_zip(&[
+        let mut merge_zip = stored_zip(&[
             ("a.log", "a data"),
             ("b.log", "b data"),
             ("c.log", "c data"),
@@ -735,7 +736,7 @@ mod test {
     #[test]
     fn test_merge_zip_directory_entries() {
         let options = FullFileOptions::default()
-            .compression_method(::zip::CompressionMethod::Zstd);
+            .compression_method(::zip::CompressionMethod::Stored);
         let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
         zip.add_directory("svc/", options.clone()).unwrap();
         zip.start_file("svc/current/svc.log", options.clone()).unwrap();
@@ -783,7 +784,7 @@ mod test {
         std::fs::create_dir_all(&zone_dir).unwrap();
         std::fs::write(
             zone_dir.join(format!("logs{MERGE_ZIP_SUFFIX}")),
-            zstd_zip(&[
+            stored_zip(&[
                 ("svc/./a.log", "first a"),
                 ("svc/a.log", "second a"),
                 ("svc//b.log", "first b"),

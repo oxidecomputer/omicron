@@ -18934,7 +18934,6 @@ dependencies = [
  "jiff",
  "memchr",
  "zopfli",
- "zstd",
 ]
 
 [[package]]
