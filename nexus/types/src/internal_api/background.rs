@@ -1577,6 +1577,10 @@ pub struct VmmMarkStopForUpdateStatus {
     /// Number of VMMs that were marked as needing to be stopped for update in
     /// this activation.
     pub vmms_marked: usize,
+    /// The number of batches that marked at least one VMM in this activation.
+    pub batches: usize,
+    /// The maximum number of VMMs marked per batch.
+    pub batch_size: u32,
     /// Error encountered during this activation, if any.
     pub error: Option<String>,
 }

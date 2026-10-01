@@ -2927,13 +2927,25 @@ fn print_task_vmm_mark_stop_for_update(details: &serde_json::Value) {
             error, details
         ),
         Ok(status) => {
-            let VmmMarkStopForUpdateStatus { vmms_marked, error } = status;
+            let VmmMarkStopForUpdateStatus {
+                vmms_marked,
+                batches,
+                batch_size,
+                error,
+            } = status;
 
             const MARKED: &str = "VMMs marked to be stopped for an update:";
+            const BATCHES: &str = "  batches:";
+            const BATCH_SIZE: &str = "batch size:";
             const ERROR: &str = "error:";
-            const WIDTH: usize = const_max_len(&[MARKED, ERROR]) + 1;
+            const WIDTH: usize =
+                const_max_len(&[MARKED, BATCHES, BATCH_SIZE, ERROR]) + 1;
 
+            println!("    {BATCH_SIZE:<WIDTH$}{batch_size}");
             println!("    {MARKED:<WIDTH$}{}", vmms_marked);
+            if batches > 0 {
+                println!("    {BATCHES:<WIDTH$}{batches}");
+            }
             if let Some(error) = &error {
                 println!("    {ERROR:<WIDTH$}{error}");
             }

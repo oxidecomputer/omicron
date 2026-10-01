@@ -1171,6 +1171,7 @@ task: "vmm_mark_stop_for_update"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    batch size:                              1000
     VMMs marked to be stopped for an update: 0
 
 task: "vpc_route_manager"
@@ -1905,6 +1906,7 @@ task: "vmm_mark_stop_for_update"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    batch size:                              1000
     VMMs marked to be stopped for an update: 0
 
 task: "vpc_route_manager"

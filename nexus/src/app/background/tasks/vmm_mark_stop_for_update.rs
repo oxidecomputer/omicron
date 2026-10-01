@@ -15,6 +15,8 @@ use crate::app::background::BackgroundTask;
 use futures::future::BoxFuture;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
+use nexus_db_queries::db::datastore::VmmBulkMarkStopForUpdateResult;
 use nexus_types::internal_api::background::VmmMarkStopForUpdateStatus;
 use serde_json::json;
 use slog_error_chain::InlineErrorChain;
@@ -33,9 +35,9 @@ impl VmmMarkStopForUpdate {
         &mut self,
         opctx: &OpContext,
     ) -> VmmMarkStopForUpdateStatus {
-        let vmms_marked =
+        let VmmBulkMarkStopForUpdateResult { vmms_marked, batches, batch_size } =
             match self.datastore.vmm_bulk_mark_stop_for_update(opctx).await {
-                Ok(count) => count,
+                Ok(result) => result,
                 Err(err) => {
                     let err = InlineErrorChain::new(&err);
                     slog::error!(
@@ -45,6 +47,8 @@ impl VmmMarkStopForUpdate {
                     );
                     return VmmMarkStopForUpdateStatus {
                         vmms_marked: 0,
+                        batches: 0,
+                        batch_size: SQL_BATCH_SIZE.get(),
                         error: Some(err.to_string()),
                     };
                 }
@@ -54,6 +58,8 @@ impl VmmMarkStopForUpdate {
             slog::info!(
                 &opctx.log,
                 "marked {vmms_marked} VMMs to stop for a sled update";
+                "batches" => batches,
+                "batch_size" => batch_size.get(),
             );
         } else {
             slog::debug!(
@@ -62,7 +68,12 @@ impl VmmMarkStopForUpdate {
             );
         }
 
-        VmmMarkStopForUpdateStatus { vmms_marked, error: None }
+        VmmMarkStopForUpdateStatus {
+            vmms_marked,
+            batches,
+            batch_size: batch_size.get(),
+            error: None,
+        }
     }
 }
 

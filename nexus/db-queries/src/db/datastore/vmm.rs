@@ -64,6 +64,17 @@ pub struct VmmStateUpdateResult {
     pub migration_out_updated: bool,
 }
 
+/// The result of a [`DataStore::vmm_bulk_mark_stop_for_update`] call.
+#[derive(Clone, Copy, Debug)]
+pub struct VmmBulkMarkStopForUpdateResult {
+    /// The number of VMMs marked as needing to be stopped for an update.
+    pub vmms_marked: usize,
+    /// The number of batches that marked at least one VMM.
+    pub batches: usize,
+    /// The maximum number of VMMs marked per batch.
+    pub batch_size: NonZeroU32,
+}
+
 /// Changeset for a VMM's runtime state.
 #[derive(Clone, Debug, AsChangeset)]
 #[diesel(table_name = vmm)]
@@ -171,16 +182,18 @@ impl DataStore {
     pub async fn vmm_bulk_mark_stop_for_update(
         &self,
         opctx: &OpContext,
-    ) -> UpdateResult<usize> {
+    ) -> UpdateResult<VmmBulkMarkStopForUpdateResult> {
         use nexus_db_schema::schema::rendezvous_sled_bp_availability::dsl as rz_dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
+        let batch_size = SQL_BATCH_SIZE;
 
         // This loop executes a query that marks up to `SQL_BATCH_SIZE` rows
         // at a time until it indicates that no records were marked. Because
         // there is a filter that excludes VMMs that have already been marked,
         // subsequent batches will not include these VMMs.
         let mut marked_total = 0;
+        let mut batches = 0;
         loop {
             // First we retrieve the ids of unavailable sleds. This prevents a
             // full scan of the `lookup_vmms_by_sled_id` index when we select
@@ -200,7 +213,7 @@ impl DataStore {
             // select a bounded batch of VMM ids and update those.
             let batch = DataStore::vmm_read_ready_to_stop_with_limit_query(
                 unavailable_sled_ids,
-                SQL_BATCH_SIZE,
+                batch_size,
             )
             .load_async::<Uuid>(&*conn)
             .await
@@ -235,9 +248,14 @@ impl DataStore {
             if marked == 0 {
                 break;
             }
+            batches += 1;
         }
 
-        Ok(marked_total)
+        Ok(VmmBulkMarkStopForUpdateResult {
+            vmms_marked: marked_total,
+            batches,
+            batch_size,
+        })
     }
 
     pub async fn vmm_fetch(
@@ -1075,9 +1093,11 @@ mod tests {
             .await
             .expect("bulk mark should succeed");
         assert_eq!(
-            marked, 8,
+            marked.vmms_marked, 8,
             "the 4 stoppable VMMs on each of sleds A and B should be marked"
         );
+        assert_eq!(marked.batches, 1);
+        assert_eq!(marked.batch_size, SQL_BATCH_SIZE);
         for vmm in expected.values_mut() {
             if vmm.time_deleted.is_none()
                 && vmm.sled_id() == sled_a
@@ -1111,7 +1131,9 @@ mod tests {
             .vmm_bulk_mark_stop_for_update(&opctx)
             .await
             .expect("re-running the bulk mark should succeed");
-        assert_eq!(marked_again, 0);
+        assert_eq!(marked_again.vmms_marked, 0);
+        assert_eq!(marked_again.batches, 0);
+        assert_eq!(marked_again.batch_size, SQL_BATCH_SIZE);
         let actual = fetch_all(datastore).await;
         assert_rows(&actual, &expected);
         assert_eq!(
@@ -1145,9 +1167,11 @@ mod tests {
             .await
             .expect("bulk mark for sled C should succeed");
         assert_eq!(
-            marked_c, 4,
+            marked_c.vmms_marked, 4,
             "only the 4 stoppable VMMs on sled C should be marked"
         );
+        assert_eq!(marked_c.batches, 1);
+        assert_eq!(marked_c.batch_size, SQL_BATCH_SIZE);
         for vmm in expected.values_mut() {
             if vmm.time_deleted.is_none()
                 && vmm.sled_id() == sled_c
@@ -1209,9 +1233,11 @@ mod tests {
             .await
             .expect("bulk mark should succeed");
         assert_eq!(
-            marked, 0,
+            marked.vmms_marked, 0,
             "no VMMs should be marked while sled A is available"
         );
+        assert_eq!(marked.batches, 0);
+        assert_eq!(marked.batch_size, SQL_BATCH_SIZE);
         let actual = fetch_all(datastore).await;
         assert_rows(&actual, &expected);
 
@@ -1240,9 +1266,11 @@ mod tests {
             .await
             .expect("bulk mark should succeed");
         assert_eq!(
-            marked, 0,
+            marked.vmms_marked, 0,
             "sled A's VMMs are already marked, nothing new should be marked"
         );
+        assert_eq!(marked.batches, 0);
+        assert_eq!(marked.batch_size, SQL_BATCH_SIZE);
         let actual = fetch_all(datastore).await;
         assert_rows(&actual, &expected);
 
@@ -1333,14 +1361,18 @@ mod tests {
             .vmm_bulk_mark_stop_for_update(opctx)
             .await
             .expect("bulk mark should succeed");
-        assert_eq!(marked, vmm_count);
+        assert_eq!(marked.vmms_marked, vmm_count);
+        assert_eq!(marked.batches, 2);
+        assert_eq!(marked.batch_size, SQL_BATCH_SIZE);
 
         // If we run again no rows should be marked
         let marked = datastore
             .vmm_bulk_mark_stop_for_update(opctx)
             .await
             .expect("bulk mark should succeed");
-        assert_eq!(marked, 0);
+        assert_eq!(marked.vmms_marked, 0);
+        assert_eq!(marked.batches, 0);
+        assert_eq!(marked.batch_size, SQL_BATCH_SIZE);
 
         db.terminate().await;
         logctx.cleanup_successful();
