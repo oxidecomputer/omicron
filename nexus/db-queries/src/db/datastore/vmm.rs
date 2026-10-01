@@ -613,6 +613,7 @@ mod tests {
     use crate::db::model::Migration;
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::pub_test_utils::helpers::create_vmm_for_instance;
+    use crate::db::raw_query_builder::expectorate_query_contents;
     use iddqd::IdOrdMap;
     use nexus_db_model::ActiveSledBpAvailability;
     use nexus_db_model::SledBlueprintAvailabilityInput;
@@ -1543,6 +1544,19 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn expectorate_vmm_read_ready_to_stop_with_limit_query() {
+        let query = DataStore::vmm_read_ready_to_stop_with_limit_query(
+            vec![Uuid::new_v4()],
+            SQL_BATCH_SIZE,
+        );
+        expectorate_query_contents(
+            &query,
+            "tests/output/vmm_read_ready_to_stop_with_limit_query.sql",
+        )
+        .await;
+    }
+
+    #[tokio::test]
     async fn explain_vmm_read_rendezvous_unavailable_sleds_query() {
         let logctx = dev::test_setup_log(
             "explain_vmm_read_rendezvous_unavailable_sleds_query",
@@ -1567,5 +1581,15 @@ mod tests {
 
         db.terminate().await;
         logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn expectorate_vmm_read_rendezvous_unavailable_sleds_query() {
+        let query = DataStore::rendezvous_read_unavailable_sleds_query();
+        expectorate_query_contents(
+            &query,
+            "tests/output/rendezvous_read_unavailable_sleds_query.sql",
+        )
+        .await;
     }
 }
