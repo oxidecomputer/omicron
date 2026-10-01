@@ -52,7 +52,7 @@ impl Reconciler for DdmdReconciler {
             .filter(|port| {
                 port.switch == self.switch_slot && port.allow_ddm_traffic
             })
-            .map(|port| format!("tfport{}_0/ll", port.port))
+            .map(|port| ddmd_specific_addrobj(&port.port))
             .collect();
 
         // Set which external ports should carry DDM traffic unconditionally.
@@ -75,6 +75,21 @@ impl Reconciler for DdmdReconciler {
             )),
         }
     }
+}
+
+/// Create an illumos addrobj as a string to identify the given port.
+///
+/// Put the port in the addrobj format that dendrite expects as a string. This
+/// string passes through maghemite into dendrite without being interpreted by
+/// maghemite. Since the string is user specified and maghemite should not know
+/// about the format of addrobjs, but should just use them directly, it cannot create
+/// this string on its own.
+///
+/// A better solution would be for there to be a specific addrobj type that can
+/// be passed directly from omicron through maghemite to dendrite and which can
+/// encode the correct format itself.
+fn ddmd_specific_addrobj(port: &str) -> String {
+    format!("tfport{}_0/ll", port)
 }
 
 #[cfg(test)]
