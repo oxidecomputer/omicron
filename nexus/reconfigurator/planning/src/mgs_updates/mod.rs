@@ -11,7 +11,7 @@ mod sled_evacuation;
 mod sp;
 
 use crate::mgs_updates::rot::RotUpdateState;
-use crate::mgs_updates::sled_evacuation::EvacuationStatus;
+use crate::mgs_updates::sled_evacuation::EvacuationDetermination;
 use crate::planner::ZoneSafetyChecks;
 
 use gateway_types::rot::RotSlot;
@@ -898,17 +898,17 @@ fn schedule_update_if_allowed_by_reboot_policy(
     //
     // so we need to evaluate 3 based on the evacuation status of the sled in
     // inventory to determine the appropriate result:
-    match evacuating_sleds.evacuation_status(sled_id, inventory) {
-        EvacuationStatus::Evacuated => {
+    match evacuating_sleds.evacuation_determination(sled_id, inventory) {
+        EvacuationDetermination::Evacuated => {
             // Sled is evacuated - we can proceed with the update.
             TryMakeUpdateResult::Update(update, host_phase2)
         }
-        EvacuationStatus::NeedsEvacuatingUpdateDisposition => {
+        EvacuationDetermination::NeedsEvacuatingUpdateDisposition => {
             // Sled needs to be evacuated - mark that now, and do not
             // proceed with the update.
             TryMakeUpdateResult::StartEvacuating(sled_id)
         }
-        EvacuationStatus::WaitingOnEvacuation(details) => {
+        EvacuationDetermination::WaitingOnEvacuation(details) => {
             // Sled is already marked for evacuation but is not yet
             // evacuated - this update is blocked.
             TryMakeUpdateResult::Blocked(BlockedMgsUpdate {

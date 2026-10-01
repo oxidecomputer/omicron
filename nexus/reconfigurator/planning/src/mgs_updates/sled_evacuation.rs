@@ -19,8 +19,11 @@ use std::num::NonZeroUsize;
 
 use crate::mgs_updates::UpdateableBoard;
 
+/// For a sled that needs to be evacuated, this describes what
+/// [`EvacuatingSleds::evacuation_determination()`] found to be the current
+/// state or required change.
 #[derive(Debug, PartialEq, Eq)]
-pub(super) enum EvacuationStatus {
+pub(super) enum EvacuationDetermination {
     Evacuated,
     NeedsEvacuatingUpdateDisposition,
     WaitingOnEvacuation(WaitingOnSledEvacuationDetails),
@@ -73,18 +76,21 @@ impl EvacuatingSleds {
         self.contains(&sled_id)
     }
 
-    pub(super) fn evacuation_status(
+    /// Given a sled (`sled_id`) that needs to be evacuated, determine its
+    /// current state based on both the parent blueprint and the specified
+    /// inventory collection.
+    pub(super) fn evacuation_determination(
         &self,
         sled_id: SledUuid,
         inventory: &Collection,
-    ) -> EvacuationStatus {
+    ) -> EvacuationDetermination {
         let Some(&desired_generation) = self.evacuating_sleds.get(&sled_id)
         else {
-            return EvacuationStatus::NeedsEvacuatingUpdateDisposition;
+            return EvacuationDetermination::NeedsEvacuatingUpdateDisposition;
         };
 
         let Some(inventory) = inventory.sled_agents.get(&sled_id) else {
-            return EvacuationStatus::WaitingOnEvacuation(
+            return EvacuationDetermination::WaitingOnEvacuation(
                 WaitingOnSledEvacuationDetails::MissingFromInventory,
             );
         };
@@ -99,12 +105,12 @@ impl EvacuatingSleds {
         //    do doesn't matter anyway, except potentially in tests - the
         //    blueprint we emit can never become the target.)
         let Some(sled_config) = inventory.ledgered_sled_config.as_ref() else {
-            return EvacuationStatus::WaitingOnEvacuation(
+            return EvacuationDetermination::WaitingOnEvacuation(
                 WaitingOnSledEvacuationDetails::MissingLedgeredSledConfig,
             );
         };
         if sled_config.generation < desired_generation {
-            return EvacuationStatus::WaitingOnEvacuation(
+            return EvacuationDetermination::WaitingOnEvacuation(
                 WaitingOnSledEvacuationDetails::WaitingForSledConfigGeneration {
                     desired: desired_generation,
                     current: sled_config.generation,
@@ -119,13 +125,13 @@ impl EvacuatingSleds {
             inventory.instance_manager_status;
         match update_disposition {
             CurrentUpdateDisposition::ConfigNotAvailable => {
-                EvacuationStatus::WaitingOnEvacuation(
+                EvacuationDetermination::WaitingOnEvacuation(
                     WaitingOnSledEvacuationDetails::InstanceManagerNoConfig,
                 )
             }
             CurrentUpdateDisposition::Known(
                 OmicronSledUpdateDisposition::Available,
-            ) => EvacuationStatus::WaitingOnEvacuation(
+            ) => EvacuationDetermination::WaitingOnEvacuation(
                 WaitingOnSledEvacuationDetails::InstanceManagerAvailable,
             ),
             CurrentUpdateDisposition::Known(
@@ -135,13 +141,13 @@ impl EvacuatingSleds {
                 if let Some(num_registered_vmms) =
                     NonZeroUsize::new(num_registered_vmms)
                 {
-                    EvacuationStatus::WaitingOnEvacuation(
+                    EvacuationDetermination::WaitingOnEvacuation(
                         WaitingOnSledEvacuationDetails::InstanceManagerRegisteredVmms {
                             num_registered_vmms,
                         }
                     )
                 } else {
-                    EvacuationStatus::Evacuated
+                    EvacuationDetermination::Evacuated
                 }
             }
         }
@@ -217,16 +223,17 @@ mod tests {
         // A sled that isn't marked for evacuation needs to be.
         let collection = test_boards.collection_builder().build();
         assert_eq!(
-            EvacuatingSleds::empty().evacuation_status(sled_0_id, &collection),
-            EvacuationStatus::NeedsEvacuatingUpdateDisposition,
+            EvacuatingSleds::empty()
+                .evacuation_determination(sled_0_id, &collection),
+            EvacuationDetermination::NeedsEvacuatingUpdateDisposition,
         );
 
         // Sled missing from inventory entirely (e.g., mid-reboot).
         let mut collection = test_boards.collection_builder().build();
         collection.sled_agents = IdOrdMap::new();
         assert_eq!(
-            evacuating_at_gen1.evacuation_status(sled_0_id, &collection),
-            EvacuationStatus::WaitingOnEvacuation(
+            evacuating_at_gen1.evacuation_determination(sled_0_id, &collection),
+            EvacuationDetermination::WaitingOnEvacuation(
                 WaitingOnSledEvacuationDetails::MissingFromInventory
             ),
         );
@@ -239,8 +246,8 @@ mod tests {
             .expect("sled 0 in inventory")
             .ledgered_sled_config = None;
         assert_eq!(
-            evacuating_at_gen1.evacuation_status(sled_0_id, &collection),
-            EvacuationStatus::WaitingOnEvacuation(
+            evacuating_at_gen1.evacuation_determination(sled_0_id, &collection),
+            EvacuationDetermination::WaitingOnEvacuation(
                 WaitingOnSledEvacuationDetails::MissingLedgeredSledConfig
             ),
         );
@@ -250,8 +257,8 @@ mod tests {
         let collection =
             test_boards.collection_builder().sled_evacuated(0, gen1).build();
         assert_eq!(
-            evacuating_at_gen2.evacuation_status(sled_0_id, &collection),
-            EvacuationStatus::WaitingOnEvacuation(
+            evacuating_at_gen2.evacuation_determination(sled_0_id, &collection),
+            EvacuationDetermination::WaitingOnEvacuation(
                 WaitingOnSledEvacuationDetails::WaitingForSledConfigGeneration {
                     desired: gen2,
                     current: gen1,
@@ -273,8 +280,8 @@ mod tests {
             )
             .build();
         assert_eq!(
-            evacuating_at_gen1.evacuation_status(sled_0_id, &collection),
-            EvacuationStatus::WaitingOnEvacuation(
+            evacuating_at_gen1.evacuation_determination(sled_0_id, &collection),
+            EvacuationDetermination::WaitingOnEvacuation(
                 WaitingOnSledEvacuationDetails::InstanceManagerNoConfig
             ),
         );
@@ -293,8 +300,8 @@ mod tests {
             )
             .build();
         assert_eq!(
-            evacuating_at_gen1.evacuation_status(sled_0_id, &collection),
-            EvacuationStatus::WaitingOnEvacuation(
+            evacuating_at_gen1.evacuation_determination(sled_0_id, &collection),
+            EvacuationDetermination::WaitingOnEvacuation(
                 WaitingOnSledEvacuationDetails::InstanceManagerAvailable
             ),
         );
@@ -313,8 +320,8 @@ mod tests {
             )
             .build();
         assert_eq!(
-            evacuating_at_gen1.evacuation_status(sled_0_id, &collection),
-            EvacuationStatus::WaitingOnEvacuation(
+            evacuating_at_gen1.evacuation_determination(sled_0_id, &collection),
+            EvacuationDetermination::WaitingOnEvacuation(
                 WaitingOnSledEvacuationDetails::InstanceManagerRegisteredVmms {
                     num_registered_vmms: NonZeroUsize::new(2).unwrap(),
                 }
@@ -325,8 +332,8 @@ mod tests {
         let collection =
             test_boards.collection_builder().sled_evacuated(0, gen1).build();
         assert_eq!(
-            evacuating_at_gen1.evacuation_status(sled_0_id, &collection),
-            EvacuationStatus::Evacuated,
+            evacuating_at_gen1.evacuation_determination(sled_0_id, &collection),
+            EvacuationDetermination::Evacuated,
         );
 
         // A ledgered config _newer_ than the one that marked the sled
@@ -335,8 +342,8 @@ mod tests {
         let collection =
             test_boards.collection_builder().sled_evacuated(0, gen2).build();
         assert_eq!(
-            evacuating_at_gen1.evacuation_status(sled_0_id, &collection),
-            EvacuationStatus::Evacuated,
+            evacuating_at_gen1.evacuation_determination(sled_0_id, &collection),
+            EvacuationDetermination::Evacuated,
         );
     }
 }
