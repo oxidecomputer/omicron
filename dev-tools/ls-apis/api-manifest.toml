@@ -744,7 +744,12 @@ permalinks = [
 [[intra_deployment_unit_only_edges]]
 server = "omicron-sled-agent"
 client = "ddm-admin-client"
-note = "Sled Agent uses Client::localhost() to connect to ddm."
+note = """
+Sled Agent talks to ddm-admin over localhost in multiple places: to get
+bootstrap prefixes in the global zone as part of `bootstrap_setup.rs:92` and
+`sled_agent.rs:1378`, and to reconcile external network config as part of
+`ddm_reconciler.rs:56` in the switch zone.
+"""
 permalinks = [
     "https://github.com/oxidecomputer/omicron/blob/6cef874/sled-agent/src/ddm_reconciler.rs#L56",
     "https://github.com/oxidecomputer/omicron/blob/6cef874/sled-agent/src/bootstrap/bootstore_setup.rs#L92",

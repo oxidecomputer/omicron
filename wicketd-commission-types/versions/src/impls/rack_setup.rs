@@ -68,20 +68,22 @@ impl UserSpecifiedRackNetworkConfig {
         iter0.chain(iter1)
     }
 
-    /// Returns an iterator over every port.
+    /// Returns an iterator over every front port.
     ///
     /// Unlike [`Self::iter_uplinks`], this includes DDM ports.
     pub fn iter_port_configs(
         &self,
-    ) -> impl Iterator<Item = (SwitchSlot, &str, Cow<'_, UplinkPortConfig>)>
+    ) -> impl Iterator<Item = (SwitchSlot, &str, &UserSpecifiedPortConfig)>
     {
-        let iter0 = self.switch0.iter().map(|(port, cfg)| {
-            (SwitchSlot::Switch0, port.as_str(), cfg.to_uplink_port_config())
-        });
+        let iter0 = self
+            .switch0
+            .iter()
+            .map(|(port, cfg)| (SwitchSlot::Switch0, port.as_str(), cfg));
 
-        let iter1 = self.switch1.iter().map(|(port, cfg)| {
-            (SwitchSlot::Switch1, port.as_str(), cfg.to_uplink_port_config())
-        });
+        let iter1 = self
+            .switch1
+            .iter()
+            .map(|(port, cfg)| (SwitchSlot::Switch1, port.as_str(), cfg));
 
         iter0.chain(iter1)
     }

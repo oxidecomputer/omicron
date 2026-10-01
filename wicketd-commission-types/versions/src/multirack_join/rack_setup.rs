@@ -11,9 +11,7 @@
 //! [`UplinkPortConfig`] (the former `ManualPortConfig`) and a DDM variant
 //! carrying the new [`L1PortConfig`].
 //! [`UserSpecifiedRackNetworkConfig`] and [`PutRssUserConfigInsensitive`] are
-//! redefined because they transitively contain it; every other rack-setup type
-//! is re-exported unchanged from [`crate::v1::rack_setup`],
-//! [`crate::v2::rack_setup`] and [`crate::v3::rack_setup`].
+//! redefined because they transitively contain it.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{IpAddr, Ipv6Addr};
@@ -30,6 +28,21 @@ use crate::v1::rack_setup::{
 use crate::v2::rack_setup::ServiceIpPoolConfig;
 use crate::v3;
 use crate::v3::rack_setup::UserSpecifiedBgpPeerConfig;
+
+// Re-exports of pinned types from sled-agent-types-versions.
+pub use sled_agent_types_versions::v1::early_networking::{
+    BfdMode, BfdPeerConfig, ImportExportPolicy,
+};
+pub use sled_agent_types_versions::v30::early_networking::UplinkAddressConfig;
+pub use sled_agent_types_versions::v47::early_networking::{
+    BgpPeerConfig, NumberedRouter, RouterPeerType, UnnumberedRouter,
+};
+pub use sled_agent_types_versions::v48::early_networking::{
+    PortConfig, RackNetworkConfig, UplinkPorts,
+};
+
+// Re-export of a type from sled-hardware-types that should never change.
+pub use sled_hardware_types::BaseboardId;
 
 /// The portion of the RSS configuration that can be posted in one shot.
 ///
@@ -218,7 +231,7 @@ impl From<v3::rack_setup::ManualPortConfig> for UplinkPortConfig {
 
 /// Configuration for the physical layer of a port
 ///
-// TODO: Use this in `ManualPortConfig` once we start restructuring toml.
+// TODO: Use this in `UplinkPortConfig` once we start restructuring toml.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct L1PortConfig {
@@ -237,8 +250,6 @@ pub struct L1PortConfig {
 }
 
 /// A user-specified port configuration.
-///
-/// An empty map is serialized and deserialized as an auto config.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 #[serde(try_from = "UnvalidatedPortConfig")]
 #[allow(clippy::large_enum_variant)]
@@ -377,7 +388,7 @@ impl TryFrom<UnvalidatedPortConfig> for UserSpecifiedPortConfig {
 }
 
 // The descriptions and shape here must stay in sync with the variant doc
-// comments and the hand-rolled Serialize/Deserialize impls above.
+// comments and the hand-rolled Serialize impl above.
 impl JsonSchema for UserSpecifiedPortConfig {
     fn schema_name() -> String {
         "UserSpecifiedPortConfig".to_string()
@@ -416,29 +427,6 @@ impl JsonSchema for UserSpecifiedPortConfig {
         .into()
     }
 }
-
-// Multirack join.
-//
-// The root struct is [`MultirackJoinRequest`]. Unlike the RSS configuration,
-// which is staged field by field as `UserSpecified*` types and resolved by
-// wicketd, a join request is posted whole and forwarded to the bootstrap agent
-// as-is, so it carries the same fully-resolved [`RackNetworkConfig`] the
-// bootstrap agent's own multirack-join endpoint takes.
-
-// Re-exports of pinned types from sled-agent-types-versions.
-pub use sled_agent_types_versions::v1::early_networking::{
-    BfdMode, BfdPeerConfig, ImportExportPolicy,
-};
-pub use sled_agent_types_versions::v30::early_networking::UplinkAddressConfig;
-pub use sled_agent_types_versions::v47::early_networking::{
-    BgpPeerConfig, NumberedRouter, RouterPeerType, UnnumberedRouter,
-};
-pub use sled_agent_types_versions::v48::early_networking::{
-    PortConfig, RackNetworkConfig, UplinkPorts,
-};
-
-// Re-export of a type from sled-hardware-types that should never change.
-pub use sled_hardware_types::BaseboardId;
 
 /// A request to join this rack into an existing multirack cluster.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]

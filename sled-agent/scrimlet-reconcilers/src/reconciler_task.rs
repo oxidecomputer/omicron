@@ -99,7 +99,7 @@ impl<T: Reconciler> ReconcilerTaskHandle<T> {
             mode,
             this_sled_switch_slot,
             parent_log,
-            move |mode, switch_slot, log| T::new(mode, switch_slot, log),
+            T::new,
         )
     }
 

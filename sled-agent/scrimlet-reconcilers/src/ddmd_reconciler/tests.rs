@@ -71,7 +71,7 @@ async fn posts_external_peers() {
     let logctx = dev::test_setup_log("posts_external_peers");
     let server = MockServer::start();
     let mock = server.mock(|when, then| {
-        when.method(httpmock::Method::POST).path("/external_peers").json_body(
+        when.method(httpmock::Method::PUT).path("/external_peers").json_body(
             serde_json::json!({
                 "address_objects": ["tfportqsfp0_0/ll"],
             }),
@@ -106,7 +106,7 @@ async fn server_error_reports_failed() {
     let logctx = dev::test_setup_log("server_error_reports_failed");
     let server = MockServer::start();
     server.mock(|when, then| {
-        when.method(httpmock::Method::POST).path("/external_peers");
+        when.method(httpmock::Method::PUT).path("/external_peers");
         then.status(500).header("content-type", "application/json").body(
             serde_json::json!({
                 "request_id": "test",
