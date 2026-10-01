@@ -490,37 +490,6 @@ impl PsuSlot {
     }
 }
 
-/// The model of a PSU in a power shelf's inventory. This is determined based on
-/// the `device` string returned by Hubris.
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Ord,
-    Eq,
-    PartialOrd,
-    PartialEq,
-    strum::EnumString,
-    strum::Display,
-    strum::IntoStaticStr,
-    serde_with::DeserializeFromStr,
-    serde_with::SerializeDisplay,
-)]
-#[strum(serialize_all = "lowercase")]
-pub enum PsuDevice {
-    Mwocp67,
-    Mwocp68,
-    // If, some day, we are adding a new model of power shelf, you'll need to
-    // add that here!
-}
-
-impl PsuDevice {
-    /// Returns the Hubris device type for this PSU.
-    pub fn as_device_type(&self) -> &'static str {
-        <&'static str>::from(self)
-    }
-}
-
 /// Describes a power supply unit (PSU) observed in a power shelf.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct Psu {
@@ -528,7 +497,14 @@ pub struct Psu {
     pub source: String,
     pub slot: PsuSlot,
     pub presence: SpComponentPresence,
-    pub device: PsuDevice,
+    /// The Hubris device type string in the SP's inventory. This identifies
+    /// which Hubris driver is used to communicate with the PSU, and is a
+    /// property of the SP's Hubris image, not a value reported by the PSU
+    /// itself.
+    ///
+    /// For the model number reported by the PSU, use [`PsuIdentity::mfr_model`]
+    /// instead.
+    pub hubris_device_type: String,
     pub vpd: Result<PsuIdentity, String>,
 }
 

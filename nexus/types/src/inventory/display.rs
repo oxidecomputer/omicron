@@ -614,7 +614,6 @@ fn display_power_shelf(
     shelf: Option<&PowerShelf>,
     f: &mut dyn fmt::Write,
 ) -> fmt::Result {
-    use super::PsuDevice;
     use super::PsuSlot;
 
     let Some(shelf) = shelf else {
@@ -626,7 +625,7 @@ fn display_power_shelf(
     struct PsuRow<'a> {
         slot: PsuSlot,
         presence: String,
-        device: PsuDevice,
+        device: &'a str,
         mfr_model: &'a str,
         mfr_serial: &'a str,
         firmware_rev: &'a str,
@@ -646,7 +645,7 @@ fn display_power_shelf(
         PsuRow {
             slot: psu.slot,
             presence: format!("{:?}", psu.presence),
-            device: psu.device,
+            device: psu.hubris_device_type.as_str(),
             mfr_id: vpd.map(|vpd| vpd.mfr_id.as_str()).unwrap_or("-"),
             mfr_model: vpd.map(|vpd| vpd.mfr_model.as_str()).unwrap_or("-"),
             firmware_rev: vpd
@@ -1582,7 +1581,6 @@ mod tests {
     use super::display_power_shelf;
     use crate::inventory::PowerShelf;
     use crate::inventory::Psu;
-    use crate::inventory::PsuDevice;
     use crate::inventory::PsuIdentity;
     use crate::inventory::PsuSlot;
     use crate::inventory::SpComponentPresence;
@@ -1644,7 +1642,7 @@ mod tests {
                 source: String::from("test MGS"),
                 slot,
                 presence,
-                device: PsuDevice::Mwocp68,
+                hubris_device_type: String::from("mwocp68"),
                 vpd,
             })
             .expect("test PSU slots are unique");

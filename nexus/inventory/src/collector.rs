@@ -20,7 +20,7 @@ use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::InternalDnsGenerationStatus;
 use nexus_types::inventory::Psu;
-use nexus_types::inventory::PsuDevice;
+
 use nexus_types::inventory::PsuIdentity;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageWhich;
@@ -823,49 +823,28 @@ async fn collect_one_psc(
     let mut total_psus = 0;
     for component in components {
         let id = &component.component;
-        let dev = &component.device;
+        let dev_type = component.device.as_str();
 
-        // This component is a PSU if both the Hubris component ID and device
-        // type strings look PSU-like. If neither do, skip it quietly, and if
-        // one or the other are PSU-like but the other is unexpected, record
-        // an error.
-        let slot = id.parse::<PsuSlot>();
-        let device = dev.parse::<PsuDevice>();
-        let (slot, device) = match (slot, device) {
-            (Ok(slot), Ok(device)) => (slot, device),
+        let slot = match id.parse::<PsuSlot>() {
+            Ok(slot) => slot,
 
-            // if neither the component ID nor the device type strings look
-            // PSU-ish, this is definitely not a PSU and we can quietly skip it.
-            (Err(_), Err(_)) => continue,
-
-            // well, hello there! this device has one of the hubris component
-            // IDs that represent PSUs, but it is not a 'mwocp68' or 'mwocp67'.
-            // did we add a new kind of power shelf but forget to update the
-            // 'PsuDevice' enum?
-            (Ok(_), Err(_)) => {
-                in_progress.found_error(InventoryError::from(anyhow!(
-                    "MGS {:?}: SP {sp:?} ({psc_baseboard_id:?}): component \
-                    {id:?} has a component ID that appears to be a PSU, but \
-                    has unknown device type {dev:?}. do we need to add support \
-                    for a new power shelf model?",
-                    client.baseurl(),
-                )));
-                continue;
-            }
-
-            // well, huh! this thing is one of the hubris device types we
+            // well, huh! this thing is one of the hubris device driver types we
             // believe represent PSUs, but its component ID doesn't match any of
             // the ones we expect the PSUs to have! report an error and
             // continue.
-            (Err(_), Ok(_)) => {
+            Err(_) if matches!(dev_type, "mwocp68" | "mwocp67") => {
                 in_progress.found_error(InventoryError::from(anyhow!(
                     "MGS {:?}: SP {sp:?} ({psc_baseboard_id:?}): component \
-                    {id:?} has a device type ({dev:?}) that seems to be a PSU, \
-                    but has a component ID we don't know about",
+                    {id:?} has a device type ({dev_type:?}) that seems to be a \
+                    PSU, but has a component ID we don't know about",
                     client.baseurl(),
                 )));
                 continue;
             }
+
+            // if neither the component ID nor the device type strings look
+            // PSU-ish, this is definitely not a PSU and we can quietly skip it.
+            Err(_) => continue,
         };
 
         total_psus += 1;
@@ -902,7 +881,7 @@ async fn collect_one_psc(
                         "psc_baseboard_id" => ?psc_baseboard_id,
                         "psc_slot" => %sp.slot,
                         "psu_slot" => %slot,
-                        "psu_device" => ?device,
+                        "psu_hubris_device_type" => ?dev_type,
                         "psu_presence" => ?presence,
                         "mgs_url" => client.baseurl(),
                     );
@@ -917,7 +896,7 @@ async fn collect_one_psc(
             source: client.baseurl().to_owned(),
             slot,
             presence,
-            device,
+            hubris_device_type: dev_type.to_string(),
             vpd,
         };
         match in_progress.found_psu(&psc_baseboard_id, sp.slot, psu) {
@@ -931,7 +910,7 @@ async fn collect_one_psc(
                     "psc_baseboard_id" => ?psc_baseboard_id,
                     "psc_slot" => %sp.slot,
                     "psu_slot" => %slot,
-                    "psu_device" => ?device,
+                    "psu_hubris_device_type" => ?dev_type,
                     "psu_presence" => ?presence,
                     "mgs_url" => client.baseurl(),
                 );
@@ -1197,7 +1176,7 @@ mod test {
                     "        {}: presence {:?} device {}",
                     psu.slot,
                     psu.presence,
-                    psu.device,
+                    psu.hubris_device_type,
                 );
                 match &psu.vpd {
                     Ok(nexus_types::inventory::PsuIdentity {

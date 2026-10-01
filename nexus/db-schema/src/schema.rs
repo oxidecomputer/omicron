@@ -1880,7 +1880,7 @@ table! {
         psc_baseboard_id -> Uuid,
         location -> crate::enums::InvPsuSlotEnum,
         presence -> crate::enums::SpComponentPresenceEnum,
-        device -> crate::enums::InvPsuDeviceEnum,
+        hubris_device_type -> Text,
         mfr_id -> Nullable<Text>,
         mfr_model -> Nullable<Text>,
         firmware_rev -> Nullable<Text>,
