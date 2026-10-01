@@ -2185,7 +2185,7 @@ dependencies = [
 [[package]]
 name = "crucible-common"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=ad8a31742adc45e925e63443a5b43c8e30604022#ad8a31742adc45e925e63443a5b43c8e30604022"
+source = "git+https://github.com/oxidecomputer/crucible?rev=310808d1207b993932e6d0e45a6535d7d1af3ccd#310808d1207b993932e6d0e45a6535d7d1af3ccd"
 dependencies = [
  "anyhow",
  "atty",
