@@ -114,16 +114,15 @@ pub struct EstablishedConn {
 
 /// Make progress on the write side of the connection.
 ///
+/// We flush after every message to ensure that it goes out on the wire. This
+/// aligns with the contract behind all `AsyncWrite` implementations, including
+/// rustls, and ensures correctness while simplifying our reasoning about the
+/// protocol.
+///
 /// Writing takes priority over flushing so that a partially written message is
 /// finished before the flush is attempted. `run` refuses to start another
 /// message while a flush is owed, so this bounds unflushed data to a single
 /// message no matter how fast the main task queues them.
-///
-/// Flushing after every message protects against starvation due to changes
-/// in rustls internal flush behavior. We were unlikely to see an issue with
-/// starvation even with a change in rustls because of the infrequency of
-/// message sends, but we err on the safe side and make any overload visible in
-/// our application level queue.
 async fn write_or_flush(
     writer: &mut WriteHalf<sprockets_tls::Stream<TcpStream>>,
     current_write: &mut Cursor<Vec<u8>>,
@@ -141,8 +140,8 @@ async fn write_or_flush(
         *needs_flush = false;
         Ok(())
     } else {
-        // This method is one branch of a `select!` and we want to disable it if
-        // there is nothing to do.
+        // This method is one branch of a `select!` and we do not want that
+        // branch to complete immediately if there is nothing to do.
         std::future::pending().await
     }
 }
