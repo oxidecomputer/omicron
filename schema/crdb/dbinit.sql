@@ -5617,9 +5617,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_power_shelf_psu (
     -- PSU itself.
     hubris_device_type TEXT NOT NULL,
 
-    -- PMBus vital product data reported by the PSU. information reported by the
-    -- PSU. these fields are present when the VPD was collected successfully,
-    -- and are null if it was not.
+    -- PMBus vital product data reported by the PSU. these fields are present
+    -- when the VPD was collected successfully, and are null if it was not, or
+    -- if the PSU is not present.
     mfr_id TEXT,
     mfr_model TEXT,
     firmware_rev TEXT,
@@ -5628,12 +5628,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_power_shelf_psu (
     mfr_serial TEXT,
 
     -- an error that occurred while reading PMBus VPD. this is NULL if the VPD
-    -- fields are present, and is present if the VPD is NULL.
+    -- fields are present or if the PSU is not present, and is set if the
+    -- VPD fields are NULL because an attempt to read the VPD failed.
     vpd_error TEXT,
 
     CONSTRAINT vpd_result_valid CHECK (
         (
-            vpd_error IS NULL
+            presence != 'not_present'
+            AND vpd_error IS NULL
             AND mfr_id IS NOT NULL
             AND mfr_model IS NOT NULL
             AND firmware_rev IS NOT NULL
@@ -5641,7 +5643,17 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_power_shelf_psu (
             AND mfr_date IS NOT NULL
             AND mfr_serial IS NOT NULL
         ) OR (
-            vpd_error IS NOT NULL
+            presence != 'not_present'
+            AND vpd_error IS NOT NULL
+            AND mfr_id IS NULL
+            AND mfr_model IS NULL
+            AND firmware_rev IS NULL
+            AND mfr_location IS NULL
+            AND mfr_date IS NULL
+            AND mfr_serial IS NULL
+        ) OR (
+            presence = 'not_present'
+            AND vpd_error IS NULL
             AND mfr_id IS NULL
             AND mfr_model IS NULL
             AND firmware_rev IS NULL

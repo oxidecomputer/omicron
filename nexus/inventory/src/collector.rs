@@ -22,9 +22,10 @@ use nexus_types::inventory::InternalDnsGenerationStatus;
 use nexus_types::inventory::Psu;
 
 use nexus_types::inventory::PsuIdentity;
+use nexus_types::inventory::PsuState;
+use nexus_types::inventory::PsuStatus;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageWhich;
-use nexus_types::inventory::SpComponentPresence;
 use nexus_types::inventory::SpType;
 use nexus_types::inventory::TimeSync;
 use omicron_cockroach_metrics::CockroachClusterAdminClient;
@@ -857,8 +858,8 @@ async fn collect_one_psc(
         // If the PSU is present (or might be present), try to read its
         // identity.
         let presence = component.presence;
-        let vpd = if presence != SpComponentPresence::NotPresent {
-            client
+        let state = if let Some(status) = PsuStatus::from_presence(presence) {
+            let identity = client
                 .sp_component_vpd_get(&sp.typ, sp.slot, &id)
                 .await
                 .with_context(|| {
@@ -886,18 +887,18 @@ async fn collect_one_psc(
                         "mgs_url" => client.baseurl(),
                     );
                     error.to_string()
-                })
+                });
+            Some(PsuState { status, identity })
         } else {
-            Err(String::from("component is not present"))
+            None
         };
 
         let psu = Psu {
             time_collected: now_db_precision(),
             source: client.baseurl().to_owned(),
             slot,
-            presence,
             hubris_device_type: dev_type.to_string(),
-            vpd,
+            state,
         };
         match in_progress.found_psu(&psc_baseboard_id, sp.slot, psu) {
             Ok(true) => changed_psus += 1,
@@ -1175,18 +1176,18 @@ mod test {
                     s,
                     "        {}: presence {:?} device {}",
                     psu.slot,
-                    psu.presence,
+                    psu.presence(),
                     psu.hubris_device_type,
                 );
-                match &psu.vpd {
-                    Ok(nexus_types::inventory::PsuIdentity {
+                match psu.identity() {
+                    Some(Ok(nexus_types::inventory::PsuIdentity {
                         mfr_id,
                         mfr_model,
                         firmware_rev,
                         mfr_location,
                         mfr_date,
                         mfr_serial,
-                    }) => {
+                    })) => {
                         swriteln!(
                             s,
                             "            VPD: mfr_model {mfr_model:?} \
@@ -1197,9 +1198,10 @@ mod test {
                               mfr_date {mfr_date:?}"
                         );
                     }
-                    Err(error) => {
+                    Some(Err(error)) => {
                         swriteln!(s, "            VPD: error: {error}");
                     }
+                    None => {}
                 }
             }
         }

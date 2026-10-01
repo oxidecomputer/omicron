@@ -42,8 +42,7 @@ use uuid::Uuid;
 
 use crate::inventory::{
     CabooseWhich, Collection, Dataset, InternalDnsGenerationStatus,
-    PhysicalDisk, PowerShelf, RotPageWhich, SledAgent, SpComponentPresence,
-    TimeSync, Zpool,
+    PhysicalDisk, PowerShelf, RotPageWhich, SledAgent, TimeSync, Zpool,
 };
 
 /// Code to display inventory collections.
@@ -635,16 +634,11 @@ fn display_power_shelf(
     }
 
     writeln!(f, "    PSUs:")?;
-    let mut any_interesting_errors = false;
     let rows = shelf.psus.iter().map(|psu| {
-        let vpd = psu.vpd.as_ref();
-        // if there was an error reading the PSU's VPD *and* it isn't just that
-        // the PSU was not present, we will want to report that later.
-        any_interesting_errors |=
-            vpd.is_err() && psu.presence != SpComponentPresence::NotPresent;
+        let vpd = psu.identity().and_then(Result::ok);
         PsuRow {
             slot: psu.slot,
-            presence: format!("{:?}", psu.presence),
+            presence: format!("{:?}", psu.presence()),
             device: psu.hubris_device_type.as_str(),
             mfr_id: vpd.map(|vpd| vpd.mfr_id.as_str()).unwrap_or("-"),
             mfr_model: vpd.map(|vpd| vpd.mfr_model.as_str()).unwrap_or("-"),
@@ -664,16 +658,14 @@ fn display_power_shelf(
         .to_string();
     writeln!(f, "{}", textwrap::indent(&table, "        "))?;
 
-    if any_interesting_errors {
-        writeln!(f, "    PSU VPD errors:")?;
-        for psu in shelf
-            .psus
-            .iter()
-            .filter(|psu| psu.presence != SpComponentPresence::NotPresent)
-        {
-            if let Err(error) = &psu.vpd {
-                writeln!(f, "      - {}: {error}", psu.slot)?;
+    let mut wrote_errors_header = false;
+    for psu in &shelf.psus {
+        if let Some(Err(error)) = psu.identity() {
+            if !wrote_errors_header {
+                writeln!(f, "    PSU VPD errors:")?;
+                wrote_errors_header = true;
             }
+            writeln!(f, "      - {}: {error}", psu.slot)?;
         }
     }
 
@@ -1583,7 +1575,8 @@ mod tests {
     use crate::inventory::Psu;
     use crate::inventory::PsuIdentity;
     use crate::inventory::PsuSlot;
-    use crate::inventory::SpComponentPresence;
+    use crate::inventory::PsuState;
+    use crate::inventory::PsuStatus;
     use chrono::DateTime;
     use chrono::Utc;
     use iddqd::IdOrdMap;
@@ -1603,47 +1596,31 @@ mod tests {
             }
         }
 
+        fn present(identity: Result<PsuIdentity, String>) -> Option<PsuState> {
+            Some(PsuState { status: PsuStatus::Present, identity })
+        }
+
         let mut psus = IdOrdMap::with_capacity(6);
         let values = [
-            (
-                PsuSlot::Psu0,
-                SpComponentPresence::Present,
-                Ok(identity("LL2111Q9002T", "2111")),
-            ),
-            (
-                PsuSlot::Psu1,
-                SpComponentPresence::Present,
-                Ok(identity("LL2111Q9003T", "2111")),
-            ),
+            (PsuSlot::Psu0, present(Ok(identity("LL2111Q9002T", "2111")))),
+            (PsuSlot::Psu1, present(Ok(identity("LL2111Q9003T", "2111")))),
             (
                 PsuSlot::Psu2,
-                SpComponentPresence::Present,
-                Err(String::from("test suite injected VPD read failure")),
+                present(Err(String::from(
+                    "test suite injected VPD read failure",
+                ))),
             ),
-            (
-                PsuSlot::Psu3,
-                SpComponentPresence::NotPresent,
-                Err(String::from("component is not present")),
-            ),
-            (
-                PsuSlot::Psu4,
-                SpComponentPresence::Present,
-                Ok(identity("LL2115Q1001T", "2115")),
-            ),
-            (
-                PsuSlot::Psu5,
-                SpComponentPresence::NotPresent,
-                Err(String::from("component is not present")),
-            ),
+            (PsuSlot::Psu3, None),
+            (PsuSlot::Psu4, present(Ok(identity("LL2115Q1001T", "2115")))),
+            (PsuSlot::Psu5, None),
         ];
-        for (slot, presence, vpd) in values {
+        for (slot, state) in values {
             psus.insert_unique(Psu {
                 time_collected: DateTime::<Utc>::MIN_UTC,
                 source: String::from("test MGS"),
                 slot,
-                presence,
                 hubris_device_type: String::from("mwocp68"),
-                vpd,
+                state,
             })
             .expect("test PSU slots are unique");
         }

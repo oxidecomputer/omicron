@@ -2428,8 +2428,15 @@ impl From<InvPsuSlot> for PsuSlot {
 
 /// Represents a PSU observed in a PSC's inventory of the power shelf.
 ///
-/// Either all the VPD fields will be present and `vpd_error` will not be, or
-/// `vpd_error` will be present and all the VPD fields will be null.
+/// This record may represent one of three possible states:
+///
+/// 1. `presence` is `NotPresent`, in which case, all the PMBus VPD fields *and*
+///   `vpd_error` will be `None` (indicating that the inventory collector did
+///   not attempt to read the device's VPD because it was not present),
+/// 2. the PMBus VPD was read successfully, in which case the VPD fields will be
+///   `Some`, and `vpd_error` will be `None`,
+/// 3. the PSU was not `NotPresent`, but reading the PMBus VPD failed, in which
+///    case, the VPD fields will be `None` and `vpd_error` will be `Some`.
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_power_shelf_psu)]
 pub struct InvPowerShelfPsu {
@@ -2457,7 +2464,8 @@ pub struct InvPowerShelfPsu {
     pub mfr_date: Option<String>,
     pub mfr_serial: Option<String>,
 
-    /// present iff the VPD fields aren't, null otherwise.
+    /// `Some` if the inventory collector requested PMBus VPD from this PSU and
+    /// the request failed. If this is `Some`, the VPD fields will be `None`.
     pub vpd_error: Option<String>,
 }
 
@@ -2465,57 +2473,79 @@ impl TryFrom<InvPowerShelfPsu> for inventory::Psu {
     type Error = anyhow::Error;
 
     fn try_from(row: InvPowerShelfPsu) -> Result<Self> {
-        let time_collected = row.time_collected;
-        let slot = row.location.into();
-        let presence = row.presence.into();
-        let (vpd, source, hubris_device_type) = match row {
-            InvPowerShelfPsu {
-                source,
-                hubris_device_type,
-                mfr_id: Some(mfr_id),
-                mfr_model: Some(mfr_model),
-                firmware_rev: Some(firmware_rev),
-                mfr_location: Some(mfr_location),
-                mfr_date: Some(mfr_date),
-                mfr_serial: Some(mfr_serial),
-                vpd_error: None,
-                ..
-            } => {
-                let vpd = inventory::PsuIdentity {
-                    mfr_id,
-                    mfr_model,
-                    firmware_rev,
-                    mfr_location,
-                    mfr_date,
-                    mfr_serial,
-                };
-                (Ok(vpd), source, hubris_device_type)
+        let InvPowerShelfPsu {
+            inv_collection_id: _,
+            time_collected,
+            source,
+            psc_baseboard_id,
+            location,
+            presence,
+            hubris_device_type,
+            mfr_id,
+            mfr_model,
+            firmware_rev,
+            mfr_location,
+            mfr_date,
+            mfr_serial,
+            vpd_error,
+        } = row;
+        let slot = PsuSlot::from(location);
+
+        let identity = match (
+            mfr_id,
+            mfr_model,
+            firmware_rev,
+            mfr_location,
+            mfr_date,
+            mfr_serial,
+            vpd_error,
+        ) {
+            (
+                Some(mfr_id),
+                Some(mfr_model),
+                Some(firmware_rev),
+                Some(mfr_location),
+                Some(mfr_date),
+                Some(mfr_serial),
+                None,
+            ) => Some(Ok(inventory::PsuIdentity {
+                mfr_id,
+                mfr_model,
+                firmware_rev,
+                mfr_location,
+                mfr_date,
+                mfr_serial,
+            })),
+            (None, None, None, None, None, None, Some(error)) => {
+                Some(Err(error))
             }
-            InvPowerShelfPsu {
-                source,
-                hubris_device_type,
-                vpd_error: Some(error),
-                mfr_id: None,
-                mfr_model: None,
-                firmware_rev: None,
-                mfr_location: None,
-                mfr_date: None,
-                mfr_serial: None,
-                ..
-            } => (Err(error), source, hubris_device_type),
+            (None, None, None, None, None, None, None) => None,
             _ => bail!(
-                "inv_power_shelf_psu row violates vpd_result_valid constraint",
+                "inv_power_shelf_psu row for PSC {psc_baseboard_id} {slot} \
+                 violates vpd_result_valid constraint: VPD fields and \
+                 vpd_error are partially populated",
             ),
         };
 
-        Ok(Self {
-            time_collected,
-            source,
-            slot,
-            presence,
-            hubris_device_type,
-            vpd,
-        })
+        let status = inventory::PsuStatus::from_presence(presence.into());
+        let state = match (status, identity) {
+            (Some(status), Some(identity)) => {
+                Some(inventory::PsuState { status, identity })
+            }
+            (None, None) => None,
+            (Some(_), None) => bail!(
+                "inv_power_shelf_psu row for PSC {psc_baseboard_id} {slot} \
+                 violates vpd_result_valid constraint: presence is \
+                 {presence:?}, but neither VPD nor vpd_error is present",
+            ),
+            (None, Some(_)) => bail!(
+                "inv_power_shelf_psu row for PSC {psc_baseboard_id} {slot} \
+                 violates vpd_result_valid constraint: presence is \
+                 {presence:?}, but VPD or vpd_error is present",
+            ),
+        };
+
+        Ok(Self { time_collected, source, slot, hubris_device_type, state })
     }
 }
 

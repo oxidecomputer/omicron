@@ -821,10 +821,11 @@ impl DataStore {
                             time_collected,
                             source,
                             slot,
-                            presence,
                             hubris_device_type,
-                            vpd,
+                            // read via `Psu::presence` and `Psu::identity`
+                            state: _,
                         } = psu;
+                        let presence = psu.presence();
                         let (
                             mfr_id,
                             mfr_model,
@@ -833,15 +834,15 @@ impl DataStore {
                             mfr_date,
                             mfr_serial,
                             vpd_error,
-                        ) = match vpd {
-                            Ok(PsuIdentity {
+                        ) = match psu.identity() {
+                            Some(Ok(PsuIdentity {
                                 mfr_id,
                                 mfr_model,
                                 firmware_rev,
                                 mfr_location,
                                 mfr_date,
                                 mfr_serial,
-                            }) => (
+                            })) => (
                                 Some(mfr_id.clone()),
                                 Some(mfr_model.clone()),
                                 Some(firmware_rev.clone()),
@@ -850,15 +851,16 @@ impl DataStore {
                                 Some(mfr_serial.clone()),
                                 None,
                             ),
-                            Err(error) => (
+                            Some(Err(error)) => (
                                 None,
                                 None,
                                 None,
                                 None,
                                 None,
                                 None,
-                                Some(error.clone()),
+                                Some(error.to_owned()),
                             ),
+                            None => (None, None, None, None, None, None, None),
                         };
                         let selection =
                             nexus_db_schema::schema::hw_baseboard_id::table
@@ -875,7 +877,7 @@ impl DataStore {
                                     baseboard_dsl::id,
                                     InvPsuSlot::from(*slot)
                                         .into_sql::<InvPsuSlotEnum>(),
-                                    DbSpComponentPresence::from(*presence)
+                                    DbSpComponentPresence::from(presence)
                                         .into_sql::<SpComponentPresenceEnum>(),
                                     hubris_device_type
                                         .clone()
