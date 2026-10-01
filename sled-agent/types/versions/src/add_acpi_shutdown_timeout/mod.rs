@@ -17,4 +17,10 @@ pub mod instance {
         // TODO doc
         pub acpi_timeout_secs: Option<u64>,
     }
+
+    impl Into<VmmPutStateBody> for crate::v1::instance::VmmPutStateBody {
+        fn into(self) -> VmmPutStateBody {
+            VmmPutStateBody { state: self.state, acpi_timeout_secs: None }
+        }
+    }
 }

@@ -5821,6 +5821,14 @@
           "run_state": {
             "$ref": "#/components/schemas/InstanceState"
           },
+          "shutdown_policy": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceShutdownPolicy"
+              }
+            ]
+          },
           "time_created": {
             "description": "Timestamp when this resource was created",
             "type": "string",
@@ -5958,6 +5966,44 @@
         },
         "required": [
           "destination"
+        ]
+      },
+      "InstanceShutdownPolicy": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": [
+                  "hard_off"
+                ]
+              }
+            },
+            "required": [
+              "action"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": [
+                  "power_button"
+                ]
+              },
+              "timeout_secs": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "action",
+              "timeout_secs"
+            ]
+          }
         ]
       },
       "InstanceState": {
