@@ -116,29 +116,94 @@ pub fn prepare_zone_log_zip(zip_path: &Utf8Path) -> Result<()> {
 
 fn write_zip<W: Write + std::io::Seek>(
     dir: &Utf8TempDir,
-    mut zip: ZipWriter<W>,
+    zip: ZipWriter<W>,
 ) -> Result<()> {
-    let mut names = BTreeSet::new();
-    recursively_add_directory_to_zipfile(
-        &mut zip,
-        &mut names,
-        dir.path(),
-        dir.path(),
-    )?;
-    zip.finish()?;
-    Ok(())
+    let mut bundle = BundleZip::new(zip);
+    recursively_add_directory_to_zipfile(&mut bundle, dir.path(), dir.path())?;
+    bundle.finish()
 }
 
-/// Adds the contents of `dir_path` to `zip`, recording the name of each entry
-/// added in `names`.
+/// A bundle zip being written, which skips any entry whose name it already
+/// holds.
 ///
 /// `ZipWriter` rejects duplicate names, and merged zips can produce names that
-/// collide with each other or with files on disk. Callers share one `names`
-/// across the whole bundle so that the first entry of a name wins and later
-/// ones are skipped. Directory names are recorded with a trailing `/`.
+/// collide with each other or with files on disk. Writing every entry through
+/// this type keeps the first entry of a name and skips later ones, rather than
+/// failing to build the bundle.
+struct BundleZip<W: Write + std::io::Seek> {
+    zip: ZipWriter<W>,
+    // Names of the entries in `zip`, with directories ending in `/`.
+    // `ZipWriter` tracks these too, but does not expose them.
+    names: BTreeSet<String>,
+}
+
+impl<W: Write + std::io::Seek> BundleZip<W> {
+    fn new(zip: ZipWriter<W>) -> Self {
+        Self { zip, names: BTreeSet::new() }
+    }
+
+    /// Adds directory entries for `path` and each of its ancestors, from the
+    /// outermost in, skipping any already present.
+    fn add_dir_all(&mut self, path: &Utf8Path) -> Result<()> {
+        let dirs: Vec<_> =
+            path.ancestors().filter(|dir| !dir.as_str().is_empty()).collect();
+        for dir in dirs.into_iter().rev() {
+            if self.names.insert(format!("{dir}/")) {
+                self.zip
+                    .add_directory_from_path(dir, FullFileOptions::default())?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Adds the file at `src` as `dst`, unless an entry named `dst` is
+    /// present.
+    fn add_file(&mut self, dst: &Utf8Path, src: &Utf8Path) -> Result<()> {
+        if !self.names.insert(dst.to_string()) {
+            return Ok(());
+        }
+
+        let zip_time = src
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|sys_time| jiff::Zoned::try_from(sys_time).ok())
+            .and_then(|zoned| ::zip::DateTime::try_from(zoned.datetime()).ok())
+            .unwrap_or_else(::zip::DateTime::default);
+
+        let opts = FullFileOptions::default()
+            .last_modified_time(zip_time)
+            .compression_method(compression_method_for(src))
+            .large_file(true);
+
+        self.zip.start_file_from_path(dst, opts)?;
+        let mut file = std::fs::File::open(&src)?;
+        std::io::copy(&mut file, &mut self.zip)?;
+        Ok(())
+    }
+
+    /// Copies `entry` as `dst` without decompressing it, unless an entry named
+    /// `dst` is present.
+    fn raw_copy<R: std::io::Read>(
+        &mut self,
+        entry: ::zip::read::ZipFile<'_, R>,
+        dst: &Utf8Path,
+    ) -> Result<()> {
+        if self.names.insert(dst.to_string()) {
+            self.zip.raw_copy_file_rename(entry, dst.as_str())?;
+        }
+        Ok(())
+    }
+
+    fn finish(self) -> Result<()> {
+        self.zip.finish()?;
+        Ok(())
+    }
+}
+
+/// Adds the contents of `dir_path` to `bundle`.
 fn recursively_add_directory_to_zipfile<W: Write + std::io::Seek>(
-    zip: &mut ZipWriter<W>,
-    names: &mut BTreeSet<String>,
+    bundle: &mut BundleZip<W>,
     root_path: &Utf8Path,
     dir_path: &Utf8Path,
 ) -> Result<()> {
@@ -158,42 +223,14 @@ fn recursively_add_directory_to_zipfile<W: Write + std::io::Seek>(
         if file_type.is_file() && entry.file_name().ends_with(MERGE_ZIP_SUFFIX)
         {
             let dst_dir = dst.parent().unwrap_or(Utf8Path::new(""));
-            merge_zip_entries(zip, names, entry.path(), dst_dir)?;
+            merge_zip_entries(bundle, entry.path(), dst_dir)?;
         } else if file_type.is_file() {
-            // A merged zip may already have added an entry of this name.
-            if !names.insert(dst.to_string()) {
-                continue;
-            }
-            let src = entry.path();
-
-            let zip_time = entry
-                .path()
-                .metadata()
-                .and_then(|m| m.modified())
-                .ok()
-                .and_then(|sys_time| jiff::Zoned::try_from(sys_time).ok())
-                .and_then(|zoned| {
-                    ::zip::DateTime::try_from(zoned.datetime()).ok()
-                })
-                .unwrap_or_else(::zip::DateTime::default);
-
-            let opts = FullFileOptions::default()
-                .last_modified_time(zip_time)
-                .compression_method(compression_method_for(src))
-                .large_file(true);
-
-            zip.start_file_from_path(dst, opts)?;
-            let mut file = std::fs::File::open(&src)?;
-            std::io::copy(&mut file, zip)?;
+            bundle.add_file(dst, entry.path())?;
         }
         if file_type.is_dir() {
-            if names.insert(format!("{dst}/")) {
-                let opts = FullFileOptions::default();
-                zip.add_directory_from_path(dst, opts)?;
-            }
+            bundle.add_dir_all(dst)?;
             recursively_add_directory_to_zipfile(
-                zip,
-                names,
+                bundle,
                 root_path,
                 entry.path(),
             )?;
@@ -202,15 +239,14 @@ fn recursively_add_directory_to_zipfile<W: Write + std::io::Seek>(
     Ok(())
 }
 
-/// Copies each entry of the zip at `src` into `zip` under `dst_dir`, without
-/// decompressing it.
+/// Copies each entry of the zip at `src` into `bundle` under `dst_dir`,
+/// without decompressing it.
 ///
-/// Directory entries are added for any directories between `dst_dir` and each
-/// copied entry. Entries are skipped if their names would place them outside
-/// of `dst_dir`, or if an entry of the same name is already in the bundle.
+/// Directory entries are added for any directories leading to each copied
+/// entry. Entries are skipped if their names would place them outside of
+/// `dst_dir`, or if an entry of the same name is already in the bundle.
 fn merge_zip_entries<W: Write + std::io::Seek>(
-    zip: &mut ZipWriter<W>,
-    names: &mut BTreeSet<String>,
+    bundle: &mut BundleZip<W>,
     src: &Utf8Path,
     dst_dir: &Utf8Path,
 ) -> Result<()> {
@@ -229,26 +265,13 @@ fn merge_zip_entries<W: Write + std::io::Seek>(
         };
         let path = dst_dir.join(&relative);
 
-        // Add the directories leading to this entry, from the outermost in.
-        let mut dirs: Vec<_> = path
-            .ancestors()
-            .skip(1)
-            .take(relative.components().count() - 1)
-            .collect();
         if entry.is_dir() {
-            dirs.insert(0, &path);
-        }
-        for dir in dirs.into_iter().rev() {
-            if names.insert(format!("{dir}/")) {
-                zip.add_directory_from_path(dir, FullFileOptions::default())?;
+            bundle.add_dir_all(&path)?;
+        } else {
+            if let Some(parent) = path.parent() {
+                bundle.add_dir_all(parent)?;
             }
-        }
-        if entry.is_dir() {
-            continue;
-        }
-
-        if names.insert(path.to_string()) {
-            zip.raw_copy_file_rename(entry, path.as_str())?;
+            bundle.raw_copy(entry, &path)?;
         }
     }
     Ok(())
