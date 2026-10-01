@@ -452,7 +452,7 @@ mod test {
     }
 
     /// Builds a zip whose entries are zstd-compressed, like the log zips from
-    /// sled agents. Names are used as-is, without sanitizing them.
+    /// older sled agents. Names are used as-is, without sanitizing them.
     fn zstd_zip(entries: &[(&str, &str)]) -> Vec<u8> {
         let options = FullFileOptions::default()
             .compression_method(::zip::CompressionMethod::Zstd);
@@ -528,6 +528,47 @@ mod test {
             assert_eq!(
                 read_entry(&mut archive, "logs/zone-a/svc/archive/svc.log.1"),
                 (::zip::CompressionMethod::Zstd, "archived data".to_string())
+            );
+        }
+    }
+
+    // Ensure that logs which sled agents store as zstd files, in entries
+    // without zip compression, are copied into the bundle byte for byte.
+    #[test]
+    fn test_merge_zip_stored_zstd_logs() {
+        let log = "log data ".repeat(100);
+        let compressed = zstd::encode_all(log.as_bytes(), 3).unwrap();
+        let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
+        zip.start_file(
+            "svc/current/svc.log.zst",
+            FullFileOptions::default()
+                .compression_method(::zip::CompressionMethod::Stored),
+        )
+        .unwrap();
+        zip.write_all(&compressed).unwrap();
+        let merge_zip = zip.finish().unwrap().into_inner();
+
+        let dir = tempdir().unwrap();
+        let zone_dir = dir.path().join("logs/zone-a");
+        std::fs::create_dir_all(&zone_dir).unwrap();
+        std::fs::write(
+            zone_dir.join(format!("logs{MERGE_ZIP_SUFFIX}")),
+            merge_zip,
+        )
+        .unwrap();
+
+        for buf in bundle_both_ways(&dir) {
+            let mut archive =
+                ::zip::read::ZipArchive::new(Cursor::new(buf)).unwrap();
+            let mut entry =
+                archive.by_name("logs/zone-a/svc/current/svc.log.zst").unwrap();
+            assert_eq!(entry.compression(), ::zip::CompressionMethod::Stored);
+            let mut contents = Vec::new();
+            std::io::Read::read_to_end(&mut entry, &mut contents).unwrap();
+            assert_eq!(contents, compressed);
+            assert_eq!(
+                zstd::decode_all(contents.as_slice()).unwrap(),
+                log.as_bytes()
             );
         }
     }

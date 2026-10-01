@@ -6,7 +6,7 @@
 //! support bundle.
 //!
 //! Setup builds one zip per zone the way sled-diagnostics does, with one
-//! zstd-compressed entry per log file. Each iteration then places those zips
+//! stored entry per log file holding that log as a zstd file. Each iteration then places those zips
 //! in a fresh collection directory as though they had just been downloaded,
 //! and writes the bundle with [`bundle_to_writer`].
 //!
@@ -68,8 +68,7 @@ fn fake_log(rng: &mut StdRng, len: usize) -> Vec<u8> {
 /// builds them.
 fn fake_zone_zip(rng: &mut StdRng, bytes_per_log: usize) -> Vec<u8> {
     let options = FullFileOptions::default()
-        .compression_method(zip::CompressionMethod::Zstd)
-        .compression_level(Some(3))
+        .compression_method(zip::CompressionMethod::Stored)
         .large_file(true);
     let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
     for service in 0..SERVICES_PER_ZONE {
@@ -77,12 +76,14 @@ fn fake_zone_zip(rng: &mut StdRng, bytes_per_log: usize) -> Vec<u8> {
             let logtype = if log == 0 { "current" } else { "archive" };
             zip.start_file(
                 format!(
-                    "fake-service-{service}/{logtype}/fake-service-{service}.log.{log}"
+                    "fake-service-{service}/{logtype}/fake-service-{service}.log.{log}.zst"
                 ),
                 options.clone(),
             )
             .unwrap();
-            zip.write_all(&fake_log(rng, bytes_per_log)).unwrap();
+            let log = fake_log(rng, bytes_per_log);
+            zip.write_all(&zstd::encode_all(log.as_slice(), 3).unwrap())
+                .unwrap();
         }
     }
     zip.finish().unwrap().into_inner()
