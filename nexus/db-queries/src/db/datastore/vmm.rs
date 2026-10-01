@@ -159,10 +159,9 @@ impl DataStore {
     /// Marks VMMs sleds that are evacuating as needing to be stopped in order
     /// to update the sled.
     ///
-    /// VMMs that are in the `Failed`, `Stopping`, `Stopped`, `Migrating`,
-    /// `Destroyed` or `SagaUnwound` states do not need to be stopped, so they
-    /// are left untouched. VMMs that are already marked to be stopped by update
-    /// are also excluded.
+    /// VMMs that are not in one of the `SHOULD_STOP_FOR_EVACUATION` states do
+    /// not need to be stopped, so they are left untouched. VMMs that are
+    /// already marked to be stopped by update are also excluded.
     ///
     /// The task to stop instances only needs to know whether a VMM should be
     /// stopped or not, so a boolean would be enough. But, we mark the VMMs
@@ -175,9 +174,10 @@ impl DataStore {
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        // We loop until a batch marks nothing, so a backlog larger than one
-        // batch is drained in a single call. Each newly marked VMM's generation
-        // is no longer NULL, so it drops out of the next batch's filter.
+        // This loop executes a query that marks up to `SQL_BATCH_SIZE` rows
+        // at a time until it indicates that no records were marked. Because
+        // there is a filter that excludes VMMs that have already been marked,
+        // subsequent batches will not include these VMMs.
         let mut marked_total = 0;
         loop {
             // Diesel's ValidSubselect doesn't allow a subquery from the same

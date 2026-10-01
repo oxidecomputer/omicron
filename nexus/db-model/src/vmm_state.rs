@@ -457,6 +457,13 @@ mod tests {
         // VMM to be stopped for sled evacuation. More detailed information about
         // the process of restarting instances during a live update can be found
         // in RFD 739.
+        //
+        // The use of an exhaustive `match state` here ensures that the addition
+        // of a new `VmmState` variant will result in a compiler error until it
+        // is added to this test. If you have added a new variant to VmmState,
+        // consider whether or not that state should be added to the list of
+        // states in which VMMs are marked to stop. Do *not* change the match
+        // here to be non-exhaustive!
         for state in VmmState::ALL_STATES.iter() {
             match state {
                 VmmState::Creating
