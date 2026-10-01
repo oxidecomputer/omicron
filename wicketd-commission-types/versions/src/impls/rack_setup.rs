@@ -2,7 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::str::FromStr;
@@ -15,8 +14,8 @@ use sled_agent_types_versions::latest::early_networking::{
 use sled_agent_types_versions::v30::early_networking::UplinkAddressConfig;
 
 use crate::latest::rack_setup::{
-    BgpAuthKeyId, L1PortConfig, ServiceIpPoolConfig, ServiceIpPoolError,
-    UplinkAddress, UplinkIpNet, UplinkPortConfig, UserSpecifiedBgpPeerConfig,
+    BgpAuthKeyId, ServiceIpPoolConfig, ServiceIpPoolError, UplinkAddress,
+    UplinkIpNet, UplinkPortConfig, UserSpecifiedBgpPeerConfig,
     UserSpecifiedImportExportPolicy, UserSpecifiedPortConfig,
     UserSpecifiedRackNetworkConfig, UserSpecifiedUplinkAddressConfig,
 };
@@ -119,30 +118,6 @@ impl UserSpecifiedPortConfig {
         match self {
             Self::Uplink(cfg) => Some(cfg),
             Self::Ddm(_) => None,
-        }
-    }
-
-    /// Returns the uplink config used to program this port on the switch.
-    ///
-    /// A DDM port is programmed like an uplink carrying no layer-3
-    /// configuration: only its physical-layer settings are applied, and it is
-    /// the only kind of port on which DDM traffic is allowed.
-    pub fn to_uplink_port_config(&self) -> Cow<'_, UplinkPortConfig> {
-        match self {
-            Self::Uplink(cfg) => Cow::Borrowed(cfg),
-            Self::Ddm(L1PortConfig { speed, fec, autoneg, lldp, tx_eq }) => {
-                Cow::Owned(UplinkPortConfig {
-                    routes: Vec::new(),
-                    addresses: Vec::new(),
-                    uplink_port_speed: *speed,
-                    uplink_port_fec: *fec,
-                    autoneg: *autoneg,
-                    bgp_peers: Vec::new(),
-                    lldp: lldp.clone(),
-                    tx_eq: *tx_eq,
-                    allow_ddm_traffic: true,
-                })
-            }
         }
     }
 }
@@ -495,36 +470,6 @@ mod tests {
         let roundtripped: PortConfigWrapper =
             toml::from_str(&toml_str).unwrap();
         assert_eq!(roundtripped.port, config);
-    }
-
-    #[test]
-    fn ddm_port_expands_to_uplink_allowing_ddm_traffic() {
-        let l1 = ddm_l1_config();
-        let config = UserSpecifiedPortConfig::Ddm(l1.clone());
-        let expanded = config.to_uplink_port_config();
-
-        assert!(expanded.allow_ddm_traffic);
-        assert_eq!(expanded.uplink_port_speed, l1.speed);
-        assert_eq!(expanded.uplink_port_fec, l1.fec);
-        assert_eq!(expanded.autoneg, l1.autoneg);
-        assert!(expanded.routes.is_empty());
-        assert!(expanded.addresses.is_empty());
-        assert!(expanded.bgp_peers.is_empty());
-    }
-
-    #[test]
-    fn uplink_port_does_not_allow_ddm_traffic() {
-        let config: UserSpecifiedPortConfig = serde_json::from_str(
-            r#"{
-                "routes": [],
-                "addresses": [],
-                "uplink_port_speed": "speed100_g",
-                "autoneg": false
-            }"#,
-        )
-        .unwrap();
-
-        assert!(!config.to_uplink_port_config().allow_ddm_traffic);
     }
 
     // `uplink_port_speed` selects the uplink variant, so a half-written uplink
