@@ -8,8 +8,7 @@
 //! Setup builds one zip per zone the way sled-diagnostics does, with one
 //! zstd-compressed entry per log file. Each iteration then places those zips
 //! in a fresh collection directory as though they had just been downloaded,
-//! runs [`prepare_zone_log_zip`] on each of them, and writes the bundle with
-//! [`bundle_to_writer`].
+//! and writes the bundle with [`bundle_to_writer`].
 //!
 //! The uncompressed logs total 100 MiB by default; set `ZONE_LOGS_BENCH_MIB`
 //! to change that.
@@ -18,7 +17,7 @@ use camino::Utf8Path;
 use criterion::{Criterion, SamplingMode, criterion_group, criterion_main};
 use std::io::Write;
 use std::time::{Duration, Instant};
-use support_bundle_collection::zip::{bundle_to_writer, prepare_zone_log_zip};
+use support_bundle_collection::zip::{MERGE_ZIP_SUFFIX, bundle_to_writer};
 use zip::write::FullFileOptions;
 
 const ZONES: usize = 20;
@@ -130,23 +129,15 @@ struct Sizes {
 /// Turns the zone zips into a bundle, returning how long that took.
 fn build_bundle(zone_zips: &[Vec<u8>]) -> (Duration, Sizes) {
     let dir = camino_tempfile::tempdir().unwrap();
-    let zip_paths: Vec<_> = zone_zips
-        .iter()
-        .enumerate()
-        .map(|(i, bytes)| {
-            let zone_dir = dir.path().join(format!("logs/oxz_fake_zone_{i}"));
-            std::fs::create_dir_all(&zone_dir).unwrap();
-            let zip_path = zone_dir.join("logs.zip");
-            std::fs::write(&zip_path, bytes).unwrap();
-            zip_path
-        })
-        .collect();
+    for (i, bytes) in zone_zips.iter().enumerate() {
+        let zone_dir = dir.path().join(format!("logs/oxz_fake_zone_{i}"));
+        std::fs::create_dir_all(&zone_dir).unwrap();
+        std::fs::write(zone_dir.join(format!("logs{MERGE_ZIP_SUFFIX}")), bytes)
+            .unwrap();
+    }
     let mut bundle = camino_tempfile::tempfile().unwrap();
 
     let start = Instant::now();
-    for zip_path in &zip_paths {
-        prepare_zone_log_zip(zip_path).unwrap();
-    }
     bundle_to_writer(&dir, &mut bundle).unwrap();
     let elapsed = start.elapsed();
 
@@ -184,7 +175,7 @@ fn zone_logs(c: &mut Criterion) {
     group.sample_size(10);
     group.measurement_time(Duration::from_secs(10));
     group.sampling_mode(SamplingMode::Flat);
-    group.bench_function(format!("prepare_and_bundle_{total_mib}MiB"), |b| {
+    group.bench_function(format!("bundle_{total_mib}MiB"), |b| {
         b.iter_custom(|iters| {
             (0..iters).map(|_| build_bundle(&zone_zips).0).sum()
         })

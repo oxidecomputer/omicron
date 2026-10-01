@@ -28,9 +28,10 @@
 //! Merged entries may collide with each other or with files on disk. The
 //! first entry of a given name is kept, and later ones are skipped.
 //!
-//! [`prepare_zone_log_zip`] runs earlier, during collection, on each zone's
-//! log zip as it arrives from a sled agent. It marks the zip for merging, so
-//! that the bundle copies its entries without decompressing them.
+//! A merge zip that cannot be read, or entries of it that cannot be read, are
+//! skipped rather than failing the bundle. What was skipped, and why, is
+//! recorded in the bundle in an entry named for the zip with `.err` appended:
+//! `logs/zone/logs.merge.zip.err`, for example.
 
 use ::zip::ZipWriter;
 use ::zip::write::FullFileOptions;
@@ -89,30 +90,6 @@ pub fn bundle_to_zipfile(
     let mut tempfile = tempfile_in(tempdir)?;
     bundle_to_writer(dir, &mut tempfile)?;
     Ok(tempfile)
-}
-
-/// Prepare a zone's log zip, downloaded from a sled agent to `zip_path`, for
-/// inclusion in the bundle.
-///
-/// The zip is renamed to end in [`MERGE_ZIP_SUFFIX`], so that its entries are
-/// copied into the bundle without being decompressed. It is first checked to
-/// be a readable zip; if it is not, it keeps its name and an error is
-/// returned.
-pub fn prepare_zone_log_zip(zip_path: &Utf8Path) -> Result<()> {
-    let file = std::fs::File::open(zip_path)
-        .with_context(|| format!("failed to open zip file: {zip_path}"))?;
-    ::zip::ZipArchive::new(file)
-        .with_context(|| format!("failed to read log zip file: {zip_path}"))?;
-
-    let file_stem = zip_path
-        .file_stem()
-        .with_context(|| format!("log zip has no file name: {zip_path}"))?;
-    let merge_path =
-        zip_path.with_file_name(format!("{file_stem}{MERGE_ZIP_SUFFIX}"));
-    std::fs::rename(zip_path, &merge_path).with_context(|| {
-        format!("failed to rename log zip file to: {merge_path}")
-    })?;
-    Ok(())
 }
 
 fn write_zip<W: Write + std::io::Seek>(
@@ -224,6 +201,16 @@ impl<W: Write + std::io::Seek> BundleZip<W> {
         Ok(())
     }
 
+    /// Adds `contents` as a file named `dst`, unless an entry named `dst` is
+    /// present.
+    fn add_text(&mut self, dst: &Utf8Path, contents: &str) -> Result<()> {
+        if let Some(name) = self.insert_file_name(dst) {
+            self.zip.start_file(name, FullFileOptions::default())?;
+            self.zip.write_all(contents.as_bytes())?;
+        }
+        Ok(())
+    }
+
     fn finish(self) -> Result<()> {
         self.zip.finish()?;
         Ok(())
@@ -272,38 +259,89 @@ fn recursively_add_directory_to_zipfile<W: Write + std::io::Seek>(
 /// without decompressing it.
 ///
 /// Directory entries are added for any directories leading to each copied
-/// entry. Entries are skipped if their names would place them outside of
-/// `dst_dir`, or if an entry of the same name is already in the bundle.
+/// entry. Entries are skipped if an entry of the same name is already in the
+/// bundle.
+///
+/// The zip is skipped if it cannot be read, and so is each entry that cannot be
+/// read or whose name would place it outside of `dst_dir`. Each is checked
+/// before anything of it is written to the bundle, and what was skipped is
+/// recorded in the bundle; see the [module documentation](self#bundle-contents).
+/// An error is returned only if writing to the bundle fails.
 fn merge_zip_entries<W: Write + std::io::Seek>(
     bundle: &mut BundleZip<W>,
     src: &Utf8Path,
     dst_dir: &Utf8Path,
 ) -> Result<()> {
-    let file = std::fs::File::open(src)
-        .with_context(|| format!("failed to open zip file: {src}"))?;
-    let mut archive = ::zip::ZipArchive::new(file)
-        .with_context(|| format!("failed to read zip file: {src}"))?;
-    for i in 0..archive.len() {
-        let entry = archive.by_index_raw(i)?;
-        let Some(relative) = entry
-            .enclosed_name()
-            .and_then(|path| Utf8PathBuf::try_from(path).ok())
-            .filter(|path| !path.as_str().is_empty())
-        else {
-            continue;
-        };
-        let path = dst_dir.join(&relative);
+    let mut skipped = Vec::new();
+    match open_zip(src) {
+        Ok((mut archive, zip_len)) => {
+            for i in 0..archive.len() {
+                let name =
+                    archive.name_for_index(i).unwrap_or_default().to_string();
+                let entry = match archive.by_index_raw(i) {
+                    Ok(entry) => entry,
+                    Err(err) => {
+                        skipped.push(format!("entry {name:?}: {err}"));
+                        continue;
+                    }
+                };
+                // Raw copies write as many bytes as the entry claims, without
+                // checking that the zip holds that many.
+                let data_end =
+                    entry.data_start().checked_add(entry.compressed_size());
+                if data_end.is_none_or(|end| end > zip_len) {
+                    skipped.push(format!(
+                        "entry {name:?}: data extends past the end of the zip"
+                    ));
+                    continue;
+                }
+                let Some(relative) = entry
+                    .enclosed_name()
+                    .and_then(|path| Utf8PathBuf::try_from(path).ok())
+                    .filter(|path| !path.as_str().is_empty())
+                else {
+                    skipped.push(format!(
+                        "entry {name:?}: name is outside of the zip's directory"
+                    ));
+                    continue;
+                };
+                let path = dst_dir.join(&relative);
 
-        if entry.is_dir() {
-            bundle.add_dir_all(&path)?;
-        } else {
-            if let Some(parent) = path.parent() {
-                bundle.add_dir_all(parent)?;
+                if entry.is_dir() {
+                    bundle.add_dir_all(&path)?;
+                } else {
+                    if let Some(parent) = path.parent() {
+                        bundle.add_dir_all(parent)?;
+                    }
+                    bundle.raw_copy(entry, &path)?;
+                }
             }
-            bundle.raw_copy(entry, &path)?;
         }
+        Err(err) => skipped.push(format!("{err:#}")),
+    }
+
+    if !skipped.is_empty() {
+        let zip_name = dst_dir.join(src.file_name().unwrap_or_default());
+        let mut note =
+            format!("Skipped while merging {zip_name} into the bundle:\n");
+        for line in skipped {
+            note.push_str(&line);
+            note.push('\n');
+        }
+        bundle
+            .add_text(&Utf8PathBuf::from(format!("{zip_name}.err")), &note)?;
     }
     Ok(())
+}
+
+/// Opens the zip at `path`, returning it along with its length in bytes.
+fn open_zip(
+    path: &Utf8Path,
+) -> Result<(::zip::ZipArchive<std::fs::File>, u64)> {
+    let file = std::fs::File::open(path).context("failed to open zip")?;
+    let len = file.metadata().context("failed to read zip metadata")?.len();
+    let archive = ::zip::ZipArchive::new(file).context("failed to read zip")?;
+    Ok((archive, len))
 }
 
 /// Chooses how to compress a file within the bundle.
@@ -495,8 +533,8 @@ mod test {
     }
 
     // Ensure that merging skips entries that would escape the merge zip's
-    // directory, and entries whose names are already in the bundle, rather
-    // than failing to build the bundle.
+    // directory, recording them, and entries whose names are already in the
+    // bundle, rather than failing to build the bundle.
     #[test]
     fn test_merge_zip_skips_unsafe_and_duplicate_entries() {
         let dir = tempdir().unwrap();
@@ -527,11 +565,126 @@ mod test {
                     "logs/zone-a/svc/",
                     "logs/zone-a/svc/current/",
                     "logs/zone-a/svc/current/svc.log",
+                    "logs/zone-a/logs.merge.zip.err",
                 ]
             );
             assert_eq!(
                 read_entry(&mut archive, "logs/zone-a/svc/current/svc.log"),
                 (::zip::CompressionMethod::Zstd, "merged data".to_string())
+            );
+            let (_, err) =
+                read_entry(&mut archive, "logs/zone-a/logs.merge.zip.err");
+            assert!(err.contains("\"../../escape.log\""), "{err}");
+        }
+    }
+
+    // Ensure that a merge zip that cannot be read is skipped and recorded in
+    // an `.err` entry, while a readable merge zip beside it is expanded, with
+    // no `.err` entry of its own.
+    #[test]
+    fn test_merge_zip_unreadable_zip() {
+        let dir = tempdir().unwrap();
+        let zone_a = dir.path().join("logs/zone-a");
+        let zone_b = dir.path().join("logs/zone-b");
+        std::fs::create_dir_all(&zone_a).unwrap();
+        std::fs::create_dir_all(&zone_b).unwrap();
+        std::fs::write(
+            zone_a.join(format!("logs{MERGE_ZIP_SUFFIX}")),
+            "not a zip",
+        )
+        .unwrap();
+        std::fs::write(
+            zone_b.join(format!("logs{MERGE_ZIP_SUFFIX}")),
+            zstd_zip(&[("svc.log", "zone b data")]),
+        )
+        .unwrap();
+
+        for buf in bundle_both_ways(&dir) {
+            let mut archive =
+                ::zip::read::ZipArchive::new(Cursor::new(buf)).unwrap();
+            let names: Vec<_> = archive.file_names().collect();
+            assert_eq!(
+                names,
+                [
+                    "logs/",
+                    "logs/zone-a/",
+                    "logs/zone-a/logs.merge.zip.err",
+                    "logs/zone-b/",
+                    "logs/zone-b/svc.log",
+                ]
+            );
+            let (_, err) =
+                read_entry(&mut archive, "logs/zone-a/logs.merge.zip.err");
+            assert!(err.contains("failed to read zip"), "{err}");
+            assert_eq!(
+                read_entry(&mut archive, "logs/zone-b/svc.log").1,
+                "zone b data"
+            );
+        }
+    }
+
+    // Ensure that entries of a merge zip that cannot be read are skipped and
+    // recorded, and the rest are copied: one whose local header is damaged,
+    // and one whose data would extend past the end of the zip.
+    #[test]
+    fn test_merge_zip_damaged_entries() {
+        let mut merge_zip = zstd_zip(&[
+            ("a.log", "a data"),
+            ("b.log", "b data"),
+            ("c.log", "c data"),
+        ]);
+        let offsets = |signature: &[u8]| -> Vec<usize> {
+            merge_zip
+                .windows(signature.len())
+                .enumerate()
+                .filter(|(_, window)| *window == signature)
+                .map(|(i, _)| i)
+                .collect()
+        };
+        // Damage the signature of b.log's local header.
+        let local_headers = offsets(b"PK\x03\x04");
+        // Claim, in c.log's central directory header, more compressed data
+        // than the zip holds.
+        let central_headers = offsets(b"PK\x01\x02");
+        merge_zip[local_headers[1]] = b'X';
+        let compressed_size = central_headers[2] + 20;
+        merge_zip[compressed_size..compressed_size + 4]
+            .copy_from_slice(&0x7fff_ffffu32.to_le_bytes());
+
+        let dir = tempdir().unwrap();
+        let zone_dir = dir.path().join("logs/zone-a");
+        std::fs::create_dir_all(&zone_dir).unwrap();
+        std::fs::write(
+            zone_dir.join(format!("logs{MERGE_ZIP_SUFFIX}")),
+            merge_zip,
+        )
+        .unwrap();
+
+        for buf in bundle_both_ways(&dir) {
+            let mut archive =
+                ::zip::read::ZipArchive::new(Cursor::new(buf)).unwrap();
+            let names: Vec<_> = archive.file_names().collect();
+            assert_eq!(
+                names,
+                [
+                    "logs/",
+                    "logs/zone-a/",
+                    "logs/zone-a/a.log",
+                    "logs/zone-a/logs.merge.zip.err",
+                ]
+            );
+            assert_eq!(
+                read_entry(&mut archive, "logs/zone-a/a.log").1,
+                "a data"
+            );
+            let (_, err) =
+                read_entry(&mut archive, "logs/zone-a/logs.merge.zip.err");
+            let lines: Vec<_> = err.lines().collect();
+            assert_eq!(lines.len(), 3, "{err}");
+            assert!(lines[1].starts_with("entry \"b.log\": "), "{err}");
+            assert_eq!(
+                lines[2],
+                "entry \"c.log\": data extends past the end of the zip"
             );
         }
     }
@@ -621,26 +774,5 @@ mod test {
                 "first b"
             );
         }
-    }
-
-    // Ensure that preparing a zone's log zip marks it for merging, and leaves
-    // a file that is not a zip alone.
-    #[test]
-    fn test_prepare_zone_log_zip() {
-        let dir = tempdir().unwrap();
-        let zip_path = dir.path().join("logs.zip");
-        let merge_path = dir.path().join(format!("logs{MERGE_ZIP_SUFFIX}"));
-
-        std::fs::write(&zip_path, zstd_zip(&[("svc.log", "data")])).unwrap();
-        prepare_zone_log_zip(&zip_path).unwrap();
-        assert!(!zip_path.exists());
-        assert!(merge_path.exists());
-        std::fs::remove_file(&merge_path).unwrap();
-
-        std::fs::write(&zip_path, "not a zip").unwrap();
-        prepare_zone_log_zip(&zip_path)
-            .expect_err("preparing a file that is not a zip should fail");
-        assert!(zip_path.exists());
-        assert!(!merge_path.exists());
     }
 }
