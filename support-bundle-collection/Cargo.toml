@@ -47,6 +47,7 @@ omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
+rand.workspace = true
 
 [[bench]]
 name = "zone_logs"

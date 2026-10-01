@@ -15,6 +15,8 @@
 
 use camino::Utf8Path;
 use criterion::{Criterion, SamplingMode, criterion_group, criterion_main};
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 use std::io::Write;
 use std::time::{Duration, Instant};
 use support_bundle_collection::zip::{MERGE_ZIP_SUFFIX, bundle_to_writer};
@@ -35,37 +37,18 @@ const MESSAGES: [&str; 6] = [
     "fake state transition",
 ];
 
-/// A small deterministic generator (xorshift64), so every run uses the same
-/// logs.
-struct Rng(u64);
-
-impl Rng {
-    fn next(&mut self) -> u64 {
-        let mut x = self.0;
-        x ^= x << 13;
-        x ^= x >> 7;
-        x ^= x << 17;
-        self.0 = x;
-        x
-    }
-
-    fn below(&mut self, n: usize) -> usize {
-        (self.next() % n as u64) as usize
-    }
-}
-
 /// Generates about `len` bytes of bunyan-style log lines.
-fn fake_log(rng: &mut Rng, len: usize) -> Vec<u8> {
+fn fake_log(rng: &mut StdRng, len: usize) -> Vec<u8> {
     let mut out = Vec::with_capacity(len + 512);
     let mut time_ns: u64 = 0;
     while out.len() < len {
-        time_ns += rng.next() % 50_000_000;
+        time_ns += rng.random_range(0..50_000_000);
         let secs = time_ns / 1_000_000_000;
         let nanos = time_ns % 1_000_000_000;
-        let msg = MESSAGES[rng.below(MESSAGES.len())];
-        let level = [20, 30, 30, 40, 50][rng.below(5)];
-        let req_id = rng.next();
-        let latency_us = rng.next() % 5_000_000;
+        let msg = MESSAGES[rng.random_range(0..MESSAGES.len())];
+        let level = [20, 30, 30, 40, 50][rng.random_range(0..5)];
+        let req_id: u64 = rng.random();
+        let latency_us = rng.random_range(0..5_000_000);
         writeln!(
             out,
             "{{\"msg\":\"{msg}\",\"v\":0,\"name\":\"fake-service\",\
@@ -83,7 +66,7 @@ fn fake_log(rng: &mut Rng, len: usize) -> Vec<u8> {
 
 /// Builds a zone's log zip, laid out and compressed the way sled-diagnostics
 /// builds them.
-fn fake_zone_zip(rng: &mut Rng, bytes_per_log: usize) -> Vec<u8> {
+fn fake_zone_zip(rng: &mut StdRng, bytes_per_log: usize) -> Vec<u8> {
     let options = FullFileOptions::default()
         .compression_method(zip::CompressionMethod::Zstd)
         .compression_level(Some(3))
@@ -154,7 +137,8 @@ fn zone_logs(c: &mut Criterion) {
         .unwrap_or(DEFAULT_TOTAL_MIB);
     let bytes_per_log =
         total_mib * (1 << 20) / (ZONES * SERVICES_PER_ZONE * LOGS_PER_SERVICE);
-    let mut rng = Rng(0x5eed);
+    // A fixed seed, so that every run uses the same logs.
+    let mut rng = StdRng::seed_from_u64(0x5eed);
     let zone_zips: Vec<_> =
         (0..ZONES).map(|_| fake_zone_zip(&mut rng, bytes_per_log)).collect();
 
