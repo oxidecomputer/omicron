@@ -16,10 +16,21 @@
 //!   chunked-upload path, which needs an owned seekable `File` for
 //!   hashing + per-chunk `try_clone` / `seek`.
 //!
+//! # Bundle contents
+//!
+//! The bundle mirrors the collected directory: each file and directory
+//! within it becomes an entry of the same relative path, with one exception.
+//! A file whose name ends in [`MERGE_ZIP_SUFFIX`] is expanded in place: the
+//! file itself is not added, and its entries are copied, still compressed,
+//! under the directory that contains it. The collected directory therefore
+//! does not match the bundle's layout exactly.
+//!
+//! Merged entries may collide with each other or with files on disk. The
+//! first entry of a given name is kept, and later ones are skipped.
+//!
 //! [`prepare_zone_log_zip`] runs earlier, during collection, on each zone's
-//! log zip as it arrives from a sled agent. It marks the zip so that the
-//! bundle copies its entries without decompressing them; see
-//! [`MERGE_ZIP_SUFFIX`].
+//! log zip as it arrives from a sled agent. It marks the zip for merging, so
+//! that the bundle copies its entries without decompressing them.
 
 use ::zip::ZipWriter;
 use ::zip::write::FullFileOptions;
@@ -43,8 +54,11 @@ use std::io::Write;
 /// bundle.
 pub const MERGE_ZIP_SUFFIX: &str = ".merge.zip";
 
-/// Write a bundle zip into a seekable destination. Produces a standard
-/// zip (no data descriptors).
+/// Write a bundle zip of `dir` into a seekable destination. Produces a
+/// standard zip (no data descriptors).
+///
+/// See the [module documentation](self#bundle-contents) for how `dir` maps to
+/// the zip's entries.
 pub fn bundle_to_writer<W: Write + std::io::Seek>(
     dir: &Utf8TempDir,
     writer: W,
@@ -55,12 +69,18 @@ pub fn bundle_to_writer<W: Write + std::io::Seek>(
 /// Write a bundle zip into a non-seekable destination. The resulting
 /// archive uses zip data descriptors (~16 bytes of overhead per entry)
 /// and is readable by any standard unzip tool.
+///
+/// See the [module documentation](self#bundle-contents) for how `dir` maps to
+/// the zip's entries.
 pub fn bundle_to_stream<W: Write>(dir: &Utf8TempDir, writer: W) -> Result<()> {
     write_zip(dir, ZipWriter::new_stream(writer))
 }
 
 /// Zip the contents of `dir` into a tempfile under `tempdir` and return
 /// the owned file handle. Used by Nexus's chunked-upload path.
+///
+/// See the [module documentation](self#bundle-contents) for how `dir` maps to
+/// the zip's entries.
 pub fn bundle_to_zipfile(
     dir: &Utf8TempDir,
     tempdir: &Utf8Path,
@@ -111,6 +131,11 @@ fn write_zip<W: Write + std::io::Seek>(
 
 /// Adds the contents of `dir_path` to `zip`, recording the name of each entry
 /// added in `names`.
+///
+/// `ZipWriter` rejects duplicate names, and merged zips can produce names that
+/// collide with each other or with files on disk. Callers share one `names`
+/// across the whole bundle so that the first entry of a name wins and later
+/// ones are skipped. Directory names are recorded with a trailing `/`.
 fn recursively_add_directory_to_zipfile<W: Write + std::io::Seek>(
     zip: &mut ZipWriter<W>,
     names: &mut BTreeSet<String>,
