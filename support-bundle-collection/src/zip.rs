@@ -36,6 +36,7 @@ use ::zip::ZipWriter;
 use ::zip::write::FullFileOptions;
 use anyhow::Context;
 use anyhow::Result;
+use camino::Utf8Component;
 use camino::Utf8DirEntry;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
@@ -134,7 +135,29 @@ struct BundleZip<W: Write + std::io::Seek> {
     zip: ZipWriter<W>,
     // Names of the entries in `zip`, with directories ending in `/`.
     // `ZipWriter` tracks these too, but does not expose them.
+    //
+    // Each name is built by `name_components`, and that same string is what
+    // is written to `zip`, so that this set agrees with `ZipWriter` on which
+    // names are duplicates.
     names: BTreeSet<String>,
+}
+
+/// Splits `path` into the components of its zip entry name, resolving `.` and
+/// `..` and dropping repeated or trailing separators.
+fn name_components(path: &Utf8Path) -> Vec<&str> {
+    let mut components = Vec::new();
+    for component in path.components() {
+        match component {
+            Utf8Component::Normal(component) => components.push(component),
+            Utf8Component::ParentDir => {
+                components.pop();
+            }
+            Utf8Component::CurDir
+            | Utf8Component::RootDir
+            | Utf8Component::Prefix(_) => {}
+        }
+    }
+    components
 }
 
 impl<W: Write + std::io::Seek> BundleZip<W> {
@@ -142,15 +165,21 @@ impl<W: Write + std::io::Seek> BundleZip<W> {
         Self { zip, names: BTreeSet::new() }
     }
 
+    /// Records the entry name for the file at `path`, returning it if no entry
+    /// of that name is present.
+    fn insert_file_name(&mut self, path: &Utf8Path) -> Option<String> {
+        let name = name_components(path).join("/");
+        (!name.is_empty() && self.names.insert(name.clone())).then_some(name)
+    }
+
     /// Adds directory entries for `path` and each of its ancestors, from the
     /// outermost in, skipping any already present.
     fn add_dir_all(&mut self, path: &Utf8Path) -> Result<()> {
-        let dirs: Vec<_> =
-            path.ancestors().filter(|dir| !dir.as_str().is_empty()).collect();
-        for dir in dirs.into_iter().rev() {
-            if self.names.insert(format!("{dir}/")) {
-                self.zip
-                    .add_directory_from_path(dir, FullFileOptions::default())?;
+        let components = name_components(path);
+        for i in 1..=components.len() {
+            let name = format!("{}/", components[..i].join("/"));
+            if self.names.insert(name.clone()) {
+                self.zip.add_directory(name, FullFileOptions::default())?;
             }
         }
         Ok(())
@@ -159,9 +188,9 @@ impl<W: Write + std::io::Seek> BundleZip<W> {
     /// Adds the file at `src` as `dst`, unless an entry named `dst` is
     /// present.
     fn add_file(&mut self, dst: &Utf8Path, src: &Utf8Path) -> Result<()> {
-        if !self.names.insert(dst.to_string()) {
+        let Some(name) = self.insert_file_name(dst) else {
             return Ok(());
-        }
+        };
 
         let zip_time = src
             .metadata()
@@ -176,7 +205,7 @@ impl<W: Write + std::io::Seek> BundleZip<W> {
             .compression_method(compression_method_for(src))
             .large_file(true);
 
-        self.zip.start_file_from_path(dst, opts)?;
+        self.zip.start_file(name, opts)?;
         let mut file = std::fs::File::open(&src)?;
         std::io::copy(&mut file, &mut self.zip)?;
         Ok(())
@@ -189,8 +218,8 @@ impl<W: Write + std::io::Seek> BundleZip<W> {
         entry: ::zip::read::ZipFile<'_, R>,
         dst: &Utf8Path,
     ) -> Result<()> {
-        if self.names.insert(dst.to_string()) {
-            self.zip.raw_copy_file_rename(entry, dst.as_str())?;
+        if let Some(name) = self.insert_file_name(dst) {
+            self.zip.raw_copy_file_rename(entry, name)?;
         }
         Ok(())
     }
@@ -503,6 +532,93 @@ mod test {
             assert_eq!(
                 read_entry(&mut archive, "logs/zone-a/svc/current/svc.log"),
                 (::zip::CompressionMethod::Zstd, "merged data".to_string())
+            );
+        }
+    }
+
+    // Ensure that a merge zip's directory entries are added once each,
+    // whether they come before or after the files within them.
+    #[test]
+    fn test_merge_zip_directory_entries() {
+        let options = FullFileOptions::default()
+            .compression_method(::zip::CompressionMethod::Zstd);
+        let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
+        zip.add_directory("svc/", options.clone()).unwrap();
+        zip.start_file("svc/current/svc.log", options.clone()).unwrap();
+        zip.write_all(b"current data").unwrap();
+        zip.start_file("svc/archive/svc.log.1", options.clone()).unwrap();
+        zip.write_all(b"archived data").unwrap();
+        zip.add_directory("svc/archive/", options).unwrap();
+        let merge_zip = zip.finish().unwrap().into_inner();
+
+        let dir = tempdir().unwrap();
+        let zone_dir = dir.path().join("logs/zone-a");
+        std::fs::create_dir_all(&zone_dir).unwrap();
+        std::fs::write(
+            zone_dir.join(format!("logs{MERGE_ZIP_SUFFIX}")),
+            merge_zip,
+        )
+        .unwrap();
+
+        for buf in bundle_both_ways(&dir) {
+            let archive =
+                ::zip::read::ZipArchive::new(Cursor::new(buf)).unwrap();
+            let names: Vec<_> = archive.file_names().collect();
+            assert_eq!(
+                names,
+                [
+                    "logs/",
+                    "logs/zone-a/",
+                    "logs/zone-a/svc/",
+                    "logs/zone-a/svc/current/",
+                    "logs/zone-a/svc/current/svc.log",
+                    "logs/zone-a/svc/archive/",
+                    "logs/zone-a/svc/archive/svc.log.1",
+                ]
+            );
+        }
+    }
+
+    // Ensure that merged entry names are normalized, so that names which
+    // differ only in `.`, `..`, or repeated separators are treated as
+    // duplicates.
+    #[test]
+    fn test_merge_zip_normalizes_names() {
+        let dir = tempdir().unwrap();
+        let zone_dir = dir.path().join("logs/zone-a");
+        std::fs::create_dir_all(&zone_dir).unwrap();
+        std::fs::write(
+            zone_dir.join(format!("logs{MERGE_ZIP_SUFFIX}")),
+            zstd_zip(&[
+                ("svc/./a.log", "first a"),
+                ("svc/a.log", "second a"),
+                ("svc//b.log", "first b"),
+                ("svc/x/../b.log", "second b"),
+            ]),
+        )
+        .unwrap();
+
+        for buf in bundle_both_ways(&dir) {
+            let mut archive =
+                ::zip::read::ZipArchive::new(Cursor::new(buf)).unwrap();
+            let names: Vec<_> = archive.file_names().collect();
+            assert_eq!(
+                names,
+                [
+                    "logs/",
+                    "logs/zone-a/",
+                    "logs/zone-a/svc/",
+                    "logs/zone-a/svc/a.log",
+                    "logs/zone-a/svc/b.log",
+                ]
+            );
+            assert_eq!(
+                read_entry(&mut archive, "logs/zone-a/svc/a.log").1,
+                "first a"
+            );
+            assert_eq!(
+                read_entry(&mut archive, "logs/zone-a/svc/b.log").1,
+                "first b"
             );
         }
     }
