@@ -759,6 +759,11 @@ struct SledCapacityArgs {
     /// and percentage used
     #[clap(long)]
     free: bool,
+
+    /// List the VMMs on each sled along with the hardware threads and
+    /// reservoir RAM assigned to each
+    #[clap(short, long)]
+    verbose: bool,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -4767,10 +4772,17 @@ async fn cmd_db_sled_capacity(
     check_limit(&sleds, limit, || String::from("listing sleds"));
 
     // Sum VMM resource reservations by sled.
+    struct VmmAssignment {
+        instance_id: Option<InstanceUuid>,
+        hardware_threads: i64,
+        reservoir_ram: i64,
+    }
+
     #[derive(Default)]
     struct VmmUsage {
         hardware_threads: i64,
         reservoir_ram: i64,
+        vmms: Vec<VmmAssignment>,
     }
 
     // Gather all of the VMM resource reservations per sled.
@@ -4790,11 +4802,17 @@ async fn cmd_db_sled_capacity(
                 PropolisUuid::from(vmm.id).into_untyped_uuid()
             });
         for vmm in batch {
-            let usage = vmm_usage.entry(vmm.sled_id.into()).or_default();
-            usage.hardware_threads +=
+            let hardware_threads =
                 i64::from(u32::from(vmm.resources.hardware_threads));
-            usage.reservoir_ram +=
-                vmm.resources.reservoir_ram.to_bytes() as i64;
+            let reservoir_ram = vmm.resources.reservoir_ram.to_bytes() as i64;
+            let usage = vmm_usage.entry(vmm.sled_id.into()).or_default();
+            usage.hardware_threads += hardware_threads;
+            usage.reservoir_ram += reservoir_ram;
+            usage.vmms.push(VmmAssignment {
+                instance_id: vmm.instance_id.map(InstanceUuid::from),
+                hardware_threads,
+                reservoir_ram,
+            });
         }
     }
 
@@ -4837,7 +4855,7 @@ async fn cmd_db_sled_capacity(
         .map(|(zpool, _)| zpool)
         .collect();
 
-    // We are trying to emulate disk allocation logic here: use the most
+    // We are trying to emulate disk allocation logic here by using the most
     // recently reported size of each zpool from any inventory collection.
     // Filtering on the known pool IDs lets this use the
     // `inv_zpool_by_id_and_time` index instead of a full table scan.
@@ -4869,16 +4887,17 @@ async fn cmd_db_sled_capacity(
     let mut storage: HashMap<SledUuid, StorageUsage> = HashMap::new();
     for zpool in zpools {
         let usage = storage.entry(zpool.sled_id()).or_default();
-        let Some(total) = pool_total_size.get(&zpool.id()) else {
-            usage.pools_missing_inventory += 1;
-            continue;
-        };
-        let buffer: i64 = zpool.control_plane_storage_buffer().into();
-        let used = pool_used.get(&zpool.id()).copied().unwrap_or(0);
-        let free = (total - buffer - used).max(0);
-        usage.total += total;
-        usage.free += free;
-        usage.largest_pool_free = usage.largest_pool_free.max(free);
+        match pool_total_size.get(&zpool.id()) {
+            Some(total) => {
+                let buffer: i64 = zpool.control_plane_storage_buffer().into();
+                let used = pool_used.get(&zpool.id()).copied().unwrap_or(0);
+                let free = (total - buffer - used).max(0);
+                usage.total += total;
+                usage.free += free;
+                usage.largest_pool_free = usage.largest_pool_free.max(free);
+            }
+            None => usage.pools_missing_inventory += 1,
+        }
     }
 
     #[derive(Clone, Copy, Default)]
@@ -4902,24 +4921,34 @@ async fn cmd_db_sled_capacity(
         n.to_string()
     }
 
-    // Formats a column of ratios as "amount / total (N%)", where the amount
-    // and percentage are either used or free depending on `show_free`. Each
-    // part is padded to the widest value in the column so they line up
-    // vertically.
+    // Formats a column of ratios as an amount over a total followed by a
+    // percentage. The amount and percentage show either the used or the free
+    // portion depending on `show_free`.
+    //
+    // Each part is padded to the widest value in the column so that the values
+    // line up vertically. The amount is padded to at least `min_amount_width`
+    // so that VMM rows can be aligned underneath it. The final amount width is
+    // returned for that purpose.
     fn format_ratio_column(
         ratios: &[Ratio],
         fmt: fn(i64) -> String,
         show_free: bool,
-    ) -> Vec<String> {
+        min_amount_width: usize,
+    ) -> (Vec<String>, usize) {
         let amounts: Vec<i64> = ratios
             .iter()
             .map(|r| if show_free { r.total - r.used } else { r.used })
             .collect();
         let amount: Vec<String> = amounts.iter().map(|a| fmt(*a)).collect();
         let total: Vec<String> = ratios.iter().map(|r| fmt(r.total)).collect();
-        let amount_width = amount.iter().map(|s| s.len()).max().unwrap_or(0);
+        let amount_width = amount
+            .iter()
+            .map(|s| s.len())
+            .max()
+            .unwrap_or(0)
+            .max(min_amount_width);
         let total_width = total.iter().map(|s| s.len()).max().unwrap_or(0);
-        ratios
+        let formatted = ratios
             .iter()
             .zip(amounts)
             .zip(amount.iter().zip(total.iter()))
@@ -4933,10 +4962,12 @@ async fn cmd_db_sled_capacity(
                     "{amount:>amount_width$} / {total:>total_width$} ({pct})"
                 )
             })
-            .collect()
+            .collect();
+        (formatted, amount_width)
     }
 
-    // Gather the raw numbers for each sled, plus a totals row at the end.
+    // Gather the raw numbers for each sled. A totals row is appended at the
+    // end once every sled has been processed.
     struct SledCapacity {
         serial: String,
         id: String,
@@ -4945,12 +4976,14 @@ async fn cmd_db_sled_capacity(
         storage: Ratio,
         largest_pool_free: Option<i64>,
         missing_inventory: bool,
+        vmms: Vec<VmmAssignment>,
     }
 
     let mut capacities: Vec<SledCapacity> = sleds
         .iter()
         .map(|sled| {
-            let vmm = vmm_usage.remove(&sled.id()).unwrap_or_default();
+            let mut vmm = vmm_usage.remove(&sled.id()).unwrap_or_default();
+            vmm.vmms.sort_by_key(|v| v.instance_id);
             let st = storage.remove(&sled.id()).unwrap_or_default();
             let threads_total =
                 i64::from(u32::from(sled.usable_hardware_threads));
@@ -4971,6 +5004,7 @@ async fn cmd_db_sled_capacity(
                 storage: Ratio { used: st.total - st.free, total: st.total },
                 largest_pool_free: Some(st.largest_pool_free),
                 missing_inventory: st.pools_missing_inventory > 0,
+                vmms: vmm.vmms,
             }
         })
         .collect();
@@ -4983,6 +5017,7 @@ async fn cmd_db_sled_capacity(
         storage: Ratio::default(),
         largest_pool_free: None,
         missing_inventory: false,
+        vmms: Vec::new(),
     };
     for c in &capacities {
         totals.threads += c.threads;
@@ -4991,14 +5026,32 @@ async fn cmd_db_sled_capacity(
     }
     capacities.push(totals);
 
-    // Format each column as a whole so that values line up.
-    let column = |get: fn(&SledCapacity) -> Ratio, fmt: fn(i64) -> String| {
-        let ratios: Vec<Ratio> = capacities.iter().map(get).collect();
-        format_ratio_column(&ratios, fmt, args.free)
+    // VMM rows are only shown in verbose mode. When they are shown their
+    // values must fit within the amount portion of their column.
+    let vmm_width = |get: fn(&VmmAssignment) -> String| {
+        capacities
+            .iter()
+            .filter(|_| args.verbose)
+            .flat_map(|c| c.vmms.iter())
+            .map(|v| get(v).len())
+            .max()
+            .unwrap_or(0)
     };
-    let threads = column(|c| c.threads, count);
-    let reservoir = column(|c| c.reservoir, gib);
-    let storage = column(|c| c.storage, gib);
+    let vmm_threads_width = vmm_width(|v| count(v.hardware_threads));
+    let vmm_reservoir_width = vmm_width(|v| gib(v.reservoir_ram));
+
+    // Format each column as a whole so that values line up.
+    let column = |get: fn(&SledCapacity) -> Ratio,
+                  fmt: fn(i64) -> String,
+                  min_amount_width: usize| {
+        let ratios: Vec<Ratio> = capacities.iter().map(get).collect();
+        format_ratio_column(&ratios, fmt, args.free, min_amount_width)
+    };
+    let (threads, threads_width) =
+        column(|c| c.threads, count, vmm_threads_width);
+    let (reservoir, reservoir_width) =
+        column(|c| c.reservoir, gib, vmm_reservoir_width);
+    let (storage, _) = column(|c| c.storage, gib, 0);
     let largest_pool: Vec<String> = capacities
         .iter()
         .map(|c| c.largest_pool_free.map(gib).unwrap_or_default())
@@ -5008,8 +5061,8 @@ async fn cmd_db_sled_capacity(
 
     let any_missing_inventory = capacities.iter().any(|c| c.missing_inventory);
 
-    // The column headers depend on whether we're showing used or free, so
-    // build the table by hand rather than deriving `Tabled`.
+    // The table is built by hand rather than by deriving `Tabled` because the
+    // column headers depend on whether we are showing used or free.
     let kind = if args.free { "free" } else { "used" };
     let suffix = kind.to_uppercase();
     let mut builder = tabled::builder::Builder::new();
@@ -5039,6 +5092,23 @@ async fn cmd_db_sled_capacity(
             storage,
             format!("{largest_pool:>largest_pool_width$}"),
         ]);
+
+        if args.verbose {
+            for vmm in c.vmms {
+                let instance_id = vmm
+                    .instance_id
+                    .map(|id| id.to_string())
+                    .unwrap_or_else(|| String::from("-"));
+                builder.push_record([
+                    String::new(),
+                    format!("  {instance_id}"),
+                    format!("{:>threads_width$}", count(vmm.hardware_threads)),
+                    format!("{:>reservoir_width$}", gib(vmm.reservoir_ram)),
+                    String::new(),
+                    String::new(),
+                ]);
+            }
+        }
     }
 
     let table = builder
