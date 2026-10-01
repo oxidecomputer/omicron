@@ -737,7 +737,18 @@ impl CollectionBuilder {
             )
     }
 
-    /// Returns true if we already found a given PSU for the PSC with the
+    /// Returns `true` if we have already found *all PSUs* for the PSC with the
+    /// provided baseboard identity.
+    pub fn found_all_psus_already(&self, psc: &BaseboardId) -> bool {
+        self.power_shelves
+            .get(psc)
+            .map(|shelf| {
+                PsuSlot::ALL.iter().all(|slot| found_psu_already(shelf, *slot))
+            })
+            .unwrap_or(false)
+    }
+
+    /// Returns `true` if we already found a given PSU for the PSC with the
     /// provided baseboard identity.
     ///
     /// This is used to avoid requesting it multiple times (from multiple MGS
@@ -745,13 +756,8 @@ impl CollectionBuilder {
     pub fn found_psu_already(&self, psc: &BaseboardId, psu: PsuSlot) -> bool {
         self.power_shelves
             .get(psc)
-            .and_then(|shelf| shelf.psus.get(&psu))
-            .is_some_and(|psu| {
-                // well, so we found it...were we able to read its identity? if
-                // not, try again, provided that it's present.
-                psu.vpd.is_ok()
-                    || psu.presence == SpComponentPresence::NotPresent
-            })
+            .map(|shelf| found_psu_already(shelf, psu))
+            .unwrap_or(false)
     }
 
     /// Record information about a power shelf PSU.
@@ -855,6 +861,14 @@ impl CollectionBuilder {
             )
         })
     }
+}
+
+fn found_psu_already(shelf: &PowerShelf, psu_slot: PsuSlot) -> bool {
+    shelf.psus.get(&psu_slot).is_some_and(|psu| {
+        // well, so we found it...were we able to read its identity? if
+        // not, try again, provided that it's present.
+        psu.vpd.is_ok() || psu.presence == SpComponentPresence::NotPresent
+    })
 }
 
 pub use omicron_common::now_db_precision;
