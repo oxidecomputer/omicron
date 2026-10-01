@@ -1788,19 +1788,7 @@ set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 omicron config from latest bluepri
 generated inventory collection a71f7a73-35a6-45e8-acbe-f1c5925eed69 from configured sleds
 
 
-> # We expunge a single internal_dns zone
-> #
-> # Note that since we are not running the command to emulate the sled-agent
-> # performing an inventory collection and seeing the DNS zone has gone away, the
-> # planner will not attempt to restore the internal DNS zone. This is intentional
-> # as we want the zone to stay in this state for the purposes of this test.
-> #
-> # A secondary effect of pinning inventory this way is that the noop image source
-> # check on serial1 will be skipped with reason "inventory stale" for the rest
-> # of this test: the expunge bumps serial1's blueprint sled-agent generation,
-> # but inventory still reports the prior generation. That's the correct
-> # behavior; see `cmds-noop-stale-inventory.txt` for a focused test of the
-> # inventory-staleness guarantee.
+> # We expunge a single internal_dns zone on serial1
 > blueprint-edit latest expunge-zones 99e2f30b-3174-40bf-a78a-90da8abba8ca
 blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba created from latest blueprint (df06bb57-ad42-4431-9206-abff322896c7): expunged zone 99e2f30b-3174-40bf-a78a-90da8abba8ca from sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 
@@ -2489,9 +2477,13 @@ external DNS:
 
 
 
-> # We forcibly update serial1 along with all the SPs to see the errors with the
-> # Host OS on serial2 and serial0, and plan no pending updates. serial1's updates
-> # are all complete, so it should be restored to `available`.
+> # We forcibly update serial1 along with all the SPs to see the blocked Host OS
+> # updates on serial0 and serial2 - the new internal DNS zone placed on serial1
+> # is not yet synchronized, so it's unsafe to reboot the sleds hosting the other
+> # two internal DNS zones.
+> #
+> # Additionally, serial1's updates are all complete, so it should be restored to
+> # `available`.
 > sled-update-sp serial0 --active 1.0.0
 set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 SP versions: active -> 1.0.0
 
