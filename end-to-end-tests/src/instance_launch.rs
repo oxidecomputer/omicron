@@ -92,6 +92,7 @@ async fn instance_launch() -> Result<()> {
             cpu_platform: None,
             multicast_groups: Vec::new(),
             enable_jumbo_frames: false,
+            shutdown_policy: None,
         })
         .send()
         .await?;

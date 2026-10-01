@@ -1451,10 +1451,24 @@ impl super::Nexus {
                 propolis_id,
             } => {
                 let sa = self.sled_client(&sled_id).await?;
+                let acpi_timeout_secs = match prev_instance_state
+                    .shutdown_policy_action
+                {
+                    nexus_db_model::InstanceShutdownAction::HardOff => None,
+                    nexus_db_model::InstanceShutdownAction::PowerButton => {
+                        prev_instance_state.shutdown_policy_timeout.and_then(
+                            // TODO: double-tap? we're verifying non-negative at the DB level
+                            |delta| delta.num_seconds().try_into().ok(),
+                        )
+                    }
+                };
                 let instance_put_result = sa
                     .vmm_put_state(
                         &propolis_id,
-                        &VmmPutStateBody { state: requested.into() },
+                        &VmmPutStateBody {
+                            state: requested.into(),
+                            acpi_timeout_secs,
+                        },
                     )
                     .await
                     .map(|res| res.into_inner().updated_runtime.map(Into::into))

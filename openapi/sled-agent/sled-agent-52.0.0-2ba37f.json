@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "51.0.0"
+    "version": "52.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -10397,6 +10397,12 @@
         "description": "The body of a request to move a previously-ensured instance into a specific runtime state.",
         "type": "object",
         "properties": {
+          "acpi_timeout_secs": {
+            "nullable": true,
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
           "state": {
             "description": "The state into which the instance should be driven.",
             "allOf": [

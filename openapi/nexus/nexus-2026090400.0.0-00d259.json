@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026082800.0.0"
+    "version": "2026090400.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -22969,6 +22969,14 @@
           "run_state": {
             "$ref": "#/components/schemas/InstanceState"
           },
+          "shutdown_policy": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceShutdownPolicy"
+              }
+            ]
+          },
           "time_created": {
             "description": "Timestamp when this resource was created",
             "type": "string",
@@ -23166,6 +23174,15 @@
             "allOf": [
               {
                 "$ref": "#/components/schemas/InstanceNetworkInterfaceAttachment"
+              }
+            ]
+          },
+          "shutdown_policy": {
+            "nullable": true,
+            "default": null,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceShutdownPolicy"
               }
             ]
           },
@@ -23618,6 +23635,44 @@
           "last_byte_offset"
         ]
       },
+      "InstanceShutdownPolicy": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": [
+                  "hard_off"
+                ]
+              }
+            },
+            "required": [
+              "action"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": [
+                  "power_button"
+                ]
+              },
+              "timeout_secs": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "action",
+              "timeout_secs"
+            ]
+          }
+        ]
+      },
       "InstanceState": {
         "description": "Running state of an Instance (primarily: booted or stopped)\n\nThis typically reflects whether it's starting, running, stopping, or stopped, but also includes states related to the Instance's lifecycle",
         "oneOf": [
@@ -23750,6 +23805,14 @@
             "allOf": [
               {
                 "$ref": "#/components/schemas/InstanceCpuCount"
+              }
+            ]
+          },
+          "shutdown_policy": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceShutdownPolicy"
               }
             ]
           }
