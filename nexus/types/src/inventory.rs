@@ -501,7 +501,6 @@ pub struct Psu {
     pub time_collected: DateTime<Utc>,
     pub source: String,
     pub slot: PsuSlot,
-    pub presence: SpComponentPresence,
     /// The Hubris device type string in the SP's inventory. This identifies
     /// which Hubris driver is used to communicate with the PSU, and is a
     /// property of the SP's Hubris image, not a value reported by the PSU
@@ -510,7 +509,37 @@ pub struct Psu {
     /// For the model number reported by the PSU, use [`PsuIdentity::mfr_model`]
     /// instead.
     pub hubris_device_type: String,
-    pub vpd: Result<PsuIdentity, String>,
+    /// Data describing the state of the PSU, or `None` if the SP reported that
+    /// no PSU is present in this slot.
+    pub state: Option<PsuState>,
+}
+
+impl Psu {
+    /// Returns the presence of this PSU, as reported by the SP.
+    pub fn presence(&self) -> SpComponentPresence {
+        match &self.state {
+            None => SpComponentPresence::NotPresent,
+            Some(state) => state.status.into(),
+        }
+    }
+
+    /// Returns `true` if we attempted to read this PSU's identity and failed.
+    ///
+    /// This is `false` both when the identity was read successfully and when
+    /// the SP reported that no PSU is present (in which case we did not try to
+    /// read the VPD).
+    pub fn identity_read_failed(&self) -> bool {
+        matches!(self.identity(), Some(Err(_)))
+    }
+
+    /// Returns the result of reading this PSU's identity, or `None` if the SP
+    /// reported that no PSU is present (in which case we did not try to read
+    /// its VPD).
+    pub fn identity(&self) -> Option<Result<&PsuIdentity, &str>> {
+        self.state
+            .as_ref()
+            .map(|state| state.identity.as_ref().map_err(String::as_str))
+    }
 }
 
 impl IdOrdItem for Psu {
@@ -521,6 +550,64 @@ impl IdOrdItem for Psu {
     }
 
     id_upcast!();
+}
+
+/// The SP-reported status of a PSU slot which was not reported as empty.
+///
+/// This is [`SpComponentPresence`] without
+/// [`NotPresent`](SpComponentPresence::NotPresent), which is represented by
+/// [`Psu::state`] being `None`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+pub enum PsuStatus {
+    /// The SP reports that the PSU is present.
+    Present,
+    /// The SP reports that the PSU is present but in a failed or faulty state.
+    Failed,
+    /// The SP was unable to determine whether a PSU is present.
+    PresenceUnavailable,
+    /// The SP's attempt to determine whether a PSU is present timed out.
+    PresenceTimeout,
+    /// The SP encountered an error while determining whether a PSU is present.
+    PresenceError,
+}
+
+impl PsuStatus {
+    /// Converts an SP-reported component presence into a `PsuStatus`.
+    ///
+    /// Returns `None` if the presence is
+    /// [`NotPresent`](SpComponentPresence::NotPresent).
+    pub fn from_presence(presence: SpComponentPresence) -> Option<Self> {
+        match presence {
+            SpComponentPresence::NotPresent => None,
+            SpComponentPresence::Present => Some(Self::Present),
+            SpComponentPresence::Failed => Some(Self::Failed),
+            SpComponentPresence::Unavailable => Some(Self::PresenceUnavailable),
+            SpComponentPresence::Timeout => Some(Self::PresenceTimeout),
+            SpComponentPresence::Error => Some(Self::PresenceError),
+        }
+    }
+}
+
+impl From<PsuStatus> for SpComponentPresence {
+    fn from(status: PsuStatus) -> Self {
+        match status {
+            PsuStatus::Present => Self::Present,
+            PsuStatus::Failed => Self::Failed,
+            PsuStatus::PresenceUnavailable => Self::Unavailable,
+            PsuStatus::PresenceTimeout => Self::Timeout,
+            PsuStatus::PresenceError => Self::Error,
+        }
+    }
+}
+
+/// The state of a PSU slot which the SP did not report as empty.
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+pub struct PsuState {
+    /// The SP-reported status of this PSU.
+    pub status: PsuStatus,
+    /// The PSU's PMBus identity, or an error describing why it could not be
+    /// read.
+    pub identity: Result<PsuIdentity, String>,
 }
 
 /// The identity of a muRata PSU in the power shelf, as reported over PMBus.

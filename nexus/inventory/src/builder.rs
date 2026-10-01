@@ -29,13 +29,13 @@ use nexus_types::inventory::InternalDnsGenerationStatus;
 use nexus_types::inventory::PowerShelf;
 use nexus_types::inventory::Psu;
 use nexus_types::inventory::PsuSlot;
+
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageFound;
 use nexus_types::inventory::RotPageWhich;
 use nexus_types::inventory::RotState;
 use nexus_types::inventory::ServiceProcessor;
 use nexus_types::inventory::SledAgent;
-use nexus_types::inventory::SpComponentPresence;
 use nexus_types::inventory::SpType;
 use nexus_types::inventory::TimeSync;
 use nexus_types::inventory::Zpool;
@@ -807,9 +807,9 @@ impl CollectionBuilder {
             // A previous attempt to collect this PSU's VPD failed, so we tried
             // again. Overwrite it iff we successfully read the VPD.
             id_ord_map::Entry::Occupied(mut previous)
-                if previous.get().vpd.is_err() =>
+                if previous.get().identity_read_failed() =>
             {
-                if psu.vpd.is_ok() {
+                if matches!(psu.identity(), Some(Ok(_))) {
                     previous.insert(psu);
                     Ok(true)
                 } else {
@@ -870,11 +870,9 @@ impl CollectionBuilder {
 }
 
 fn found_psu_already(shelf: &PowerShelf, psu_slot: PsuSlot) -> bool {
-    shelf.psus.get(&psu_slot).is_some_and(|psu| {
-        // well, so we found it...were we able to read its identity? if
-        // not, try again, provided that it's present.
-        psu.vpd.is_ok() || psu.presence == SpComponentPresence::NotPresent
-    })
+    // well, so we found it...were we able to read its identity? if not, try
+    // again.
+    shelf.psus.get(&psu_slot).is_some_and(|psu| !psu.identity_read_failed())
 }
 
 pub use omicron_common::now_db_precision;

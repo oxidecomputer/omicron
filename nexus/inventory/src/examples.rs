@@ -19,12 +19,12 @@ use iddqd::id_ord_map;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::InternalDnsGenerationStatus;
 use nexus_types::inventory::Psu;
-
 use nexus_types::inventory::PsuIdentity;
 use nexus_types::inventory::PsuSlot;
+use nexus_types::inventory::PsuState;
+use nexus_types::inventory::PsuStatus;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageWhich;
-use nexus_types::inventory::SpComponentPresence;
 use nexus_types::inventory::SpType;
 use nexus_types::inventory::ZpoolName;
 use omicron_cockroach_metrics::MetricValue;
@@ -246,21 +246,16 @@ pub fn representative() -> Representative {
     ];
     let psu_device = ExamplePsuKind::Mwocp68;
     for (slot, serial) in psus {
-        let presence = if serial.is_some() {
-            SpComponentPresence::Present
-        } else {
-            SpComponentPresence::NotPresent
-        };
-        let vpd = serial
-            .map(|serial| psu_identity(psu_device, serial))
-            .ok_or_else(|| String::from("component is not present"));
+        let state = serial.map(|serial| PsuState {
+            status: PsuStatus::Present,
+            identity: Ok(psu_identity(psu_device, serial)),
+        });
         let psu = Psu {
             time_collected: now_db_precision(),
             source: String::from("fake MGS 1"),
             slot,
-            presence,
             hubris_device_type: psu_device.hubris_device_type(),
-            vpd,
+            state,
         };
         builder.found_psu(&psc_bb, 1, psu).unwrap();
     }
