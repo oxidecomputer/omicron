@@ -111,19 +111,9 @@ blueprint-diff latest
 blueprint-plan latest latest
 blueprint-diff latest
 
-# Give the sled a nonzero number of registered VMMs and have it pick up the new
-# config. Inventory will now reflect that the sled is in the evacuating
-# disposition, but not yet fully evacuated: the planner should continue to note
-# that the SP update is blocked.
-sled-set serial0 registered-vmms 5
+# Propagate the config specifying evacuation to the sled and collect inventory.
+# The planner should now schedule the SP update.
 sled-set serial0 omicron-config latest
-inventory-generate
-blueprint-plan latest latest
-blueprint-diff latest
-
-# Evacuate the sled and regenerate inventory. The planner should now schedule
-# the SP update.
-sled-set serial0 registered-vmms 0
 inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest
