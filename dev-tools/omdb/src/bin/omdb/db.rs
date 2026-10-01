@@ -4983,7 +4983,14 @@ async fn cmd_db_sled_capacity(
         .iter()
         .map(|sled| {
             let mut vmm = vmm_usage.remove(&sled.id()).unwrap_or_default();
-            vmm.vmms.sort_by_key(|v| v.instance_id);
+            // The largest VMMs are listed first. Ties are broken by instance
+            // ID so that the output is stable.
+            vmm.vmms.sort_by(|a, b| {
+                b.hardware_threads
+                    .cmp(&a.hardware_threads)
+                    .then(b.reservoir_ram.cmp(&a.reservoir_ram))
+                    .then(a.instance_id.cmp(&b.instance_id))
+            });
             let st = storage.remove(&sled.id()).unwrap_or_default();
             let threads_total =
                 i64::from(u32::from(sled.usable_hardware_threads));
@@ -5068,7 +5075,11 @@ async fn cmd_db_sled_capacity(
     let mut builder = tabled::builder::Builder::new();
     builder.push_record([
         String::from("SERIAL"),
-        String::from("ID"),
+        if args.verbose {
+            String::from("SLED_ID / INSTANCE_ID")
+        } else {
+            String::from("ID")
+        },
         format!("THREADS_{suffix}"),
         format!("RESERVOIR_{suffix}"),
         format!("STORAGE_{suffix}"),
@@ -5101,7 +5112,7 @@ async fn cmd_db_sled_capacity(
                     .unwrap_or_else(|| String::from("-"));
                 builder.push_record([
                     String::new(),
-                    format!("  {instance_id}"),
+                    instance_id,
                     format!("{:>threads_width$}", count(vmm.hardware_threads)),
                     format!("{:>reservoir_width$}", gib(vmm.reservoir_ram)),
                     String::new(),
