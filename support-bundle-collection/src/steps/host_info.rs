@@ -349,7 +349,6 @@ async fn save_zone_log_zip_or_error(
             {
                 // Leave an error in the bundle in place of the logs, rather
                 // than a zip that could not be saved.
-                discard_zone_log_zip(&output_dir).await;
                 let err_string =
                     InlineErrorChain::new(err.as_ref()).to_string();
                 tokio::fs::write(
@@ -380,44 +379,45 @@ fn zone_log_zip_path(output_dir: &Utf8Path) -> Utf8PathBuf {
 
 // Stream a zone's log zip to `output_dir`.
 //
-// On failure, `output_dir` may hold a partial zip; see
-// `discard_zone_log_zip`.
+// On failure, removes what it wrote, so that neither a partial zip nor an
+// empty directory for it ends up in the bundle.
 async fn save_zone_log_zip(
     bytestream: sled_agent_client::ByteStream,
     output_dir: &Utf8Path,
 ) -> anyhow::Result<()> {
     let zipfile_path = zone_log_zip_path(output_dir);
 
-    // Ensure the logs output directory exists.
-    tokio::fs::create_dir_all(&output_dir).await.with_context(|| {
-        format!("failed to create output directory: {output_dir}")
-    })?;
-
-    // Stream the log zip file to disk.
-    let mut file =
-        tokio::fs::File::create(&zipfile_path).await.with_context(|| {
-            format!("failed to create log zip file: {zipfile_path}")
+    let result = async {
+        // Ensure the logs output directory exists.
+        tokio::fs::create_dir_all(&output_dir).await.with_context(|| {
+            format!("failed to create output directory: {output_dir}")
         })?;
 
-    let stream = bytestream
-        .into_inner()
-        .map(|chunk| chunk.map_err(|e| std::io::Error::other(e)));
-    let mut reader = tokio_util::io::StreamReader::new(stream);
-    let _nbytes =
-        tokio::io::copy(&mut reader, &mut file).await.with_context(|| {
-            format!("failed to download log zip: {zipfile_path}")
-        })?;
-    file.flush().await?;
-    Ok(())
-}
+        // Stream the log zip file to disk.
+        let mut file =
+            tokio::fs::File::create(&zipfile_path).await.with_context(
+                || format!("failed to create log zip file: {zipfile_path}"),
+            )?;
 
-// Remove what a failed `save_zone_log_zip` left in `output_dir`, so that
-// neither the zip nor an empty directory for it ends up in the bundle.
-//
-// This is best-effort: if removal fails, the bundle skips whatever it cannot
-// read of the partial zip, and records what it skipped.
-async fn discard_zone_log_zip(output_dir: &Utf8Path) {
-    let _ = tokio::fs::remove_file(zone_log_zip_path(output_dir)).await;
-    // Fails, leaving the directory alone, unless it is empty.
-    let _ = tokio::fs::remove_dir(output_dir).await;
+        let stream = bytestream
+            .into_inner()
+            .map(|chunk| chunk.map_err(|e| std::io::Error::other(e)));
+        let mut reader = tokio_util::io::StreamReader::new(stream);
+        let _nbytes =
+            tokio::io::copy(&mut reader, &mut file).await.with_context(
+                || format!("failed to download log zip: {zipfile_path}"),
+            )?;
+        file.flush().await?;
+        Ok::<_, anyhow::Error>(())
+    }
+    .await;
+
+    if result.is_err() {
+        // This is best-effort: if removal fails, the bundle skips whatever it
+        // cannot read of the partial zip, and records what it skipped.
+        let _ = tokio::fs::remove_file(&zipfile_path).await;
+        // Fails, leaving the directory alone, unless it is empty.
+        let _ = tokio::fs::remove_dir(output_dir).await;
+    }
+    result
 }
