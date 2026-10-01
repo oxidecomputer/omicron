@@ -17,6 +17,7 @@ use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::ReconfiguratorConfig;
 use nexus_types::deployment::ReconfiguratorConfigParam;
 use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
+use nexus_types::deployment::SledUpdateRebootPolicy;
 use std::io;
 use std::io::Write;
 use std::num::ParseIntError;
@@ -58,6 +59,9 @@ pub struct ReconfiguratorConfigOpts {
     #[clap(long)]
     disruption_policy: Option<ReconfiguratorDisruptionPolicyOpt>,
 
+    #[clap(long)]
+    sled_update_reboot_policy: Option<SledUpdateRebootPolicyOpt>,
+
     #[clap(long, action = ArgAction::Set)]
     blueprint_pruner_enabled: Option<bool>,
 
@@ -78,6 +82,12 @@ impl ReconfiguratorConfigOpts {
                     .disruption_policy
                     .map(|p| p.into())
                     .unwrap_or(current.planner_config.disruption_policy),
+                sled_update_reboot_policy: self
+                    .sled_update_reboot_policy
+                    .map(|p| p.into())
+                    .unwrap_or(
+                        current.planner_config.sled_update_reboot_policy,
+                    ),
             },
             tuf_repo_pruner_enabled: self
                 .tuf_repo_pruner_enabled
@@ -123,6 +133,23 @@ impl From<ReconfiguratorDisruptionPolicyOpt>
                 Self::MigrateOrTerminate
             }
             ReconfiguratorDisruptionPolicyOpt::MigrateOnly => Self::MigrateOnly,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum SledUpdateRebootPolicyOpt {
+    ImmediateNoEvacuation,
+    Evacuate,
+}
+
+impl From<SledUpdateRebootPolicyOpt> for SledUpdateRebootPolicy {
+    fn from(value: SledUpdateRebootPolicyOpt) -> Self {
+        match value {
+            SledUpdateRebootPolicyOpt::ImmediateNoEvacuation => {
+                Self::ImmediateNoEvacuation
+            }
+            SledUpdateRebootPolicyOpt::Evacuate => Self::Evacuate,
         }
     }
 }
