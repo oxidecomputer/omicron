@@ -28,7 +28,8 @@ pub static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
-        KnownVersion::new(304, "inv-power-shelf-psu"),
+        KnownVersion::new(305, "inv-power-shelf-psu"),
+        KnownVersion::new(304, "support-bundle-time-range"),
         KnownVersion::new(303, "reconfigurator-config-sled-reboot-policy"),
         KnownVersion::new(302, "longer-system-version"),
         KnownVersion::new(301, "vmm-failure-reason-if-failed"),

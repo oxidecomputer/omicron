@@ -1,3 +1,8 @@
+---
+name: api-docs-lint
+description: API docstring style guide for public endpoint handlers and external API types. Use when writing or reviewing doc comments in nexus/external-api or nexus/types/src/external_api.
+---
+
 # API Docstring Style Guide
 
 This guide covers public docstrings (`///`) on endpoint handlers in

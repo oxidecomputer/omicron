@@ -129,6 +129,28 @@ mfr_location = "China"
 mfr_date = "2216"
 mfr_serial = "LL2216RB000H"
 
+# A MWOCP68 has two PMBus rails, V54_PSU{n} and V12_PSU{n}
+[simulated_sps.psc.components.pmbus_rails.V54_PSU0]
+status_word = 0x0000
+status_vout = 0x00
+status_iout = 0x00
+status_temperature = 0x00
+status_cml = 0x00
+status_input = 0x00
+status_mfr_specific = 0x00
+status_fans_1_2 = 0x00
+# MWOCP68 does not implement STATUS_OTHER or STATUS_FANS_3_4
+
+[simulated_sps.psc.components.pmbus_rails.V12_PSU0]
+status_word = 0x0000
+status_vout = 0x00
+status_iout = 0x00
+status_temperature = 0x00
+status_cml = 0x00
+status_input = 0x00
+status_mfr_specific = 0x00
+status_fans_1_2 = 0x00
+
 [[simulated_sps.psc.components]]
 id = "PSU1"
 device = "mwocp68"
@@ -157,6 +179,28 @@ mfr_revision = "0762-0701-0000"
 mfr_location = "China"
 mfr_date = "2216"
 mfr_serial = "LL2216RB003E"
+
+# A MWOCP68 has two PMBus rails, V54_PSU{n} and V12_PSU{n}
+[simulated_sps.psc.components.pmbus_rails.V54_PSU1]
+status_word = 0x0000
+status_vout = 0x00
+status_iout = 0x00
+status_temperature = 0x00
+status_cml = 0x00
+status_input = 0x00
+status_mfr_specific = 0x00
+status_fans_1_2 = 0x00
+# MWOCP68 does not implement STATUS_OTHER or STATUS_FANS_3_4
+
+[simulated_sps.psc.components.pmbus_rails.V12_PSU1]
+status_word = 0x0000
+status_vout = 0x00
+status_iout = 0x00
+status_temperature = 0x00
+status_cml = 0x00
+status_input = 0x00
+status_mfr_specific = 0x00
+status_fans_1_2 = 0x00
 
 [[simulated_sps.psc.components]]
 id = "PSU2"
@@ -187,6 +231,28 @@ mfr_location = "China"
 mfr_date = "2216"
 mfr_serial = "LL2216RB000C"
 
+# A MWOCP68 has two PMBus rails, V54_PSU{n} and V12_PSU{n}
+[simulated_sps.psc.components.pmbus_rails.V54_PSU2]
+status_word = 0x0000
+status_vout = 0x00
+status_iout = 0x00
+status_temperature = 0x00
+status_cml = 0x00
+status_input = 0x00
+status_mfr_specific = 0x00
+status_fans_1_2 = 0x00
+# MWOCP68 does not implement STATUS_OTHER or STATUS_FANS_3_4
+
+[simulated_sps.psc.components.pmbus_rails.V12_PSU2]
+status_word = 0x0000
+status_vout = 0x00
+status_iout = 0x00
+status_temperature = 0x00
+status_cml = 0x00
+status_input = 0x00
+status_mfr_specific = 0x00
+status_fans_1_2 = 0x00
+
 [[simulated_sps.psc.components]]
 id = "PSU3"
 device = "mwocp68"
@@ -215,6 +281,28 @@ mfr_revision = "0762-0701-0000"
 mfr_location = "China"
 mfr_date = "2216"
 mfr_serial = "LL2216RB000D"
+
+# A MWOCP68 has two PMBus rails, V54_PSU{n} and V12_PSU{n}
+[simulated_sps.psc.components.pmbus_rails.V54_PSU3]
+status_word = 0x0000
+status_vout = 0x00
+status_iout = 0x00
+status_temperature = 0x00
+status_cml = 0x00
+status_input = 0x00
+status_mfr_specific = 0x00
+status_fans_1_2 = 0x00
+# MWOCP68 does not implement STATUS_OTHER or STATUS_FANS_3_4
+
+[simulated_sps.psc.components.pmbus_rails.V12_PSU3]
+status_word = 0x0000
+status_vout = 0x00
+status_iout = 0x00
+status_temperature = 0x00
+status_cml = 0x00
+status_input = 0x00
+status_mfr_specific = 0x00
+status_fans_1_2 = 0x00
 
 [[simulated_sps.psc.components]]
 id = "PSU4"
@@ -245,6 +333,28 @@ mfr_location = "China"
 mfr_date = "2216"
 mfr_serial = "LL2216RB000E"
 
+# A MWOCP68 has two PMBus rails, V54_PSU{n} and V12_PSU{n}
+[simulated_sps.psc.components.pmbus_rails.V54_PSU4]
+status_word = 0x0000
+status_vout = 0x00
+status_iout = 0x00
+status_temperature = 0x00
+status_cml = 0x00
+status_input = 0x00
+status_mfr_specific = 0x00
+status_fans_1_2 = 0x00
+# MWOCP68 does not implement STATUS_OTHER or STATUS_FANS_3_4
+
+[simulated_sps.psc.components.pmbus_rails.V12_PSU4]
+status_word = 0x0000
+status_vout = 0x00
+status_iout = 0x00
+status_temperature = 0x00
+status_cml = 0x00
+status_input = 0x00
+status_mfr_specific = 0x00
+status_fans_1_2 = 0x00
+
 [[simulated_sps.psc.components]]
 id = "PSU5"
 device = "mwocp68"
@@ -273,6 +383,28 @@ mfr_revision = "0762-0701-0000"
 mfr_location = "China"
 mfr_date = "2216"
 mfr_serial = "LL2216RB000F"
+
+# A MWOCP68 has two PMBus rails, V54_PSU{n} and V12_PSU{n}
+[simulated_sps.psc.components.pmbus_rails.V54_PSU5]
+status_word = 0x0000
+status_vout = 0x00
+status_iout = 0x00
+status_temperature = 0x00
+status_cml = 0x00
+status_input = 0x00
+status_mfr_specific = 0x00
+status_fans_1_2 = 0x00
+# MWOCP68 does not implement STATUS_OTHER or STATUS_FANS_3_4
+
+[simulated_sps.psc.components.pmbus_rails.V12_PSU5]
+status_word = 0x0000
+status_vout = 0x00
+status_iout = 0x00
+status_temperature = 0x00
+status_cml = 0x00
+status_input = 0x00
+status_mfr_specific = 0x00
+status_fans_1_2 = 0x00
 
 [log]
 # Show log messages of this level and more severe

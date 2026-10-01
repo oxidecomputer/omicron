@@ -7,6 +7,7 @@ mod device_descriptions;
 mod ereport;
 mod gimlet;
 mod helpers;
+mod pmbus_rails;
 mod psc;
 mod sensors;
 mod server;

@@ -15097,6 +15097,7 @@ dependencies = [
  "gateway-types",
  "hex",
  "hubtools 0.4.9",
+ "iddqd",
  "nexus-types",
  "nix 0.31.2",
  "omicron-common",
