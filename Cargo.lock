@@ -14737,6 +14737,7 @@ dependencies = [
  "tokio",
  "zfs-test-harness",
  "zip 4.6.1",
+ "zstd",
 ]
 
 [[package]]

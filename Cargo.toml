@@ -918,6 +918,7 @@ zeroize = { version = "1.8.1", features = ["zeroize_derive", "serde", "std"] }
 zfs-test-harness = { path = "sled-storage/zfs-test-harness" }
 zip = { version = "4.2.0", default-features = false, features = ["deflate","bzip2"] }
 zone = { version = "0.3.1", default-features = false, features = ["async"] }
+zstd = { version = "0.13.3", default-features = false }
 
 # newtype-uuid is set to default-features = false because we don't want to
 # depend on std in omicron-uuid-kinds (in case a no-std library wants to access
