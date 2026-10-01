@@ -61,7 +61,7 @@ use nexus_db_model::InvOmicronSledConfigZoneExternalIp;
 use nexus_db_model::InvOmicronSledConfigZoneNic;
 use nexus_db_model::InvPhysicalDisk;
 use nexus_db_model::InvPowerShelfPsu;
-use nexus_db_model::InvPsuDevice;
+
 use nexus_db_model::InvPsuSlot;
 use nexus_db_model::InvRootOfTrust;
 use nexus_db_model::InvRotPage;
@@ -95,7 +95,6 @@ use nexus_db_schema::enums::HwM2SlotEnum;
 use nexus_db_schema::enums::HwPowerStateEnum;
 use nexus_db_schema::enums::HwRotSlotEnum;
 use nexus_db_schema::enums::InvConfigReconcilerStatusKindEnum;
-use nexus_db_schema::enums::InvPsuDeviceEnum;
 use nexus_db_schema::enums::InvPsuSlotEnum;
 use nexus_db_schema::enums::InvSledUpdateDispositionEnum;
 use nexus_db_schema::enums::InvZoneManifestSourceEnum;
@@ -828,7 +827,7 @@ impl DataStore {
                             source,
                             slot,
                             presence,
-                            device,
+                            hubris_device_type,
                             vpd,
                         } = psu;
                         let (
@@ -883,8 +882,9 @@ impl DataStore {
                                         .into_sql::<InvPsuSlotEnum>(),
                                     DbSpComponentPresence::from(*presence)
                                         .into_sql::<SpComponentPresenceEnum>(),
-                                    InvPsuDevice::from(*device)
-                                        .into_sql::<InvPsuDeviceEnum>(),
+                                    hubris_device_type
+                                        .clone()
+                                        .into_sql::<diesel::sql_types::Text>(),
                                     mfr_id.into_sql::<Nullable<
                                         diesel::sql_types::Text,
                                     >>(),
@@ -929,7 +929,7 @@ impl DataStore {
                             psu_dsl::psc_baseboard_id,
                             psu_dsl::location,
                             psu_dsl::presence,
-                            psu_dsl::device,
+                            psu_dsl::hubris_device_type,
                             psu_dsl::mfr_id,
                             psu_dsl::mfr_model,
                             psu_dsl::firmware_rev,
@@ -948,7 +948,7 @@ impl DataStore {
                             _psc_baseboard_id,
                             _location,
                             _presence,
-                            _device,
+                            _hubris_device_type,
                             _mfr_id,
                             _mfr_model,
                             _firmware_rev,

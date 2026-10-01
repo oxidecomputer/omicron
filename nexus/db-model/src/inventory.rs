@@ -55,7 +55,7 @@ use nexus_db_schema::schema::{
 use nexus_types::inventory::HostPhase1ActiveSlot;
 use nexus_types::inventory::{
     self, Caboose, CockroachStatus, Collection, InternalDnsGenerationStatus,
-    NvmeFirmware, PowerState, PsuDevice, PsuSlot, RotPage, RotSlot, TimeSync,
+    NvmeFirmware, PowerState, PsuSlot, RotPage, RotSlot, TimeSync,
 };
 use omicron_common::disk::DatasetName;
 use omicron_common::update::OmicronInstallManifestSource;
@@ -2389,35 +2389,6 @@ impl From<InvFmdResource> for FmdResource {
     }
 }
 
-// See [`nexus_types::inventory::PsuDevice`].
-impl_enum_type!(
-    InvPsuDeviceEnum:
-
-    #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
-    pub enum InvPsuDevice;
-
-    Mwocp68 => b"mwocp68"
-    Mwocp67 => b"mwocp67"
-);
-
-impl From<PsuDevice> for InvPsuDevice {
-    fn from(value: PsuDevice) -> Self {
-        match value {
-            PsuDevice::Mwocp68 => Self::Mwocp68,
-            PsuDevice::Mwocp67 => Self::Mwocp67,
-        }
-    }
-}
-
-impl From<InvPsuDevice> for PsuDevice {
-    fn from(value: InvPsuDevice) -> Self {
-        match value {
-            InvPsuDevice::Mwocp68 => Self::Mwocp68,
-            InvPsuDevice::Mwocp67 => Self::Mwocp67,
-        }
-    }
-}
-
 // See [`nexus_types::inventory::PsuSlot`].
 impl_enum_type!(
     InvPsuSlotEnum:
@@ -2473,7 +2444,14 @@ pub struct InvPowerShelfPsu {
     pub psc_baseboard_id: Uuid,
     pub location: InvPsuSlot,
     pub presence: SpComponentPresence,
-    pub device: InvPsuDevice,
+    /// The Hubris device type string in the SP's inventory. This identifies
+    /// which Hubris driver is used to communicate with the PSU, and is a
+    /// property of the SP's Hubris image, not a value reported by the PSU
+    /// itself.
+    ///
+    /// For the model number reported by the PSU, use
+    /// [`InvPowerShelfPsu::mfr_model`].
+    pub hubris_device_type: String,
 
     // PMBus VPD fields
     pub mfr_id: Option<String>,
@@ -2494,10 +2472,10 @@ impl TryFrom<InvPowerShelfPsu> for inventory::Psu {
         let time_collected = row.time_collected;
         let slot = row.location.into();
         let presence = row.presence.into();
-        let device = row.device.into();
-        let (vpd, source) = match row {
+        let (vpd, source, hubris_device_type) = match row {
             InvPowerShelfPsu {
                 source,
+                hubris_device_type,
                 mfr_id: Some(mfr_id),
                 mfr_model: Some(mfr_model),
                 firmware_rev: Some(firmware_rev),
@@ -2515,10 +2493,11 @@ impl TryFrom<InvPowerShelfPsu> for inventory::Psu {
                     mfr_date,
                     mfr_serial,
                 };
-                (Ok(vpd), source)
+                (Ok(vpd), source, hubris_device_type)
             }
             InvPowerShelfPsu {
                 source,
+                hubris_device_type,
                 vpd_error: Some(error),
                 mfr_id: None,
                 mfr_model: None,
@@ -2527,13 +2506,20 @@ impl TryFrom<InvPowerShelfPsu> for inventory::Psu {
                 mfr_date: None,
                 mfr_serial: None,
                 ..
-            } => (Err(error), source),
+            } => (Err(error), source, hubris_device_type),
             _ => bail!(
                 "inv_power_shelf_psu row violates vpd_result_valid constraint",
             ),
         };
 
-        Ok(Self { time_collected, source, slot, presence, device, vpd })
+        Ok(Self {
+            time_collected,
+            source,
+            slot,
+            presence,
+            hubris_device_type,
+            vpd,
+        })
     }
 }
 

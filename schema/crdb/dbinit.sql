@@ -5605,11 +5605,6 @@ CREATE TYPE IF NOT EXISTS omicron.public.inv_psu_slot AS ENUM (
     'PSU5'
 );
 
--- PSU device types, as reported by the power shelf controller.
-CREATE TYPE IF NOT EXISTS omicron.public.inv_psu_device AS ENUM (
-    'mwocp68',
-    'mwocp67'
-);
 
 -- inventory table for power supply units (PSUs) in a power shelf
 CREATE TABLE IF NOT EXISTS omicron.public.inv_power_shelf_psu (
@@ -5631,9 +5626,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_power_shelf_psu (
     -- the SP-reported presence value for this PSU.
     presence omicron.public.sp_component_presence NOT NULL,
 
-    -- PSU device reported by Hubris (the value of the 'device' field in the SP's
-    -- inventory response).
-    device omicron.public.inv_psu_device NOT NULL,
+    -- the Hubris device type string reported by the SP's inventory.
+    --
+    -- this identifies which Hubris driver is used to communicate with the PSU,
+    -- and is a property of the SP's Hubris image, not a value reported by the
+    -- PSU itself.
+    hubris_device_type TEXT NOT NULL,
 
     -- PMBus vital product data reported by the PSU. information reported by the
     -- PSU. these fields are present when the VPD was collected successfully,
