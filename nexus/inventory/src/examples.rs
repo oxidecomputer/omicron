@@ -19,7 +19,7 @@ use iddqd::id_ord_map;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::InternalDnsGenerationStatus;
 use nexus_types::inventory::Psu;
-use nexus_types::inventory::PsuDevice;
+
 use nexus_types::inventory::PsuIdentity;
 use nexus_types::inventory::PsuSlot;
 use nexus_types::inventory::RotPage;
@@ -244,7 +244,7 @@ pub fn representative() -> Representative {
         (PsuSlot::Psu4, Some("LL2115Q1001T")),
         (PsuSlot::Psu5, None),
     ];
-    let psu_device = PsuDevice::Mwocp68;
+    let psu_device = ExamplePsuKind::Mwocp68;
     for (slot, serial) in psus {
         let presence = if serial.is_some() {
             SpComponentPresence::Present
@@ -259,7 +259,7 @@ pub fn representative() -> Representative {
             source: String::from("fake MGS 1"),
             slot,
             presence,
-            device: psu_device,
+            hubris_device_type: psu_device.hubris_device_type(),
             vpd,
         };
         builder.found_psu(&psc_bb, 1, psu).unwrap();
@@ -870,11 +870,29 @@ pub fn rot_page(unique: &str) -> RotPage {
     }
 }
 
+#[derive(Copy, Clone, Debug)]
+pub enum ExamplePsuKind {
+    Mwocp68,
+    Mwocp67,
+}
+
+impl ExamplePsuKind {
+    pub fn hubris_device_type(&self) -> String {
+        match self {
+            ExamplePsuKind::Mwocp68 => String::from("mwocp68"),
+            ExamplePsuKind::Mwocp67 => String::from("mwocp67"),
+        }
+    }
+}
+
 /// Constructs a realistic-looking PSU identity for a muRata PSU.
-pub fn psu_identity(device: PsuDevice, serial: impl ToString) -> PsuIdentity {
-    let mfr_model = match device {
-        PsuDevice::Mwocp68 => String::from("MWOCP68-3600-D-RM"),
-        PsuDevice::Mwocp67 => String::from("MWOCP67-5500-B-RM"),
+pub fn psu_identity(
+    kind: ExamplePsuKind,
+    serial: impl ToString,
+) -> PsuIdentity {
+    let mfr_model = match kind {
+        ExamplePsuKind::Mwocp68 => String::from("MWOCP68-3600-D-RM"),
+        ExamplePsuKind::Mwocp67 => String::from("MWOCP67-5500-B-RM"),
     };
     let mfr_serial = serial.to_string();
     // muRata's date fields are 4 digits, which also appear in the serial
