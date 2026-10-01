@@ -6,6 +6,7 @@
 
 use super::DataStore;
 use crate::context::OpContext;
+use crate::db::datastore::RunnableQuery;
 use crate::db::datastore::SQL_BATCH_SIZE;
 use crate::db::model;
 use crate::db::model::Vmm;
@@ -39,6 +40,7 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use sled_agent_types::instance::MigrationRuntimeState;
 use std::net::SocketAddr;
+use std::num::NonZeroU32;
 use uuid::Uuid;
 
 /// The result of an [`DataStore::vmm_and_migration_update_runtime`] call,
@@ -180,37 +182,34 @@ impl DataStore {
         // subsequent batches will not include these VMMs.
         let mut marked_total = 0;
         loop {
-            // Diesel's ValidSubselect doesn't allow a subquery from the same
-            // table being updated, so we alias the `vmm` table for the subquery
-            let vmm_sub =
-                diesel::alias!(nexus_db_schema::schema::vmm as vmm_sub);
+            // First we retrieve the ids of unavailable sleds. This prevents a
+            // full scan of the `lookup_vmms_by_sled_id` index when we select
+            // the VMMs to mark.
+            let unavailable_sled_ids =
+                DataStore::rendezvous_read_unavailable_sleds_query()
+                    .load_async::<Uuid>(&*conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                            .internal_context(
+                                "failed to load unavailable sleds",
+                            )
+                    })?;
 
             // Diesel (and CockroachDB) don't support LIMIT on an UPDATE, so we
-            // select a bounded batch of VMM ids and update those
-            let batch =
-                vmm_sub
-                    .filter(vmm_sub.field(vmm::time_deleted).is_null())
-                    .filter(
-                        vmm_sub
-                            .field(vmm::stop_for_update_disposition_generation)
-                            .is_null(),
+            // select a bounded batch of VMM ids and update those.
+            let batch = DataStore::vmm_read_ready_to_stop_with_limit_query(
+                unavailable_sled_ids,
+                SQL_BATCH_SIZE,
+            )
+            .load_async::<Uuid>(&*conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context(
+                        "failed to load VMMs ready to be marked to stop",
                     )
-                    .filter(
-                        vmm_sub
-                            .field(vmm::state)
-                            .eq_any(DbVmmState::SHOULD_STOP_FOR_EVACUATION),
-                    )
-                    .filter(
-                        vmm_sub.field(vmm::sled_id).eq_any(
-                            rz_dsl::rendezvous_sled_bp_availability
-                                .filter(rz_dsl::bp_availability.eq(
-                                    model::DbSledBpAvailability::Unavailable,
-                                ))
-                                .select(rz_dsl::sled_id),
-                        ),
-                    )
-                    .limit(i64::from(SQL_BATCH_SIZE.get()))
-                    .select(vmm_sub.field(vmm::id));
+            })?;
 
             let marked =
                 diesel::update(dsl::vmm)
@@ -574,12 +573,42 @@ impl DataStore {
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
+
+    /// Creates a query to retrieve VMMs on the given sleds that are candidates
+    /// for stopping during an update.
+    fn vmm_read_ready_to_stop_with_limit_query(
+        sled_ids: Vec<Uuid>,
+        limit: NonZeroU32,
+    ) -> impl RunnableQuery<Uuid> + use<> {
+        dsl::vmm
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::stop_for_update_disposition_generation.is_null())
+            .filter(dsl::state.eq_any(DbVmmState::SHOULD_STOP_FOR_EVACUATION))
+            .filter(dsl::sled_id.eq_any(sled_ids))
+            .limit(i64::from(limit.get()))
+            .select(dsl::id)
+    }
+
+    /// Creates a query to retrieve the ids of all sleds whose blueprint
+    /// availability is `unavailable`.
+    fn rendezvous_read_unavailable_sleds_query()
+    -> impl RunnableQuery<Uuid> + use<> {
+        use nexus_db_schema::schema::rendezvous_sled_bp_availability::dsl as rz_dsl;
+
+        rz_dsl::rendezvous_sled_bp_availability
+            .filter(
+                rz_dsl::bp_availability
+                    .eq(model::DbSledBpAvailability::Unavailable),
+            )
+            .select(rz_dsl::sled_id)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::db;
+    use crate::db::explain::ExplainableAsync;
     use crate::db::model::Generation;
     use crate::db::model::Migration;
     use crate::db::pub_test_utils::TestDatabase;
@@ -1478,6 +1507,63 @@ mod tests {
             Some(db::model::VmmFailureReason::NoSuchInstance),
         )
         .await;
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn explain_vmm_read_ready_to_stop_with_limit_query() {
+        let logctx = dev::test_setup_log(
+            "explain_vmm_read_ready_to_stop_with_limit_query",
+        );
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        let query = DataStore::vmm_read_ready_to_stop_with_limit_query(
+            vec![Uuid::new_v4()],
+            SQL_BATCH_SIZE,
+        );
+        let explanation = query
+            .explain_async(&conn)
+            .await
+            .expect("Failed to explain query - is it valid SQL?");
+
+        eprintln!("{explanation}");
+
+        assert!(
+            !explanation.contains("FULL SCAN"),
+            "Found an unexpected FULL SCAN: {}",
+            explanation
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn explain_vmm_read_rendezvous_unavailable_sleds_query() {
+        let logctx = dev::test_setup_log(
+            "explain_vmm_read_rendezvous_unavailable_sleds_query",
+        );
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        let query = DataStore::rendezvous_read_unavailable_sleds_query();
+        let explanation = query
+            .explain_async(&conn)
+            .await
+            .expect("Failed to explain query - is it valid SQL?");
+
+        eprintln!("{explanation}");
+
+        assert!(
+            !explanation.contains("FULL SCAN"),
+            "Found an unexpected FULL SCAN: {}",
+            explanation
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();

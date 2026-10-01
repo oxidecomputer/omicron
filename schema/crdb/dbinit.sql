@@ -6431,6 +6431,10 @@ CREATE INDEX IF NOT EXISTS lookup_available_sled
     ON omicron.public.rendezvous_sled_bp_availability (sled_id)
     WHERE bp_availability = 'available';
 
+/* Add an index which lets us find sleds by availability */
+CREATE INDEX IF NOT EXISTS lookup_sled_by_bp_availability
+    ON omicron.public.rendezvous_sled_bp_availability (bp_availability);
+
 /*******************************************************************/
 
 /*
@@ -9532,7 +9536,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '303.0.0', NULL)
+    (TRUE, NOW(), NOW(), '304.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
