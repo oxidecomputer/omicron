@@ -472,6 +472,7 @@ impl IdOrdItem for PowerShelf {
     strum::EnumString,
     strum::Display,
     strum::IntoStaticStr,
+    strum::VariantArray,
     serde_with::DeserializeFromStr,
     serde_with::SerializeDisplay,
 )]
@@ -486,6 +487,8 @@ pub enum PsuSlot {
 }
 
 impl PsuSlot {
+    pub const ALL: &[Self] = <Self as strum::VariantArray>::VARIANTS;
+
     /// Returns the SP component ID for the PSU in this slot.
     pub fn as_component_id(&self) -> &'static str {
         <&'static str>::from(self)

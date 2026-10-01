@@ -336,7 +336,12 @@ impl<'a> Collector<'a> {
 
             // For power shelf controller SPs, collect an inventory of PSUs in
             // the power shelf.
-            if matches!(sp.typ, SpType::Power) {
+            if matches!(sp.typ, SpType::Power)
+                // Skip collecting this SP's PSUs if we have already collected
+                // them. In general, this will be true for the second MGS, but
+                // if there were transient errors, this gives us a second try.
+                && !in_progress.found_all_psus_already(&baseboard_id)
+            {
                 if let Err(e) = collect_one_psc(
                     &log,
                     &client,
