@@ -16,6 +16,8 @@ use itertools::Itertools;
 use nexus_auth::authz::Action;
 use nexus_db_lookup::AsyncConnection;
 use nexus_db_lookup::LookupPath;
+use nexus_db_model::LocalStorageUnencryptedDatasetAllocation;
+use nexus_db_model::PhysicalDiskPolicy;
 use nexus_db_model::SledResourceVmm;
 use nexus_db_model::to_db_typed_uuid;
 use nexus_db_queries::context::OpContext;
@@ -10017,4 +10019,116 @@ async fn can_create_instance_with_multiple_nics_and_ephemeral_ip(
         vec![],
     )
     .await;
+}
+
+#[nexus_test]
+async fn test_cannot_start_local_storage_disk_gone(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    DiskTest::new(&cptestctx).await;
+    create_project_and_pool(client).await;
+    let nexus = &cptestctx.server.server_context().nexus;
+
+    let local_disk_name: Name = "local-disk".parse().unwrap();
+    let instance_name = "local-disk-instance";
+
+    // Create a local storage disk.
+    let disks_url = get_disks_url();
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&disk::DiskCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: local_disk_name.clone(),
+                    description: "local storage disk".to_string(),
+                },
+                disk_backend: disk::DiskBackend::Local {},
+                size: ByteCount::from_gibibytes_u32(1),
+            }))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("created local storage disk");
+
+    // Create an instance with the local disk attached and start it. Starting
+    // the instance triggers `sled_reservation_create`, which allocates a
+    // dataset for the local storage disk. Without this allocation, the disk
+    // delete saga short-circuits and never reaches the retry loop.
+    let instance = create_instance_with(
+        client,
+        PROJECT_NAME,
+        instance_name,
+        &instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+        vec![instance::InstanceDiskAttachment::Attach(
+            instance::InstanceDiskAttach { name: local_disk_name.clone() },
+        )],
+        Vec::<instance::ExternalIpCreate>::new(),
+        true,
+        Default::default(),
+        None,
+        Vec::new(),
+    )
+    .await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+
+    // Simulate the instance transitioning to Running so the start saga
+    // completes (including local storage allocation).
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Running).await;
+
+    // Stop the instance.
+    instance_post(client, instance_name, InstanceOp::Stop).await;
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
+
+    // Expunge the zpool backing the allocation
+
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    let allocations: Vec<_> = {
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        use nexus_db_schema::schema::local_storage_unencrypted_dataset_allocation::dsl;
+
+        dsl::local_storage_unencrypted_dataset_allocation
+            .filter(dsl::time_deleted.is_null())
+            .select(LocalStorageUnencryptedDatasetAllocation::as_select())
+            .load_async(&*conn)
+            .await
+            .unwrap()
+    };
+
+    assert_eq!(allocations.len(), 1);
+
+    let (.., db_zpool) = LookupPath::new(&opctx, datastore)
+        .zpool_id(allocations[0].pool_id().upcast())
+        .fetch()
+        .await
+        .unwrap();
+
+    datastore
+        .physical_disk_update_policy(
+            &opctx,
+            db_zpool.physical_disk_id(),
+            PhysicalDiskPolicy::Expunged,
+        )
+        .await
+        .unwrap();
+
+    // The instance should no longer be able to be started
+
+    NexusRequest::expect_failure(
+        client,
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Method::POST,
+        get_instance_start_url(instance_name).as_str(),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
 }
