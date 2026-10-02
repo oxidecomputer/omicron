@@ -1194,13 +1194,14 @@ impl DataStore {
 mod tests {
     use super::*;
 
+    use std::net::Ipv4Addr;
+
     use nexus_types::identity::Resource;
     use nexus_types::multicast::MulticastGroupCreate;
     use omicron_common::address::{
         MAX_SOURCE_IPS_PER_GROUP, MAX_SOURCE_IPS_PER_MEMBER,
     };
     use omicron_common::api::external::DataPageParams;
-    use std::net::Ipv4Addr;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::{ProbeUuid, SledUuid};
