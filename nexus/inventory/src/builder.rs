@@ -29,7 +29,6 @@ use nexus_types::inventory::InternalDnsGenerationStatus;
 use nexus_types::inventory::PowerShelf;
 use nexus_types::inventory::Psu;
 use nexus_types::inventory::PsuSlot;
-
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageFound;
 use nexus_types::inventory::RotPageWhich;
