@@ -282,7 +282,6 @@ impl super::Nexus {
             // add capacity after the fact if they want to use it for that
             // purpose.
             quotas: silo::SiloQuotasCreate::empty(),
-            discoverable: false,
             identity_mode: silo::SiloIdentityMode::LocalOnly,
             admin_group_name: None,
             tls_certificates,

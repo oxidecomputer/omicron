@@ -1819,6 +1819,7 @@ mod tests {
                         },
                         ipv6_prefix: Some("fd00::/48".parse().unwrap()),
                         dns_name: "foo".parse().unwrap(),
+                        defaults: None,
                     },
                 )
                 .unwrap(),

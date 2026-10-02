@@ -700,7 +700,7 @@ async fn test_update_status() -> Result<()> {
 
     let counts = status.components_by_release_version;
     assert_eq!(counts.get("install dataset").unwrap(), &7);
-    assert_eq!(counts.get("unknown").unwrap(), &11);
+    assert_eq!(counts.get("unknown").unwrap(), &14);
 
     // hold onto this to compare it to later values
     let time_last_step_planned = status.time_last_step_planned;
@@ -732,7 +732,7 @@ async fn test_update_status() -> Result<()> {
 
     let counts = status.components_by_release_version;
     assert_eq!(counts.get("install dataset").unwrap(), &7);
-    assert_eq!(counts.get("unknown").unwrap(), &11);
+    assert_eq!(counts.get("unknown").unwrap(), &14);
 
     // do it again so there are two, so both versions are associated with tuf
     // repos
@@ -761,7 +761,7 @@ async fn test_update_status() -> Result<()> {
 
     let counts = status.components_by_release_version;
     assert_eq!(counts.get("install dataset").unwrap(), &7);
-    assert_eq!(counts.get("unknown").unwrap(), &11);
+    assert_eq!(counts.get("unknown").unwrap(), &14);
 
     // Setting the target release for mupdate recovery only updates the
     // target_release row, but the blueprint stays in its initial
@@ -1039,7 +1039,12 @@ async fn test_repo_list() -> Result<()> {
 async fn test_request_without_api_version(cptestctx: &ControlPlaneTestContext) {
     // We can't use cptestctx.external_client directly since it always sets the
     // header. Instead, construct a NexusRequest by hand.
-    let server_addr = cptestctx.server.get_http_server_external_address();
+    let server_addr = cptestctx
+        .server
+        .get_all_http_server_external_addresses()
+        .into_iter()
+        .next()
+        .expect("Should have >= 1 external API address");
     let test_cx =
         ClientTestContext::new(server_addr, cptestctx.logctx.log.clone());
 

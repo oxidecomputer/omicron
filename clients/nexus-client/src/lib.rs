@@ -31,6 +31,7 @@ progenitor::generate_api!(
         Name = omicron_common::api::external::Name,
         NetworkInterface = sled_agent_types::inventory::NetworkInterface,
         NetworkInterfaceKind = sled_agent_types::inventory::NetworkInterfaceKind,
+        SledRole = sled_agent_types::inventory::SledRole,
     },
     patch = {
         SledAgentInfo = { derives = [PartialEq, Eq] },

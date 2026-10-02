@@ -62,7 +62,9 @@ use sled_agent_types::disk::DiskVariant;
 use sled_agent_types::disk::M2Slot;
 use sled_agent_types::inventory::ConfigReconcilerInventory;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+use sled_agent_types::inventory::CurrentUpdateDisposition;
 use sled_agent_types::inventory::FmdInventory;
+use sled_agent_types::inventory::InstanceManagerStatus;
 use sled_agent_types::inventory::Inventory;
 use sled_agent_types::inventory::InventoryDataset;
 use sled_agent_types::inventory::InventoryDisk;
@@ -429,6 +431,11 @@ impl SystemDescription {
         })
     }
 
+    /// Return an iterator over every sled in the system, in sled ID order.
+    pub fn sleds(&self) -> impl Iterator<Item = &Sled> + '_ {
+        self.sleds.values().map(|sled| &**sled)
+    }
+
     pub fn get_sled(&self, sled_id: SledUuid) -> anyhow::Result<&Sled> {
         let Some(sled) = self.sleds.get(&sled_id) else {
             bail!("Sled not found with id {sled_id}");
@@ -492,6 +499,7 @@ impl SystemDescription {
             sled.policy,
             sled.sled_config,
             sled.npools,
+            sled.resources,
         );
         self.sleds.insert(sled_id, Arc::new(sled));
         Ok(self)
@@ -571,6 +579,12 @@ impl SystemDescription {
         sled.inventory_sled_agent.ledgered_sled_config =
             Some(sled_config.clone());
 
+        // A real sled-agent's instance manager reads its update disposition
+        // from the ledgered config, so reflect the new config's disposition in
+        // the reported instance manager status too.
+        sled.inventory_sled_agent.instance_manager_status.update_disposition =
+            CurrentUpdateDisposition::Known(sled_config.update_disposition);
+
         // Present results as though the reconciler has successfully completed.
         sled.inventory_sled_agent.reconciler_status =
             ConfigReconcilerInventoryStatus::Idle {
@@ -589,6 +603,30 @@ impl SystemDescription {
             }
         };
 
+        Ok(self)
+    }
+
+    /// Get the instance manager status reported by a sled in inventory.
+    ///
+    /// Returns an error if the sled is not found.
+    pub fn sled_instance_manager_status(
+        &self,
+        sled_id: SledUuid,
+    ) -> anyhow::Result<InstanceManagerStatus> {
+        let sled = self.get_sled(sled_id)?;
+        Ok(sled.inventory_sled_agent.instance_manager_status)
+    }
+
+    /// Set the number of registered VMMs as reported by this sled's instance
+    /// manager status.
+    pub fn sled_set_num_registered_vmms(
+        &mut self,
+        sled_id: SledUuid,
+        count: usize,
+    ) -> anyhow::Result<&mut Self> {
+        let sled = self.get_sled_mut(sled_id)?;
+        sled.inventory_sled_agent.instance_manager_status.num_registered_vmms =
+            count;
         Ok(self)
     }
 
@@ -912,7 +950,7 @@ impl SystemDescription {
     }
 
     /// Get the planner's configuration.
-    pub fn get_planner_config(&self) -> PlannerConfig {
+    pub fn planner_config(&self) -> PlannerConfig {
         self.planner_config
     }
 
@@ -1256,6 +1294,36 @@ pub enum SledHardware {
     Empty,
 }
 
+/// The hardware resources for a simulated sled in the example system.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SimulatedSledResources {
+    /// The number of hardware threads available to the sled.
+    pub usable_hardware_threads: u32,
+    /// The amount of physical RAM available to the sled.
+    pub usable_physical_ram: ByteCount,
+    /// The size of the reservoir available to the sled.
+    pub reservoir_size: ByteCount,
+    /// The CPU family of the sled.
+    pub cpu_family: SledCpuFamily,
+}
+
+impl Default for SimulatedSledResources {
+    /// Return the default simulated sled resources.
+    ///
+    /// These defaults are fairly small. Tests that place instances should set
+    /// more realistic values.
+    fn default() -> Self {
+        // The default values match the fixed ones SystemDescription used to
+        // report in the past -- existing fixtures might depend on those values.
+        Self {
+            usable_hardware_threads: 10,
+            usable_physical_ram: ByteCount::from(1024 * 1024),
+            reservoir_size: ByteCount::from(1024),
+            cpu_family: SledCpuFamily::AmdMilan,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct SledBuilder {
     id: Option<SledUuid>,
@@ -1266,6 +1334,7 @@ pub struct SledBuilder {
     policy: SledPolicy,
     sled_config: OmicronSledConfig,
     npools: u8,
+    resources: SimulatedSledResources,
 }
 
 impl SledBuilder {
@@ -1287,6 +1356,7 @@ impl SledBuilder {
                 provision_policy: SledProvisionPolicy::Provisionable,
             },
             npools: Self::DEFAULT_NPOOLS,
+            resources: SimulatedSledResources::default(),
         }
     }
 
@@ -1346,6 +1416,12 @@ impl SledBuilder {
         self.policy = policy;
         self
     }
+
+    /// Sets the hardware resources this sled reports in inventory.
+    pub fn resources(mut self, resources: SimulatedSledResources) -> Self {
+        self.resources = resources;
+        self
+    }
 }
 
 /// Convenience structure summarizing `Sled` inputs that come from inventory
@@ -1400,6 +1476,7 @@ impl Sled {
         policy: SledPolicy,
         sled_config: OmicronSledConfig,
         nzpools: u8,
+        resources: SimulatedSledResources,
     ) -> Sled {
         use typed_rng::TypedUuidRng;
         let unique = unique.unwrap_or_else(|| hardware_slot.to_string());
@@ -1475,13 +1552,13 @@ impl Sled {
             let sled_agent_address = get_sled_address(sled_subnet);
             Inventory {
                 baseboard_id,
-                reservoir_size: ByteCount::from(1024),
+                reservoir_size: resources.reservoir_size,
                 sled_role,
                 sled_agent_address,
                 sled_id,
-                usable_hardware_threads: 10,
-                usable_physical_ram: ByteCount::from(1024 * 1024),
-                cpu_family: SledCpuFamily::AmdMilan,
+                usable_hardware_threads: resources.usable_hardware_threads,
+                usable_physical_ram: resources.usable_physical_ram,
+                cpu_family: resources.cpu_family,
                 // Populate disks, appearing like a real device.
                 disks: zpools
                     .values()
@@ -1518,6 +1595,7 @@ impl Sled {
                         sled_config,
                     ),
                 ),
+                instance_manager_status: InstanceManagerStatus::available(0),
                 // XXX: return something more reasonable here?
                 file_source_resolver:
                     OmicronFileSourceResolverInventory::new_fake(),
@@ -1704,6 +1782,7 @@ impl Sled {
             ledgered_sled_config: inv_sled_agent.ledgered_sled_config.clone(),
             reconciler_status: inv_sled_agent.reconciler_status.clone(),
             last_reconciliation: inv_sled_agent.last_reconciliation.clone(),
+            instance_manager_status: InstanceManagerStatus::available(0),
             file_source_resolver: inv_sled_agent.file_source_resolver.clone(),
             smf_services_enabled_not_online: inv_sled_agent
                 .smf_services_enabled_not_online
@@ -1769,7 +1848,9 @@ impl Sled {
             .map(|(&slot, &hash)| (slot, hash))
     }
 
-    fn sled_agent_inventory(&self) -> &Inventory {
+    /// Returns the inventory as the simulated sled's Sled Agent would report up
+    /// to Nexus.
+    pub fn sled_agent_inventory(&self) -> &Inventory {
         &self.inventory_sled_agent
     }
 

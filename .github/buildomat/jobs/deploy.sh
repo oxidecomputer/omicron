@@ -5,7 +5,7 @@
 #:
 #: name = "helios / deploy"
 #: variety = "basic"
-#: target = "lab-3.0-opte-0.41"
+#: target = "lab-3.0-opte-0.42"
 #: output_rules = [
 #:  "%/var/svc/log/oxide-*.log*",
 #:  "%/zone/oxz_*/root/var/svc/log/oxide-*.log*",
@@ -267,6 +267,14 @@ PXA_END="$EXTRA_IP_END"
 # least.
 DISKS=( $(pfexec nvmeadm list -p -o disk) )
 pfexec zpool create -f scratch "${DISKS[@]}"
+
+gh_sha() {
+    curl -fsS -H "Accept: application/vnd.github.sha" \
+        "https://api.github.com/repos/oxidecomputer/$1/commits/$2"
+}
+SOFTNPU_COMMIT=$(gh_sha softnpu zl/multicast)
+SIDECAR_LITE_COMMIT=$(gh_sha sidecar-lite zl/multicast)
+export SOFTNPU_COMMIT SIDECAR_LITE_COMMIT
 
 ptime -m \
     pfexec ./target/release/xtask virtual-hardware \

@@ -12,22 +12,18 @@
 //!   hosting sled
 //! - **M2P mappings**: Overlay multicast IP to underlay IPv6 address
 //!   translation, installed on all sleds
-//! - **Forwarding entries**: Underlay multicast address to switch next-hop,
+//! - **Forwarding entries**: Underlay multicast address to switch nexthop,
 //!   installed on all sleds so OPTE forwards to the switch for replication
 //!
 //! [`dataplane`]: super::dataplane
 
 use std::collections::BTreeSet;
-use std::collections::HashMap;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 use std::net::{IpAddr, Ipv6Addr};
 use std::sync::Arc;
 
 use anyhow::Context;
 use futures::future::join_all;
 use omicron_common::api::external;
-use sled_agent_types::early_networking::SwitchSlot;
 use slog::{debug, info, warn};
 
 use nexus_db_lookup::LookupPath;
@@ -324,34 +320,49 @@ impl MulticastSledClient {
             .await
             .context("failed to enumerate sleds")?;
 
-        // Select one of the available switches as the forwarding next hop.
+        // Program the switches as this group's forwarding nexthops.
         //
-        // OPTE treats each next hop as a duplication it performs itself, so
+        // OPTE treats each nexthop as a duplication it performs itself, so
         // pointing at individual member sleds would cause O(n) copies over
         // cxgbe per sender.
         //
-        // A single switch next hop means one copy to the switch, which
-        // replicates to member sled ports via DPD multicast group membership.
-        // ECMP over both switches is the more correct longer-term answer,
-        // but OPTE and mgd lack the tooling to express that today.
-        let switch_zone_addrs = crate::app::switch_zone_address_mappings(
-            &self.resolver,
-            &opctx.log,
-        )
-        .await
-        .map_err(|e| anyhow::anyhow!(e))
-        .context("failed to resolve switch zone addresses")?;
+        // Every switch carries the group's external entry, so any of them
+        // is a correct nexthop. We program every
+        // reachable switch as a nexthop and OPTE deduplicates: its
+        // per-target ECMP selection injects each packet toward exactly one
+        // switch, so a copy is never sent down both uplinks. A switch
+        // leaving the candidate set simply drops out of the list on the
+        // next pass.
+        //
+        // The addresses come from the same switch discovery that defines
+        // the candidate set (Dendrite zones in DNS, kept only when their
+        // DPD reports a slot), so every programmed nexthop is addressable.
+        // The MGS-derived switch-zone map is not used here: a second
+        // resolver could name a switch this path cannot address,
+        // black-holing guest egress.
+        let switch_addrs =
+            crate::app::dpd_switch_underlay_addrs(&self.resolver, &opctx.log)
+                .await
+                .map_err(|e| anyhow::anyhow!(e))
+                .context("failed to resolve Dendrite switch addresses")?;
 
-        let switch_ip =
-            select_forwarding_switch_ip(group_id, &switch_zone_addrs)
-                .context("no switch zone found for forwarding next hop")?;
+        // Sorted by slot so the nexthop list compares stably against the
+        // sled's current entry across passes and Nexus instances.
+        let mut slot_addrs: Vec<_> =
+            switch_addrs.iter().map(|(slot, ip)| (*slot, *ip)).collect();
+        slot_addrs.sort_by_key(|(slot, _)| *slot);
+        let switch_ips: Vec<Ipv6Addr> =
+            slot_addrs.into_iter().map(|(_, ip)| ip).collect();
+        if switch_ips.is_empty() {
+            anyhow::bail!("no reachable switch for forwarding nexthop");
+        }
 
         let convergence_params = GroupConvergenceParams {
             group_ip,
             underlay_ip,
             group_is_active,
             desired_m2p: &desired_m2p,
-            switch_ip,
+            switch_ips: &switch_ips,
         };
 
         // Fan out per-sled convergence so a large rack doesn't pay
@@ -477,9 +488,11 @@ struct GroupConvergenceParams<'a> {
     underlay_ip: Ipv6Addr,
     group_is_active: bool,
     desired_m2p: &'a Mcast2PhysMapping,
-    /// Switch zone underlay IP chosen as the forwarding next hop.
-    /// The switch replicates to member sled ports via DPD config.
-    switch_ip: Ipv6Addr,
+    /// Switch zone underlay IPs programmed as forwarding nexthops, one per
+    /// reachable switch (sorted by slot). OPTE's per-target ECMP selection
+    /// picks one per packet, and each switch replicates to member sled
+    /// ports via DPD config.
+    switch_ips: &'a [Ipv6Addr],
 }
 
 /// Per-sled convergence of M2P and forwarding state.
@@ -560,7 +573,7 @@ async fn converge_m2p(
 
 /// Converge a single sled's forwarding entries for one group.
 ///
-/// When the group is active, this sets a single next hop to the switch
+/// When the group is active, this sets a single nexthop to the switch
 /// zone. The switch replicates to member sled ports via its DPD
 /// multicast group membership. When inactive, this clears any stale
 /// entries.
@@ -587,14 +600,18 @@ async fn converge_forwarding(
         return Ok(());
     }
 
-    let desired_next_hops = vec![McastForwardingNextHop {
-        next_hop: params.switch_ip,
-        replication: McastReplication::Underlay,
-        filter: McastSourceFilter {
-            mode: McastFilterMode::Exclude,
-            sources: Vec::new(),
-        },
-    }];
+    let desired_next_hops: Vec<McastForwardingNextHop> = params
+        .switch_ips
+        .iter()
+        .map(|switch_ip| McastForwardingNextHop {
+            next_hop: *switch_ip,
+            replication: McastReplication::Underlay,
+            filter: McastSourceFilter {
+                mode: McastFilterMode::Exclude,
+                sources: Vec::new(),
+            },
+        })
+        .collect();
 
     let needs_update = match current_entry {
         Some(f) => f.next_hops != desired_next_hops,
@@ -623,67 +640,4 @@ async fn converge_forwarding(
     }
 
     Ok(())
-}
-
-fn select_forwarding_switch_ip(
-    group_id: MulticastGroupUuid,
-    switch_zone_addrs: &HashMap<SwitchSlot, Ipv6Addr>,
-) -> Option<Ipv6Addr> {
-    let mut ordered_switches: Vec<_> = switch_zone_addrs.iter().collect();
-    ordered_switches.sort_by_key(|(slot, _)| **slot);
-
-    if ordered_switches.is_empty() {
-        return None;
-    }
-
-    // Hash the group UUID to distribute switch selection across both
-    // switches. Ordering by slot keeps the selection stable across
-    // reconciliation passes and Nexus instances.
-    let mut hasher = DefaultHasher::new();
-    group_id.hash(&mut hasher);
-    let idx = (hasher.finish() as usize) % ordered_switches.len();
-    Some(*ordered_switches[idx].1)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::select_forwarding_switch_ip;
-
-    use std::collections::HashMap;
-    use std::net::Ipv6Addr;
-
-    use omicron_uuid_kinds::{GenericUuid, MulticastGroupUuid};
-    use sled_agent_types::early_networking::SwitchSlot;
-    use uuid::Uuid;
-
-    #[test]
-    fn select_forwarding_switch_ip_returns_none_when_empty() {
-        let group_id = MulticastGroupUuid::from_untyped_uuid(Uuid::new_v4());
-        let switch_zone_addrs = HashMap::new();
-
-        assert_eq!(
-            select_forwarding_switch_ip(group_id, &switch_zone_addrs),
-            None
-        );
-    }
-
-    #[test]
-    fn select_forwarding_switch_ip_is_stable_across_map_order() {
-        let group_id = MulticastGroupUuid::from_untyped_uuid(Uuid::new_v4());
-        let switch0 = Ipv6Addr::LOCALHOST;
-        let switch1 = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 2);
-
-        let mut first = HashMap::new();
-        first.insert(SwitchSlot::Switch0, switch0);
-        first.insert(SwitchSlot::Switch1, switch1);
-
-        let mut second = HashMap::new();
-        second.insert(SwitchSlot::Switch1, switch1);
-        second.insert(SwitchSlot::Switch0, switch0);
-
-        assert_eq!(
-            select_forwarding_switch_ip(group_id, &first),
-            select_forwarding_switch_ip(group_id, &second)
-        );
-    }
 }

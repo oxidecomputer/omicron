@@ -206,8 +206,14 @@ pub struct Nexus {
     /// saga execution coordinator (SEC)
     sagas: Arc<SagaExecutor>,
 
-    /// External dropshot servers
-    external_server: std::sync::Mutex<Option<DropshotServer>>,
+    /// External dropshot servers.
+    ///
+    /// The external API is always served on at least one external address, but
+    /// may be served on more to support IPv4 / IPv6 dual-stack deployments.
+    /// Servers are created, stored, and closed in the order they're defined in
+    /// the provided configuration, with the primary server first, then one
+    /// server for each additional address.
+    external_servers: std::sync::Mutex<Vec<DropshotServer>>,
 
     /// External dropshot server that listens on the internal network to allow
     /// connections from the tech port; see RFD 431.
@@ -276,6 +282,9 @@ pub struct Nexus {
     // TODO: This needs to be moved to the database.
     // https://github.com/oxidecomputer/omicron/issues/3732
     external_dns_servers: Vec<IpAddr>,
+
+    /// Configuration for external HTTP clients.
+    external_http_client_config: nexus_config::ExternalHttpClientConfig,
 
     /// Background task driver
     background_tasks_driver: OnceLock<background::Driver>,
@@ -448,12 +457,17 @@ impl Nexus {
                 let native_resolver =
                     qorb_resolver.for_service(ServiceName::OximeterReader);
                 oximeter_db::Client::new_with_resolver(
+                    oximeter_db::User::Reader,
                     native_resolver,
                     "nexus-oximeter-reader",
                     &log,
                 )
             }
-            Some(address) => oximeter_db::Client::new(*address, &log),
+            Some(address) => oximeter_db::Client::new(
+                oximeter_db::User::Reader,
+                *address,
+                &log,
+            ),
         };
 
         // TODO-cleanup We may want to make the populator a first-class
@@ -559,7 +573,7 @@ impl Nexus {
             db_datastore: Arc::clone(&db_datastore),
             authz: Arc::clone(&authz),
             sagas,
-            external_server: std::sync::Mutex::new(None),
+            external_servers: std::sync::Mutex::new(vec![]),
             techport_external_server: std::sync::Mutex::new(None),
             internal_server: std::sync::Mutex::new(None),
             lockstep_server: std::sync::Mutex::new(None),
@@ -597,6 +611,10 @@ impl Nexus {
             external_dns_servers: config
                 .deployment
                 .external_dns_servers
+                .clone(),
+            external_http_client_config: config
+                .deployment
+                .external_http_clients
                 .clone(),
             background_tasks_driver: OnceLock::new(),
             background_tasks,
@@ -812,7 +830,7 @@ impl Nexus {
     // Called to hand off management of external servers to Nexus.
     pub(crate) async fn set_servers(
         &self,
-        external_server: DropshotServer,
+        external_servers: Vec<DropshotServer>,
         techport_external_server: DropshotServer,
         internal_server: DropshotServer,
         lockstep_server: DropshotServer,
@@ -822,7 +840,7 @@ impl Nexus {
         let _ = self.close_servers().await;
 
         // Insert the new servers.
-        self.external_server.lock().unwrap().replace(external_server);
+        *self.external_servers.lock().unwrap() = external_servers;
         self.techport_external_server
             .lock()
             .unwrap()
@@ -849,7 +867,8 @@ impl Nexus {
         // NOTE: All these take the lock and swap out of the option immediately,
         // because they are synchronous mutexes, which cannot be held across the
         // await point these `close()` methods expose.
-        let external_server = self.external_server.lock().unwrap().take();
+        let external_servers =
+            std::mem::take(&mut *self.external_servers.lock().unwrap());
         let mut res = Ok(());
 
         let extend_err =
@@ -863,7 +882,7 @@ impl Nexus {
                 }
             };
 
-        if let Some(server) = external_server {
+        for server in external_servers.into_iter() {
             extend_err(&mut res, server.close().await);
         }
         let techport_external_server =
@@ -910,14 +929,23 @@ impl Nexus {
         Ok(())
     }
 
-    pub(crate) fn get_external_server_address(
+    /// This returns all addresses for the external API servers.
+    ///
+    /// If the servers have not been started yet, then `None` is returned. If
+    /// they have been started, then `Some(_)` is returned, where the contained
+    /// vector has at least one element. `Some(vec![])`, with a contained empty
+    /// vector, is never returned.
+    pub(crate) fn get_all_external_server_addresses(
         &self,
-    ) -> Option<std::net::SocketAddr> {
-        self.external_server
+    ) -> Option<Vec<std::net::SocketAddr>> {
+        let addrs: Vec<_> = self
+            .external_servers
             .lock()
             .unwrap()
-            .as_ref()
+            .iter()
             .map(|server| server.local_addr())
+            .collect();
+        if addrs.is_empty() { None } else { Some(addrs) }
     }
 
     pub(crate) fn get_techport_server_address(
@@ -1310,13 +1338,21 @@ pub enum Unimpl {
     ProtectedLookup(Error),
 }
 
-/// Returns a mapping of clients for the Dendrite daemons of reachable switch zones.
-/// If we are unable to communicate with the switch zone and determine the mapping
-/// of SwitchSlot -> Zone Underlay Address, we omit an entry for that client.
-pub(crate) async fn dpd_clients(
+/// Resolve the reachable Dendrite switch zones, returning each switch's
+/// underlay address and a DPD client keyed by switch slot.
+///
+/// A switch appears in the result only when its Dendrite service resolves and
+/// reports a slot, so the address and the client are always consistent for a
+/// given slot.
+///
+/// Switches we cannot reach are omitted. The second element of
+/// the result 3-tuple is the number of Dendrite instances advertised in DNS
+/// letting callers know if the mapping is complete or partial.
+async fn dpd_switches(
     resolver: &internal_dns_resolver::Resolver,
     log: &slog::Logger,
-) -> Result<HashMap<SwitchSlot, dpd_client::Client>, String> {
+) -> Result<(HashMap<SwitchSlot, (Ipv6Addr, dpd_client::Client)>, usize), String>
+{
     let dpd_socketaddrs = match resolver
         .lookup_all_socket_v6(ServiceName::Dendrite)
         .await
@@ -1357,7 +1393,8 @@ pub(crate) async fn dpd_clients(
         })
         .collect();
 
-    let mut mappings: HashMap<SwitchSlot, dpd_client::Client> = HashMap::new();
+    let mut mappings: HashMap<SwitchSlot, (Ipv6Addr, dpd_client::Client)> =
+        HashMap::new();
 
     for (addr, client) in clients {
         let switch_slot = match client.switch_identifiers().await {
@@ -1382,10 +1419,60 @@ pub(crate) async fn dpd_clients(
             }
         };
 
-        mappings.insert(location, client);
+        mappings.insert(location, (*addr.ip(), client));
     }
 
-    Ok(mappings)
+    // A dendrite advertised in DNS that fails to report a slot leaves the
+    // result partial.
+    if mappings.len() < dpd_socketaddrs.len() {
+        warn!(
+            log,
+            "some dendrite instances advertised in DNS did not report a \
+             switch slot";
+            "advertised" => dpd_socketaddrs.len(),
+            "reported" => mappings.len(),
+        );
+    }
+
+    Ok((mappings, dpd_socketaddrs.len()))
+}
+
+/// Returns a mapping of clients for the Dendrite daemons of reachable switch
+/// zones.
+///
+/// If we are unable to communicate with the switch zone and determine the
+/// mapping of `SwitchSlot -> Zone Underlay Address`, we must omit an entry
+/// for that client.
+pub(crate) async fn dpd_clients(
+    resolver: &internal_dns_resolver::Resolver,
+    log: &slog::Logger,
+) -> Result<HashMap<SwitchSlot, dpd_client::Client>, String> {
+    Ok(dpd_switches(resolver, log)
+        .await?
+        .0
+        .into_iter()
+        .map(|(slot, (_addr, client))| (slot, client))
+        .collect())
+}
+
+/// Returns the underlay address of each reachable Dendrite switch zone
+/// (by slot).
+///
+/// This shares [`dpd_switches`] with [`dpd_clients`], so that the slot set is
+/// exactly the DPD-reachable set.
+///
+/// The address is the switch zone underlay address, which is usable as a
+/// multicast forwarding nexthop.
+pub(crate) async fn dpd_switch_underlay_addrs(
+    resolver: &internal_dns_resolver::Resolver,
+    log: &slog::Logger,
+) -> Result<HashMap<SwitchSlot, Ipv6Addr>, String> {
+    Ok(dpd_switches(resolver, log)
+        .await?
+        .0
+        .into_iter()
+        .map(|(slot, (addr, _client))| (slot, addr))
+        .collect())
 }
 
 // We currently ignore the rack_id argument here, as the shared

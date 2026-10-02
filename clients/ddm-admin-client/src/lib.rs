@@ -11,7 +11,9 @@ pub use ddm_admin_client::types;
 pub use ddm_api_types_versions::latest::db::{
     MulticastRoute, PeerInfo, PeerStatus,
 };
-pub use ddm_api_types_versions::latest::net::MulticastOrigin;
+pub use ddm_api_types_versions::latest::net::{
+    MulticastOrigin, OverlayMulticast, UnderlayMulticastIpv6, Vni,
+};
 
 use ddm_admin_client::Client as InnerClient;
 use either::Either;
@@ -98,6 +100,36 @@ impl Client {
         &self,
     ) -> Result<Vec<Ipv6Net>, Error<types::Error>> {
         self.inner.get_originated().await.map(|resp| resp.into_inner())
+    }
+
+    /// Originates multicast group subscriptions from this DDM instance.
+    ///
+    /// The multicast analog of [`Client::advertise_prefixes`]. A member
+    /// sled calls this against its local `ddmd` so the switch's `ddmd` imports
+    /// the subscription (nexthop = this sled's session) and programs the
+    /// sled's switch port as a replication target for the group.
+    pub async fn advertise_multicast_groups(
+        &self,
+        groups: &Vec<MulticastOrigin>,
+    ) -> Result<(), Error<types::Error>> {
+        self.inner
+            .advertise_multicast_groups(groups)
+            .await
+            .map(|resp| resp.into_inner())
+    }
+
+    /// Withdraws multicast group subscriptions previously advertised by
+    /// this DDM instance.
+    ///
+    /// The multicast analog of [`Client::withdraw_prefixes`].
+    pub async fn withdraw_multicast_groups(
+        &self,
+        groups: &Vec<MulticastOrigin>,
+    ) -> Result<(), Error<types::Error>> {
+        self.inner
+            .withdraw_multicast_groups(groups)
+            .await
+            .map(|resp| resp.into_inner())
     }
 
     pub async fn enable_stats(

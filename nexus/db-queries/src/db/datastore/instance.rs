@@ -2545,6 +2545,7 @@ mod tests {
                             name: "stuff".parse().unwrap(),
                             description: "Where I keep my stuff".into(),
                         },
+                        defaults: None,
                     },
                 ),
             )

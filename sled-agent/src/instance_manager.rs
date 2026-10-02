@@ -26,6 +26,7 @@ use sled_agent_config_reconciler::UpdateDispositionReceiver;
 use sled_agent_types::attached_subnet::AttachedSubnet;
 use sled_agent_types::attached_subnet::AttachedSubnets;
 use sled_agent_types::instance::*;
+use sled_agent_types::inventory::InstanceManagerStatus;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
@@ -37,8 +38,6 @@ mod jobs;
 use self::jobs::CanEnsureVmm;
 use self::jobs::InstanceManagerJobsStatusReceiver;
 use self::jobs::Jobs;
-
-pub(crate) use self::jobs::InstanceManagerJobsStatus;
 
 // The depth of the request queue for the instance manager.
 const QUEUE_SIZE: usize = 256;
@@ -228,9 +227,9 @@ impl InstanceManager {
         })
     }
 
-    // TODO: Plumb this status through inventory. Part of omicron#11121.
-    #[allow(unused)]
-    pub fn jobs_status(&self) -> InstanceManagerJobsStatus {
+    pub fn status(&self) -> InstanceManagerStatus {
+        // For now, the only meaningful status we report to inventory is the
+        // status of our `jobs` map.
         self.jobs_status_rx.read()
     }
 
@@ -1012,14 +1011,22 @@ impl InstanceManagerRunner {
         }
 
         tokio::spawn(async move {
+            // Await every instance before reporting, keeping the first
+            // error, so one failed refresh does not leave the remaining
+            // ports on stale IGW keying. The per-instance result is
+            // propagated, not just the channel error, so a failed OPTE
+            // refresh is visible to the caller and retried on the next
+            // mapping push.
+            let mut result = Ok(());
             for channel in channels {
-                if let Err(e) = channel.await {
-                    let _ = tx.send(Err(e.into()));
-                    return;
-                }
+                let refresh = match channel.await {
+                    Ok(inner) => inner,
+                    Err(e) => Err(e.into()),
+                };
+                result = result.and(refresh);
             }
 
-            let _ = tx.send(Ok(()));
+            let _ = tx.send(result);
         });
 
         Ok(())

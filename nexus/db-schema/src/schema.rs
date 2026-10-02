@@ -1665,10 +1665,16 @@ table! {
 table! {
     support_bundle_data_selection_ereports (bundle_id) {
         bundle_id -> Uuid,
-        start_time -> Nullable<Timestamptz>,
-        end_time -> Nullable<Timestamptz>,
         only_serials -> Array<Text>,
         only_classes -> Array<Text>,
+    }
+}
+
+table! {
+    support_bundle_data_selection_time_range (bundle_id) {
+        bundle_id -> Uuid,
+        start_time -> Timestamptz,
+        end_time -> Nullable<Timestamptz>,
     }
 }
 
@@ -1676,6 +1682,7 @@ allow_tables_to_appear_in_same_query!(
     support_bundle_data_selection_flags,
     support_bundle_data_selection_host_info,
     support_bundle_data_selection_ereports,
+    support_bundle_data_selection_time_range,
 );
 
 /* hardware inventory */
@@ -1909,6 +1916,9 @@ table! {
         measurement_manifest_source -> Nullable<crate::enums::InvZoneManifestSourceEnum>,
         measurement_manifest_mupdate_id -> Nullable<Uuid>,
         measurement_manifest_boot_disk_error -> Nullable<Text>,
+
+        instance_manager_update_disposition -> Nullable<crate::enums::InvSledUpdateDispositionEnum>,
+        instance_manager_num_registered_vmms -> Int8,
     }
 }
 
@@ -2246,6 +2256,9 @@ table! {
         time_modified -> Timestamptz,
         tuf_repo_pruner_enabled -> Bool,
         disruption_policy -> crate::enums::ReconfiguratorDisruptionPolicyEnum,
+        blueprint_pruner_enabled -> Bool,
+        blueprint_pruner_nkeep -> Int8,
+        sled_update_reboot_policy -> crate::enums::SledUpdateRebootPolicyEnum,
     }
 }
 
@@ -2409,10 +2422,6 @@ table! {
         ntp_domain -> Nullable<Text>,
         nexus_external_tls -> Nullable<Bool>,
         nexus_external_dns_servers -> Nullable<Array<Inet>>,
-        snat_ip -> Nullable<Inet>,
-        snat_first_port -> Nullable<Int4>,
-        snat_last_port -> Nullable<Int4>,
-        external_ip_id -> Nullable<Uuid>,
         filesystem_pool -> Uuid,
         disposition -> crate::enums::BpZoneDispositionEnum,
         disposition_expunged_as_of_generation -> Nullable<Int8>,
@@ -2442,6 +2451,18 @@ table! {
         slot -> Int2,
         ipv6 -> Nullable<Inet>,
         ipv6_subnet -> Nullable<Inet>,
+    }
+}
+
+table! {
+    bp_omicron_zone_external_ip (blueprint_id, zone_id, external_ip_id) {
+        blueprint_id -> Uuid,
+        zone_id -> Uuid,
+        external_ip_id -> Uuid,
+        ip -> Inet,
+        port -> Nullable<Int4>,
+        snat_first_port -> Nullable<Int4>,
+        snat_last_port -> Nullable<Int4>,
     }
 }
 
@@ -3484,10 +3505,17 @@ table! {
     fm_support_bundle_request_data_selection_ereports (sitrep_id, request_id) {
         sitrep_id -> Uuid,
         request_id -> Uuid,
-        start_time -> Nullable<Timestamptz>,
-        end_time -> Nullable<Timestamptz>,
         only_serials -> Array<Text>,
         only_classes -> Array<Text>,
+    }
+}
+
+table! {
+    fm_support_bundle_request_data_selection_time_range (sitrep_id, request_id) {
+        sitrep_id -> Uuid,
+        request_id -> Uuid,
+        start_time -> Nullable<Timestamptz>,
+        end_time -> Nullable<Timestamptz>,
     }
 }
 
@@ -3495,6 +3523,7 @@ allow_tables_to_appear_in_same_query!(
     fm_support_bundle_request_data_selection_flags,
     fm_support_bundle_request_data_selection_host_info,
     fm_support_bundle_request_data_selection_ereports,
+    fm_support_bundle_request_data_selection_time_range,
 );
 
 table! {

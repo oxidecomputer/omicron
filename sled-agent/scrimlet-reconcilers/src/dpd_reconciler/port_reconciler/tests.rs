@@ -69,6 +69,7 @@ fn dpd_port_settings(
     fec: Option<DpdPortFec>,
     autoneg: bool,
     addrs: Vec<IpAddr>,
+    allow_ddm_traffic: bool,
 ) -> DpdPortSettings {
     let mut links = HashMap::new();
     let link_id = DpdLinkId(0);
@@ -77,13 +78,13 @@ fn dpd_port_settings(
         DpdLinkSettings {
             addrs,
             params: DpdLinkCreate {
-                allow_ddm_traffic: false,
                 autoneg,
                 fec,
                 kr: false,
                 lane: Some(link_id),
                 speed,
                 tx_eq: None,
+                allow_ddm_traffic,
             },
         },
     );
@@ -128,6 +129,7 @@ fn plan_all_unchanged() {
             Some(DpdPortFec::Rs),
             true,
             vec![addr],
+            false, // This is an uplink
         ),
     )]);
 
@@ -219,6 +221,7 @@ fn plan_clear_all() {
                 Some(DpdPortFec::Rs),
                 true,
                 vec!["10.0.0.1".parse().unwrap()],
+                false,
             ),
         ),
         (
@@ -228,6 +231,7 @@ fn plan_clear_all() {
                 None,
                 false,
                 vec!["10.0.0.2".parse().unwrap()],
+                false,
             ),
         ),
     ]);
@@ -301,15 +305,28 @@ fn plan_mix() {
                 Some(DpdPortFec::Rs),
                 true,
                 vec![ip0],
+                false,
             ),
         ),
         (
             qsfp1.clone(),
-            dpd_port_settings(DpdPortSpeed::Speed25G, None, false, vec![ip1]),
+            dpd_port_settings(
+                DpdPortSpeed::Speed25G,
+                None,
+                false,
+                vec![ip1],
+                false,
+            ),
         ),
         (
             qsfp2.clone(),
-            dpd_port_settings(DpdPortSpeed::Speed10G, None, false, vec![ip2]),
+            dpd_port_settings(
+                DpdPortSpeed::Speed10G,
+                None,
+                false,
+                vec![ip2],
+                false,
+            ),
         ),
     ]);
 
@@ -411,6 +428,7 @@ fn plan_link_local_addrs_ignored_from_dpd() {
             None,
             true,
             vec![addr, link_local],
+            false,
         ),
     )]);
 
@@ -451,13 +469,13 @@ fn plan_rejects_multi_link_dpd_port() {
     let link0 = DpdLinkId(0);
     let link1 = DpdLinkId(1);
     let link_params = DpdLinkCreate {
-        allow_ddm_traffic: false,
         autoneg: true,
         fec: None,
         kr: false,
         lane: Some(link0),
         speed: DpdPortSpeed::Speed100G,
         tx_eq: None,
+        allow_ddm_traffic: false,
     };
     links.insert(
         link0.to_string(),
@@ -548,14 +566,12 @@ struct ArbitraryPortSettings {
         0..=4,
     ))]
     addrs: BTreeSet<UplinkAddressConfig>,
-    allow_ddm_traffic: bool,
 }
 
 impl ArbitraryPortSettings {
     fn to_dpd_settings(&self, port_id: &PortId) -> DpdPortSettings {
         DpdPortSettings::from(&DiffablePortSettings {
             port_id: port_id.0.clone(),
-            allow_ddm_traffic: self.allow_ddm_traffic,
             autoneg: self.autoneg,
             tx_eq: self.tx_eq,
             fec: self.fec,
@@ -831,14 +847,7 @@ fn diffable_to_port_config(
     port_id: &PortId,
     config: &ArbitraryPortSettings,
 ) -> PortConfig {
-    let ArbitraryPortSettings {
-        autoneg,
-        tx_eq,
-        fec,
-        speed,
-        addrs,
-        allow_ddm_traffic,
-    } = config;
+    let ArbitraryPortSettings { autoneg, tx_eq, fec, speed, addrs } = config;
     PortConfig {
         addresses: addrs.into_iter().copied().collect(),
         switch,
@@ -847,12 +856,12 @@ fn diffable_to_port_config(
         uplink_port_fec: *fec,
         autoneg: *autoneg,
         tx_eq: *tx_eq,
-        allow_ddm_traffic: *allow_ddm_traffic,
 
         // Fields that aren't involved in dpd configuration
         routes: Vec::new(),
         bgp_peers: Vec::new(),
         lldp: None,
+        allow_ddm_traffic: false,
     }
 }
 

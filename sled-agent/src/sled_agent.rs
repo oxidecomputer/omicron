@@ -680,6 +680,12 @@ impl SledAgent {
             &underlay_nics,
         );
 
+        // Wire the PortManager into the DDM reconciler so it can originate this
+        // sled's multicast group subscriptions (read from live OPTE state) to
+        // the local ddmd. The reconciler is created during bootstrap, before
+        // the PortManager exists, so this late binding is required.
+        services.ddm_reconciler().set_port_manager(port_manager.clone());
+
         // The VMM reservoir is configured with respect to what's left after
         // accounting for relatively fixed and predictable uses.
         // We expect certain amounts of memory to be set aside for kernel,
@@ -718,8 +724,10 @@ impl SledAgent {
             config_reconciler_spawn_token.subscribe_update_disposition(),
         )?;
 
-        let svc_config =
-            services::Config::new(identifiers, config.sidecar_revision.clone());
+        let svc_config = services::Config::new(
+            identifiers,
+            config.deployment.sidecar_revision(),
+        );
 
         // Get our system network config from the bootstore; we cannot proceed
         // until we have this, as we need to set up uplinks inside the switch
@@ -1463,6 +1471,7 @@ impl SledAgent {
             reconciler_status,
             last_reconciliation,
             file_source_resolver,
+            instance_manager_status: self.inner.instances.status(),
             smf_services_enabled_not_online,
             reference_measurements: self.inner.measurements.to_inventory(),
             fmd,

@@ -214,7 +214,7 @@ impl core::ops::Add for Progress {
                 .saturating_add(rhs.total_rows_to_read),
             total_bytes_to_read: self
                 .total_bytes_to_read
-                .saturating_add(rhs.total_rows_to_read),
+                .saturating_add(rhs.total_bytes_to_read),
             rows_written: self.rows_written.saturating_add(rhs.rows_written),
             bytes_written: self.bytes_written.saturating_add(rhs.bytes_written),
             query_time: self.query_time.saturating_add(rhs.query_time),
@@ -232,7 +232,7 @@ impl core::ops::AddAssign for Progress {
                 .saturating_add(rhs.total_rows_to_read),
             total_bytes_to_read: self
                 .total_bytes_to_read
-                .saturating_add(rhs.total_rows_to_read),
+                .saturating_add(rhs.total_bytes_to_read),
             rows_written: self.rows_written.saturating_add(rhs.rows_written),
             bytes_written: self.bytes_written.saturating_add(rhs.bytes_written),
             query_time: self.query_time.saturating_add(rhs.query_time),
