@@ -278,7 +278,7 @@ impl TryFrom<v3::rack_setup::UserSpecifiedPortConfig>
                 Ok(Self::Uplink(cfg.into()))
             }
             v3::rack_setup::UserSpecifiedPortConfig::DdmAutoPortConfig => {
-                Err(format!("Cannot upgrade from DdmAutoPortConfig"))
+                Err("Cannot upgrade from DdmAutoPortConfig".to_string())
             }
         }
     }
