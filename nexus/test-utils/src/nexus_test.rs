@@ -50,7 +50,9 @@ use slog::debug;
 use slog::info;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
+use std::sync::Mutex;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use transient_dns_server::TransientDnsServer;
@@ -675,22 +677,55 @@ pub async fn omicron_dev_setup_with_config<N: NexusServer>(
     gateway_config_file: Utf8PathBuf,
 ) -> Result<ControlPlaneTestContext<N>> {
     let starter = ControlPlaneStarter::<N>::new("omicron-dev", config);
+    omicron_dev_setup_impl(starter, extra_sled_agents, gateway_config_file)
+        .await
+}
 
-    let log = &starter.logctx.log;
+/// Like [`omicron_dev_setup_with_config`], but assigns unique loopback IPs to
+/// each rack's pair of mgd BGP dispatchers so that multiple control plane
+/// instances can coexist on the same host.
+///
+/// `mgd_bgp_addrs` maps each [`SwitchSlot`] to the IPv4 address that the
+/// corresponding mgd instance should bind its BGP dispatcher on. The addresses
+/// must exist on a loopback interface; use the supplied `mgd_bgp_loopback`
+/// manager to allocate them (it handles install/uninstall with cross-process
+/// reference counting).
+#[cfg(feature = "omicron-dev")]
+pub async fn omicron_dev_setup_with_bgp_loopbacks<N: NexusServer>(
+    config: &mut NexusConfig,
+    extra_sled_agents: u16,
+    gateway_config_file: Utf8PathBuf,
+    mgd_bgp_loopback: Arc<Mutex<loopback_ip_mgr::LoopbackIpManager>>,
+    mgd_bgp_addrs: BTreeMap<SwitchSlot, Ipv4Addr>,
+) -> Result<ControlPlaneTestContext<N>> {
+    let mut starter = ControlPlaneStarter::<N>::new("omicron-dev", config);
+    starter.mgd_bgp_loopback = Some(mgd_bgp_loopback);
+    starter.mgd_bgp_addrs = mgd_bgp_addrs;
+    omicron_dev_setup_impl(starter, extra_sled_agents, gateway_config_file)
+        .await
+}
+
+#[cfg(feature = "omicron-dev")]
+async fn omicron_dev_setup_impl<'a, N: NexusServer>(
+    starter: ControlPlaneStarter<'a, N>,
+    extra_sled_agents: u16,
+    gateway_config_file: Utf8PathBuf,
+) -> Result<ControlPlaneTestContext<N>> {
+    // Clone the logger so we can use it without holding a borrow on `starter`
+    // while moving it into setup_with_config_impl below.
+    let log = starter.logctx.log.clone();
     slog::debug!(log, "Ensuring seed tarball exists");
 
-    // Start up a ControlPlaneTestContext, which tautologically sets up
-    // everything needed for a simulated control plane.
     let why_invalidate =
         omicron_test_utils::dev::seed::should_invalidate_seed();
     let (seed_tar, status) =
         omicron_test_utils::dev::seed::ensure_seed_tarball_exists(
-            log,
+            &log,
             why_invalidate,
         )
         .await
         .context("error ensuring seed tarball exists")?;
-    status.log(log, &seed_tar);
+    status.log(&log, &seed_tar);
 
     Ok(setup_with_config_impl(
         starter,

@@ -242,6 +242,7 @@ expected_in_path=(
   'cockroach'
   'clickhouse'
   'dpd'
+  'mgd'
 )
 
 function show_hint
