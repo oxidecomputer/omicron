@@ -10,6 +10,7 @@ use serde::Serialize;
 use sled_agent_types::early_networking::BgpConfig;
 use sled_agent_types::early_networking::LldpPortConfig;
 use sled_agent_types::early_networking::RouteConfig;
+use sled_agent_types::early_networking::TxEqConfig;
 use sled_hardware_types::BaseboardId;
 use std::borrow::Cow;
 use std::fmt;
@@ -26,9 +27,10 @@ use wicket_common::rack_setup::BootstrapSledDescription;
 use wicket_common::rack_setup::CurrentRssUserConfigInsensitive;
 use wicketd_commission_types::rack_setup::AllowedSourceIps;
 use wicketd_commission_types::rack_setup::IpRange;
-use wicketd_commission_types::rack_setup::ManualPortConfig;
+use wicketd_commission_types::rack_setup::L1PortConfig;
 use wicketd_commission_types::rack_setup::ServiceIpPoolConfig;
 use wicketd_commission_types::rack_setup::UplinkAddress;
+use wicketd_commission_types::rack_setup::UplinkPortConfig;
 use wicketd_commission_types::rack_setup::UserSpecifiedBgpPeerConfig;
 use wicketd_commission_types::rack_setup::UserSpecifiedImportExportPolicy;
 use wicketd_commission_types::rack_setup::UserSpecifiedPortConfig;
@@ -321,8 +323,16 @@ fn populate_network_table(
         switch_table.set_implicit(true);
 
         for (port, cfg) in &config.switch0 {
-            let uplink = populate_uplink_table(cfg);
-            switch_table.insert(port, Item::Table(uplink));
+            match cfg {
+                UserSpecifiedPortConfig::Uplink(uplink) => {
+                    let uplink = populate_uplink_table(uplink);
+                    switch_table.insert(port, Item::Table(uplink));
+                }
+                UserSpecifiedPortConfig::Ddm(ddm) => {
+                    let ddm = populate_ddm_table(ddm);
+                    switch_table.insert(port, Item::Table(ddm));
+                }
+            }
         }
     }
 
@@ -336,8 +346,16 @@ fn populate_network_table(
         switch_table.set_implicit(true);
 
         for (port, cfg) in &config.switch1 {
-            let uplink = populate_uplink_table(cfg);
-            switch_table.insert(port, Item::Table(uplink));
+            match cfg {
+                UserSpecifiedPortConfig::Uplink(uplink) => {
+                    let uplink = populate_uplink_table(uplink);
+                    switch_table.insert(port, Item::Table(uplink));
+                }
+                UserSpecifiedPortConfig::Ddm(ddm) => {
+                    let ddm = populate_ddm_table(ddm);
+                    switch_table.insert(port, Item::Table(ddm));
+                }
+            }
         }
     }
 
@@ -381,22 +399,24 @@ fn populate_network_table(
     }
 }
 
+fn populate_ddm_table(cfg: &L1PortConfig) -> Table {
+    // A DDM port carries only physical-layer settings (the comment is
+    // operator-facing).
+    let L1PortConfig { speed, fec, autoneg, lldp, tx_eq } = cfg;
+    let mut ddm = Table::new();
+    ddm.decor_mut().set_prefix("\n# This port routes DDM traffic.\n");
+    ddm.insert("speed", string_item(enum_to_toml_string(&speed)));
+    if let Some(fec) = fec {
+        ddm.insert("fec", string_item(enum_to_toml_string(&fec)));
+    }
+    ddm.insert("autoneg", bool_item(*autoneg));
+    populate_lldp_and_tx_eq(&mut ddm, lldp, tx_eq);
+    ddm
+}
+
 #[must_use]
-fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
-    // This style ensures that if a new field is added, this fails loudly.
-    let manual_port_config = match cfg {
-        UserSpecifiedPortConfig::Manual(manual) => manual,
-        UserSpecifiedPortConfig::DdmAutoPortConfig => {
-            // A DDM-auto port is encoded as an empty table (the comment is
-            // operator-facing).
-            let mut uplink = Table::new();
-            uplink.decor_mut().set_prefix(
-                "\n# This port is configured automatically via DDM.\n",
-            );
-            return uplink;
-        }
-    };
-    let ManualPortConfig {
+fn populate_uplink_table(cfg: &UplinkPortConfig) -> Table {
+    let UplinkPortConfig {
         routes,
         addresses,
         uplink_port_speed,
@@ -405,7 +425,7 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
         bgp_peers,
         lldp,
         tx_eq,
-    } = manual_port_config;
+    } = cfg;
 
     let mut uplink = Table::new();
 
@@ -602,6 +622,16 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
 
     uplink.insert("bgp_peers", Item::ArrayOfTables(peers));
 
+    populate_lldp_and_tx_eq(&mut uplink, lldp, tx_eq);
+
+    uplink
+}
+
+fn populate_lldp_and_tx_eq(
+    uplink: &mut Table,
+    lldp: &Option<LldpPortConfig>,
+    tx_eq: &Option<TxEqConfig>,
+) {
     if let Some(l) = lldp {
         let LldpPortConfig {
             status,
@@ -661,8 +691,6 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
         }
         uplink.insert("tx_eq", Item::Table(tx_eq));
     }
-
-    uplink
 }
 
 // Helper function to serialize enums into their appropriate string

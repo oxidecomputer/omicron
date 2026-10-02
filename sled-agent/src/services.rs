@@ -459,7 +459,7 @@ enum SwitchService {
     Pumpkind { asic: DendriteAsic },
     Tfport { pkt_source: String, asic: DendriteAsic },
     Uplink,
-    MgDdm { mode: String },
+    MgDdm { mode: String, baseboard: Baseboard },
     Mgd,
     SpSim,
 }
@@ -2889,12 +2889,21 @@ impl ServiceManager {
                             .add_property_group(mgd_config),
                     );
                 }
-                SwitchService::MgDdm { mode } => {
+                SwitchService::MgDdm { mode, baseboard } => {
                     info!(self.inner.log, "Setting up mg-ddm service");
 
                     let mut mg_ddm_config = PropertyGroupBuilder::new("config")
                         .add_property("mode", "astring", mode)
-                        .add_property("dendrite", "astring", "true");
+                        .add_property("dendrite", "astring", "true")
+                        // We must bind to "::" so the ddmd scrimlet reconciler
+                        // in the global zone can reach the ddm-admin port in
+                        // the switch zone via the underlay network.
+                        .add_property("admin_host", "astring", "::")
+                        .add_property(
+                            "router_id",
+                            "astring",
+                            &switch_zone_ddm_router_id(&baseboard),
+                        );
 
                     if let Some(i) = info {
                         mg_ddm_config = mg_ddm_config
@@ -3135,7 +3144,10 @@ impl ServiceManager {
                     SwitchService::Uplink,
                     SwitchService::Wicketd { baseboard: baseboard.clone() },
                     SwitchService::Mgd,
-                    SwitchService::MgDdm { mode: "transit".to_string() },
+                    SwitchService::MgDdm {
+                        mode: "transit".to_string(),
+                        baseboard: baseboard.clone(),
+                    },
                 ]
             }
 
@@ -3150,7 +3162,10 @@ impl ServiceManager {
                     SwitchService::Uplink,
                     SwitchService::Wicketd { baseboard: baseboard.clone() },
                     SwitchService::Mgd,
-                    SwitchService::MgDdm { mode: "transit".to_string() },
+                    SwitchService::MgDdm {
+                        mode: "transit".to_string(),
+                        baseboard: baseboard.clone(),
+                    },
                     SwitchService::Tfport {
                         pkt_source: "vioif0".to_string(),
                         asic,
@@ -3181,7 +3196,10 @@ impl ServiceManager {
                     SwitchService::Uplink,
                     SwitchService::Wicketd { baseboard: baseboard.clone() },
                     SwitchService::Mgd,
-                    SwitchService::MgDdm { mode: "transit".to_string() },
+                    SwitchService::MgDdm {
+                        mode: "transit".to_string(),
+                        baseboard: baseboard.clone(),
+                    },
                     SwitchService::Tfport {
                         pkt_source: "tfpkt0".to_string(),
                         asic,
@@ -3598,7 +3616,7 @@ impl ServiceManager {
                                 "refreshed mgd service with new configuration"
                             )
                         }
-                        SwitchService::MgDdm { mode } => {
+                        SwitchService::MgDdm { mode, baseboard } => {
                             info!(self.inner.log, "configuring mg-ddm service");
                             smfh.delpropvalue_default_instance(
                                 "config/mode",
@@ -3607,6 +3625,15 @@ impl ServiceManager {
                             smfh.addpropvalue_type_default_instance(
                                 "config/mode",
                                 &mode,
+                                "astring",
+                            )?;
+                            smfh.delpropvalue_default_instance(
+                                "config/router_id",
+                                "*",
+                            )?;
+                            smfh.addpropvalue_type_default_instance(
+                                "config/router_id",
+                                &switch_zone_ddm_router_id(&baseboard),
                                 "astring",
                             )?;
                             if let Some(info) = self.inner.sled_info.get() {
@@ -3862,6 +3889,10 @@ impl ServiceManager {
 
 fn internal_dns_addrobj_name(gz_address_index: u32) -> String {
     format!("internaldns{gz_address_index}")
+}
+
+fn switch_zone_ddm_router_id(baseboard: &Baseboard) -> String {
+    format!("sw{}", baseboard.identifier())
 }
 
 #[cfg(test)]

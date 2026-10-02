@@ -36,3 +36,5 @@ pub mod v2;
 pub mod v3;
 #[path = "update_elapsed/mod.rs"]
 pub mod v4;
+#[path = "multirack_join/mod.rs"]
+pub mod v5;
