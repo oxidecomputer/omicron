@@ -40,6 +40,7 @@ use crate::http_helpers::{
 use crate::mgs::{
     GetInventoryResponse as MgsInventoryResponse, MgsHandle, ShutdownInProgress,
 };
+use crate::update_tracker::SystemVersionAndEventReports;
 
 /// How long to wait for a forced SP refresh.
 ///
@@ -244,7 +245,8 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<GetUpdateProgressResponse>, HttpError> {
         let ctx = rqctx.context();
-        let event_reports = ctx.update_tracker.event_reports().await;
+        let SystemVersionAndEventReports { system_version, event_reports } =
+            ctx.update_tracker.system_version_and_event_reports().await;
 
         let mut sps = IdOrdMap::new();
         for report in event_reports {
@@ -255,7 +257,10 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
             .expect("event_reports is keyed by SpIdentifier");
         }
 
-        Ok(HttpResponseOk(GetUpdateProgressResponse { sps }))
+        Ok(HttpResponseOk(GetUpdateProgressResponse {
+            repository: RepositoryDescription { system_version },
+            sps,
+        }))
     }
 
     async fn post_start_update(

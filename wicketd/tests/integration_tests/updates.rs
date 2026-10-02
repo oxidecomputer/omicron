@@ -17,6 +17,7 @@ use clap::Parser;
 use gateway_messages::SpPort;
 use gateway_test_utils::setup as gateway_setup;
 use http::StatusCode;
+use iddqd::IdOrdMap;
 use installinator::HOST_PHASE_2_FILE_NAME;
 use maplit::btreeset;
 use omicron_common::update::{
@@ -783,7 +784,21 @@ async fn test_update_races() {
         .await
         .expect("get_update_progress succeeded")
         .into_inner();
-    assert!(progress.sps.is_empty(), "no updates in progress yet");
+    assert_eq!(
+        progress,
+        update::GetUpdateProgressResponse {
+            repository: update::RepositoryDescription {
+                system_version: Some(Version::new(1, 0, 0)),
+            },
+            sps: IdOrdMap::new(),
+        },
+        "progress reports the system version from the fake manifest and no \
+         updates yet",
+    );
+    assert_eq!(
+        progress.repository, repo,
+        "GET /update-progress and GET /repository agree on the repository",
+    );
 
     // Now start an update.
     let sp = SpIdentifier { slot: 0, typ: SpType::Sled };
@@ -1000,7 +1015,16 @@ async fn test_update_races() {
         .await
         .expect("get_update_progress succeeded")
         .into_inner();
-    assert!(progress.sps.is_empty(), "update progress cleared for sled 0");
+    assert_eq!(
+        progress,
+        update::GetUpdateProgressResponse {
+            repository: update::RepositoryDescription {
+                system_version: Some(Version::new(1, 0, 0)),
+            },
+            sps: IdOrdMap::new(),
+        },
+        "update progress cleared for sled 0, and the repository left in place",
+    );
 
     let event_buffer = wicketd_testctx
         .wicketd_client
@@ -1055,6 +1079,23 @@ async fn test_update_races() {
     assert!(
         event_buffer.step_events.is_empty(),
         "event buffer is empty: {event_buffer:#?}"
+    );
+
+    let progress = wicketd_testctx
+        .commission_client
+        .get_update_progress()
+        .await
+        .expect("get_update_progress succeeded")
+        .into_inner();
+    assert_eq!(
+        progress,
+        update::GetUpdateProgressResponse {
+            repository: update::RepositoryDescription {
+                system_version: Some(Version::new(1, 0, 0)),
+            },
+            sps: IdOrdMap::new(),
+        },
+        "uploading a repository clears update progress",
     );
 
     wicketd_testctx.teardown().await;
