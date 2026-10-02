@@ -6431,9 +6431,10 @@ CREATE INDEX IF NOT EXISTS lookup_available_sled
     ON omicron.public.rendezvous_sled_bp_availability (sled_id)
     WHERE bp_availability = 'available';
 
-/* Add an index which lets us find sleds by availability */
-CREATE INDEX IF NOT EXISTS lookup_sled_by_bp_availability
-    ON omicron.public.rendezvous_sled_bp_availability (bp_availability);
+/* Add an index which lets us find unavailable sleds */
+CREATE INDEX IF NOT EXISTS lookup_unavailable_sled
+    ON omicron.public.rendezvous_sled_bp_availability (sled_id)
+    WHERE bp_availability = 'unavailable';
 
 /*******************************************************************/
 
