@@ -101,5 +101,19 @@ rot pages found:
 
 sled agents found:
 
+power shelves found:
+    shelf 0 PSC baseboard part "FAKE_SIM_PSC" serial "SimPsc0"
+        PSU0: presence Present hubris_device mwocp68
+            VPD: mfr_model "MWOCP68-3600-D-RM" mfr_serial "LL2216RB000H" firmware_rev "0762-0701-0000" mfr_id "Murata-PS" mfr_location "China" mfr_date "2216"
+        PSU1: presence Present hubris_device mwocp68
+            VPD: mfr_model "MWOCP68-3600-D-RM" mfr_serial "LL2216RB003E" firmware_rev "0762-0701-0000" mfr_id "Murata-PS" mfr_location "China" mfr_date "2216"
+        PSU2: presence NotPresent hubris_device mwocp68
+        PSU3: presence Present hubris_device mwocp68
+            VPD: mfr_model "MWOCP68-3600-D-RM" mfr_serial "LL2216RB000D" firmware_rev "0762-0701-0000" mfr_id "Murata-PS" mfr_location "China" mfr_date "2216"
+        PSU4: presence Timeout hubris_device mwocp68
+            VPD: error: reading VPD for PSU component "PSU4" (component is Timeout): Error Response: status: 503 Service Unavailable; headers: {"content-type": "application/json", "x-request-id": "..........<REDACTED_UUID>...........", "content-length": "226", "date": "<REDACTED_TIMESTAMP>"}; value: Error { error_code: Some("VpdDeviceTimeout"), message: "error communicating with SP SpIdentifier { typ: Power, slot: 0 }: Error response from SP: vpd: vpd device timed out", request_id: "..........<REDACTED_UUID>..........." }
+        PSU5: presence Present hubris_device mwocp68
+            VPD: mfr_model "MWOCP68-3600-D-RM" mfr_serial "LL2216RB000F" firmware_rev "0762-0701-0000" mfr_id "Murata-PS" mfr_location "China" mfr_date "2216"
+
 errors:
 error: MGS "http://[100::1]:12345": listing ignition targets: Communication Error <<redacted>>

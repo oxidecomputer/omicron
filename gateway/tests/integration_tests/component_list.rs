@@ -2,12 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use gateway_client::types::{SpComponentInfo, SpComponentPresence};
+use gateway_client::types::SpComponentInfo;
 use gateway_messages::DeviceCapabilities;
 use gateway_messages::SpComponent;
 use gateway_messages::SpPort;
 use gateway_test_utils::current_simulator_state;
 use gateway_test_utils::setup;
+use gateway_types::component::SpComponentPresence;
 use gateway_types::component::SpType;
 use pretty_assertions::assert_eq;
 

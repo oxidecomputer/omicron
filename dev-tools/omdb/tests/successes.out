@@ -285,13 +285,13 @@ SP DETAILS: type "Power" slot 0
 
     COMPONENTS
 
-        NAME DESCRIPTION DEVICE  PRESENCE SERIAL 
-        PSU0 PSU 0 MCU   mwocp68 Present  None   
-        PSU1 PSU 1 MCU   mwocp68 Present  None   
-        PSU2 PSU 2 MCU   mwocp68 Present  None   
-        PSU3 PSU 3 MCU   mwocp68 Present  None   
-        PSU4 PSU 4 MCU   mwocp68 Present  None   
-        PSU5 PSU 5 MCU   mwocp68 Present  None   
+        NAME DESCRIPTION DEVICE  PRESENCE   SERIAL 
+        PSU0 PSU 0 MCU   mwocp68 Present    None   
+        PSU1 PSU 1 MCU   mwocp68 Present    None   
+        PSU2 PSU 2 MCU   mwocp68 NotPresent None   
+        PSU3 PSU 3 MCU   mwocp68 Present    None   
+        PSU4 PSU 4 MCU   mwocp68 Timeout    None   
+        PSU5 PSU 5 MCU   mwocp68 Present    None   
 
     CABOOSES: none found
 

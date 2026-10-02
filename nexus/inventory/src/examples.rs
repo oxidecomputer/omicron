@@ -18,6 +18,11 @@ use gateway_types::rot::RotState;
 use iddqd::id_ord_map;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::InternalDnsGenerationStatus;
+use nexus_types::inventory::Psu;
+use nexus_types::inventory::PsuIdentity;
+use nexus_types::inventory::PsuSlot;
+use nexus_types::inventory::PsuState;
+use nexus_types::inventory::PsuStatus;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageWhich;
 use nexus_types::inventory::SpType;
@@ -214,6 +219,34 @@ pub fn representative() -> Representative {
             },
         )
         .unwrap();
+
+    // a real PSC will always report 6 PSU slots, even if some are not present,
+    // so let's make sure to do that here for realism's sake.
+    let psus = [
+        (PsuSlot::Psu0, Some(Ok("LL2111Q9002T"))),
+        (PsuSlot::Psu1, Some(Ok("LL2111Q9003T"))),
+        (PsuSlot::Psu2, Some(Ok("LL2111Q9013T"))),
+        (PsuSlot::Psu3, Some(Err("fake VPD read error"))),
+        (PsuSlot::Psu4, Some(Ok("LL2115Q1001T"))),
+        (PsuSlot::Psu5, None),
+    ];
+    let psu_device = ExamplePsuKind::Mwocp68;
+    for (slot, serial) in psus {
+        let state = serial.map(|id_result| {
+            let identity = id_result
+                .map(|serial| psu_identity(psu_device, serial))
+                .map_err(ToString::to_string);
+            PsuState { status: PsuStatus::Present, identity }
+        });
+        let psu = Psu {
+            time_collected: now_db_precision(),
+            source: String::from("fake MGS 1"),
+            slot,
+            hubris_device_type: psu_device.hubris_device_type(),
+            state,
+        };
+        builder.found_psu(&psc_bb, 1, psu).unwrap();
+    }
 
     // a sled with no RoT state or other optional fields
     let sled3_bb = builder
@@ -816,6 +849,49 @@ pub fn rot_page(unique: &str) -> RotPage {
     use base64::Engine;
     RotPage {
         data_base64: base64::engine::general_purpose::STANDARD.encode(unique),
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum ExamplePsuKind {
+    Mwocp68,
+    Mwocp67,
+}
+
+impl ExamplePsuKind {
+    pub fn hubris_device_type(&self) -> String {
+        match self {
+            ExamplePsuKind::Mwocp68 => String::from("mwocp68"),
+            ExamplePsuKind::Mwocp67 => String::from("mwocp67"),
+        }
+    }
+}
+
+/// Constructs a realistic-looking PSU identity for a muRata PSU.
+pub fn psu_identity(
+    kind: ExamplePsuKind,
+    serial: impl ToString,
+) -> PsuIdentity {
+    let mfr_model = match kind {
+        ExamplePsuKind::Mwocp68 => String::from("MWOCP68-3600-D-RM"),
+        ExamplePsuKind::Mwocp67 => String::from("MWOCP67-5500-B-RM"),
+    };
+    let mfr_serial = serial.to_string();
+    // muRata's date fields are 4 digits, which also appear in the serial
+    // number; if the caller provided a serial number that looks like a real
+    // one, extract the date from that. otherwise, make something up i guess...
+    let mfr_date = mfr_serial
+        .get(2..6)
+        .filter(|date| date.chars().all(|c| c.is_numeric()))
+        .unwrap_or("2111")
+        .to_string();
+    PsuIdentity {
+        mfr_id: String::from("Murata-PS"),
+        mfr_model,
+        firmware_rev: String::from("0762-0701-0000"),
+        mfr_location: String::from("China"),
+        mfr_date,
+        mfr_serial,
     }
 }
 

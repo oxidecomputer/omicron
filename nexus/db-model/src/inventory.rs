@@ -45,17 +45,17 @@ use nexus_db_schema::schema::{
     inv_omicron_sled_config, inv_omicron_sled_config_dataset,
     inv_omicron_sled_config_disk, inv_omicron_sled_config_zone,
     inv_omicron_sled_config_zone_external_ip, inv_omicron_sled_config_zone_nic,
-    inv_physical_disk, inv_root_of_trust, inv_root_of_trust_page,
-    inv_service_processor, inv_single_measurements, inv_sled_agent,
-    inv_sled_boot_partition, inv_sled_config_reconciler,
+    inv_physical_disk, inv_power_shelf_psu, inv_root_of_trust,
+    inv_root_of_trust_page, inv_service_processor, inv_single_measurements,
+    inv_sled_agent, inv_sled_boot_partition, inv_sled_config_reconciler,
     inv_svc_enabled_not_online, inv_svc_enabled_not_online_parse_error,
     inv_svc_enabled_not_online_service, inv_zone_manifest_measurement,
     inv_zpool, sw_caboose, sw_root_of_trust_page,
 };
 use nexus_types::inventory::HostPhase1ActiveSlot;
 use nexus_types::inventory::{
-    Caboose, CockroachStatus, Collection, InternalDnsGenerationStatus,
-    NvmeFirmware, PowerState, RotPage, RotSlot, TimeSync,
+    self, Caboose, CockroachStatus, Collection, InternalDnsGenerationStatus,
+    NvmeFirmware, PowerState, PsuSlot, RotPage, RotSlot, TimeSync,
 };
 use omicron_common::disk::DatasetName;
 use omicron_common::update::OmicronInstallManifestSource;
@@ -2381,6 +2381,212 @@ impl From<InvFmdResource> for FmdResource {
             faulty: row.faulty,
             unusable: row.unusable,
             invisible: row.invisible,
+        }
+    }
+}
+
+// See [`nexus_types::inventory::PsuSlot`].
+impl_enum_type!(
+    InvPsuSlotEnum:
+
+    #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
+    pub enum InvPsuSlot;
+
+    Psu0 => b"PSU0"
+    Psu1 => b"PSU1"
+    Psu2 => b"PSU2"
+    Psu3 => b"PSU3"
+    Psu4 => b"PSU4"
+    Psu5 => b"PSU5"
+);
+
+impl From<PsuSlot> for InvPsuSlot {
+    fn from(value: PsuSlot) -> Self {
+        match value {
+            PsuSlot::Psu0 => Self::Psu0,
+            PsuSlot::Psu1 => Self::Psu1,
+            PsuSlot::Psu2 => Self::Psu2,
+            PsuSlot::Psu3 => Self::Psu3,
+            PsuSlot::Psu4 => Self::Psu4,
+            PsuSlot::Psu5 => Self::Psu5,
+        }
+    }
+}
+
+impl From<InvPsuSlot> for PsuSlot {
+    fn from(value: InvPsuSlot) -> Self {
+        match value {
+            InvPsuSlot::Psu0 => Self::Psu0,
+            InvPsuSlot::Psu1 => Self::Psu1,
+            InvPsuSlot::Psu2 => Self::Psu2,
+            InvPsuSlot::Psu3 => Self::Psu3,
+            InvPsuSlot::Psu4 => Self::Psu4,
+            InvPsuSlot::Psu5 => Self::Psu5,
+        }
+    }
+}
+
+/// Represents a PSU observed in a PSC's inventory of the power shelf.
+///
+/// This record may represent one of three possible states:
+///
+/// 1. `presence` is `NotPresent`, in which case, all the PMBus VPD fields *and*
+///   `vpd_error` will be `None` (indicating that the inventory collector did
+///   not attempt to read the device's VPD because it was not present),
+/// 2. the PMBus VPD was read successfully, in which case the VPD fields will be
+///   `Some`, and `vpd_error` will be `None`,
+/// 3. the PSU was not `NotPresent`, but reading the PMBus VPD failed, in which
+///    case, the VPD fields will be `None` and `vpd_error` will be `Some`.
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_power_shelf_psu)]
+pub struct InvPowerShelfPsu {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub time_collected: DateTime<Utc>,
+    pub source: String,
+    /// Baseboard ID of the PSC.
+    pub psc_baseboard_id: Uuid,
+    pub location: InvPsuSlot,
+    pub presence: SpComponentPresence,
+    /// The Hubris device type string in the SP's inventory. This identifies
+    /// which Hubris driver is used to communicate with the PSU, and is a
+    /// property of the SP's Hubris image, not a value reported by the PSU
+    /// itself.
+    ///
+    /// For the model number reported by the PSU, use
+    /// [`InvPowerShelfPsu::mfr_model`].
+    pub hubris_device_type: String,
+
+    // PMBus VPD fields
+    pub mfr_id: Option<String>,
+    pub mfr_model: Option<String>,
+    pub firmware_rev: Option<String>,
+    pub mfr_location: Option<String>,
+    pub mfr_date: Option<String>,
+    pub mfr_serial: Option<String>,
+
+    /// `Some` if the inventory collector requested PMBus VPD from this PSU and
+    /// the request failed. If this is `Some`, the VPD fields will be `None`.
+    pub vpd_error: Option<String>,
+}
+
+impl TryFrom<InvPowerShelfPsu> for inventory::Psu {
+    type Error = anyhow::Error;
+
+    fn try_from(row: InvPowerShelfPsu) -> Result<Self> {
+        let InvPowerShelfPsu {
+            inv_collection_id: _,
+            time_collected,
+            source,
+            psc_baseboard_id,
+            location,
+            presence,
+            hubris_device_type,
+            mfr_id,
+            mfr_model,
+            firmware_rev,
+            mfr_location,
+            mfr_date,
+            mfr_serial,
+            vpd_error,
+        } = row;
+        let slot = PsuSlot::from(location);
+
+        let identity = match (
+            mfr_id,
+            mfr_model,
+            firmware_rev,
+            mfr_location,
+            mfr_date,
+            mfr_serial,
+            vpd_error,
+        ) {
+            (
+                Some(mfr_id),
+                Some(mfr_model),
+                Some(firmware_rev),
+                Some(mfr_location),
+                Some(mfr_date),
+                Some(mfr_serial),
+                None,
+            ) => Some(Ok(inventory::PsuIdentity {
+                mfr_id,
+                mfr_model,
+                firmware_rev,
+                mfr_location,
+                mfr_date,
+                mfr_serial,
+            })),
+            (None, None, None, None, None, None, Some(error)) => {
+                Some(Err(error))
+            }
+            (None, None, None, None, None, None, None) => None,
+            _ => bail!(
+                "inv_power_shelf_psu row for PSC {psc_baseboard_id} {slot} \
+                 violates vpd_result_valid constraint: VPD fields and \
+                 vpd_error are partially populated",
+            ),
+        };
+
+        let status = inventory::PsuStatus::from_presence(presence.into());
+        let state = match (status, identity) {
+            (Some(status), Some(identity)) => {
+                Some(inventory::PsuState { status, identity })
+            }
+            (None, None) => None,
+            (Some(_), None) => bail!(
+                "inv_power_shelf_psu row for PSC {psc_baseboard_id} {slot} \
+                 violates vpd_result_valid constraint: presence is \
+                 {presence:?}, but neither VPD nor vpd_error is present",
+            ),
+            (None, Some(_)) => bail!(
+                "inv_power_shelf_psu row for PSC {psc_baseboard_id} {slot} \
+                 violates vpd_result_valid constraint: presence is \
+                 {presence:?}, but VPD or vpd_error is present",
+            ),
+        };
+
+        Ok(Self { time_collected, source, slot, hubris_device_type, state })
+    }
+}
+
+// See [`gateway_types::component::SpComponentPresence`].
+impl_enum_type!(
+    SpComponentPresenceEnum:
+
+    #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
+    pub enum SpComponentPresence;
+
+    // Enum values
+    Present => b"present"
+    NotPresent => b"not_present"
+    Failed => b"failed"
+    Unavailable => b"unavailable"
+    Timeout => b"timeout"
+    Error => b"error"
+);
+
+impl From<inventory::SpComponentPresence> for SpComponentPresence {
+    fn from(value: inventory::SpComponentPresence) -> Self {
+        match value {
+            inventory::SpComponentPresence::Present => Self::Present,
+            inventory::SpComponentPresence::NotPresent => Self::NotPresent,
+            inventory::SpComponentPresence::Failed => Self::Failed,
+            inventory::SpComponentPresence::Unavailable => Self::Unavailable,
+            inventory::SpComponentPresence::Timeout => Self::Timeout,
+            inventory::SpComponentPresence::Error => Self::Error,
+        }
+    }
+}
+
+impl From<SpComponentPresence> for inventory::SpComponentPresence {
+    fn from(value: SpComponentPresence) -> Self {
+        match value {
+            SpComponentPresence::Present => Self::Present,
+            SpComponentPresence::NotPresent => Self::NotPresent,
+            SpComponentPresence::Failed => Self::Failed,
+            SpComponentPresence::Unavailable => Self::Unavailable,
+            SpComponentPresence::Timeout => Self::Timeout,
+            SpComponentPresence::Error => Self::Error,
         }
     }
 }

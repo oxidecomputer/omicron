@@ -15,6 +15,7 @@ use chrono::Utc;
 use clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership;
 use daft::Diffable;
 pub use gateway_types::component::PowerState;
+pub use gateway_types::component::SpComponentPresence;
 pub use gateway_types::component::SpType;
 pub use gateway_types::rot::RotImageError;
 pub use gateway_types::rot::RotSlot;
@@ -148,6 +149,12 @@ pub struct Collection {
     #[serde_as(as = "BTreeMap<_, Vec<(_, _)>>")]
     pub rot_pages_found:
         BTreeMap<RotPageWhich, BTreeMap<Arc<BaseboardId>, RotPageFound>>,
+
+    /// all power shelf PSUs found, keyed by the PSC's baseboard id, and then by
+    /// PSU slot in that power shelf.
+    ///
+    /// In practice, these will be inserted into the `inv_power_shelf_psu` table.
+    pub power_shelves: IdOrdMap<PowerShelf>,
 
     /// Sled Agent information, by *sled* id
     pub sled_agents: IdOrdMap<SledAgent>,
@@ -415,6 +422,242 @@ pub struct ServiceProcessor {
     pub baseboard_revision: u32,
     pub hubris_archive: String,
     pub power_state: PowerState,
+}
+
+/// Describes a power shelf, as reported by its power shelf controller.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct PowerShelf {
+    /// The baseboard identity of the power shelf controller.
+    pub psc_baseboard_id: Arc<BaseboardId>,
+
+    /// Which power shelf (0 or 1) this is.
+    ///
+    /// This duplicates the [`ServiceProcessor::sp_slot`] in the
+    /// `ServiceProcessor` entry for the PSC's baseboard ID, but I figured it
+    /// would be useful to have it here, too, so you don't have to go look it up
+    /// if all you need is to know which power shelf it is.
+    pub slot: u16,
+
+    /// PSU slots reported by the power shelf controller.
+    pub psus: IdOrdMap<Psu>,
+}
+
+impl IdOrdItem for PowerShelf {
+    type Key<'a> = &'a BaseboardId;
+
+    fn key(&self) -> Self::Key<'_> {
+        &self.psc_baseboard_id
+    }
+
+    id_upcast!();
+}
+
+/// Identifies a PSU's slot in a power shelf.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Ord,
+    Eq,
+    PartialOrd,
+    PartialEq,
+    Hash,
+    strum::EnumString,
+    strum::Display,
+    strum::IntoStaticStr,
+    strum::VariantArray,
+    serde_with::DeserializeFromStr,
+    serde_with::SerializeDisplay,
+)]
+#[strum(serialize_all = "UPPERCASE")]
+pub enum PsuSlot {
+    Psu0,
+    Psu1,
+    Psu2,
+    Psu3,
+    Psu4,
+    Psu5,
+}
+
+impl PsuSlot {
+    pub const ALL: &[Self] = <Self as strum::VariantArray>::VARIANTS;
+
+    /// Returns the SP component ID for the PSU in this slot.
+    pub fn as_component_id(&self) -> &'static str {
+        <&'static str>::from(self)
+    }
+}
+
+/// Describes a power supply unit (PSU) observed in a power shelf.
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+pub struct Psu {
+    pub time_collected: DateTime<Utc>,
+    pub source: String,
+    pub slot: PsuSlot,
+    /// The Hubris device type string in the SP's inventory. This identifies
+    /// which Hubris driver is used to communicate with the PSU, and is a
+    /// property of the SP's Hubris image, not a value reported by the PSU
+    /// itself.
+    ///
+    /// For the model number reported by the PSU, use [`PsuIdentity::mfr_model`]
+    /// instead.
+    pub hubris_device_type: String,
+    /// Data describing the state of the PSU, or `None` if the SP reported that
+    /// no PSU is present in this slot.
+    pub state: Option<PsuState>,
+}
+
+impl Psu {
+    /// Returns the presence of this PSU, as reported by the SP.
+    pub fn presence(&self) -> SpComponentPresence {
+        match &self.state {
+            None => SpComponentPresence::NotPresent,
+            Some(state) => state.status.into(),
+        }
+    }
+
+    /// Returns the result of reading this PSU's identity, or
+    /// [`PsuIdentityResult::NotPresent`] if the SP indicated that no PSU is
+    /// present in this slot.
+    pub fn identity(&self) -> PsuIdentityResult<'_> {
+        match self.state {
+            None => PsuIdentityResult::NotPresent,
+            Some(PsuState { identity: Ok(ref identity), .. }) => {
+                PsuIdentityResult::Present(identity)
+            }
+            Some(PsuState { identity: Err(ref error), .. }) => {
+                PsuIdentityResult::ReadError(error)
+            }
+        }
+    }
+}
+
+impl IdOrdItem for Psu {
+    type Key<'a> = PsuSlot;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.slot
+    }
+
+    id_upcast!();
+}
+
+/// The SP-reported status of a PSU slot which was not reported as empty.
+///
+/// This is [`SpComponentPresence`] without
+/// [`NotPresent`](SpComponentPresence::NotPresent), which is represented by
+/// [`Psu::state`] being `None`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+pub enum PsuStatus {
+    /// The SP reports that the PSU is present.
+    Present,
+    /// The SP reports that the PSU is present but in a failed or faulty state.
+    Failed,
+    /// The SP was unable to determine whether a PSU is present.
+    PresenceUnavailable,
+    /// The SP's attempt to determine whether a PSU is present timed out.
+    PresenceTimeout,
+    /// The SP encountered an error while determining whether a PSU is present.
+    PresenceError,
+}
+
+impl PsuStatus {
+    /// Converts an SP-reported component presence into a `PsuStatus`.
+    ///
+    /// Returns `None` if the presence is
+    /// [`NotPresent`](SpComponentPresence::NotPresent).
+    pub fn from_presence(presence: SpComponentPresence) -> Option<Self> {
+        match presence {
+            SpComponentPresence::NotPresent => None,
+            SpComponentPresence::Present => Some(Self::Present),
+            SpComponentPresence::Failed => Some(Self::Failed),
+            SpComponentPresence::Unavailable => Some(Self::PresenceUnavailable),
+            SpComponentPresence::Timeout => Some(Self::PresenceTimeout),
+            SpComponentPresence::Error => Some(Self::PresenceError),
+        }
+    }
+}
+
+impl From<PsuStatus> for SpComponentPresence {
+    fn from(status: PsuStatus) -> Self {
+        match status {
+            PsuStatus::Present => Self::Present,
+            PsuStatus::Failed => Self::Failed,
+            PsuStatus::PresenceUnavailable => Self::Unavailable,
+            PsuStatus::PresenceTimeout => Self::Timeout,
+            PsuStatus::PresenceError => Self::Error,
+        }
+    }
+}
+
+/// The state of a PSU slot which the SP did not report as empty.
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+pub struct PsuState {
+    /// The SP-reported status of this PSU.
+    pub status: PsuStatus,
+    /// The PSU's PMBus identity, or an error describing why it could not be
+    /// read.
+    pub identity: Result<PsuIdentity, String>,
+}
+
+/// Values returned by [`Psu::identity`].
+#[derive(Copy, Clone, Debug, Eq, PartialOrd, PartialEq)]
+pub enum PsuIdentityResult<'psu> {
+    /// The VPD identity of the PSU was not read because no PSU was present in
+    /// this slot.
+    NotPresent,
+    /// The VPD identity of the PSU was successfully read.
+    Present(&'psu PsuIdentity),
+    /// The PSU was not determined to be not present, but an error occurred
+    /// while reading its VPD identity.
+    ReadError(&'psu str),
+}
+
+impl<'psu> PsuIdentityResult<'psu> {
+    /// Returns [`Some`]`(`[`PsuIdentity`]`)` if the PSU was present and its VPD
+    /// identity was read successfully, or [`None`] if no PSU was present or an
+    /// error occurred while reading its VPD identity.
+    pub fn ok(self) -> Option<&'psu PsuIdentity> {
+        match self {
+            PsuIdentityResult::Present(identity) => Some(identity),
+            _ => None,
+        }
+    }
+
+    pub fn is_present(&self) -> bool {
+        matches!(self, PsuIdentityResult::Present(_))
+    }
+
+    pub fn is_read_error(&self) -> bool {
+        matches!(self, PsuIdentityResult::ReadError(_))
+    }
+
+    pub fn is_not_present(&self) -> bool {
+        matches!(self, PsuIdentityResult::NotPresent)
+    }
+}
+
+/// The identity of a muRata PSU in the power shelf, as reported over PMBus.
+///
+/// The combination of `mfr_model` and `mfr_serial` identifies the PSU.
+#[derive(Clone, Debug, Eq, PartialOrd, PartialEq, Deserialize, Serialize)]
+pub struct PsuIdentity {
+    /// `MFR_ID` (PMBus command 0x99).
+    pub mfr_id: String,
+    /// `MFR_MODEL` (PMBus command 0x9A).
+    pub mfr_model: String,
+    /// `MFR_REVISION` (PMBus command 0x9B).
+    ///
+    /// Note that muRata uses this command to represent the *firmware revision*
+    /// of the PSU, rather than a hardware revision, so we rename this field to
+    /// keep that obvious.
+    pub firmware_rev: String,
+    /// `MFR_LOCATION` (PMBus command 0x9C).
+    pub mfr_location: String,
+    /// `MFR_DATE` (PMBus command 0x9D).
+    pub mfr_date: String,
+    /// `MFR_SERIAL` (PMBus command 0x9E).
+    pub mfr_serial: String,
 }
 
 /// Describes the root of trust state found (from a service processor) during
