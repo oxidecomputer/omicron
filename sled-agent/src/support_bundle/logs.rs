@@ -10,6 +10,7 @@ use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use range_requests::make_get_response;
 use sled_agent_config_reconciler::AvailableDatasetsReceiver;
+use sled_storage::dataset::U2_DEBUG_SCRATCH_DATASET_NAME;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use tokio::io::AsyncSeekExt;
@@ -32,6 +33,13 @@ pub enum Error {
 
     #[error("No storage found for temporary file storage")]
     MissingStorage,
+
+    #[error("Failed to create temporary file in {path}")]
+    TempFile {
+        path: camino::Utf8PathBuf,
+        #[source]
+        err: std::io::Error,
+    },
 
     #[error(transparent)]
     Range(#[from] range_requests::Error),
@@ -86,7 +94,8 @@ impl<'a> SupportBundleLogs<'a> {
         Z: Into<String>,
     {
         let dataset_path = self.dataset_for_temporary_storage().await?;
-        let mut tempfile = tempfile_in(dataset_path)?;
+        let mut tempfile = tempfile_in(&dataset_path)
+            .map_err(|err| Error::TempFile { path: dataset_path, err })?;
 
         let log = self.log.clone();
         let zone = zone.into();
@@ -130,6 +139,9 @@ impl<'a> SupportBundleLogs<'a> {
     /// Attempt to find a U.2 device with the most available free space
     /// for temporary storage to assemble a zip file made up of all of the
     /// discovered zone's logs.
+    ///
+    /// Returns the debug scratch dataset on that device, which sled-agent
+    /// creates when it sets up each U.2.
     async fn dataset_for_temporary_storage(
         &self,
     ) -> Result<camino::Utf8PathBuf, Error> {
@@ -174,11 +186,64 @@ impl<'a> SupportBundleLogs<'a> {
             .collect()
             .await;
 
+        // Use the scratch dataset within the debug dataset, rather than the
+        // debug dataset itself. The zip file is already compressed, and the
+        // debug dataset's gzip-9 compression would spend CPU trying to
+        // compress it again.
         storage_paths_to_size
             .into_iter()
             .flatten()
             .max_by_key(|(_, size)| *size)
-            .map(|(dataset_path, _)| dataset_path)
+            .map(|(debug_path, _)| {
+                debug_path.join(U2_DEBUG_SCRATCH_DATASET_NAME)
+            })
             .ok_or(Error::MissingStorage)
+    }
+}
+
+#[cfg(all(target_os = "illumos", test))]
+mod illumos_tests {
+    use super::*;
+    use illumos_utils::zfs::Zfs;
+    use omicron_test_utils::dev::test_setup_log;
+    use sled_storage::dataset::U2_DEBUG_DATASET;
+    use zfs_test_harness::ZfsTestHarness;
+
+    #[tokio::test]
+    async fn temporary_storage_uses_debug_scratch_dataset() {
+        let logctx =
+            test_setup_log("temporary_storage_uses_debug_scratch_dataset");
+        let log = &logctx.log;
+
+        // Setting up a U.2 creates the scratch dataset within its debug
+        // dataset, using lz4 compression.
+        let mut harness = ZfsTestHarness::new(log.clone());
+        harness.add_external_disks(1).await;
+        let zpool = *harness.all_external_zpools().next().unwrap();
+        let scratch_dataset =
+            format!("{U2_DEBUG_DATASET}/{U2_DEBUG_SCRATCH_DATASET_NAME}");
+        let compression = Zfs::get_value(
+            &format!("{zpool}/{scratch_dataset}"),
+            "compression",
+        )
+        .await
+        .expect("Should have been able to read compression");
+        assert_eq!(compression, "lz4");
+
+        // Log collection picks the scratch dataset for its temporary files.
+        let root = &harness.mount_config().root;
+        let available_datasets_rx = AvailableDatasetsReceiver::fake_static(
+            std::iter::once((zpool, zpool.dataset_mountpoint(root, ""))),
+        );
+        let logs = SupportBundleLogs::new(log, available_datasets_rx);
+        let path = logs
+            .dataset_for_temporary_storage()
+            .await
+            .expect("Should have found temporary storage");
+        assert_eq!(path, zpool.dataset_mountpoint(root, &scratch_dataset));
+        tempfile_in(&path).expect("Should be able to create a tempfile");
+
+        harness.cleanup();
+        logctx.cleanup_successful();
     }
 }

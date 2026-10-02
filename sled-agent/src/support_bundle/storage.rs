@@ -39,6 +39,7 @@ use sled_agent_types::support_bundle::NESTED_DATASET_NOT_FOUND;
 use sled_agent_types::support_bundle::{
     SupportBundleMetadata, SupportBundleState,
 };
+use sled_storage::dataset::U2_DEBUG_SCRATCH_DATASET_NAME;
 use sled_storage::nested_dataset::NestedDatasetConfig;
 use sled_storage::nested_dataset::NestedDatasetListOptions;
 use sled_storage::nested_dataset::NestedDatasetLocation;
@@ -555,8 +556,14 @@ impl<'a> SupportBundleManager<'a> {
 
         let mut bundles = Vec::with_capacity(datasets.len());
         for dataset in datasets {
-            // We should be able to parse each dataset name as a support bundle
-            // UUID
+            // The debug dataset also holds a scratch dataset for log
+            // collection, which is not a support bundle.
+            if dataset.name.path == U2_DEBUG_SCRATCH_DATASET_NAME {
+                continue;
+            }
+
+            // We should be able to parse each other dataset name as a support
+            // bundle UUID
             let Ok(support_bundle_id) =
                 dataset.name.path.parse::<SupportBundleUuid>()
             else {

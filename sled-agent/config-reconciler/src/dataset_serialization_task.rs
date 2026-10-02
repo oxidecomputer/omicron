@@ -2571,6 +2571,7 @@ mod illumos_tests {
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::ZpoolUuid;
     use sled_agent_types::disk::CompressionAlgorithm;
+    use sled_storage::dataset::U2_DEBUG_SCRATCH_DATASET_NAME;
     use sled_storage::disk::Disk;
     use sled_storage::disk::RawSyntheticDisk;
     use tokio::sync::watch;
@@ -3111,26 +3112,16 @@ mod illumos_tests {
             Ok(())
         );
 
-        // Start querying the state of nested datasets.
-        //
-        // When we ask about the root of a dataset, we only get information
-        // about the dataset we're asking for.
+        // Setting up the zpool created the debug scratch dataset within the
+        // debug dataset.
         let root_location = NestedDatasetLocation {
             path: String::new(),
             root: debug_dataset.name.clone(),
         };
-        let nested_datasets = task_handle
-            .nested_dataset_list(
-                root_location.root.clone(),
-                NestedDatasetListOptions::SelfAndChildren,
-            )
-            .await
-            .expect("no task error")
-            .expect("no error listing datasets");
-        assert_eq!(nested_datasets.len(), 1);
-        assert_eq!(nested_datasets[0].name, root_location);
-
-        // If we ask about children of this dataset, we see nothing.
+        let scratch_location = NestedDatasetLocation {
+            path: U2_DEBUG_SCRATCH_DATASET_NAME.to_string(),
+            ..root_location.clone()
+        };
         let nested_datasets = task_handle
             .nested_dataset_list(
                 root_location.root.clone(),
@@ -3139,6 +3130,33 @@ mod illumos_tests {
             .await
             .expect("no task error")
             .expect("no error listing datasets");
+        assert_eq!(nested_datasets.len(), 1);
+        assert_eq!(nested_datasets[0].name, scratch_location);
+
+        // The rest of this test ignores the scratch dataset.
+        let list_nested_datasets = async |options| {
+            let mut nested_datasets = task_handle
+                .nested_dataset_list(root_location.root.clone(), options)
+                .await
+                .expect("no task error")
+                .expect("no error listing datasets");
+            nested_datasets.retain(|d| d.name != scratch_location);
+            nested_datasets
+        };
+
+        // Start querying the state of nested datasets.
+        //
+        // When we ask about the root of a dataset, we only get information
+        // about the dataset we're asking for.
+        let nested_datasets =
+            list_nested_datasets(NestedDatasetListOptions::SelfAndChildren)
+                .await;
+        assert_eq!(nested_datasets.len(), 1);
+        assert_eq!(nested_datasets[0].name, root_location);
+
+        // If we ask about children of this dataset, we see nothing.
+        let nested_datasets =
+            list_nested_datasets(NestedDatasetListOptions::ChildrenOnly).await;
         assert_eq!(nested_datasets.len(), 0);
 
         // We can't destroy non-nested datasets through this API
@@ -3178,25 +3196,14 @@ mod illumos_tests {
             .expect("re-ensured dataset");
 
         // We can observe the nested dataset
-        let nested_datasets = task_handle
-            .nested_dataset_list(
-                root_location.root.clone(),
-                NestedDatasetListOptions::SelfAndChildren,
-            )
-            .await
-            .expect("no task error")
-            .expect("no error listing datasets");
+        let nested_datasets =
+            list_nested_datasets(NestedDatasetListOptions::SelfAndChildren)
+                .await;
         assert_eq!(nested_datasets.len(), 2);
         assert_eq!(nested_datasets[0].name, root_location);
         assert_eq!(nested_datasets[1].name, nested_location);
-        let nested_datasets = task_handle
-            .nested_dataset_list(
-                root_location.root.clone(),
-                NestedDatasetListOptions::ChildrenOnly,
-            )
-            .await
-            .expect("no task error")
-            .expect("no error listing datasets");
+        let nested_datasets =
+            list_nested_datasets(NestedDatasetListOptions::ChildrenOnly).await;
         assert_eq!(nested_datasets.len(), 1);
         assert_eq!(nested_datasets[0].name, nested_location);
 
@@ -3223,14 +3230,8 @@ mod illumos_tests {
         );
 
         // The nested dataset should now be gone
-        let nested_datasets = task_handle
-            .nested_dataset_list(
-                root_location.root.clone(),
-                NestedDatasetListOptions::ChildrenOnly,
-            )
-            .await
-            .expect("no task error")
-            .expect("no error listing datasets");
+        let nested_datasets =
+            list_nested_datasets(NestedDatasetListOptions::ChildrenOnly).await;
         assert_eq!(nested_datasets.len(), 0);
 
         harness.cleanup().await;

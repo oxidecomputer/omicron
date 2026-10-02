@@ -56,6 +56,24 @@ pub const ARTIFACT_DATASET_QUOTA: ByteCount = ByteCount::from_gibibytes_u32(40);
 pub const ZONE_DATASET: &'static str = "crypt/zone";
 pub const DUMP_DATASET: &'static str = "crypt/debug";
 pub const U2_DEBUG_DATASET: &'static str = "crypt/debug";
+
+/// Name of a dataset nested within [`U2_DEBUG_DATASET`] that holds temporary
+/// files for support bundle log collection.
+///
+/// The files written here are already compressed, so this dataset uses lz4
+/// rather than the debug dataset's gzip-9: gzip-9 spends significant CPU on
+/// data it cannot shrink, while lz4 gives up quickly. This dataset is not part
+/// of the blueprint; sled-agent creates it along with the other
+/// [`U2_EXPECTED_DATASETS`] when it sets up each U.2.
+pub const U2_DEBUG_SCRATCH_DATASET_NAME: &'static str = "support-logs-tmp";
+
+/// The path of [`U2_DEBUG_SCRATCH_DATASET_NAME`] within a U.2's zpool.
+pub const U2_DEBUG_SCRATCH_DATASET: &'static str = const_format::concatcp!(
+    U2_DEBUG_DATASET,
+    "/",
+    U2_DEBUG_SCRATCH_DATASET_NAME
+);
+
 pub const LOCAL_STORAGE_DATASET: &'static str = "crypt/local_storage";
 
 // Some U.2 datasets do not inherit any encryption
@@ -65,7 +83,11 @@ pub const LOCAL_STORAGE_UNENCRYPTED_DATASET: &'static str =
 // This is the root dataset for all U.2 drives. Encryption is inherited.
 pub const CRYPT_DATASET: &'static str = "crypt";
 
-pub const U2_EXPECTED_DATASET_COUNT: usize = 2;
+pub const U2_EXPECTED_DATASET_COUNT: usize = 3;
+/// Datasets that sled-agent creates on each U.2, in order.
+///
+/// RSS adds each of these to the initial blueprint, except for
+/// [`U2_DEBUG_SCRATCH_DATASET`], which is not part of the blueprint.
 pub const U2_EXPECTED_DATASETS: [ExpectedDataset; U2_EXPECTED_DATASET_COUNT] = [
     // Stores filesystems for zones
     ExpectedDataset::new(ZONE_DATASET),
@@ -74,6 +96,10 @@ pub const U2_EXPECTED_DATASETS: [ExpectedDataset; U2_EXPECTED_DATASET_COUNT] = [
     ExpectedDataset::new(DUMP_DATASET)
         .quota(DUMP_DATASET_QUOTA)
         .compression(DUMP_DATASET_COMPRESSION),
+    // Temporary files for support bundle log collection. This must follow its
+    // parent, DUMP_DATASET.
+    ExpectedDataset::new(U2_DEBUG_SCRATCH_DATASET)
+        .compression(CompressionAlgorithm::Lz4),
 ];
 
 const M2_EXPECTED_DATASET_COUNT: usize = 7;
