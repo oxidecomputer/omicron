@@ -840,8 +840,9 @@ async fn collect_one_psc(
                 let bytes = match value {
                     Some(bytes) => bytes,
                     None => {
-                        let err = anyhow::anyhow!(
-                            "expected the PSU to implement PMBus command {command}"
+                        let err = anyhow!(
+                            "expected the PSU to implement PMBus command \
+                             {command}"
                         )
                         .context(ctx());
                         in_progress.found_error(InventoryError::from(err));
@@ -854,7 +855,7 @@ async fn collect_one_psc(
                 // the conversion will be lossy or not
                 let s = str::from_utf8(&bytes[..])
                     .map_err(|e| {
-                        anyhow::anyhow!(
+                        anyhow!(
                             "PMBus {command} should return ASCII bytes: {e}"
                         )
                     })
