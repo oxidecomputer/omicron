@@ -56,13 +56,9 @@ impl VmmStopForUpdate {
         Self { datastore }
     }
 
-    /// TODO-K: Fix comment, Lists every non-deleted VMM that is marked to be
-    /// stopped for a sled update, and groups their IDs by the sled they run on.
-    async fn vmms_to_stop_by_sled(
-        &self,
-        opctx: &OpContext,
-    ) -> Result<IdOrdMap<SledVmmsToStop>, Error> {
-        let mut vmms_by_sled = IdOrdMap::new();
+    /// Retrieves a list of VMMs marked to be stopped for update by sled, and
+    /// stops them in batches.
+    async fn stop_all(&self, opctx: &OpContext) -> Result<(), Error> {
         let mut paginator = Paginator::new(
             SQL_BATCH_SIZE,
             dropshot::PaginationOrder::Ascending,
@@ -73,6 +69,8 @@ impl VmmStopForUpdate {
                 .vmm_list_marked_stop_for_update(opctx, &p.current_pagparams())
                 .await?;
             paginator = p.found_batch(&vmms, &|vmm| vmm.id);
+
+            let mut vmms_by_sled = IdOrdMap::new();
             for vmm in vmms {
                 let sled_id = vmm.sled_id();
                 vmms_by_sled
@@ -84,20 +82,47 @@ impl VmmStopForUpdate {
                     .vmm_ids
                     .push(PropolisUuid::from_untyped_uuid(vmm.id));
             }
+            self.stop_batch(vmms_by_sled, opctx).await;
         }
-        Ok(vmms_by_sled)
+
+        // TODO-K: Actually return some useful information like how many VMMs
+        // were stoppped, which sleds these we in, etc
+        Ok(())
+    }
+
+    /// Stops a batch of VMMs
+    async fn stop_batch(
+        &self,
+        vmms_by_sled: IdOrdMap<SledVmmsToStop>,
+        opctx: &OpContext,
+    ) {
+        for sled in vmms_by_sled {
+            let SledVmmsToStop { sled_id, vmm_ids } = sled;
+            slog::info!(
+                opctx.log,
+                "Stopping VMMs for update";
+                "sled_id" => %sled_id,
+                "vmms" => ?vmm_ids,
+            );
+
+            // TODO-K: actually stop the VMMs in `vmms_by_sled` and record
+            // how many were stopped on each sled, how many failed, whatever
+        }
+
+        // TODO-K: Return some useful information like how many VMMs
+        // were stoppped, which sleds these we in, etc
     }
 
     pub(crate) async fn actually_activate(
         &mut self,
         opctx: &OpContext,
     ) -> VmmStopForUpdateStatus {
-        let vmms_by_sled = match self.vmms_to_stop_by_sled(opctx).await {
-            Ok(vmms_by_sled) => vmms_by_sled,
+        let _results = match self.stop_all(opctx).await {
+            Ok(results) => results,
             Err(err) => {
                 slog::error!(
                     &opctx.log,
-                    "failed to list VMMs marked to stop for a sled update";
+                    "failed to stop VMMs marked to stop for a sled update";
                     &err,
                 );
                 return VmmStopForUpdateStatus {
@@ -107,24 +132,24 @@ impl VmmStopForUpdate {
             }
         };
 
-        if vmms_by_sled.is_empty() {
-            slog::debug!(
-                &opctx.log,
-                "no VMMs are marked to stop for a sled update";
-            );
-        } else {
-            let vmm_count: usize =
-                vmms_by_sled.iter().map(|sled| sled.vmm_ids.len()).sum();
-            slog::info!(
-                &opctx.log,
-                "found VMMs marked to stop for a sled update";
-                "sleds" => vmms_by_sled.len(),
-                "vmms" => vmm_count,
-            );
-        }
+        // TODO-K: Once we have useful information log it
+        //    if results.vmms_by_sled.is_empty() {
+        //        slog::debug!(
+        //            &opctx.log,
+        //            "no VMMs were stopped for a sled update";
+        //        );
+        //    } else {
+        //        let vmm_count: usize =
+        //            vmms_by_sled.iter().map(|sled| sled.vmm_ids.len()).sum();
+        //        slog::info!(
+        //            &opctx.log,
+        //            "stopped VMMs marked to stop for a sled update";
+        //            "sleds" => vmms_by_sled.len(),
+        //            "vmms" => vmm_count,
+        //        );
+        //    }
 
-        // TODO-K: actually stop the VMMs in `vmms_by_sled` and record
-        // how many were stopped on each sled in `vmms_stopped_by_sled`.
+        // TODO-K: Should return a nicely structured struct here instead
         let vmms_stopped_by_sled = BTreeMap::new();
 
         VmmStopForUpdateStatus { vmms_stopped_by_sled, error: None }
