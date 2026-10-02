@@ -12,6 +12,7 @@ use crate::config::SpComponentConfig;
 
 use gateway_messages::SpComponent;
 use gateway_messages::SpError;
+use gateway_messages::VpdError;
 use gateway_messages::vpd as gw;
 
 use anyhow::Context;
@@ -99,7 +100,7 @@ pub(crate) struct ComponentVpds {
 
 #[derive(Debug)]
 struct ComponentVpd {
-    vpd: gw::Vpd,
+    vpd: Result<gw::Vpd, VpdError>,
 }
 
 impl ComponentVpds {
@@ -135,9 +136,14 @@ impl ComponentVpds {
         let vpd = self
             .by_component
             .get(component)
-            .ok_or(SpError::RequestUnsupportedForComponent)?;
-        // TODO(eliza): allow simulating errors as well here?
-        match gateway_messages::serialize(buf, &vpd.vpd) {
+            .ok_or(SpError::RequestUnsupportedForComponent)?
+            .vpd
+            .as_ref()
+            .map_err(|e| {
+                // oh, we were asked to simulate a read error!
+                SpError::Vpd(*e)
+            })?;
+        match gateway_messages::serialize(buf, vpd) {
             Ok(len) => Ok(len),
             Err(e) => {
                 panic!(
@@ -171,13 +177,14 @@ impl ComponentVpd {
                     ic_device_rev: pmbus_block(config.ic_device_rev.as_ref())
                         .context("invalid PMBus ic_device_rev")?,
                 };
-                gw::Vpd::Pmbus(vpd)
+                Ok(gw::Vpd::Pmbus(vpd))
             }
-            ComponentVpdConfig::Barcode(vpd) => gw::Vpd::Barcode(*vpd),
+            ComponentVpdConfig::Barcode(vpd) => Ok(gw::Vpd::Barcode(*vpd)),
             ComponentVpdConfig::SledFanTray(vpd) => {
-                gw::Vpd::SledFanTray((**vpd).clone())
+                Ok(gw::Vpd::SledFanTray((**vpd).clone()))
             }
-            ComponentVpdConfig::Tmp11x(vpd) => gw::Vpd::Tmp11x(vpd.clone()),
+            ComponentVpdConfig::Tmp11x(vpd) => Ok(gw::Vpd::Tmp11x(vpd.clone())),
+            ComponentVpdConfig::ReadError(e) => Err(*e),
         };
         Ok(Self { vpd })
     }
