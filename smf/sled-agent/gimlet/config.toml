@@ -1,18 +1,9 @@
 # Sled Agent Configuration
 
-# Identifies whether sled agent treats itself as a scrimlet or a gimlet.
-#
-# If this is set to "scrimlet", the sled agent treats itself as a scrimlet.
-# If this is set to "gimlet", the sled agent treats itself as a gimlet.
-# If this is set to "auto":
-# - On illumos, the sled automatically detects whether or not it is a scrimlet.
-# - On all other platforms, the sled assumes it is a gimlet.
-sled_mode = "auto"
-
-# Identifies the revision of the sidecar that is attached, if one is attached.
-# TODO: This field should be removed once Gimlets have the ability to auto-detect
-# this information.
-sidecar_revision.physical = "b"
+# Oxide rack. The hardware monitor detects the Tofino ASIC and the sled runs
+# as a scrimlet when one is present. The sidecar board revision defaults to
+# "b".
+deployment = { kind = "production" }
 
 # An optional data link from which we extract a MAC address.
 # This is used as a unique identifier for the bootstrap address.

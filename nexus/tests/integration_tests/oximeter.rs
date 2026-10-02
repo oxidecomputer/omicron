@@ -8,7 +8,6 @@ use nexus_test_interface::NexusServer;
 use nexus_test_utils::wait_for_producer;
 use nexus_test_utils_macros::nexus_test;
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
-use oximeter_db::DbWrite;
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -119,11 +118,11 @@ async fn test_oximeter_reregistration() {
 
     // ClickHouse client for verifying collection.
     let native_address = context.clickhouse.native_address().into();
-    let client = oximeter_db::Client::new(native_address, &context.logctx.log);
-    client
-        .init_single_node_db()
-        .await
-        .expect("Failed to initialize timeseries database");
+    let client = oximeter_db::Client::new(
+        oximeter_db::User::Reader,
+        native_address,
+        &context.logctx.log,
+    );
 
     // Helper to retrieve the timeseries from ClickHouse
     let timeseries_name = "integration_target:integration_metric";

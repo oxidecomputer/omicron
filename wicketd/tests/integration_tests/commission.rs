@@ -15,6 +15,7 @@ use http::StatusCode;
 use iddqd::{IdOrdMap, id_ord_map};
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use semver::Version;
+use sp_sim::FAKE_SIDECAR_MODEL;
 use sp_sim::ROT_STAGING_DEVEL_SIGN;
 use tufaceous::edit::RepositoryEditor;
 use wicket_common::example::ExampleRackSetupData;
@@ -77,6 +78,7 @@ async fn test_commission_inventory() {
     let gateway =
         gateway_setup::test_setup("test_commission_inventory", SpPort::One)
             .await;
+    let n_sps = gateway.simrack.num_sps();
     let ctx = WicketdTestContext::setup(gateway).await;
 
     // Wait for MGS inventory, ignition, and cabooses.
@@ -92,7 +94,7 @@ async fn test_commission_inventory() {
     })
     .await;
 
-    assert_eq!(sps.len(), 4, "four simulated SPs");
+    assert_eq!(sps.len(), n_sps, "{n_sps} simulated SPs");
 
     let sled0 = sps
         .get(&SpIdentifier { typ: SpType::Sled, slot: 0 })
@@ -154,8 +156,8 @@ async fn test_commission_inventory() {
     );
     assert_eq!(
         refreshed.sps.len(),
-        4,
-        "four simulated SPs after forced refresh"
+        n_sps,
+        "{n_sps} simulated SPs after forced refresh"
     );
     assert!(
         refreshed.transceivers.is_empty(),
@@ -258,7 +260,7 @@ async fn test_commission_inventory() {
     assert_eq!(
         location.switch_baseboard,
         Some(BaseboardId {
-            part_number: "FAKE_SIM_SIDECAR".to_string(),
+            part_number: FAKE_SIDECAR_MODEL.to_string(),
             serial_number: "SimSidecar0".to_string(),
         }),
         "switch 0 baseboard reported by sp-sim"

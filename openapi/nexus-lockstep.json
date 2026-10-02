@@ -4838,6 +4838,37 @@
               "type",
               "value"
             ]
+          },
+          {
+            "description": "An update to the given component could be scheduled, but we're waiting for the sled to evacuate",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "waiting_on_sled_evacuation"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "component": {
+                    "$ref": "#/components/schemas/MgsUpdateComponent"
+                  },
+                  "details": {
+                    "$ref": "#/components/schemas/WaitingOnSledEvacuationDetails"
+                  }
+                },
+                "required": [
+                  "component",
+                  "details"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
           }
         ]
       },
@@ -6347,6 +6378,15 @@
           "sp"
         ]
       },
+      "MgsUpdateComponent": {
+        "type": "string",
+        "enum": [
+          "sp",
+          "rot",
+          "rot_bootloader",
+          "host_os"
+        ]
+      },
       "MgsUpdateDriverStatus": {
         "description": "Status of ongoing update attempts, recently completed attempts, and update requests that are waiting for retry.",
         "type": "object",
@@ -7642,11 +7682,25 @@
         "type": "object",
         "properties": {
           "disruption_policy": {
-            "$ref": "#/components/schemas/ReconfiguratorDisruptionPolicy"
+            "description": "Disruption policy applied to sleds being evacuated.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ReconfiguratorDisruptionPolicy"
+              }
+            ]
+          },
+          "sled_update_reboot_policy": {
+            "description": "Policy for how the planner schedules updates that will induce reboots on sleds.\n\nIf `sled_update_reboot_policy` is [`SledUpdateRebootPolicy::ImmediateNoEvacuation`], the planner will not mark sleds for evacuation at all, which means `disruption_policy` will be ignored.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SledUpdateRebootPolicy"
+              }
+            ]
           }
         },
         "required": [
-          "disruption_policy"
+          "disruption_policy",
+          "sled_update_reboot_policy"
         ]
       },
       "PlanningAddOutOfEligibleSleds": {
@@ -7981,11 +8035,18 @@
           },
           "pending_mgs_updates": {
             "$ref": "#/components/schemas/PendingMgsUpdates"
+          },
+          "update_disposition_changes": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/BlueprintSledUpdateDispositionKind"
+            }
           }
         },
         "required": [
           "blocked_mgs_updates",
-          "pending_mgs_updates"
+          "pending_mgs_updates",
+          "update_disposition_changes"
         ]
       },
       "PlanningNexusGenerationBumpReport": {
@@ -9079,7 +9140,8 @@
           },
           "planner_config": {
             "default": {
-              "disruption_policy": "terminate"
+              "disruption_policy": "terminate",
+              "sled_update_reboot_policy": "immediate_no_evacuation"
             },
             "allOf": [
               {
@@ -9880,6 +9942,25 @@
           }
         ]
       },
+      "SledUpdateRebootPolicy": {
+        "description": "Controls how the planner interacts with sleds that it needs to reboot to perform an update (e.g., of the SP or host OS).",
+        "oneOf": [
+          {
+            "description": "Reboot sleds without evacuating them first.\n\nThis results in the fastest update time, but is the most disruptive to instances on the sled: the sled will be rebooted out from under them.\n\nThis is currently the default, but we expect to change the default to `Evacuate` once all the supporting work to enable that is complete.",
+            "type": "string",
+            "enum": [
+              "immediate_no_evacuation"
+            ]
+          },
+          {
+            "description": "Evacuate sleds before rebooting.\n\nWith this policy, when the planner needs to schedule an update that will cause a sled to reboot, it will first mark the sled for evacuation and then wait for the sled to be fully evacuated before scheduling that update.",
+            "type": "string",
+            "enum": [
+              "evacuate"
+            ]
+          }
+        ]
+      },
       "SledUuid": {
         "x-rust-type": {
           "crate": "omicron-uuid-kinds",
@@ -10579,6 +10660,125 @@
         "format": "uint32",
         "minimum": 0
       },
+      "WaitingOnSledEvacuationDetails": {
+        "description": "Describes the details of what we're waiting on when a sled is being evacuated",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "missing_from_inventory"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "missing_ledgered_sled_config"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "waiting_for_sled_config_generation"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "current": {
+                    "$ref": "#/components/schemas/SledConfigGeneration"
+                  },
+                  "desired": {
+                    "$ref": "#/components/schemas/SledConfigGeneration"
+                  }
+                },
+                "required": [
+                  "current",
+                  "desired"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "instance_manager_no_config"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "instance_manager_available"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "instance_manager_registered_vmms"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "num_registered_vmms": {
+                    "type": "integer",
+                    "format": "uint",
+                    "minimum": 1
+                  }
+                },
+                "required": [
+                  "num_registered_vmms"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
+        ]
+      },
       "WaitingStatus": {
         "description": "externally-exposed status for waiting updates",
         "type": "object",
@@ -10885,6 +11085,21 @@
                 "type": "string",
                 "enum": [
                   "pending_mgs_updates"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Waiting on sled update disposition changes in support of MGS updates",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "sled_update_disposition_changes"
                 ]
               }
             },

@@ -190,7 +190,10 @@ pub async fn test_setup_with_config(
                 let sled = &simrack.gimlets[usize::from(target_sp.slot)];
                 (sled.local_addr(sp_port), sled.local_ereport_addr(sp_port))
             }
-            SpType::Power => todo!(),
+            SpType::Power => {
+                let psc = &simrack.pscs[usize::from(target_sp.slot)];
+                (psc.local_addr(sp_port), psc.local_ereport_addr(sp_port))
+            }
         };
         match &mut port_description.config {
             SwitchPortConfig::Simulated { addr, ereport_addr, .. } => {
