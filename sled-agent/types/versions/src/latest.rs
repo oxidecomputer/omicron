@@ -39,7 +39,8 @@ pub mod debug {
 pub mod diagnostics {
     pub use crate::v1::diagnostics::SledDiagnosticsLogsDownloadPathParam;
     pub use crate::v1::diagnostics::SledDiagnosticsLogsDownloadPathParm;
-    pub use crate::v1::diagnostics::SledDiagnosticsLogsDownloadQueryParam;
+
+    pub use crate::v54::diagnostics::SledDiagnosticsLogsDownloadQueryParam;
 }
 
 pub mod disk {
