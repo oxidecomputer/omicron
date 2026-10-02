@@ -18,6 +18,7 @@ gateway-messages.workspace = true
 gateway-types.workspace = true
 hex = { workspace = true, features = [ "serde" ] }
 hubtools.workspace = true
+iddqd.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
 oxide-tokio-rt.workspace = true

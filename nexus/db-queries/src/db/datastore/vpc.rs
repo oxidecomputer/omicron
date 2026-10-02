@@ -3067,6 +3067,7 @@ mod tests {
                 name: "project".parse().unwrap(),
                 description: String::from("test project"),
             },
+            defaults: None,
         };
         let project = Project::new(Uuid::new_v4(), project_params);
         let (authz_project, _) = datastore
@@ -3091,6 +3092,7 @@ mod tests {
                     },
                     ipv6_prefix: None,
                     dns_name: name.clone(),
+                    defaults: None,
                 },
             )
             .expect("failed to create incomplete VPC");
@@ -3132,6 +3134,7 @@ mod tests {
                 },
                 ipv6_prefix: None,
                 dns_name: name.clone(),
+                defaults: None,
             },
         )
         .expect("failed to create incomplete VPC");
@@ -3172,6 +3175,7 @@ mod tests {
                 name: "project".parse().unwrap(),
                 description: String::from("test project"),
             },
+            defaults: None,
         };
         let project = Project::new(Uuid::new_v4(), project_params);
         let (authz_project, _) = datastore
@@ -3196,6 +3200,7 @@ mod tests {
                     },
                     ipv6_prefix: None,
                     dns_name: name.clone(),
+                    defaults: None,
                 },
             )
             .expect("failed to create incomplete VPC");
@@ -3238,6 +3243,7 @@ mod tests {
                 },
                 ipv6_prefix: None,
                 dns_name: name.clone(),
+                defaults: None,
             },
         )
         .expect("failed to create incomplete VPC");
@@ -3328,10 +3334,11 @@ mod tests {
 
         // Helper to convert a zone's nic into an insertable nic.
         let db_nic_from_zone = |zone_config: &BlueprintZoneConfig| {
-            let (_, nic) = zone_config
+            let nic = zone_config
                 .zone_type
                 .external_networking()
-                .expect("external networking for zone type");
+                .expect("external networking for zone type")
+                .nic();
             let ip = nic
                 .ip_config
                 .ipv4_addr()
@@ -3597,6 +3604,7 @@ mod tests {
                 name: "project".parse().unwrap(),
                 description: String::from("test project"),
             },
+            defaults: None,
         };
         let project = Project::new(DEFAULT_SILO.id(), project_params);
         let (authz_project, _) = datastore
@@ -3617,6 +3625,7 @@ mod tests {
                 },
                 ipv6_prefix: None,
                 dns_name: vpc_name.clone(),
+                defaults: None,
             },
         )
         .expect("failed to create incomplete VPC");

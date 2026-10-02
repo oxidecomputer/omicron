@@ -657,6 +657,7 @@ impl CollectionBuilder {
             ledgered_sled_config: inventory.ledgered_sled_config,
             reconciler_status: inventory.reconciler_status,
             last_reconciliation: inventory.last_reconciliation,
+            instance_manager_status: inventory.instance_manager_status,
             file_source_resolver: inventory.file_source_resolver,
             smf_services_enabled_not_online: inventory
                 .smf_services_enabled_not_online,

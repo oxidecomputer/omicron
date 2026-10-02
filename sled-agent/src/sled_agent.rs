@@ -724,8 +724,10 @@ impl SledAgent {
             config_reconciler_spawn_token.subscribe_update_disposition(),
         )?;
 
-        let svc_config =
-            services::Config::new(identifiers, config.sidecar_revision.clone());
+        let svc_config = services::Config::new(
+            identifiers,
+            config.deployment.sidecar_revision(),
+        );
 
         // Get our system network config from the bootstore; we cannot proceed
         // until we have this, as we need to set up uplinks inside the switch
@@ -1469,6 +1471,7 @@ impl SledAgent {
             reconciler_status,
             last_reconciliation,
             file_source_resolver,
+            instance_manager_status: self.inner.instances.status(),
             smf_services_enabled_not_online,
             reference_measurements: self.inner.measurements.to_inventory(),
             fmd,

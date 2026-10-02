@@ -359,7 +359,11 @@ async fn test_silo_certificates() {
     // create the other Silos and their users.
     let resolver = Arc::new(
         CustomDnsResolver::new(
-            cptestctx.external_dns.dns_server.local_address(),
+            cptestctx
+                .external_dns
+                .dns_server
+                .sole_local_address()
+                .expect("exactly one DNS address"),
         )
         .unwrap(),
     );
@@ -392,7 +396,6 @@ async fn test_silo_certificates() {
             oxide_client::types::SiloCreate::builder()
                 .name(silo2.silo_name.clone())
                 .description("")
-                .discoverable(false)
                 .quotas(oxide_client::types::SiloQuotasCreate {
                     cpus: 0,
                     memory: oxide_client::types::ByteCount(0),
@@ -461,7 +464,6 @@ async fn test_silo_certificates() {
             oxide_client::types::SiloCreate::builder()
                 .name(silo3.silo_name.clone())
                 .description("")
-                .discoverable(false)
                 .quotas(oxide_client::types::SiloQuotasCreate {
                     cpus: 0,
                     memory: oxide_client::types::ByteCount(0),

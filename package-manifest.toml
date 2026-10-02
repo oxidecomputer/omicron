@@ -148,10 +148,9 @@ output.type = "zone"
 service_name = "oximeter-collector"
 only_for_targets.image = "standard"
 source.type = "local"
-source.rust.binary_names = ["oximeter", "clickhouse-schema-updater"]
+source.rust.binary_names = ["oximeter"]
 source.rust.release = true
 source.paths = [
-  { from = "oximeter/db/schema", to = "/opt/oxide/oximeter/schema" },
   { from = "smf/oximeter/{{clickhouse-topology}}/config.toml", to = "/var/svc/manifest/site/oximeter/config.toml" },
   { from = "smf/oximeter/manifest.xml", to = "/var/svc/manifest/site/oximeter/manifest.xml" },
 ]
@@ -183,6 +182,7 @@ source.paths = [
   { from = "smf/clickhouse/manifest.xml", to = "/var/svc/manifest/site/clickhouse/manifest.xml" },
   { from = "smf/clickhouse/method_script.sh", to = "/opt/oxide/lib/svc/manifest/clickhouse.sh" },
   { from = "smf/clickhouse/config.xml", to = "/opt/oxide/clickhouse/config.xml" },
+  { from = "smf/clickhouse/users-and-roles.xml", to = "/opt/oxide/clickhouse/users-and-roles.xml" },
   { from = "smf/clickhouse-admin-single", to = "/var/svc/manifest/site/clickhouse-admin-single" },
 ]
 output.type = "zone"
@@ -252,12 +252,19 @@ setup_hint = "Run `cargo xtask download clickhouse` to download the necessary bi
 service_name = "omicron-clickhouse-admin"
 only_for_targets.image = "standard"
 source.type = "local"
-source.rust.binary_names = ["clickhouse-admin-keeper", "clickhouse-admin-server", "clickhouse-admin-single"]
+source.rust.binary_names = [
+    "clickhouse-admin-keeper",
+    "clickhouse-admin-server",
+    "clickhouse-admin-single",
+    "clickhouse-schema-updater"
+]
 source.rust.release = true
 # We specifically put the smf manifests with their corresponding container zones
 # so that both servers aren't started simultaneously
 # See [package.clickhouse_keeper_svc] and [package.clickhouse_server_svc]
-source.paths = []
+source.paths = [
+  { from = "oximeter/db/schema", to = "/opt/oxide/oximeter/schema" }
+]
 output.type = "zone"
 output.intermediate_only = true
 
@@ -605,8 +612,8 @@ source.type = "prebuilt"
 source.repo = "management-gateway-service"
 # In general, this commit should match the pinned revision of `gateway-sp-comms`
 # in `Cargo.toml`.
-source.commit = "6c0aca2545a73fd75536e149d29faa7108be5862"
-source.sha256 = "48748a5090ed9c7b4d61cc127d9c6959b228864b75a4ab111468dc22ae20d656"
+source.commit = "c29e6832c4b230e361253bc9b5e1ae73413a124f"
+source.sha256 = "6b179f7974d0e72bdf7491381b287e5a0b7c56362f0d8cb56a49a9bf0cda9eb2"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -840,7 +847,7 @@ output.intermediate_only = true
 
 # To package and install the asic variant of the switch, do:
 #
-# $ cargo run --release --bin omicron-package -- -t default target create -p dev -m gimlet -s asic
+# $ cargo run --release --bin omicron-package -- -t default target create -p dev -m gimlet
 # $ cargo run --release --bin omicron-package -- package
 # $ pfexec ./target/release/omicron-package install
 [package.switch-asic]
@@ -869,9 +876,12 @@ output.type = "zone"
 
 # To package and install the stub variant of the switch, do the following:
 #
-# $ cargo run --release --bin omicron-package -- -t default target create -p dev -m <gimlet|gimlet-standalone|non-gimlet> -s stub
+# $ cargo run --release --bin omicron-package -- -t default target create -p dev -m gimlet-standalone
 # $ cargo run --release --bin omicron-package -- package
 # $ pfexec ./target/release/omicron-package install
+#
+# The gimlet-standalone sled-agent config selects the stub Dendrite;
+# omicron-package derives the switch from the machine.
 [package.switch-stub]
 service_name = "switch"
 only_for_targets.switch = "stub"
@@ -896,9 +906,14 @@ output.type = "zone"
 
 # To package and install the softnpu variant of the switch, do the following:
 #
-# $ cargo run --release --bin omicron-package -- -t default target create -p dev -m <gimlet|gimlet-standalone|non-gimlet>
+# $ cargo run --release --bin omicron-package -- -t default target create -p dev
 # $ cargo run --release --bin omicron-package -- package
 # $ pfexec ./target/release/omicron-package install
+#
+# The non-gimlet sled-agent config selects a SoftNPU zone on this host
+# (deployment kind "standalone") whereas a propolis-hosted lab rewrites
+# it to "virtual", which detects the SoftNPU device at startup.
+# omicron-package derives the switch from the machine.
 [package.switch-softnpu]
 service_name = "switch"
 only_for_targets.switch = "softnpu"

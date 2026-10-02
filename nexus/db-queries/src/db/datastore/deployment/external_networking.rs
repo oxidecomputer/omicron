@@ -200,46 +200,49 @@ impl DataStore {
         zones_to_allocate: impl Iterator<Item = &BlueprintZoneConfig>,
     ) -> Result<(), TransactionError<Error>> {
         for z in zones_to_allocate {
-            let Some((external_ip, nic)) = z.zone_type.external_networking()
-            else {
+            let Some(networking) = z.zone_type.external_networking() else {
                 continue;
             };
 
+            let kind = z.zone_type.kind();
             let log = opctx.log.new(slog::o!(
                 "action" => "allocate-external-networking",
-                "zone_kind" => z.zone_type.kind().report_str(),
+                "zone_kind" => kind.report_str(),
                 "zone_id" => z.id.to_string(),
-                "ip" => format!("{external_ip:?}"),
-                "nic" => format!("{nic:?}"),
+                "nic" => format!("{:?}", networking.nic()),
             ));
 
-            // Look up the system-service pool containing this address, if any.
-            let (_authz_pool, db_pool) = self
-                .ip_pool_fetch_containing_address_for_services_on_connection(
-                    opctx,
-                    conn,
-                    external_ip.ip(),
-                )
-                .await
-                .map_err(|e| {
-                    Self::map_external_ip_not_found_for_zone_error(
-                        e,
+            // Ensure each external IP of the zone.
+            for external_ip in networking.external_ips() {
+                // Look up the system-service pool containing this address, if
+                // any.
+                let (_authz_pool, db_pool) = self
+                    .ip_pool_fetch_containing_address_for_services_on_connection(
+                        opctx,
+                        conn,
                         external_ip.ip(),
                     )
-                })?;
+                    .await
+                    .map_err(|e| {
+                        Self::map_external_ip_not_found_for_zone_error(
+                            e,
+                            external_ip.ip(),
+                        )
+                    })?;
 
-            // Actually ensure the IP address.
-            let kind = z.zone_type.kind();
-            self.ensure_external_service_ip(
-                conn,
-                &db_pool,
-                kind,
-                z.id,
-                external_ip,
-                &log,
-            )
-            .await?;
-            self.ensure_service_nic(conn, kind, z.id, nic, &log).await?;
+                // Actually ensure the IP address.
+                self.ensure_external_service_ip(
+                    conn,
+                    &db_pool,
+                    kind,
+                    z.id,
+                    external_ip,
+                    &log,
+                )
+                .await?;
+            }
+            self.ensure_service_nic(conn, kind, z.id, networking.nic(), &log)
+                .await?;
         }
 
         Ok(())
@@ -252,8 +255,7 @@ impl DataStore {
         zones_to_deallocate: impl Iterator<Item = &BlueprintZoneConfig>,
     ) -> Result<(), TransactionError<Error>> {
         for z in zones_to_deallocate {
-            let Some((external_ip, nic)) = z.zone_type.external_networking()
-            else {
+            let Some(networking) = z.zone_type.external_networking() else {
                 continue;
             };
 
@@ -262,29 +264,39 @@ impl DataStore {
                 "action" => "deallocate-external-networking",
                 "zone_kind" => kind.report_str(),
                 "zone_id" => z.id.to_string(),
-                "ip" => format!("{external_ip:?}"),
-                "nic" => format!("{nic:?}"),
+                "nic" => format!("{:?}", networking.nic()),
             ));
 
-            let deleted_ip = self
-                .deallocate_external_ip_on_connection(
-                    conn,
-                    external_ip.id().into_untyped_uuid(),
-                )
-                .await?;
-            match deleted_ip {
-                SoftDeleteResult::SoftDeleteApplied => {
-                    info!(log, "successfully deleted Omicron zone external IP");
-                }
-                SoftDeleteResult::AlreadySoftDeleted => {
-                    debug!(log, "Omicron zone external IP already deleted");
-                }
-                SoftDeleteResult::NotFound => {
-                    debug!(
-                        log,
-                        "Skipped soft-deletion of Omicron zone external IP \
-                         (external IP does not exist)"
-                    );
+            for external_ip in networking.external_ips() {
+                let deleted_ip = self
+                    .deallocate_external_ip_on_connection(
+                        conn,
+                        external_ip.id().into_untyped_uuid(),
+                    )
+                    .await?;
+                match deleted_ip {
+                    SoftDeleteResult::SoftDeleteApplied => {
+                        info!(
+                            log,
+                            "successfully deleted Omicron zone external IP";
+                            "ip" => ?external_ip,
+                        );
+                    }
+                    SoftDeleteResult::AlreadySoftDeleted => {
+                        debug!(
+                            log,
+                            "Omicron zone external IP already deleted";
+                            "ip" => ?external_ip,
+                        );
+                    }
+                    SoftDeleteResult::NotFound => {
+                        debug!(
+                            log,
+                            "Skipped soft-deletion of Omicron zone external \
+                             IP (external IP does not exist)";
+                            "ip" => ?external_ip,
+                        );
+                    }
                 }
             }
 
@@ -292,7 +304,7 @@ impl DataStore {
                 .service_delete_network_interface_on_connection(
                     conn,
                     z.id.into_untyped_uuid(),
-                    nic.id,
+                    networking.nic().id,
                 )
                 .await
                 .map_err(|txn_err| txn_err.map(|err| err.into_external()))?;
@@ -350,57 +362,52 @@ impl DataStore {
             )
             .await?;
 
-        // We expect to find either 0 or exactly 1 IP for any given zone. If 0,
-        // we know the IP isn't allocated; if 1, we'll check that it matches
-        // below.
-        let existing_ip = match allocated_ips.as_slice() {
-            [] => {
-                info!(log, "external IP allocation required for zone");
+        // There can be any number of IPs for a given zone. We'll search all
+        // currently-allocated IPs to find a match for the candidate
+        // `external_ip`. Note that it's not an error for there to be zero EIPs
+        // or other EIPs that do _not_ match the candidate.
+        for allocated_ip in allocated_ips.iter() {
+            // We expect this to always succeed; a failure here means we've
+            // stored an Omicron zone IP in the database that can't be converted
+            // back to an Omicron zone IP!
+            let existing_ip =
+                match OmicronZoneExternalIp::try_from(allocated_ip) {
+                    Ok(existing_ip) => existing_ip,
+                    Err(err) => {
+                        error!(log, "invalid IP in database for zone"; &err);
+                        return Err(Error::invalid_request(format!(
+                            "zone {zone_id} has invalid IP database record: {}",
+                            InlineErrorChain::new(&err)
+                        ))
+                        .into());
+                    }
+                };
 
-                return Ok(false);
+            // If the ID doesn't match, we assume it's a separate record
+            // entirely. We'll let the database constraints catch things like
+            // duplicate IPs.
+            if existing_ip.id() != external_ip.id() {
+                continue;
             }
-            [ip] => ip,
-            _ => {
-                warn!(
-                    log, "zone has multiple IPs allocated";
-                    "allocated_ips" => ?allocated_ips,
-                );
+
+            // Now if the rest of the record _also_ matches, then we're
+            // really reallocating the same thing and we can return safely.
+            if existing_ip == external_ip {
+                info!(log, "found already-allocated external IP");
+                return Ok(true);
+            } else {
                 return Err(Error::invalid_request(format!(
-                    "zone {zone_id} already has {} IPs allocated (expected 1)",
-                    allocated_ips.len()
+                    "zone {zone_id} has a different IP \
+                    allocated: {existing_ip:?}"
                 ))
                 .into());
             }
-        };
-
-        // We expect this to always succeed; a failure here means we've stored
-        // an Omicron zone IP in the database that can't be converted back to an
-        // Omicron zone IP!
-        let existing_ip = match OmicronZoneExternalIp::try_from(existing_ip) {
-            Ok(existing_ip) => existing_ip,
-            Err(err) => {
-                error!(log, "invalid IP in database for zone"; &err);
-                return Err(Error::invalid_request(format!(
-                    "zone {zone_id} has invalid IP database record: {}",
-                    InlineErrorChain::new(&err)
-                ))
-                .into());
-            }
-        };
-
-        if existing_ip == external_ip {
-            info!(log, "found already-allocated external IP");
-            Ok(true)
-        } else {
-            warn!(
-                log, "zone has unexpected IP allocated";
-                "allocated_ip" => ?existing_ip,
-            );
-            return Err(Error::invalid_request(format!(
-                "zone {zone_id} has a different IP allocated ({existing_ip:?})",
-            ))
-            .into());
         }
+
+        // Getting here means that there are either zero IPs for the zone, or
+        // that the candidate isn't already allocated for it. Both are fine.
+        info!(log, "external IP allocation required for zone");
+        return Ok(false);
     }
 
     // Helper function to determine whether a given NIC is already allocated to
@@ -502,6 +509,7 @@ impl DataStore {
         {
             return Ok(());
         }
+        let eip = external_ip.ip();
         self.external_ip_allocate_omicron_zone_on_connection(
             conn,
             pool,
@@ -511,7 +519,7 @@ impl DataStore {
         )
         .await?;
 
-        info!(log, "successfully allocated external IP");
+        info!(log, "successfully allocated external IP"; "ip" => %eip);
 
         Ok(())
     }
@@ -665,7 +673,10 @@ mod tests {
     use nexus_types::deployment::BlueprintZoneImageSource;
     use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
+    use nexus_types::deployment::OmicronZoneExternalFloatingAddrs;
     use nexus_types::deployment::OmicronZoneExternalFloatingIp;
+    use nexus_types::deployment::OmicronZoneExternalFloatingIps;
+    use nexus_types::deployment::OmicronZoneExternalSnat;
     use nexus_types::deployment::OmicronZoneExternalSnatIp;
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::identity::Resource;
@@ -891,7 +902,10 @@ mod tests {
                         blueprint_zone_type::Nexus {
                             internal_address: "[::1]:0".parse().unwrap(),
                             lockstep_port: 0,
-                            external_ip: self.nexus_external_ip,
+                            external_ips:
+                                OmicronZoneExternalFloatingIps::from_single(
+                                    self.nexus_external_ip,
+                                ),
                             nic: self.nexus_nic.clone(),
                             external_tls: false,
                             external_dns_servers: Vec::new(),
@@ -914,7 +928,10 @@ mod tests {
                                     .expect("bad name"),
                             },
                             http_address: "[::1]:0".parse().unwrap(),
-                            dns_address: self.dns_external_addr,
+                            dns_addresses:
+                                OmicronZoneExternalFloatingAddrs::from_single(
+                                    self.dns_external_addr,
+                                ),
                             nic: self.dns_nic.clone(),
                         },
                     ),
@@ -933,7 +950,9 @@ mod tests {
                             dns_servers: Vec::new(),
                             domain: None,
                             nic: self.ntp_nic.clone(),
-                            external_ip: self.ntp_external_ip,
+                            external_ip: OmicronZoneExternalSnat::from_single(
+                                self.ntp_external_ip,
+                            ),
                         },
                     ),
                     image_source: BlueprintZoneImageSource::InstallDataset,
@@ -1251,10 +1270,14 @@ mod tests {
             (&|zones: &mut [BlueprintZoneConfig]| {
                 for zone in zones {
                     if let BlueprintZoneType::Nexus(
-                        blueprint_zone_type::Nexus { external_ip, .. },
+                        blueprint_zone_type::Nexus { external_ips, .. },
                     ) = &mut zone.zone_type
                     {
-                        external_ip.ip = bogus_ip;
+                        let mut ip =
+                            *external_ips.iter().next().expect("has one IP");
+                        ip.ip = bogus_ip;
+                        *external_ips =
+                            OmicronZoneExternalFloatingIps::from_single(ip);
                         return format!(
                             "zone {} has a different IP allocated",
                             zone.id
@@ -1269,11 +1292,15 @@ mod tests {
                 for zone in zones {
                     if let BlueprintZoneType::ExternalDns(
                         blueprint_zone_type::ExternalDns {
-                            dns_address, ..
+                            dns_addresses, ..
                         },
                     ) = &mut zone.zone_type
                     {
-                        dns_address.addr.set_ip(bogus_ip);
+                        let mut addr =
+                            *dns_addresses.iter().next().expect("has one addr");
+                        addr.addr.set_ip(bogus_ip);
+                        *dns_addresses =
+                            OmicronZoneExternalFloatingAddrs::from_single(addr);
                         return format!(
                             "zone {} has a different IP allocated",
                             zone.id
@@ -1291,16 +1318,20 @@ mod tests {
                         },
                     ) = &mut zone.zone_type
                     {
+                        let mut snat =
+                            external_ip.iter().next().expect("has one SNAT IP");
                         let (mut first, mut last) =
-                            external_ip.snat_cfg.port_range_raw();
+                            snat.snat_cfg.port_range_raw();
                         first += NUM_SOURCE_NAT_PORTS;
                         last += NUM_SOURCE_NAT_PORTS;
-                        external_ip.snat_cfg = SourceNatConfigGeneric::new(
-                            external_ip.snat_cfg.ip,
+                        snat.snat_cfg = SourceNatConfigGeneric::new(
+                            snat.snat_cfg.ip,
                             first,
                             last,
                         )
                         .unwrap();
+                        *external_ip =
+                            OmicronZoneExternalSnat::from_single(snat);
                         return format!(
                             "zone {} has a different IP allocated",
                             zone.id

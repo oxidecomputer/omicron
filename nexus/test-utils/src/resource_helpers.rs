@@ -616,23 +616,15 @@ pub async fn create_switch(
 pub async fn create_silo(
     client: &ClientTestContext,
     silo_name: &str,
-    discoverable: bool,
     identity_mode: silo::SiloIdentityMode,
 ) -> Silo {
-    create_silo_with_admin_group_name(
-        client,
-        silo_name,
-        discoverable,
-        identity_mode,
-        None,
-    )
-    .await
+    create_silo_with_admin_group_name(client, silo_name, identity_mode, None)
+        .await
 }
 
 pub async fn create_silo_with_admin_group_name(
     client: &ClientTestContext,
     silo_name: &str,
-    discoverable: bool,
     identity_mode: silo::SiloIdentityMode,
     admin_group_name: Option<String>,
 ) -> Silo {
@@ -645,7 +637,6 @@ pub async fn create_silo_with_admin_group_name(
                 description: "a silo".to_string(),
             },
             quotas: silo::SiloQuotasCreate::arbitrarily_high_default(),
-            discoverable,
             identity_mode,
             admin_group_name,
             tls_certificates: vec![],
@@ -718,6 +709,7 @@ pub async fn create_project(
                 name: project_name.parse().unwrap(),
                 description: "a pier".to_string(),
             },
+            defaults: None,
         },
     )
     .await
@@ -1070,6 +1062,7 @@ pub async fn create_vpc(
             },
             ipv6_prefix: None,
             dns_name: "abc".parse().unwrap(),
+            defaults: None,
         },
     )
     .await
@@ -1096,6 +1089,7 @@ pub async fn create_vpc_with_error(
             },
             ipv6_prefix: None,
             dns_name: "abc".parse().unwrap(),
+            defaults: None,
         }))
         .expect_status(Some(status)),
     )

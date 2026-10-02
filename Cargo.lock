@@ -438,11 +438,11 @@ dependencies = [
 [[package]]
 name = "attest-data"
 version = "0.5.0"
-source = "git+https://github.com/oxidecomputer/dice-util?branch=main#ff9f27aa0d6ef6fb64c349890b6e3c242ea3d8fc"
+source = "git+https://github.com/oxidecomputer/dice-util?rev=4a39ef08d81e5177edee0bddb1146032aa21074d#4a39ef08d81e5177edee0bddb1146032aa21074d"
 dependencies = [
  "const-oid 0.9.6",
  "der 0.7.10",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "hex",
  "hubpack",
  "rats-corim 0.1.0 (git+https://github.com/oxidecomputer/rats-corim)",
@@ -457,11 +457,11 @@ dependencies = [
 [[package]]
 name = "attest-data"
 version = "0.5.0"
-source = "git+https://github.com/oxidecomputer/dice-util?rev=4a39ef08d81e5177edee0bddb1146032aa21074d#4a39ef08d81e5177edee0bddb1146032aa21074d"
+source = "git+https://github.com/oxidecomputer/dice-util?rev=ff9f27aa0d6ef6fb64c349890b6e3c242ea3d8fc#ff9f27aa0d6ef6fb64c349890b6e3c242ea3d8fc"
 dependencies = [
  "const-oid 0.9.6",
  "der 0.7.10",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "hex",
  "hubpack",
  "rats-corim 0.1.0 (git+https://github.com/oxidecomputer/rats-corim)",
@@ -2943,28 +2943,6 @@ dependencies = [
 [[package]]
 name = "dice-verifier"
 version = "0.3.0-pre0"
-source = "git+https://github.com/oxidecomputer/dice-util?branch=main#ff9f27aa0d6ef6fb64c349890b6e3c242ea3d8fc"
-dependencies = [
- "attest-data 0.5.0 (git+https://github.com/oxidecomputer/dice-util?branch=main)",
- "const-oid 0.9.6",
- "ed25519-dalek 2.2.0",
- "env_logger",
- "hex",
- "hubpack",
- "libipcc 0.1.0 (git+https://github.com/oxidecomputer/ipcc-rs?rev=7cdf2ab9c8d9e9267a8b366aa780c6c26f9a5ecf)",
- "log",
- "p384 0.13.1",
- "rats-corim 0.1.0 (git+https://github.com/oxidecomputer/rats-corim)",
- "sha3 0.10.8",
- "slog",
- "tempfile",
- "thiserror 2.0.18",
- "x509-cert",
-]
-
-[[package]]
-name = "dice-verifier"
-version = "0.3.0-pre0"
 source = "git+https://github.com/oxidecomputer/dice-util?rev=4a39ef08d81e5177edee0bddb1146032aa21074d#4a39ef08d81e5177edee0bddb1146032aa21074d"
 dependencies = [
  "anyhow",
@@ -2986,6 +2964,28 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "x509-cert",
+]
+
+[[package]]
+name = "dice-verifier"
+version = "0.3.0-pre0"
+source = "git+https://github.com/oxidecomputer/dice-util?rev=ff9f27aa0d6ef6fb64c349890b6e3c242ea3d8fc#ff9f27aa0d6ef6fb64c349890b6e3c242ea3d8fc"
+dependencies = [
+ "attest-data 0.5.0 (git+https://github.com/oxidecomputer/dice-util?rev=ff9f27aa0d6ef6fb64c349890b6e3c242ea3d8fc)",
+ "const-oid 0.9.6",
+ "ed25519-dalek 2.2.0",
+ "env_logger",
+ "hex",
+ "hubpack",
+ "libipcc 0.1.0 (git+https://github.com/oxidecomputer/ipcc-rs?rev=7cdf2ab9c8d9e9267a8b366aa780c6c26f9a5ecf)",
+ "log",
+ "p384 0.13.1",
+ "rats-corim 0.1.0 (git+https://github.com/oxidecomputer/rats-corim)",
+ "sha3 0.10.8",
+ "slog",
+ "tempfile",
+ "thiserror 2.0.18",
  "x509-cert",
 ]
 
@@ -4332,8 +4332,9 @@ dependencies = [
 [[package]]
 name = "gateway-ereport-messages"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=6c0aca2545a73fd75536e149d29faa7108be5862#6c0aca2545a73fd75536e149d29faa7108be5862"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=c29e6832c4b230e361253bc9b5e1ae73413a124f#c29e6832c4b230e361253bc9b5e1ae73413a124f"
 dependencies = [
+ "hubpack",
  "serde",
  "zerocopy 0.8.55",
 ]
@@ -4341,9 +4342,10 @@ dependencies = [
 [[package]]
 name = "gateway-messages"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=6c0aca2545a73fd75536e149d29faa7108be5862#6c0aca2545a73fd75536e149d29faa7108be5862"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=c29e6832c4b230e361253bc9b5e1ae73413a124f#c29e6832c4b230e361253bc9b5e1ae73413a124f"
 dependencies = [
  "bitflags 2.11.0",
+ "gateway-ereport-messages",
  "hubpack",
  "serde",
  "serde-big-array",
@@ -4359,7 +4361,7 @@ dependencies = [
 [[package]]
 name = "gateway-sp-comms"
 version = "0.1.2"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=6c0aca2545a73fd75536e149d29faa7108be5862#6c0aca2545a73fd75536e149d29faa7108be5862"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=c29e6832c4b230e361253bc9b5e1ae73413a124f#c29e6832c4b230e361253bc9b5e1ae73413a124f"
 dependencies = [
  "async-trait",
  "backoff",
@@ -4370,7 +4372,7 @@ dependencies = [
  "gateway-messages",
  "hex",
  "hubpack",
- "hubtools 0.4.7 (git+https://github.com/oxidecomputer/hubtools.git?rev=2b1ef9b38d75563ea800baa3b17327eec17b1b7a)",
+ "hubtools 0.4.9",
  "lru-cache",
  "lzss",
  "nix 0.27.1",
@@ -4392,7 +4394,7 @@ dependencies = [
  "uuid",
  "version_check",
  "zerocopy 0.8.55",
- "zip 0.6.6",
+ "zip 8.6.0",
 ]
 
 [[package]]
@@ -4795,6 +4797,9 @@ name = "hashbrown"
 version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4f467dd6dccf739c208452f8014c75c18bb8301b050ad1cfb27153803edb0f51"
+dependencies = [
+ "foldhash 0.2.0",
+]
 
 [[package]]
 name = "headers"
@@ -5238,14 +5243,14 @@ source = "git+https://github.com/oxidecomputer/hubtools.git?branch=main#2b1ef9b3
 dependencies = [
  "digest 0.10.7",
  "hex",
- "lpc55_areas",
- "lpc55_sign",
+ "lpc55_areas 0.2.5 (git+https://github.com/oxidecomputer/lpc55_support)",
+ "lpc55_sign 0.3.5 (git+https://github.com/oxidecomputer/lpc55_support)",
  "object 0.30.4",
- "path-slash",
+ "path-slash 0.1.5",
  "rsa 0.9.10",
  "thiserror 1.0.69",
  "tlvc 0.3.1 (git+https://github.com/oxidecomputer/tlvc)",
- "tlvc-text",
+ "tlvc-text 0.3.0",
  "toml 0.7.8",
  "x509-cert",
  "zerocopy 0.6.6",
@@ -5259,18 +5264,39 @@ source = "git+https://github.com/oxidecomputer/hubtools.git?rev=2b1ef9b38d75563e
 dependencies = [
  "digest 0.10.7",
  "hex",
- "lpc55_areas",
- "lpc55_sign",
+ "lpc55_areas 0.2.5 (git+https://github.com/oxidecomputer/lpc55_support)",
+ "lpc55_sign 0.3.5 (git+https://github.com/oxidecomputer/lpc55_support)",
  "object 0.30.4",
- "path-slash",
+ "path-slash 0.1.5",
  "rsa 0.9.10",
  "thiserror 1.0.69",
  "tlvc 0.3.1 (git+https://github.com/oxidecomputer/tlvc)",
- "tlvc-text",
+ "tlvc-text 0.3.0",
  "toml 0.7.8",
  "x509-cert",
  "zerocopy 0.6.6",
  "zip 0.6.6",
+]
+
+[[package]]
+name = "hubtools"
+version = "0.4.9"
+source = "git+https://github.com/oxidecomputer/hubtools.git?rev=87881bd389025f7c5692c0be153452c11ae3312e#87881bd389025f7c5692c0be153452c11ae3312e"
+dependencies = [
+ "digest 0.11.3",
+ "hex",
+ "lpc55_areas 0.2.5 (git+https://github.com/oxidecomputer/lpc55_support?rev=fc64732faf5511850b35f1734d572b9953d73374)",
+ "lpc55_sign 0.3.5 (git+https://github.com/oxidecomputer/lpc55_support?rev=fc64732faf5511850b35f1734d572b9953d73374)",
+ "object 0.39.1",
+ "path-slash 0.2.1",
+ "rsa 0.9.10",
+ "thiserror 2.0.18",
+ "tlvc 0.4.1",
+ "tlvc-text 0.4.0",
+ "toml 1.1.2+spec-1.1.0",
+ "x509-cert",
+ "zerocopy 0.8.55",
+ "zip 8.6.0",
 ]
 
 [[package]]
@@ -5586,7 +5612,7 @@ checksum = "a4b8219c9c8c2c844dfd5772ec0bda5cd2a81d78c4579aba97f699721d46ab24"
 [[package]]
 name = "illumos-sys-hdrs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=0525f2f95588760133b7d5ebc8548e1ccdfbb353#0525f2f95588760133b7d5ebc8548e1ccdfbb353"
+source = "git+https://github.com/oxidecomputer/opte?rev=fd2d6ad625cef6fb903660e57dcd4729ff66a6fe#fd2d6ad625cef6fb903660e57dcd4729ff66a6fe"
 dependencies = [
  "bitflags 2.11.0",
 ]
@@ -6361,7 +6387,7 @@ dependencies = [
 [[package]]
 name = "kstat-macro"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=0525f2f95588760133b7d5ebc8548e1ccdfbb353#0525f2f95588760133b7d5ebc8548e1ccdfbb353"
+source = "git+https://github.com/oxidecomputer/opte?rev=fd2d6ad625cef6fb903660e57dcd4729ff66a6fe#fd2d6ad625cef6fb903660e57dcd4729ff66a6fe"
 dependencies = [
  "quote",
  "syn 2.0.117",
@@ -6743,12 +6769,48 @@ checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 [[package]]
 name = "lpc55_areas"
 version = "0.2.5"
+source = "git+https://github.com/oxidecomputer/lpc55_support?rev=fc64732faf5511850b35f1734d572b9953d73374#fc64732faf5511850b35f1734d572b9953d73374"
+dependencies = [
+ "bitfield",
+ "clap",
+ "packed_struct",
+ "serde",
+]
+
+[[package]]
+name = "lpc55_areas"
+version = "0.2.5"
 source = "git+https://github.com/oxidecomputer/lpc55_support#fc64732faf5511850b35f1734d572b9953d73374"
 dependencies = [
  "bitfield",
  "clap",
  "packed_struct",
  "serde",
+]
+
+[[package]]
+name = "lpc55_sign"
+version = "0.3.5"
+source = "git+https://github.com/oxidecomputer/lpc55_support?rev=fc64732faf5511850b35f1734d572b9953d73374#fc64732faf5511850b35f1734d572b9953d73374"
+dependencies = [
+ "byteorder",
+ "const-oid 0.9.6",
+ "crc-any",
+ "der 0.7.10",
+ "env_logger",
+ "hex",
+ "log",
+ "lpc55_areas 0.2.5 (git+https://github.com/oxidecomputer/lpc55_support?rev=fc64732faf5511850b35f1734d572b9953d73374)",
+ "num-traits",
+ "packed_struct",
+ "pem-rfc7468 0.7.0",
+ "rsa 0.9.10",
+ "serde",
+ "serde-hex",
+ "sha2 0.10.9",
+ "thiserror 2.0.18",
+ "x509-cert",
+ "zerocopy 0.8.55",
 ]
 
 [[package]]
@@ -6763,7 +6825,7 @@ dependencies = [
  "env_logger",
  "hex",
  "log",
- "lpc55_areas",
+ "lpc55_areas 0.2.5 (git+https://github.com/oxidecomputer/lpc55_support)",
  "num-traits",
  "packed_struct",
  "pem-rfc7468 0.7.0",
@@ -6844,12 +6906,12 @@ checksum = "60302e4db3a61da70c0cb7991976248362f30319e88850c487b9b95bbf059e00"
 
 [[package]]
 name = "md-5"
-version = "0.10.6"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d89e7ee0cfbedfc4da3340218492196241d89eefb6dab27de5df917a6d2e78cf"
+checksum = "69b6441f590336821bb897fb28fc622898ccceb1d6cea3fde5ea86b090c4de98"
 dependencies = [
  "cfg-if",
- "digest 0.10.7",
+ "digest 0.11.3",
 ]
 
 [[package]]
@@ -7469,6 +7531,7 @@ dependencies = [
  "nexus-db-lookup",
  "nexus-db-model",
  "nexus-db-schema",
+ "nexus-fm-slippy",
  "nexus-inventory",
  "nexus-reconfigurator-planning",
  "nexus-test-utils",
@@ -7601,6 +7664,7 @@ dependencies = [
  "ereport-types",
  "iddqd",
  "nexus-db-model",
+ "nexus-fm-slippy",
  "nexus-inventory",
  "nexus-reconfigurator-planning",
  "nexus-types",
@@ -7621,6 +7685,21 @@ dependencies = [
  "thiserror 2.0.18",
  "typed-rng",
  "uuid",
+]
+
+[[package]]
+name = "nexus-fm-slippy"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "nexus-fm",
+ "nexus-types",
+ "omicron-rpaths",
+ "omicron-test-utils",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "pq-sys",
+ "serde_json",
 ]
 
 [[package]]
@@ -7674,6 +7753,7 @@ dependencies = [
  "omicron-sled-agent",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "parallel-task-set",
  "regex",
  "reqwest 0.13.2",
  "serde_json",
@@ -7793,7 +7873,7 @@ dependencies = [
  "gateway-test-utils",
  "gateway-types",
  "http",
- "hubtools 0.4.7 (git+https://github.com/oxidecomputer/hubtools.git?rev=2b1ef9b38d75563ea800baa3b17327eec17b1b7a)",
+ "hubtools 0.4.9",
  "iddqd",
  "illumos-utils",
  "internal-dns-resolver",
@@ -8071,6 +8151,7 @@ dependencies = [
  "serde",
  "sled-agent-types",
  "slog",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "test-strategy",
  "tokio",
  "uuid",
@@ -8237,6 +8318,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oximeter",
  "oximeter-collector",
+ "oximeter-db",
  "oximeter-producer",
  "oxnet",
  "pq-sys",
@@ -8245,6 +8327,7 @@ dependencies = [
  "serde_json",
  "serde_urlencoded",
  "sled-agent-client",
+ "sled-agent-scrimlet-reconcilers",
  "sled-agent-types",
  "slog",
  "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
@@ -8720,6 +8803,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "object"
+version = "0.39.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2e5a6c098c7a3b6547378093f5cc30bc54fd361ce711e05293a5cc589562739b"
+dependencies = [
+ "crc32fast",
+ "hashbrown 0.17.0",
+ "indexmap 2.14.0",
+ "memchr",
+]
+
+[[package]]
 name = "olpc-cjson"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9071,6 +9166,7 @@ dependencies = [
  "oximeter",
  "oximeter-instruments",
  "oximeter-producer",
+ "pretty_assertions",
  "schemars 0.8.22",
  "serde",
  "serde_json",
@@ -9239,7 +9335,7 @@ dependencies = [
  "http-body-util",
  "httpmock",
  "httptest",
- "hubtools 0.4.7 (git+https://github.com/oxidecomputer/hubtools.git?rev=2b1ef9b38d75563ea800baa3b17327eec17b1b7a)",
+ "hubtools 0.4.9",
  "hyper",
  "hyper-rustls",
  "hyper-staticfile",
@@ -9471,6 +9567,7 @@ dependencies = [
  "nexus-db-model",
  "nexus-db-queries",
  "nexus-db-schema",
+ "nexus-fm-slippy",
  "nexus-inventory",
  "nexus-lockstep-client",
  "nexus-networking",
@@ -9515,6 +9612,7 @@ dependencies = [
  "support-bundle-collection",
  "support-bundle-viewer",
  "supports-color 3.0.2",
+ "swrite",
  "tabled 0.15.0",
  "textwrap 0.16.2",
  "tokio",
@@ -9733,7 +9831,7 @@ dependencies = [
  "crucible-agent-client",
  "crucible-client-types",
  "derive_more 0.99.20",
- "dice-verifier 0.3.0-pre0 (git+https://github.com/oxidecomputer/dice-util?branch=main)",
+ "dice-verifier 0.3.0-pre0 (git+https://github.com/oxidecomputer/dice-util?rev=ff9f27aa0d6ef6fb64c349890b6e3c242ea3d8fc)",
  "display-error-chain",
  "dropshot",
  "expectorate",
@@ -9964,7 +10062,6 @@ dependencies = [
  "futures-sink",
  "futures-task",
  "futures-util",
- "gateway-ereport-messages",
  "gateway-messages",
  "generic-array 0.14.7",
  "getrandom 0.2.17",
@@ -9972,6 +10069,7 @@ dependencies = [
  "group 0.13.0",
  "hashbrown 0.15.5",
  "hashbrown 0.16.1",
+ "hashbrown 0.17.0",
  "heck 0.4.1",
  "hex",
  "hickory-proto 0.25.2",
@@ -10019,6 +10117,7 @@ dependencies = [
  "predicates",
  "proc-macro2",
  "quote",
+ "rand 0.10.1",
  "rand 0.8.6",
  "rand 0.9.2",
  "rand_chacha 0.3.1",
@@ -10084,8 +10183,8 @@ dependencies = [
  "x509-cert",
  "zerocopy 0.8.55",
  "zeroize",
- "zip 0.6.6",
  "zip 4.6.1",
+ "zip 8.6.0",
 ]
 
 [[package]]
@@ -10223,7 +10322,7 @@ dependencies = [
 [[package]]
 name = "opte"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=0525f2f95588760133b7d5ebc8548e1ccdfbb353#0525f2f95588760133b7d5ebc8548e1ccdfbb353"
+source = "git+https://github.com/oxidecomputer/opte?rev=fd2d6ad625cef6fb903660e57dcd4729ff66a6fe#fd2d6ad625cef6fb903660e57dcd4729ff66a6fe"
 dependencies = [
  "bitflags 2.11.0",
  "dyn-clone",
@@ -10242,7 +10341,7 @@ dependencies = [
 [[package]]
 name = "opte-api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=0525f2f95588760133b7d5ebc8548e1ccdfbb353#0525f2f95588760133b7d5ebc8548e1ccdfbb353"
+source = "git+https://github.com/oxidecomputer/opte?rev=fd2d6ad625cef6fb903660e57dcd4729ff66a6fe#fd2d6ad625cef6fb903660e57dcd4729ff66a6fe"
 dependencies = [
  "illumos-sys-hdrs",
  "ingot",
@@ -10255,7 +10354,7 @@ dependencies = [
 [[package]]
 name = "opte-ioctl"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=0525f2f95588760133b7d5ebc8548e1ccdfbb353#0525f2f95588760133b7d5ebc8548e1ccdfbb353"
+source = "git+https://github.com/oxidecomputer/opte?rev=fd2d6ad625cef6fb903660e57dcd4729ff66a6fe#fd2d6ad625cef6fb903660e57dcd4729ff66a6fe"
 dependencies = [
  "libc",
  "libnet",
@@ -10422,11 +10521,12 @@ dependencies = [
 [[package]]
 name = "oxide-vpc"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=0525f2f95588760133b7d5ebc8548e1ccdfbb353#0525f2f95588760133b7d5ebc8548e1ccdfbb353"
+source = "git+https://github.com/oxidecomputer/opte?rev=fd2d6ad625cef6fb903660e57dcd4729ff66a6fe#fd2d6ad625cef6fb903660e57dcd4729ff66a6fe"
 dependencies = [
  "cfg-if",
  "illumos-sys-hdrs",
  "opte",
+ "rand 0.10.1",
  "serde",
  "tabwriter",
  "uuid",
@@ -10572,6 +10672,7 @@ dependencies = [
  "oxql-types",
  "parse-display",
  "peg",
+ "proptest",
  "qorb",
  "quote",
  "rand 0.9.2",
@@ -10791,10 +10892,7 @@ dependencies = [
  "chrono",
  "clap",
  "glob",
- "illumos-nvpair",
- "illumos-nvpair-sys",
  "jiff",
- "libc",
  "omicron-workspace-hack",
  "rayon",
  "sigpipe",
@@ -11083,6 +11181,12 @@ name = "path-slash"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "498a099351efa4becc6a19c72aa9270598e8fd274ca47052e37455241c88b696"
+
+[[package]]
+name = "path-slash"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e91099d4268b0e11973f036e885d652fb0b21fedcf69738c627f94db6a44f42"
 
 [[package]]
 name = "path-tree"
@@ -11600,27 +11704,27 @@ dependencies = [
 
 [[package]]
 name = "postgres-protocol"
-version = "0.6.10"
+version = "0.6.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ee9dd5fe15055d2b6806f4736aa0c9637217074e224bbec46d4041b91bb9491"
+checksum = "08808e3c483c46e999108051c78334f473d5adb59d78bb80a1268c7e6aa6c514"
 dependencies = [
  "base64 0.22.1",
  "byteorder",
  "bytes",
  "fallible-iterator",
- "hmac 0.12.1",
+ "hmac 0.13.0",
  "md-5",
  "memchr",
- "rand 0.9.2",
- "sha2 0.10.9",
+ "rand 0.10.1",
+ "sha2 0.11.0",
  "stringprep",
 ]
 
 [[package]]
 name = "postgres-types"
-version = "0.2.12"
+version = "0.2.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "54b858f82211e84682fecd373f68e1ceae642d8d751a1ebd13f33de6257b3e20"
+checksum = "851ca9db4932932d69f3ea811b1abe63087a0f740a47692619dd40d4899b68be"
 dependencies = [
  "bytes",
  "chrono",
@@ -14234,6 +14338,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "byte-wrapper",
  "chrono",
  "omicron-common",
  "omicron-generation-kinds",
@@ -14966,7 +15071,7 @@ version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c1c97747dbf44bb1ca44a561ece23508e99cb592e862f22222dcf42f51d1e451"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -15005,7 +15110,8 @@ dependencies = [
  "gateway-messages",
  "gateway-types",
  "hex",
- "hubtools 0.4.7 (git+https://github.com/oxidecomputer/hubtools.git?rev=2b1ef9b38d75563ea800baa3b17327eec17b1b7a)",
+ "hubtools 0.4.9",
+ "iddqd",
  "nexus-types",
  "nix 0.31.2",
  "omicron-common",
@@ -15064,7 +15170,7 @@ checksum = "3a0219bd7d979d58245a4f41f695e1ac9f8befdffadd7f61f1bae9e39abc6620"
 [[package]]
 name = "sprockets-tls"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sprockets.git?rev=a233079e04d9688454486c452b694587a28c5257#a233079e04d9688454486c452b694587a28c5257"
+source = "git+https://github.com/oxidecomputer/sprockets.git?rev=02c7e5414d97c0c85d629cb76d1f6beab73d960e#02c7e5414d97c0c85d629cb76d1f6beab73d960e"
 dependencies = [
  "anyhow",
  "attest-data 0.5.0 (git+https://github.com/oxidecomputer/dice-util?rev=4a39ef08d81e5177edee0bddb1146032aa21074d)",
@@ -15097,7 +15203,7 @@ dependencies = [
 [[package]]
 name = "sprockets-tls-test-utils"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sprockets.git?rev=a233079e04d9688454486c452b694587a28c5257#a233079e04d9688454486c452b694587a28c5257"
+source = "git+https://github.com/oxidecomputer/sprockets.git?rev=02c7e5414d97c0c85d629cb76d1f6beab73d960e#02c7e5414d97c0c85d629cb76d1f6beab73d960e"
 dependencies = [
  "camino",
  "pki-playground 0.2.0 (git+https://github.com/oxidecomputer/pki-playground?rev=7600756029ce046a02c6234aa84ce230cc5eaa04)",
@@ -16001,6 +16107,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "tlvc"
+version = "0.4.1"
+source = "git+https://github.com/oxidecomputer/tlvc?rev=7a96eab94c8aec9120412d8601ffd68853957da3#7a96eab94c8aec9120412d8601ffd68853957da3"
+dependencies = [
+ "crc",
+ "thiserror 2.0.18",
+ "zerocopy 0.8.55",
+ "zerocopy-derive 0.8.55",
+]
+
+[[package]]
 name = "tlvc-text"
 version = "0.3.0"
 source = "git+https://github.com/oxidecomputer/tlvc#e644a21a7ca973ed31499106ea926bd63ebccc6f"
@@ -16009,6 +16126,17 @@ dependencies = [
  "serde",
  "tlvc 0.3.1 (git+https://github.com/oxidecomputer/tlvc)",
  "zerocopy 0.6.6",
+]
+
+[[package]]
+name = "tlvc-text"
+version = "0.4.0"
+source = "git+https://github.com/oxidecomputer/tlvc?rev=7a96eab94c8aec9120412d8601ffd68853957da3#7a96eab94c8aec9120412d8601ffd68853957da3"
+dependencies = [
+ "ron",
+ "serde",
+ "tlvc 0.4.1",
+ "zerocopy 0.8.55",
 ]
 
 [[package]]
@@ -16072,9 +16200,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-postgres"
-version = "0.7.16"
+version = "0.7.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dcea47c8f71744367793f16c2db1f11cb859d28f436bdb4ca9193eb1f787ee42"
+checksum = "a528f7d280f6d5b9cd149635c8705b0dd049754bc67d81d31fa25169a93809d3"
 dependencies = [
  "async-trait",
  "byteorder",
@@ -16089,7 +16217,7 @@ dependencies = [
  "pin-project-lite",
  "postgres-protocol",
  "postgres-types",
- "rand 0.9.2",
+ "rand 0.10.1",
  "socket2 0.6.3",
  "tokio",
  "tokio-util",
@@ -16329,7 +16457,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-util",
- "typed-path",
+ "typed-path 0.9.3",
  "untrusted 0.7.1",
  "url",
  "walkdir",
@@ -16362,7 +16490,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-util",
- "typed-path",
+ "typed-path 0.9.3",
  "untrusted 0.7.1",
  "url",
  "walkdir",
@@ -16951,6 +17079,12 @@ name = "typed-path"
 version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "82205ffd44a9697e34fc145491aa47310f9871540bb7909eaa9365e0a9a46607"
+
+[[package]]
+name = "typed-path"
+version = "0.12.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8e28f89b80c87b8fb0cf04ab448d5dd0dd0ade2f8891bae878de66a75a28600e"
 
 [[package]]
 name = "typed-rng"
@@ -17814,7 +17948,7 @@ dependencies = [
  "internal-dns-resolver",
  "internal-dns-types",
  "itertools 0.14.0",
- "lpc55_areas",
+ "lpc55_areas 0.2.5 (git+https://github.com/oxidecomputer/lpc55_support)",
  "maplit",
  "omicron-certificates",
  "omicron-common",
@@ -17876,6 +18010,7 @@ dependencies = [
  "bootstrap-agent-lockstep-types",
  "dropshot",
  "gateway-client",
+ "iddqd",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "schemars 0.8.22",
@@ -17893,6 +18028,7 @@ version = "0.1.0"
 dependencies = [
  "bootstrap-agent-lockstep-types",
  "chrono",
+ "iddqd",
  "installinator-common",
  "omicron-common",
  "omicron-uuid-kinds",
@@ -18792,7 +18928,6 @@ dependencies = [
  "bzip2 0.4.4",
  "crc32fast",
  "crossbeam-utils",
- "flate2",
 ]
 
 [[package]]
@@ -18810,6 +18945,21 @@ dependencies = [
  "memchr",
  "zopfli",
  "zstd",
+]
+
+[[package]]
+name = "zip"
+version = "8.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2d04a6b5381502aa6087c94c669499eb1602eb9c5e8198e534de571f7154809b"
+dependencies = [
+ "bzip2 0.6.1",
+ "crc32fast",
+ "flate2",
+ "indexmap 2.14.0",
+ "memchr",
+ "typed-path 0.12.3",
+ "zopfli",
 ]
 
 [[package]]

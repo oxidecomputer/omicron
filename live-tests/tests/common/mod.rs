@@ -10,6 +10,7 @@ use internal_dns_resolver::Resolver;
 use internal_dns_types::names::ServiceName;
 use nexus_config::PostgresConfigWithUrl;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::SledFilter;
 use omicron_common::address::Ipv6Subnet;
@@ -134,8 +135,11 @@ async fn create_datastore(
     .context("failed to parse constructed postgres URL")?;
 
     let db_config = nexus_db_queries::db::Config { url };
-    let pool =
-        Arc::new(nexus_db_queries::db::Pool::new_single_host(log, &db_config));
+    let pool = Arc::new(nexus_db_queries::db::Pool::new_single_host(
+        log,
+        &db_config,
+        db::ClaimBacktraceSetting::Capture,
+    ));
     DataStore::new_failfast(log, pool)
         .await
         .context("creating DataStore")
@@ -222,11 +226,11 @@ async fn check_hardware_environment(
         "BRM42220004",
         // test rig: "london"
         "BRM42220036",
-        "BRM42220062",
+        "2CN2M459",
         "BRM42220030",
-        "BRM44220007",
+        "2RGCFG10",
         // test rig: "dublin"
-        "BRM42220026",
+        "2F8JEXDK",
         "BRM27230037",
         "BRM23230018",
         "BRM23230010",
@@ -234,7 +238,7 @@ async fn check_hardware_environment(
         "BRM42220011",
         "BRM44220007",
         "BRM42220082",
-        "BRM06240029",
+        "271FVPY0",
     ];
 
     // Refuse to operate in an environment that might contain real Oxide

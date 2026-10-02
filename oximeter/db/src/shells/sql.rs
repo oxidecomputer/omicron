@@ -6,7 +6,8 @@
 
 use super::prepare_columns;
 use crate::sql::{QueryResult, Table, function_allow_list};
-use crate::{Client, make_client};
+use crate::{Client, DbWrite as _, User};
+use anyhow::Context as _;
 use clap::Args;
 use dropshot::EmptyScanParams;
 use dropshot::WhichPage;
@@ -15,7 +16,7 @@ use reedline::DefaultPromptSegment;
 use reedline::Reedline;
 use reedline::Signal;
 use slog::Logger;
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr};
 
 /// Options for the SQL shell.
 #[derive(Clone, Debug, Args)]
@@ -52,7 +53,11 @@ pub async fn shell(
     log: Logger,
     opts: ShellOptions,
 ) -> anyhow::Result<()> {
-    let client = make_client(address, port, &log).await?;
+    let client = Client::new(User::Admin, SocketAddr::new(address, port), &log);
+    client
+        .init_single_node_db()
+        .await
+        .context("Failed to initialize timeseries database")?;
 
     // A workaround to ensure the client has all available timeseries when the
     // shell starts.

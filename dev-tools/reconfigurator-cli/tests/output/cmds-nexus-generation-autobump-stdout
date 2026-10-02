@@ -22,7 +22,8 @@ cockroachdb settings:
     version::::::::::::   (none)
     preserve downgrade:   (not set)
 planner config:
-    (no current planner configs)
+    disruption policy : terminate
+    sled update reboot policy: immediate (no evacuation)
 
 
 
@@ -734,6 +735,7 @@ LEDGERED SLED CONFIG
         all datasets reconciled successfully
         all zones reconciled successfully
     reconciler task status: idle (finished at <REDACTED_TIMESTAMP> after running for <REDACTED_DURATION>s)
+    instance manager status: available (0 registered VMMs)
     reference measurements:
         (measurement set is empty)
     fmd:
@@ -932,6 +934,7 @@ LEDGERED SLED CONFIG
         all datasets reconciled successfully
         all zones reconciled successfully
     reconciler task status: idle (finished at <REDACTED_TIMESTAMP> after running for <REDACTED_DURATION>s)
+    instance manager status: available (0 registered VMMs)
     reference measurements:
         (measurement set is empty)
     fmd:
@@ -1130,6 +1133,7 @@ LEDGERED SLED CONFIG
         all datasets reconciled successfully
         all zones reconciled successfully
     reconciler task status: idle (finished at <REDACTED_TIMESTAMP> after running for <REDACTED_DURATION>s)
+    instance manager status: available (0 registered VMMs)
     reference measurements:
         (measurement set is empty)
     fmd:
