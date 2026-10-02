@@ -367,13 +367,13 @@ fn redact_basic(input: &str) -> String {
         .unwrap()
         .replace_all(&s, "<REDACTED_TIMESTAMP>")
         .to_string();
-    // More timestamps, in the format that `dropshot` uses in the `Date`
-    // HTTP header. This is not RFC 3339, but is instead some other thing.
+    // HTTP Date headers contain timestamps in the following format:
+    // https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Date
     //
     // Examples:
     //   Fri, 02 Oct 2026 20:33:20 GMT
     let s =
-        regex::Regex::new(r"\w{3}, \d{2} \w{3} \d{4} \d{2}:\d{2}:\d{2} GMT")
+        regex::Regex::new(r"(Mon|Tue|Wed|Thu|Fri|Sun|Sat), \d{2} (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{4} \d{2}:\d{2}:\d{2} GMT")
             .unwrap()
             .replace_all(&s, "<REDACTED_TIMESTAMP>")
             .to_string();
