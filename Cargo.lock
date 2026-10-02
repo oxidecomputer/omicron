@@ -659,7 +659,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?branch=zl%2Fvoxel#b7b67633af9b1da945e64f56f4c15ec06a14bc35"
+source = "git+https://github.com/oxidecomputer/propolis?branch=zl%2Fvoxel#6fc51e6042d38f70ee6db4afd7365911abcc45c1"
 dependencies = [
  "bhyve_api_sys",
  "libc",
@@ -669,7 +669,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?branch=zl%2Fvoxel#b7b67633af9b1da945e64f56f4c15ec06a14bc35"
+source = "git+https://github.com/oxidecomputer/propolis?branch=zl%2Fvoxel#6fc51e6042d38f70ee6db4afd7365911abcc45c1"
 dependencies = [
  "libc",
  "strum 0.26.3",
@@ -1595,7 +1595,7 @@ dependencies = [
 [[package]]
 name = "client-common"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?branch=zl%2Fddm-mcast#36e43651d452b07302d464b0997da22b0af75ea7"
+source = "git+https://github.com/oxidecomputer/maghemite?branch=zl%2Fddm-mcast#5c703453939ea2e331522d043518d1476a2b34de"
 dependencies = [
  "oxnet",
  "schemars 0.8.22",
@@ -2637,7 +2637,7 @@ dependencies = [
 [[package]]
 name = "ddm-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?branch=zl%2Fddm-mcast#36e43651d452b07302d464b0997da22b0af75ea7"
+source = "git+https://github.com/oxidecomputer/maghemite?branch=zl%2Fddm-mcast#5c703453939ea2e331522d043518d1476a2b34de"
 dependencies = [
  "ddm-api-types-versions",
  "oxnet",
@@ -2651,7 +2651,7 @@ dependencies = [
 [[package]]
 name = "ddm-api-types-versions"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?branch=zl%2Fddm-mcast#36e43651d452b07302d464b0997da22b0af75ea7"
+source = "git+https://github.com/oxidecomputer/maghemite?branch=zl%2Fddm-mcast#5c703453939ea2e331522d043518d1476a2b34de"
 dependencies = [
  "client-common",
  "ddm-protocol",
@@ -2667,7 +2667,7 @@ dependencies = [
 [[package]]
 name = "ddm-protocol"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?branch=zl%2Fddm-mcast#36e43651d452b07302d464b0997da22b0af75ea7"
+source = "git+https://github.com/oxidecomputer/maghemite?branch=zl%2Fddm-mcast#5c703453939ea2e331522d043518d1476a2b34de"
 dependencies = [
  "oxnet",
  "schemars 0.8.22",
@@ -6957,7 +6957,7 @@ dependencies = [
 [[package]]
 name = "mg-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?branch=zl%2Fddm-mcast#36e43651d452b07302d464b0997da22b0af75ea7"
+source = "git+https://github.com/oxidecomputer/maghemite?branch=zl%2Fddm-mcast#5c703453939ea2e331522d043518d1476a2b34de"
 dependencies = [
  "chrono",
  "client-common",
@@ -6977,7 +6977,7 @@ dependencies = [
 [[package]]
 name = "mg-api-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?branch=zl%2Fddm-mcast#36e43651d452b07302d464b0997da22b0af75ea7"
+source = "git+https://github.com/oxidecomputer/maghemite?branch=zl%2Fddm-mcast#5c703453939ea2e331522d043518d1476a2b34de"
 dependencies = [
  "mg-api-types-versions",
 ]
@@ -6985,7 +6985,7 @@ dependencies = [
 [[package]]
 name = "mg-api-types-versions"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?branch=zl%2Fddm-mcast#36e43651d452b07302d464b0997da22b0af75ea7"
+source = "git+https://github.com/oxidecomputer/maghemite?branch=zl%2Fddm-mcast#5c703453939ea2e331522d043518d1476a2b34de"
 dependencies = [
  "chrono",
  "client-common",
@@ -8746,7 +8746,7 @@ version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "680998035259dcfcafe653688bf2aa6d3e2dc05e98be6ab46afb089dc84f1df8"
 dependencies = [
- "proc-macro-crate 3.4.0",
+ "proc-macro-crate 1.3.1",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -12096,7 +12096,7 @@ dependencies = [
 [[package]]
 name = "propolis-api-types-versions"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?branch=zl%2Fvoxel#b7b67633af9b1da945e64f56f4c15ec06a14bc35"
+source = "git+https://github.com/oxidecomputer/propolis?branch=zl%2Fvoxel#6fc51e6042d38f70ee6db4afd7365911abcc45c1"
 dependencies = [
  "crucible-client-types",
  "propolis_types",
@@ -12109,7 +12109,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?branch=zl%2Fvoxel#b7b67633af9b1da945e64f56f4c15ec06a14bc35"
+source = "git+https://github.com/oxidecomputer/propolis?branch=zl%2Fvoxel#6fc51e6042d38f70ee6db4afd7365911abcc45c1"
 dependencies = [
  "async-trait",
  "base64 0.21.7",
@@ -12133,7 +12133,7 @@ dependencies = [
 [[package]]
 name = "propolis-mock-server"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?branch=zl%2Fvoxel#b7b67633af9b1da945e64f56f4c15ec06a14bc35"
+source = "git+https://github.com/oxidecomputer/propolis?branch=zl%2Fvoxel#6fc51e6042d38f70ee6db4afd7365911abcc45c1"
 dependencies = [
  "anyhow",
  "base64 0.21.7",
@@ -12165,7 +12165,7 @@ dependencies = [
 [[package]]
 name = "propolis_api_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?branch=zl%2Fvoxel#b7b67633af9b1da945e64f56f4c15ec06a14bc35"
+source = "git+https://github.com/oxidecomputer/propolis?branch=zl%2Fvoxel#6fc51e6042d38f70ee6db4afd7365911abcc45c1"
 dependencies = [
  "crucible-client-types",
  "propolis-api-types-versions",
@@ -12174,7 +12174,7 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?branch=zl%2Fvoxel#b7b67633af9b1da945e64f56f4c15ec06a14bc35"
+source = "git+https://github.com/oxidecomputer/propolis?branch=zl%2Fvoxel#6fc51e6042d38f70ee6db4afd7365911abcc45c1"
 dependencies = [
  "schemars 0.8.22",
  "serde",
@@ -15071,7 +15071,7 @@ version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c1c97747dbf44bb1ca44a561ece23508e99cb592e862f22222dcf42f51d1e451"
 dependencies = [
- "heck 0.5.0",
+ "heck 0.4.1",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
