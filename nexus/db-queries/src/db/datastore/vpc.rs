@@ -2475,9 +2475,9 @@ impl DataStore {
         use nexus_db_schema::schema::internet_gateway_ip_pool as igw_pool;
         use nexus_db_schema::schema::internet_gateway_ip_pool::dsl as igw_pool_dsl;
         use nexus_db_schema::schema::network_interface as ni;
-        use nexus_db_schema::schema::vmm;
         use nexus_db_schema::schema::probe;
         use nexus_db_schema::schema::probe::dsl as probe_dsl;
+        use nexus_db_schema::schema::vmm;
         use omicron_uuid_kinds::GenericUuid;
 
         // We don't know at first glance which VPC ID each IP addr has.
