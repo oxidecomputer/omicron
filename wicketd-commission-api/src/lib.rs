@@ -234,7 +234,10 @@ pub trait WicketdCommissionApi {
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<v3::rack_setup::PutRssUserConfigInsensitive>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        Self::put_rss_config(rqctx, body.map(Into::into)).await
+        let body = body.try_map(TryFrom::try_from).map_err(|e| {
+            HttpError::for_bad_request(None, format!("Invalid conversion: {e}"))
+        })?;
+        Self::put_rss_config(rqctx, body).await
     }
 
     #[endpoint {

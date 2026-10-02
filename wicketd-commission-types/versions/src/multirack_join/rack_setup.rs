@@ -120,22 +120,25 @@ impl TryFrom<UnvalidatedPutRssUserConfigInsensitive>
     }
 }
 
-impl From<v3::rack_setup::PutRssUserConfigInsensitive>
+impl TryFrom<v3::rack_setup::PutRssUserConfigInsensitive>
     for PutRssUserConfigInsensitive
 {
-    fn from(old: v3::rack_setup::PutRssUserConfigInsensitive) -> Self {
-        Self {
+    type Error = String;
+    fn try_from(
+        old: v3::rack_setup::PutRssUserConfigInsensitive,
+    ) -> Result<Self, Self::Error> {
+        Ok(Self {
             bootstrap_sleds: old.bootstrap_sleds,
             ntp_servers: old.ntp_servers,
             dns_servers: old.dns_servers,
             service_ip_pools: old.service_ip_pools,
             external_dns_ips: old.external_dns_ips,
             external_dns_zone_name: old.external_dns_zone_name,
-            rack_network_config: old.rack_network_config.into(),
+            rack_network_config: old.rack_network_config.try_into()?,
             allowed_source_ips: old.allowed_source_ips,
             external_jumbo_frames_opt_in_enabled: old
                 .external_jumbo_frames_opt_in_enabled,
-        }
+        })
     }
 }
 
@@ -157,24 +160,35 @@ pub struct UserSpecifiedRackNetworkConfig {
     pub bgp: Vec<BgpConfig>,
 }
 
-impl From<v3::rack_setup::UserSpecifiedRackNetworkConfig>
+impl TryFrom<v3::rack_setup::UserSpecifiedRackNetworkConfig>
     for UserSpecifiedRackNetworkConfig
 {
-    fn from(old: v3::rack_setup::UserSpecifiedRackNetworkConfig) -> Self {
+    type Error = String;
+    fn try_from(
+        old: v3::rack_setup::UserSpecifiedRackNetworkConfig,
+    ) -> Result<Self, Self::Error> {
         let convert_ports = |ports: BTreeMap<
             String,
             v3::rack_setup::UserSpecifiedPortConfig,
-        >| {
-            ports.into_iter().map(|(name, cfg)| (name, cfg.into())).collect()
+        >|
+         -> Result<
+            BTreeMap<String, UserSpecifiedPortConfig>,
+            String,
+        > {
+            let mut new_ports = BTreeMap::new();
+            for (name, cfg) in ports {
+                new_ports.insert(name, cfg.try_into()?);
+            }
+            Ok(new_ports)
         };
-        Self {
+        Ok(Self {
             rack_subnet_address: old.rack_subnet_address,
             infra_ip_first: old.infra_ip_first,
             infra_ip_last: old.infra_ip_last,
-            switch0: convert_ports(old.switch0),
-            switch1: convert_ports(old.switch1),
+            switch0: convert_ports(old.switch0)?,
+            switch1: convert_ports(old.switch1)?,
             bgp: old.bgp,
-        }
+        })
     }
 }
 
@@ -252,25 +266,19 @@ pub enum UserSpecifiedPortConfig {
     Ddm(L1PortConfig),
 }
 
-// The physical-layer settings a `v3` DDM-automatic port is upgraded to. That
-// version encoded such a port as an empty map, so there is no prior value to
-// carry forward and these have to be synthesized.
-const UPGRADED_DDM_L1_CONFIG: L1PortConfig = L1PortConfig {
-    speed: LinkSpeed::Speed100G,
-    fec: None,
-    autoneg: false,
-    lldp: None,
-    tx_eq: None,
-};
-
-impl From<v3::rack_setup::UserSpecifiedPortConfig> for UserSpecifiedPortConfig {
-    fn from(old: v3::rack_setup::UserSpecifiedPortConfig) -> Self {
+impl TryFrom<v3::rack_setup::UserSpecifiedPortConfig>
+    for UserSpecifiedPortConfig
+{
+    type Error = String;
+    fn try_from(
+        old: v3::rack_setup::UserSpecifiedPortConfig,
+    ) -> Result<Self, Self::Error> {
         match old {
             v3::rack_setup::UserSpecifiedPortConfig::Manual(cfg) => {
-                Self::Uplink(cfg.into())
+                Ok(Self::Uplink(cfg.into()))
             }
             v3::rack_setup::UserSpecifiedPortConfig::DdmAutoPortConfig => {
-                Self::Ddm(UPGRADED_DDM_L1_CONFIG)
+                Err(format!("Cannot upgrade from DdmAutoPortConfig"))
             }
         }
     }
