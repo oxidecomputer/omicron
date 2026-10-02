@@ -40,7 +40,9 @@ mod normalize_service_external_ips;
 mod prune_service_nat_entries;
 mod rename_default_igw_ip_pool;
 mod sled_resource_vmm_state;
+mod support_bundle_time_range;
 mod tufaceous_v2;
+mod vmm_failure_reason_if_failed;
 
 pub(crate) fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     let versions: HashMap<&str, Version> = KNOWN_VERSIONS
@@ -82,6 +84,8 @@ pub(crate) fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     register!(add_rendezvous_sled_bp_availability);
     register!(inventory_zone_multiple_external_ips);
     register!(blueprint_zone_multiple_external_ips);
+    register!(vmm_failure_reason_if_failed);
+    register!(support_bundle_time_range);
 
     map
 }

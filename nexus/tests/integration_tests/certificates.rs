@@ -396,7 +396,6 @@ async fn test_silo_certificates() {
             oxide_client::types::SiloCreate::builder()
                 .name(silo2.silo_name.clone())
                 .description("")
-                .discoverable(false)
                 .quotas(oxide_client::types::SiloQuotasCreate {
                     cpus: 0,
                     memory: oxide_client::types::ByteCount(0),
@@ -465,7 +464,6 @@ async fn test_silo_certificates() {
             oxide_client::types::SiloCreate::builder()
                 .name(silo3.silo_name.clone())
                 .description("")
-                .discoverable(false)
                 .quotas(oxide_client::types::SiloQuotasCreate {
                     cpus: 0,
                     memory: oxide_client::types::ByteCount(0),

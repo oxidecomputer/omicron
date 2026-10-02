@@ -88,6 +88,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_09_15_00, REMOVE_SILO_DISCOVERABLE),
     (2026_09_11_00, ALERT_PAYLOAD),
     (2026_09_08_00, PROJECT_AND_VPC_CREATE_DEFAULTS),
     (2026_08_28_00, SILO_USER_DOCS),
@@ -632,11 +633,27 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/system/silos",
         tags = ["system/silos"],
+        versions = VERSION_REMOVE_SILO_DISCOVERABLE..,
     }]
     async fn silo_create(
         rqctx: RequestContext<Self::Context>,
         new_silo_params: TypedBody<latest::silo::SiloCreate>,
     ) -> Result<HttpResponseCreated<latest::silo::Silo>, HttpError>;
+
+    /// Create silo
+    #[endpoint {
+        operation_id = "silo_create",
+        method = POST,
+        path = "/v1/system/silos",
+        tags = ["system/silos"],
+        versions = ..VERSION_REMOVE_SILO_DISCOVERABLE,
+    }]
+    async fn silo_create_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        new_silo_params: TypedBody<v2025_11_20_00::silo::SiloCreate>,
+    ) -> Result<HttpResponseCreated<latest::silo::Silo>, HttpError> {
+        Self::silo_create(rqctx, new_silo_params.map(Into::into)).await
+    }
 
     /// Fetch silo
     ///

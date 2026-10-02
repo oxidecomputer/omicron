@@ -3128,7 +3128,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.tuf_repo (
     --
     -- Because the system version is embedded in the repo's artifacts.json,
     -- each system version is associated with exactly one checksum.
-    system_version STRING(64) NOT NULL,
+    system_version STRING(128) NOT NULL,
 
     -- For debugging only:
     -- Filename provided by the user.
@@ -3373,13 +3373,25 @@ CREATE TABLE IF NOT EXISTS omicron.public.support_bundle_data_selection_host_inf
 
 CREATE TABLE IF NOT EXISTS omicron.public.support_bundle_data_selection_ereports (
     bundle_id UUID NOT NULL,
-    start_time TIMESTAMPTZ,
-    end_time TIMESTAMPTZ,
     only_serials TEXT[] NOT NULL DEFAULT ARRAY[],
     only_classes TEXT[] NOT NULL DEFAULT ARRAY[],
 
+    PRIMARY KEY (bundle_id)
+);
+
+-- Bundle-wide time range applied to time-bounded categories (host-info logs
+-- and ereports) at collection time. Row existence indicates a range was set,
+-- and a persisted range always carries a start bound (stamped at bundle
+-- creation).
+CREATE TABLE IF NOT EXISTS omicron.public.support_bundle_data_selection_time_range (
+    bundle_id UUID NOT NULL,
+    start_time TIMESTAMPTZ NOT NULL,
+    end_time TIMESTAMPTZ,
+
     PRIMARY KEY (bundle_id),
-    CHECK (start_time IS NULL OR end_time IS NULL OR start_time <= end_time)
+    CONSTRAINT start_before_end CHECK (
+        end_time IS NULL OR start_time <= end_time
+    )
 );
 
 /*******************************************************************/
@@ -5555,6 +5567,17 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_fmd_resource (
     PRIMARY KEY (inv_collection_id, sled_id, resource_id)
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.reconfigurator_disruption_policy AS ENUM (
+    'terminate',
+    'migrate_or_terminate',
+    'migrate_only'
+);
+
+CREATE TYPE IF NOT EXISTS omicron.public.sled_update_reboot_policy AS ENUM (
+    'immediate_no_evacuation',
+    'evacuate'
+);
+
 /*
  * Various runtime configuration switches for reconfigurator
  *
@@ -5564,12 +5587,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_fmd_resource (
  *
  * See https://github.com/oxidecomputer/omicron/issues/8253 for more details.
  */
-CREATE TYPE IF NOT EXISTS omicron.public.reconfigurator_disruption_policy AS ENUM (
-    'terminate',
-    'migrate_or_terminate',
-    'migrate_only'
-);
-
 CREATE TABLE IF NOT EXISTS omicron.public.reconfigurator_config (
     -- Monotonically increasing version for all bp_targets
     version INT8 PRIMARY KEY,
@@ -5590,7 +5607,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.reconfigurator_config (
     blueprint_pruner_enabled BOOL NOT NULL,
 
     -- Number of recent target blueprints that the blueprint pruner keeps
-    blueprint_pruner_nkeep INT8 NOT NULL
+    blueprint_pruner_nkeep INT8 NOT NULL,
+
+    -- How the planner schedules updates that induce sled reboots
+    sled_update_reboot_policy omicron.public.sled_update_reboot_policy NOT NULL
 );
 
 /*
@@ -6351,8 +6371,11 @@ CREATE TYPE IF NOT EXISTS omicron.public.sled_bp_availability AS ENUM (
  * Per-sled provisioning availability as of the target blueprint.
  *
  * This is a Reconfigurator rendezvous table reflecting which sleds the
- * target blueprint considers available for provisioning. Once wired up, the
- * instance-start allocation path will consult this table alongside `sled`.
+ * target blueprint considers available for provisioning. VMM placement
+ * consults this table alongside `sled`.
+ *
+ * The table is seeded at rack initialization and maintained by the
+ * blueprint_rendezvous background task.
  *
  * Unlike the other rendezvous tables, sled availability is not monotonic: a sled
  * becomes unavailable while evacuated for an update, then available again
@@ -6589,11 +6612,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.vmm (
      */
     stop_for_update_disposition_generation INT8,
 
-    -- If a VMM is in the 'failed' state, it must have a failure reason; if it
-    -- is not in the failed state, it must not have a failure reason.
-    CONSTRAINT failure_reason_iff_failed CHECK (
-        (state = 'failed' AND failure_reason IS NOT NULL)
-            OR (state != 'failed' AND failure_reason IS NULL)
+    -- If a VMM is in the 'failed' state, it must have a failure reason; VMMs
+    -- not in the 'failed' state are allowed to keep a stale reason from an
+    -- earlier failure.
+    CONSTRAINT failure_reason_if_failed CHECK (
+        state != 'failed' OR failure_reason IS NOT NULL
     )
 );
 
@@ -8574,13 +8597,24 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_support_bundle_request_data_selecti
 CREATE TABLE IF NOT EXISTS omicron.public.fm_support_bundle_request_data_selection_ereports (
     sitrep_id UUID NOT NULL,
     request_id UUID NOT NULL,
-    start_time TIMESTAMPTZ,
-    end_time TIMESTAMPTZ,
     only_serials TEXT[] NOT NULL DEFAULT ARRAY[],
     only_classes TEXT[] NOT NULL DEFAULT ARRAY[],
 
+    PRIMARY KEY (sitrep_id, request_id)
+);
+
+-- Bundle-wide time range applied to time-bounded categories (host-info logs
+-- and ereports) at collection time. Row existence indicates a range was set.
+CREATE TABLE IF NOT EXISTS omicron.public.fm_support_bundle_request_data_selection_time_range (
+    sitrep_id UUID NOT NULL,
+    request_id UUID NOT NULL,
+    start_time TIMESTAMPTZ,
+    end_time TIMESTAMPTZ,
+
     PRIMARY KEY (sitrep_id, request_id),
-    CHECK (start_time IS NULL OR end_time IS NULL OR start_time <= end_time)
+    CONSTRAINT start_before_end CHECK (
+        start_time IS NULL OR end_time IS NULL OR start_time <= end_time
+    )
 );
 
 -- Marker written by `SitrepGuardedInsert` atomically with a corresponding
@@ -9521,7 +9555,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '300.0.0', NULL)
+    (TRUE, NOW(), NOW(), '304.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

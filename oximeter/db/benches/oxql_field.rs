@@ -11,6 +11,7 @@ mod common;
 use common::{bench_metric, bench_oxql_query, get_client, get_socket_addr};
 use criterion::Criterion;
 use criterion::{criterion_group, criterion_main};
+use oximeter_db::User;
 use oximeter_db::native::Connection;
 use rand::seq::SliceRandom;
 use uuid::Uuid;
@@ -54,7 +55,8 @@ fn get_timeseries_info(rt: &tokio::runtime::Runtime) -> Vec<TimeseriesInfo> {
     );
 
     rt.block_on(async {
-        let mut conn = Connection::new(get_socket_addr()).await.unwrap();
+        let mut conn =
+            Connection::new(get_socket_addr(), User::Reader).await.unwrap();
         let result = conn.query(Uuid::new_v4(), &query).await.unwrap();
         let block = result.data.as_ref().expect("query returned no data");
 

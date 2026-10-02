@@ -226,7 +226,6 @@ async fn test_subnet_pool_silo_list(cptestctx: &ControlPlaneTestContext) {
         let silo = create_silo(
             client,
             &format!("test-silo-{i}"),
-            true,
             SiloIdentityMode::LocalOnly,
         )
         .await;
@@ -312,8 +311,7 @@ async fn test_silo_subnet_pool_list(cptestctx: &ControlPlaneTestContext) {
 
     // Create a silo and a bunch of pools.
     let silo =
-        create_silo(client, SILO_NAME, false, SiloIdentityMode::LocalOnly)
-            .await;
+        create_silo(client, SILO_NAME, SiloIdentityMode::LocalOnly).await;
     let n_pools = 100;
     let mut pools = Vec::with_capacity(n_pools);
     for i in 0..n_pools {
@@ -410,8 +408,7 @@ async fn test_current_silo_subnet_pool_list(
     let client = &cptestctx.external_client;
 
     let silo =
-        create_silo(client, SILO_NAME, false, SiloIdentityMode::LocalOnly)
-            .await;
+        create_silo(client, SILO_NAME, SiloIdentityMode::LocalOnly).await;
     let silo_url = format!("{}/{}", SILO_URL, SILO_NAME);
 
     let default_name = "default-subnet-pool";
@@ -465,8 +462,7 @@ async fn test_current_silo_subnet_pool_view(
     let client = &cptestctx.external_client;
 
     let silo =
-        create_silo(client, SILO_NAME, false, SiloIdentityMode::LocalOnly)
-            .await;
+        create_silo(client, SILO_NAME, SiloIdentityMode::LocalOnly).await;
     let silo_url = format!("{}/{}", SILO_URL, SILO_NAME);
 
     let default_name = "default-subnet-pool";
@@ -562,8 +558,7 @@ async fn test_subnet_pool_silo_link(cptestctx: &ControlPlaneTestContext) {
 
     // Link to another silo as default.
     let new_silo =
-        create_silo(client, "new-guy", false, SiloIdentityMode::LocalOnly)
-            .await;
+        create_silo(client, "new-guy", SiloIdentityMode::LocalOnly).await;
     let new_silo_id = new_silo.identity.id;
     link_subnet_pool(client, SUBNET_POOL_NAME, &new_silo_id, true).await;
     assert_silos_for_pool(

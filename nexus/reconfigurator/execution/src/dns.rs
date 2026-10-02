@@ -297,6 +297,7 @@ mod test {
     use crate::Sled;
     use crate::test_utils::overridables_for_test;
     use crate::test_utils::realize_blueprint_and_expect;
+    use anyhow::Context;
     use internal_dns_resolver::Resolver;
     use internal_dns_types::config::Host;
     use internal_dns_types::config::Zone;
@@ -1081,18 +1082,20 @@ mod test {
         blueprint.internal_dns_version = Generation::new();
         blueprint.external_dns_version = Generation::new();
 
-        let my_silo = Silo::new(silo::SiloCreate {
-            identity: IdentityMetadataCreateParams {
-                name: "my-silo".parse().unwrap(),
-                description: String::new(),
+        let my_silo = Silo::new(
+            silo::SiloCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "my-silo".parse().unwrap(),
+                    description: String::new(),
+                },
+                quotas: silo::SiloQuotasCreate::empty(),
+                identity_mode: silo::SiloIdentityMode::SamlJit,
+                admin_group_name: None,
+                tls_certificates: vec![],
+                mapped_fleet_roles: Default::default(),
             },
-            quotas: silo::SiloQuotasCreate::empty(),
-            discoverable: false,
-            identity_mode: silo::SiloIdentityMode::SamlJit,
-            admin_group_name: None,
-            tls_certificates: vec![],
-            mapped_fleet_roles: Default::default(),
-        })
+            false,
+        )
         .unwrap();
 
         // It shouldn't ever be possible to have no Silos at all, but at least
@@ -1784,40 +1787,23 @@ mod test {
         // Build blueprint B2 from B1, adding a new Oximeter zone.  When B2 is
         // executed, internal DNS will gain a new AAAA record and updated SRV
         // records for that zone.
-        //
-        // We use the same process as in test_silos_external_dns_end_to_end()
-        // above.
-        let mut builder = BlueprintBuilder::new_based_on(
-            &log,
-            &blueprint,
-            "test suite",
-            PlannerRng::from_entropy(),
-        )
-        .unwrap();
         let sled_id =
             blueprint.sleds().next().expect("expected at least one sled");
-        builder
-            .sled_add_zone_oximeter(
-                sled_id,
-                BlueprintZoneImageSource::InstallDataset,
-            )
-            .unwrap();
-        let blueprint2 = builder.build(BlueprintSource::Test);
-        datastore
-            .blueprint_insert(&opctx, &blueprint2)
+        let (_, blueprint2) = cptestctx
+            .blueprint_edit_current_target(|builder| {
+                builder
+                    .sled_add_zone_oximeter(
+                        sled_id,
+                        BlueprintZoneImageSource::InstallDataset,
+                    )
+                    .with_context(|| {
+                        format!("adding Oximeter zone to sled {sled_id}")
+                    })?;
+                builder.comment("add an Oximeter zone");
+                Ok(())
+            })
             .await
-            .expect("failed to save blueprint2");
-        datastore
-            .blueprint_target_set_current(
-                &opctx,
-                BlueprintTarget {
-                    target_id: blueprint2.id,
-                    enabled: false,
-                    time_made_target: chrono::Utc::now(),
-                },
-            )
-            .await
-            .expect("failed to set blueprint2 as target");
+            .expect("edited blueprint to add an Oximeter zone");
 
         // Execute B2.  Internal DNS should now include the new zone.
         _ = realize_blueprint_and_expect(
@@ -1940,7 +1926,6 @@ mod test {
         let silo = create_silo(
             &cptestctx.external_client,
             silo_name,
-            false,
             silo::SiloIdentityMode::SamlJit,
         )
         .await;

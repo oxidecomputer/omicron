@@ -462,6 +462,7 @@ impl DataStore {
                 opctx,
                 opctx,
                 recovery_silo,
+                false,
                 &[recovery_silo_fq_dns_name],
                 dns_update,
             )
@@ -1233,7 +1234,6 @@ mod test {
                     // Set a default quota of a half rack's worth of resources
                     quotas:
                         silo_types::SiloQuotasCreate::arbitrarily_high_default(),
-                    discoverable: false,
                     identity_mode: SiloIdentityMode::LocalOnly,
                     admin_group_name: None,
                     tls_certificates: vec![],

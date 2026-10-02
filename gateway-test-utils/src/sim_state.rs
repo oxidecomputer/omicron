@@ -35,9 +35,7 @@ pub async fn current_simulator_state(simrack: &SimRack) -> Vec<SpInfo> {
         let typ = match target_state.system_type {
             SystemType::Sidecar => SpType::Switch,
             SystemType::Gimlet | SystemType::Cosmo => SpType::Sled,
-            SystemType::Psc => {
-                todo!("testing simulated PSC not yet implemented")
-            }
+            SystemType::Psc => SpType::Power,
             SystemType::Unknown(id) => {
                 panic!("unknown ignition id ({id}) not implemented in tests")
             }
@@ -58,7 +56,7 @@ pub async fn current_simulator_state(simrack: &SimRack) -> Vec<SpInfo> {
         let sp: &dyn SimulatedSp = match typ {
             SpType::Switch => &simrack.sidecars[slot as usize],
             SpType::Sled => &simrack.gimlets[slot as usize],
-            SpType::Power => todo!(),
+            SpType::Power => &simrack.pscs[slot as usize],
         };
 
         let details =
