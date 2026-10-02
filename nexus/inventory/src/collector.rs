@@ -20,7 +20,6 @@ use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::InternalDnsGenerationStatus;
 use nexus_types::inventory::Psu;
-
 use nexus_types::inventory::PsuIdentity;
 use nexus_types::inventory::PsuState;
 use nexus_types::inventory::PsuStatus;
@@ -959,6 +958,8 @@ mod test {
     use iddqd::IdOrdMap;
     use iddqd::id_ord_map;
     use nexus_types::inventory::Collection;
+    use nexus_types::inventory::PsuIdentity;
+    use nexus_types::inventory::PsuIdentityResult;
     use omicron_cockroach_metrics::CockroachClusterAdminClient;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_generation_kinds::SledConfigGeneration;
@@ -1195,20 +1196,20 @@ mod test {
             for psu in &shelf.psus {
                 swriteln!(
                     s,
-                    "        {}: presence {:?} device {}",
+                    "        {}: presence {:?} hubris_device {}",
                     psu.slot,
                     psu.presence(),
                     psu.hubris_device_type,
                 );
                 match psu.identity() {
-                    Some(Ok(nexus_types::inventory::PsuIdentity {
+                    PsuIdentityResult::Present(PsuIdentity {
                         mfr_id,
                         mfr_model,
                         firmware_rev,
                         mfr_location,
                         mfr_date,
                         mfr_serial,
-                    })) => {
+                    }) => {
                         swriteln!(
                             s,
                             "            VPD: mfr_model {mfr_model:?} \
@@ -1219,10 +1220,10 @@ mod test {
                               mfr_date {mfr_date:?}"
                         );
                     }
-                    Some(Err(error)) => {
+                    PsuIdentityResult::ReadError(error) => {
                         swriteln!(s, "            VPD: error: {error}");
                     }
-                    None => {}
+                    PsuIdentityResult::NotPresent => {}
                 }
             }
         }

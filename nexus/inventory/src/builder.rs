@@ -807,9 +807,9 @@ impl CollectionBuilder {
             // A previous attempt to collect this PSU's VPD failed, so we tried
             // again. Overwrite it iff we successfully read the VPD.
             id_ord_map::Entry::Occupied(mut previous)
-                if previous.get().identity_read_failed() =>
+                if !previous.get().identity().is_present() =>
             {
-                if matches!(psu.identity(), Some(Ok(_))) {
+                if psu.identity().is_present() {
                     previous.insert(psu);
                     Ok(true)
                 } else {
@@ -870,9 +870,13 @@ impl CollectionBuilder {
 }
 
 fn found_psu_already(shelf: &PowerShelf, psu_slot: PsuSlot) -> bool {
-    // well, so we found it...were we able to read its identity? if not, try
-    // again.
-    shelf.psus.get(&psu_slot).is_some_and(|psu| !psu.identity_read_failed())
+    shelf.psus.get(&psu_slot).is_some_and(|psu| {
+        // well, so we found it...were we able to read its identity? if the
+        // attempt to read the PSU's identity failed, let's say that we have not
+        // "found it already" so that we make a second attempt, so that we try
+        // again in the event of a transient I2C error on the SP or similar.
+        !psu.identity().is_read_error()
+    })
 }
 
 pub use omicron_common::now_db_precision;
