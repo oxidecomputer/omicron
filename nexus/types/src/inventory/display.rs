@@ -613,6 +613,7 @@ fn display_power_shelf(
     shelf: Option<&PowerShelf>,
     f: &mut dyn fmt::Write,
 ) -> fmt::Result {
+    use super::PsuIdentityResult;
     use super::PsuSlot;
 
     let Some(shelf) = shelf else {
@@ -635,7 +636,7 @@ fn display_power_shelf(
 
     writeln!(f, "    PSUs:")?;
     let rows = shelf.psus.iter().map(|psu| {
-        let vpd = psu.identity().and_then(Result::ok);
+        let vpd = psu.identity().ok();
         PsuRow {
             slot: psu.slot,
             presence: format!("{:?}", psu.presence()),
@@ -660,13 +661,14 @@ fn display_power_shelf(
 
     let mut wrote_errors_header = false;
     for psu in &shelf.psus {
-        if let Some(Err(error)) = psu.identity() {
-            if !wrote_errors_header {
-                writeln!(f, "    PSU VPD errors:")?;
-                wrote_errors_header = true;
-            }
-            writeln!(f, "      - {}: {error}", psu.slot)?;
+        let PsuIdentityResult::ReadError(error) = psu.identity() else {
+            continue;
+        };
+        if !wrote_errors_header {
+            writeln!(f, "    PSU VPD errors:")?;
+            wrote_errors_header = true;
         }
+        writeln!(f, "      - {}: {error}", psu.slot)?;
     }
 
     Ok(())

@@ -61,7 +61,6 @@ use nexus_db_model::InvOmicronSledConfigZoneExternalIp;
 use nexus_db_model::InvOmicronSledConfigZoneNic;
 use nexus_db_model::InvPhysicalDisk;
 use nexus_db_model::InvPowerShelfPsu;
-
 use nexus_db_model::InvPsuSlot;
 use nexus_db_model::InvRootOfTrust;
 use nexus_db_model::InvRotPage;
@@ -109,7 +108,6 @@ use nexus_types::inventory::InternalDnsGenerationStatus;
 use nexus_types::inventory::PhysicalDiskFirmware;
 use nexus_types::inventory::PowerShelf;
 use nexus_types::inventory::Psu;
-use nexus_types::inventory::PsuIdentity;
 use nexus_types::inventory::SledAgent;
 use nexus_types::inventory::TimeSync;
 use omicron_common::api::external::Error;
@@ -809,6 +807,8 @@ impl DataStore {
             {
                 use nexus_db_schema::schema::hw_baseboard_id::dsl as baseboard_dsl;
                 use nexus_db_schema::schema::inv_power_shelf_psu::dsl as psu_dsl;
+                use nexus_types::inventory::PsuIdentityResult;
+                use nexus_types::inventory::PsuIdentity;
 
                 for shelf in &collection.power_shelves {
                     let PowerShelf {
@@ -835,14 +835,14 @@ impl DataStore {
                             mfr_serial,
                             vpd_error,
                         ) = match psu.identity() {
-                            Some(Ok(PsuIdentity {
+                            PsuIdentityResult::Present(PsuIdentity {
                                 mfr_id,
                                 mfr_model,
                                 firmware_rev,
                                 mfr_location,
                                 mfr_date,
                                 mfr_serial,
-                            })) => (
+                            }) => (
                                 Some(mfr_id.clone()),
                                 Some(mfr_model.clone()),
                                 Some(firmware_rev.clone()),
@@ -851,7 +851,7 @@ impl DataStore {
                                 Some(mfr_serial.clone()),
                                 None,
                             ),
-                            Some(Err(error)) => (
+                            PsuIdentityResult::ReadError(error) => (
                                 None,
                                 None,
                                 None,
@@ -860,7 +860,7 @@ impl DataStore {
                                 None,
                                 Some(error.to_owned()),
                             ),
-                            None => (None, None, None, None, None, None, None),
+                            PsuIdentityResult::NotPresent => (None, None, None, None, None, None, None),
                         };
                         let selection =
                             nexus_db_schema::schema::hw_baseboard_id::table

@@ -518,22 +518,19 @@ impl Psu {
         }
     }
 
-    /// Returns `true` if we attempted to read this PSU's identity and failed.
-    ///
-    /// This is `false` both when the identity was read successfully and when
-    /// the SP reported that no PSU is present (in which case we did not try to
-    /// read the VPD).
-    pub fn identity_read_failed(&self) -> bool {
-        matches!(self.identity(), Some(Err(_)))
-    }
-
-    /// Returns the result of reading this PSU's identity, or `None` if the SP
-    /// reported that no PSU is present (in which case we did not try to read
-    /// its VPD).
-    pub fn identity(&self) -> Option<Result<&PsuIdentity, &str>> {
-        self.state
-            .as_ref()
-            .map(|state| state.identity.as_ref().map_err(String::as_str))
+    /// Returns the result of reading this PSU's identity, or
+    /// [`PsuIdentityResult::NotPresent`] if the SP indicated that no PSU is
+    /// present in this slot.
+    pub fn identity(&self) -> PsuIdentityResult<'_> {
+        match self.state {
+            None => PsuIdentityResult::NotPresent,
+            Some(PsuState { identity: Ok(ref identity), .. }) => {
+                PsuIdentityResult::Present(identity)
+            }
+            Some(PsuState { identity: Err(ref error), .. }) => {
+                PsuIdentityResult::ReadError(error)
+            }
+        }
     }
 }
 
@@ -603,6 +600,43 @@ pub struct PsuState {
     /// The PSU's PMBus identity, or an error describing why it could not be
     /// read.
     pub identity: Result<PsuIdentity, String>,
+}
+
+/// Values returned by [`Psu::identity`].
+#[derive(Copy, Clone, Debug, Eq, PartialOrd, PartialEq)]
+pub enum PsuIdentityResult<'psu> {
+    /// The VPD identity of the PSU was not read because no PSU was present in
+    /// this slot.
+    NotPresent,
+    /// The VPD identity of the PSU was successfully read.
+    Present(&'psu PsuIdentity),
+    /// The PSU was not determined to be not present, but an error occurred
+    /// while reading its VPD identity.
+    ReadError(&'psu str),
+}
+
+impl<'psu> PsuIdentityResult<'psu> {
+    /// Returns [`Some`]`(`[`PsuIdentity`]`)` if the PSU was present and its VPD
+    /// identity was read successfully, or [`None`] if no PSU was present or an
+    /// error occurred while reading its VPD identity.
+    pub fn ok(self) -> Option<&'psu PsuIdentity> {
+        match self {
+            PsuIdentityResult::Present(identity) => Some(identity),
+            _ => None,
+        }
+    }
+
+    pub fn is_present(&self) -> bool {
+        matches!(self, PsuIdentityResult::Present(_))
+    }
+
+    pub fn is_read_error(&self) -> bool {
+        matches!(self, PsuIdentityResult::ReadError(_))
+    }
+
+    pub fn is_not_present(&self) -> bool {
+        matches!(self, PsuIdentityResult::NotPresent)
+    }
 }
 
 /// The identity of a muRata PSU in the power shelf, as reported over PMBus.
