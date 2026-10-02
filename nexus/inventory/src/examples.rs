@@ -223,18 +223,20 @@ pub fn representative() -> Representative {
     // a real PSC will always report 6 PSU slots, even if some are not present,
     // so let's make sure to do that here for realism's sake.
     let psus = [
-        (PsuSlot::Psu0, Some("LL2111Q9002T")),
-        (PsuSlot::Psu1, Some("LL2111Q9003T")),
-        (PsuSlot::Psu2, Some("LL2111Q9013T")),
-        (PsuSlot::Psu3, None),
-        (PsuSlot::Psu4, Some("LL2115Q1001T")),
+        (PsuSlot::Psu0, Some(Ok("LL2111Q9002T"))),
+        (PsuSlot::Psu1, Some(Ok("LL2111Q9003T"))),
+        (PsuSlot::Psu2, Some(Ok("LL2111Q9013T"))),
+        (PsuSlot::Psu3, Some(Err("fake VPD read error"))),
+        (PsuSlot::Psu4, Some(Ok("LL2115Q1001T"))),
         (PsuSlot::Psu5, None),
     ];
     let psu_device = ExamplePsuKind::Mwocp68;
     for (slot, serial) in psus {
-        let state = serial.map(|serial| PsuState {
-            status: PsuStatus::Present,
-            identity: Ok(psu_identity(psu_device, serial)),
+        let state = serial.map(|id_result| {
+            let identity = id_result
+                .map(|serial| psu_identity(psu_device, serial))
+                .map_err(ToString::to_string);
+            PsuState { status: PsuStatus::Present, identity }
         });
         let psu = Psu {
             time_collected: now_db_precision(),
