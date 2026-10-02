@@ -779,18 +779,26 @@ impl CollectionBuilder {
         psc: &BaseboardId,
         sp_slot: u16,
         psu: Psu,
-    ) -> Result<bool, anyhow::Error> {
+    ) -> Result<bool, CollectorBug> {
         let (psc, sp) = self.sps.get_key_value(psc).ok_or_else(|| {
             anyhow::anyhow!("reporting PSU for unknown PSC baseboard {psc:?}")
         })?;
         // This really shouldn't happen, but we may as well check for it..
-        anyhow::ensure!(
-            sp.sp_type == SpType::Power && sp.sp_slot == sp_slot,
-            "reporting PSU for {psc:?} from power shelf {sp_slot} SP, but \
-             the recorded SP is {:?} slot {}",
-            sp.sp_type,
-            sp.sp_slot,
-        );
+        if sp.sp_type != SpType::Power {
+            return Err(CollectorBug(anyhow::anyhow!(
+                "reporting a PSU for baseboard {psc:?}, which is not a power \
+                 shelf controller (it's a {})",
+                sp.sp_type
+            )));
+        }
+        if sp.sp_slot != sp_slot {
+            return Err(CollectorBug(anyhow::anyhow!(
+                "reporting a PSU for baseboard {psc:?}, which claims to be \
+                 power shelf {sp_slot} from power shelf {sp_slot} SP, but the \
+                 recorded SP for that baseboard claims to be in slot {}",
+                sp.sp_slot
+            )));
+        }
 
         let psus_for_psc = &mut self
             .power_shelves
@@ -832,10 +840,13 @@ impl CollectionBuilder {
             // We've already found this PSU, and its VPD was read successfully
             // or it was not present. We shouldn't have tried to collect it
             // again!
-            id_ord_map::Entry::Occupied(_) => Err(anyhow::anyhow!(
-                "PSC {sp_slot} ({psc:?}) attempted to report PSU {psu_slot} \
-                 multiple times when the first collection succeeded"
-            )),
+            id_ord_map::Entry::Occupied(_) => {
+                Err(CollectorBug(anyhow::anyhow!(
+                    "PSC {sp_slot} ({psc:?}) attempted to report PSU \
+                    {psu_slot} multiple times, but the first collection from \
+                    that PSU succeeded"
+                )))
+            }
         }
     }
 
