@@ -1026,6 +1026,7 @@ mod test {
     use omicron_common::zpool_name::ZpoolName;
     use omicron_generation_kinds::SledConfigGeneration;
     use omicron_sled_agent::sim;
+    use omicron_test_utils::dev::test_cmds::Redactor;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
@@ -1246,6 +1247,15 @@ mod test {
         }
 
         swrite!(s, "\npower shelves found:\n");
+        // When the simulated SP simulates a VPD read error, MGS returns it to
+        // Nexus as an HTTP error, which gets formatted with timestamps, IP
+        // addresses, and UUIDs in its formatted representation, so don't let
+        // those make it into the snapshot file.
+        let error_redactor = {
+            let mut r = Redactor::noop();
+            r.basic(true).uuids(true);
+            r
+        };
         for shelf in &collection.power_shelves {
             swriteln!(
                 s,
@@ -1282,6 +1292,7 @@ mod test {
                         );
                     }
                     PsuIdentityResult::ReadError(error) => {
+                        let error = error_redactor.do_redact(error);
                         swriteln!(s, "            VPD: error: {error}");
                     }
                     PsuIdentityResult::NotPresent => {}
