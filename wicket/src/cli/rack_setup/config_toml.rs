@@ -323,8 +323,16 @@ fn populate_network_table(
         switch_table.set_implicit(true);
 
         for (port, cfg) in &config.switch0 {
-            let uplink = populate_uplink_table(cfg);
-            switch_table.insert(port, Item::Table(uplink));
+            match cfg {
+                UserSpecifiedPortConfig::Uplink(uplink) => {
+                    let uplink = populate_uplink_table(uplink);
+                    switch_table.insert(port, Item::Table(uplink));
+                }
+                UserSpecifiedPortConfig::Ddm(ddm) => {
+                    let ddm = populate_ddm_table(ddm);
+                    switch_table.insert(port, Item::Table(ddm));
+                }
+            }
         }
     }
 
@@ -338,8 +346,16 @@ fn populate_network_table(
         switch_table.set_implicit(true);
 
         for (port, cfg) in &config.switch1 {
-            let uplink = populate_uplink_table(cfg);
-            switch_table.insert(port, Item::Table(uplink));
+            match cfg {
+                UserSpecifiedPortConfig::Uplink(uplink) => {
+                    let uplink = populate_uplink_table(uplink);
+                    switch_table.insert(port, Item::Table(uplink));
+                }
+                UserSpecifiedPortConfig::Ddm(ddm) => {
+                    let ddm = populate_ddm_table(ddm);
+                    switch_table.insert(port, Item::Table(ddm));
+                }
+            }
         }
     }
 
@@ -383,28 +399,23 @@ fn populate_network_table(
     }
 }
 
+fn populate_ddm_table(cfg: &L1PortConfig) -> Table {
+    // A DDM port carries only physical-layer settings (the comment is
+    // operator-facing).
+    let L1PortConfig { speed, fec, autoneg, lldp, tx_eq } = cfg;
+    let mut ddm = Table::new();
+    ddm.decor_mut().set_prefix("\n# This port routes DDM traffic.\n");
+    ddm.insert("speed", string_item(enum_to_toml_string(&speed)));
+    if let Some(fec) = fec {
+        ddm.insert("fec", string_item(enum_to_toml_string(&fec)));
+    }
+    ddm.insert("autoneg", bool_item(*autoneg));
+    populate_lldp_and_tx_eq(&mut ddm, lldp, tx_eq);
+    ddm
+}
+
 #[must_use]
-fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
-    // This style ensures that if a new field is added, this fails loudly.
-    let uplink_port_config = match cfg {
-        UserSpecifiedPortConfig::Uplink(uplink) => uplink,
-        UserSpecifiedPortConfig::Ddm(l1) => {
-            // A DDM port carries only physical-layer settings (the comment is
-            // operator-facing).
-            let L1PortConfig { speed, fec, autoneg, lldp, tx_eq } = l1;
-            let mut uplink = Table::new();
-            uplink.decor_mut().set_prefix(
-                "\n# This port is configured automatically via DDM.\n",
-            );
-            uplink.insert("speed", string_item(enum_to_toml_string(&speed)));
-            if let Some(fec) = fec {
-                uplink.insert("fec", string_item(enum_to_toml_string(&fec)));
-            }
-            uplink.insert("autoneg", bool_item(*autoneg));
-            populate_lldp_and_tx_eq(&mut uplink, lldp, tx_eq);
-            return uplink;
-        }
-    };
+fn populate_uplink_table(cfg: &UplinkPortConfig) -> Table {
     let UplinkPortConfig {
         routes,
         addresses,
@@ -414,9 +425,7 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
         bgp_peers,
         lldp,
         tx_eq,
-        // Derived from the port kind, not operator-specified.
-        allow_ddm_traffic: _,
-    } = uplink_port_config;
+    } = cfg;
 
     let mut uplink = Table::new();
 

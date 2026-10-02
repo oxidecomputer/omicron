@@ -204,13 +204,6 @@ pub struct UplinkPortConfig {
     /// Transmit equalization overrides for this port.
     #[serde(default)]
     pub tx_eq: Option<TxEqConfig>,
-    /// Whether the switch should carry DDM traffic on this port.
-    ///
-    /// Derived from which [`UserSpecifiedPortConfig`] variant the port came
-    /// from rather than supplied by the operator, so it is absent from both the
-    /// TOML config and the API schema.
-    #[serde(skip)]
-    pub allow_ddm_traffic: bool,
 }
 
 impl From<v3::rack_setup::ManualPortConfig> for UplinkPortConfig {
@@ -224,7 +217,6 @@ impl From<v3::rack_setup::ManualPortConfig> for UplinkPortConfig {
             bgp_peers: old.bgp_peers,
             lldp: old.lldp,
             tx_eq: old.tx_eq,
-            allow_ddm_traffic: false,
         }
     }
 }
@@ -367,7 +359,6 @@ impl TryFrom<UnvalidatedPortConfig> for UserSpecifiedPortConfig {
                     bgp_peers: bgp_peers.unwrap_or_default(),
                     lldp,
                     tx_eq,
-                    allow_ddm_traffic: false,
                 }))
             }
             (None, Some(speed)) => {

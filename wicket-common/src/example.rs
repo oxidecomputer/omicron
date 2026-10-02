@@ -288,7 +288,6 @@ impl ExampleRackSetupData {
                     lldp: switch0_port0_lldp,
                     tx_eq,
                     autoneg: true,
-                    allow_ddm_traffic: false,
                 }),
             },
             #[rustfmt::skip]
@@ -311,7 +310,6 @@ impl ExampleRackSetupData {
                     lldp: switch1_port0_lldp,
                     tx_eq,
                     autoneg: true,
-                    allow_ddm_traffic: false,
                 }),
             },
             bgp: vec![BgpConfig {

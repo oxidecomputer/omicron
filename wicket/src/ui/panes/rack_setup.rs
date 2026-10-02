@@ -685,9 +685,6 @@ fn rss_config_text<'a>(
                 bgp_peers,
                 lldp,
                 tx_eq,
-                // TODO-multirack: Leave this out of RSS for now because it's
-                // not relevant to existing users until multirack is complete.
-                allow_ddm_traffic: _,
             } = uplink;
 
             let switch_description = match switch {

@@ -538,7 +538,6 @@ mod tests {
             bgp_peers: vec![],
             lldp: None,
             tx_eq: None,
-            allow_ddm_traffic: false,
         });
 
         eprintln!("** testing JSON round-trip");
