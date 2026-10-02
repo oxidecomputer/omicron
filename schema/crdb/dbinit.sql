@@ -1501,8 +1501,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
     /* TODO: doc. note the above 'intended_state' has a 'guest_shutdown' already
     so we may want this field's value to decide that gets set accordingly whenever
     a stop request comes in.  interval(0) means seconds */
-    shutdown_policy_action omicron.public.instance_shutdown_action NOT NULL,
     shutdown_policy_timeout INTERVAL(0),
+    shutdown_policy_action omicron.public.instance_shutdown_action NOT NULL default 'hard_off',
 
     CONSTRAINT vmm_iff_active_propolis CHECK (
         ((state = 'vmm') AND (active_propolis_id IS NOT NULL)) OR
