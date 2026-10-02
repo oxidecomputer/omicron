@@ -795,7 +795,7 @@ rustls = "0.23.40"
 rustls-pemfile = "2.2.0"
 rustyline = "14.0.0"
 rustix = "1.1.2"
-samael = { version = "0.0.19", features = ["xmlsec"] }
+samael = { version = "0.0.22", features = ["xmlsec"] }
 schemars = "0.8.22"
 scopeguard = "1.2.0"
 scuffle = { version = "0.1.0", features = ["daft", "smf-by-instance"] }
@@ -1180,3 +1180,4 @@ path = "workspace-hack"
 omicron-common = { path = "common" }
 omicron-generation-kinds = { path = "generation-kinds" }
 omicron-uuid-kinds = { path = "uuid-kinds" }
+
