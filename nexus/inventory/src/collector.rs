@@ -952,9 +952,8 @@ async fn collect_one_psc(
         // If the PSU is present (or might be present), try to read its
         // identity.
         let presence = component.presence;
-        let state =
-            if let Some(status) = PsuStatus::from_presence(presence) {
-                let identity = client
+        let state = if let Some(status) = PsuStatus::from_presence(presence) {
+            let identity = client
                 .sp_component_vpd_get(&sp.typ, sp.slot, &id)
                 .await
                 .with_context(|| {
@@ -966,19 +965,29 @@ async fn collect_one_psc(
                 .and_then(|response| {
                     let vpd = match response.into_inner() {
                         ComponentVpd::Pmbus(vpd) => vpd,
-                        other => return Err(anyhow!(
-                            "expected a PSU to report PMBus VPD, but got \
-                            {other:?} instead",
-                        )),
+                        other => {
+                            return Err(anyhow!(
+                                "expected a PSU to report PMBus VPD, but got \
+                                 {other:?} instead",
+                            ));
+                        }
                     };
                     Ok(convert_psu_vpd(&ctx, in_progress, vpd))
                 })
                 .map_err(|error| {
-                    let error = InlineErrorChain::new(&*error);
+                    // when formatting the error for use in the `vpd_error`
+                    // field or log line, we don't want to include the whole
+                    // context, because the record/log line will already incldue
+                    // everything in a more structured way...
+                    let error_string =
+                        InlineErrorChain::new(&*error).to_string();
+                    // ...but we *do* want to add all of that when including the
+                    // error in the collection-level error list.
+                    in_progress.found_error(error.context(ctx()).into());
                     slog::warn!(
                         log,
                         "failed to read VPD identity for PSC component {id:?}";
-                        "error" => &error,
+                        "error" => %error_string,
                         "psc_baseboard_id" => ?psc_baseboard_id,
                         "psc_slot" => %sp.slot,
                         "psu_slot" => %slot,
@@ -986,12 +995,12 @@ async fn collect_one_psc(
                         "psu_presence" => ?presence,
                         "mgs_url" => client.baseurl(),
                     );
-                    error.to_string()
+                    error_string
                 });
-                Some(PsuState { status, identity })
-            } else {
-                None
-            };
+            Some(PsuState { status, identity })
+        } else {
+            None
+        };
 
         let psu = Psu {
             time_collected: now_db_precision(),
