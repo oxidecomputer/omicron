@@ -805,11 +805,19 @@ impl CollectionBuilder {
         let psu_slot = psu.slot;
         match psus_for_psc.entry(psu_slot) {
             // A previous attempt to collect this PSU's VPD failed, so we tried
-            // again. Overwrite it iff we successfully read the VPD.
+            // again. Overwrite it if the subsequent attempt was not a read
+            // error, otherwise, do nothing..
             id_ord_map::Entry::Occupied(mut previous)
-                if !previous.get().identity().is_present() =>
+                if !previous.get().identity().is_read_error() =>
             {
-                if psu.identity().is_present() {
+                // Note that we overwrite it with *any* value that does not
+                // contain an identity read error. We may have previously failed
+                // to read the VPD because the PSU was being removed from the
+                // power shelf, so if it was present, and then we read the VPD
+                // and it failed, and then subsequently it was not present, we
+                // want to overwrite the "present/error" with the new "not
+                // present".
+                if !psu.identity().is_read_error() {
                     previous.insert(psu);
                     Ok(true)
                 } else {
