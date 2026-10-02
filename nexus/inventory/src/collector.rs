@@ -906,7 +906,7 @@ async fn collect_one_psc(
                 error!(
                     log,
                     "error reporting power shelf PSU";
-                    "error" => InlineErrorChain::new(&*error),
+                    "error" => InlineErrorChain::new(&error),
                     "psc_baseboard_id" => ?psc_baseboard_id,
                     "psc_slot" => %sp.slot,
                     "psu_slot" => %slot,
