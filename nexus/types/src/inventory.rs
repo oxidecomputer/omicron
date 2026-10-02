@@ -10,7 +10,6 @@
 //! convenient to separate these concerns.)
 
 use crate::external_api::physical_disk::PhysicalDiskKind;
-use anyhow::Context;
 use chrono::DateTime;
 use chrono::Utc;
 use clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership;
@@ -18,7 +17,6 @@ use daft::Diffable;
 pub use gateway_types::component::PowerState;
 pub use gateway_types::component::SpComponentPresence;
 pub use gateway_types::component::SpType;
-use gateway_types::component_vpd as gw_vpd;
 pub use gateway_types::rot::RotImageError;
 pub use gateway_types::rot::RotSlot;
 use iddqd::IdOrdItem;
@@ -660,68 +658,6 @@ pub struct PsuIdentity {
     pub mfr_date: String,
     /// `MFR_SERIAL` (PMBus command 0x9E).
     pub mfr_serial: String,
-}
-
-impl TryFrom<gw_vpd::PmbusDevice> for PsuIdentity {
-    type Error = anyhow::Error;
-
-    fn try_from(vpd: gw_vpd::PmbusDevice) -> Result<Self, Self::Error> {
-        fn expect_string(
-            command: &'static str,
-            value: Option<Vec<u8>>,
-        ) -> Result<String, anyhow::Error> {
-            let value = value.ok_or_else(|| {
-                anyhow::anyhow!(
-                    "expected a value for the PMBus {command} command"
-                )
-            })?;
-            String::from_utf8(value).with_context(|| {
-                format!(
-                    "expected the response to the PMBus {command} command to \
-                     be a UTF-8 string",
-                )
-            })
-        }
-
-        let gw_vpd::PmbusDevice {
-            mfr_id,
-            mfr_model,
-            mfr_revision,
-            mfr_location,
-            mfr_date,
-            mfr_serial,
-            // muRata PSUs do not implement the IC_DEVICE_ID or IC_DEVICE_REV
-            // PMbus commands, and Hubris will not try to read them, but if
-            // we encounter them unexpectedly, just ignore them.
-            ic_device_id: _,
-            ic_device_rev: _,
-        } = vpd;
-
-        Ok(Self {
-            mfr_id: expect_string("MFR_ID", mfr_id)?,
-            mfr_model: expect_string("MFR_MODEL", mfr_model)?,
-            // muRata uses the PMBus `MFR_REVISION` command to represent the
-            // PSU's *firmware* revision, rather than a hardware revision. We
-            // rename it to `firmware_rev` here to make that clear.
-            firmware_rev: expect_string("MFR_REVISION", mfr_revision)?,
-            mfr_location: expect_string("MFR_LOCATION", mfr_location)?,
-            mfr_date: expect_string("MFR_DATE", mfr_date)?,
-            mfr_serial: expect_string("MFR_SERIAL", mfr_serial)?,
-        })
-    }
-}
-
-impl TryFrom<gw_vpd::ComponentVpd> for PsuIdentity {
-    type Error = anyhow::Error;
-
-    fn try_from(vpd: gw_vpd::ComponentVpd) -> Result<Self, Self::Error> {
-        match vpd {
-            gw_vpd::ComponentVpd::Pmbus(vpd) => Self::try_from(vpd),
-            other => Err(anyhow::anyhow!(
-                "expected a PSU to report PMBus VPD, but got {other:?} instead",
-            )),
-        }
-    }
 }
 
 /// Describes the root of trust state found (from a service processor) during

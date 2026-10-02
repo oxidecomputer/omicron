@@ -20,7 +20,6 @@ use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::InternalDnsGenerationStatus;
 use nexus_types::inventory::Psu;
-use nexus_types::inventory::PsuIdentity;
 use nexus_types::inventory::PsuState;
 use nexus_types::inventory::PsuStatus;
 use nexus_types::inventory::RotPage;
@@ -806,7 +805,75 @@ async fn collect_one_psc(
     psc_baseboard_id: &Arc<BaseboardId>,
     sp: &gateway_types::component::SpIdentifier,
 ) -> Result<(), anyhow::Error> {
+    use gateway_types::component_vpd::ComponentVpd;
+    use gateway_types::component_vpd::PmbusDevice;
+    use nexus_types::inventory::PsuIdentity;
     use nexus_types::inventory::PsuSlot;
+
+    fn convert_psu_vpd(
+        ctx: impl Fn() -> String,
+        in_progress: &mut CollectionBuilder,
+        vpd: PmbusDevice,
+    ) -> PsuIdentity {
+        let mut expect_string =
+            |command: &'static str, value: Option<Vec<u8>>| {
+                let bytes = match value {
+                    Some(bytes) => bytes,
+                    None => {
+                        let err = anyhow::anyhow!(
+                            "expected the PSU to implement PMBus command {command}"
+                        )
+                        .context(ctx());
+                        in_progress.found_error(InventoryError::from(err));
+                        return String::from("<command not implemented>");
+                    }
+                };
+                // Ultimately, we will convert the received bytes to a string
+                // using `String::from_utf8_lossy`. However, we expect that the
+                // string value *should* be valid UTF-8, so first check whether
+                // the conversion will be lossy or not
+                let s = str::from_utf8(&bytes[..])
+                    .map_err(|e| {
+                        anyhow::anyhow!(
+                            "PMBus {command} should return ASCII bytes: {e}"
+                        )
+                    })
+                    .with_context(&ctx);
+                match s {
+                    Ok(s) => s.to_owned(),
+                    Err(e) => {
+                        in_progress.found_error(InventoryError::from(e));
+                        String::from_utf8_lossy(&bytes[..]).into_owned()
+                    }
+                }
+            };
+
+        let PmbusDevice {
+            mfr_id,
+            mfr_model,
+            mfr_revision,
+            mfr_location,
+            mfr_date,
+            mfr_serial,
+            // muRata PSUs do not implement the IC_DEVICE_ID or IC_DEVICE_REV
+            // PMbus commands, and Hubris will not try to read them, but if
+            // we encounter them unexpectedly, just ignore them.
+            ic_device_id: _,
+            ic_device_rev: _,
+        } = vpd;
+
+        PsuIdentity {
+            mfr_id: expect_string("MFR_ID", mfr_id),
+            mfr_model: expect_string("MFR_MODEL", mfr_model),
+            // muRata uses the PMBus `MFR_REVISION` command to represent the
+            // PSU's *firmware* revision, rather than a hardware revision. We
+            // rename it to `firmware_rev` here to make that clear.
+            firmware_rev: expect_string("MFR_REVISION", mfr_revision),
+            mfr_location: expect_string("MFR_LOCATION", mfr_location),
+            mfr_date: expect_string("MFR_DATE", mfr_date),
+            mfr_serial: expect_string("MFR_SERIAL", mfr_serial),
+        }
+    }
 
     let components = client
         .sp_component_list(&sp.typ, sp.slot)
@@ -825,6 +892,14 @@ async fn collect_one_psc(
         let id = &component.component;
         let dev_type = component.device.as_str();
 
+        // Don't type this out every time we might construct an error...
+        let ctx = || {
+            format!(
+                "MGS {:?}: SP {sp:?} ({psc_baseboard_id:?}): component {id:?}",
+                client.baseurl()
+            )
+        };
+
         let slot = match id.parse::<PsuSlot>() {
             Ok(slot) => slot,
 
@@ -833,12 +908,12 @@ async fn collect_one_psc(
             // the ones we expect the PSUs to have! report an error and
             // continue.
             Err(_) if matches!(dev_type, "mwocp68" | "mwocp67") => {
-                in_progress.found_error(InventoryError::from(anyhow!(
-                    "MGS {:?}: SP {sp:?} ({psc_baseboard_id:?}): component \
-                    {id:?} has a device type ({dev_type:?}) that seems to be a \
-                    PSU, but has a component ID we don't know about",
-                    client.baseurl(),
-                )));
+                let err = anyhow!(
+                    "device type {dev_type:?} seems to be a PSU, but this is \
+                     not a component ID we expect a PSU to have",
+                );
+                in_progress
+                    .found_error(InventoryError::from(err.context(ctx())));
                 continue;
             }
 
@@ -857,20 +932,26 @@ async fn collect_one_psc(
         // If the PSU is present (or might be present), try to read its
         // identity.
         let presence = component.presence;
-        let state = if let Some(status) = PsuStatus::from_presence(presence) {
-            let identity = client
+        let state =
+            if let Some(status) = PsuStatus::from_presence(presence) {
+                let identity = client
                 .sp_component_vpd_get(&sp.typ, sp.slot, &id)
                 .await
                 .with_context(|| {
                     format!(
-                        "MGS {:?}: SP {sp:?} ({psc_baseboard_id:?}): reading \
-                        VPD for PSC component {id:?} (component is \
+                        "reading VPD for PSU component {id:?} (component is \
                         {presence:?})",
-                        client.baseurl(),
                     )
                 })
                 .and_then(|response| {
-                    PsuIdentity::try_from(response.into_inner())
+                    let vpd = match response.into_inner() {
+                        ComponentVpd::Pmbus(vpd) => vpd,
+                        other => return Err(anyhow!(
+                            "expected a PSU to report PMBus VPD, but got \
+                            {other:?} instead",
+                        )),
+                    };
+                    Ok(convert_psu_vpd(&ctx, in_progress, vpd))
                 })
                 .map_err(|error| {
                     let error = InlineErrorChain::new(&*error);
@@ -887,10 +968,10 @@ async fn collect_one_psc(
                     );
                     error.to_string()
                 });
-            Some(PsuState { status, identity })
-        } else {
-            None
-        };
+                Some(PsuState { status, identity })
+            } else {
+                None
+            };
 
         let psu = Psu {
             time_collected: now_db_precision(),
