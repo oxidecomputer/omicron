@@ -400,32 +400,29 @@ status_fans_1_2 = 0x00
 id = "PSU2"
 device = "mwocp68"
 description = "PSU 2 MCU"
-presence = "Present"
+# Simulate one PSU not being present.
+presence = "NotPresent"
 sensors = [
-    { name = "psu2mcu", kind = "Temperature", last_data.value = 23.125, last_data.timestamp = 1234 },
-    { name = "psu2mcu", kind = "Temperature", last_data.value = 54.625, last_data.timestamp = 1234 },
-    { name = "psu2mcu", kind = "Temperature", last_data.value = 44.25, last_data.timestamp = 1234 },
-    { name = "V54_PSU2", kind = "Current", last_data.value = 35.1875, last_data.timestamp = 1234 },
-    { name = "V12_PSU2", kind = "Current", last_data.value = 0.0859375, last_data.timestamp = 1234 },
-    { name = "V54_PSU2", kind = "Voltage", last_data.value = 54.490234, last_data.timestamp = 1234 },
-    { name = "V12_PSU2", kind = "Voltage", last_data.value = 12.0703125, last_data.timestamp = 1234 },
-    { name = "V54_PSU2", kind = "InputCurrent", last_data.value = 8.15625, last_data.timestamp = 1234 },
-    { name = "V12_PSU2", kind = "InputCurrent", last_data.value = 8.15625, last_data.timestamp = 1234 },
-    { name = "V54_PSU2", kind = "InputVoltage", last_data.value = 242.25, last_data.timestamp = 1234 },
-    { name = "V12_PSU2", kind = "InputVoltage", last_data.value = 242.25, last_data.timestamp = 1234 },
-    { name = "psu2mcu", kind = "Speed", last_data.value = 12096.0, last_data.timestamp = 1234 },
-    { name = "psu2mcu", kind = "Speed", last_data.value = 9376.0, last_data.timestamp = 1234 },
+    { name = "psu4mcu", kind = "Temperature", last_error.value = "DeviceNotPresent", last_error.timestamp = 1234 },
+    { name = "psu4mcu", kind = "Temperature", last_error.value = "DeviceNotPresent", last_error.timestamp = 1234 },
+    { name = "psu4mcu", kind = "Temperature", last_error.value = "DeviceNotPresent", last_error.timestamp = 1234 },
+    { name = "V54_PSU4", kind = "Current", last_error.value = "DeviceNotPresent", last_error.timestamp = 1234 },
+    { name = "V12_PSU4", kind = "Current", last_error.value = "DeviceNotPresent", last_error.timestamp = 1234 },
+    { name = "V54_PSU4", kind = "Voltage", last_error.value = "DeviceNotPresent", last_error.timestamp = 1234 },
+    { name = "V12_PSU4", kind = "Voltage", last_error.value = "DeviceNotPresent", last_error.timestamp = 1234 },
+    { name = "V54_PSU4", kind = "InputCurrent", last_error.value = "DeviceNotPresent", last_error.timestamp = 1234 },
+    { name = "V12_PSU4", kind = "InputCurrent", last_error.value = "DeviceNotPresent", last_error.timestamp = 1234 },
+    { name = "V54_PSU4", kind = "InputVoltage", last_error.value = "DeviceNotPresent", last_error.timestamp = 1234 },
+    { name = "V12_PSU4", kind = "InputVoltage", last_error.value = "DeviceNotPresent", last_error.timestamp = 1234 },
+    { name = "psu4mcu", kind = "Speed", last_error.value = "DeviceNotPresent", last_error.timestamp = 1234 },
+    { name = "psu4mcu", kind = "Speed", last_error.value = "DeviceNotPresent", last_error.timestamp = 1234 },
 ]
 
-[simulated_sps.psc.components.vpd.pmbus]
-mfr_id = "Murata-PS"
-mfr_model = "MWOCP68-3600-D-RM"
-mfr_revision = "0762-0701-0000"
-mfr_location = "China"
-mfr_date = "2216"
-mfr_serial = "LL2216RB000C"
+[simulated_sps.psc.components.vpd]
+read_error = "NotPresent"
 
-# A MWOCP68 has two PMBus rails, V54_PSU{n} and V12_PSU{n}
+# TODO(eliza): there should be a way to make the simulated PMBus rails return an
+# error, too...
 [simulated_sps.psc.components.pmbus_rails.V54_PSU2]
 status_word = 0x0000
 status_vout = 0x00
@@ -502,30 +499,26 @@ status_fans_1_2 = 0x00
 id = "PSU4"
 device = "mwocp68"
 description = "PSU 4 MCU"
-presence = "Present"
+# Let's do a silly one!
+presence = "Timeout"
 sensors = [
-    { name = "psu4mcu", kind = "Temperature", last_data.value = 23.125, last_data.timestamp = 1234 },
-    { name = "psu4mcu", kind = "Temperature", last_data.value = 54.625, last_data.timestamp = 1234 },
-    { name = "psu4mcu", kind = "Temperature", last_data.value = 44.25, last_data.timestamp = 1234 },
-    { name = "V54_PSU4", kind = "Current", last_data.value = 35.1875, last_data.timestamp = 1234 },
-    { name = "V12_PSU4", kind = "Current", last_data.value = 0.0859375, last_data.timestamp = 1234 },
-    { name = "V54_PSU4", kind = "Voltage", last_data.value = 54.490234, last_data.timestamp = 1234 },
-    { name = "V12_PSU4", kind = "Voltage", last_data.value = 12.0703125, last_data.timestamp = 1234 },
-    { name = "V54_PSU4", kind = "InputCurrent", last_data.value = 8.15625, last_data.timestamp = 1234 },
-    { name = "V12_PSU4", kind = "InputCurrent", last_data.value = 8.15625, last_data.timestamp = 1234 },
-    { name = "V54_PSU4", kind = "InputVoltage", last_data.value = 242.25, last_data.timestamp = 1234 },
-    { name = "V12_PSU4", kind = "InputVoltage", last_data.value = 242.25, last_data.timestamp = 1234 },
-    { name = "psu4mcu", kind = "Speed", last_data.value = 12096.0, last_data.timestamp = 1234 },
-    { name = "psu4mcu", kind = "Speed", last_data.value = 9376.0, last_data.timestamp = 1234 },
+    { name = "psu4mcu", kind = "Temperature", last_error.value = "DeviceTimeout", last_error.timestamp = 1234 },
+    { name = "psu4mcu", kind = "Temperature", last_error.value = "DeviceTimeout", last_error.timestamp = 1234 },
+    { name = "psu4mcu", kind = "Temperature", last_error.value = "DeviceTimeout", last_error.timestamp = 1234 },
+    { name = "V54_PSU4", kind = "Current", last_error.value = "DeviceTimeout", last_error.timestamp = 1234 },
+    { name = "V12_PSU4", kind = "Current", last_error.value = "DeviceTimeout", last_error.timestamp = 1234 },
+    { name = "V54_PSU4", kind = "Voltage", last_error.value = "DeviceTimeout", last_error.timestamp = 1234 },
+    { name = "V12_PSU4", kind = "Voltage", last_error.value = "DeviceTimeout", last_error.timestamp = 1234 },
+    { name = "V54_PSU4", kind = "InputCurrent", last_error.value = "DeviceTimeout", last_error.timestamp = 1234 },
+    { name = "V12_PSU4", kind = "InputCurrent", last_error.value = "DeviceTimeout", last_error.timestamp = 1234 },
+    { name = "V54_PSU4", kind = "InputVoltage", last_error.value = "DeviceTimeout", last_error.timestamp = 1234 },
+    { name = "V12_PSU4", kind = "InputVoltage", last_error.value = "DeviceTimeout", last_error.timestamp = 1234 },
+    { name = "psu4mcu", kind = "Speed", last_error.value = "DeviceTimeout", last_error.timestamp = 1234 },
+    { name = "psu4mcu", kind = "Speed", last_error.value = "DeviceTimeout", last_error.timestamp = 1234 },
 ]
 
-[simulated_sps.psc.components.vpd.pmbus]
-mfr_id = "Murata-PS"
-mfr_model = "MWOCP68-3600-D-RM"
-mfr_revision = "0762-0701-0000"
-mfr_location = "China"
-mfr_date = "2216"
-mfr_serial = "LL2216RB000E"
+[simulated_sps.psc.components.vpd]
+read_error = "DeviceTimeout"
 
 # A MWOCP68 has two PMBus rails, V54_PSU{n} and V12_PSU{n}
 [simulated_sps.psc.components.pmbus_rails.V54_PSU4]
