@@ -110,3 +110,7 @@ pub mod update {
     pub use crate::v1::update::UpdateAbortBody;
     pub use crate::v1::update::UpdatePreparationProgress;
 }
+
+pub mod local {
+    pub use crate::v5::local::RackId;
+}
