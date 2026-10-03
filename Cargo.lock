@@ -659,6 +659,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.0.0"
+source = "git+https://github.com/oxidecomputer/propolis?rev=bd5596b957d80595da9ffd8ba2965385c48d3e76#bd5596b957d80595da9ffd8ba2965385c48d3e76"
 dependencies = [
  "bhyve_api_sys",
  "libc",
@@ -668,6 +669,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api_sys"
 version = "0.0.0"
+source = "git+https://github.com/oxidecomputer/propolis?rev=bd5596b957d80595da9ffd8ba2965385c48d3e76#bd5596b957d80595da9ffd8ba2965385c48d3e76"
 dependencies = [
  "libc",
  "strum 0.26.3",
@@ -11946,6 +11948,7 @@ dependencies = [
 [[package]]
 name = "propolis-api-types-versions"
 version = "0.0.0"
+source = "git+https://github.com/oxidecomputer/propolis?rev=bd5596b957d80595da9ffd8ba2965385c48d3e76#bd5596b957d80595da9ffd8ba2965385c48d3e76"
 dependencies = [
  "crucible-client-types",
  "propolis_types",
@@ -11958,6 +11961,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/propolis?rev=bd5596b957d80595da9ffd8ba2965385c48d3e76#bd5596b957d80595da9ffd8ba2965385c48d3e76"
 dependencies = [
  "async-trait",
  "base64 0.21.7",
@@ -11981,6 +11985,7 @@ dependencies = [
 [[package]]
 name = "propolis-mock-server"
 version = "0.0.0"
+source = "git+https://github.com/oxidecomputer/propolis?rev=bd5596b957d80595da9ffd8ba2965385c48d3e76#bd5596b957d80595da9ffd8ba2965385c48d3e76"
 dependencies = [
  "anyhow",
  "base64 0.21.7",
@@ -12012,6 +12017,7 @@ dependencies = [
 [[package]]
 name = "propolis_api_types"
 version = "0.0.0"
+source = "git+https://github.com/oxidecomputer/propolis?rev=bd5596b957d80595da9ffd8ba2965385c48d3e76#bd5596b957d80595da9ffd8ba2965385c48d3e76"
 dependencies = [
  "crucible-client-types",
  "propolis-api-types-versions",
@@ -12020,6 +12026,7 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
+source = "git+https://github.com/oxidecomputer/propolis?rev=bd5596b957d80595da9ffd8ba2965385c48d3e76#bd5596b957d80595da9ffd8ba2965385c48d3e76"
 dependencies = [
  "schemars 0.8.22",
  "serde",

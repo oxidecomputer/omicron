@@ -152,8 +152,8 @@ pub struct Instance {
     pub enable_jumbo_frames: bool,
 
     // TODO doc
-    pub shutdown_policy_action: InstanceShutdownAction,
     pub shutdown_policy_timeout: Option<TimeDelta>,
+    pub shutdown_policy_action: InstanceShutdownAction,
 }
 
 impl Instance {
@@ -181,6 +181,26 @@ impl Instance {
             IntendedState::Stopped
         };
 
+        let (shutdown_policy_action, shutdown_policy_timeout) =
+            match params.shutdown_policy {
+                Some(InstanceShutdownPolicy::HardOff) => {
+                    (InstanceShutdownAction::HardOff, None)
+                }
+                Some(InstanceShutdownPolicy::PowerButton { timeout_secs })
+                    if (1..=3600).contains(&timeout_secs) =>
+                {
+                    (
+                        InstanceShutdownAction::PowerButton,
+                        Some(TimeDelta::seconds(timeout_secs as i64)),
+                    )
+                }
+                // absent or invalid timeout, default to 600 seconds
+                _ => (
+                    InstanceShutdownAction::PowerButton,
+                    Some(TimeDelta::minutes(10)),
+                ),
+            };
+
         Self {
             identity,
             project_id,
@@ -204,8 +224,8 @@ impl Instance {
             intended_state,
             cpu_platform: params.cpu_platform.map(Into::into),
             enable_jumbo_frames: params.enable_jumbo_frames,
-            shutdown_policy_action: InstanceShutdownAction::HardOff,
-            shutdown_policy_timeout: None,
+            shutdown_policy_action,
+            shutdown_policy_timeout,
         }
     }
 
