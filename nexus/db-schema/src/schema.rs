@@ -453,8 +453,8 @@ table! {
         intended_state -> crate::enums::InstanceIntendedStateEnum,
         cpu_platform -> Nullable<crate::enums::InstanceCpuPlatformEnum>,
         enable_jumbo_frames -> Bool,
-        shutdown_policy_action -> crate::enums::InstanceShutdownActionEnum,
         shutdown_policy_timeout -> Nullable<Interval>,
+        shutdown_policy_action -> crate::enums::InstanceShutdownActionEnum,
     }
 }
 
