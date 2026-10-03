@@ -466,17 +466,19 @@ impl IdOrdItem for PowerShelf {
     strum::Display,
     strum::IntoStaticStr,
     strum::VariantArray,
+    strum::FromRepr,
     serde_with::DeserializeFromStr,
     serde_with::SerializeDisplay,
 )]
 #[strum(serialize_all = "UPPERCASE")]
+#[repr(u8)]
 pub enum PsuSlot {
-    Psu0,
-    Psu1,
-    Psu2,
-    Psu3,
-    Psu4,
-    Psu5,
+    Psu0 = 0,
+    Psu1 = 1,
+    Psu2 = 2,
+    Psu3 = 3,
+    Psu4 = 4,
+    Psu5 = 5,
 }
 
 impl PsuSlot {
