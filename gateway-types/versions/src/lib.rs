@@ -37,5 +37,5 @@ pub mod v1;
 pub mod v2;
 #[path = "component_vpd/mod.rs"]
 pub mod v4;
-#[path = "rack_id/mod.rs"]
+#[path = "gateway_id/mod.rs"]
 pub mod v5;

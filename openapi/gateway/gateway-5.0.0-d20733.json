@@ -160,18 +160,18 @@
         }
       }
     },
-    "/local/rack-id": {
+    "/local/identity": {
       "get": {
-        "summary": "Returns the rack UUID of the rack this management gateway service is",
-        "description": "located in.\n\nAll service processors accessed via this gateway can be assumed to be located in the rack with this ID.\n\nIf the rack UUID has not yet been set (i.e. because RSS has not yet run), this endpoint returns a 503 Service Unavailable error.",
-        "operationId": "rack_id_get",
+        "summary": "Returns the identity of this MGS instance, including the rack UUID and",
+        "description": "the gateway process UUID.\n\nAll service processors accessed via this gateway can be assumed to be located in the rack with the returned rack ID.\n\nIf the rack UUID has not yet been set (i.e. because RSS has not yet run), this endpoint returns a 503 Service Unavailable error.\n\nNote that unlike most MGS endpoints, this endpoint does not send any communication on the management network.",
+        "operationId": "gateway_identity_get",
         "responses": {
           "200": {
             "description": "successful operation",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RackId"
+                  "$ref": "#/components/schemas/GatewayIdentity"
                 }
               }
             }
@@ -2350,6 +2350,29 @@
           "request_id"
         ]
       },
+      "GatewayIdentity": {
+        "description": "The identity of this management gateway service.",
+        "type": "object",
+        "properties": {
+          "gateway_id": {
+            "description": "The unique UUID of this management gateway service process.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "rack_id": {
+            "description": "The rack UUID of the rack in which this management gateway is located.\n\nAll service processors contacted through this gateway can be assumed to be located in this rack.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RackUuid"
+              }
+            ]
+          }
+        },
+        "required": [
+          "gateway_id",
+          "rack_id"
+        ]
+      },
       "GetCfpaParams": {
         "type": "object",
         "properties": {
@@ -3160,18 +3183,6 @@
           "A0",
           "A1",
           "A2"
-        ]
-      },
-      "RackId": {
-        "description": "The rack ID of the rack in which this management gateway is located.",
-        "type": "object",
-        "properties": {
-          "rack_id": {
-            "$ref": "#/components/schemas/RackUuid"
-          }
-        },
-        "required": [
-          "rack_id"
         ]
       },
       "RackUuid": {

@@ -17,6 +17,7 @@ pub struct ServerContext {
     pub mgmt_switch: ManagementSwitch,
     pub host_phase2_provider: Arc<InMemoryHostPhase2Provider>,
     pub rack_id: OnceLock<RackUuid>,
+    pub mgs_id: Uuid,
     pub latencies: oximeter_instruments::http::LatencyTracker,
     pub log: Logger,
 }
@@ -60,6 +61,7 @@ impl ServerContext {
             mgmt_switch,
             host_phase2_provider,
             rack_id,
+            mgs_id: id,
             log: log.clone(),
         }))
     }
