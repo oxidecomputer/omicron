@@ -128,18 +128,26 @@ impl<'a> Collector<'a> {
         );
 
         // First, determine the gateway's rack ID.
-        let rack_id = client.rack_id_get().await.with_context(|| {
-            format!("MGS {:?}: determining gateway's rack ID", client.baseurl())
-        });
-        let rack_id = match rack_id {
-            Ok(id) => id.into_inner().rack_id,
-            Err(e) => {
-                in_progress.found_error(InventoryError::from(e));
-                return;
-            }
-        };
+        let mgs_id_result =
+            client.gateway_identity_get().await.with_context(|| {
+                format!(
+                    "MGS {:?}: determining gateway's identity",
+                    client.baseurl()
+                )
+            });
+        let gateway_client::types::GatewayIdentity { rack_id, gateway_id } =
+            match mgs_id_result {
+                Ok(id) => id.into_inner(),
+                Err(e) => {
+                    in_progress.found_error(InventoryError::from(e));
+                    return;
+                }
+            };
 
-        let log = log.new(o!("rack_id" => rack_id.to_string()));
+        let log = log.new(o!(
+            "rack_id" => rack_id.to_string(),
+            "gateway_id" => gateway_id.to_string(),
+        ));
 
         // Next, see which SPs MGS can see via Ignition.
         let ignition_result = client.ignition_list().await.with_context(|| {
