@@ -10,7 +10,6 @@ use nexus_db_model::Probe;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_types::external_api::ip_pool;
-use nexus_types::external_api::multicast;
 use nexus_types::external_api::probe;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
@@ -218,19 +217,6 @@ impl super::Nexus {
             let mut seen =
                 HashSet::with_capacity(params.multicast_groups.len());
             for spec in &params.multicast_groups {
-                if matches!(spec.ip_version, Some(IpVersion::V6))
-                    || matches!(
-                        &spec.group,
-                        multicast::MulticastGroupIdentifier::Ip(ip)
-                            if ip.is_ipv6()
-                    )
-                {
-                    return Err(Error::invalid_request(
-                        "probes do not support IPv6 multicast group \
-                         memberships",
-                    ));
-                }
-
                 let source_ips = spec.source_ips.as_deref();
 
                 // TODO: Revisit source list validation when the probe
@@ -254,23 +240,6 @@ impl super::Nexus {
                 let group_id = resolved.id;
                 if resolved.created {
                     created_group_ids.push(group_id);
-                }
-
-                let selector = multicast::MulticastGroupSelector {
-                    multicast_group: multicast::MulticastGroupIdentifier::Id(
-                        group_id.into_untyped_uuid(),
-                    ),
-                };
-                let (.., db_group) = self
-                    .multicast_group_lookup(opctx, &selector)
-                    .await?
-                    .fetch()
-                    .await?;
-                if db_group.multicast_ip.ip().is_ipv6() {
-                    return Err(Error::invalid_request(
-                        "probes do not support IPv6 multicast group \
-                         memberships",
-                    ));
                 }
 
                 if !seen.insert(group_id.into_untyped_uuid()) {
