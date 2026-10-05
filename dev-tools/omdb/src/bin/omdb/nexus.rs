@@ -1520,7 +1520,7 @@ fn print_task_vmm_stop_for_update(details: &serde_json::Value) {
         Ok(VmmStopForUpdateStatus {
             vmms_stopped_by_sled,
             vmms_failed_by_sled,
-            error,
+            error_messages,
         }) => {
             const STOPPED: &str = "VMMs stopped for sled evacuation:";
             const ERROR: &str = "error:";
@@ -1549,8 +1549,13 @@ fn print_task_vmm_stop_for_update(details: &serde_json::Value) {
                     }
                 }
             }
-            if let Some(error) = error {
-                println!("    {ERROR:<WIDTH$}{error}");
+
+            // TODO-K: double check this is actually what I want the errors to
+            // look like
+            if !error_messages.is_empty() {
+                for error in error_messages {
+                    println!("    {ERROR:<WIDTH$}{error}");
+                }
             }
         }
     };

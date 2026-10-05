@@ -133,8 +133,8 @@ pub struct VmmStopForUpdateStatus {
     /// Number of VMMs that failed to stop in this activation, keyed by the sled
     /// they are running on.
     pub vmms_failed_by_sled: IdOrdMap<VmmsBySled>,
-    /// Error encountered during this activation, if any.
-    pub error: Option<String>,
+    /// Errors encountered during this activation, if any.
+    pub error_messages: Vec<String>,
 }
 
 /// The status of an `instance_updater` background task activation.

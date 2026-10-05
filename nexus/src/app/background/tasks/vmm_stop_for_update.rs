@@ -21,6 +21,47 @@ use serde_json::json;
 use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
 
+struct VmmStopForUpdateResult {
+    vmms_stopped_by_sled: IdOrdMap<VmmsBySled>,
+    vmms_failed_by_sled: IdOrdMap<VmmsBySled>,
+    errors: Vec<Error>,
+}
+
+impl VmmStopForUpdateResult {
+    fn new() -> Self {
+        Self {
+            vmms_stopped_by_sled: IdOrdMap::new(),
+            vmms_failed_by_sled: IdOrdMap::new(),
+            errors: Vec::new(),
+        }
+    }
+
+    /// Merges the values of `self` with a given [`VmmStopForUpdateResult`]
+    fn merge(&mut self, other: VmmStopForUpdateResult) {
+        let VmmStopForUpdateResult {
+            vmms_stopped_by_sled,
+            vmms_failed_by_sled,
+            errors,
+        } = other;
+
+        for VmmsBySled { sled_id, vmm_ids } in vmms_stopped_by_sled {
+            self.vmms_stopped_by_sled
+                .entry(sled_id)
+                .or_insert_with(|| VmmsBySled { sled_id, vmm_ids: Vec::new() })
+                .vmm_ids
+                .extend(vmm_ids);
+        }
+        for VmmsBySled { sled_id, vmm_ids } in vmms_failed_by_sled {
+            self.vmms_failed_by_sled
+                .entry(sled_id)
+                .or_insert_with(|| VmmsBySled { sled_id, vmm_ids: Vec::new() })
+                .vmm_ids
+                .extend(vmm_ids);
+        }
+        self.errors.extend(errors);
+    }
+}
+
 pub struct VmmStopForUpdate {
     datastore: Arc<DataStore>,
 }
@@ -32,16 +73,26 @@ impl VmmStopForUpdate {
 
     /// Retrieves a list of VMMs marked to be stopped for update by sled, and
     /// stops them in batches.
-    async fn stop_all(&self, opctx: &OpContext) -> Result<(), Error> {
+    async fn stop_all(&self, opctx: &OpContext) -> VmmStopForUpdateResult {
+        let mut result = VmmStopForUpdateResult::new();
         let mut paginator = Paginator::new(
             SQL_BATCH_SIZE,
             dropshot::PaginationOrder::Ascending,
         );
         while let Some(p) = paginator.next() {
-            let vmms = self
+            let vmms = match self
                 .datastore
                 .vmm_list_marked_stop_for_update(opctx, &p.current_pagparams())
-                .await?;
+                .await
+            {
+                Ok(vmms) => vmms,
+                Err(err) => {
+                    // TODO-K: Verify how the paginator actually works. Should
+                    // I break here or not?
+                    result.errors.push(err);
+                    break;
+                }
+            };
             paginator = p.found_batch(&vmms, &|vmm| vmm.id);
 
             let mut vmms_by_sled = IdOrdMap::new();
@@ -56,12 +107,11 @@ impl VmmStopForUpdate {
                     .vmm_ids
                     .push(PropolisUuid::from_untyped_uuid(vmm.id));
             }
-            self.stop_batch(vmms_by_sled, opctx).await;
+            let batch_result = self.stop_batch(vmms_by_sled, opctx).await;
+            result.merge(batch_result);
         }
 
-        // TODO-K: Actually return some useful information like how many VMMs
-        // were stoppped, which sleds these we in, etc
-        Ok(())
+        result
     }
 
     /// Stops a batch of VMMs
@@ -69,44 +119,36 @@ impl VmmStopForUpdate {
         &self,
         vmms_by_sled: IdOrdMap<VmmsBySled>,
         opctx: &OpContext,
-    ) {
-        for sled in vmms_by_sled {
-            let VmmsBySled { sled_id, vmm_ids } = sled;
+    ) -> VmmStopForUpdateResult {
+        for VmmsBySled { sled_id, vmm_ids } in &vmms_by_sled {
             slog::info!(
                 opctx.log,
                 "Stopping VMMs for update";
                 "sled_id" => %sled_id,
                 "vmms" => ?vmm_ids,
             );
-
             // TODO-K: actually stop the VMMs in `vmms_by_sled` and record
             // how many were stopped on each sled, how many failed, whatever
         }
 
-        // TODO-K: Return some useful information like how many VMMs
-        // were stoppped, which sleds these we in, etc
+        // TODO-K: actually return the results of the stopped vmms
+        VmmStopForUpdateResult::new()
     }
 
     pub(crate) async fn actually_activate(
         &mut self,
         opctx: &OpContext,
     ) -> VmmStopForUpdateStatus {
-        let _results = match self.stop_all(opctx).await {
-            Ok(results) => results,
-            Err(err) => {
-                let err = InlineErrorChain::new(&err);
-                slog::error!(
-                    &opctx.log,
-                    "failed to stop VMMs marked to stop for a sled update";
-                    &err,
-                );
-                return VmmStopForUpdateStatus {
-                    vmms_stopped_by_sled: IdOrdMap::new(),
-                    vmms_failed_by_sled: IdOrdMap::new(),
-                    error: Some(err.to_string()),
-                };
-            }
-        };
+        let VmmStopForUpdateResult {
+            vmms_stopped_by_sled,
+            vmms_failed_by_sled,
+            errors,
+        } = self.stop_all(opctx).await;
+
+        let error_messages: Vec<String> = errors
+            .iter()
+            .map(|err| InlineErrorChain::new(err).to_string())
+            .collect();
 
         // TODO-K: Once we have useful information log it
         //    if results.vmms_by_sled.is_empty() {
@@ -126,14 +168,18 @@ impl VmmStopForUpdate {
         //      TODO-K: for debug show IDs? also show which failed
         //    }
 
-        // TODO-K: Should return a nicely structured struct here instead
-        let vmms_stopped_by_sled = IdOrdMap::new();
-        let vmms_failed_by_sled = IdOrdMap::new();
+        if !error_messages.is_empty() {
+            slog::error!(
+                &opctx.log,
+                "failed to stop VMMs marked to stop for a sled update";
+                "errors" => ?error_messages,
+            );
+        }
 
         VmmStopForUpdateStatus {
             vmms_stopped_by_sled,
             vmms_failed_by_sled,
-            error: None,
+            error_messages,
         }
     }
 }
