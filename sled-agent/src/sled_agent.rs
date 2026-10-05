@@ -5,9 +5,6 @@
 //! Sled agent implementation
 
 use crate::artifact_store::{ArtifactStore, SledAgentArtifactStoreWrapper};
-use crate::bootstrap::sprockets_client::{
-    SprocketsClient, SprocketsClientError,
-};
 use crate::config::Config;
 use crate::hardware_monitor::HardwareMonitorHandle;
 use crate::instance_manager::InstanceManager;
@@ -44,14 +41,12 @@ use illumos_utils::zfs::SizeDetails;
 use illumos_utils::zfs::Zfs;
 use illumos_utils::zpool::PathInPool;
 use illumos_utils::zpool::ZpoolOrRamdisk;
-use internal_dns_resolver::Resolver;
 use itertools::Itertools as _;
 use omicron_common::address::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use omicron_common::address::{
     Ipv6Subnet, SLED_PREFIX_LENGTH, get_sled_address,
 };
 use omicron_common::api::external::{ByteCount, ByteCountRangeError, Vni};
-use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::shared::DelegatedZvol;
 use omicron_common::api::internal::shared::{
     ExternalIpGatewayMap, ResolvedVpcRouteSet, ResolvedVpcRouteState,
@@ -64,6 +59,9 @@ use omicron_uuid_kinds::{
 };
 use oximeter_instruments::http::LatencyTracker;
 use oxnet::IpNet;
+use sled_agent_bootstrap_common::sprockets::{
+    SprocketsClient, SprocketsClientError,
+};
 use sled_agent_config_reconciler::{
     ConfigReconcilerHandle, ConfigReconcilerSpawnToken, InternalDisks,
     InternalDisksReceiver, LedgerNewConfigError, LedgerTaskError,
@@ -78,7 +76,7 @@ use sled_agent_types::attached_subnet::AttachedSubnet;
 use sled_agent_types::attached_subnet::AttachedSubnets;
 use sled_agent_types::dataset::LocalStorageDatasetDeleteRequest;
 use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
-use sled_agent_types::disk::DiskStateRequested;
+use sled_agent_types::disk::CompressionAlgorithm;
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::instance::ResolvedVpcFirewallRule;
 use sled_agent_types::instance::{
@@ -218,6 +216,8 @@ impl From<Error> for omicron_common::api::external::Error {
 // Provide a more specific HTTP error for some sled agent errors.
 impl From<Error> for dropshot::HttpError {
     fn from(err: Error) -> Self {
+        use crate::instance::Error as InstanceError;
+        use crate::instance_manager::Error as InstanceManagerError;
         use dropshot::ClientErrorStatusCode;
         use dropshot::ErrorStatusCode;
 
@@ -225,14 +225,12 @@ impl From<Error> for dropshot::HttpError {
         const INSTANCE_CHANNEL_FULL: &str = "INSTANCE_CHANNEL_FULL";
         const SUBNET_ALREADY_ATTACHED: &str = "SUBNET_ALREADY_ATTACHED";
         match err {
-            Error::Instance(crate::instance_manager::Error::Instance(
-                instance_error,
-            )) => {
+            Error::Instance(InstanceManagerError::Instance(instance_error)) => {
                 match instance_error {
                     // The instance's request channel is full, so it cannot
                     // currently process this request. Shed load, but indicate
                     // to the client that it can try again later.
-                    err @ crate::instance::Error::FailedSendChannelFull => {
+                    err @ InstanceError::FailedSendChannelFull => {
                         HttpError::for_unavail(
                             Some(INSTANCE_CHANNEL_FULL.to_string()),
                             // InlineErrorChain isn't really necessary here, but include it anyway,
@@ -240,7 +238,7 @@ impl From<Error> for dropshot::HttpError {
                             InlineErrorChain::new(&err).to_string(),
                         )
                     }
-                    crate::instance::Error::Propolis(propolis_error) => {
+                    InstanceError::Propolis(propolis_error) => {
                         if let Some(status_code) =
                             propolis_error.status().and_then(|status| {
                                 ErrorStatusCode::try_from(status).ok()
@@ -268,13 +266,13 @@ impl From<Error> for dropshot::HttpError {
                             propolis_error.to_string(),
                         )
                     }
-                    crate::instance::Error::Transition(omicron_error) => {
+                    InstanceError::Transition(omicron_error) => {
                         // Preserve the status associated with the wrapped
                         // Omicron error so that Nexus will see it in the
                         // Progenitor client error it gets back.
                         HttpError::from(omicron_error)
                     }
-                    crate::instance::Error::Terminating => {
+                    InstanceError::Terminating => {
                         HttpError::for_client_error(
                             Some(NO_SUCH_INSTANCE.to_string()),
                             ClientErrorStatusCode::GONE,
@@ -284,7 +282,7 @@ impl From<Error> for dropshot::HttpError {
                             InlineErrorChain::new(&instance_error).to_string(),
                         )
                     }
-                    err @ crate::instance::Error::SubnetAlreadyAttached(_) => {
+                    err @ InstanceError::SubnetAlreadyAttached(_) => {
                         HttpError::for_client_error(
                             Some(SUBNET_ALREADY_ATTACHED.to_string()),
                             ClientErrorStatusCode::CONFLICT,
@@ -292,19 +290,62 @@ impl From<Error> for dropshot::HttpError {
                             InlineErrorChain::new(&err).to_string(),
                         )
                     }
-                    e => HttpError::for_internal_error(
-                        InlineErrorChain::new(&e).to_string(),
-                    ),
+                    err @ (InstanceError::Timeout(_)
+                    | InstanceError::VnicCreation(_)
+                    | InstanceError::Notification(_)
+                    | InstanceError::Migration(_)
+                    | InstanceError::NicNotInPropolisSpec(_)
+                    | InstanceError::ZoneCommand(_)
+                    | InstanceError::ZoneBoot(_)
+                    | InstanceError::ZoneEnsureAddress(_)
+                    | InstanceError::ZoneInstall(_)
+                    | InstanceError::SerdeJsonError(_)
+                    | InstanceError::Opte(_)
+                    | InstanceError::InvalidHostname(_)
+                    | InstanceError::ResolveError(_)
+                    | InstanceError::VmNotRunning(_)
+                    | InstanceError::PropolisAlreadyRegistered(_)
+                    | InstanceError::U2NotFound
+                    | InstanceError::Io(_)
+                    | InstanceError::FailedSendChannelClosed
+                    | InstanceError::FailedSendClientClosed
+                    | InstanceError::RequestDropped(_)) => {
+                        HttpError::for_internal_error(
+                            InlineErrorChain::new(&err).to_string(),
+                        )
+                    }
                 }
             }
+            Error::Instance(e @ InstanceManagerError::NoSuchVmm(_)) => {
+                HttpError::for_not_found(
+                    Some(NO_SUCH_INSTANCE.to_string()),
+                    // NoSuchVmm has no source error, so it's currently not
+                    // necessary to use a chain-logging adapter here, but if
+                    // that changes in the future, the compiler won't complain.
+                    InlineErrorChain::new(&e).to_string(),
+                )
+            }
             Error::Instance(
-                e @ crate::instance_manager::Error::NoSuchVmm(_),
-            ) => HttpError::for_not_found(
-                Some(NO_SUCH_INSTANCE.to_string()),
-                // NoSuchVmm has no source error, so it's currently not necessary to use a
-                // chain-logging adapter here, but if that changes in the future, the compiler
-                // won't complain.
-                InlineErrorChain::new(&e).to_string(),
+                e @ InstanceManagerError::VmmRegistrationDisallowed(reason),
+            ) => {
+                HttpError::for_unavail(
+                    Some(reason.http_error_code().to_string()),
+                    // VmmRegistrationDisallowed has no source error, so it's
+                    // currently not necessary to use a chain-logging adapter
+                    // here, but if that changes in the future, the compiler
+                    // won't complain.
+                    InlineErrorChain::new(&e).to_string(),
+                )
+            }
+            err @ Error::Instance(
+                InstanceManagerError::Opte(_)
+                | InstanceManagerError::Underlay(_)
+                | InstanceManagerError::ZoneBundle(_)
+                | InstanceManagerError::FailedSendInstanceManagerClosed
+                | InstanceManagerError::FailedSendClientClosed
+                | InstanceManagerError::RequestDropped(_),
+            ) => HttpError::for_internal_error(
+                InlineErrorChain::new(&err).to_string(),
             ),
             Error::ZoneBundle(ref inner) => match inner {
                 BundleError::NoStorage | BundleError::Unavailable { .. } => {
@@ -325,7 +366,32 @@ impl From<Error> for dropshot::HttpError {
                         inner.to_string(),
                     )
                 }
-                _ => HttpError::for_internal_error(
+                err @ (BundleError::Command { .. }
+                | BundleError::CreateDirectory { .. }
+                | BundleError::OpenBundleFile { .. }
+                | BundleError::AddBundleData { .. }
+                | BundleError::ReadBundleData { .. }
+                | BundleError::CopyArchive { .. }
+                | BundleError::ReadDirectory { .. }
+                | BundleError::Metadata { .. }
+                | BundleError::Serialization(_)
+                | BundleError::Deserialization(_)
+                | BundleError::Task(_)
+                | BundleError::FailedSend(_)
+                | BundleError::DroppedRequest(_)
+                | BundleError::BundleFailed(_)
+                | BundleError::Zone(_)
+                | BundleError::PathBuf(_)
+                | BundleError::Cleanup(_)
+                | BundleError::CreateSnapshot(_)
+                | BundleError::DestroySnapshot(_)
+                | BundleError::ListSnapshot(_)
+                | BundleError::EnsureDataset(_)
+                | BundleError::DestroyDataset(_)
+                | BundleError::ListDatasets(_)
+                | BundleError::SetProperty(_)
+                | BundleError::GetProperty(_)
+                | BundleError::WalkDir(_)) => HttpError::for_internal_error(
                     InlineErrorChain::new(&err).to_string(),
                 ),
             },
@@ -333,8 +399,29 @@ impl From<Error> for dropshot::HttpError {
                 let err = omicron_common::api::external::Error::from(err);
                 err.into()
             }
-            e => HttpError::for_internal_error(
-                InlineErrorChain::new(&e).to_string(),
+            err @ (Error::BootDiskNotFound
+            | Error::Config(_)
+            | Error::BackingFs(_)
+            | Error::SwapDevice(_)
+            | Error::Etherstub(_)
+            | Error::EtherstubVnic(_)
+            | Error::Bootstrap(_)
+            | Error::DeleteAddress(_)
+            | Error::Underlay(_)
+            | Error::SledSubnet { .. }
+            | Error::Opte(_)
+            | Error::Hardware(_)
+            | Error::ResolveError(_)
+            | Error::ZpoolList(_)
+            | Error::Bootstore(_)
+            | Error::EarlyNetworkDeserialize(_)
+            | Error::SupportBundle(_)
+            | Error::Metrics(_)
+            | Error::UnexpectedRevision(_)
+            | Error::RepoDepotStart(_)
+            | Error::TimeNotSynchronized
+            | Error::Rot(_)) => HttpError::for_internal_error(
+                InlineErrorChain::new(&err).to_string(),
             ),
         }
     }
@@ -622,10 +709,13 @@ impl SledAgent {
             long_running_task_handles.zone_bundler.clone(),
             vmm_reservoir_manager.clone(),
             metrics_manager.request_queue(),
+            config_reconciler_spawn_token.subscribe_update_disposition(),
         )?;
 
-        let svc_config =
-            services::Config::new(identifiers, config.sidecar_revision.clone());
+        let svc_config = services::Config::new(
+            identifiers,
+            config.deployment.sidecar_revision(),
+        );
 
         // Get our system network config from the bootstore; we cannot proceed
         // until we have this, as we need to set up uplinks inside the switch
@@ -698,7 +788,7 @@ impl SledAgent {
         long_running_task_handles
             .scrimlet_reconcilers
             .set_sled_agent_networking_info_once(SledAgentNetworkingInfo {
-                system_networking_config_rx: network_config_rx.clone(),
+                system_networking_config_rx: network_config_rx,
                 mode: ScrimletReconcilersMode::SwitchZone(
                     this_sled_switch_zone_ip,
                 ),
@@ -722,14 +812,9 @@ impl SledAgent {
             .sled_agent_started(SledAgentInfo {
                 config: svc_config,
                 port_manager: port_manager.clone(),
-                resolver: Resolver::new_from_ip(
-                    parent_log.new(o!("component" => "DnsResolver")),
-                    *sled_address.ip(),
-                )?,
                 underlay_address: *sled_address.ip(),
                 local_switch_zone_ip: this_sled_switch_zone_ip,
                 rack_id: request.body.rack_id,
-                network_config_rx,
                 metrics_queue: metrics_manager.request_queue(),
             })
             .await?;
@@ -964,15 +1049,6 @@ impl SledAgent {
         self.inner.config_reconciler.set_sled_config(config).await
     }
 
-    /// Returns whether or not the sled believes itself to be a scrimlet
-    pub fn get_role(&self) -> SledRole {
-        if self.inner.hardware.is_scrimlet() {
-            SledRole::Scrimlet
-        } else {
-            SledRole::Gimlet
-        }
-    }
-
     /// Idempotently ensures that a given instance is registered with this sled,
     /// i.e., that it can be addressed by future calls to
     /// [`Self::instance_ensure_state`].
@@ -1083,19 +1159,6 @@ impl SledAgent {
             .get_instance_state(propolis_id)
             .await
             .map_err(|e| Error::Instance(e))
-    }
-
-    /// Idempotently ensures that the given virtual disk is attached (or not) as
-    /// specified.
-    ///
-    /// NOTE: Not yet implemented.
-    pub async fn disk_ensure(
-        &self,
-        _disk_id: Uuid,
-        _initial_state: DiskRuntimeState,
-        _target: DiskStateRequested,
-    ) -> Result<DiskRuntimeState, Error> {
-        todo!("Disk attachment not yet implemented");
     }
 
     pub fn artifact_store(&self) -> &ArtifactStore<InternalDisksReceiver> {
@@ -1306,6 +1369,7 @@ impl SledAgent {
             reconciler_status,
             last_reconciliation,
             file_source_resolver,
+            instance_manager_status: self.inner.instances.status(),
             smf_services_enabled_not_online,
             reference_measurements: self.inner.measurements.to_inventory(),
             fmd,
@@ -1440,7 +1504,7 @@ impl SledAgent {
             size_details: Some(SizeDetails {
                 quota: Some(dataset_size),
                 reservation: Some(dataset_size),
-                compression: omicron_common::disk::CompressionAlgorithm::Off,
+                compression: CompressionAlgorithm::Off,
             }),
             id: None,
             additional_options: None,

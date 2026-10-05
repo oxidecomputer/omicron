@@ -5,8 +5,10 @@
 //! Error handling facilities for the management gateway.
 
 use crate::management_switch::SpIdentifier;
+use dropshot::ErrorStatusCode;
 use dropshot::HttpError;
 use gateway_messages::SpError;
+use gateway_messages::VpdError;
 use gateway_sp_comms::BindError;
 pub use gateway_sp_comms::error::CommunicationError;
 use gateway_sp_comms::error::UpdateError;
@@ -186,12 +188,72 @@ fn comms_error_to_http(
                 InlineErrorChain::new(&error).to_string(),
             )
         }
+        CommunicationError::SpError(SpError::Vpd(vpd_error)) => {
+            vpd_error_to_http(error, vpd_error)
+        }
         _ => http_err_with_message(
             dropshot::ErrorStatusCode::SERVICE_UNAVAILABLE,
             "SpCommunicationFailed",
             InlineErrorChain::new(&error).to_string(),
         ),
     }
+}
+
+fn vpd_error_to_http(error: &dyn Error, kind: &VpdError) -> HttpError {
+    let (status_code, error_code) = match kind {
+        VpdError::InvalidDevice => {
+            (ErrorStatusCode::BAD_REQUEST, "InvalidVpdDevice")
+        }
+        VpdError::NotPresent => {
+            (ErrorStatusCode::SERVICE_UNAVAILABLE, "VpdDeviceNotPresent")
+        }
+        VpdError::DeviceError => {
+            (ErrorStatusCode::INTERNAL_SERVER_ERROR, "VpdDeviceError")
+        }
+        VpdError::Unavailable => {
+            (ErrorStatusCode::SERVICE_UNAVAILABLE, "VpdDeviceUnavailable")
+        }
+        VpdError::DeviceTimeout => {
+            (ErrorStatusCode::SERVICE_UNAVAILABLE, "VpdDeviceTimeout")
+        }
+        VpdError::DeviceOff => {
+            (ErrorStatusCode::SERVICE_UNAVAILABLE, "VpdDeviceOff")
+        }
+        VpdError::BadAddress => {
+            (ErrorStatusCode::INTERNAL_SERVER_ERROR, "InvalidVpdAddress")
+        }
+        VpdError::BadBuffer => {
+            (ErrorStatusCode::INTERNAL_SERVER_ERROR, "InvalidVpdBuffer")
+        }
+        VpdError::BadRead => {
+            (ErrorStatusCode::INTERNAL_SERVER_ERROR, "VpdReadFailed")
+        }
+        VpdError::BadWrite => {
+            (ErrorStatusCode::INTERNAL_SERVER_ERROR, "VpdWriteFailed")
+        }
+        VpdError::BadLock => {
+            (ErrorStatusCode::INTERNAL_SERVER_ERROR, "VpdLockFailed")
+        }
+        VpdError::NotImplemented => {
+            (ErrorStatusCode::NOT_IMPLEMENTED, "VpdNotImplemented")
+        }
+        VpdError::IsLocked => (ErrorStatusCode::CONFLICT, "VpdLocked"),
+        VpdError::PartiallyLocked => {
+            (ErrorStatusCode::CONFLICT, "VpdPartiallyLocked")
+        }
+        VpdError::AlreadyLocked => {
+            (ErrorStatusCode::CONFLICT, "VpdAlreadyLocked")
+        }
+        VpdError::TaskRestarted => {
+            (ErrorStatusCode::SERVICE_UNAVAILABLE, "VpdTaskRestarted")
+        }
+    };
+
+    http_err_with_message(
+        status_code,
+        error_code,
+        InlineErrorChain::new(&error).to_string(),
+    )
 }
 
 impl From<SpLookupError> for HttpError {

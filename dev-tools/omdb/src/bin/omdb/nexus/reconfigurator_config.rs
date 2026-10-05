@@ -17,6 +17,7 @@ use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::ReconfiguratorConfig;
 use nexus_types::deployment::ReconfiguratorConfigParam;
 use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
+use nexus_types::deployment::SledUpdateRebootPolicy;
 use std::io;
 use std::io::Write;
 use std::num::ParseIntError;
@@ -57,6 +58,15 @@ pub struct ReconfiguratorConfigOpts {
 
     #[clap(long)]
     disruption_policy: Option<ReconfiguratorDisruptionPolicyOpt>,
+
+    #[clap(long)]
+    sled_update_reboot_policy: Option<SledUpdateRebootPolicyOpt>,
+
+    #[clap(long, action = ArgAction::Set)]
+    blueprint_pruner_enabled: Option<bool>,
+
+    #[clap(long)]
+    blueprint_pruner_nkeep: Option<u32>,
 }
 
 impl ReconfiguratorConfigOpts {
@@ -67,14 +77,27 @@ impl ReconfiguratorConfigOpts {
             planner_enabled: self
                 .planner_enabled
                 .unwrap_or(current.planner_enabled),
-            planner_config: PlannerConfig::default(),
+            planner_config: PlannerConfig {
+                disruption_policy: self
+                    .disruption_policy
+                    .map(|p| p.into())
+                    .unwrap_or(current.planner_config.disruption_policy),
+                sled_update_reboot_policy: self
+                    .sled_update_reboot_policy
+                    .map(|p| p.into())
+                    .unwrap_or(
+                        current.planner_config.sled_update_reboot_policy,
+                    ),
+            },
             tuf_repo_pruner_enabled: self
                 .tuf_repo_pruner_enabled
                 .unwrap_or(current.tuf_repo_pruner_enabled),
-            disruption_policy: self
-                .disruption_policy
-                .map(|p| p.into())
-                .unwrap_or(current.disruption_policy),
+            blueprint_pruner_enabled: self
+                .blueprint_pruner_enabled
+                .unwrap_or(current.blueprint_pruner_enabled),
+            blueprint_pruner_nkeep: self
+                .blueprint_pruner_nkeep
+                .unwrap_or(current.blueprint_pruner_nkeep),
         }
     }
 
@@ -110,6 +133,23 @@ impl From<ReconfiguratorDisruptionPolicyOpt>
                 Self::MigrateOrTerminate
             }
             ReconfiguratorDisruptionPolicyOpt::MigrateOnly => Self::MigrateOnly,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum SledUpdateRebootPolicyOpt {
+    ImmediateNoEvacuation,
+    Evacuate,
+}
+
+impl From<SledUpdateRebootPolicyOpt> for SledUpdateRebootPolicy {
+    fn from(value: SledUpdateRebootPolicyOpt) -> Self {
+        match value {
+            SledUpdateRebootPolicyOpt::ImmediateNoEvacuation => {
+                Self::ImmediateNoEvacuation
+            }
+            SledUpdateRebootPolicyOpt::Evacuate => Self::Evacuate,
         }
     }
 }

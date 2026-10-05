@@ -21,6 +21,8 @@ use slog_error_chain::InlineErrorChain;
 use std::mem;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use tokio::sync::oneshot;
 use tokio::sync::oneshot::error::TryRecvError;
 use tokio::sync::watch;
@@ -43,6 +45,8 @@ pub enum RssAccessError {
     MultirackJoinPanicked,
     #[error("Already part of a multirack cluster")]
     MultirackJoinCompleted,
+    #[error("Membership cannot be changed anymore")]
+    MembershipChangeNoLongerAllowed,
 }
 
 impl RssAccessError {
@@ -62,6 +66,9 @@ impl RssAccessError {
             RssAccessError::MultirackJoinFailed { .. } => "MultirackJoinFailed",
             RssAccessError::MultirackJoinPanicked => "MultirackJoinPanicked",
             RssAccessError::MultirackJoinCompleted => "MultirackJoinCompleted",
+            RssAccessError::MembershipChangeNoLongerAllowed => {
+                "MembershipChangeNoLongerAllowed"
+            }
         }
     }
 }
@@ -251,11 +258,13 @@ impl RssAccess {
                     join_handle,
                     input_tx,
                     output_rx,
+                    membership_change_still_possible,
                 } = MultirackJoinServiceHandle::spawn(ctx, request);
                 *status = RssStatus::MultirackJoinInProgress {
                     id,
                     input_tx,
                     output_rx,
+                    membership_change_still_possible,
                 };
                 mem::drop(status);
                 let status = Arc::clone(&self.status);
@@ -292,18 +301,39 @@ impl RssAccess {
                 Err(RssAccessError::InitializationPanicked)
             }
 
-            RssStatus::MultirackJoinInProgress { id, input_tx, .. } => {
+            RssStatus::MultirackJoinInProgress {
+                id,
+                input_tx,
+                membership_change_still_possible,
+                ..
+            } => {
                 // We allow updating the input so that we don't always require a
                 // clean slate like in RSS.
+                let mut invalid_membership_change = false;
                 input_tx.send_if_modified(|saved| {
                     if &request != saved {
+                        // After trust quorum initializes we no longer allow
+                        // membership changes. Check for that here so we can
+                        // error out early.
+                        if saved.trust_quorum_peers
+                            != request.trust_quorum_peers
+                            && !membership_change_still_possible
+                                .load(Ordering::Relaxed)
+                        {
+                            invalid_membership_change = true;
+                            return false;
+                        }
                         *saved = request;
                         true
                     } else {
                         false
                     }
                 });
-                Ok(*id)
+                if invalid_membership_change {
+                    Err(RssAccessError::MembershipChangeNoLongerAllowed)
+                } else {
+                    Ok(*id)
+                }
             }
             RssStatus::MultirackJoinCompleted { .. } => {
                 Err(RssAccessError::MultirackJoinCompleted)
@@ -391,6 +421,7 @@ enum RssStatus {
         id: MultirackJoinUuid,
         input_tx: watch::Sender<MultirackJoinRequest>,
         output_rx: watch::Receiver<MultirackJoinServiceState>,
+        membership_change_still_possible: Arc<AtomicBool>,
     },
 
     MultirackJoinCompleted {

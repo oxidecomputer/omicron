@@ -486,11 +486,20 @@ impl SupportBundleCollector {
         bundle: &SupportBundle,
         dir: Utf8TempDir,
     ) -> anyhow::Result<()> {
-        // Create the zipfile as a temporary file
-        let mut zipfile = tokio::fs::File::from_std(bundle_to_zipfile(
-            &dir,
-            Utf8Path::new(TEMPDIR),
-        )?);
+        // Create the zipfile as a temporary file.
+        //
+        // Zipping compresses every file in the bundle, and dropping `dir`
+        // recursively deletes it, so both run on a blocking thread. Dropping
+        // `dir` here frees the uncompressed copy of the bundle before the
+        // upload starts.
+        let zipfile = tokio::task::spawn_blocking(move || {
+            let zipfile = bundle_to_zipfile(&dir, Utf8Path::new(TEMPDIR));
+            drop(dir);
+            zipfile
+        })
+        .await
+        .with_context(|| "Zipping the support bundle panicked")??;
+        let mut zipfile = tokio::fs::File::from_std(zipfile);
         let total_len = zipfile.metadata().await?.len();
 
         // Collect the hash locally before we send it over the network
@@ -727,15 +736,15 @@ mod test {
     use nexus_types::support_bundle::BundleDataSelection;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::internal::shared::DatasetKind;
-    use omicron_common::disk::DatasetConfig;
     use omicron_common::disk::DatasetName;
-    use omicron_common::disk::SharedDatasetConfig;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::{
         BlueprintUuid, DatasetUuid, EreporterRestartUuid, OmicronZoneUuid,
         PhysicalDiskUuid, RackUuid, SledUuid,
     };
+    use sled_agent_types::disk::DatasetConfig;
+    use sled_agent_types::disk::SharedDatasetConfig;
     use sled_agent_types::inventory::ZpoolHealth;
     use std::num::NonZeroU64;
     use support_bundle_collection::perfetto;

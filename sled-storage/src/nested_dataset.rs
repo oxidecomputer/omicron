@@ -7,7 +7,7 @@
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use omicron_common::disk::DatasetName;
-use omicron_common::disk::SharedDatasetConfig;
+use sled_agent_types::disk::SharedDatasetConfig;
 
 #[derive(Debug)]
 pub enum NestedDatasetListOptions {

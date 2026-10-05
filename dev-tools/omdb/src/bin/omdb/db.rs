@@ -66,6 +66,7 @@ use nexus_db_errors::OptionalError;
 use nexus_db_lookup::DataStoreConnection;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::CrucibleDataset;
+use nexus_db_model::DbSledBpAvailability;
 use nexus_db_model::DnsGroup;
 use nexus_db_model::DnsName;
 use nexus_db_model::DnsVersion;
@@ -152,8 +153,11 @@ use nexus_types::inventory::Collection;
 use nexus_types::inventory::CollectionDisplayCliFilter;
 use omicron_common::api::external;
 use omicron_common::api::external::DataPageParams;
-use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;
+use omicron_generation_kinds::Generation;
+use omicron_generation_kinds::InstanceStateGeneration;
+use omicron_generation_kinds::InstanceUpdaterGeneration;
+use omicron_generation_kinds::UpdateDispositionGeneration;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::DownstairsRegionUuid;
@@ -4665,11 +4669,13 @@ struct SledRow {
     role: &'static str,
     policy: SledPolicy,
     state: SledState,
+    #[tabled(rename = "BP AVAIL")]
+    bp_availability: &'static str,
     id: SledUuid,
 }
 
-impl From<Sled> for SledRow {
-    fn from(s: Sled) -> Self {
+impl SledRow {
+    fn new(s: Sled, bp_availability: Option<DbSledBpAvailability>) -> Self {
         SledRow {
             id: s.id(),
             serial: s.serial_number().to_string(),
@@ -4677,6 +4683,10 @@ impl From<Sled> for SledRow {
             role: if s.is_scrimlet() { "scrimlet" } else { "-" },
             policy: s.policy(),
             state: s.state().into(),
+            bp_availability: match bp_availability {
+                Some(state) => state.label(),
+                None => "(missing)",
+            },
         }
     }
 }
@@ -4706,7 +4716,19 @@ async fn cmd_db_sleds(
         .context("listing sleds")?;
     check_limit(&sleds, limit, || String::from("listing sleds"));
 
-    let rows = sleds.into_iter().map(|s| SledRow::from(s));
+    // Look up each sled's reconfigurator provisioning availability from the
+    // `rendezvous_sled_bp_availability` rendezvous table. A sled might not be
+    // present in the table (e.g. it was just added and the reconciliation task
+    // has not run yet), in which case it is rendered as `(missing)`.
+    let bp_availability = datastore
+        .rendezvous_sled_bp_availability_list_all_batched(opctx)
+        .await
+        .context("listing sled bp-availability rendezvous rows")?;
+
+    let rows = sleds.into_iter().map(|s| {
+        let state = bp_availability.get(&s.id()).map(|r| r.bp_availability());
+        SledRow::new(s, state)
+    });
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())
         .with(tabled::settings::Padding::new(1, 1, 0, 0))
@@ -5048,7 +5070,7 @@ async fn cmd_db_instance_info(
     println!("    {INTENDED_STATE:>WIDTH$}: {}", instance.intended_state);
     println!(
         "    {LAST_UPDATED:>WIDTH$}: {time_updated:?} (generation {})",
-        generation.0
+        InstanceStateGeneration::from(generation)
     );
 
     // Reincarnation status
@@ -5104,7 +5126,10 @@ async fn cmd_db_instance_info(
     } else {
         print!("    {UPDATER_LOCK:>WIDTH$}: UNLOCKED");
     }
-    println!(" at generation: {}", instance.updater_gen.0);
+    println!(
+        " at generation: {}",
+        InstanceUpdaterGeneration::from(instance.updater_gen)
+    );
 
     fn print_vmm(kind: &str, id: Uuid, vmm: Option<&Vmm>) {
         match vmm {
@@ -5315,7 +5340,7 @@ async fn cmd_db_instance_info(
             .with_context(ctx)?;
 
         if !past_migrations.is_empty() {
-            println!("\n{:=<80}\n", "== MIGRATION HISTORY");
+            println!("\n{:=<80}\n", "== MIGRATION HISTORY ");
 
             check_limit(&past_migrations, fetch_opts.fetch_limit, ctx);
 
@@ -5374,6 +5399,7 @@ async fn cmd_db_instance_info(
                     generation: _,
                     state: _,
                     failure_reason: _,
+                    stop_for_update_disposition_generation: _,
                 } = vmm;
                 VmmRow {
                     state: VmmStateRow::from(vmm),
@@ -5667,8 +5693,8 @@ async fn cmd_db_dns_diff(
             .select(DnsName::as_select())
             .load_async(&*datastore.pool_connection_for_tests().await?)
             .await
-            .context("loading added names")?;
-        check_limit(&added, limit, || "loading removed names");
+            .context("loading removed names")?;
+        check_limit(&removed, limit, || "loading removed names");
         println!(
             "changes:                    names added: {}, names removed: {}",
             added.len(),
@@ -8097,98 +8123,130 @@ fn prettyprint_vmm(
     sled_serial: Option<&str>,
     inst_id: bool,
 ) {
-    const ID: &'static str = "ID";
-    const CREATED: &'static str = "created at";
-    const DELETED: &'static str = "deleted at";
-    const UPDATED: &'static str = "updated at";
-    const INSTANCE_ID: &'static str = "instance ID";
-    const SLED_ID: &'static str = "sled ID";
-    const SLED_SERIAL: &'static str = "sled serial";
-    const CPU_PLATFORM: &'static str = "CPU platform";
-    const ADDRESS: &'static str = "propolis address";
-    const STATE: &'static str = "state";
-    const FAILURE_REASON: &'static str = "  failure reason";
-    const FAILURE_NOTE: &'static str = "  note";
-    const WIDTH: usize = const_max_len(&[
-        ID,
-        CREATED,
-        DELETED,
-        UPDATED,
-        INSTANCE_ID,
-        SLED_ID,
-        SLED_SERIAL,
-        CPU_PLATFORM,
-        STATE,
-        ADDRESS,
-        FAILURE_REASON,
-        FAILURE_NOTE,
-    ]);
+    print!("{}", VmmDisplay { indent, vmm, width, sled_serial, inst_id });
+}
 
-    let width = std::cmp::max(width, Some(WIDTH)).unwrap_or(WIDTH);
-    let Vmm {
-        id,
-        time_created,
-        time_deleted,
-        instance_id,
-        sled_id,
-        propolis_ip,
-        propolis_port,
-        cpu_platform,
-        state,
-        generation,
-        time_state_updated,
-        failure_reason,
-    } = vmm;
+struct VmmDisplay<'a> {
+    indent: &'a str,
+    vmm: &'a Vmm,
+    width: Option<usize>,
+    sled_serial: Option<&'a str>,
+    inst_id: bool,
+}
 
-    println!("{indent}{ID:>width$}: {id}");
-    if inst_id {
-        println!("{indent}{INSTANCE_ID:>width$}: {instance_id}");
-    }
-    println!("{indent}{CREATED:>width$}: {time_created}");
-    if let Some(deleted) = time_deleted {
-        println!("{indent}{DELETED:width$}: {deleted}");
-    }
-    println!("{indent}{STATE:>width$}: {state}");
-    if let Some(reason) = failure_reason {
-        println!("{indent}{FAILURE_REASON:>width$}: {reason}");
+impl Display for VmmDisplay<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self { indent, vmm, width, sled_serial, inst_id } = *self;
+        const ID: &'static str = "ID";
+        const CREATED: &'static str = "created at";
+        const DELETED: &'static str = "deleted at";
+        const UPDATED: &'static str = "updated at";
+        const INSTANCE_ID: &'static str = "instance ID";
+        const SLED_ID: &'static str = "sled ID";
+        const SLED_SERIAL: &'static str = "sled serial";
+        const CPU_PLATFORM: &'static str = "CPU platform";
+        const ADDRESS: &'static str = "propolis address";
+        const STATE: &'static str = "state";
+        const FAILURE_REASON: &'static str = "  failure reason";
+        const FAILURE_NOTE: &'static str = "  note";
+        const STOP_FOR_UPDATE: &'static str =
+            "  marked to stop for sled update";
+        const WIDTH: usize = const_max_len(&[
+            ID,
+            CREATED,
+            DELETED,
+            UPDATED,
+            INSTANCE_ID,
+            SLED_ID,
+            SLED_SERIAL,
+            CPU_PLATFORM,
+            STATE,
+            ADDRESS,
+            FAILURE_REASON,
+            FAILURE_NOTE,
+            STOP_FOR_UPDATE,
+        ]);
 
-        if state == &db::model::VmmState::Failed {
-            println!(
-                "{indent}{FAILURE_NOTE:>width$}: {}",
-                reason.description()
-            );
-        } else {
-            println!(
-                "{:<width$}weird: VMMs should only have non-NULL failure \
-                     reasons if they are in the failed state",
+        let width = std::cmp::max(width, Some(WIDTH)).unwrap_or(WIDTH);
+        let Vmm {
+            id,
+            time_created,
+            time_deleted,
+            instance_id,
+            sled_id,
+            propolis_ip,
+            propolis_port,
+            cpu_platform,
+            state,
+            generation,
+            time_state_updated,
+            failure_reason,
+            stop_for_update_disposition_generation,
+        } = vmm;
+
+        writeln!(f, "{indent}{ID:>width$}: {id}")?;
+        if inst_id {
+            writeln!(f, "{indent}{INSTANCE_ID:>width$}: {instance_id}")?;
+        }
+        writeln!(f, "{indent}{CREATED:>width$}: {time_created}")?;
+        if let Some(deleted) = time_deleted {
+            writeln!(f, "{indent}{DELETED:>width$}: {deleted}")?;
+        }
+        writeln!(f, "{indent}{STATE:>width$}: {state}")?;
+        if let Some(reason) = failure_reason {
+            writeln!(f, "{indent}{FAILURE_REASON:>width$}: {reason}")?;
+
+            if state == &db::model::VmmState::Failed {
+                writeln!(
+                    f,
+                    "{indent}{FAILURE_NOTE:>width$}: {}",
+                    reason.description()
+                )?;
+            } else {
+                writeln!(
+                    f,
+                    "{:<width$}weird: VMMs should only have non-NULL failure \
+                         reasons if they are in the failed state",
+                    "/!\\",
+                    width = indent.len(),
+                )?;
+            }
+        } else if state == &db::model::VmmState::Failed {
+            writeln!(
+                f,
+                "{:<width$}weird: VMMs in the 'failed' state should have a \
+                 non-NULL failure reason",
                 "/!\\",
                 width = indent.len(),
-            );
+            )?;
         }
-    } else if state == &db::model::VmmState::Failed {
-        println!(
-            "{:<width$}weird: VMMs in the 'failed' state should have a \
-             non-NULL failure reason",
-            "/!\\",
-            width = indent.len(),
-        );
-    }
+        if let Some(ud_generation) = stop_for_update_disposition_generation {
+            let u_g = UpdateDispositionGeneration::from(*ud_generation);
+            writeln!(
+                f,
+                "{indent}{STOP_FOR_UPDATE:>width$}: update disposition generation {u_g}"
+            )?;
+        }
 
-    let g = u64::from(generation.0);
-    println!(
-        "{indent}{UPDATED:>width$}: {time_state_updated:?} (generation {g})"
-    );
+        let g = u64::from(generation.0);
+        writeln!(
+            f,
+            "{indent}{UPDATED:>width$}: {time_state_updated:?} (generation {g})"
+        )?;
 
-    println!(
-        "{indent}{ADDRESS:>width$}: {}:{}",
-        propolis_ip.ip(),
-        propolis_port.0
-    );
-    println!("{indent}{SLED_ID:>width$}: {sled_id}");
-    if let Some(serial) = sled_serial {
-        println!("{indent}{SLED_SERIAL:>width$}: {serial}");
+        writeln!(
+            f,
+            "{indent}{ADDRESS:>width$}: {}:{}",
+            propolis_ip.ip(),
+            propolis_port.0
+        )?;
+        writeln!(f, "{indent}{SLED_ID:>width$}: {sled_id}")?;
+        if let Some(serial) = sled_serial {
+            writeln!(f, "{indent}{SLED_SERIAL:>width$}: {serial}")?;
+        }
+        writeln!(f, "{indent}{CPU_PLATFORM:>width$}: {cpu_platform}")?;
+        Ok(())
     }
-    println!("{indent}{CPU_PLATFORM:>width$}: {cpu_platform}");
 }
 
 async fn cmd_db_vmm_list(
@@ -8269,6 +8327,7 @@ async fn cmd_db_vmm_list(
                 generation: _,
                 state: _,
                 failure_reason: _,
+                stop_for_update_disposition_generation: _,
             } = vmm;
             let sled = match sled {
                 Some(sled) => sled.serial_number(),
@@ -8616,4 +8675,70 @@ async fn cmd_db_trust_quorum_list_configs(
     println!("{}", table);
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use swrite::SWrite as _;
+    use swrite::swriteln;
+
+    fn epoch_vmm() -> Vmm {
+        let when = chrono::DateTime::from_timestamp(0, 0)
+            .expect("the epoch is a valid timestamp");
+        let mut vmm = Vmm::new(
+            PropolisUuid::nil(),
+            InstanceUuid::nil(),
+            SledUuid::nil(),
+            "127.0.0.1".parse().unwrap(),
+            12400,
+            db::model::VmmCpuPlatform::AmdMilan,
+        );
+        vmm.time_created = when;
+        vmm.time_state_updated = when;
+        vmm
+    }
+
+    #[test]
+    fn test_vmm_display() {
+        let mut failed = epoch_vmm();
+        failed.state = db::model::VmmState::Failed;
+        failed.stop_for_update_disposition_generation =
+            Some(db::model::to_db_typed_generation(
+                UpdateDispositionGeneration::from_u32(7),
+            ));
+
+        let mut running = epoch_vmm();
+        running.state = db::model::VmmState::Running;
+        running.failure_reason = Some(db::model::VmmFailureReason::SledOff);
+
+        let mut deleted = epoch_vmm();
+        deleted.time_deleted = Some(deleted.time_created);
+
+        let mut output = String::new();
+        for (name, vmm, sled_serial, inst_id) in [
+            ("failed without reason", &failed, None, false),
+            ("reason without failure", &running, None, false),
+            (
+                "deleted with instance and serial",
+                &deleted,
+                Some("BRM00000000"),
+                true,
+            ),
+        ] {
+            swriteln!(output, "=== {name} ===");
+            swriteln!(
+                output,
+                "{}",
+                VmmDisplay {
+                    indent: "    ",
+                    vmm,
+                    width: None,
+                    sled_serial,
+                    inst_id,
+                }
+            );
+        }
+        expectorate::assert_contents("tests/output/vmm-lines.txt", &output);
+    }
 }

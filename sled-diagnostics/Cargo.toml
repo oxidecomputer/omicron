@@ -35,4 +35,5 @@ zip = { workspace = true, features = ["jiff-02","zstd"] }
 omicron-common.workspace = true
 omicron-test-utils.workspace = true
 omicron-uuid-kinds.workspace = true
+sled-agent-types.workspace = true
 sled-storage = { workspace = true, features = ["testing"] }

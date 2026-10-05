@@ -17,6 +17,7 @@ use super::filesystem::FilesystemLister;
 use super::rules::ALL_RULES;
 use super::rules::ArchiveGroup;
 use super::rules::NamingRule;
+use super::rules::RuleScanning;
 use super::rules::RuleScope;
 use super::rules::Source;
 use anyhow::Context;
@@ -25,12 +26,14 @@ use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use chrono::DateTime;
 use chrono::Utc;
+use regex::Regex;
 use slog::Logger;
 use slog::debug;
 use slog::info;
 use slog::o;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
+use std::collections::BTreeSet;
 
 /// Describes what kind of archive operation this is, which affects what debug
 /// data to collect
@@ -200,22 +203,18 @@ impl ArchivePlan<'_> {
     }
 
     pub(crate) fn to_steps_generic<'a>(
-        log: &Logger,
+        log: &'a Logger,
         groups: &'a [ArchiveGroup<'static>],
         debug_dir: &'a Utf8Path,
         lister: &'a (dyn FileLister + Send + Sync),
     ) -> impl Iterator<Item = Result<ArchiveStep<'a>, anyhow::Error>> {
-        // This gigantic combinator iterates the list of archive steps, which
-        // consist of:
+        // This iterates the list of archive steps:
         //
         // - an `ArchiveStep::Mkdir` for each output directory we need to create
         // - an `ArchiveStep::ArchiveFile` for each file that we need to archive
-        //   (all files matching all the rules that have been applied to the
-        //   input sources).
         //
-        // In fact, each item that we iterate is a `Result`: it's either one of
-        // these archive steps or its an error that was encountered along the
-        // way.
+        // Each item is a `Result`: either an archive step or an error
+        // encountered along the way.
         //
         // Being one big expression makes this annoying to read and modify, but
         // it has the useful property that it operates in a streaming way: at no
@@ -223,7 +222,8 @@ impl ArchivePlan<'_> {
         // into memory at once.
         groups
             .iter()
-            // Start with a `mkdir` for each of the output directories.
+            // Start with a `mkdir` for each of the top-level output
+            // directories.
             .filter_map(move |group| {
                 let output_directory = group.output_directory(debug_dir);
                 if output_directory != debug_dir {
@@ -233,78 +233,29 @@ impl ArchivePlan<'_> {
                 }
             })
             // Chain this with a list of all the files we need to archive.
-            .chain(
-                groups
-                    .iter()
-                    .flat_map(move |group| {
-                        // Each group essentially identifies one directory that
-                        // we need to scan for files to archive.  For each of
-                        // these, list the files in the directory.
-                        let input_directory = group.input_directory();
-
-                        debug!(
+            .chain(groups.iter().flat_map(move |group| {
+                match &group.rule.scanning {
+                    RuleScanning::Flat { include_files_matching } => {
+                        flat_file_steps(
                             log,
-                            "listing directory";
-                            "input_directory" => %input_directory
-                        );
-                        lister.list_files(&input_directory).into_iter().map(
-                            move |item| item.map(|filename| (group, filename)),
+                            group,
+                            debug_dir,
+                            lister,
+                            include_files_matching,
                         )
-                    })
-                    .filter(move |entry| match entry {
-                        // Errors are passed to the end of this pipeline.
-                        Err(_) => true,
-
-                        // Files that we found in an input directory are checked
-                        // against the corresponding rule to see if we should
-                        // include them.
-                        Ok((group, filename)) => {
-                            debug!(
-                                log,
-                                "checking file";
-                                "file" => %filename.as_ref(),
-                            );
-                            group.rule.include_file(&filename)
-                        }
-                    })
-                    .map(|entry| match entry {
-                        // Errors are passed to the end of this pipeline.
-                        Err(error) => Err(error),
-
-                        // If we found a matching file, fetch its metadata and
-                        // grab the mtime.  This is used for naming the archived
-                        // file.
-                        Ok((group, filename)) => {
-                            let input_path =
-                                group.input_directory().join(filename.as_ref());
-                            lister
-                                .file_mtime(&input_path)
-                                .map(|mtime| (group, input_path, mtime))
-                        }
-                    })
-                    .map(|entry| match entry {
-                        // Errors are passed to the end of this pipeline.
-                        Err(error) => Err(error),
-
-                        // If we succeeded so far, we have a matching input
-                        // file, its mtime and the associated group.  Construct
-                        // an archive step describing that we need to archive
-                        // this file.
-                        Ok((group, input_path, mtime)) => {
-                            let output_directory =
-                                group.output_directory(debug_dir);
-                            Ok(ArchiveStep::ArchiveFile(ArchiveFile {
-                                input_path,
-                                mtime,
-                                output_directory,
-                                namer: group.rule.naming,
-                                delete_original: group.rule.delete_original,
-                                #[cfg(test)]
-                                rule: group.rule.label,
-                            }))
-                        }
-                    }),
-            )
+                    }
+                    RuleScanning::Nested { output_subdir, exclude_subdirs } => {
+                        nested_file_steps(
+                            log,
+                            group,
+                            debug_dir,
+                            lister,
+                            output_subdir,
+                            exclude_subdirs,
+                        )
+                    }
+                }
+            }))
     }
 
     pub(crate) async fn execute(self) -> Vec<anyhow::Error> {
@@ -331,6 +282,172 @@ impl ArchivePlan<'_> {
 
         errors
     }
+}
+
+/// Produces archive steps for a `RuleScanning::Flat` group: lists files
+/// directly in the group's input directory, filters by the rule's regex, and
+/// emits one `ArchiveFile` step per match.
+fn flat_file_steps<'a>(
+    log: &'a Logger,
+    group: &'a ArchiveGroup<'static>,
+    debug_dir: &'a Utf8Path,
+    lister: &'a (dyn FileLister + Send + Sync),
+    include_files_matching: &'a Regex,
+) -> Box<dyn Iterator<Item = Result<ArchiveStep<'a>, anyhow::Error>> + Send + 'a>
+{
+    let input_directory = group.input_directory();
+    debug!(
+        log,
+        "listing directory";
+        "input_directory" => %input_directory
+    );
+    // This is expressed as a big combinator so that we only need to process one
+    // item at a time.  (These directories could be large.)
+    let steps = lister
+        .list_files(&input_directory)
+        .into_iter()
+        // Filter out non-matching files.
+        .filter(move |item| match item {
+            // Pass errors through to the end of the pipeline.
+            Err(_) => true,
+            Ok(filename) => {
+                debug!(log, "checking file"; "file" => %filename.as_ref());
+                include_files_matching.is_match(filename.as_ref())
+            }
+        })
+        // Grab the input files' mtimes.
+        .map(move |item| match item {
+            // Pass errors through to the end of the pipeline.
+            Err(error) => Err(error),
+            Ok(filename) => {
+                let input_path =
+                    group.input_directory().join(filename.as_ref());
+                lister.file_mtime(&input_path).map(|mtime| (input_path, mtime))
+            }
+        })
+        // Produce the final `ArchiveFile` struct.
+        .map(move |item| match item {
+            // Pass errors through to the end of the pipeline.
+            Err(error) => Err(error),
+            Ok((input_path, mtime)) => {
+                Ok(ArchiveStep::ArchiveFile(ArchiveFile {
+                    input_path,
+                    mtime,
+                    output_directory: group.output_directory(debug_dir),
+                    namer: group.rule.naming,
+                    delete_original: group.rule.delete_original,
+                    #[cfg(test)]
+                    rule: group.rule.label,
+                }))
+            }
+        });
+    Box::new(steps)
+}
+
+/// Produces archive steps for a `RuleScanning::Nested` group: lists immediate
+/// subdirectories of the group's input directory, skips those matching
+/// `exclude_subdirs`, then for each retained subdirectory emits two `Mkdir`
+/// steps (for the top-level container and the subdir) followed by one
+/// `ArchiveFile` step per file in that subdirectory.
+///
+/// Non-regular-file entries within subdirectories are skipped (they do not
+/// appear as `ArchiveFile` steps).
+fn nested_file_steps<'a>(
+    log: &'a Logger,
+    group: &'a ArchiveGroup<'static>,
+    debug_dir: &'a Utf8Path,
+    lister: &'a (dyn FileLister + Send + Sync),
+    output_subdir: &'a Filename,
+    exclude_subdirs: &'a BTreeSet<Filename>,
+) -> Box<dyn Iterator<Item = Result<ArchiveStep<'a>, anyhow::Error>> + Send + 'a>
+{
+    let input_directory = group.input_directory();
+    let zone_output_dir = group.output_directory(debug_dir);
+
+    debug!(
+        log,
+        "listing subdirectories";
+        "input_directory" => %input_directory
+    );
+
+    // Emit the top-level directory for this rule's outputs first.
+    let rule_output_dir = zone_output_dir.join(output_subdir.as_ref());
+    let top_mkdir_step = std::iter::once(Ok(ArchiveStep::Mkdir {
+        output_directory: rule_output_dir.clone(),
+    }));
+
+    // This is a large combinator in order to avoid loading the whole directory
+    // tree into memory at once.
+    let steps = lister
+        .list_directories(&input_directory)
+        .into_iter()
+        .filter(move |item| match item {
+            // Pass errors through to the end of the pipeline.
+            Err(_) => true,
+            Ok(subdir) => !exclude_subdirs.contains(subdir),
+        })
+        .flat_map(
+            move |item| -> Box<
+                dyn Iterator<Item = Result<ArchiveStep<'a>, anyhow::Error>>
+                    + Send
+                    + 'a,
+            > {
+                match item {
+                    // Pass errors through to the end of the pipeline.
+                    Err(error) => Box::new(std::iter::once(Err(error))),
+                    Ok(subdir) => {
+                        let input_subdir =
+                            input_directory.join(subdir.as_ref());
+                        let output_subdir =
+                            rule_output_dir.join(subdir.as_ref());
+
+                        debug!(
+                            log,
+                            "listing subdirectory";
+                            "subdirectory" => %input_subdir,
+                        );
+
+                        let mkdir_step =
+                            std::iter::once(Ok(ArchiveStep::Mkdir {
+                                output_directory: output_subdir.clone(),
+                            }));
+
+                        let file_steps = lister
+                            .list_files(&input_subdir)
+                            .into_iter()
+                            .map(move |item| match item {
+                                // Pass errors through to the end of the
+                                // pipeline.
+                                Err(error) => Err(error),
+                                Ok(filename) => {
+                                    let input_file =
+                                        input_subdir.join(filename.as_ref());
+                                    let mtime =
+                                        match lister.file_mtime(&input_file) {
+                                            Err(error) => return Err(error),
+                                            Ok(m) => m,
+                                        };
+                                    Ok(ArchiveStep::ArchiveFile(ArchiveFile {
+                                        input_path: input_file,
+                                        mtime,
+                                        output_directory: output_subdir.clone(),
+                                        namer: group.rule.naming,
+                                        delete_original: group
+                                            .rule
+                                            .delete_original,
+                                        #[cfg(test)]
+                                        rule: group.rule.label,
+                                    }))
+                                }
+                            });
+
+                        Box::new(mkdir_step.chain(file_steps))
+                    }
+                }
+            },
+        );
+
+    Box::new(top_mkdir_step.chain(steps))
 }
 
 pub(crate) enum ArchiveStep<'a> {
@@ -389,9 +506,12 @@ mod test {
     use file_archiver::planning::ArchiveStep;
     use file_archiver::rules::ALL_RULES;
     use file_archiver::rules::MAX_COLLIDING_FILENAMES;
+    use file_archiver::rules::NameDropbox;
     use file_archiver::rules::NameRotatedLogFile;
     use file_archiver::test_helpers::*;
+    use iddqd::IdOrdMap;
     use omicron_test_utils::dev::test_setup_log;
+    use slog::Logger;
     use slog::debug;
     use slog::info;
     use slog_error_chain::InlineErrorChain;
@@ -427,45 +547,52 @@ mod test {
             let step = step.expect("no errors with test lister");
 
             match step {
-                // For a `mkdir`, verify that the parent directory matches our
-                // output directory.  (For more on why, see the code where we
-                // process this Mkdir.)  Then record it.  We'll use that to
-                // verify that files are always archived into directories that
-                // already exist.
+                // For a `mkdir`, verify that the parent directory either:
+                //
+                // - *is* the overall output directory, or
+                // - is underneath the overall output directory _and_ has been
+                //   created by a previous `Mkdir` field
+                //
+                // We record the directories created so that we can verify the
+                // above, as well as to verify that files are always created
+                // inside directories that have been created.
                 ArchiveStep::Mkdir { output_directory } => {
                     let parent = output_directory
                         .parent()
                         .expect("output directory has a parent");
                     if parent != fake_output_dir {
-                        panic!(
-                            "archiver created an output directory \
-                             ({output_directory:?}) whose parent is not the \
-                             fake debug directory ({fake_output_dir:?}).  \
-                             This is not currently supported."
+                        assert!(
+                            parent.starts_with(fake_output_dir),
+                            "archiver created directory ({output_directory:?}) \
+                             that's not under the fake debug directory \
+                             ({fake_output_dir:?})",
+                        );
+                        assert!(
+                            directories_created.contains(parent),
+                            "archiver created directory ({output_directory:?}) \
+                             inside a directory that it did not also create \
+                             (and so may not exist at runtime)",
                         );
                     }
+
+                    println!("archive step: mkdir {output_directory:?}");
                     directories_created.insert(output_directory);
                 }
 
-                ArchiveStep::ArchiveFile(ArchiveFile {
-                    input_path,
-                    delete_original,
-                    output_directory,
-                    rule,
-                    ..
-                }) => {
-                    println!("archiving: {input_path}");
+                ArchiveStep::ArchiveFile(archive_file) => {
+                    println!("archive step: file {}", archive_file.input_path);
 
                     // Check that we have not already archived this file.
                     // That would imply that two rules matched the same file,
                     // which would be a bug in the rule definitions.
                     let test_file = unarchived_files
-                        .remove(input_path.as_path())
+                        .remove(archive_file.input_path.as_path())
                         .unwrap_or_else(|| {
                             panic!(
                                 "attempted to archive the same file multiple \
                                  times (or it was not in the test dataset): \
-                                 {input_path:?}",
+                                 {:?}",
+                                archive_file.input_path,
                             );
                         });
 
@@ -477,11 +604,12 @@ mod test {
                         TestFileKind::ProcessCoreDump { .. }
                         | TestFileKind::LogSmfRotated { .. }
                         | TestFileKind::LogSyslogRotated { .. }
+                        | TestFileKind::DebugDropbox { .. }
                         | TestFileKind::GlobalLogSmfRotated
                         | TestFileKind::GlobalLogSyslogRotated
                         | TestFileKind::Ignored => {
                             assert!(
-                                delete_original,
+                                archive_file.delete_original,
                                 "expected to delete original file when \
                                  archiving file of kind {:?}",
                                 test_file.kind,
@@ -493,10 +621,19 @@ mod test {
                         | TestFileKind::GlobalLogSmfLive
                         | TestFileKind::GlobalLogSyslogLive => {
                             assert!(
-                                !delete_original,
+                                !archive_file.delete_original,
                                 "expected not to delete original file when \
                                  archiving file of kind {:?}",
                                 test_file.kind,
+                            );
+                        }
+
+                        TestFileKind::DebugDropboxStaged { .. }
+                        | TestFileKind::DebugDropboxTooDeep { .. } => {
+                            panic!(
+                                "archived a file that must never be archived \
+                                 (kind {:?}): {:?}",
+                                test_file.kind, test_file.path,
                             );
                         }
                     }
@@ -504,8 +641,9 @@ mod test {
                     // The output directory must either match the overall output
                     // directory or else be one of the directories created by a
                     // Mkdir that we've already processed.
-                    if output_directory != fake_output_dir
-                        && !directories_created.contains(&output_directory)
+                    if archive_file.output_directory != fake_output_dir
+                        && !directories_created
+                            .contains(&archive_file.output_directory)
                     {
                         panic!(
                             "file was archived into a non-existent \
@@ -516,7 +654,7 @@ mod test {
 
                     // Mark that we've used this rule.  It's not a problem if
                     // we've already done so.
-                    let _ = rules_unused.remove(rule);
+                    let _ = rules_unused.remove(archive_file.rule);
                 }
             };
         }
@@ -531,12 +669,23 @@ mod test {
         println!("files that were not archived: {}", unarchived_files.len());
         for test_file in unarchived_files {
             println!("    {}", test_file.path);
-            if !matches!(test_file.kind, TestFileKind::Ignored) {
+            if test_file.kind.is_archived() {
                 panic!(
-                    "non-ignored test file was not archived: {:?}",
-                    test_file.path
+                    "test file of kind {:?} was not archived: {:?}",
+                    test_file.kind, test_file.path,
                 );
             }
+        }
+
+        // Verify that we never created an output directory corresponding to the
+        // debug dropbox's staging directory.
+        for directory in &directories_created {
+            assert_ne!(
+                directory.file_name(),
+                Some(omicron_debug_dropbox::RESERVED_PRODUCER_NAME),
+                "archiver created an output directory for the debug dropbox's \
+                 staging directory: {directory:?}",
+            );
         }
 
         logctx.cleanup_successful();
@@ -572,12 +721,15 @@ mod test {
                     TestFileKind::ProcessCoreDump { .. }
                     | TestFileKind::LogSmfRotated { .. }
                     | TestFileKind::LogSyslogRotated { .. }
+                    | TestFileKind::DebugDropbox { .. }
                     | TestFileKind::GlobalLogSmfRotated
                     | TestFileKind::GlobalLogSyslogRotated => true,
                     TestFileKind::LogSmfLive { .. }
                     | TestFileKind::LogSyslogLive { .. }
                     | TestFileKind::GlobalLogSmfLive
                     | TestFileKind::GlobalLogSyslogLive
+                    | TestFileKind::DebugDropboxStaged { .. }
+                    | TestFileKind::DebugDropboxTooDeep { .. }
                     | TestFileKind::Ignored => false,
                 };
 
@@ -696,84 +848,25 @@ mod test {
         let fail_dir = files
             .iter()
             .find_map(|test_file| {
-                if matches!(&test_file.kind, TestFileKind::Ignored) {
+                if !test_file.kind.is_archived() {
                     None
                 } else {
                     let parent = test_file.path.parent().unwrap();
                     Some(Utf8Path::new(parent))
                 }
             })
-            .expect("at least one non-ignored file in test data");
-        info!(
-            log,
-            "injecting error for directory";
-            "directory" => fail_dir.as_str(),
-        );
-
-        // Begin a simulated archive.  Configure the lister to inject an error
-        // for the directory that we chose.
-        let fake_output_dir = Utf8Path::new("/fake-output-directory");
-        let mut lister = TestLister::new_for_test_data(&files);
-        lister.inject_error(fail_dir);
-        let plan = test_archive(
-            log,
-            &files,
-            fake_output_dir,
-            ArchiveKind::Final,
-            &lister,
-        );
-
-        // Now walk through the archive plan and make sure:
-        // (1) Everything that's not in this directory gets archived.
-        // (2) There's an error produced for this directory.
-        // (3) Nothing is archived within this directory.
-        let mut unarchived_files = files.clone();
-        let mut nerrors = 0;
-        for step in plan.to_steps() {
-            let step = match step {
-                Err(error) => {
-                    let error = InlineErrorChain::new(&*error);
-                    let error_str = error.to_string();
-                    debug!(log, "found error"; error);
-                    assert!(error_str.contains(fail_dir.as_str()));
-                    assert!(error_str.contains("injected error"));
-                    nerrors += 1;
-                    continue;
-                }
-                Ok(step) => step,
-            };
-
-            let ArchiveStep::ArchiveFile(archive_file) = &step else {
-                continue;
-            };
-
-            assert!(
-                !archive_file.input_path.starts_with(fail_dir),
-                "archived file in the directory where we injected an error"
-            );
-
-            let _ = unarchived_files
-                .remove(archive_file.input_path.as_path())
-                .expect("archived file was in list of test files");
-        }
+            .expect("at least one always-archived file in test data");
 
         // We should see one error for each time the directory that we chose was
         // listed.  That should always be at least once.  It could be more than
         // once, depending on how rules are configured.  For example, with two
         // rules for syslog (/var/adm/messages.* and /var/adm/messages), there
         // would be two errors for /var/adm.
+        let nerrors = check_injected_error(log, &files, fail_dir);
         assert_ne!(
             nerrors, 0,
             "expected at least one error after injecting one"
         );
-
-        for file in unarchived_files {
-            assert!(
-                file.path.starts_with(fail_dir),
-                "missed file: {:?}",
-                file.path
-            );
-        }
 
         logctx.cleanup_successful();
     }
@@ -795,7 +888,7 @@ mod test {
         {
             let mut dirs_with_files: BTreeSet<_> = BTreeSet::new();
             for test_file in &files {
-                if matches!(&test_file.kind, TestFileKind::Ignored) {
+                if !test_file.kind.is_archived() {
                     continue;
                 }
                 let file = &test_file.path;
@@ -812,29 +905,111 @@ mod test {
         };
         let Some(fail_file) = fail_file else {
             panic!(
-                "test data had no directory with multiple non-ignored files"
+                "test data had no directory with multiple always-archived files"
             );
         };
 
+        // There should be exactly one error.  Only one rule looks at any given
+        // file, so an error on a file path can only be reported once.
+        let nerrors = check_injected_error(log, &files, fail_file);
+        assert_eq!(
+            nerrors, 1,
+            "expected exactly one error after injecting only one error \
+             on a file path",
+        );
+
+        logctx.cleanup_successful();
+    }
+
+    /// Verifies that failures while scanning a `RuleScanning::Nested` rule do
+    /// not affect archiving other files
+    ///
+    /// Nested rules are scanned by `nested_file_steps()`, which is separate
+    /// code from `flat_file_steps()` and looks at the filesystem in three
+    /// places.  Each of those can fail on its own, and each has its own code to
+    /// report the failure.  This test injects an error at each of them in turn.
+    ///
+    /// The debug dropbox is used as the example here because it's the only
+    /// nested rule today.  Nothing about this test is specific to it.
+    #[test]
+    fn test_nested_archival_errors() {
+        // Set up the test.
+        let logctx = test_setup_log("test_nested_archival_errors");
+        let log = &logctx.log;
+
+        // Load the test data
+        let files = load_test_files().unwrap();
+
+        // Find a file archived by a nested rule.  From it we can derive all
+        // three paths where the nested scan looks at the filesystem: the file
+        // itself, the subdirectory containing it, and the directory containing
+        // that one (the root of the nested scan).  We look this up by kind
+        // rather than hardcoding a path so that this keeps working if the test
+        // data changes.
+        let nested_file = files
+            .iter()
+            .find(|test_file| {
+                matches!(test_file.kind, TestFileKind::DebugDropbox { .. })
+            })
+            .expect("test data has a file archived by a nested rule")
+            .path
+            .as_path();
+        let subdir =
+            nested_file.parent().expect("nested file has a parent directory");
+        let scan_root =
+            subdir.parent().expect("nested subdirectory has a parent");
+
+        // Each of these paths is used by exactly one rule, so each one should
+        // produce exactly one error.
+        //
+        // Failure to fetch the file's mtime.
+        let nerrors = check_injected_error(log, &files, nested_file);
+        assert_eq!(nerrors, 1, "expected one error for the nested file");
+
+        // Failure to list the files in the subdirectory.
+        let nerrors = check_injected_error(log, &files, subdir);
+        assert_eq!(nerrors, 1, "expected one error for the subdirectory");
+
+        // Failure to list the subdirectories of the scan's root directory.
+        let nerrors = check_injected_error(log, &files, scan_root);
+        assert_eq!(nerrors, 1, "expected one error for the scan root");
+
+        logctx.cleanup_successful();
+    }
+
+    /// Plans an archive with the lister configured to fail on `fail_path`, then
+    /// verifies that:
+    ///
+    /// (1) every error in the plan names `fail_path`
+    /// (2) nothing under `fail_path` is archived
+    /// (3) everything else that should be archived still is
+    ///
+    /// `fail_path` may be either a file or a directory.
+    ///
+    /// Returns the number of errors found in the plan.  Callers check this
+    /// because how many times a path is visited depends on the rules.
+    fn check_injected_error<'a>(
+        log: &Logger,
+        files: &'a IdOrdMap<TestFile>,
+        fail_path: &'a Utf8Path,
+    ) -> usize {
+        info!(log, "injecting error"; "path" => fail_path.as_str());
+
         // Begin a simulated archive.  Configure the lister to inject an error
-        // on the path that we selected above.
+        // for the path that the caller chose.
         let fake_output_dir = Utf8Path::new("/fake-output-directory");
-        let mut lister = TestLister::new_for_test_data(&files);
-        lister.inject_error(fail_file);
+        let mut lister = TestLister::new_for_test_data(files);
+        lister.inject_error(fail_path);
         let plan = test_archive(
             log,
-            &files,
+            files,
             fake_output_dir,
             ArchiveKind::Final,
             &lister,
         );
 
-        // Run through the archive plan and verify:
-        //
-        // (1) We get exactly one error and it's for the path we injected an
-        //     error for.
-        // (2) That file does not get archived.
-        // (2) Every other file gets archived.
+        // Walk through the archive plan, counting errors and removing the files
+        // that were archived from the list of files that were not.
         let mut unarchived_files = files.clone();
         let mut nerrors = 0;
         for step in plan.to_steps() {
@@ -843,7 +1018,7 @@ mod test {
                     let error = InlineErrorChain::new(&*error);
                     let error_str = error.to_string();
                     debug!(log, "found error"; error);
-                    assert!(error_str.contains(fail_file.as_str()));
+                    assert!(error_str.contains(fail_path.as_str()));
                     assert!(error_str.contains("injected error"));
                     nerrors += 1;
                     continue;
@@ -858,8 +1033,9 @@ mod test {
             };
 
             assert!(
-                input_path != fail_file,
-                "unexpectedly archived file for which we injected an error"
+                !input_path.starts_with(fail_path),
+                "archived a file at or under the path where we injected an \
+                 error: {input_path:?}",
             );
 
             let _ = unarchived_files
@@ -867,18 +1043,24 @@ mod test {
                 .expect("archived file was in list of test files");
         }
 
-        // There should be exactly one error.
-        assert_eq!(
-            nerrors, 1,
-            "expected exatcly one error after injecting only one error \
-             on a file path",
-        );
+        // The files that should have been archived but were not should be
+        // exactly those at or under the path where we injected the error.
+        let missed: Vec<_> = unarchived_files
+            .iter()
+            .filter(|test_file| test_file.kind.is_archived())
+            .map(|test_file| test_file.path.as_path())
+            .collect();
+        let expected: Vec<_> = files
+            .iter()
+            .filter(|test_file| {
+                test_file.kind.is_archived()
+                    && test_file.path.starts_with(fail_path)
+            })
+            .map(|test_file| test_file.path.as_path())
+            .collect();
+        assert_eq!(missed, expected);
 
-        // There should be exactly one file that was not archived.
-        assert_eq!(unarchived_files.len(), 1);
-        assert!(unarchived_files.contains_key(fail_file.as_path()));
-
-        logctx.cleanup_successful();
+        nerrors
     }
 
     #[test]
@@ -993,6 +1175,80 @@ mod test {
             .collect();
         let lister = TestLister::new(colliding_filenames.iter());
         let error = input.choose_filename(&lister).unwrap_err();
+        assert!(
+            error.to_string().contains("too many files with colliding names")
+        );
+    }
+
+    #[test]
+    fn test_naming_dropbox() {
+        // Unlike log files, dropbox files keep their whole name.  The mtime and
+        // a counter are appended to it.
+        let template = ArchiveFile {
+            input_path: Utf8Path::new("/nonexistent/one/dap-test.txt")
+                .to_owned(),
+            mtime: Some("2025-12-12T16:51:00-07:00".parse().unwrap()),
+            output_directory: Utf8Path::new("/nonexistent/out").to_owned(),
+            namer: &NameDropbox,
+            delete_original: true,
+            rule: "dummy rule",
+        };
+
+        let empty_lister = TestLister::empty();
+
+        // ordinary case: output filename generated from the whole input
+        // filename, the mtime, and a counter
+        let filename = template.choose_filename(&empty_lister).unwrap();
+        assert_eq!(filename.as_ref(), "dap-test.txt.1765583460.0");
+
+        // case: no mtime available
+        // (this may never happen in practice)
+        //
+        // The current time should be used instead.
+        let input = ArchiveFile { mtime: None, ..template.clone() };
+        let before = Utc::now().with_nanosecond(0).unwrap();
+        let filename = input.choose_filename(&empty_lister).unwrap();
+        let after = Utc::now();
+        assert!(before <= after);
+        // The resulting filename should be "dap-test.txt.MTIME.0".
+        let (rest, counter) =
+            filename.as_ref().rsplit_once(".").expect("unexpected filename");
+        assert_eq!(counter, "0");
+        let (prefix, mtime) =
+            rest.rsplit_once(".").expect("unexpected filename");
+        assert_eq!(prefix, "dap-test.txt");
+        let parsed: DateTime<Utc> = DateTime::from_timestamp(
+            mtime.parse().expect("expected Unix timestamp in filename"),
+            0,
+        )
+        .unwrap();
+        assert!(before <= parsed);
+        assert!(parsed <= after);
+
+        // case: the normal output filename already exists
+        // expected behavior: the counter is incremented (unlike log files,
+        // where the mtime is what gets incremented)
+        let lister =
+            TestLister::new(["/nonexistent/out/dap-test.txt.1765583460.0"]);
+        let filename = template.choose_filename(&lister).unwrap();
+        assert_eq!(filename.as_ref(), "dap-test.txt.1765583460.1");
+
+        // case: several closely-named output filenames also exist
+        let lister = TestLister::new([
+            "/nonexistent/out/dap-test.txt.1765583460.0",
+            "/nonexistent/out/dap-test.txt.1765583460.1",
+            "/nonexistent/out/dap-test.txt.1765583460.2",
+            "/nonexistent/out/dap-test.txt.1765583460.4",
+        ]);
+        let filename = template.choose_filename(&lister).unwrap();
+        assert_eq!(filename.as_ref(), "dap-test.txt.1765583460.3");
+
+        // case: too many closely-named output files also exist
+        let colliding_filenames: Vec<_> = (0..=MAX_COLLIDING_FILENAMES)
+            .map(|i| format!("/nonexistent/out/dap-test.txt.1765583460.{i}"))
+            .collect();
+        let lister = TestLister::new(colliding_filenames.iter());
+        let error = template.choose_filename(&lister).unwrap_err();
         assert!(
             error.to_string().contains("too many files with colliding names")
         );

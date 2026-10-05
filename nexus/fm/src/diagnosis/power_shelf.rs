@@ -772,7 +772,8 @@ mod tests {
     use nexus_types::fm::case::{AlertRequest, CaseEreport};
     use nexus_types::fm::{self, Sitrep, SitrepVersion};
     use nexus_types::inventory::SpType;
-    use omicron_common::api::external::Generation;
+    use omicron_generation_kinds::AlertGeneration;
+    use omicron_generation_kinds::SupportBundleGeneration;
     use omicron_uuid_kinds::{
         AlertUuid, CaseEreportUuid, CaseUuid, CollectionUuid, OmicronZoneUuid,
         SitrepUuid,
@@ -1113,8 +1114,8 @@ mod tests {
                 time_created: Utc::now(),
                 next_inv_min_time_started: Utc::now(),
                 comment: "parent sitrep for test".to_string(),
-                alert_generation: Generation::new(),
-                support_bundle_generation: Generation::new(),
+                alert_generation: AlertGeneration::new(),
+                support_bundle_generation: SupportBundleGeneration::new(),
             },
             cases,
             ereports_by_id: ereports.into_iter().collect(),

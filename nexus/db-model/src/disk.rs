@@ -99,7 +99,7 @@ impl Disk {
 
         Self {
             identity,
-            rcgen: external::Generation::new().into(),
+            rcgen: omicron_generation_kinds::Generation::new().into(),
             project_id,
             disk_state: runtime_initial.disk_state,
             attach_instance_id: runtime_initial.attach_instance_id,
@@ -170,7 +170,7 @@ impl DiskRuntimeState {
         Self {
             disk_state: external::DiskState::Creating.label().to_string(),
             attach_instance_id: None,
-            generation: external::Generation::new().into(),
+            generation: omicron_generation_kinds::Generation::new().into(),
             time_updated: Utc::now(),
         }
     }

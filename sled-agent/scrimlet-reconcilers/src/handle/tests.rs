@@ -71,6 +71,7 @@ impl<T: MgsFlavor> Harness<T> {
                 autoneg: false,
                 lldp: None,
                 tx_eq: None,
+                allow_ddm_traffic: false,
             }])
             .unwrap()
         }
@@ -106,6 +107,7 @@ impl<T: MgsFlavor> Harness<T> {
                 mgs_addr: self.mgs.address(),
                 dpd_addr: dummy_addr,
                 mgd_addr: dummy_addr,
+                bgp_socket_config: BgpSocketConfig::for_test(dummy_addr),
             },
         }
     }

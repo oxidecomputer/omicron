@@ -24,7 +24,7 @@ to:   blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
 
  MODIFIED SLEDS:
 
-  sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 2):
+  sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 2 -> 3):
 *   update disposition:   available -> evacuating (live-migrate or terminate) (generation 1 -> 2)
 
     measurements:
@@ -117,7 +117,7 @@ to:   blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 
  MODIFIED SLEDS:
 
-  sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 2):
+  sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 3 -> 4):
 *   update disposition:   evacuating (live-migrate or terminate) -> evacuating (live-migrate only) (generation 2 -> 3)
 
     measurements:
@@ -209,7 +209,7 @@ to:   blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
 
  MODIFIED SLEDS:
 
-  sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 2):
+  sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 4 -> 5):
 *   update disposition:   evacuating (live-migrate only) -> available (generation 3 -> 4)
 
     measurements:
@@ -398,7 +398,7 @@ parent:    af934083-59b5-4bf6-8966-6fb5292c29e1
   sled: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
     state::::::::::::::   active
     update disposition:   available (generation 4)
-    config generation::   2
+    config generation::   5
     subnet:::::::::::::   fd00:1122:3344:101::/64
     last allocated IP::   fd00:1122:3344:101::7
 

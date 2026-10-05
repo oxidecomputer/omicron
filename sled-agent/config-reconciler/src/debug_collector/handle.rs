@@ -11,7 +11,7 @@ use super::worker::DebugCollectorWorker;
 use super::worker::DebugZpool;
 use super::worker::DumpSlicePath;
 use camino::Utf8Path;
-use omicron_common::disk::DiskVariant;
+use sled_agent_types::disk::DiskVariant;
 use sled_agent_types::inventory::ZpoolHealth;
 use sled_storage::config::MountConfig;
 use sled_storage::disk::Disk;

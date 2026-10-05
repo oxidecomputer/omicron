@@ -75,7 +75,14 @@ progenitor::generate_api!(
     },
 
     replace = {
+        Barcode = gateway_types::component_vpd::Barcode,
+        ComponentVpd = gateway_types::component_vpd::ComponentVpd,
+        Mpn1Barcode = gateway_types::component_vpd::Mpn1Barcode,
+        OxideBarcode = gateway_types::component_vpd::OxideBarcode,
+        PmbusDevice = gateway_types::component_vpd::PmbusDevice,
         RotSlot = gateway_types::rot::RotSlot,
+        SledFanTray = gateway_types::component_vpd::SledFanTray,
+        Tmp11x = gateway_types::component_vpd::Tmp11x,
         RotState = gateway_types::rot::RotState,
         RotImageError = gateway_types::rot::RotImageError,
         Ena = ereport_types::Ena,

@@ -4,6 +4,7 @@
 
 //! Submodule responsible for reconciliation of BGP configuration in mgd.
 
+use crate::handle::BgpSocketConfig;
 use crate::switch_zone_slot::ThisSledSwitchSlot;
 use anyhow::Context;
 use anyhow::bail;
@@ -35,6 +36,7 @@ use sled_agent_types::early_networking::ImportExportPolicy;
 use sled_agent_types::early_networking::MaxPathConfig;
 use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::early_networking::RouterPeerType;
+use sled_agent_types::early_networking::UnnumberedRouter;
 use slog::Logger;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
@@ -42,9 +44,7 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::btree_map;
 use std::net::IpAddr;
-use std::net::Ipv6Addr;
 use std::net::SocketAddr;
-use std::net::SocketAddrV6;
 
 type MgdClientError = mg_admin_client::Error<mg_admin_client::types::Error>;
 
@@ -53,12 +53,11 @@ type MgdClientError = mg_admin_client::Error<mg_admin_client::types::Error>;
 // before breaking to check for shutdown conditions.
 const BGP_SESSION_RESOLUTION: u64 = 100;
 
-const BGP_PORT: u16 = 179;
-
 pub(super) async fn reconcile(
     client: &Client,
     desired_config: &RackNetworkConfig,
     our_switch_slot: ThisSledSwitchSlot,
+    bgp_socket_config: BgpSocketConfig,
     log: &Logger,
 ) -> MgdBgpReconcilerStatus {
     let current_config = match DiffableBgpConfig::fetch_current(client).await {
@@ -73,6 +72,7 @@ pub(super) async fn reconcile(
     let desired_config = match DiffableBgpConfig::from_desired_config(
         &desired_config,
         our_switch_slot,
+        bgp_socket_config,
         log,
     ) {
         Ok(config) => config,
@@ -1236,6 +1236,7 @@ impl DiffableBgpConfig {
     fn from_desired_config(
         config: &RackNetworkConfig,
         our_switch_slot: ThisSledSwitchSlot,
+        bgp_socket_config: BgpSocketConfig,
         log: &Logger,
     ) -> anyhow::Result<Self> {
         // Filter down to just the peers of the ports matching our switch slot.
@@ -1334,13 +1335,7 @@ impl DiffableBgpConfig {
                 entry.insert(DiffableBgpRouterConfig {
                     id: *asn,
                     graceful_shutdown: false,
-                    listen: SocketAddrV6::new(
-                        Ipv6Addr::UNSPECIFIED,
-                        BGP_PORT,
-                        0,
-                        0,
-                    )
-                    .to_string(),
+                    listen: bgp_socket_config.router_listen_addr().to_string(),
                 });
 
                 originate4.insert(
@@ -1375,7 +1370,9 @@ impl DiffableBgpConfig {
                 RouterPeerType::Unnumbered { .. } => {
                     format!("unnumbered-{port_name}")
                 }
-                RouterPeerType::Numbered { ip } => ip.to_string(),
+                RouterPeerType::Numbered(numbered_router) => {
+                    numbered_router.target_addr().to_string()
+                }
             };
 
             let common = DiffableBgpCommonPeerConfig {
@@ -1420,12 +1417,14 @@ impl DiffableBgpConfig {
                     max: 1.0.into(),
                     min: 0.75.into(),
                 }),
-                src_addr: None,
+                src_addr: addr.src_addr().map(From::from),
                 src_port: None,
             };
 
             match addr {
-                RouterPeerType::Unnumbered { router_lifetime } => {
+                RouterPeerType::Unnumbered(UnnumberedRouter {
+                    router_lifetime,
+                }) => {
                     let interface = format!("tfport{port_name}_0");
                     if let Some(_prev) = unnumbered_peers.insert(
                         interface.clone(),
@@ -1440,8 +1439,12 @@ impl DiffableBgpConfig {
                         );
                     }
                 }
-                RouterPeerType::Numbered { ip } => {
-                    let addr = SocketAddr::new((*ip).into(), BGP_PORT);
+                RouterPeerType::Numbered(numbered_router) => {
+                    let bgp_port = bgp_socket_config.peer_port();
+                    let addr = SocketAddr::new(
+                        (numbered_router.target_addr()).into(),
+                        bgp_port,
+                    );
                     if let Some(_prev) = numbered_peers.insert(addr, common) {
                         bail!(
                             "invalid config: multiple numbered peers \

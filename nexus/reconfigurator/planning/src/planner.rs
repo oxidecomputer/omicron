@@ -18,6 +18,7 @@ use crate::blueprint_editor::DisksEditError;
 use crate::blueprint_editor::ExternalNetworkingAllocator;
 use crate::blueprint_editor::SledEditError;
 use crate::measurements::plan_measurement_updates;
+use crate::mgs_updates::EvacuatingSleds;
 use crate::mgs_updates::ImpossibleUpdatePolicy;
 use crate::mgs_updates::MgsUpdatePlanner;
 use crate::mgs_updates::PlannedMgsUpdates;
@@ -62,11 +63,11 @@ use nexus_types::external_api::sled::SledPolicy;
 use nexus_types::external_api::sled::SledState;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::SpType;
-use omicron_common::api::external::Generation;
-use omicron_common::disk::M2Slot;
+use omicron_generation_kinds::{NexusGeneration, TargetReleaseGeneration};
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
+use sled_agent_types::disk::M2Slot;
 use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
 use sled_agent_types::inventory::OmicronSingleMeasurement;
 use sled_agent_types::inventory::OmicronZoneImageSource;
@@ -297,7 +298,7 @@ impl<'a> Planner<'a> {
         // exactly 2.
         let target_release_generation_is_one =
             self.input.tuf_repo().target_release_generation
-                == Generation::from_u32(1);
+                == TargetReleaseGeneration::from_u32(1);
         let mut add = if add_update_blocked_reasons.is_empty()
             || target_release_generation_is_one
             || measurement_updates.all_sleds_updated()
@@ -326,6 +327,12 @@ impl<'a> Planner<'a> {
             // RoT bootloader.
             PlanningZoneUpdatesStepReport::waiting_on(
                 ZoneUpdatesWaitingOn::BlockedMgsUpdates,
+            )
+        } else if !mgs_updates.update_disposition_changes.is_empty() {
+            // ... or if we need to change sleds to or from the evacuating
+            // update disposition
+            PlanningZoneUpdatesStepReport::waiting_on(
+                ZoneUpdatesWaitingOn::SledUpdateDispositionChanges,
             )
         } else if !add.add_update_blocked_reasons.is_empty() {
             // ... or if there are pending zone add blockers.
@@ -1529,7 +1536,7 @@ impl<'a> Planner<'a> {
     fn determine_nexus_generation(
         &self,
         image_source: &BlueprintZoneImageSource,
-    ) -> Result<Generation, Error> {
+    ) -> Result<NexusGeneration, Error> {
         // If any other Nexus in the blueprint has the same image source,
         // use it. Otherwise, use the highest generation number + 1.
         let mut highest_seen_generation = None;
@@ -1632,14 +1639,19 @@ impl<'a> Planner<'a> {
             } else {
                 ImpossibleUpdatePolicy::Reevaluate
             };
+        let evacuating_sleds =
+            EvacuatingSleds::from_blueprint(self.blueprint.parent_blueprint());
         let PlannedMgsUpdates {
             pending_updates,
             pending_host_phase_2_changes,
+            pending_update_disposition_changes,
             blocked_mgs_updates,
         } = MgsUpdatePlanner {
             log: &self.log,
+            planner_config: self.input.planner_config(),
             inventory: &self.inventory,
             current_boards: &included_baseboards,
+            evacuating_sleds: &evacuating_sleds,
             zone_safety_checks,
             current_updates,
             current_artifacts,
@@ -1656,13 +1668,25 @@ impl<'a> Planner<'a> {
                 self.blueprint.comment(update.description());
             }
         }
+        for (sled_id, new_disposition) in
+            pending_update_disposition_changes.iter()
+        {
+            self.blueprint.comment(format!(
+                "setting sled {sled_id} update disposition to {new_disposition}"
+            ));
+        }
         self.blueprint
             .apply_pending_host_phase_2_changes(pending_host_phase_2_changes)?;
+        self.blueprint.apply_pending_update_disposition_changes(
+            &pending_update_disposition_changes,
+        )?;
 
         self.blueprint.pending_mgs_updates_replace_all(pending_updates.clone());
 
         report.pending_mgs_updates = pending_updates;
         report.blocked_mgs_updates = blocked_mgs_updates;
+        report.update_disposition_changes =
+            pending_update_disposition_changes.into_map();
         Ok(report)
     }
 
@@ -2621,7 +2645,9 @@ impl<'a> Planner<'a> {
         }
     }
 
-    fn lookup_current_nexus_generation(&self) -> Result<Generation, Error> {
+    fn lookup_current_nexus_generation(
+        &self,
+    ) -> Result<NexusGeneration, Error> {
         // Look up the active Nexus zone in the blueprint to get its generation.
         //
         // The Nexus generation is immutable, so it's fine (and easier in this

@@ -273,14 +273,20 @@ impl<'a> ProgressBuilder<'a> {
         };
         match &summary.execution_status {
             ExecutionStatus::NotStarted => UpdateState::Waiting,
-            ExecutionStatus::Running { .. } => UpdateState::Running,
+            ExecutionStatus::Running { root_total_elapsed, .. } => {
+                UpdateState::Running { elapsed: *root_total_elapsed }
+            }
             ExecutionStatus::Terminal(info) => match info.kind {
-                TerminalKind::Completed => UpdateState::Completed,
+                TerminalKind::Completed => {
+                    UpdateState::Completed { elapsed: info.root_total_elapsed }
+                }
                 TerminalKind::Failed => UpdateState::Failed {
                     message: failed_message(self.event_buffer, &info.step_key),
+                    elapsed: info.root_total_elapsed,
                 },
                 TerminalKind::Aborted => UpdateState::Aborted {
                     message: aborted_message(self.event_buffer, &info.step_key),
+                    elapsed: info.root_total_elapsed,
                 },
             },
         }

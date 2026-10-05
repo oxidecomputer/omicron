@@ -311,42 +311,15 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analysis_input::Input;
-    use crate::builder::{SitrepBuilder, SitrepBuilderRng};
-    use crate::test_util::FmTest;
-    use chrono::Utc;
-    use iddqd::IdOrdMap;
-    use nexus_types::external_api::physical_disk::PhysicalDiskKind;
-    use nexus_types::fm::{self, Sitrep, SitrepVersion};
+    use crate::test_util::{
+        FmTest, build_input, make_disk_case, make_in_service_disks,
+        make_parent_sitrep, make_zpool_degraded_fact, run_analyze, set_health,
+    };
+    use nexus_types::fm::{self, Sitrep};
     use nexus_types::in_service_disk::InServiceDisk;
     use nexus_types::inventory;
-    use omicron_common::api::external;
     use omicron_test_utils::dev;
-    use omicron_uuid_kinds::{
-        OmicronZoneUuid, PhysicalDiskUuid, SitrepUuid, SledUuid,
-    };
-    use std::sync::Arc;
-
-    /// Make an in-service disk set from a list of zpool IDs. Each zpool gets
-    /// its own fresh `PhysicalDiskUuid` and dummy identity fields
-    /// (vendor/serial/model); tests in this module only care about the zpool
-    /// dimension.
-    fn mk_in_service(
-        zpool_ids: impl IntoIterator<Item = ZpoolUuid>,
-    ) -> IdOrdMap<InServiceDisk> {
-        zpool_ids
-            .into_iter()
-            .map(|zpool_id| InServiceDisk {
-                physical_disk_id: PhysicalDiskUuid::new_v4(),
-                zpool_id,
-                sled_id: SledUuid::new_v4(),
-                vendor: "test-vendor".to_string(),
-                serial: format!("test-serial-{zpool_id}"),
-                model: "test-model".to_string(),
-                variant: PhysicalDiskKind::U2,
-            })
-            .collect()
-    }
+    use omicron_uuid_kinds::{PhysicalDiskUuid, SitrepUuid};
 
     /// Find the `physical_disk_id` for the given `zpool_id` in the
     /// in-service set, or fabricate a fresh one if not present (e.g., when
@@ -385,146 +358,13 @@ mod tests {
         (logctx, example.collection, zpool_ids)
     }
 
-    /// Set the zpool with `zpool_id` to `health`, panicking if not found.
-    fn set_health(
-        collection: &mut inventory::Collection,
-        zpool_id: ZpoolUuid,
-        health: ZpoolHealth,
-    ) {
-        for mut sa in collection.sled_agents.iter_mut() {
-            for z in sa.zpools.iter_mut() {
-                if z.id == zpool_id {
-                    z.health = health;
-                    return;
-                }
-            }
-        }
-        panic!("zpool {zpool_id} not found in collection");
-    }
-
-    /// Build an `Input` from a collection, an optional parent sitrep, and a
-    /// pre-built set of in-service disks.
-    fn build_input(
-        collection: inventory::Collection,
-        parent_sitrep: Option<Sitrep>,
-        in_service: IdOrdMap<InServiceDisk>,
-    ) -> Input {
-        let parent = parent_sitrep.map(|s| {
-            Arc::new((
-                SitrepVersion {
-                    id: s.id(),
-                    version: 0,
-                    time_made_current: Utc::now(),
-                },
-                s,
-            ))
-        });
-        let builder = Input::builder(parent, Arc::new(collection))
-            .expect("input builder should accept fresh inventory")
-            .in_service_disks(Arc::new(in_service))
-            .with_empty_defaults();
-        let (input, _report) = builder.build().expect("all inputs provided");
-        input
-    }
-
-    /// Run `analyze` over an input and return the resulting Sitrep along
-    /// with the analysis report.
-    fn run_analyze(
-        log: &slog::Logger,
-        input: &Input,
-    ) -> (Sitrep, fm::analysis_reports::AnalysisReport) {
-        let mut builder = SitrepBuilder::new_with_rng(
-            log,
-            input,
-            SitrepBuilderRng::from_seed("disk-analyze"),
-        );
-        analyze(&mut builder).expect("analyze ok");
-        builder.build(OmicronZoneUuid::new_v4(), Utc::now())
-    }
-
-    /// Make a `ZpoolUnhealthy` (Degraded) fact for the given disk and zpool.
-    fn make_degraded_fact(
-        parent_sitrep_id: SitrepUuid,
-        inv_collection_id: omicron_uuid_kinds::CollectionUuid,
-        physical_disk_id: PhysicalDiskUuid,
-        zpool_id: ZpoolUuid,
-    ) -> fm::case::Fact {
-        fm::case::Fact {
-            metadata: fm::case::FactMetadata {
-                id: omicron_uuid_kinds::FactUuid::new_v4(),
-                created_sitrep_id: parent_sitrep_id,
-                comment: format!("zpool {zpool_id} degraded"),
-            },
-            payload: DiskFact::ZpoolUnhealthy(ZpoolUnhealthyFactPayload {
-                physical_disk_id,
-                zpool_id,
-                last_seen_health: ZpoolHealth::Degraded,
-                observed_in_inv: inv_collection_id,
-                time_observed: Utc::now(),
-            })
-            .into(),
-        }
-    }
-
-    /// Make an open `PhysicalDisk` case carrying the given facts.
-    fn make_disk_case(
-        case_id: omicron_uuid_kinds::CaseUuid,
-        parent_sitrep_id: SitrepUuid,
-        facts: impl IntoIterator<Item = fm::case::Fact>,
-    ) -> fm::Case {
-        let mut fact_map = iddqd::IdOrdMap::new();
-        for fact in facts {
-            fact_map.insert_unique(fact).unwrap();
-        }
-        fm::Case {
-            id: case_id,
-            metadata: fm::case::Metadata {
-                created_sitrep_id: parent_sitrep_id,
-                closed_sitrep_id: None,
-                de: DiagnosisEngineKind::PhysicalDisk,
-                comment: "a disk case".to_string(),
-            },
-            ereports: Default::default(),
-            alerts_requested: Default::default(),
-            support_bundles_requested: Default::default(),
-            facts: fact_map,
-        }
-    }
-
-    /// Make a parent sitrep containing the given cases.
-    fn make_parent_sitrep(
-        parent_sitrep_id: SitrepUuid,
-        inv_collection_id: omicron_uuid_kinds::CollectionUuid,
-        cases: impl IntoIterator<Item = fm::Case>,
-    ) -> Sitrep {
-        let mut case_map = iddqd::IdOrdMap::new();
-        for case in cases {
-            case_map.insert_unique(case).unwrap();
-        }
-        Sitrep {
-            metadata: fm::SitrepMetadata {
-                id: parent_sitrep_id,
-                inv_collection_id,
-                creator_id: OmicronZoneUuid::new_v4(),
-                parent_sitrep_id: None,
-                time_created: Utc::now(),
-                next_inv_min_time_started: Utc::now(),
-                comment: String::new(),
-                alert_generation: external::Generation::new(),
-                support_bundle_generation: external::Generation::new(),
-            },
-            cases: case_map,
-            ereports_by_id: Default::default(),
-        }
-    }
-
     fn make_parent_with_disk_case(
         parent_sitrep_id: SitrepUuid,
         inv_collection_id: omicron_uuid_kinds::CollectionUuid,
         physical_disk_id: PhysicalDiskUuid,
         zpool_id: ZpoolUuid,
     ) -> Sitrep {
-        let fact = make_degraded_fact(
+        let fact = make_zpool_degraded_fact(
             parent_sitrep_id,
             inv_collection_id,
             physical_disk_id,
@@ -581,7 +421,7 @@ mod tests {
             setup("disk_open_degraded_in_service");
         let target = zpools[0];
         set_health(&mut collection, target, ZpoolHealth::Degraded);
-        let in_service = mk_in_service(zpools.iter().copied());
+        let in_service = make_in_service_disks(zpools.iter().copied());
         let expected_disk_id = disk_id_for(&in_service, target);
         let input = build_input(collection, None, in_service);
 
@@ -609,7 +449,7 @@ mod tests {
         let target = zpools[0];
         set_health(&mut collection, target, ZpoolHealth::Faulted);
         // target is *not* in the in-service set.
-        let in_service = mk_in_service(zpools.iter().copied().skip(1));
+        let in_service = make_in_service_disks(zpools.iter().copied().skip(1));
         let input = build_input(collection, None, in_service);
 
         let (sitrep, _report) = run_analyze(&logctx.log, &input);
@@ -627,7 +467,7 @@ mod tests {
         let (logctx, mut collection, zpools) = setup("disk_idempotent");
         let target = zpools[0];
         set_health(&mut collection, target, ZpoolHealth::Degraded);
-        let in_service = mk_in_service(zpools.iter().copied());
+        let in_service = make_in_service_disks(zpools.iter().copied());
         let target_disk_id = disk_id_for(&in_service, target);
         let parent_id = SitrepUuid::new_v4();
         let parent = make_parent_with_disk_case(
@@ -657,7 +497,7 @@ mod tests {
         let (logctx, collection, zpools) = setup("disk_close_on_recovery");
         let target = zpools[0];
         // The example system reports zpools as Online by default.
-        let in_service = mk_in_service(zpools.iter().copied());
+        let in_service = make_in_service_disks(zpools.iter().copied());
         let target_disk_id = disk_id_for(&in_service, target);
         let parent_id = SitrepUuid::new_v4();
         let parent = make_parent_with_disk_case(
@@ -692,7 +532,7 @@ mod tests {
         set_health(&mut collection, target, ZpoolHealth::Degraded);
         // Target is NOT in-service in this sitrep (just expunged), so
         // disk_id_for fabricates a stable PhysicalDiskUuid for it.
-        let in_service = mk_in_service(zpools.iter().copied().skip(1));
+        let in_service = make_in_service_disks(zpools.iter().copied().skip(1));
         let target_disk_id = disk_id_for(&in_service, target);
         let parent_id = SitrepUuid::new_v4();
         let parent = make_parent_with_disk_case(
@@ -727,7 +567,8 @@ mod tests {
         let (logctx, collection, zpools) = setup("disk_keep_open_on_absence");
         let phantom = ZpoolUuid::new_v4();
         assert!(!zpools.contains(&phantom));
-        let in_service = mk_in_service(zpools.iter().copied().chain([phantom]));
+        let in_service =
+            make_in_service_disks(zpools.iter().copied().chain([phantom]));
         let phantom_disk_id = disk_id_for(&in_service, phantom);
         let parent_id = SitrepUuid::new_v4();
         let parent = make_parent_with_disk_case(
@@ -756,7 +597,7 @@ mod tests {
     #[test]
     fn empty_case_is_closed() {
         let (logctx, collection, _zpools) = setup("disk_empty_case_closed");
-        let in_service = mk_in_service(std::iter::empty());
+        let in_service = make_in_service_disks(std::iter::empty());
 
         let parent_sitrep_id = SitrepUuid::new_v4();
         let empty_case_id = omicron_uuid_kinds::CaseUuid::new_v4();
@@ -792,7 +633,7 @@ mod tests {
         let (logctx, mut collection, zpools) = setup("disk_duplicate_closed");
         let target = zpools[0];
         set_health(&mut collection, target, ZpoolHealth::Degraded);
-        let in_service = mk_in_service(zpools.iter().copied());
+        let in_service = make_in_service_disks(zpools.iter().copied());
         let target_disk_id = disk_id_for(&in_service, target);
         let parent_id = SitrepUuid::new_v4();
 
@@ -800,14 +641,14 @@ mod tests {
         let id_b = omicron_uuid_kinds::CaseUuid::new_v4();
         let (kept_id, dup_id) =
             if id_a < id_b { (id_a, id_b) } else { (id_b, id_a) };
-        let kept_fact = make_degraded_fact(
+        let kept_fact = make_zpool_degraded_fact(
             parent_id,
             collection.id,
             target_disk_id,
             target,
         );
         let kept_fact_id = kept_fact.metadata.id;
-        let dup_fact = make_degraded_fact(
+        let dup_fact = make_zpool_degraded_fact(
             parent_id,
             collection.id,
             target_disk_id,
@@ -860,7 +701,7 @@ mod tests {
             setup("disk_uninterpretable_replaced");
         let target = zpools[0];
         set_health(&mut collection, target, ZpoolHealth::Degraded);
-        let in_service = mk_in_service(zpools.iter().copied());
+        let in_service = make_in_service_disks(zpools.iter().copied());
         let target_disk_id = disk_id_for(&in_service, target);
         let parent_id = SitrepUuid::new_v4();
 
@@ -871,13 +712,13 @@ mod tests {
             corrupt_case_id,
             parent_id,
             [
-                make_degraded_fact(
+                make_zpool_degraded_fact(
                     parent_id,
                     collection.id,
                     target_disk_id,
                     target,
                 ),
-                make_degraded_fact(
+                make_zpool_degraded_fact(
                     parent_id,
                     collection.id,
                     PhysicalDiskUuid::new_v4(),
@@ -937,7 +778,7 @@ mod tests {
         let (logctx, mut collection, zpools) = setup("disk_fact_uuid_stable");
         let target = zpools[0];
         set_health(&mut collection, target, ZpoolHealth::Degraded);
-        let in_service = mk_in_service(zpools.iter().copied());
+        let in_service = make_in_service_disks(zpools.iter().copied());
         let target_disk_id = disk_id_for(&in_service, target);
         let parent_id = SitrepUuid::new_v4();
         let parent = make_parent_with_disk_case(
@@ -981,7 +822,7 @@ mod tests {
         let target = zpools[0];
         // Parent recorded Degraded; current inventory shows Faulted.
         set_health(&mut collection, target, ZpoolHealth::Faulted);
-        let in_service = mk_in_service(zpools.iter().copied());
+        let in_service = make_in_service_disks(zpools.iter().copied());
         let target_disk_id = disk_id_for(&in_service, target);
         let parent_id = SitrepUuid::new_v4();
         let parent = make_parent_with_disk_case(
@@ -1032,7 +873,7 @@ mod tests {
             setup("disk_fact_uuid_rotates_zpool_replaced");
         let target = zpools[0];
         set_health(&mut collection, target, ZpoolHealth::Degraded);
-        let in_service = mk_in_service(zpools.iter().copied());
+        let in_service = make_in_service_disks(zpools.iter().copied());
         let target_disk_id = disk_id_for(&in_service, target);
         // The parent's fact records the same disk and the same health
         // (Degraded), but a zpool that no longer exists.
@@ -1082,7 +923,7 @@ mod tests {
         let (logctx, collection, _zpools) =
             setup("disk_foreign_payload_closed");
         let inv_id = collection.id;
-        let in_service = mk_in_service(std::iter::empty());
+        let in_service = make_in_service_disks(std::iter::empty());
         let parent_id = SitrepUuid::new_v4();
         let case_id = omicron_uuid_kinds::CaseUuid::new_v4();
         let foreign_fact = fm::case::Fact {

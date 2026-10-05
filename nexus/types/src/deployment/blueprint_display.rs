@@ -5,7 +5,7 @@
 //! Types helpful for rendering blueprints.
 
 use daft::Leaf;
-use omicron_common::api::external::Generation;
+use omicron_generation_kinds::Generation;
 use std::fmt;
 
 pub mod constants {

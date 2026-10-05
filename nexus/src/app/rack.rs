@@ -282,7 +282,6 @@ impl super::Nexus {
             // add capacity after the fact if they want to use it for that
             // purpose.
             quotas: silo::SiloQuotasCreate::empty(),
-            discoverable: false,
             identity_mode: silo::SiloIdentityMode::LocalOnly,
             admin_group_name: None,
             tls_certificates,
@@ -603,7 +602,12 @@ impl super::Nexus {
 
             match self
                 .db_datastore
-                .switch_port_settings_create(opctx, &port_settings_params, None)
+                .switch_port_settings_create(
+                    opctx,
+                    &port_settings_params,
+                    None,
+                    uplink_config.allow_ddm_traffic,
+                )
                 .await
             {
                 Ok(_) | Err(Error::ObjectAlreadyExists { .. }) => Ok(()),

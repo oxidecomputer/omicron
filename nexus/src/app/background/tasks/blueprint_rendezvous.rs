@@ -12,10 +12,12 @@ use futures::FutureExt;
 use futures::future::BoxFuture;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_reconfigurator_rendezvous::reconcile_blueprint_rendezvous_tables;
-use nexus_types::{
-    internal_api::background::BlueprintRendezvousStatus, inventory::Collection,
-};
+use nexus_reconfigurator_rendezvous::reconcile_dataset_rendezvous_tables;
+use nexus_reconfigurator_rendezvous::reconcile_sled_blueprint_availability;
+use nexus_types::internal_api::background::BlueprintRendezvousStatus;
+use nexus_types::internal_api::background::DatasetRendezvousOutcome;
+use nexus_types::internal_api::background::SledBlueprintAvailabilityRendezvousOutcome;
+use nexus_types::inventory::Collection;
 use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::watch;
@@ -57,42 +59,85 @@ impl BlueprintRendezvous {
             return json!({"error": "no blueprint" });
         };
 
+        // Reconcile sled availability -- this can be done without an inventory
+        // collection available.
+        let sled_blueprint_availability =
+            match reconcile_sled_blueprint_availability(
+                opctx,
+                &self.datastore,
+                &blueprint,
+            )
+            .await
+            {
+                Ok(stats) => {
+                    SledBlueprintAvailabilityRendezvousOutcome::Reconciled(
+                        stats,
+                    )
+                }
+                Err(err) => {
+                    error!(
+                        &opctx.log,
+                        "Blueprint rendezvous: sled availability reconciliation \
+                         failed";
+                        "blueprint_id" => %blueprint.id,
+                        "error" => format!("{err:#}"),
+                    );
+                    SledBlueprintAvailabilityRendezvousOutcome::Error(format!(
+                        "{err:#}"
+                    ))
+                }
+            };
+
         // Get the inventory most recently seen by the inventory loader
         // background task. We clone the Arc to avoid keeping the channel locked
         // for the rest of our execution.
-        let Some(collection) =
-            self.rx_inventory.borrow_and_update().as_ref().map(Arc::clone)
-        else {
-            warn!(
-                &opctx.log, "Blueprint rendezvous: skipped";
-                "reason" => "no inventory collection",
-            );
-            return json!({"error": "no inventory collection" });
+        let inventory =
+            self.rx_inventory.borrow_and_update().as_ref().map(Arc::clone);
+        let datasets = match inventory {
+            None => {
+                warn!(
+                    &opctx.log,
+                    "Blueprint rendezvous: skipped dataset reconciliation";
+                    "reason" => "no inventory collection",
+                );
+                DatasetRendezvousOutcome::NoInventoryCollection
+            }
+            Some(collection) => {
+                match reconcile_dataset_rendezvous_tables(
+                    opctx,
+                    &self.datastore,
+                    &blueprint,
+                    &collection,
+                )
+                .await
+                {
+                    Ok(stats) => DatasetRendezvousOutcome::Reconciled {
+                        inventory_collection_id: collection.id,
+                        stats,
+                    },
+                    Err(err) => {
+                        error!(
+                            &opctx.log,
+                            "Blueprint rendezvous: dataset reconciliation \
+                             failed";
+                            "blueprint_id" => %blueprint.id,
+                            "inventory_collection_id" => %collection.id,
+                            "error" => format!("{err:#}"),
+                        );
+                        DatasetRendezvousOutcome::Error {
+                            inventory_collection_id: collection.id,
+                            error: format!("{err:#}"),
+                        }
+                    }
+                }
+            }
         };
 
-        // Actually perform rendezvous table reconciliation
-        let result = reconcile_blueprint_rendezvous_tables(
-            opctx,
-            &self.datastore,
-            &blueprint,
-            &collection,
-        )
-        .await;
-
-        // Return the result as a `serde_json::Value`
-        match result {
-            Ok(stats) => {
-                let status = BlueprintRendezvousStatus {
-                    blueprint_id: blueprint.id,
-                    inventory_collection_id: collection.id,
-                    stats,
-                };
-                json!(status)
-            }
-            Err(err) => json!({ "error":
-                format!("rendezvous reconciliation failed: {err:#}"),
-            }),
-        }
+        json!(BlueprintRendezvousStatus {
+            blueprint_id: blueprint.id,
+            sled_blueprint_availability,
+            datasets,
+        })
     }
 }
 

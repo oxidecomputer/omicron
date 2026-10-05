@@ -36,7 +36,9 @@ use nexus_types_versions::v2026_01_30_01;
 use nexus_types_versions::v2026_01_31_00;
 use nexus_types_versions::v2026_02_13_01;
 use nexus_types_versions::v2026_04_16_00;
+use nexus_types_versions::v2026_05_07_00;
 use nexus_types_versions::v2026_06_05_00;
+use nexus_types_versions::v2026_08_14_00;
 use omicron_common::address::IpRange;
 use omicron_common::api::external::{
     http_pagination::{
@@ -86,6 +88,11 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_09_15_00, REMOVE_SILO_DISCOVERABLE),
+    (2026_09_11_00, ALERT_PAYLOAD),
+    (2026_09_08_00, PROJECT_AND_VPC_CREATE_DEFAULTS),
+    (2026_08_28_00, SILO_USER_DOCS),
+    (2026_08_19_01, BGP_PEER_SRC_ADDR),
     (2026_08_17_00, SUPPORT_BUNDLES_STABLE),
     (2026_08_14_00, ALERT_LIST),
     (2026_08_12_00, SLED_SLOT),
@@ -626,11 +633,27 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/system/silos",
         tags = ["system/silos"],
+        versions = VERSION_REMOVE_SILO_DISCOVERABLE..,
     }]
     async fn silo_create(
         rqctx: RequestContext<Self::Context>,
         new_silo_params: TypedBody<latest::silo::SiloCreate>,
     ) -> Result<HttpResponseCreated<latest::silo::Silo>, HttpError>;
+
+    /// Create silo
+    #[endpoint {
+        operation_id = "silo_create",
+        method = POST,
+        path = "/v1/system/silos",
+        tags = ["system/silos"],
+        versions = ..VERSION_REMOVE_SILO_DISCOVERABLE,
+    }]
+    async fn silo_create_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        new_silo_params: TypedBody<v2025_11_20_00::silo::SiloCreate>,
+    ) -> Result<HttpResponseCreated<latest::silo::Silo>, HttpError> {
+        Self::silo_create(rqctx, new_silo_params.map(Into::into)).await
+    }
 
     /// Fetch silo
     ///
@@ -737,7 +760,7 @@ pub trait NexusExternalApi {
 
     // Silo-specific user endpoints
 
-    /// List built-in (system) users in silo
+    /// List users in silo
     #[endpoint {
         method = GET,
         path = "/v1/system/users",
@@ -749,7 +772,7 @@ pub trait NexusExternalApi {
         query_params: Query<PaginatedById<latest::silo::SiloSelector>>,
     ) -> Result<HttpResponseOk<ResultsPage<latest::user::User>>, HttpError>;
 
-    /// List built-in (system) users in silo
+    /// List users in silo
     #[endpoint {
         operation_id = "silo_user_list",
         method = GET,
@@ -774,7 +797,7 @@ pub trait NexusExternalApi {
         )
     }
 
-    /// Fetch built-in (system) user
+    /// Fetch user in silo
     #[endpoint {
         method = GET,
         path = "/v1/system/users/{user_id}",
@@ -787,7 +810,7 @@ pub trait NexusExternalApi {
         query_params: Query<latest::silo::SiloSelector>,
     ) -> Result<HttpResponseOk<latest::user::User>, HttpError>;
 
-    /// Fetch built-in (system) user
+    /// Fetch user in silo
     #[endpoint {
         operation_id = "silo_user_view",
         method = GET,
@@ -1156,11 +1179,28 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/projects",
         tags = ["projects"],
+        versions = VERSION_PROJECT_AND_VPC_CREATE_DEFAULTS..,
     }]
     async fn project_create(
         rqctx: RequestContext<Self::Context>,
         new_project: TypedBody<latest::project::ProjectCreate>,
     ) -> Result<HttpResponseCreated<latest::project::Project>, HttpError>;
+
+    /// Create project
+    #[endpoint {
+        operation_id = "project_create",
+        method = POST,
+        path = "/v1/projects",
+        tags = ["projects"],
+        versions = ..VERSION_PROJECT_AND_VPC_CREATE_DEFAULTS,
+    }]
+    async fn project_create_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        new_project: TypedBody<v2025_11_20_00::project::ProjectCreate>,
+    ) -> Result<HttpResponseCreated<v2025_11_20_00::project::Project>, HttpError>
+    {
+        Self::project_create(rqctx, new_project.map(Into::into)).await
+    }
 
     /// Fetch project
     #[endpoint {
@@ -5279,7 +5319,7 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/system/networking/switch-port-settings",
         tags = ["system/networking"],
-        versions = VERSION_REMOVE_DUPLICATED_NETWORKING_TYPES..,
+        versions = VERSION_BGP_PEER_SRC_ADDR..,
     }]
     async fn networking_switch_port_settings_create(
         rqctx: RequestContext<Self::Context>,
@@ -5288,6 +5328,37 @@ pub trait NexusExternalApi {
         HttpResponseCreated<latest::networking::SwitchPortSettings>,
         HttpError,
     >;
+
+    #[endpoint {
+        operation_id = "networking_switch_port_settings_create",
+        method = POST,
+        path = "/v1/system/networking/switch-port-settings",
+        tags = ["system/networking"],
+        versions = VERSION_REMOVE_DUPLICATED_NETWORKING_TYPES..VERSION_BGP_PEER_SRC_ADDR,
+    }]
+    async fn networking_switch_port_settings_create_v2026_05_07_00(
+        rqctx: RequestContext<Self::Context>,
+        new_settings: TypedBody<
+            v2026_05_07_00::networking::SwitchPortSettingsCreate,
+        >,
+    ) -> Result<
+        HttpResponseCreated<v2026_05_07_00::networking::SwitchPortSettings>,
+        HttpError,
+    > {
+        Self::networking_switch_port_settings_create(
+            rqctx,
+            new_settings.map(Into::into),
+        )
+        .await
+        .and_then(|response| {
+            response.try_map(TryFrom::try_from).map_err(|err| {
+                HttpError::for_internal_error(format!(
+                    "switch port settings contain configuration that \
+                     cannot be represented in this API version: {err:#}"
+                ))
+            })
+        })
+    }
 
     #[endpoint {
         operation_id = "networking_switch_port_settings_create",
@@ -5315,7 +5386,14 @@ pub trait NexusExternalApi {
             })?,
         )
         .await
-        .map(|response| response.map(From::from))
+        .and_then(|response| {
+            response.try_map(TryFrom::try_from).map_err(|err| {
+                HttpError::for_internal_error(format!(
+                    "switch port settings contain configuration that \
+                     cannot be represented in this API version: {err:#}"
+                ))
+            })
+        })
     }
 
     #[endpoint {
@@ -5411,12 +5489,38 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/networking/switch-port-settings/{port}",
         tags = ["system/networking"],
-        versions = VERSION_REMOVE_DUPLICATED_NETWORKING_TYPES..,
+        versions = VERSION_BGP_PEER_SRC_ADDR..,
     }]
     async fn networking_switch_port_settings_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::networking::SwitchPortSettingsInfoSelector>,
     ) -> Result<HttpResponseOk<latest::networking::SwitchPortSettings>, HttpError>;
+
+    #[endpoint {
+        operation_id = "networking_switch_port_settings_view",
+        method = GET,
+        path = "/v1/system/networking/switch-port-settings/{port}",
+        tags = ["system/networking"],
+        versions = VERSION_REMOVE_DUPLICATED_NETWORKING_TYPES..VERSION_BGP_PEER_SRC_ADDR,
+    }]
+    async fn networking_switch_port_settings_view_v2026_05_07_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::networking::SwitchPortSettingsInfoSelector>,
+    ) -> Result<
+        HttpResponseOk<v2026_05_07_00::networking::SwitchPortSettings>,
+        HttpError,
+    > {
+        Self::networking_switch_port_settings_view(rqctx, path_params)
+            .await
+            .and_then(|response| {
+                response.try_map(TryFrom::try_from).map_err(|err| {
+                    HttpError::for_internal_error(format!(
+                        "switch port settings contain configuration that \
+                         cannot be represented in this API version: {err:#}"
+                    ))
+                })
+            })
+    }
 
     #[endpoint {
         operation_id = "networking_switch_port_settings_view",
@@ -5434,7 +5538,14 @@ pub trait NexusExternalApi {
     > {
         Self::networking_switch_port_settings_view(rqctx, path_params)
             .await
-            .map(|response| response.map(From::from))
+            .and_then(|response| {
+                response.try_map(TryFrom::try_from).map_err(|err| {
+                    HttpError::for_internal_error(format!(
+                        "switch port settings contain configuration that \
+                         cannot be represented in this API version: {err:#}"
+                    ))
+                })
+            })
     }
 
     #[endpoint {
@@ -6919,12 +7030,29 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/vpcs",
         tags = ["vpcs"],
+        versions = VERSION_PROJECT_AND_VPC_CREATE_DEFAULTS..,
     }]
     async fn vpc_create(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<latest::project::ProjectSelector>,
         body: TypedBody<latest::vpc::VpcCreate>,
     ) -> Result<HttpResponseCreated<latest::vpc::Vpc>, HttpError>;
+
+    /// Create VPC
+    #[endpoint {
+        operation_id = "vpc_create",
+        method = POST,
+        path = "/v1/vpcs",
+        tags = ["vpcs"],
+        versions = ..VERSION_PROJECT_AND_VPC_CREATE_DEFAULTS,
+    }]
+    async fn vpc_create_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<v2025_11_20_00::project::ProjectSelector>,
+        body: TypedBody<v2025_11_20_00::vpc::VpcCreate>,
+    ) -> Result<HttpResponseCreated<v2025_11_20_00::vpc::Vpc>, HttpError> {
+        Self::vpc_create(rqctx, query_params, body.map(Into::into)).await
+    }
 
     /// Fetch VPC
     #[endpoint {
@@ -8912,10 +9040,10 @@ pub trait NexusExternalApi {
     ///
     /// Audit log entries are designed to be immutable: once you see an entry,
     /// fetching it again will never get you a different result. The list is
-    /// ordered by `time_completed`, not `time_started`. If you fetch the audit
-    /// log for a time range that is fully in the past, the resulting list is
-    /// guaranteed to be complete, i.e., fetching the same timespan again later
-    /// will always produce the same set of entries.
+    /// ordered and filtered by `time_completed`, not `time_started`. If
+    /// you fetch the audit log for a time range that is fully in the past,
+    /// the resulting list is guaranteed to be complete, i.e., fetching the
+    /// same timespan again later will always produce the same set of entries.
     #[endpoint {
         method = GET,
         path = "/v1/system/audit-log",
@@ -9266,24 +9394,69 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/alerts",
         tags = ["system/alerts"],
-        versions = VERSION_ALERT_LIST..
+        versions = VERSION_ALERT_PAYLOAD..
     }]
     async fn alert_list(
         rqctx: RequestContext<Self::Context>,
         pagination: Query<PaginatedByTimeAndId<latest::alert::AlertListParams>>,
     ) -> Result<HttpResponseOk<ResultsPage<latest::alert::Alert>>, HttpError>;
 
+    /// List alerts
+    ///
+    /// Alerts may be filtered by alert class or alert class glob and by an
+    /// inclusive creation time range.
+    #[endpoint {
+        operation_id = "alert_list",
+        method = GET,
+        path = "/v1/alerts",
+        tags = ["system/alerts"],
+        versions = VERSION_ALERT_LIST..VERSION_ALERT_PAYLOAD
+    }]
+    async fn alert_list_v2026_08_14_00(
+        rqctx: RequestContext<Self::Context>,
+        pagination: Query<
+            PaginatedByTimeAndId<v2026_08_14_00::alert::AlertListParams>,
+        >,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2026_08_14_00::alert::Alert>>,
+        HttpError,
+    > {
+        Self::alert_list(rqctx, pagination).await.map(|HttpResponseOk(page)| {
+            HttpResponseOk(ResultsPage {
+                items: page.items.into_iter().map(Into::into).collect(),
+                next_page: page.next_page,
+            })
+        })
+    }
+
     /// Fetch alert
     #[endpoint {
         method = GET,
         path = "/v1/alerts/{alert_id}",
         tags = ["system/alerts"],
-        versions = VERSION_ALERT_LIST..
+        versions = VERSION_ALERT_PAYLOAD..
     }]
     async fn alert_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::alert::AlertSelector>,
     ) -> Result<HttpResponseOk<latest::alert::Alert>, HttpError>;
+
+    /// Fetch alert
+    #[endpoint {
+        operation_id = "alert_view",
+        method = GET,
+        path = "/v1/alerts/{alert_id}",
+        tags = ["system/alerts"],
+        versions = VERSION_ALERT_LIST..VERSION_ALERT_PAYLOAD
+    }]
+    async fn alert_view_v2026_08_14_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::alert::AlertSelector>,
+    ) -> Result<HttpResponseOk<v2026_08_14_00::alert::Alert>, HttpError> {
+        Self::alert_view(rqctx, path_params)
+            .await
+            .map(|HttpResponseOk(alert)| HttpResponseOk(alert.into()))
+    }
 
     /// List alert classes
     #[endpoint {

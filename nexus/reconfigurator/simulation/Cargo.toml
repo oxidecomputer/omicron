@@ -17,6 +17,7 @@ itertools.workspace = true
 nexus-inventory.workspace = true
 nexus-reconfigurator-planning.workspace = true
 nexus-types.workspace = true
+omicron-generation-kinds.workspace = true
 sled-agent-types.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true

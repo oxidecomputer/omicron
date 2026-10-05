@@ -19,6 +19,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize, Serializer};
 use slog_error_chain::InlineErrorChain;
 use uuid::Uuid;
+use zeroize::Zeroizing;
 
 // Re-exports of pinned types from sled-agent-types-versions.
 pub use sled_agent_types_versions::v1::early_networking::{
@@ -653,7 +654,12 @@ pub struct CertificatePem(pub String);
 ///
 /// The key material is redacted from the `Debug` output.
 #[derive(Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-pub struct PrivateKeyPem(pub String);
+pub struct PrivateKeyPem(
+    // Zeroizing wipes the backing allocation on drop. Serialization and
+    // deserialization are transparent, so schemars(with = "String") is
+    // reasonable.
+    #[schemars(with = "String")] pub Zeroizing<String>,
+);
 
 impl fmt::Debug for PrivateKeyPem {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

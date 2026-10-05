@@ -36,7 +36,9 @@ use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::BlueprintMeasurements;
 use nexus_types::deployment::BlueprintSledUpdateDispositionKind;
 use nexus_types::deployment::CockroachDbSettings;
+use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
+use nexus_types::deployment::SledUpdateRebootPolicy;
 use nexus_types::deployment::execution::blueprint_external_dns_config;
 use nexus_types::deployment::execution::blueprint_internal_dns_config;
 use nexus_types::deployment::{Blueprint, UnstableReconfiguratorState};
@@ -53,11 +55,12 @@ use nexus_types::external_api::sled::{SledPolicy, SledProvisionPolicy};
 use nexus_types::inventory::CollectionDisplayCliFilter;
 use nexus_types::tuf_repo::TufRepoDescription;
 use omicron_common::address::REPO_DEPOT_PORT;
-use omicron_common::api::external::Generation;
 use omicron_common::api::external::Name;
-use omicron_common::disk::M2Slot;
 use omicron_common::policy::NEXUS_REDUNDANCY;
 use omicron_common::update::OmicronInstallManifestSource;
+use omicron_generation_kinds::{
+    Generation, NexusGeneration, TargetReleaseGeneration,
+};
 use omicron_repl_utils::run_repl_from_file;
 use omicron_repl_utils::run_repl_on_stdin;
 use omicron_uuid_kinds::GenericUuid;
@@ -69,6 +72,7 @@ use omicron_uuid_kinds::VnicUuid;
 use omicron_uuid_kinds::{BlueprintUuid, MupdateOverrideUuid};
 use omicron_uuid_kinds::{CollectionUuid, MupdateUuid};
 use semver::Version;
+use sled_agent_types::disk::M2Slot;
 use sled_agent_types::inventory::ZoneKind;
 use slog_error_chain::InlineErrorChain;
 use std::borrow::Cow;
@@ -155,12 +159,13 @@ impl ReconfiguratorSim {
 
         // Handle zone networking setup first
         for (_, zone) in parent_blueprint.in_service_zones() {
-            if let Some((external_ip, nic)) =
-                zone.zone_type.external_networking()
-            {
-                builder
-                    .add_omicron_zone_external_ip(zone.id, external_ip)
-                    .context("adding omicron zone external IP")?;
+            if let Some(networking) = zone.zone_type.external_networking() {
+                for external_ip in networking.external_ips() {
+                    builder
+                        .add_omicron_zone_external_ip(zone.id, external_ip)
+                        .context("adding omicron zone external IP")?;
+                }
+                let nic = networking.nic();
                 let nic = OmicronZoneNic {
                     // TODO-cleanup use `TypedUuid` everywhere
                     id: VnicUuid::from_untyped_uuid(nic.id),
@@ -617,6 +622,15 @@ enum SledSetCommand {
     Visibility(SledSetVisibilityCommand),
     /// set the mupdate override for this sled
     MupdateOverride(SledSetMupdateOverrideArgs),
+    /// set the number of VMMs this sled's instance manager reports as
+    /// registered (relevant when the sled is being evacuated)
+    RegisteredVmms(SledSetRegisteredVmmsArgs),
+}
+
+#[derive(Debug, Args)]
+struct SledSetRegisteredVmmsArgs {
+    /// the number of registered VMMs to report
+    count: usize,
 }
 
 #[derive(Debug, Args)]
@@ -910,7 +924,7 @@ enum BlueprintEditCommands {
         sled_id: SledOpt,
 
         /// generation of the new Nexus instance
-        nexus_generation: Generation,
+        nexus_generation: NexusGeneration,
 
         /// image source for the new zone
         ///
@@ -974,7 +988,7 @@ enum BlueprintEditCommands {
     #[clap(visible_alias = "set-target-release-min-gen")]
     SetTargetReleaseMinimumGeneration {
         /// the minimum target release generation
-        generation: Generation,
+        generation: TargetReleaseGeneration,
     },
     /// expunge a zone
     ExpungeZones { zone_ids: Vec<OmicronZoneUuid> },
@@ -1556,7 +1570,7 @@ enum SetArgs {
     NumNexus { num_nexus: u16 },
     /// specify the generation of Nexus zones that are considered active when
     /// running the blueprint planner
-    ActiveNexusGen { r#gen: Generation },
+    ActiveNexusGen { r#gen: NexusGeneration },
     /// Control the set of Nexus zones seen as input to the planner
     NexusZones {
         #[clap(long, conflicts_with = "active")]
@@ -1581,6 +1595,8 @@ enum SetArgs {
     },
     /// CockroachDB settings
     CockroachdbSettings(SetCockroachdbSettingsArgs),
+    /// Planner config settings
+    PlannerConfig(SetPlannerConfigArgs),
 }
 
 #[derive(Debug, Clone)]
@@ -1641,6 +1657,80 @@ impl CockroachdbSettingsOpts {
                 .unwrap_or_else(|| current.preserve_downgrade.clone()),
         };
         (new != *current).then_some(new)
+    }
+}
+
+#[derive(Debug, Args)]
+struct SetPlannerConfigArgs {
+    #[clap(flatten)]
+    opts: PlannerConfigOpts,
+}
+
+#[derive(Debug, Clone, Args)]
+#[group(required = true, multiple = true)]
+struct PlannerConfigOpts {
+    /// sled reboot policy
+    #[clap(long)]
+    sled_update_reboot_policy: Option<SledUpdateRebootPolicyOpt>,
+    /// disruption policy
+    #[clap(long)]
+    disruption_policy: Option<ReconfiguratorDisruptionPolicyOpt>,
+}
+
+impl PlannerConfigOpts {
+    fn update_if_modified(
+        &self,
+        current: &PlannerConfig,
+    ) -> Option<PlannerConfig> {
+        let new = PlannerConfig {
+            sled_update_reboot_policy: self
+                .sled_update_reboot_policy
+                .map(From::from)
+                .unwrap_or_else(|| current.sled_update_reboot_policy),
+            disruption_policy: self
+                .disruption_policy
+                .map(From::from)
+                .unwrap_or_else(|| current.disruption_policy),
+        };
+        (new != *current).then_some(new)
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum ReconfiguratorDisruptionPolicyOpt {
+    Terminate,
+    MigrateOrTerminate,
+    MigrateOnly,
+}
+
+impl From<ReconfiguratorDisruptionPolicyOpt>
+    for ReconfiguratorDisruptionPolicy
+{
+    fn from(value: ReconfiguratorDisruptionPolicyOpt) -> Self {
+        match value {
+            ReconfiguratorDisruptionPolicyOpt::Terminate => Self::Terminate,
+            ReconfiguratorDisruptionPolicyOpt::MigrateOrTerminate => {
+                Self::MigrateOrTerminate
+            }
+            ReconfiguratorDisruptionPolicyOpt::MigrateOnly => Self::MigrateOnly,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum SledUpdateRebootPolicyOpt {
+    ImmediateNoEvacuation,
+    Evacuate,
+}
+
+impl From<SledUpdateRebootPolicyOpt> for SledUpdateRebootPolicy {
+    fn from(value: SledUpdateRebootPolicyOpt) -> Self {
+        match value {
+            SledUpdateRebootPolicyOpt::ImmediateNoEvacuation => {
+                Self::ImmediateNoEvacuation
+            }
+            SledUpdateRebootPolicyOpt::Evacuate => Self::Evacuate,
+        }
     }
 }
 
@@ -2137,6 +2227,23 @@ fn cmd_sled_set(
             Ok(Some(format!(
                 "set sled {} mupdate override: {} -> {}",
                 sled_id, prev_desc, desc,
+            )))
+        }
+        SledSetCommand::RegisteredVmms(SledSetRegisteredVmmsArgs { count }) => {
+            let description = system.description_mut();
+            let prev = description
+                .sled_instance_manager_status(sled_id)?
+                .num_registered_vmms;
+            description.sled_set_num_registered_vmms(sled_id, count)?;
+            sim.commit_and_bump(
+                format!(
+                    "reconfigurator-cli sled-set registered-vmms: \
+                     {sled_id}: {prev} -> {count}",
+                ),
+                state,
+            );
+            Ok(Some(format!(
+                "set sled {sled_id} registered VMMs: {prev} -> {count}",
             )))
         }
     }
@@ -3453,11 +3560,7 @@ fn cmd_show(sim: &mut ReconfiguratorSim) -> anyhow::Result<Option<String>> {
     swriteln!(s, "planner config:");
     // No need for swriteln! here because .display() adds its own newlines at
     // the end.
-    swrite!(
-        s,
-        "{}",
-        state.system().description().get_planner_config().display()
-    );
+    swrite!(s, "{}", state.system().description().planner_config().display());
 
     Ok(Some(s))
 }
@@ -3580,6 +3683,19 @@ fn cmd_set(
                     "no changes to cockroachdb settings:\n{}",
                     current.display()
                 )
+            }
+        }
+        SetArgs::PlannerConfig(args) => {
+            let current = state.system_mut().description().planner_config();
+            if let Some(new) = args.opts.update_if_modified(&current) {
+                let rv = format!(
+                    "planner config updated:\n{}",
+                    current.diff(&new).display()
+                );
+                state.system_mut().description_mut().set_planner_config(new);
+                rv
+            } else {
+                format!("no changes to planner config:\n{}", current.display())
             }
         }
     };
@@ -3903,6 +4019,6 @@ fn cmd_file_contents(args: FileContentsArgs) -> anyhow::Result<Option<String>> {
 /// second case above, this is always correct.  In the first case, this is
 /// basically equivalent to assuming that the Nexus handoff had happened
 /// instantaneously when the blueprint was created.
-fn blueprint_active_nexus_generation(blueprint: &Blueprint) -> Generation {
+fn blueprint_active_nexus_generation(blueprint: &Blueprint) -> NexusGeneration {
     blueprint.nexus_generation
 }

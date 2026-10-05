@@ -7,7 +7,7 @@
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
-use crate::db::model::{Generation, TargetRelease};
+use crate::db::model::{TargetRelease, to_db_typed_generation};
 use async_bb8_diesel::AsyncRunQueryDsl as _;
 use diesel::insert_into;
 use diesel::prelude::*;
@@ -16,6 +16,7 @@ use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
 use nexus_db_schema::enums::TargetReleaseSourceEnum;
 use nexus_db_schema::schema::target_release::dsl;
 use omicron_common::api::external::{CreateResult, Error, LookupResult};
+use omicron_generation_kinds::TargetReleaseGeneration;
 use omicron_uuid_kinds::TufRepoUuid;
 use std::collections::BTreeSet;
 
@@ -51,7 +52,7 @@ impl DataStore {
     pub async fn target_release_get_generation(
         &self,
         opctx: &OpContext,
-        generation: Generation,
+        generation: TargetReleaseGeneration,
     ) -> LookupResult<Option<TargetRelease>> {
         opctx
             .authorize(authz::Action::Read, &authz::TARGET_RELEASE_CONFIG)
@@ -59,7 +60,7 @@ impl DataStore {
         let conn = self.pool_connection_authorized(opctx).await?;
         dsl::target_release
             .select(TargetRelease::as_select())
-            .filter(dsl::generation.eq(generation))
+            .filter(dsl::generation.eq(to_db_typed_generation(generation)))
             .first_async(&*conn)
             .await
             .optional()
@@ -220,7 +221,7 @@ impl DataStore {
             ));
         }
 
-        let target_release_generation = rows[0].generation.0;
+        let target_release_generation = rows[0].generation();
         let nfound = rows.len();
         let mut releases = BTreeSet::new();
         for target_release in rows {
@@ -265,14 +266,13 @@ pub struct RecentTargetReleases {
     /// latest target_release generation when we fetched these releases
     /// (used to notice if a new target release has been set that could
     /// invalidate this information)
-    pub(crate) target_release_generation:
-        omicron_common::api::external::Generation,
+    pub(crate) target_release_generation: TargetReleaseGeneration,
 }
 
 #[cfg(test)]
 mod test {
     use crate::db::DataStore;
-    use crate::db::model::{Generation, TargetReleaseSource};
+    use crate::db::model::TargetReleaseSource;
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::pub_test_utils::helpers::insert_test_tuf_repo;
     use crate::diesel::ExpressionMethods;
@@ -283,6 +283,7 @@ mod test {
     use nexus_db_model::TufRepo;
     use nexus_types::tuf_repo::TufRepoDescription;
     use omicron_common::now_db_precision;
+    use omicron_generation_kinds::TargetReleaseGeneration;
     use omicron_test_utils::dev;
     use semver::Version;
     use sha2::Digest;
@@ -336,7 +337,10 @@ mod test {
             .target_release_get_current(opctx)
             .await
             .expect("should be a target release");
-        assert_eq!(initial_target_release.generation, Generation(1.into()));
+        assert_eq!(
+            initial_target_release.generation(),
+            TargetReleaseGeneration::from_u32(1)
+        );
         assert!(initial_target_release.time_requested < Utc::now());
         assert_eq!(
             initial_target_release.release_source().unwrap(),
@@ -354,7 +358,10 @@ mod test {
             .target_release_insert(opctx, target_release)
             .await
             .unwrap();
-        assert_eq!(target_release.generation, Generation(2.into()));
+        assert_eq!(
+            target_release.generation(),
+            TargetReleaseGeneration::from_u32(2)
+        );
         assert!(
             (target_release.time_requested - time_requested).abs()
                 < TimeDelta::microseconds(1)
@@ -383,7 +390,10 @@ mod test {
             )
             .await
             .unwrap();
-        assert_eq!(target_release.generation, Generation(3.into()));
+        assert_eq!(
+            target_release.generation(),
+            TargetReleaseGeneration::from_u32(3)
+        );
 
         // Now add a new TUF repo and use it as the source.
         let version = Version::new(0, 0, 1);
@@ -406,7 +416,10 @@ mod test {
             .await
             .unwrap();
         let after = now_db_precision();
-        assert_eq!(target_release.generation, Generation(4.into()));
+        assert_eq!(
+            target_release.generation(),
+            TargetReleaseGeneration::from_u32(4)
+        );
         assert!(target_release.time_requested >= before);
         assert!(target_release.time_requested <= after);
         assert_eq!(
@@ -432,8 +445,7 @@ mod test {
             .target_release_get_current(opctx)
             .await
             .unwrap()
-            .generation
-            .0;
+            .generation();
         let recent = datastore
             .target_release_fetch_recent_distinct(opctx, 3)
             .await
@@ -448,7 +460,7 @@ mod test {
         let target_release =
             datastore.target_release_get_current(opctx).await.unwrap();
         let last_generation = generation;
-        let generation = target_release.generation.0;
+        let generation = target_release.generation();
         let recent = datastore
             .target_release_fetch_recent_distinct(opctx, 3)
             .await
@@ -470,7 +482,7 @@ mod test {
             .await
             .unwrap();
         let last_generation = generation;
-        let generation = target_release.generation.0;
+        let generation = target_release.generation();
         assert_ne!(last_generation, generation);
         let recent = datastore
             .target_release_fetch_recent_distinct(opctx, 3)
@@ -494,7 +506,7 @@ mod test {
             .await
             .unwrap();
         let last_generation = generation;
-        let generation = target_release.generation.0;
+        let generation = target_release.generation();
         assert_ne!(last_generation, generation);
         let recent = datastore
             .target_release_fetch_recent_distinct(opctx, 3)
@@ -528,7 +540,7 @@ mod test {
             )
             .await
             .unwrap();
-        let generation = target_release.generation.0;
+        let generation = target_release.generation();
         let recent = datastore
             .target_release_fetch_recent_distinct(opctx, 3)
             .await
@@ -554,7 +566,7 @@ mod test {
                 )
                 .await
                 .unwrap();
-            let generation = target_release.generation.0;
+            let generation = target_release.generation();
             if i < 5 {
                 let recent = datastore
                     .target_release_fetch_recent_distinct(opctx, 2)
@@ -634,7 +646,10 @@ mod test {
             )
             .await
             .expect("made repo1 the target release");
-        assert_eq!(target_release.generation, Generation(2.into()));
+        assert_eq!(
+            target_release.generation(),
+            TargetReleaseGeneration::from_u32(2)
+        );
 
         // Attempting to make repo1 the target release again should fail with a
         // reasonable error message (we need a higher generation).

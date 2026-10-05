@@ -94,6 +94,7 @@ mod disk;
 mod dns;
 mod ereport;
 mod external_ip;
+mod external_service_ip_pool;
 mod external_subnet;
 pub mod fm;
 mod fm_config;
@@ -123,6 +124,7 @@ mod region_replacement;
 mod region_snapshot;
 pub mod region_snapshot_replacement;
 mod rendezvous_debug_dataset;
+mod rendezvous_sled_bp_availability;
 mod role;
 mod saga;
 mod scim;
@@ -161,7 +163,9 @@ pub use alert::AlertFilters;
 pub use alert::FmRendezvousAlertCreateError;
 pub use db_metadata::DatastoreSetupAction;
 pub use db_metadata::ValidatedDatastoreSetupAction;
+pub use deployment::BpTargetPruneable;
 pub use deployment::ExternalServiceNetworkingConfig;
+pub use deployment::KeepWhat;
 pub use disk::CrucibleDisk;
 pub use disk::Disk;
 pub use disk::LocalStorageAllocation;
@@ -185,6 +189,11 @@ pub use region::RegionAllocationFor;
 pub use region::RegionAllocationParameters;
 pub use region_snapshot_replacement::NewRegionVolumeId;
 pub use region_snapshot_replacement::OldSnapshotVolumeId;
+pub use rendezvous_sled_bp_availability::SledBpAvailabilityDecommissionOutcome;
+pub use rendezvous_sled_bp_availability::SledBpAvailabilityUpsertOutcome;
+pub use rendezvous_sled_bp_availability::SledBpAvailabilityWrite;
+pub use rendezvous_sled_bp_availability::SledBpAvailabilityWriteError;
+pub use rendezvous_sled_bp_availability::SledBpAvailabilityWriteOutcome;
 pub use saga::NewSagaState;
 pub use saga::SagaStateDbFields;
 pub use scim_provider_store::CrdbScimProviderStore;
@@ -766,6 +775,7 @@ mod test {
                     name: "project".parse().unwrap(),
                     description: "desc".to_string(),
                 },
+                defaults: None,
             },
         );
         datastore.project_create(&opctx, project).await.unwrap();

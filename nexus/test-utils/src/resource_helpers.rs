@@ -74,12 +74,8 @@ use omicron_common::api::external::RouteDestination;
 use omicron_common::api::external::RouteTarget;
 use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::UserId;
-use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetKind;
 use omicron_common::disk::DatasetName;
-use omicron_common::disk::DiskIdentity;
-use omicron_common::disk::OmicronPhysicalDiskConfig;
-use omicron_common::disk::SharedDatasetConfig;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_sled_agent::sim::SledAgent;
 use omicron_test_utils::dev::poll::CondCheckError;
@@ -93,6 +89,10 @@ use omicron_uuid_kinds::ZpoolUuid;
 use oxnet::IpNet;
 use oxnet::Ipv4Net;
 use oxnet::Ipv6Net;
+use sled_agent_types::disk::DatasetConfig;
+use sled_agent_types::disk::DiskIdentity;
+use sled_agent_types::disk::OmicronPhysicalDiskConfig;
+use sled_agent_types::disk::SharedDatasetConfig;
 use sled_agent_types::inventory::ZpoolHealth;
 use slog::debug;
 use std::collections::BTreeMap;
@@ -593,23 +593,15 @@ pub async fn create_switch(
 pub async fn create_silo(
     client: &ClientTestContext,
     silo_name: &str,
-    discoverable: bool,
     identity_mode: silo::SiloIdentityMode,
 ) -> Silo {
-    create_silo_with_admin_group_name(
-        client,
-        silo_name,
-        discoverable,
-        identity_mode,
-        None,
-    )
-    .await
+    create_silo_with_admin_group_name(client, silo_name, identity_mode, None)
+        .await
 }
 
 pub async fn create_silo_with_admin_group_name(
     client: &ClientTestContext,
     silo_name: &str,
-    discoverable: bool,
     identity_mode: silo::SiloIdentityMode,
     admin_group_name: Option<String>,
 ) -> Silo {
@@ -622,7 +614,6 @@ pub async fn create_silo_with_admin_group_name(
                 description: "a silo".to_string(),
             },
             quotas: silo::SiloQuotasCreate::arbitrarily_high_default(),
-            discoverable,
             identity_mode,
             admin_group_name,
             tls_certificates: vec![],
@@ -695,6 +686,7 @@ pub async fn create_project(
                 name: project_name.parse().unwrap(),
                 description: "a pier".to_string(),
             },
+            defaults: None,
         },
     )
     .await
@@ -1047,6 +1039,7 @@ pub async fn create_vpc(
             },
             ipv6_prefix: None,
             dns_name: "abc".parse().unwrap(),
+            defaults: None,
         },
     )
     .await
@@ -1073,6 +1066,7 @@ pub async fn create_vpc_with_error(
             },
             ipv6_prefix: None,
             dns_name: "abc".parse().unwrap(),
+            defaults: None,
         }))
         .expect_status(Some(status)),
     )

@@ -31,10 +31,11 @@ use omicron_uuid_kinds::BgpPeerConfigCommunityKind;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackKind;
 use omicron_uuid_kinds::RackUuid;
+use omicron_uuid_kinds::SwitchPortSettingsKind;
+use omicron_uuid_kinds::SwitchPortSettingsUuid;
 use omicron_uuid_kinds::TypedUuid;
 use oxnet::IpNet;
 use serde::{Deserialize, Serialize};
-use sled_agent_types::early_networking::ImportExportPolicy;
 use sled_agent_types::early_networking::LinkFec;
 use sled_agent_types::early_networking::LinkSpeed;
 use sled_agent_types::early_networking::RouterLifetimeConfig;
@@ -43,9 +44,14 @@ use sled_agent_types::early_networking::RouterPeerIpAddr;
 use sled_agent_types::early_networking::RouterPeerIpAddrError;
 use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
+use sled_agent_types::early_networking::{
+    AddressFamilyMismatchError, UnnumberedRouter,
+};
+use sled_agent_types::early_networking::{ImportExportPolicy, NumberedRouter};
+use std::net::IpAddr;
 use uuid::Uuid;
 
-/// Extension trait on [`RouterPeerType`] for converting it to and from the way
+/// Extension trait on [`RouterPeerType`] for converting it to the way
 /// we represent peer addresses in the database.
 ///
 /// This trait should only be used by database model and query functions.
@@ -55,39 +61,15 @@ pub trait RouterPeerTypeDbRepresentation: Sized {
     /// For numbered peers, returns `Some(ip)` (corresponding to a non-NULL
     /// `INET`); for unnumbered peers, returns `None` (corresponding to NULL).
     fn ip_db_repr(&self) -> Option<IpNetwork>;
-
-    /// Convert the database representation of a peer back into a
-    /// [`RouterPeerType`].
-    ///
-    /// Unconditionally requires the caller to supply a `router_lifetime`, but
-    /// this argument is only used if `ip` is `None` (indicating an unnumbered
-    /// peer). This matches the database table's storage of a NULLable address
-    /// (the peer IP, where NULL means unnumbered) alongside a non-NULL
-    /// router_lifetime (left at 0 for numbered peers).
-    fn from_db_repr(
-        ip: Option<IpNetwork>,
-        router_lifetime: RouterLifetimeConfig,
-    ) -> Result<Self, RouterPeerIpAddrError>;
 }
 
 impl RouterPeerTypeDbRepresentation for RouterPeerType {
     fn ip_db_repr(&self) -> Option<IpNetwork> {
         match self {
-            Self::Unnumbered { .. } => None,
-            Self::Numbered { ip } => Some((*ip).into()),
-        }
-    }
-
-    fn from_db_repr(
-        ip: Option<IpNetwork>,
-        router_lifetime: RouterLifetimeConfig,
-    ) -> Result<Self, RouterPeerIpAddrError> {
-        match ip.map(|ip| ip.ip()) {
-            Some(ip) => {
-                let ip = RouterPeerIpAddr::try_from(ip)?;
-                Ok(Self::Numbered { ip })
+            Self::Unnumbered(_) => None,
+            Self::Numbered(numbered_router) => {
+                Some((numbered_router.target_addr()).into())
             }
-            None => Ok(Self::Unnumbered { router_lifetime }),
         }
     }
 }
@@ -322,7 +304,7 @@ pub struct SwitchPort {
     pub id: Uuid,
     pub rack_id: DbTypedUuid<RackKind>,
     pub port_name: Name,
-    pub port_settings_id: Option<Uuid>,
+    pub port_settings_id: Option<DbTypedUuid<SwitchPortSettingsKind>>,
     pub switch_slot: DbSwitchSlot,
 }
 
@@ -344,6 +326,10 @@ impl SwitchPort {
     pub fn rack_id(&self) -> RackUuid {
         self.rack_id.into()
     }
+
+    pub fn port_settings_id(&self) -> Option<SwitchPortSettingsUuid> {
+        self.port_settings_id.map(Into::into)
+    }
 }
 
 impl Into<networking_types::SwitchPort> for SwitchPort {
@@ -353,7 +339,9 @@ impl Into<networking_types::SwitchPort> for SwitchPort {
             rack_id: self.rack_id.into_untyped_uuid(),
             switch_slot: self.switch_slot.into(),
             port_name: self.port_name.into(),
-            port_settings_id: self.port_settings_id,
+            port_settings_id: self
+                .port_settings_id
+                .map(|id| id.into_untyped_uuid()),
         }
     }
 }
@@ -369,6 +357,7 @@ impl Into<networking_types::SwitchPort> for SwitchPort {
     Deserialize,
 )]
 #[diesel(table_name = switch_port_settings)]
+#[resource(uuid_kind = SwitchPortSettingsKind)]
 pub struct SwitchPortSettings {
     #[diesel(embed)]
     pub identity: SwitchPortSettingsIdentity,
@@ -378,14 +367,14 @@ impl SwitchPortSettings {
     pub fn new(meta: &external::IdentityMetadataCreateParams) -> Self {
         Self {
             identity: SwitchPortSettingsIdentity::new(
-                Uuid::new_v4(),
+                SwitchPortSettingsUuid::new_v4(),
                 meta.clone(),
             ),
         }
     }
 
     pub fn with_id(
-        id: Uuid,
+        id: SwitchPortSettingsUuid,
         meta: &external::IdentityMetadataCreateParams,
     ) -> Self {
         Self { identity: SwitchPortSettingsIdentity::new(id, meta.clone()) }
@@ -405,7 +394,7 @@ impl Into<networking_types::SwitchPortSettingsIdentity> for SwitchPortSettings {
 )]
 #[diesel(table_name = switch_port_settings_groups)]
 pub struct SwitchPortSettingsGroups {
-    pub port_settings_id: Uuid,
+    pub port_settings_id: DbTypedUuid<SwitchPortSettingsKind>,
     pub port_settings_group_id: Uuid,
 }
 
@@ -414,7 +403,7 @@ impl Into<networking_types::SwitchPortSettingsGroups>
 {
     fn into(self) -> networking_types::SwitchPortSettingsGroups {
         networking_types::SwitchPortSettingsGroups {
-            port_settings_id: self.port_settings_id,
+            port_settings_id: self.port_settings_id.into_untyped_uuid(),
             port_settings_group_id: self.port_settings_group_id,
         }
     }
@@ -434,7 +423,7 @@ impl Into<networking_types::SwitchPortSettingsGroups>
 pub struct SwitchPortSettingsGroup {
     #[diesel(embed)]
     pub identity: SwitchPortSettingsGroupIdentity,
-    pub port_settings_id: Uuid,
+    pub port_settings_id: DbTypedUuid<SwitchPortSettingsKind>,
 }
 
 impl Into<networking_types::SwitchPortSettingsGroup>
@@ -443,7 +432,7 @@ impl Into<networking_types::SwitchPortSettingsGroup>
     fn into(self) -> networking_types::SwitchPortSettingsGroup {
         networking_types::SwitchPortSettingsGroup {
             identity: self.identity(),
-            port_settings_id: self.port_settings_id,
+            port_settings_id: self.port_settings_id.into_untyped_uuid(),
         }
     }
 }
@@ -453,20 +442,30 @@ impl Into<networking_types::SwitchPortSettingsGroup>
 )]
 #[diesel(table_name = switch_port_settings_port_config)]
 pub struct SwitchPortConfig {
-    pub port_settings_id: Uuid,
+    pub port_settings_id: DbTypedUuid<SwitchPortSettingsKind>,
     pub geometry: SwitchPortGeometry,
+    /// Whether DDM traffic is permitted on this port.
+    pub allow_ddm_traffic: bool,
 }
 
 impl SwitchPortConfig {
-    pub fn new(port_settings_id: Uuid, geometry: SwitchPortGeometry) -> Self {
-        Self { port_settings_id, geometry }
+    pub fn new(
+        port_settings_id: SwitchPortSettingsUuid,
+        geometry: SwitchPortGeometry,
+        allow_ddm_traffic: bool,
+    ) -> Self {
+        Self {
+            port_settings_id: port_settings_id.into(),
+            geometry,
+            allow_ddm_traffic,
+        }
     }
 }
 
 impl Into<networking_types::SwitchPortConfig> for SwitchPortConfig {
     fn into(self) -> networking_types::SwitchPortConfig {
         networking_types::SwitchPortConfig {
-            port_settings_id: self.port_settings_id,
+            port_settings_id: self.port_settings_id.into_untyped_uuid(),
             geometry: self.geometry.into(),
         }
     }
@@ -484,7 +483,7 @@ impl Into<networking_types::SwitchPortConfig> for SwitchPortConfig {
 )]
 #[diesel(table_name = switch_port_settings_link_config)]
 pub struct SwitchPortLinkConfig {
-    pub port_settings_id: Uuid,
+    pub port_settings_id: DbTypedUuid<SwitchPortSettingsKind>,
     pub lldp_link_config_id: Option<Uuid>,
     pub link_name: Name,
     pub mtu: SqlU16,
@@ -497,7 +496,7 @@ pub struct SwitchPortLinkConfig {
 impl SwitchPortLinkConfig {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        port_settings_id: Uuid,
+        port_settings_id: SwitchPortSettingsUuid,
         lldp_link_config_id: Uuid,
         link_name: Name,
         mtu: u16,
@@ -507,7 +506,7 @@ impl SwitchPortLinkConfig {
         tx_eq_config_id: Option<Uuid>,
     ) -> Self {
         Self {
-            port_settings_id,
+            port_settings_id: port_settings_id.into(),
             lldp_link_config_id: Some(lldp_link_config_id),
             link_name,
             fec,
@@ -646,7 +645,7 @@ impl Into<sled_agent_types::early_networking::TxEqConfig> for TxEqConfig {
 )]
 #[diesel(table_name = switch_port_settings_interface_config)]
 pub struct SwitchInterfaceConfig {
-    pub port_settings_id: Uuid,
+    pub port_settings_id: DbTypedUuid<SwitchPortSettingsKind>,
     pub id: Uuid,
     pub interface_name: Name,
     pub v6_enabled: bool,
@@ -655,13 +654,13 @@ pub struct SwitchInterfaceConfig {
 
 impl SwitchInterfaceConfig {
     pub fn new(
-        port_settings_id: Uuid,
+        port_settings_id: SwitchPortSettingsUuid,
         interface_name: Name,
         v6_enabled: bool,
         kind: crate::DbSwitchInterfaceKind,
     ) -> Self {
         Self {
-            port_settings_id,
+            port_settings_id: port_settings_id.into(),
             id: Uuid::new_v4(),
             interface_name,
             v6_enabled,
@@ -682,7 +681,7 @@ impl SwitchInterfaceConfig {
 )]
 #[diesel(table_name = switch_port_settings_route_config)]
 pub struct SwitchPortRouteConfig {
-    pub port_settings_id: Uuid,
+    pub port_settings_id: DbTypedUuid<SwitchPortSettingsKind>,
     pub interface_name: Name,
     pub dst: IpNetwork,
     pub gw: IpNetwork,
@@ -692,21 +691,28 @@ pub struct SwitchPortRouteConfig {
 
 impl SwitchPortRouteConfig {
     pub fn new(
-        port_settings_id: Uuid,
+        port_settings_id: SwitchPortSettingsUuid,
         interface_name: Name,
         dst: IpNetwork,
         gw: IpNetwork,
         vid: Option<SqlU16>,
         rib_priority: Option<SqlU8>,
     ) -> Self {
-        Self { port_settings_id, interface_name, dst, gw, vid, rib_priority }
+        Self {
+            port_settings_id: port_settings_id.into(),
+            interface_name,
+            dst,
+            gw,
+            vid,
+            rib_priority,
+        }
     }
 }
 
 impl Into<networking_types::SwitchPortRouteConfig> for SwitchPortRouteConfig {
     fn into(self) -> networking_types::SwitchPortRouteConfig {
         networking_types::SwitchPortRouteConfig {
-            port_settings_id: self.port_settings_id,
+            port_settings_id: self.port_settings_id.into_untyped_uuid(),
             interface_name: self.interface_name.into(),
             dst: self.dst.into(),
             gw: self.gw.ip(),
@@ -728,7 +734,7 @@ impl Into<networking_types::SwitchPortRouteConfig> for SwitchPortRouteConfig {
 )]
 #[diesel(table_name = switch_port_settings_bgp_peer_config)]
 pub struct SwitchPortBgpPeerConfig {
-    pub port_settings_id: Uuid,
+    pub port_settings_id: DbTypedUuid<SwitchPortSettingsKind>,
     pub bgp_config_id: DbTypedUuid<BgpConfigKind>,
     pub interface_name: Name,
     addr: Option<IpNetwork>,
@@ -748,6 +754,7 @@ pub struct SwitchPortBgpPeerConfig {
     pub vlan_id: Option<SqlU16>,
     pub id: Uuid,
     router_lifetime: SqlU16,
+    src_addr: Option<IpNetwork>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -757,7 +764,7 @@ pub enum SwitchPortBgpPeerConfigInvalidData {
         invalid peer address in BGP peer config {port_settings_id}"
     )]
     PeerAddress {
-        port_settings_id: Uuid,
+        port_settings_id: SwitchPortSettingsUuid,
         #[source]
         err: RouterPeerIpAddrError,
     },
@@ -766,9 +773,32 @@ pub enum SwitchPortBgpPeerConfigInvalidData {
         invalid router lifetime in BGP peer config {port_settings_id}"
     )]
     RouterLifetime {
-        port_settings_id: Uuid,
+        port_settings_id: SwitchPortSettingsUuid,
         #[source]
         err: RouterLifetimeConfigError,
+    },
+    #[error(
+        "database inconsistency: \
+        invalid source address in BGP peer config {port_settings_id}"
+    )]
+    SrcAddress {
+        port_settings_id: SwitchPortSettingsUuid,
+        #[source]
+        err: RouterPeerIpAddrError,
+    },
+    #[error(
+        "database inconsistency: \
+        src_addr is set for an unnumbered peer {port_settings_id}"
+    )]
+    SrcAddressUse { port_settings_id: SwitchPortSettingsUuid },
+    #[error(
+        "database inconsistency: \
+        mismatched address families in BGP peer config {port_settings_id}"
+    )]
+    AddressFamily {
+        port_settings_id: SwitchPortSettingsUuid,
+        #[source]
+        err: AddressFamilyMismatchError,
     },
 }
 
@@ -787,17 +817,38 @@ impl SwitchPortBgpPeerConfig {
     ) -> Result<RouterPeerType, SwitchPortBgpPeerConfigInvalidData> {
         // We only expect NULL (corresponding to unnumbered, in which case we
         // expect a valid `router_lifetime` too) or `Some(ip)` where `ip` is a
-        // valid router peer IP.
+        // valid router peer IP. `src_addr` should only be set for numbered
+        // peers, and should have a matching address family.
         match self.addr {
             Some(db_ip) => {
                 let ip =
                     RouterPeerIpAddr::try_from(db_ip.ip()).map_err(|err| {
                         SwitchPortBgpPeerConfigInvalidData::PeerAddress {
-                            port_settings_id: self.port_settings_id,
+                            port_settings_id: self.port_settings_id.into(),
                             err,
                         }
                     })?;
-                Ok(RouterPeerType::Numbered { ip })
+
+                let src_addr = self
+                    .src_addr
+                    .map(|network| RouterPeerIpAddr::try_from(network.ip()))
+                    .transpose()
+                    .map_err(|err| {
+                        SwitchPortBgpPeerConfigInvalidData::SrcAddress {
+                            port_settings_id: self.port_settings_id.into(),
+                            err,
+                        }
+                    })?;
+
+                let router =
+                    NumberedRouter::new(ip, src_addr).map_err(|err| {
+                        SwitchPortBgpPeerConfigInvalidData::AddressFamily {
+                            port_settings_id: self.port_settings_id.into(),
+                            err,
+                        }
+                    })?;
+
+                Ok(router.into())
             }
             None => {
                 let router_lifetime = RouterLifetimeConfig::new(
@@ -805,11 +856,20 @@ impl SwitchPortBgpPeerConfig {
                 )
                 .map_err(|err| {
                     SwitchPortBgpPeerConfigInvalidData::RouterLifetime {
-                        port_settings_id: self.port_settings_id,
+                        port_settings_id: self.port_settings_id.into(),
                         err,
                     }
                 })?;
-                Ok(RouterPeerType::Unnumbered { router_lifetime })
+
+                if self.src_addr.is_some() {
+                    return Err(
+                        SwitchPortBgpPeerConfigInvalidData::SrcAddressUse {
+                            port_settings_id: self.port_settings_id.into(),
+                        },
+                    );
+                }
+
+                Ok(UnnumberedRouter { router_lifetime }.into())
             }
         }
     }
@@ -836,7 +896,7 @@ impl SwitchPortBgpPeerConfig {
 )]
 #[diesel(table_name = switch_port_settings_bgp_peer_config_communities)]
 pub struct SwitchPortBgpPeerConfigCommunity {
-    pub port_settings_id: Uuid,
+    pub port_settings_id: DbTypedUuid<SwitchPortSettingsKind>,
     pub interface_name: Name,
     addr: Option<IpNetwork>,
     pub community: SqlU32,
@@ -845,13 +905,13 @@ pub struct SwitchPortBgpPeerConfigCommunity {
 
 impl SwitchPortBgpPeerConfigCommunity {
     pub fn new(
-        port_settings_id: Uuid,
+        port_settings_id: SwitchPortSettingsUuid,
         interface_name: Name,
         addr: RouterPeerType,
         community: u32,
     ) -> Self {
         Self {
-            port_settings_id,
+            port_settings_id: port_settings_id.into(),
             interface_name,
             addr: addr.ip_db_repr(),
             community: community.into(),
@@ -873,7 +933,7 @@ impl SwitchPortBgpPeerConfigCommunity {
 #[diesel(table_name = switch_port_settings_bgp_peer_config_allow_export)]
 pub struct SwitchPortBgpPeerConfigAllowExport {
     /// Parent switch port configuration
-    pub port_settings_id: Uuid,
+    pub port_settings_id: DbTypedUuid<SwitchPortSettingsKind>,
     /// Interface peer is reachable on
     pub interface_name: Name,
     /// Peer Address
@@ -885,13 +945,13 @@ pub struct SwitchPortBgpPeerConfigAllowExport {
 
 impl SwitchPortBgpPeerConfigAllowExport {
     pub fn new(
-        port_settings_id: Uuid,
+        port_settings_id: SwitchPortSettingsUuid,
         interface_name: Name,
         addr: RouterPeerType,
         prefix: IpNet,
     ) -> Self {
         Self {
-            port_settings_id,
+            port_settings_id: port_settings_id.into(),
             interface_name,
             addr: addr.ip_db_repr(),
             prefix: prefix.into(),
@@ -913,7 +973,7 @@ impl SwitchPortBgpPeerConfigAllowExport {
 #[diesel(table_name = switch_port_settings_bgp_peer_config_allow_import)]
 pub struct SwitchPortBgpPeerConfigAllowImport {
     /// Parent switch port configuration
-    pub port_settings_id: Uuid,
+    pub port_settings_id: DbTypedUuid<SwitchPortSettingsKind>,
     /// Interface peer is reachable on
     pub interface_name: Name,
     /// Peer Address
@@ -925,13 +985,13 @@ pub struct SwitchPortBgpPeerConfigAllowImport {
 
 impl SwitchPortBgpPeerConfigAllowImport {
     pub fn new(
-        port_settings_id: Uuid,
+        port_settings_id: SwitchPortSettingsUuid,
         interface_name: Name,
         addr: RouterPeerType,
         prefix: IpNet,
     ) -> Self {
         Self {
-            port_settings_id,
+            port_settings_id: port_settings_id.into(),
             interface_name,
             addr: addr.ip_db_repr(),
             prefix: prefix.into(),
@@ -942,7 +1002,7 @@ impl SwitchPortBgpPeerConfigAllowImport {
 
 impl SwitchPortBgpPeerConfig {
     pub fn new(
-        port_settings_id: Uuid,
+        port_settings_id: SwitchPortSettingsUuid,
         bgp_config_id: BgpConfigUuid,
         interface_name: Name,
         p: &networking_types::BgpPeer,
@@ -951,11 +1011,11 @@ impl SwitchPortBgpPeerConfig {
         // must use the default (0). This is enforced by a CHECK constraint.
         let router_lifetime = match p.addr {
             RouterPeerType::Numbered { .. } => RouterLifetimeConfig::default(),
-            RouterPeerType::Unnumbered { router_lifetime } => router_lifetime,
+            RouterPeerType::Unnumbered(u) => u.router_lifetime,
         };
         Self {
             id: Uuid::new_v4(),
-            port_settings_id,
+            port_settings_id: port_settings_id.into(),
             bgp_config_id: bgp_config_id.into(),
             interface_name,
             addr: p.addr.ip_db_repr(),
@@ -982,6 +1042,12 @@ impl SwitchPortBgpPeerConfig {
             },
             vlan_id: p.vlan_id.map(|x| x.into()),
             router_lifetime: router_lifetime.as_u16().into(),
+            src_addr: match p.addr {
+                RouterPeerType::Numbered(numbered_router) => {
+                    numbered_router.src_addr().map(|a| IpAddr::from(a).into())
+                }
+                RouterPeerType::Unnumbered(_) => None,
+            },
         }
     }
 }
@@ -998,7 +1064,7 @@ impl SwitchPortBgpPeerConfig {
 )]
 #[diesel(table_name = switch_port_settings_address_config)]
 pub struct SwitchPortAddressConfig {
-    pub port_settings_id: Uuid,
+    pub port_settings_id: DbTypedUuid<SwitchPortSettingsKind>,
     pub address_lot_block_id: Uuid,
     pub rsvd_address_lot_block_id: Uuid,
     pub address: IpNetwork,
@@ -1008,7 +1074,7 @@ pub struct SwitchPortAddressConfig {
 
 impl SwitchPortAddressConfig {
     pub fn new(
-        port_settings_id: Uuid,
+        port_settings_id: SwitchPortSettingsUuid,
         address_lot_block_id: Uuid,
         rsvd_address_lot_block_id: Uuid,
         address: IpNetwork,
@@ -1016,7 +1082,7 @@ impl SwitchPortAddressConfig {
         vlan_id: Option<u16>,
     ) -> Self {
         Self {
-            port_settings_id,
+            port_settings_id: port_settings_id.into(),
             address_lot_block_id,
             rsvd_address_lot_block_id,
             address,
@@ -1031,7 +1097,7 @@ impl Into<networking_types::SwitchPortAddressConfig>
 {
     fn into(self) -> networking_types::SwitchPortAddressConfig {
         networking_types::SwitchPortAddressConfig {
-            port_settings_id: self.port_settings_id,
+            port_settings_id: self.port_settings_id.into_untyped_uuid(),
             address_lot_block_id: self.address_lot_block_id,
             address: self.address.into(),
             interface_name: self.interface_name.into(),
@@ -1043,83 +1109,40 @@ impl Into<networking_types::SwitchPortAddressConfig>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sled_agent_types::early_networking::InvalidIpAddrError;
+    use sled_agent_types::early_networking::NumberedRouter;
     use sled_agent_types::early_networking::RouterLifetimeConfig;
     use sled_agent_types::early_networking::RouterPeerIpAddr;
     use sled_agent_types::early_networking::RouterPeerType;
+    use sled_agent_types::early_networking::UnnumberedRouter;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
     #[test]
-    fn router_peer_repr_round_trip_numbered_v4() {
+    fn router_peer_type_test_ip_db_repr() {
         let ip_addr = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1));
         let ip = RouterPeerIpAddr::try_from(ip_addr).unwrap();
-        let original = RouterPeerType::Numbered { ip };
+        let src_addr = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
+        let src = RouterPeerIpAddr::try_from(src_addr).unwrap();
+        let original: RouterPeerType =
+            NumberedRouter::new(ip, Some(src)).unwrap().into();
 
         let db_repr = original.ip_db_repr();
         assert_eq!(db_repr, Some(IpNetwork::from(ip_addr)));
 
-        let reconstructed = RouterPeerType::from_db_repr(
-            db_repr,
-            RouterLifetimeConfig::default(),
-        )
-        .unwrap();
-        assert_eq!(original, reconstructed);
-    }
-
-    #[test]
-    fn router_peer_repr_round_trip_numbered_v6() {
         let ip_addr = IpAddr::V6(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1));
         let ip = RouterPeerIpAddr::try_from(ip_addr).unwrap();
-        let original = RouterPeerType::Numbered { ip };
+        let src_addr = IpAddr::V6(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 2));
+        let src = RouterPeerIpAddr::try_from(src_addr).unwrap();
+        let original: RouterPeerType =
+            NumberedRouter::new(ip, Some(src)).unwrap().into();
 
         let db_repr = original.ip_db_repr();
         assert_eq!(db_repr, Some(IpNetwork::from(ip_addr)));
 
-        let reconstructed = RouterPeerType::from_db_repr(
-            db_repr,
-            RouterLifetimeConfig::default(),
-        )
-        .unwrap();
-        assert_eq!(original, reconstructed);
-    }
-
-    #[test]
-    fn router_peer_repr_round_trip_unnumbered() {
-        let lifetime = RouterLifetimeConfig::new(1800).unwrap();
-        let original = RouterPeerType::Unnumbered { router_lifetime: lifetime };
+        let router_lifetime = RouterLifetimeConfig::new(1800).unwrap();
+        let original: RouterPeerType =
+            UnnumberedRouter { router_lifetime }.into();
 
         assert_eq!(original.ip_db_repr(), None);
-
-        let reconstructed =
-            RouterPeerType::from_db_repr(None, lifetime).unwrap();
-        assert_eq!(original, reconstructed);
-    }
-
-    #[test]
-    fn router_peer_from_db_repr_rejects_invalid_ips() {
-        let cases: &[(IpAddr, InvalidIpAddrError)] = &[
-            (
-                Ipv4Addr::UNSPECIFIED.into(),
-                InvalidIpAddrError::UnspecifiedAddress,
-            ),
-            (Ipv4Addr::LOCALHOST.into(), InvalidIpAddrError::LoopbackAddress),
-            (Ipv4Addr::BROADCAST.into(), InvalidIpAddrError::Ipv4Broadcast),
-            (
-                Ipv6Addr::UNSPECIFIED.into(),
-                InvalidIpAddrError::UnspecifiedAddress,
-            ),
-            (Ipv6Addr::LOCALHOST.into(), InvalidIpAddrError::LoopbackAddress),
-        ];
-        let lifetime = RouterLifetimeConfig::default();
-        for (ip, expected_err) in cases {
-            let err = RouterPeerType::from_db_repr(
-                Some(IpNetwork::from(*ip)),
-                lifetime,
-            )
-            .unwrap_err();
-            assert_eq!(err.ip, *ip);
-            assert_eq!(err.err, *expected_err, "wrong error for {ip}");
-        }
     }
 
     fn make_bgp_peer(addr: RouterPeerType) -> networking_types::BgpPeer {
@@ -1149,9 +1172,11 @@ mod tests {
         let ip =
             RouterPeerIpAddr::try_from(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)))
                 .unwrap();
-        let original = RouterPeerType::Numbered { ip };
+        let src_addr = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
+        let src = RouterPeerIpAddr::try_from(src_addr).unwrap();
+        let original = NumberedRouter::new(ip, Some(src)).unwrap().into();
         let db_peer = SwitchPortBgpPeerConfig::new(
-            Uuid::new_v4(),
+            SwitchPortSettingsUuid::new_v4(),
             BgpConfigUuid::new_v4(),
             "phy0".parse::<external::Name>().unwrap().into(),
             &make_bgp_peer(original),
@@ -1167,17 +1192,17 @@ mod tests {
 
     #[test]
     fn peer_type_round_trip_unnumbered() {
-        let lifetime = RouterLifetimeConfig::new(300).unwrap();
-        let original = RouterPeerType::Unnumbered { router_lifetime: lifetime };
+        let router_lifetime = RouterLifetimeConfig::new(300).unwrap();
+        let original = UnnumberedRouter { router_lifetime }.into();
         let db_peer = SwitchPortBgpPeerConfig::new(
-            Uuid::new_v4(),
+            SwitchPortSettingsUuid::new_v4(),
             BgpConfigUuid::new_v4(),
             "phy0".parse::<external::Name>().unwrap().into(),
             &make_bgp_peer(original),
         );
         // Unnumbered peers store NULL addr in the DB.
         assert_eq!(db_peer.raw_ip_in_db_repr(), None);
-        assert_eq!(db_peer.router_lifetime, SqlU16(lifetime.as_u16()));
+        assert_eq!(db_peer.router_lifetime, SqlU16(router_lifetime.as_u16()));
         assert_eq!(db_peer.peer_type().unwrap(), original);
     }
 }

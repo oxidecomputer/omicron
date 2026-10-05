@@ -6,7 +6,6 @@ use std::{collections::BTreeSet, fmt, net::SocketAddr};
 
 use camino::Utf8PathBuf;
 use illumos_utils::zpool;
-use omicron_common::disk::M2Slot;
 use oxide_update_engine_types::errors::NestedEngineError;
 use oxide_update_engine_types::spec::{AsError, EngineSpec};
 use schemars::{
@@ -16,6 +15,7 @@ use schemars::{
 };
 use serde::{Deserialize, Serialize};
 use serde_with::rust::deserialize_ignore_any;
+use sled_agent_types::disk::M2Slot;
 use thiserror::Error;
 
 // ---

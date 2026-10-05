@@ -38,7 +38,6 @@ use wicket_common::rack_setup::GetBgpAuthKeyInfoResponse;
 use wicket_common::rack_update::AbortUpdateOptions;
 use wicket_common::update_events::EventReport;
 use wicketd_api::*;
-use wicketd_commission_types::rack_setup::CertificateUploadResponse;
 use wicketd_commission_types::update::ClearUpdateStateResponse;
 
 use crate::ServerContext;
@@ -159,24 +158,6 @@ impl WicketdApi for WicketdApiImpl {
         Ok(HttpResponseUpdatedNoContent())
     }
 
-    async fn post_rss_config_key(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<String>,
-    ) -> Result<HttpResponseOk<CertificateUploadResponse>, HttpError> {
-        let ctx = rqctx.context();
-
-        let mut config = ctx.rss_or_multirack_join_config.lock().unwrap();
-        let rss_config = config.rss_config_mut_or_conflict(
-            "cannot post private keys when not preparing for RSS",
-        )?;
-
-        let response = rss_config
-            .push_key(body.into_inner())
-            .map_err(|err| HttpError::for_bad_request(None, err))?;
-
-        Ok(HttpResponseOk(response))
-    }
-
     async fn get_bgp_auth_key_info(
         rqctx: RequestContext<Self::Context>,
         // A bit weird for a GET request to have a TypedBody, but there's no other
@@ -193,54 +174,6 @@ impl WicketdApi for WicketdApiImpl {
         let data = config.get_bgp_auth_key_data();
 
         Ok(HttpResponseOk(GetBgpAuthKeyInfoResponse { data }))
-    }
-
-    async fn put_bgp_auth_key(
-        rqctx: RequestContext<Self::Context>,
-        params: Path<PutBgpAuthKeyParams>,
-        body: TypedBody<PutBgpAuthKeyBody>,
-    ) -> Result<HttpResponseOk<PutBgpAuthKeyResponse>, HttpError> {
-        let ctx = rqctx.context();
-        let params = params.into_inner();
-
-        let mut config = ctx.rss_or_multirack_join_config.lock().unwrap();
-        let status = config
-            .set_bgp_auth_key(params.key_id, body.into_inner().key)
-            .map_err(|err| HttpError::for_bad_request(None, err.to_string()))?;
-
-        Ok(HttpResponseOk(PutBgpAuthKeyResponse { status }))
-    }
-
-    async fn put_rss_config_recovery_user_password_hash(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<PutRssRecoveryUserPasswordHash>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let ctx = rqctx.context();
-
-        let mut config = ctx.rss_or_multirack_join_config.lock().unwrap();
-
-        let rss_config = config.rss_config_mut_or_conflict(
-            "cannot put recovery user password when not preparing for RSS",
-        )?;
-
-        rss_config.set_recovery_user_password_hash(body.into_inner().hash);
-
-        Ok(HttpResponseUpdatedNoContent())
-    }
-
-    async fn delete_rss_config(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let ctx = rqctx.context();
-
-        let mut config = ctx.rss_or_multirack_join_config.lock().unwrap();
-        let rss_config = config.rss_config_mut_or_conflict(
-            "cannot delete RSS config when not preparing for RSS",
-        )?;
-
-        *rss_config = Default::default();
-
-        Ok(HttpResponseUpdatedNoContent())
     }
 
     async fn get_rack_setup_state(

@@ -219,7 +219,6 @@ async fn setup_silo_with_quota(
                 description: "".into(),
             },
             quotas,
-            discoverable: true,
             identity_mode: SiloIdentityMode::LocalOnly,
             admin_group_name: None,
             tls_certificates: vec![],
@@ -262,6 +261,7 @@ async fn setup_silo_with_quota(
                 name: "project".parse().unwrap(),
                 description: "".into(),
             },
+            defaults: None,
         },
     )
     .authn_as(auth_mode.clone())
@@ -438,7 +438,6 @@ async fn test_negative_quota(cptestctx: &ControlPlaneTestContext) {
                 description: "".into(),
             },
             quotas,
-            discoverable: true,
             identity_mode: SiloIdentityMode::LocalOnly,
             admin_group_name: None,
             tls_certificates: vec![],

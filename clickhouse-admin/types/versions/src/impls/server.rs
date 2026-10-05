@@ -15,11 +15,16 @@ use crate::latest::server::{
 use anyhow::{Context, Result};
 use atomicwrites::AtomicFile;
 use camino::Utf8PathBuf;
-use omicron_common::api::external::Generation;
+use omicron_generation_kinds::Generation;
 use slog::{Logger, info};
 use std::fs::create_dir;
 use std::io::{ErrorKind, Write};
 use std::net::Ipv6Addr;
+
+const USERS_AND_ROLES_XML: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../../oximeter/db/src/configs/users-and-roles.xml"
+));
 
 impl ServerConfigurableSettings {
     /// Generate a configuration file for a replica server node
@@ -64,6 +69,14 @@ impl ServerConfigurableSettings {
         )
         .write(|f| f.write_all(config.to_xml().as_bytes()))
         .with_context(|| format!("failed to write to `{}`", path))?;
+
+        let users_path = self.settings.config_dir.join("users-and-roles.xml");
+        AtomicFile::new(
+            users_path.clone(),
+            atomicwrites::OverwriteBehavior::AllowOverwrite,
+        )
+        .write(|f| f.write_all(USERS_AND_ROLES_XML.as_bytes()))
+        .with_context(|| format!("failed to write to `{}`", users_path))?;
 
         Ok(config)
     }
@@ -244,7 +257,7 @@ mod tests {
     use camino::Utf8PathBuf;
     use camino_tempfile::Builder;
     use chrono::{DateTime, Utc};
-    use omicron_common::api::external::Generation;
+    use omicron_generation_kinds::Generation;
     use slog::{Drain, o};
     use slog_term::{FullFormat, PlainDecorator, TestStdoutWriter};
     use std::collections::BTreeMap;

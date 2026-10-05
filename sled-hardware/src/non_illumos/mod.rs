@@ -6,8 +6,9 @@ use std::collections::HashMap;
 
 use crate::disk::{DiskPaths, Partition, PooledDiskError, UnparsedDisk};
 use crate::{ExternalDisks, HardwareView, SledMode};
-use omicron_common::disk::{DiskIdentity, DiskVariant};
 use omicron_uuid_kinds::ZpoolUuid;
+use sled_agent_types::disk::DiskIdentity;
+use sled_agent_types::disk::DiskVariant;
 use sled_hardware_types::{Baseboard, SledCpuFamily};
 use slog::Logger;
 use tokio::sync::watch;
@@ -83,5 +84,12 @@ pub async fn ensure_partition_layout(
 
 /// Return true if the host system is an Oxide sled.
 pub fn is_oxide_sled() -> anyhow::Result<bool> {
+    Ok(false)
+}
+
+/// No-op for non-illumos systems.
+pub fn find_softnpu_device(
+    _log: &Logger,
+) -> Result<bool, crate::SwitchDetectError> {
     Ok(false)
 }

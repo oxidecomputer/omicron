@@ -31,6 +31,8 @@ use serde::Deserialize;
 use serde::Serialize;
 use uuid::Uuid;
 
+pub use crate::v2026_04_16_00::networking::SwitchPortSettingsCreate;
+
 /// A switch port interface configuration for a port settings object.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
 pub struct SwitchInterfaceConfig {

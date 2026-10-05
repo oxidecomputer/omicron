@@ -8,6 +8,8 @@
 //! and the Multirack Join Service. Please do not use it in public facing,
 //! non-lockstep, interfaces.
 
+pub mod sprockets;
+
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
 use omicron_ledger::{Ledger, Ledgerable};
