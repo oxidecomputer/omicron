@@ -7630,22 +7630,32 @@
       },
       "UserSpecifiedPortConfig": {
         "description": "A user-specified port configuration.",
-        "anyOf": [
+        "oneOf": [
           {
             "description": "A front port intended for use as an uplink",
-            "allOf": [
-              {
+            "type": "object",
+            "properties": {
+              "uplink": {
                 "$ref": "#/components/schemas/UplinkPortConfig"
               }
-            ]
+            },
+            "required": [
+              "uplink"
+            ],
+            "additionalProperties": false
           },
           {
             "description": "A front port running DDM for multirack",
-            "allOf": [
-              {
+            "type": "object",
+            "properties": {
+              "ddm": {
                 "$ref": "#/components/schemas/L1PortConfig"
               }
-            ]
+            },
+            "required": [
+              "ddm"
+            ],
+            "additionalProperties": false
           }
         ]
       },

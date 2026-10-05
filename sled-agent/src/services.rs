@@ -2945,11 +2945,6 @@ impl ServiceManager {
                                 // all rear ports, which is what
                                 // we're directing ddmd to listen
                                 // for advertisements on.
-                                //
-                                // This may grow in a multi-rack
-                                // future to include a subset of
-                                // "front" ports too, when racks are
-                                // cabled together.
                                 AddrObject::new(
                                     &format!("tfportrear{}_0", i),
                                     IPV6_LINK_LOCAL_ADDROBJ_NAME,

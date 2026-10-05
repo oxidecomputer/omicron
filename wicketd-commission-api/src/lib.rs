@@ -11,6 +11,7 @@ use dropshot::{
     RequestContext, StreamingBody, TypedBody,
 };
 use dropshot_api_manager_types::api_versions;
+use slog_error_chain::InlineErrorChain;
 use wicketd_commission_types_versions::{latest, v1, v2, v3};
 
 // NOTE: The commission API is server-side versioned, but changing it requires
@@ -234,9 +235,16 @@ pub trait WicketdCommissionApi {
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<v3::rack_setup::PutRssUserConfigInsensitive>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let body = body.try_map(TryFrom::try_from).map_err(|e| {
-            HttpError::for_bad_request(None, format!("Invalid conversion: {e}"))
-        })?;
+        let body =
+            body.try_map(TryFrom::try_from).map_err(|e: anyhow::Error| {
+                HttpError::for_bad_request(
+                    None,
+                    format!(
+                        "Invalid conversion: {}",
+                        InlineErrorChain::new(e.as_ref())
+                    ),
+                )
+            })?;
         Self::put_rss_config(rqctx, body).await
     }
 

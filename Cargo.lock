@@ -18047,11 +18047,13 @@ dependencies = [
 name = "wicketd-commission-api"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "dropshot",
  "dropshot-api-manager-types",
  "iddqd",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "wicketd-commission-types-versions",
 ]
 
@@ -18084,6 +18086,7 @@ dependencies = [
 name = "wicketd-commission-types-versions"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "gateway-types-versions",
  "iddqd",
  "omicron-common",

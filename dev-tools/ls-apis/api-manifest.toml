@@ -748,12 +748,14 @@ note = """
 Sled Agent talks to ddm-admin over localhost in multiple places: to get
 bootstrap prefixes in the global zone as part of `bootstrap_setup.rs:92` and
 `sled_agent.rs:1378`, and to reconcile external network config as part of
-`ddm_reconciler.rs:56` in the switch zone.
+`ddm_reconciler.rs:56` in the global zone, and to reconcile external network
+config in the switch zone in "handle.rs:201".
 """
 permalinks = [
     "https://github.com/oxidecomputer/omicron/blob/6cef874/sled-agent/src/ddm_reconciler.rs#L56",
     "https://github.com/oxidecomputer/omicron/blob/6cef874/sled-agent/src/bootstrap/bootstore_setup.rs#L92",
     "https://github.com/oxidecomputer/omicron/blob/6cef874/sled-agent/src/sled_agent.rs#L1378",
+    "https://github.com/oxidecomputer/omicron/blob/6cef874/sled-agent/scrimlet-reconcilers/src/handle.rs#201", 
 ]
 
 [[intra_deployment_unit_only_edges]]

@@ -13,13 +13,14 @@
 //! [`UserSpecifiedRackNetworkConfig`] and [`PutRssUserConfigInsensitive`] are
 //! redefined because they transitively contain it.
 
+use anyhow::{Context, anyhow, bail};
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{IpAddr, Ipv6Addr};
 
 use iddqd::IdOrdMap;
 use omicron_uuid_kinds::MultirackJoinUuid;
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 
 use crate::v1::rack_setup::{
     AllowedSourceIps, BgpConfig, LinkFec, LinkSpeed, LldpPortConfig,
@@ -97,14 +98,14 @@ struct UnvalidatedPutRssUserConfigInsensitive {
 impl TryFrom<UnvalidatedPutRssUserConfigInsensitive>
     for PutRssUserConfigInsensitive
 {
-    type Error = String;
+    type Error = anyhow::Error;
 
     fn try_from(
         value: UnvalidatedPutRssUserConfigInsensitive,
     ) -> Result<Self, Self::Error> {
         let service_ip_pools =
             IdOrdMap::from_iter_unique(value.service_ip_pools)
-                .map_err(|e| format!("duplicate service IP pool name: {e}"))?;
+                .context("duplicate service IP pool name")?;
         Ok(Self {
             bootstrap_sleds: value.bootstrap_sleds,
             ntp_servers: value.ntp_servers,
@@ -123,7 +124,7 @@ impl TryFrom<UnvalidatedPutRssUserConfigInsensitive>
 impl TryFrom<v3::rack_setup::PutRssUserConfigInsensitive>
     for PutRssUserConfigInsensitive
 {
-    type Error = String;
+    type Error = anyhow::Error;
     fn try_from(
         old: v3::rack_setup::PutRssUserConfigInsensitive,
     ) -> Result<Self, Self::Error> {
@@ -163,7 +164,8 @@ pub struct UserSpecifiedRackNetworkConfig {
 impl TryFrom<v3::rack_setup::UserSpecifiedRackNetworkConfig>
     for UserSpecifiedRackNetworkConfig
 {
-    type Error = String;
+    type Error = anyhow::Error;
+
     fn try_from(
         old: v3::rack_setup::UserSpecifiedRackNetworkConfig,
     ) -> Result<Self, Self::Error> {
@@ -173,7 +175,7 @@ impl TryFrom<v3::rack_setup::UserSpecifiedRackNetworkConfig>
         >|
          -> Result<
             BTreeMap<String, UserSpecifiedPortConfig>,
-            String,
+            anyhow::Error,
         > {
             let mut new_ports = BTreeMap::new();
             for (name, cfg) in ports {
@@ -256,8 +258,8 @@ pub struct L1PortConfig {
 }
 
 /// A user-specified port configuration.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
-#[serde(try_from = "UnvalidatedPortConfig")]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(try_from = "UnvalidatedPortConfig", rename_all = "snake_case")]
 #[allow(clippy::large_enum_variant)]
 pub enum UserSpecifiedPortConfig {
     /// A front port intended for use as an uplink
@@ -269,7 +271,8 @@ pub enum UserSpecifiedPortConfig {
 impl TryFrom<v3::rack_setup::UserSpecifiedPortConfig>
     for UserSpecifiedPortConfig
 {
-    type Error = String;
+    type Error = anyhow::Error;
+
     fn try_from(
         old: v3::rack_setup::UserSpecifiedPortConfig,
     ) -> Result<Self, Self::Error> {
@@ -278,152 +281,73 @@ impl TryFrom<v3::rack_setup::UserSpecifiedPortConfig>
                 Ok(Self::Uplink(cfg.into()))
             }
             v3::rack_setup::UserSpecifiedPortConfig::DdmAutoPortConfig => {
-                Err("Cannot upgrade from DdmAutoPortConfig".to_string())
+                Err(anyhow!("Cannot upgrade from DdmAutoPortConfig"))
             }
         }
     }
 }
 
-// Hand-roll the Serialize impl so we don't have to use serde(untagged), under
-// which invalid uplink configs would silently fall back to the DDM variant.
-//
-// We may wish to switch this to internal tagging in the future, but that will
-// cause changes to the TOML config as well as the JSON schema.
-impl Serialize for UserSpecifiedPortConfig {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        match self {
-            Self::Uplink(cfg) => cfg.serialize(serializer),
-            Self::Ddm(cfg) => cfg.serialize(serializer),
-        }
-    }
+/// A representation of a serialized tag for `UserSpecifiedPortConfig`
+///
+/// This is used to allow deserializing from legacy untagged data into
+/// `UnvalidatedPortConfig`, which we can then convert via `TryFrom` into
+/// `UserSpecifiedPortConfig`.
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
+#[serde(rename_all = "snake_case")]
+enum PortConfigTag {
+    #[default]
+    Uplink,
+    Ddm,
 }
 
-// Superset of both variants' fields, used to pick a variant without
-// `serde(untagged)`. The fields a variant requires are optional here so that
-// the `TryFrom` can report a precise error; it re-imposes each variant's own
-// requirements.
+// A tagged struct used solely for deserializing `UserSpecifiedPortConfig`.
+//
+// It indicates which variant of `UserSpecifiedPortConfig` is present in the
+// serialized version which allows us to deal with untagged serialization of
+// a `UserSpecifiedPortConfig` as well. In the case the serialized form is
+// untagged, we default to assuming it is an `UplinkPortConfig`.
+//
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct UnvalidatedPortConfig {
-    routes: Option<Vec<RouteConfig>>,
-    addresses: Option<Vec<UserSpecifiedUplinkAddressConfig>>,
-    uplink_port_speed: Option<LinkSpeed>,
-    uplink_port_fec: Option<LinkFec>,
-    bgp_peers: Option<Vec<UserSpecifiedBgpPeerConfig>>,
-    speed: Option<LinkSpeed>,
-    fec: Option<LinkFec>,
-    autoneg: bool,
-    lldp: Option<LldpPortConfig>,
-    tx_eq: Option<TxEqConfig>,
+    // Automatically defaults to `PortConfigTag::Uplink` if the key is missing.
+    // This allows us to provide backwards compatibility for untagged `rss_config.toml`,
+    // but move forward with tagging for multirack usecases.
+    #[serde(default)]
+    tag: PortConfigTag,
+    uplink: Option<UplinkPortConfig>,
+    ddm: Option<L1PortConfig>,
 }
 
 impl TryFrom<UnvalidatedPortConfig> for UserSpecifiedPortConfig {
-    type Error = String;
+    type Error = anyhow::Error;
 
     fn try_from(value: UnvalidatedPortConfig) -> Result<Self, Self::Error> {
-        let UnvalidatedPortConfig {
-            routes,
-            addresses,
-            uplink_port_speed,
-            uplink_port_fec,
-            bgp_peers,
-            speed,
-            fec,
-            autoneg,
-            lldp,
-            tx_eq,
-        } = value;
+        let UnvalidatedPortConfig { tag, uplink, ddm } = value;
 
-        // The two variants name their speed and FEC fields differently, so the
-        // required speed key is what selects the variant.
-        match (uplink_port_speed, speed) {
-            (Some(_), Some(_)) => Err("a port configuration sets both \
-                 `uplink_port_speed` and `speed`"
-                .to_string()),
-            (None, None) => Err("a port configuration must set either \
-                 `uplink_port_speed` (uplink) or `speed` (DDM)"
-                .to_string()),
-            (Some(uplink_port_speed), None) => {
-                if fec.is_some() {
-                    return Err("an uplink port configuration uses \
-                         `uplink_port_fec`, not `fec`"
-                        .to_string());
+        // I don't think this is actually possible, but it doesn't hurt to
+        // defend against it.
+        if uplink.is_some() && ddm.is_some() {
+            bail!(
+                "cannot have both uplink and ddm data in one table. tag = {:?}",
+                tag
+            );
+        }
+
+        match tag {
+            PortConfigTag::Uplink => {
+                if uplink.is_none() {
+                    bail!("tag does not match uplink data")
                 }
-                let (Some(routes), Some(addresses)) = (routes, addresses)
-                else {
-                    return Err("an uplink port configuration requires \
-                         `routes` and `addresses`"
-                        .to_string());
-                };
-                Ok(Self::Uplink(UplinkPortConfig {
-                    routes,
-                    addresses,
-                    uplink_port_speed,
-                    uplink_port_fec,
-                    autoneg,
-                    bgp_peers: bgp_peers.unwrap_or_default(),
-                    lldp,
-                    tx_eq,
-                }))
+                Ok(UserSpecifiedPortConfig::Uplink(uplink.unwrap()))
             }
-            (None, Some(speed)) => {
-                if routes.is_some()
-                    || addresses.is_some()
-                    || bgp_peers.is_some()
-                    || uplink_port_fec.is_some()
-                {
-                    return Err("a DDM port configuration cannot set \
-                         `routes`, `addresses`, `bgp_peers` or \
-                         `uplink_port_fec`"
-                        .to_string());
+            PortConfigTag::Ddm => {
+                if ddm.is_none() {
+                    bail!("tag does not match ddm data")
                 }
-                Ok(Self::Ddm(L1PortConfig { speed, fec, autoneg, lldp, tx_eq }))
+                Ok(UserSpecifiedPortConfig::Ddm(ddm.unwrap()))
             }
         }
-    }
-}
-
-// The descriptions and shape here must stay in sync with the variant doc
-// comments and the hand-rolled Serialize impl above.
-impl JsonSchema for UserSpecifiedPortConfig {
-    fn schema_name() -> String {
-        "UserSpecifiedPortConfig".to_string()
-    }
-
-    fn json_schema(
-        generator: &mut schemars::r#gen::SchemaGenerator,
-    ) -> schemars::schema::Schema {
-        use schemars::schema::Metadata;
-        use schemars::schema::Schema;
-        use schemars::schema::SchemaObject;
-        use schemars::schema::SubschemaValidation;
-
-        let mut uplink =
-            generator.subschema_for::<UplinkPortConfig>().into_object();
-        uplink.metadata().description =
-            Some("A front port intended for use as an uplink".to_string());
-
-        let mut ddm = generator.subschema_for::<L1PortConfig>().into_object();
-        ddm.metadata().description =
-            Some("A front port running DDM for multirack".to_string());
-
-        SchemaObject {
-            metadata: Some(Box::new(Metadata {
-                description: Some(
-                    "A user-specified port configuration.".to_string(),
-                ),
-                ..Default::default()
-            })),
-            subschemas: Some(Box::new(SubschemaValidation {
-                any_of: Some(vec![Schema::Object(uplink), Schema::Object(ddm)]),
-                ..Default::default()
-            })),
-            ..Default::default()
-        }
-        .into()
     }
 }
 
