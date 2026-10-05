@@ -1,0 +1,47 @@
+@import 'tailwindcss' source(none);
+@source './dist/**/*.html';
+
+@import '@oxide/design-system/styles/tailwind.css';
+@import '@oxide/design-system/styles/preflight.css' layer(base);
+@import '@oxide/design-system/styles/main.css';
+@import '@oxide/design-system/styles/dark.css';
+@import '@oxide/design-system/styles/light.css';
+@import '@oxide/design-system/components/asciidoc.css';
+
+/* Font files are copied into dist/fonts in CI; see build.tsx */
+@font-face {
+  font-family: 'GT America Mono';
+  src: url('fonts/GT-America-Mono-Regular-OCC.woff2') format('woff2');
+  font-weight: 400;
+}
+@font-face {
+  font-family: 'GT America Mono';
+  src: url('fonts/GT-America-Mono-Medium.woff2') format('woff2');
+  font-weight: 500;
+}
+@font-face {
+  font-family: 'SuisseIntl';
+  src: url('fonts/SuisseIntl-Light-WebS.woff2') format('woff2');
+  font-weight: 300;
+}
+@font-face {
+  font-family: 'SuisseIntl';
+  src: url('fonts/SuisseIntl-Regular-WebS.woff2') format('woff2');
+  font-weight: 400;
+}
+@font-face {
+  font-family: 'SuisseIntl';
+  src: url('fonts/SuisseIntl-RegularItalic-WebS.woff2') format('woff2');
+  font-weight: 400;
+  font-style: italic;
+}
+@font-face {
+  font-family: 'SuisseIntl';
+  src: url('fonts/SuisseIntl-Medium-WebS.woff2') format('woff2');
+  font-weight: 500;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  scroll-padding-top: 4.5rem;
+}

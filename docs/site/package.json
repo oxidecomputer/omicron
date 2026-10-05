@@ -1,0 +1,27 @@
+{
+  "name": "omicron-docs-site",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node --import tsx build.tsx && tailwindcss --input style.css --output dist/style.css --minify",
+    "tsc": "tsc",
+    "unlisted": "node --import tsx unlisted.ts"
+  },
+  "dependencies": {
+    "@asciidoctor/core": "^3.0.4",
+    "@oxide/design-system": "^6.7.2",
+    "@oxide/react-asciidoc": "^2.2.1",
+    "@tailwindcss/cli": "^4.3.3",
+    "marked": "^18.1.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "tailwindcss": "^4.3.3",
+    "tsx": "^4.23.15"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "typescript": "^5.9.3"
+  }
+}
