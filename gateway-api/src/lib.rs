@@ -24,7 +24,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
-    (5, GATEWAY_ID),
+    (5, RACK_ID),
     (4, COMPONENT_VPD),
     (3, NEWTYPE_UUID_BUMP),
     (2, COSMO),
@@ -615,25 +615,22 @@ pub trait GatewayApi {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<latest::component::SpIdentifier>>, HttpError>;
 
-    /// Returns the identity of this MGS instance, including the rack UUID and
-    /// the gateway process UUID.
+    /// Returns the rack UUID of the rack this management gateway service is
+    /// located in.
     ///
     /// All service processors accessed via this gateway can be assumed to be
-    /// located in the rack with the returned rack ID.
+    /// located in the rack with this ID.
     ///
     /// If the rack UUID has not yet been set (i.e. because RSS has not yet
     /// run), this endpoint returns a 503 Service Unavailable error.
-    ///
-    /// Note that unlike most MGS endpoints, this endpoint does not send any
-    /// communication on the management network.
     #[endpoint {
             method = GET,
-            path = "/local/identity",
-            versions = VERSION_GATEWAY_ID..
+            path = "/local/rack-id",
+            versions = VERSION_RACK_ID..
         }]
-    async fn gateway_identity_get(
+    async fn rack_id_get(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<latest::local::GatewayIdentity>, HttpError>;
+    ) -> Result<HttpResponseOk<latest::local::RackId>, HttpError>;
 
     /// Request ereports from the target service processor.
     ///

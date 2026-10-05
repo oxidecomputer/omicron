@@ -112,5 +112,5 @@ pub mod update {
 }
 
 pub mod local {
-    pub use crate::v5::local::GatewayIdentity;
+    pub use crate::v5::local::RackId;
 }
