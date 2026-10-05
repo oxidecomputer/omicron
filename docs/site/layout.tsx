@@ -5,6 +5,16 @@ import type { ReactNode } from 'react'
 import type { Page, TocItem } from './build.tsx'
 import { site } from './nav.ts'
 
+// Pagefind's search UI web components
+declare module 'react' {
+  namespace JSX {
+    interface IntrinsicElements {
+      'pagefind-modal-trigger': { placeholder?: string }
+      'pagefind-modal': {}
+    }
+  }
+}
+
 /** Page titles can contain inline markup and entities, e.g. `<code>oxdb sql</code>` */
 const plain = (html: string) =>
   html
@@ -37,7 +47,12 @@ function Shell({
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>{title}</title>
+        {/* Pagefind's CSS goes first so style.css can override its variables */}
+        <link rel="stylesheet" href={`${root}/pagefind/pagefind-component-ui.css`} />
         <link rel="stylesheet" href={`${root}/style.css`} />
+        {/* A classic script, not type="module", so Pagefind can find its bundle
+            relative to the script's own URL, which works under any base path */}
+        <script src={`${root}/pagefind/pagefind-component-ui.js`} defer />
         {/* Dark by default, like other Oxide sites, unless the OS asks for light */}
         <script>{`if (matchMedia('(prefers-color-scheme: light)').matches) document.documentElement.dataset.theme = 'light'`}</script>
       </head>
@@ -46,11 +61,15 @@ function Shell({
           <a href={`${root}/index.html`} className="text-sans-semi-xl text-raise">
             {site.title}
           </a>
-          <span className="text-mono-sm text-tertiary">developer docs</span>
-          <a href={site.repo} className="text-mono-sm text-secondary hover:text-default ml-auto">
-            GitHub
-          </a>
+          <span className="text-mono-sm text-tertiary 600:inline hidden">developer docs</span>
+          <div className="ml-auto flex items-center gap-6">
+            <pagefind-modal-trigger placeholder="Search" />
+            <a href={site.repo} className="text-mono-sm text-secondary hover:text-default">
+              GitHub
+            </a>
+          </div>
         </header>
+        <pagefind-modal />
         {children}
       </body>
     </html>
@@ -133,16 +152,20 @@ export function DocPage({
               </div>
             </details>
             <div className="text-mono-sm text-tertiary mb-2">{page.section}</div>
-            <h1 className="text-sans-3xl text-raise mb-2">
-              <Html>{page.title}</Html>
-            </h1>
-            <a
-              href={`${site.repo}/blob/main/${page.src}`}
-              className="text-mono-xs text-tertiary hover:text-secondary mb-10 inline-block"
-            >
-              {page.src}
-            </a>
-            <div dangerouslySetInnerHTML={{ __html: body }} />
+            {/* Only this part of the page goes in the search index */}
+            <div data-pagefind-body="">
+              <h1 className="text-sans-3xl text-raise mb-2">
+                <Html>{page.title}</Html>
+              </h1>
+              <a
+                href={`${site.repo}/blob/main/${page.src}`}
+                className="text-mono-xs text-tertiary hover:text-secondary mb-10 inline-block"
+                data-pagefind-ignore=""
+              >
+                {page.src}
+              </a>
+              <div dangerouslySetInnerHTML={{ __html: body }} />
+            </div>
             <div className="border-secondary mt-16 flex justify-between gap-4 border-t pt-6">
               {prev ? (
                 <a href={href(prev)} className="group">

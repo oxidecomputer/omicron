@@ -25,6 +25,9 @@ npm run build
 open dist/index.html
 ```
 
+Search doesn't work from `file://`. To try it, run `npm run serve`, which builds the
+site and serves it at http://localhost:1414.
+
 The build warns about broken links and Asciidoctor errors. To see which docs in the
 repo aren't on the site, run `npm run unlisted`. The site uses system fonts locally unless `docs/site/fonts`
 contains the Oxide font files (for example, a symlink to `app/ui/assets/fonts` in a
@@ -37,4 +40,6 @@ with `@oxide/react-asciidoc` and the AsciiDoc components and styles from
 `@oxide/design-system`. Markdown goes through `marked`. `layout.tsx` is the page
 chrome. The output mirrors each doc's path in the repo, so `docs/how-to-run.adoc`
 becomes `dist/docs/how-to-run.html` and relative links keep working. Tailwind
-compiles `style.css` against the generated HTML.
+compiles `style.css` against the generated HTML. [Pagefind](https://pagefind.app/)
+then indexes the HTML in `dist/` and writes the search index and UI to
+`dist/pagefind/`, all loaded client-side, so search needs no server.

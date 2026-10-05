@@ -45,3 +45,24 @@ html {
   -webkit-font-smoothing: antialiased;
   scroll-padding-top: 4.5rem;
 }
+
+/* Pagefind's search UI resets inherited styles, so it can only be themed
+   through its variables. These follow the light/dark theme tokens. */
+:root {
+  --pf-font: var(--font-sans);
+  --pf-text: var(--content-raise);
+  --pf-text-secondary: var(--content-secondary);
+  --pf-text-muted: var(--content-tertiary);
+  --pf-background: var(--surface-raise);
+  --pf-border: var(--stroke-default);
+  --pf-border-focus: var(--stroke-accent);
+  --pf-skeleton: var(--surface-secondary);
+  --pf-skeleton-shine: var(--surface-tertiary);
+  --pf-hover: var(--surface-hover);
+  --pf-mark: var(--content-accent);
+  --pf-outline-focus: var(--stroke-accent);
+  --pf-modal-backdrop: var(--surface-scrim);
+  --pf-border-radius: 6px;
+  --pf-input-height: 32px;
+  --pf-modal-max-width: 640px;
+}

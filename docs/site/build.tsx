@@ -58,7 +58,7 @@ async function renderAdoc(src: string) {
     title: s.title,
     children: s.sections.map(toToc),
   })
-  const body = renderToStaticMarkup(
+  const html = renderToStaticMarkup(
     <Asciidoc
       document={document}
       options={{
@@ -71,6 +71,13 @@ async function renderAdoc(src: string) {
         customDocument: AsciiDocBlocks.MinimalDocument,
       }}
     />,
+  )
+  // Section headings carry their ID on an empty span inside the heading. Move
+  // it to the heading itself, which is where Pagefind looks for anchors when it
+  // splits a page into per-section search results.
+  const body = html.replace(
+    /<(h[1-6])([^>]*)><span class="anchor" id="([^"]+)" aria-hidden="true"><\/span>/g,
+    '<$1 id="$3"$2>',
   )
   return { title: document.title, body, toc: document.sections.map(toToc) }
 }
