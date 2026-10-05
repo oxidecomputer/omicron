@@ -100,7 +100,7 @@ impl SpEreportIngester {
         // determined. See also the 'TODO-multirack' comment in the
         // `mgs_requests()` function for where the rack ID would be used.
         let mgs_clients = match GatewayClient::resolve_all_gateways(
-            &self.datastore,
+            &self.inner.datastore,
             &self.resolver,
             &opctx,
         )
@@ -113,7 +113,7 @@ impl SpEreportIngester {
                 status.errors.push(format!("{MSG}: {error}"));
                 return status;
             }
-            Ok(clients) => clients.collect::<Arc<[_]>>(),
+            Ok(clients) => Arc::new(clients),
         };
 
         // Ask MGS for the list of all present SP identifiers. If a request to
@@ -858,10 +858,11 @@ mod tests {
                     &opctx,
                 )
                 .await
-                .map_err(|e| poll::CondCheckError::<Error>::NotYet {
-                    status: Some(e.to_string()),
-                })?
-                .collect::<Vec<_>>();
+                .map_err(|e| {
+                    poll::CondCheckError::<Error>::NotYet {
+                        status: Some(e.to_string()),
+                    }
+                })?;
                 if gateways.is_empty() {
                     return Err(poll::CondCheckError::<Error>::NotYet {
                         status: Some("no gateways resolved".to_string()),

@@ -613,7 +613,7 @@ impl BackgroundTask for InstanceWatcher {
         &'a mut self,
         opctx: &'a OpContext,
     ) -> BoxFuture<'a, serde_json::Value> {
-        async {
+        async move {
             let mut paginator = Some(Paginator::new(
                 nexus_db_queries::db::datastore::SQL_BATCH_SIZE,
                 dropshot::PaginationOrder::Ascending
