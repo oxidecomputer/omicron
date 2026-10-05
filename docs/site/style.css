@@ -66,3 +66,14 @@ html {
   --pf-input-height: 32px;
   --pf-modal-max-width: 640px;
 }
+
+/* Before you type, the results area is empty but keeps its padding, leaving a
+   blank band between the input and the footer. Hide it, and the footer's top
+   border, which would double up with the header's. !important because
+   Pagefind's selectors are built to out-specify the host page's. */
+.pf-modal-body:has(.pf-summary:empty):has(.pf-results:empty) {
+  display: none !important;
+  & + .pf-modal-footer {
+    border-top: none !important;
+  }
+}
