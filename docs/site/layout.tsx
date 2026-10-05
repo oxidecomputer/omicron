@@ -89,6 +89,7 @@ function Nav({ pages, current }: { pages: Page[]; current: Page }) {
                 <li key={p.out}>
                   <a
                     href={path.posix.relative(path.posix.dirname(current.out), p.out)}
+                    aria-current={p === current ? 'page' : undefined}
                     className={
                       p === current
                         ? 'text-sans-md text-accent block leading-tight'
@@ -105,6 +106,24 @@ function Nav({ pages, current }: { pages: Page[]; current: Page }) {
     </div>
   )
 }
+
+/**
+ * Every page has the same sidebar, so restore its scroll position from the
+ * previous page. That keeps the link you clicked where it was. If the current
+ * page's link still isn't visible (you got here from a link in a page body, or
+ * by loading the page directly), center it. Inline right after the sidebar so
+ * it runs before the sidebar is painted at the wrong position.
+ */
+const sidebarScrollScript = `{
+  const nav = document.getElementById('sidebar')
+  try { nav.scrollTop = Number(sessionStorage.getItem('sidebar-scroll')) } catch {}
+  const n = nav.getBoundingClientRect()
+  const l = nav.querySelector('[aria-current=page]').getBoundingClientRect()
+  if (l.top < n.top || l.bottom > n.bottom) nav.scrollTop += l.top - n.top - (n.height - l.height) / 2
+  addEventListener('pagehide', () => {
+    try { sessionStorage.setItem('sidebar-scroll', nav.scrollTop) } catch {}
+  })
+}`
 
 const Toc = ({ items }: { items: TocItem[] }) => (
   <ul className="space-y-1.5">
@@ -140,9 +159,13 @@ export function DocPage({
   return (
     <Shell title={`${plain(page.title)} | ${site.title}`} root={rootFrom(page.out)}>
       <div className="flex">
-        <nav className="border-secondary 900:block sticky top-14 hidden h-[calc(100vh-3.5rem)] w-64 shrink-0 overflow-y-auto border-r px-6 py-8">
+        <nav
+          id="sidebar"
+          className="border-secondary 900:block sticky top-14 hidden h-[calc(100vh-3.5rem)] w-64 shrink-0 overflow-y-auto border-r px-6 py-8 [overflow-anchor:none]"
+        >
           <Nav pages={pages} current={page} />
         </nav>
+        <script>{sidebarScrollScript}</script>
         <main className="900:px-12 min-w-0 flex-1 px-6 py-10">
           <div className="mx-auto max-w-[760px]">
             <details className="900:hidden border-secondary mb-8 rounded border px-4 py-3">
