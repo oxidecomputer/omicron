@@ -2940,6 +2940,7 @@ mod tests {
         propolis_addr: SocketAddr,
         nexus_client: NexusClient,
         available_datasets_rx: AvailableDatasetsReceiver,
+        zones: Arc<illumos_utils::fakes::zone::Zones>,
         temp_dir: &str,
     ) -> (Instance, MetricsRx) {
         let id = InstanceUuid::new_v4();
@@ -2953,6 +2954,7 @@ mod tests {
             log,
             available_datasets_rx,
             nexus_client,
+            zones,
             temp_dir,
         )
         .await;
@@ -3091,6 +3093,7 @@ mod tests {
         log: &Logger,
         available_datasets_rx: AvailableDatasetsReceiver,
         nexus_client: NexusClient,
+        zones: Arc<illumos_utils::fakes::zone::Zones>,
         temp_dir: &str,
     ) -> (InstanceManagerServices, MetricsRx) {
         let vnic_allocator = VnicAllocator::new(
@@ -3135,7 +3138,7 @@ mod tests {
             zone_bundler,
             zone_builder_factory: ZoneBuilderFactory::fake(
                 Some(temp_dir),
-                illumos_utils::fakes::zone::Zones::new(),
+                zones,
             ),
             metrics_queue,
         };
@@ -3175,6 +3178,7 @@ mod tests {
                     ZpoolOrRamdisk::Ramdisk,
                 ),
                 nexus.nexus_client.clone(),
+                illumos_utils::fakes::zone::Zones::new(),
                 temp_guard.path().as_str(),
             )
             .await;
@@ -3246,6 +3250,7 @@ mod tests {
                 AvailableDatasetsReceiver::fake_in_tempdir_for_tests(
                     ZpoolOrRamdisk::Ramdisk,
                 ),
+                illumos_utils::fakes::zone::Zones::new(),
                 temp_guard.path().as_str(),
             ),
         )
@@ -3353,6 +3358,7 @@ mod tests {
                     AvailableDatasetsReceiver::fake_in_tempdir_for_tests(
                         ZpoolOrRamdisk::Ramdisk,
                     ),
+                    illumos_utils::fakes::zone::Zones::new(),
                     temp_guard.path().as_str(),
                 ),
             )
@@ -3993,6 +3999,7 @@ mod tests {
                     ZpoolOrRamdisk::Ramdisk,
                 ),
                 nexus_client,
+                illumos_utils::fakes::zone::Zones::new(),
                 temp_guard.path().as_str(),
             )
             .await;
@@ -4147,6 +4154,137 @@ mod tests {
         };
 
         assert_eq!(state.vmm_state.state, VmmState::Failed);
+        logctx.cleanup_successful();
+    }
+
+    // Test that we correctly clean up a running zone if we fail to start an
+    // instance.
+    //
+    // This is a regression test for
+    // https://github.com/oxidecomputer/omicron/issues/7726. It ensures that we
+    // correctly destroy a running zone under the following circumstances:
+    //
+    // - We've created and booted the zone
+    // - We've started Propolis, and the HTTP server is running
+    // - We fail to send an instance ensure request to Propolis.
+    #[tokio::test]
+    async fn test_cleanup_zone_when_failing_to_start_instance() {
+        let logctx = omicron_test_utils::dev::test_setup_log(
+            "test_cleanup_zone_when_failing_to_start_instance",
+        );
+        let log = logctx.log.new(o!(FileKv));
+
+        let (propolis_server, propolis_client) = propolis_mock_server(&log);
+        let propolis_addr = propolis_server.local_addr();
+
+        let FakeNexusParts {
+            nexus_client,
+            state_rx: _,
+            _dns_server,
+            _nexus_server,
+        } = FakeNexusParts::new(&log).await;
+
+        let temp_guard = Utf8TempDir::new().unwrap();
+
+        // Handle to the zones API, for messing with the state.
+        let (zones, mut handle) =
+            illumos_utils::fakes::zone::Zones::new_with_halt_control();
+
+        // Create an instance and register it with the manager, but don't start
+        // it.
+        let (inst, _metrics_rx) = timeout(
+            TIMEOUT_DURATION,
+            instance_struct(
+                &log,
+                propolis_addr,
+                nexus_client,
+                AvailableDatasetsReceiver::fake_in_tempdir_for_tests(
+                    ZpoolOrRamdisk::Ramdisk,
+                ),
+                zones,
+                temp_guard.path().as_str(),
+            ),
+        )
+        .await
+        .expect("timed out creating Instance struct");
+
+        // Make a channel to get state updates.
+        let (put_tx, mut put_rx) = oneshot::channel();
+
+        // Intentionally send a bad request to Propolis.
+        //
+        // This sends an out-of-band instance-ensure request directly to
+        // Propolis, with intentionally different instance properties. This
+        // causes Propolis to make a record of this _incorrect_ instance, so
+        // that when we call `Instance::put_state()`, that fails when we send
+        // the instance ensure request to Proplis inside. This simulates an
+        // error where we started the Propolis zone and HTTP server, but then
+        // failed to send the instance_ensure request.
+        let temp = fake_instance_initial_state(propolis_addr);
+        let bad_instance_ensure =
+            propolis_client::types::InstanceEnsureRequest {
+                init:
+                    propolis_client::types::InstanceInitializationMethod::Spec {
+                        spec: temp.vmm_spec.0,
+                    },
+                properties: propolis_api_types::instance::InstanceProperties {
+                    id: inst.id.into_untyped_uuid(),
+                    name: String::from("ernie"),
+                    description: String::from("front-running is my jam"),
+                    metadata: propolis_api_types::instance::InstanceMetadata {
+                        silo_id: Uuid::new_v4(),
+                        project_id: Uuid::new_v4(),
+                        sled_id: Uuid::new_v4(),
+                        sled_serial: String::from("abcdef"),
+                        sled_revision: 1,
+                        sled_model: String::from("ghijkl"),
+                    },
+                },
+            };
+        propolis_client
+            .instance_ensure()
+            .body(bad_instance_ensure)
+            .send()
+            .await
+            .expect("Able to send instance_ensure to mock Propolis");
+
+        // Now, actually put the state directly from the instance runner.
+        inst.put_state(put_tx, VmmStateRequested::Running)
+            .expect("able to queue put_state request");
+
+        // Wait until the zone actually starts halting.
+        handle.halt_started().await;
+
+        // We should still have no response on the instance state channel.
+        match put_rx.try_recv() {
+            Ok(Ok(state)) => panic!(
+                "Expected no response, but found \
+                an actual instance state response: {state:#?}"
+            ),
+            Ok(Err(e)) => panic!(
+                "Expected no response, but found an error \
+                setting the instance state: {e:#?}",
+            ),
+            Err(oneshot::error::TryRecvError::Closed) => {
+                panic!("Expected no response, but the channel is closed")
+            }
+            Err(oneshot::error::TryRecvError::Empty) => {}
+        }
+
+        // Let the zone continue halting.
+        handle.release();
+
+        // Now we should have an error on the instance state channel.
+        let err = put_rx
+            .try_recv()
+            .unwrap()
+            .expect_err("Should have failed to set the instance state");
+        assert_matches!(
+            err,
+            ManagerError::Instance(Error::Propolis(_)),
+            "Should have received a Propolis error kind"
+        );
+
         logctx.cleanup_successful();
     }
 
