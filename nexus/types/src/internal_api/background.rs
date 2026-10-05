@@ -1111,6 +1111,7 @@ pub struct SpEreportIngesterStatus {
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct SpEreporterStatus {
+    pub rack_id: RackUuid,
     pub sp_type: SpType,
     pub slot: u16,
     pub ignition_type: gateway_types::ignition::SpIgnitionSystemType,

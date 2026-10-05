@@ -28,6 +28,7 @@ use omicron_uuid_kinds::RackUuid;
 use parallel_task_set::ParallelTaskSet;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 pub struct SpEreportIngester {
@@ -41,7 +42,6 @@ pub struct SpEreportIngester {
 struct Ingester {
     datastore: Arc<DataStore>,
     nexus_id: OmicronZoneUuid,
-    rack_id: RackUuid,
 }
 
 impl BackgroundTask for SpEreportIngester {
@@ -62,13 +62,12 @@ impl SpEreportIngester {
         datastore: Arc<DataStore>,
         resolver: internal_dns_resolver::Resolver,
         nexus_id: OmicronZoneUuid,
-        rack_id: RackUuid,
         fm_analysis: Activator,
         disabled: bool,
     ) -> Self {
         Self {
             resolver,
-            inner: Ingester { datastore, nexus_id, rack_id },
+            inner: Ingester { datastore, nexus_id },
             fm_analysis,
             disabled,
         }
@@ -78,10 +77,6 @@ impl SpEreportIngester {
         &mut self,
         opctx: &OpContext,
     ) -> SpEreportIngesterStatus {
-        use gateway_client::types::SpIgnitionInfo;
-        use gateway_types::component::SpIdentifier;
-        use gateway_types::ignition::SpIgnition;
-
         let mut status = SpEreportIngesterStatus::default();
         if self.disabled {
             status.disabled = true;
@@ -91,29 +86,124 @@ impl SpEreportIngester {
             );
             return status;
         }
-        // Find MGS clients.
-        // TODO(eliza): reuse the same client across activations; qorb, etc.
-        //
-        // TODO-multirack: eventually, we'll need a way to discover the MGS
-        // clients for *all* the racks in the cluster, along with the rack ID of
-        // the rack those clients will talk to. How this works has yet to be
-        // determined. See also the 'TODO-multirack' comment in the
-        // `mgs_requests()` function for where the rack ID would be used.
-        let mgs_clients = match GatewayClient::resolve_all_gateways(
-            &opctx.log,
-            &self.resolver,
-        )
-        .await
-        {
-            Err(error) => {
-                const MSG: &str = "no MGS successfully returned SP ID list";
-                let error = InlineErrorChain::new(&*error);
-                error!(opctx.log, "{MSG}"; "error" => &error);
-                status.errors.push(format!("{MSG}: {error}"));
-                return status;
+        // Find MGS clients, and partition the resolved clients by rack ID.
+        let mgs_clients = {
+            // This is where we might, elsewhere, reach for a BTreeMap to ensure
+            // deterministic iteration ordering. Here, we *intentionally* do the
+            // opposite, so that each Nexus collecting ereports starts with a
+            // different rack each time this task is activated, helping to
+            // distribute collection throughout the cluster.
+            let mut by_rack = HashMap::<RackUuid, Vec<GatewayClient>>::new();
+            let all_clients = match GatewayClient::resolve_all_gateways(
+                &opctx.log,
+                &self.resolver,
+            )
+            .await
+            {
+                Err(error) => {
+                    const MSG: &str = "no MGS successfully returned SP ID list";
+                    let error = InlineErrorChain::new(&*error);
+                    error!(opctx.log, "{MSG}"; "error" => &error);
+                    status.errors.push(format!("{MSG}: {error}"));
+                    return status;
+                }
+                Ok(clients) => clients,
+            };
+
+            for gateway in all_clients {
+                let rack_id = match gateway.client.rack_id_get().await {
+                    Ok(rsp) => rsp.into_inner().rack_id,
+                    Err(e) => {
+                        const MSG: &str = "failed to determine rack ID for MGS";
+
+                        let error = InlineErrorChain::new(&e);
+                        error!(
+                            opctx.log,
+                            "{MSG}";
+                            "mgs_addr" => %gateway.addr,
+                            "error" => &error,
+                        );
+                        status
+                            .errors
+                            .push(format!("{MSG} {}: {error}", gateway.addr));
+                        continue;
+                    }
+                };
+                by_rack.entry(rack_id).or_default().push(gateway);
             }
-            Ok(clients) => clients.collect::<Arc<[_]>>(),
+            by_rack
         };
+
+        // TODO(eliza): what seems like an appropriate parallelism? should we
+        // just do 16?
+        let mut tasks = ParallelTaskSet::new();
+        let mut totals = Totals { ereports: 0, new_ereports: 0, racks: 0 };
+
+        for (rack_id, mgs_clients) in mgs_clients {
+            self.ingest_one_rack(
+                opctx,
+                mgs_clients,
+                rack_id,
+                &mut status,
+                &mut totals,
+                &mut tasks,
+            )
+            .await;
+        }
+
+        // Wait for remaining ingestion tasks to come back.
+        while let Some(sp_status) = tasks.join_next().await {
+            totals.ereports += sp_status.status.ereports_received;
+            totals.new_ereports += sp_status.status.new_ereports;
+            status.sps.push(sp_status);
+        }
+
+        // If any ereports were ingested that were not already in the database,
+        // trigger a new FM analysis run.
+        let Totals { ereports, new_ereports, racks } = totals;
+        if new_ereports > 0 {
+            slog::info!(
+                opctx.log,
+                "ingested {ereports} ({new_ereports} new) ereports from {} \
+                 service processors in {racks} racks",
+                status.sps.len();
+                "total_ereports" => ereports,
+                "new_ereports" => new_ereports,
+                "racks" => racks,
+                "absent_sps" => status.sps_not_present,
+            );
+            self.fm_analysis.activate();
+        } else {
+            slog::debug!(
+                opctx.log,
+                "ingested {ereports} (0 new) ereports from {} service \
+                 processors in {racks} racks",
+                status.sps.len();
+                "total_ereports" => ereports,
+                "new_ereports" => new_ereports,
+                "racks" => racks,
+                "absent_sps" => status.sps_not_present,
+            );
+        }
+
+        // Sort statuses for consistent output in OMDB commands.
+        status.sps.sort_unstable_by_key(|sp| (sp.sp_type, sp.slot));
+
+        status
+    }
+
+    async fn ingest_one_rack(
+        &mut self,
+        opctx: &OpContext,
+        mgs_clients: Vec<GatewayClient>,
+        rack_id: RackUuid,
+        status: &mut SpEreportIngesterStatus,
+        totals: &mut Totals,
+        tasks: &mut ParallelTaskSet<SpEreporterStatus>,
+    ) {
+        use gateway_client::types::SpIgnitionInfo;
+        use gateway_types::component::SpIdentifier;
+        use gateway_types::ignition::SpIgnition;
 
         // Ask MGS for the list of all present SP identifiers. If a request to
         // the first gateway fails, we'll try again for every resolved MGS
@@ -124,9 +214,9 @@ impl SpEreportIngester {
                 let Some(GatewayClient { addr, client }) = gateways.next()
                 else {
                     const MSG: &str = "no MGS successfully returned SP ID list";
-                    error!(opctx.log, "{MSG}");
-                    status.errors.push(MSG.to_string());
-                    return status;
+                    error!(opctx.log, "{MSG}"; "rack_id" => %rack_id);
+                    status.errors.push(format!("rack {rack_id}: {MSG}"));
+                    return;
                 };
                 match client.ignition_list().await {
                     Ok(ids) => break ids.into_inner(),
@@ -137,19 +227,20 @@ impl SpEreportIngester {
                             "{MSG}";
                             "error" => %err,
                             "gateway_addr" => %addr,
+                            "rack_id" => %rack_id
                         );
-                        status.errors.push(format!("{MSG} ({addr}): {err}"));
+                        status.errors.push(format!(
+                            "rack {rack_id}: {MSG} ({addr}): {err}"
+                        ));
                     }
                 }
             }
         };
 
-        // TODO(eliza): what seems like an appropriate parallelism? should we
-        // just do 16?
-        let mut tasks = ParallelTaskSet::new();
-        let mut total_ereports = 0;
-        let mut total_new_ereports = 0;
+        let mgs_clients = Arc::new(mgs_clients);
+        totals.racks += 1;
 
+        let mut this_rack_sps_found = 0;
         for SpIgnitionInfo { details, id } in sps {
             let ignition_type = match details {
                 SpIgnition::Present { id, .. } if details.is_sp_running() => id,
@@ -161,12 +252,14 @@ impl SpEreportIngester {
             };
 
             status.sps_found += 1;
+            this_rack_sps_found += 1;
 
             let SpIdentifier { typ: type_, slot } = id;
             let sp_result = tasks
                 .spawn({
                     let opctx = opctx.child(BTreeMap::from([
                         // XXX(eliza): that's so many little strings... :(
+                        ("rack_id".to_string(), rack_id.to_string()),
                         ("sp_type".to_string(), type_.to_string()),
                         (
                             "ignition_type".to_string(),
@@ -178,9 +271,12 @@ impl SpEreportIngester {
                     let ingester = self.inner.clone();
                     async move {
                         let status = ingester
-                            .ingest_sp_ereports(opctx, &clients, type_, slot)
+                            .ingest_sp_ereports(
+                                opctx, &clients, rack_id, type_, slot,
+                            )
                             .await;
                         SpEreporterStatus {
+                            rack_id,
                             sp_type: type_,
                             slot,
                             ignition_type,
@@ -190,49 +286,26 @@ impl SpEreportIngester {
                 })
                 .await;
             if let Some(sp_status) = sp_result {
-                total_ereports += sp_status.status.ereports_received;
-                total_new_ereports += sp_status.status.new_ereports;
+                totals.ereports += sp_status.status.ereports_received;
+                totals.new_ereports += sp_status.status.new_ereports;
                 status.sps.push(sp_status);
             }
         }
 
-        // Wait for remaining ingestion tasks to come back.
-        while let Some(sp_status) = tasks.join_next().await {
-            total_ereports += sp_status.status.ereports_received;
-            total_new_ereports += sp_status.status.new_ereports;
-            status.sps.push(sp_status);
-        }
-
-        // If any ereports were ingested that were not already in the database,
-        // trigger a new FM analysis run.
-        if total_new_ereports > 0 {
-            slog::info!(
-                opctx.log,
-                "ingested {total_ereports} ({total_new_ereports} new) \
-                 ereports from {} service processors",
-                status.sps.len();
-                "total_ereports" => total_ereports,
-                "new_ereports" => total_new_ereports,
-                "absent_sps" => status.sps_not_present,
-            );
-            self.fm_analysis.activate();
-        } else {
+        if this_rack_sps_found > 0 {
             slog::debug!(
-                opctx.log,
-                "ingested {total_ereports} (0 new) \
-                 ereports from {} service processors",
-                status.sps.len();
-                "total_ereports" => total_ereports,
-                "new_ereports" => total_new_ereports,
-                "absent_sps" => status.sps_not_present,
+                &opctx.log,
+                "spawned {} tasks to ingest SP ereports", this_rack_sps_found;
+                "rack_id" => %rack_id,
             );
         }
-
-        // Sort statuses for consistent output in OMDB commands.
-        status.sps.sort_unstable_by_key(|sp| (sp.sp_type, sp.slot));
-
-        status
     }
+}
+
+struct Totals {
+    ereports: usize,
+    new_ereports: usize,
+    racks: usize,
 }
 
 const LIMIT: std::num::NonZeroU32 = match std::num::NonZeroU32::new(255) {
@@ -245,6 +318,7 @@ impl Ingester {
         &self,
         opctx: OpContext,
         clients: &[GatewayClient],
+        rack_id: RackUuid,
         sp_type: nexus_types::inventory::SpType,
         slot: u16,
     ) -> EreporterStatus {
@@ -300,24 +374,7 @@ impl Ingester {
                     restart_id,
                     time_collected,
                     self.nexus_id,
-                    // TODO-multirack: this argument to `ereports_insert` is
-                    // used to determine the rack ID of the SP that generated
-                    // this batch of ereports. Currently, using `self.rack_id`
-                    // (the rack ID of the Nexus instance ingesting the
-                    // ereports) is always correct, since this Nexus is only
-                    // ingesting ereports from SPs in its own rack. This will
-                    // not be the case if we begin ingesting ereports from SPs
-                    // in other racks.
-                    //
-                    // If this code changes to ingest ereports from the
-                    // management gateways in multiple racks, we'll need to
-                    // change this to pass the rack ID of the target rack, not
-                    // the one this Nexus lives in. Eventually, the rack ID will
-                    // become a property of the MGS clients that are passed into
-                    // this function: they'll have to become a type that says
-                    // "here are the clients for talking to the management
-                    // gateways in *that* rack, in particular".
-                    self.rack_id,
+                    rack_id,
                     reporter,
                     db_ereports,
                 )
@@ -474,7 +531,6 @@ mod tests {
             datastore.clone(),
             nexus.internal_resolver.clone(),
             nexus.id(),
-            nexus.rack_id(),
             fm_analysis_activator.clone(),
             false,
         );
@@ -496,8 +552,13 @@ mod tests {
         fm_analysis_activator
             .assert_activated("fm analysis task should be activated");
 
-        for SpEreporterStatus { sp_type, slot, status, ignition_type: _ } in
-            &activation1.sps
+        for SpEreporterStatus {
+            sp_type,
+            slot,
+            status,
+            ignition_type: _,
+            rack_id: _,
+        } in &activation1.sps
         {
             assert_eq!(
                 &status.errors,
@@ -732,8 +793,13 @@ mod tests {
              ereports were observed: {:?}",
             activation2.sps,
         );
-        for SpEreporterStatus { sp_type, slot, status, ignition_type: _ } in
-            &activation2.sps
+        for SpEreporterStatus {
+            sp_type,
+            slot,
+            status,
+            ignition_type: _,
+            rack_id: _,
+        } in &activation2.sps
         {
             assert_eq!(
                 status.ereports_received, 0,
@@ -963,11 +1029,8 @@ mod tests {
                 "ereports from simulated previous restart should be inserted",
             );
 
-        let ingester = Ingester {
-            datastore: datastore.clone(),
-            nexus_id: nexus.id(),
-            rack_id: nexus.rack_id(),
-        };
+        let ingester =
+            Ingester { datastore: datastore.clone(), nexus_id: nexus.id() };
 
         // Generously longer than a terminating ingestion pass (a couple of
         // HTTP requests and a handful of database queries) could ever take.
@@ -977,6 +1040,7 @@ mod tests {
             ingester.ingest_sp_ereports(
                 opctx.child(BTreeMap::new()),
                 &clients,
+                nexus_test_utils::RACK_UUID,
                 sp_type,
                 sp_slot,
             ),
