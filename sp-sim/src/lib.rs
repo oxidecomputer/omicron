@@ -7,6 +7,8 @@ mod device_descriptions;
 mod ereport;
 mod gimlet;
 mod helpers;
+mod pmbus_rails;
+mod psc;
 mod sensors;
 mod server;
 mod sidecar;
@@ -24,6 +26,9 @@ pub use gimlet::FAKE_GIMLET_MODEL;
 pub use gimlet::Gimlet;
 pub use gimlet::GimletPowerState;
 pub use gimlet::SIM_GIMLET_BOARD;
+pub use psc::FAKE_PSC_MODEL;
+pub use psc::Psc;
+pub use psc::SIM_PSC_BOARD;
 pub use server::logger;
 pub use sidecar::FAKE_SIDECAR_MODEL;
 pub use sidecar::SIM_SIDECAR_BOARD;
@@ -133,6 +138,7 @@ pub trait SimulatedSp {
 pub struct SimRack {
     pub sidecars: Vec<Sidecar>,
     pub gimlets: Vec<Gimlet>,
+    pub pscs: Vec<Psc>,
 }
 
 impl SimRack {
@@ -166,7 +172,13 @@ impl SimRack {
             );
         }
 
-        Ok(Self { sidecars, gimlets })
+        let mut pscs = Vec::with_capacity(config.simulated_sps.psc.len());
+        for (i, psc) in config.simulated_sps.psc.iter().enumerate() {
+            let log = log.new(slog::o!("slot" => format!("PSC {i}")));
+            pscs.push(Psc::spawn(psc, log).await?);
+        }
+
+        Ok(Self { sidecars, gimlets, pscs })
     }
 
     pub fn ignition_controller(&self) -> &Sidecar {
@@ -174,5 +186,10 @@ impl SimRack {
         // sidecar in place. We'll assume we're always configured with at least
         // one, and panic if that's wrong.
         &self.sidecars[0]
+    }
+
+    /// Returns the total number of SPs in the simulated rack.
+    pub fn num_sps(&self) -> usize {
+        self.gimlets.len() + self.pscs.len() + self.sidecars.len()
     }
 }

@@ -795,7 +795,7 @@ rustls = "0.23.40"
 rustls-pemfile = "2.2.0"
 rustyline = "14.0.0"
 rustix = "1.1.2"
-samael = { version = "0.0.19", features = ["xmlsec"] }
+samael = { version = "0.0.22", features = ["xmlsec"] }
 schemars = "0.8.22"
 scopeguard = "1.2.0"
 scuffle = { version = "0.1.0", features = ["daft", "smf-by-instance"] }
@@ -849,8 +849,8 @@ slog-term = "2.9.1"
 smf = "0.2"
 socket2 = { version = "0.5", features = ["all"] }
 sp-sim = { path = "sp-sim" }
-sprockets-tls = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "a233079e04d9688454486c452b694587a28c5257" }
-sprockets-tls-test-utils = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "a233079e04d9688454486c452b694587a28c5257" }
+sprockets-tls = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "02c7e5414d97c0c85d629cb76d1f6beab73d960e" }
+sprockets-tls-test-utils = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "02c7e5414d97c0c85d629cb76d1f6beab73d960e" }
 sqlformat = "0.3.5"
 sqlparser = { version = "0.61.0", features = [ "visitor" ] }
 static_assertions = "1.1.0"
@@ -1181,3 +1181,4 @@ path = "workspace-hack"
 omicron-common = { path = "common" }
 omicron-generation-kinds = { path = "generation-kinds" }
 omicron-uuid-kinds = { path = "uuid-kinds" }
+

@@ -61,6 +61,7 @@ pub(crate) fn read_dummy_rot_page(
     let board = match board {
         BaseboardKind::Gimlet => "gimlet",
         BaseboardKind::Sidecar => "sidecar",
+        BaseboardKind::Psc => "psc",
     };
     let page = match request {
         RotRequest::ReadCmpa => "cmpa",

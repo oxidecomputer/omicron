@@ -486,11 +486,20 @@ impl SupportBundleCollector {
         bundle: &SupportBundle,
         dir: Utf8TempDir,
     ) -> anyhow::Result<()> {
-        // Create the zipfile as a temporary file
-        let mut zipfile = tokio::fs::File::from_std(bundle_to_zipfile(
-            &dir,
-            Utf8Path::new(TEMPDIR),
-        )?);
+        // Create the zipfile as a temporary file.
+        //
+        // Zipping compresses every file in the bundle, and dropping `dir`
+        // recursively deletes it, so both run on a blocking thread. Dropping
+        // `dir` here frees the uncompressed copy of the bundle before the
+        // upload starts.
+        let zipfile = tokio::task::spawn_blocking(move || {
+            let zipfile = bundle_to_zipfile(&dir, Utf8Path::new(TEMPDIR));
+            drop(dir);
+            zipfile
+        })
+        .await
+        .with_context(|| "Zipping the support bundle panicked")??;
+        let mut zipfile = tokio::fs::File::from_std(zipfile);
         let total_len = zipfile.metadata().await?.len();
 
         // Collect the hash locally before we send it over the network

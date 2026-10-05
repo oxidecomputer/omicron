@@ -172,6 +172,7 @@ ALL CONFIGURED SPs
     TYPE   SLOT 
     Sled   0    
     Sled   1    
+    Power  0    
     Switch 0    
     Switch 1    
 
@@ -180,6 +181,7 @@ SPs FOUND THROUGH IGNITION
     TYPE   SLOT SYSTEM_TYPE SP 
     Sled   0    Gimlet      on 
     Sled   1    Gimlet      on 
+    Power  0    PSC         on 
     Switch 0    Sidecar     on 
     Switch 1    Sidecar     on 
 
@@ -188,6 +190,7 @@ SERVICE PROCESSOR STATES
     TYPE   SLOT MODEL            SERIAL      REV HUBRIS           PWR ROT_ACTIVE 
     Sled   0    i86pc            SimGimlet00 0   0000000000000000 A0  slot A     
     Sled   1    i86pc            SimGimlet01 0   0000000000000000 A0  slot A     
+    Power  0    FAKE_SIM_PSC     SimPsc0     0   0000000000000000 A2  slot A     
     Switch 0    FAKE_SIM_SIDECAR SimSidecar0 0   0000000000000000 A2  slot A     
     Switch 1    FAKE_SIM_SIDECAR SimSidecar1 0   0000000000000000 A2  slot A     
 
@@ -259,6 +262,36 @@ SP DETAILS: type "Sled" slot 1
         dev-46       CPU temperature sensor                   sbtsi        Present  None   
         dev-53       FAKE Fan controller                      max31790     Present  None   
         ibc          FAKE intermediate bus converter          bmr491       Present  None   
+
+    CABOOSES: none found
+
+SP DETAILS: type "Power" slot 0
+
+    ROOT OF TRUST
+
+        NAME                               VALUE                                                            
+        active slot                        slot A                                                           
+        persistent boot preference         slot A                                                           
+        pending persistent boot preference -                                                                
+        transient boot preference          -                                                                
+        slot A FWID                        aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 
+        slot B FWID                        bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb 
+        Stage0 FWID                        cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc 
+        Stage0Next FWID                    dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd 
+        Slot A status                      VALID                                                            
+        Slot B status                      VALID                                                            
+        Stage0 status                      VALID                                                            
+        stage0next status                  VALID                                                            
+
+    COMPONENTS
+
+        NAME DESCRIPTION DEVICE  PRESENCE SERIAL 
+        PSU0 PSU 0 MCU   mwocp68 Present  None   
+        PSU1 PSU 1 MCU   mwocp68 Present  None   
+        PSU2 PSU 2 MCU   mwocp68 Present  None   
+        PSU3 PSU 3 MCU   mwocp68 Present  None   
+        PSU4 PSU 4 MCU   mwocp68 Present  None   
+        PSU5 PSU 5 MCU   mwocp68 Present  None   
 
     CABOOSES: none found
 
@@ -841,29 +874,31 @@ task: "fm_sitrep_gc"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    batch size:                                                               1000
-    orphaned sitreps deleted:                                                    <ORPHANED_SITREPS_DELETED_REDACTED>
-      batches:                                                                   1
-    orphaned fm_alert_request rows deleted:                                      0
-      batches:                                                                   1
-    orphaned fm_case rows deleted:                                               0
-      batches:                                                                   1
-    orphaned fm_ereport_in_case rows deleted:                                    0
-      batches:                                                                   1
-    orphaned fm_fact_physical_disk rows deleted:                                 0
-      batches:                                                                   1
-    orphaned fm_fact_saga rows deleted:                                          0
-      batches:                                                                   1
-    orphaned fm_sitrep_analysis_report rows deleted:                             <ORPHANED_FMSITREPANALYSISREPORT_ROWS_DELETED_REDACTED>
-      batches:                                                                   1
-    orphaned fm_support_bundle_request rows deleted:                             0
-      batches:                                                                   1
-    orphaned fm_support_bundle_request_data_selection_ereports rows deleted:     0
-      batches:                                                                   1
-    orphaned fm_support_bundle_request_data_selection_flags rows deleted:        0
-      batches:                                                                   1
-    orphaned fm_support_bundle_request_data_selection_host_info rows deleted:    0
-      batches:                                                                   1
+    batch size:                                                                1000
+    orphaned sitreps deleted:                                                     <ORPHANED_SITREPS_DELETED_REDACTED>
+      batches:                                                                    1
+    orphaned fm_alert_request rows deleted:                                       0
+      batches:                                                                    1
+    orphaned fm_case rows deleted:                                                0
+      batches:                                                                    1
+    orphaned fm_ereport_in_case rows deleted:                                     0
+      batches:                                                                    1
+    orphaned fm_fact_physical_disk rows deleted:                                  0
+      batches:                                                                    1
+    orphaned fm_fact_saga rows deleted:                                           0
+      batches:                                                                    1
+    orphaned fm_sitrep_analysis_report rows deleted:                              <ORPHANED_FMSITREPANALYSISREPORT_ROWS_DELETED_REDACTED>
+      batches:                                                                    1
+    orphaned fm_support_bundle_request rows deleted:                              0
+      batches:                                                                    1
+    orphaned fm_support_bundle_request_data_selection_ereports rows deleted:      0
+      batches:                                                                    1
+    orphaned fm_support_bundle_request_data_selection_flags rows deleted:         0
+      batches:                                                                    1
+    orphaned fm_support_bundle_request_data_selection_host_info rows deleted:     0
+      batches:                                                                    1
+    orphaned fm_support_bundle_request_data_selection_time_range rows deleted:    0
+      batches:                                                                    1
 
 task: "fm_sitrep_history_pruner"
   configured period: every <REDACTED_DURATION>m
@@ -1569,29 +1604,31 @@ task: "fm_sitrep_gc"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    batch size:                                                               1000
-    orphaned sitreps deleted:                                                    <ORPHANED_SITREPS_DELETED_REDACTED>
-      batches:                                                                   1
-    orphaned fm_alert_request rows deleted:                                      0
-      batches:                                                                   1
-    orphaned fm_case rows deleted:                                               0
-      batches:                                                                   1
-    orphaned fm_ereport_in_case rows deleted:                                    0
-      batches:                                                                   1
-    orphaned fm_fact_physical_disk rows deleted:                                 0
-      batches:                                                                   1
-    orphaned fm_fact_saga rows deleted:                                          0
-      batches:                                                                   1
-    orphaned fm_sitrep_analysis_report rows deleted:                             <ORPHANED_FMSITREPANALYSISREPORT_ROWS_DELETED_REDACTED>
-      batches:                                                                   1
-    orphaned fm_support_bundle_request rows deleted:                             0
-      batches:                                                                   1
-    orphaned fm_support_bundle_request_data_selection_ereports rows deleted:     0
-      batches:                                                                   1
-    orphaned fm_support_bundle_request_data_selection_flags rows deleted:        0
-      batches:                                                                   1
-    orphaned fm_support_bundle_request_data_selection_host_info rows deleted:    0
-      batches:                                                                   1
+    batch size:                                                                1000
+    orphaned sitreps deleted:                                                     <ORPHANED_SITREPS_DELETED_REDACTED>
+      batches:                                                                    1
+    orphaned fm_alert_request rows deleted:                                       0
+      batches:                                                                    1
+    orphaned fm_case rows deleted:                                                0
+      batches:                                                                    1
+    orphaned fm_ereport_in_case rows deleted:                                     0
+      batches:                                                                    1
+    orphaned fm_fact_physical_disk rows deleted:                                  0
+      batches:                                                                    1
+    orphaned fm_fact_saga rows deleted:                                           0
+      batches:                                                                    1
+    orphaned fm_sitrep_analysis_report rows deleted:                              <ORPHANED_FMSITREPANALYSISREPORT_ROWS_DELETED_REDACTED>
+      batches:                                                                    1
+    orphaned fm_support_bundle_request rows deleted:                              0
+      batches:                                                                    1
+    orphaned fm_support_bundle_request_data_selection_ereports rows deleted:      0
+      batches:                                                                    1
+    orphaned fm_support_bundle_request_data_selection_flags rows deleted:         0
+      batches:                                                                    1
+    orphaned fm_support_bundle_request_data_selection_host_info rows deleted:     0
+      batches:                                                                    1
+    orphaned fm_support_bundle_request_data_selection_time_range rows deleted:    0
+      batches:                                                                    1
 
 task: "fm_sitrep_history_pruner"
   configured period: every <REDACTED_DURATION>m
@@ -2326,9 +2363,9 @@ Count of each component type by system version:
 
                   |install-dataset |unknown 
 ------------------+----------------+--------
-RoT bootloader    |0               |4       
-RoT               |0               |4       
-SP                |0               |4       
+RoT bootloader    |0               |5       
+RoT               |0               |5       
+SP                |0               |5       
 Host OS (phase 1) |0               |2       
 Host OS (phase 2) |0               |2       
 Zone              |7               |0       
@@ -2344,6 +2381,7 @@ termination: Exited(0)
 stdout:
 Installed RoT Bootloader Software
 BASEBOARD_ID                 STAGE0_VERSION STAGE0_NEXT_VERSION 
+FAKE_SIM_PSC:SimPsc0         unknown        unknown             
 FAKE_SIM_SIDECAR:SimSidecar0 unknown        unknown             
 FAKE_SIM_SIDECAR:SimSidecar1 unknown        unknown             
 i86pc:SimGimlet00            unknown        unknown             
@@ -2351,6 +2389,7 @@ i86pc:SimGimlet01            unknown        unknown
 
 Installed RoT Software
 BASEBOARD_ID                 SLOT_A_VERSION   SLOT_B_VERSION 
+FAKE_SIM_PSC:SimPsc0         unknown (active) unknown        
 FAKE_SIM_SIDECAR:SimSidecar0 unknown (active) unknown        
 FAKE_SIM_SIDECAR:SimSidecar1 unknown (active) unknown        
 i86pc:SimGimlet00            unknown (active) unknown        
@@ -2358,6 +2397,7 @@ i86pc:SimGimlet01            unknown (active) unknown
 
 Installed SP Software
 BASEBOARD_ID                 SLOT0_VERSION SLOT1_VERSION 
+FAKE_SIM_PSC:SimPsc0         unknown       unknown       
 FAKE_SIM_SIDECAR:SimSidecar0 unknown       unknown       
 FAKE_SIM_SIDECAR:SimSidecar1 unknown       unknown       
 i86pc:SimGimlet00            unknown       unknown       
