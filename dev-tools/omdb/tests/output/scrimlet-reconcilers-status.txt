@@ -28,12 +28,16 @@ dpd reconciler:
                 reconciliation completed
                     zones unchanged:
                         * zone 00000000-0000-0000-0000-000000000001
-                        * zone 00000000-0000-0000-0000-000000000002NAT entries removed:
+                        * zone 00000000-0000-0000-0000-000000000002
+                    NAT entries removed:
                         * 192.0.2.1 (ports 0-16383)
-                        * 192.0.2.3 (ports 0-16383)NAT entries created:
-                        * zone 00000000-0000-0000-0000-000000000003: 192.0.2.2 (ports 0-16383)remove failures:
+                        * 192.0.2.3 (ports 0-16383)
+                    NAT entries created:
+                        * zone 00000000-0000-0000-0000-000000000003: 192.0.2.2 (ports 0-16383)
+                    remove failures:
                         * 192.0.2.4 (ports 0-16383): remove failed
-                        * 192.0.2.5 (ports 0-16383): remove failed againcreate failures:
+                        * 192.0.2.5 (ports 0-16383): remove failed again
+                    create failures:
                         * zone 00000000-0000-0000-0000-000000000004, 192.0.2.6 (ports 0-16383): create failed
                         * zone 00000000-0000-0000-0000-000000000005, 192.0.2.7 (ports 0-16383): create failed again
 
@@ -110,6 +114,7 @@ uplinkd reconciler:
             successfully reconciled 2 ports:
                 * qsfp0: 192.0.2.10/24, 2001:db8::10/64
                 * qsfp1: 192.0.2.11/24
+
 ---------------------------------------------
 stderr:
 =============================================
@@ -182,6 +187,7 @@ uplinkd reconciler:
     current status:
         idle
     last completion: none
+
 ---------------------------------------------
 stderr:
 =============================================
