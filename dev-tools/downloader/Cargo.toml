@@ -9,6 +9,7 @@ workspace = true
 
 [dependencies]
 anyhow.workspace = true
+backon.workspace = true
 camino.workspace = true
 camino-tempfile.workspace = true
 clap.workspace = true
@@ -22,4 +23,8 @@ slog-async.workspace = true
 slog-term.workspace = true
 strum.workspace = true
 tar.workspace = true
+thiserror.workspace = true
 tokio.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }

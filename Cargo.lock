@@ -18691,6 +18691,7 @@ name = "xtask-downloader"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "backon",
  "camino",
  "camino-tempfile",
  "clap",
@@ -18704,6 +18705,7 @@ dependencies = [
  "slog-term",
  "strum 0.27.2",
  "tar",
+ "thiserror 2.0.18",
  "tokio",
 ]
 
