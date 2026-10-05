@@ -143,7 +143,10 @@ impl<'a> Collector<'a> {
 
         // Next, see which SPs MGS can see via Ignition.
         let ignition_result = client.ignition_list().await.with_context(|| {
-            format!("MGS {:?}: listing ignition targets", client.baseurl())
+            format!(
+                "MGS {:?} (rack {rack_id}): listing ignition targets",
+                client.baseurl()
+            )
         });
 
         // Select only the SPs that appear powered on.
@@ -182,7 +185,7 @@ impl<'a> Collector<'a> {
             let result =
                 client.sp_get(&sp.typ, sp.slot).await.with_context(|| {
                     format!(
-                        "MGS {:?}: fetching state of SP {:?}",
+                        "MGS {:?} (rack {rack_id}): fetching state of SP {:?}",
                         client.baseurl(),
                         sp
                     )
@@ -226,7 +229,8 @@ impl<'a> Collector<'a> {
                         .await
                         .with_context(|| {
                             format!(
-                                "MGS {:?}: SP {sp:?}: phase 1 active slot",
+                                "MGS {:?} (rack {rack_id}): SP {sp:?}: phase 1 \
+                                 active slot",
                                 client.baseurl(),
                             )
                         })
@@ -234,7 +238,7 @@ impl<'a> Collector<'a> {
                             M2Slot::from_mgs_firmware_slot(response.slot)
                                 .ok_or_else(|| {
                                     anyhow!(
-                                        "MGS {:?}: SP {sp:?}: \
+                                        "MGS {:?} (rack {rack_id}): SP {sp:?}: \
                                          invalid host phase 1 slot {}",
                                         client.baseurl(),
                                         response.slot
@@ -291,7 +295,8 @@ impl<'a> Collector<'a> {
                         .await
                         .with_context(|| {
                             format!(
-                                "MGS {:?}: SP {sp:?}: phase 1 slot {slot:?}",
+                                "MGS {:?} (rack {rack_id}): SP {sp:?}: phase 1 \
+                                 slot {slot:?}",
                                 client.baseurl(),
                             )
                         });
@@ -344,7 +349,7 @@ impl<'a> Collector<'a> {
                     .await
                     .with_context(|| {
                         format!(
-                            "MGS {:?}: SP {:?}: caboose {:?}",
+                            "MGS {:?} (rack {rack_id}): SP {:?}: caboose {:?}",
                             client.baseurl(),
                             sp,
                             which
@@ -420,7 +425,7 @@ impl<'a> Collector<'a> {
                 }
                 .with_context(|| {
                     format!(
-                        "MGS {:?}: SP {:?}: rot page {:?}",
+                        "MGS {:?} (rack {rack_id}): SP {:?}: rot page {:?}",
                         client.baseurl(),
                         sp,
                         which
