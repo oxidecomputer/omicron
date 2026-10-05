@@ -26,7 +26,7 @@ use sled_agent_types_versions::latest::multicast::{
 use sled_agent_types_versions::{
     latest, v1, v4, v6, v7, v9, v10, v11, v12, v14, v16, v17, v18, v20, v22,
     v24, v25, v26, v28, v29, v30, v31, v32, v33, v34, v37, v39, v40, v41, v42,
-    v43, v46, v47, v48, v49,
+    v43, v46, v47, v48, v49, v50, v51,
 };
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 use slog_error_chain::InlineErrorChain;
@@ -43,8 +43,12 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
-    (52, PROBE_MULTICAST_GROUPS),
-    (51, MCAST_M2P_FORWARDING),
+    (56, PROBE_MULTICAST_GROUPS),
+    (55, MCAST_M2P_FORWARDING),
+    (54, ADD_LOG_TIME_RANGE),
+    (53, ADD_INSTANCE_MANAGER_STATUS_TO_INVENTORY),
+    (52, TYPED_ARTIFACT_CONFIG_GENERATION),
+    (51, MULTIPLE_ZONE_EXTERNAL_IPS),
     (50, TYPED_SLED_CONFIG_GENERATION),
     (49, ADD_UPDATE_DISPOSITION),
     (48, ALLOW_DDM_TRAFFIC),
@@ -381,12 +385,24 @@ pub trait SledAgentApi {
     #[endpoint {
         method = PUT,
         path = "/omicron-config",
-        versions = VERSION_TYPED_SLED_CONFIG_GENERATION..,
+        versions = VERSION_MULTIPLE_ZONE_EXTERNAL_IPS..,
     }]
     async fn omicron_config_put(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<latest::inventory::OmicronSledConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        method = PUT,
+        path = "/omicron-config",
+        versions = VERSION_TYPED_SLED_CONFIG_GENERATION..VERSION_MULTIPLE_ZONE_EXTERNAL_IPS,
+    }]
+    async fn omicron_config_put_v50(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v50::inventory::OmicronSledConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::omicron_config_put(rqctx, body.map(Into::into)).await
+    }
 
     #[endpoint {
         operation_id = "omicron_config_put",
@@ -398,7 +414,7 @@ pub trait SledAgentApi {
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<v49::inventory::OmicronSledConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        Self::omicron_config_put(rqctx, body.map(Into::into)).await
+        Self::omicron_config_put_v50(rqctx, body.map(Into::into)).await
     }
 
     #[endpoint {
@@ -794,15 +810,31 @@ pub trait SledAgentApi {
 
     #[endpoint {
         method = GET,
-        path = "/artifacts-config"
+        path = "/artifacts-config",
+        versions = VERSION_TYPED_ARTIFACT_CONFIG_GENERATION..,
     }]
     async fn artifact_config_get(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<latest::artifact::ArtifactConfig>, HttpError>;
 
     #[endpoint {
+        operation_id = "artifact_config_get",
+        method = GET,
+        path = "/artifacts-config",
+        versions = ..VERSION_TYPED_ARTIFACT_CONFIG_GENERATION,
+    }]
+    async fn artifact_config_get_v1(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v1::artifact::ArtifactConfig>, HttpError> {
+        Self::artifact_config_get(rqctx)
+            .await
+            .map(|response| response.map(v1::artifact::ArtifactConfig::from))
+    }
+
+    #[endpoint {
         method = PUT,
-        path = "/artifacts-config"
+        path = "/artifacts-config",
+        versions = VERSION_TYPED_ARTIFACT_CONFIG_GENERATION..,
     }]
     async fn artifact_config_put(
         rqctx: RequestContext<Self::Context>,
@@ -810,16 +842,46 @@ pub trait SledAgentApi {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     #[endpoint {
+        operation_id = "artifact_config_put",
+        method = PUT,
+        path = "/artifacts-config",
+        versions = ..VERSION_TYPED_ARTIFACT_CONFIG_GENERATION,
+    }]
+    async fn artifact_config_put_v1(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v1::artifact::ArtifactConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::artifact_config_put(rqctx, body.map(Into::into)).await
+    }
+
+    #[endpoint {
         method = GET,
-        path = "/artifacts"
+        path = "/artifacts",
+        versions = VERSION_TYPED_ARTIFACT_CONFIG_GENERATION..,
     }]
     async fn artifact_list(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<latest::artifact::ArtifactListResponse>, HttpError>;
 
     #[endpoint {
+        operation_id = "artifact_list",
+        method = GET,
+        path = "/artifacts",
+        versions = ..VERSION_TYPED_ARTIFACT_CONFIG_GENERATION,
+    }]
+    async fn artifact_list_v1(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v1::artifact::ArtifactListResponse>, HttpError>
+    {
+        Self::artifact_list(rqctx).await.map(|response| {
+            response.map(v1::artifact::ArtifactListResponse::from)
+        })
+    }
+
+    #[endpoint {
         method = POST,
-        path = "/artifacts/{sha256}/copy-from-depot"
+        path = "/artifacts/{sha256}/copy-from-depot",
+        versions = VERSION_TYPED_ARTIFACT_CONFIG_GENERATION..,
     }]
     async fn artifact_copy_from_depot(
         rqctx: RequestContext<Self::Context>,
@@ -832,9 +894,34 @@ pub trait SledAgentApi {
     >;
 
     #[endpoint {
+        operation_id = "artifact_copy_from_depot",
+        method = POST,
+        path = "/artifacts/{sha256}/copy-from-depot",
+        versions = ..VERSION_TYPED_ARTIFACT_CONFIG_GENERATION,
+    }]
+    async fn artifact_copy_from_depot_v1(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v1::artifact::ArtifactPathParam>,
+        query_params: Query<v1::artifact::ArtifactQueryParam>,
+        body: TypedBody<v1::artifact::ArtifactCopyFromDepotBody>,
+    ) -> Result<
+        HttpResponseAccepted<v1::artifact::ArtifactCopyFromDepotResponse>,
+        HttpError,
+    > {
+        Self::artifact_copy_from_depot(
+            rqctx,
+            path_params,
+            query_params.map(Into::into),
+            body,
+        )
+        .await
+    }
+
+    #[endpoint {
         method = PUT,
         path = "/artifacts/{sha256}",
         request_body_max_bytes = UPDATE_ARTIFACT_MAX_BYTES,
+        versions = VERSION_TYPED_ARTIFACT_CONFIG_GENERATION..,
     }]
     async fn artifact_put(
         rqctx: RequestContext<Self::Context>,
@@ -842,6 +929,29 @@ pub trait SledAgentApi {
         query_params: Query<latest::artifact::ArtifactQueryParam>,
         body: StreamingBody,
     ) -> Result<HttpResponseOk<latest::artifact::ArtifactPutResponse>, HttpError>;
+
+    #[endpoint {
+        operation_id = "artifact_put",
+        method = PUT,
+        path = "/artifacts/{sha256}",
+        request_body_max_bytes = UPDATE_ARTIFACT_MAX_BYTES,
+        versions = ..VERSION_TYPED_ARTIFACT_CONFIG_GENERATION,
+    }]
+    async fn artifact_put_v1(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v1::artifact::ArtifactPathParam>,
+        query_params: Query<v1::artifact::ArtifactQueryParam>,
+        body: StreamingBody,
+    ) -> Result<HttpResponseOk<v1::artifact::ArtifactPutResponse>, HttpError>
+    {
+        Self::artifact_put(
+            rqctx,
+            path_params,
+            query_params.map(Into::into),
+            body,
+        )
+        .await
+    }
 
     /// Take a snapshot of a disk that is attached to an instance
     #[endpoint {
@@ -1311,11 +1421,42 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/inventory",
-        versions = VERSION_TYPED_SLED_CONFIG_GENERATION..,
+        versions = VERSION_ADD_INSTANCE_MANAGER_STATUS_TO_INVENTORY..,
     }]
     async fn inventory(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<latest::inventory::Inventory>, HttpError>;
+
+    /// Fetch basic information about this sled
+    #[endpoint {
+        operation_id = "inventory",
+        method = GET,
+        path = "/inventory",
+        versions = VERSION_MULTIPLE_ZONE_EXTERNAL_IPS..VERSION_ADD_INSTANCE_MANAGER_STATUS_TO_INVENTORY,
+    }]
+    async fn inventory_v51(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v51::inventory::Inventory>, HttpError> {
+        Self::inventory(rqctx).await.map(|HttpResponseOk(inv)| {
+            HttpResponseOk(v51::inventory::Inventory::from(inv))
+        })
+    }
+
+    /// Fetch basic information about this sled
+    #[endpoint {
+        operation_id = "inventory",
+        method = GET,
+        path = "/inventory",
+        versions = VERSION_TYPED_SLED_CONFIG_GENERATION..VERSION_MULTIPLE_ZONE_EXTERNAL_IPS,
+    }]
+    async fn inventory_v50(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v50::inventory::Inventory>, HttpError> {
+        let HttpResponseOk(inv) = Self::inventory_v51(rqctx).await?;
+        v50::inventory::Inventory::try_from(inv)
+            .map(HttpResponseOk)
+            .map_err(HttpError::from)
+    }
 
     /// Fetch basic information about this sled
     #[endpoint {
@@ -1327,7 +1468,7 @@ pub trait SledAgentApi {
     async fn inventory_v49(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<v49::inventory::Inventory>, HttpError> {
-        Self::inventory(rqctx).await.map(|HttpResponseOk(inv)| {
+        Self::inventory_v50(rqctx).await.map(|HttpResponseOk(inv)| {
             HttpResponseOk(v49::inventory::Inventory::from(inv))
         })
     }
@@ -1695,6 +1836,7 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/support/logs/download/{zone}",
+        versions = VERSION_ADD_LOG_TIME_RANGE..,
     }]
     async fn support_logs_download(
         request_context: RequestContext<Self::Context>,
@@ -1705,6 +1847,30 @@ pub trait SledAgentApi {
             latest::diagnostics::SledDiagnosticsLogsDownloadQueryParam,
         >,
     ) -> Result<http::Response<Body>, HttpError>;
+
+    /// This endpoint returns a zip file of a zone's logs organized by service.
+    #[endpoint {
+        operation_id = "support_logs_download",
+        method = GET,
+        path = "/support/logs/download/{zone}",
+        versions = ..VERSION_ADD_LOG_TIME_RANGE,
+    }]
+    async fn support_logs_download_v1(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<
+            v1::diagnostics::SledDiagnosticsLogsDownloadPathParam,
+        >,
+        query_params: Query<
+            v1::diagnostics::SledDiagnosticsLogsDownloadQueryParam,
+        >,
+    ) -> Result<http::Response<Body>, HttpError> {
+        Self::support_logs_download(
+            request_context,
+            path_params,
+            query_params.map(Into::into),
+        )
+        .await
+    }
 
     /// This endpoint reports the status of the `destroy_orphaned_datasets`
     /// chicken switch. It will be removed with omicron#6177.

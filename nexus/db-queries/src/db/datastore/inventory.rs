@@ -44,6 +44,7 @@ use nexus_db_model::InvFmdResource;
 use nexus_db_model::InvFmdStatus;
 use nexus_db_model::InvHostPhase1ActiveSlot;
 use nexus_db_model::InvHostPhase1FlashHash;
+use nexus_db_model::InvInstanceManagerStatusCols;
 use nexus_db_model::InvInternalDns;
 use nexus_db_model::InvLastReconciliationDatasetResult;
 use nexus_db_model::InvLastReconciliationDiskResult;
@@ -85,16 +86,17 @@ use nexus_db_model::{
 use nexus_db_model::{HwPowerState, InvZoneManifestNonBoot};
 use nexus_db_model::{HwRotSlot, InvMupdateOverrideNonBoot};
 use nexus_db_model::{InvCaboose, InvRemoveMupdateOverride};
+use nexus_db_schema::enums::CabooseWhichEnum;
 use nexus_db_schema::enums::HwM2SlotEnum;
+use nexus_db_schema::enums::HwPowerStateEnum;
 use nexus_db_schema::enums::HwRotSlotEnum;
+use nexus_db_schema::enums::InvConfigReconcilerStatusKindEnum;
+use nexus_db_schema::enums::InvSledUpdateDispositionEnum;
+use nexus_db_schema::enums::InvZoneManifestSourceEnum;
 use nexus_db_schema::enums::RotImageErrorEnum;
 use nexus_db_schema::enums::RotPageWhichEnum;
 use nexus_db_schema::enums::SledRoleEnum;
 use nexus_db_schema::enums::SpTypeEnum;
-use nexus_db_schema::enums::{
-    CabooseWhichEnum, InvConfigReconcilerStatusKindEnum,
-};
-use nexus_db_schema::enums::{HwPowerStateEnum, InvZoneManifestSourceEnum};
 use nexus_types::inventory::CockroachStatus;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::InternalDnsGenerationStatus;
@@ -567,6 +569,27 @@ impl DataStore {
                     file_source_resolver,
                 )
                 .map_err(|e| Error::internal_error(&e.to_string()))
+            })
+            .collect::<Result<Vec<_>, Error>>()?;
+        let sled_agents_baseboards = sled_agents_baseboards
+            .into_iter()
+            .map(|sled_agent| {
+                let config_reconciler_fields = config_reconciler_fields_by_sled
+                    .remove(&sled_agent.sled_id)
+                    .expect("all sled IDs should exist");
+                let instance_manager_status_cols = sled_agent
+                    .instance_manager_status
+                    .try_into()
+                    .map_err(|e: anyhow::Error| {
+                        Error::internal_error(
+                            &InlineErrorChain::new(&*e).to_string(),
+                        )
+                    })?;
+                Ok(InvSledAgentWithBaseboardFields {
+                    config_reconciler_fields,
+                    instance_manager_status_cols,
+                    sled_agent,
+                })
             })
             .collect::<Result<Vec<_>, Error>>()?;
 
@@ -1800,16 +1823,23 @@ impl DataStore {
                 // For sleds with a real baseboard id, we have to use the
                 // `INSERT INTO ... SELECT` pattern that we used for other types
                 // of rows above to pull in the baseboard id's uuid.
-                for sled_agent in &sled_agents_baseboards {
+                for sled_agent in sled_agents_baseboards {
+                    let InvSledAgentWithBaseboardFields {
+                        config_reconciler_fields,
+                        instance_manager_status_cols,
+                        sled_agent,
+                    } = sled_agent;
                     let baseboard_id = sled_agent.baseboard_id.as_ref().expect(
                         "already selected only sled agents with baseboards",
                     );
                     let ConfigReconcilerFields {
                         ledgered_sled_config,
                         reconciler_status,
-                    } = config_reconciler_fields_by_sled
-                        .remove(&sled_agent.sled_id)
-                        .expect("all sled IDs should exist");
+                    } = config_reconciler_fields;
+                    let InvInstanceManagerStatusCols {
+                        update_disposition: instance_manager_update_disposition,
+                        num_registered_vmms: instance_manager_num_registered_vmms,
+                    } = instance_manager_status_cols;
                     let file_source_resolver = InvOmicronFileSourceResolver::new(&sled_agent.file_source_resolver);
                     let selection = nexus_db_schema::schema::hw_baseboard_id::table
                         .select((
@@ -1879,6 +1909,10 @@ impl DataStore {
                                 .into_sql::<Nullable<diesel::sql_types::Uuid>>(),
                             file_source_resolver.mupdate_override_boot_disk_error
                                 .into_sql::<Nullable<diesel::sql_types::Text>>(),
+                            instance_manager_update_disposition
+                                .into_sql::<Nullable<InvSledUpdateDispositionEnum>>(),
+                            instance_manager_num_registered_vmms
+                                .into_sql::<diesel::sql_types::Int8>(),
                         ))
                         .filter(
                             baseboard_dsl::part_number
@@ -1921,6 +1955,8 @@ impl DataStore {
                                 sa_dsl::mupdate_override_boot_disk_path,
                                 sa_dsl::mupdate_override_id,
                                 sa_dsl::mupdate_override_boot_disk_error,
+                                sa_dsl::instance_manager_update_disposition,
+                                sa_dsl::instance_manager_num_registered_vmms,
                             ))
                             .execute_async(&conn)
                             .await?;
@@ -1957,6 +1993,8 @@ impl DataStore {
                         _mupdate_override_boot_disk_path,
                         _mupdate_override_boot_disk_id,
                         _mupdate_override_boot_disk_error,
+                        _instance_manager_update_disposition,
+                        _instance_manager_num_registered_vmms,
                     ) = sa_dsl::inv_sled_agent::all_columns();
                 }
 
@@ -4849,6 +4887,8 @@ impl DataStore {
                 })
                 .transpose()?;
 
+            let instance_manager_status = s.instance_manager_status();
+
             let file_source_resolver = s
                 .file_source_resolver
                 .into_inventory(
@@ -4954,6 +4994,7 @@ impl DataStore {
                 ledgered_sled_config,
                 reconciler_status,
                 last_reconciliation,
+                instance_manager_status,
                 file_source_resolver,
                 smf_services_enabled_not_online,
                 reference_measurements: last_reconciliation_measurements
@@ -5136,6 +5177,16 @@ impl DataStore {
 
         Ok(collections)
     }
+}
+
+// Inserting an `inv_sled_agent` row with a baseboard requires listing all the
+// columns explicitly; this struct helps us gather up those columns ahead of
+// time (which requires some error handling).
+#[derive(Debug)]
+struct InvSledAgentWithBaseboardFields<'a> {
+    config_reconciler_fields: ConfigReconcilerFields,
+    instance_manager_status_cols: InvInstanceManagerStatusCols,
+    sled_agent: &'a SledAgent,
 }
 
 #[derive(Debug)]
@@ -5525,10 +5576,10 @@ mod test {
     };
     use pretty_assertions::assert_eq;
     use sled_agent_types::disk::M2Slot;
-    use sled_agent_types::inventory::BootPartitionContents;
     use sled_agent_types::inventory::BootPartitionDetails;
     use sled_agent_types::inventory::NetworkInterface;
     use sled_agent_types::inventory::NetworkInterfaceKind;
+    use sled_agent_types::inventory::NexusExternalIps;
     use sled_agent_types::inventory::OmicronZoneConfig;
     use sled_agent_types::inventory::OmicronZoneType;
     use sled_agent_types::inventory::OrphanedDataset;
@@ -5537,13 +5588,15 @@ mod test {
         BootImageHeader, RemoveMupdateOverrideBootSuccessInventory,
         RemoveMupdateOverrideInventory,
     };
+    use sled_agent_types::inventory::{BootPartitionContents, ZoneSnatConfig};
     use sled_agent_types::inventory::{
         ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
         ConfigReconcilerInventoryStatus, OmicronZoneImageSource,
         SingleMeasurementInventory,
     };
     use sled_hardware_types::BaseboardId;
-    use std::net::IpAddr;
+    use std::collections::BTreeSet;
+    use std::net::{IpAddr, Ipv4Addr};
     use std::num::NonZeroU32;
     use std::time::Duration;
     use tufaceous_artifact::ArtifactHash;
@@ -6225,59 +6278,71 @@ mod test {
         Ok(())
     }
 
-    // Assert that reading an inventory collection with multiple external IPs
-    // fails. This should be impossible today, since the blueprint system only
-    // generates zones with zero or one EIP. But the inventory tables can store
-    // many, while the Rust model types can't yet.
+    // A zone with more than one external IP round-trips through the inventory
+    // tables in the database. The blueprint system only generates zones with a
+    // single external IP today, so we construct the multi-IP zone by hand.
     #[tokio::test]
-    async fn test_zone_external_ip_read_requires_exactly_one() {
-        let logctx =
-            dev::test_setup_log("zone_external_ip_read_requires_exactly_one");
+    async fn test_zone_with_multiple_external_ips_round_trips_through_database()
+    {
+        let logctx = dev::test_setup_log(
+            "zone_with_multiple_external_ips_round_trips_through_database",
+        );
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        // The representative collection has Nexus, external DNS, and boundary
-        // NTP zones, each with exactly one external IP.
+        // Start with a representative collection and give one Nexus zone a
+        // second external IP.
         let Representative { builder, .. } = representative();
-        let collection = builder.build();
+        let mut collection = builder.build();
+        let second_ip = "10.255.255.255".parse::<std::net::IpAddr>().unwrap();
+
+        let mut nexus_zone_id = None;
+        'outer: for mut sa in collection.sled_agents.iter_mut() {
+            let Some(config) = sa.ledgered_sled_config.as_mut() else {
+                continue;
+            };
+            for mut zone in config.zones.iter_mut() {
+                if let OmicronZoneType::Nexus { external_ips, .. } =
+                    &mut zone.zone_type
+                {
+                    let mut ips: BTreeSet<_> =
+                        external_ips.iter().copied().collect();
+                    ips.insert(second_ip);
+                    *external_ips = NexusExternalIps::new(ips)
+                        .expect("two external IPs is valid");
+                    nexus_zone_id = Some(zone.id);
+                    break 'outer;
+                }
+            }
+        }
+        let nexus_zone_id =
+            nexus_zone_id.expect("collection has a ledgered Nexus zone");
+
+        // Write it and read it back.
         datastore
             .inventory_insert_collection(&opctx, &collection)
             .await
             .expect("failed to insert collection");
-
-        // It reads back fine to start.
-        datastore
+        let read = datastore
             .inventory_collection_read(&opctx, collection.id)
             .await
-            .expect("collection with one external IP per zone reads back");
+            .expect("collection with multiple external IPs reads back");
 
-        // Give one zone a second external IP, violating the invariant.
-        let conn = datastore.pool_connection_for_tests().await.unwrap();
-        conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await.unwrap();
-        conn.batch_execute_async(
-            "INSERT INTO omicron.public.inv_omicron_sled_config_zone_external_ip \
-                (inv_collection_id, sled_config_id, zone_id, ip, port, \
-                 snat_first_port, snat_last_port) \
-             SELECT inv_collection_id, sled_config_id, zone_id, \
-                 '10.255.255.255', port, snat_first_port, snat_last_port \
-             FROM omicron.public.inv_omicron_sled_config_zone_external_ip \
-             LIMIT 1",
-        )
-        .await
-        .expect("inserted duplicate external IP row");
-
-        // Now the read fails.
-        let err = datastore
-            .inventory_collection_read(&opctx, collection.id)
-            .await
-            .expect_err(
-                "expected read to fail with two external IPs on a zone",
-            );
-        let msg = err.to_string();
+        // The Nexus zone comes back with both external IPs.
+        let zone = read
+            .all_ledgered_omicron_zones()
+            .find(|z| z.id == nexus_zone_id)
+            .expect("the modified Nexus zone");
+        let OmicronZoneType::Nexus { external_ips, .. } = &zone.zone_type
+        else {
+            panic!("expected a Nexus zone");
+        };
+        let ips: Vec<_> = external_ips.iter().copied().collect();
         assert!(
-            msg.contains("expected exactly one external IP"),
-            "unexpected error message: {msg}",
+            ips.contains(&second_ip),
+            "second external IP survived the round trip: {ips:?}",
         );
+        assert_eq!(ips.len(), 2, "expected two external IPs, got {ips:?}");
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -6305,24 +6370,26 @@ mod test {
         let Representative { builder, .. } = representative();
         let mut collection = builder.build();
 
-        let shared_ip: IpAddr = "192.0.2.10".parse().unwrap();
+        let shared_ipv4: Ipv4Addr = "192.0.2.10".parse().unwrap();
+        let shared_ip = IpAddr::V4(shared_ipv4);
         let ranges = [
             (0, NUM_SOURCE_NAT_PORTS - 1),
             (NUM_SOURCE_NAT_PORTS, 2 * NUM_SOURCE_NAT_PORTS - 1),
         ];
-        let mut expected: Vec<(OmicronZoneUuid, u16, u16)> = Vec::new();
+        let mut expected = Vec::new();
         'outer: for mut sa in collection.sled_agents.iter_mut() {
             let Some(config) = sa.ledgered_sled_config.as_mut() else {
                 continue;
             };
             for mut zone in config.zones.iter_mut() {
-                if let OmicronZoneType::BoundaryNtp { snat_cfg, .. } =
+                if let OmicronZoneType::BoundaryNtp { snat, .. } =
                     &mut zone.zone_type
                 {
                     let (first, last) = ranges[expected.len()];
-                    *snat_cfg =
+                    *snat = ZoneSnatConfig::from(
                         SourceNatConfigGeneric::new(shared_ip, first, last)
-                            .expect("aligned SNAT port range");
+                            .expect("aligned SNAT port range"),
+                    );
                     expected.push((zone.id, first, last));
                     if expected.len() == ranges.len() {
                         break 'outer;
@@ -6353,12 +6420,13 @@ mod test {
                 .all_ledgered_omicron_zones()
                 .find(|z| z.id == zone_id)
                 .expect("boundary NTP zone");
-            let OmicronZoneType::BoundaryNtp { snat_cfg, .. } = &zone.zone_type
+            let OmicronZoneType::BoundaryNtp { snat, .. } = &zone.zone_type
             else {
                 panic!("expected a boundary NTP zone");
             };
-            assert_eq!(snat_cfg.ip, shared_ip);
-            assert_eq!(snat_cfg.port_range_raw(), (first, last));
+            let snat_v4 = snat.as_ipv4().unwrap();
+            assert_eq!(snat_v4.ip, shared_ipv4);
+            assert_eq!(snat_v4.port_range_raw(), (first, last));
         }
 
         db.terminate().await;
@@ -6884,7 +6952,9 @@ mod test {
             zone_type: OmicronZoneType::Nexus {
                 internal_address: "[::1]:12345".parse().unwrap(),
                 lockstep_port: 12346,
-                external_ip: "192.0.2.1".parse().unwrap(),
+                external_ips: NexusExternalIps::from_single(
+                    "192.0.2.1".parse().unwrap(),
+                ),
                 nic: nic.clone(),
                 external_tls: false,
                 external_dns_servers: vec![],

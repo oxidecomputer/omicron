@@ -1567,7 +1567,7 @@ impl MulticastGroupReconciler {
         // Propagate M2P mappings and forwarding entries to all sleds.
         //
         // At this point the member is "Joined" in the database, so propagation
-        // includes this sled in forwarding next-hops. If propagation or
+        // includes this sled in forwarding nexthops. If propagation or
         // subscribe fails below, the member remains "Joined" with incomplete
         // sled state. The next reconciler pass re-propagates and re-issues the
         // subscription from `handle_instance_joined`. DPD members are

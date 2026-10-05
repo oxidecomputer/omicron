@@ -5,7 +5,7 @@
 #:
 #: name = "helios / deploy"
 #: variety = "basic"
-#: target = "lab-3.0-opte-0.41"
+#: target = "lab-3.0-opte-0.42"
 #: output_rules = [
 #:  "%/var/svc/log/oxide-*.log*",
 #:  "%/zone/oxz_*/root/var/svc/log/oxide-*.log*",
@@ -35,6 +35,26 @@ set -o xtrace
 _exit_trap() {
 	local status=$?
 	set +o errexit
+
+	# TODO: temporary diagnostics for the switch-zone readiness timeout.
+	if [[ $status -ne 0 ]]; then
+		echo "== switch zone installer diagnostics"
+		date -u
+		pfexec zoneadm list -civ || true
+		local installer_pid
+		local -a installer_pids
+		installer_pids=( $(pgrep -f '^/usr/sbin/zoneadm -z oxz_switch install ' || true) )
+		while [[ ${#installer_pids[@]} -gt 0 ]]; do
+			installer_pid=${installer_pids[0]}
+			installer_pids=( "${installer_pids[@]:1}" )
+			installer_pids+=( $(pgrep -P "$installer_pid" || true) )
+			echo "== installer PID $installer_pid"
+			pfexec pflags "$installer_pid" || true
+			pfexec pstack "$installer_pid" || true
+			pfexec pfiles "$installer_pid" || true
+		done
+	fi
+	# TODO: remove these diagnostics after identifying the install delay.
 
 	# Restore the override opteadm from /tmp before debug-evidence
 	# collection runs, in case anything earlier in this trap or any
@@ -267,6 +287,14 @@ PXA_END="$EXTRA_IP_END"
 # least.
 DISKS=( $(pfexec nvmeadm list -p -o disk) )
 pfexec zpool create -f scratch "${DISKS[@]}"
+
+gh_sha() {
+    curl -fsS -H "Accept: application/vnd.github.sha" \
+        "https://api.github.com/repos/oxidecomputer/$1/commits/$2"
+}
+SOFTNPU_COMMIT=$(gh_sha softnpu zl/multicast)
+SIDECAR_LITE_COMMIT=$(gh_sha sidecar-lite zl/multicast)
+export SOFTNPU_COMMIT SIDECAR_LITE_COMMIT
 
 ptime -m \
     pfexec ./target/release/xtask virtual-hardware \

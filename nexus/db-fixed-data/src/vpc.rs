@@ -60,6 +60,7 @@ pub static SERVICES_VPC: LazyLock<model::IncompleteVpc> = LazyLock::new(|| {
             },
             ipv6_prefix: Some(*SERVICE_VPC_IPV6_SUBNET),
             dns_name: SERVICES_DB_NAME.parse().unwrap(),
+            defaults: None,
         },
     )
     // `IncompleteVpc::new` only fails if given an invalid `ipv6_prefix`

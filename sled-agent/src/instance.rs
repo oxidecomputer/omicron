@@ -1497,8 +1497,17 @@ impl InstanceRunner {
     }
 
     fn refresh_external_ips_inner(&mut self) -> Result<(), Error> {
+        // An instance without a primary NIC has no OPTE port and thus no
+        // external IPs to refresh. The sled-wide refresh propagates
+        // per-instance errors, so returning `NoPrimaryNic` here would
+        // permanently fail `set_eip_gateways` for the whole sled whenever
+        // a NIC-less instance is running. Treat it as a successful no-op
+        // instead.
+        //
+        // Note: explicit add/delete operations still error, since those
+        // request a change that cannot be applied.
         let Some(primary_nic) = self.primary_nic() else {
-            return Err(Error::Opte(illumos_utils::opte::Error::NoPrimaryNic));
+            return Ok(());
         };
 
         self.port_manager
@@ -2751,9 +2760,7 @@ impl InstanceRunner {
 mod tests {
     use super::*;
     use crate::fakes::nexus::{FakeNexusServer, ServerContext};
-    use crate::instance_manager::{
-        InstanceManagerJobsStatus, VmmRegistrationDisallowedReason,
-    };
+    use crate::instance_manager::VmmRegistrationDisallowedReason;
     use crate::metrics;
     use crate::nexus::make_nexus_client_with_port;
     use crate::vmm_reservoir::VmmReservoirManagerHandle;
@@ -2774,13 +2781,15 @@ mod tests {
     };
     use sled_agent_config_reconciler::UpdateDispositionReceiver;
     use sled_agent_config_reconciler::{
-        CurrentUpdateDisposition, CurrentlyManagedZpoolsReceiver,
-        InternalDiskDetails, InternalDisksReceiver,
+        CurrentlyManagedZpoolsReceiver, InternalDiskDetails,
+        InternalDisksReceiver,
     };
     use sled_agent_types::disk::DiskIdentity;
     use sled_agent_types::instance::ExternalIpv4Config;
     use sled_agent_types::instance::ExternalIpv6Config;
     use sled_agent_types::instance::InstanceEnsureBody;
+    use sled_agent_types::inventory::CurrentUpdateDisposition;
+    use sled_agent_types::inventory::InstanceManagerStatus;
     use sled_agent_types::inventory::OmicronSledUpdateDisposition;
     use sled_agent_types::inventory::SourceNatConfigV6;
     use sled_agent_types::zone_bundle::CleanupContext;
@@ -2859,7 +2868,10 @@ mod tests {
             let resolver = Arc::new(
                 Resolver::new_from_addrs(
                     log.clone(),
-                    &[_dns_server.dns_server.local_address()],
+                    &_dns_server
+                        .dns_server
+                        .local_addresses()
+                        .collect::<Vec<_>>(),
                 )
                 .unwrap(),
             );
@@ -3451,6 +3463,73 @@ mod tests {
         logctx.cleanup_successful();
     }
 
+    // A registered instance without a primary NIC has no OPTE port, so the
+    // sled-wide external IP refresh must treat it as a no-op. Propagating
+    // `NoPrimaryNic` instead would permanently fail `set_eip_gateways` for
+    // the whole sled.
+    #[tokio::test]
+    async fn test_refresh_external_ips_no_primary_nic() {
+        let logctx = omicron_test_utils::dev::test_setup_log(
+            "test_refresh_external_ips_no_primary_nic",
+        );
+        let log = logctx.log.new(o!(FileKv));
+
+        let test_objects = InstanceTestObjects::new(&log).await;
+
+        let (propolis_server, _propolis_client) =
+            propolis_mock_server(&logctx.log);
+        let propolis_addr = propolis_server.local_addr();
+
+        let instance_id = InstanceUuid::new_v4();
+        let propolis_id = PropolisUuid::from_untyped_uuid(PROPOLIS_ID);
+        let InstanceInitialState {
+            vmm_spec,
+            local_config,
+            vmm_runtime,
+            propolis_addr,
+            migration_id: _,
+        } = fake_instance_initial_state(propolis_addr);
+
+        let metadata = InstanceMetadata {
+            silo_id: Uuid::new_v4(),
+            project_id: Uuid::new_v4(),
+        };
+        let sled_identifiers = SledIdentifiers {
+            rack_id: Uuid::new_v4(),
+            sled_id: Uuid::new_v4(),
+            model: "fake-model".into(),
+            revision: 1,
+            serial: "fake-serial".into(),
+        };
+
+        test_objects
+            .instance_manager
+            .ensure_registered(
+                propolis_id,
+                InstanceEnsureBody {
+                    vmm_spec,
+                    local_config,
+                    instance_id,
+                    migration_id: None,
+                    vmm_runtime,
+                    propolis_addr,
+                    metadata,
+                },
+                sled_identifiers,
+            )
+            .await
+            .unwrap();
+
+        // The fixture instance has no NICs at all, hence no primary NIC.
+        test_objects
+            .instance_manager
+            .refresh_external_ips()
+            .await
+            .expect("refresh with a NIC-less instance should be a no-op");
+
+        logctx.cleanup_successful();
+    }
+
     // Tests a scenario in which a propolis-server process fails to stop in a
     // timely manner (i.e. it's gotten stuck somehow). This test asserts that
     // the sled-agent will eventually forcibly terminate the VMM process, tear
@@ -3582,15 +3661,15 @@ mod tests {
             .await
     }
 
-    /// Wait (with a timeout) until the `InstanceManager`'s jobs status
-    /// satisfies `pred`.
-    async fn wait_for_jobs_status(
+    /// Wait (with a timeout) until the `InstanceManager`'s status satisfies
+    /// `pred`.
+    async fn wait_for_status(
         instance_manager: &crate::instance_manager::InstanceManager,
-        pred: fn(&InstanceManagerJobsStatus) -> bool,
+        pred: fn(&InstanceManagerStatus) -> bool,
     ) {
         wait_for_condition(
             || async {
-                let status = instance_manager.jobs_status();
+                let status = instance_manager.status();
                 if pred(&status) {
                     Ok(())
                 } else {
@@ -3637,7 +3716,7 @@ mod tests {
             )
         );
 
-        let status = test_objects.instance_manager.jobs_status();
+        let status = test_objects.instance_manager.status();
         assert_eq!(status.num_registered_vmms, 0);
         assert_eq!(
             status.update_disposition,
@@ -3686,7 +3765,7 @@ mod tests {
         disposition_tx.set(CurrentUpdateDisposition::Known(
             OmicronSledUpdateDisposition::Available,
         ));
-        wait_for_jobs_status(&test_objects.instance_manager, |status| {
+        wait_for_status(&test_objects.instance_manager, |status| {
             status.update_disposition
                 == CurrentUpdateDisposition::Known(
                     OmicronSledUpdateDisposition::Available,
@@ -3697,7 +3776,7 @@ mod tests {
         try_ensure_registered(&test_objects, propolis_id, instance_id)
             .await
             .expect("registration should succeed once the sled is available");
-        wait_for_jobs_status(&test_objects.instance_manager, |status| {
+        wait_for_status(&test_objects.instance_manager, |status| {
             status.num_registered_vmms == 1
         })
         .await;
@@ -3727,7 +3806,7 @@ mod tests {
         try_ensure_registered(&test_objects, propolis_id_a, instance_id_a)
             .await
             .expect("registration should succeed while available");
-        wait_for_jobs_status(&test_objects.instance_manager, |status| {
+        wait_for_status(&test_objects.instance_manager, |status| {
             status.num_registered_vmms == 1
         })
         .await;
@@ -3735,7 +3814,7 @@ mod tests {
         disposition_tx.set(CurrentUpdateDisposition::Known(
             OmicronSledUpdateDisposition::Evacuating,
         ));
-        wait_for_jobs_status(&test_objects.instance_manager, |status| {
+        wait_for_status(&test_objects.instance_manager, |status| {
             status.update_disposition
                 == CurrentUpdateDisposition::Known(
                     OmicronSledUpdateDisposition::Evacuating,
@@ -3749,7 +3828,7 @@ mod tests {
             .await
             .expect("re-registration should succeed while evacuating");
         assert_eq!(
-            test_objects.instance_manager.jobs_status().num_registered_vmms,
+            test_objects.instance_manager.status().num_registered_vmms,
             1
         );
 
@@ -3769,7 +3848,7 @@ mod tests {
             )
         );
         assert_eq!(
-            test_objects.instance_manager.jobs_status().num_registered_vmms,
+            test_objects.instance_manager.status().num_registered_vmms,
             1
         );
 
@@ -3777,7 +3856,7 @@ mod tests {
         disposition_tx.set(CurrentUpdateDisposition::Known(
             OmicronSledUpdateDisposition::Available,
         ));
-        wait_for_jobs_status(&test_objects.instance_manager, |status| {
+        wait_for_status(&test_objects.instance_manager, |status| {
             status.update_disposition
                 == CurrentUpdateDisposition::Known(
                     OmicronSledUpdateDisposition::Available,
@@ -3787,7 +3866,7 @@ mod tests {
         try_ensure_registered(&test_objects, propolis_id_b, instance_id_b)
             .await
             .expect("registration should succeed once available again");
-        wait_for_jobs_status(&test_objects.instance_manager, |status| {
+        wait_for_status(&test_objects.instance_manager, |status| {
             status.num_registered_vmms == 2
         })
         .await;
@@ -3809,7 +3888,7 @@ mod tests {
         try_ensure_registered(&test_objects, propolis_id_a, instance_id_a)
             .await
             .expect("registration A should succeed");
-        wait_for_jobs_status(&test_objects.instance_manager, |status| {
+        wait_for_status(&test_objects.instance_manager, |status| {
             status.num_registered_vmms == 1
         })
         .await;
@@ -3822,7 +3901,7 @@ mod tests {
         )
         .await
         .expect("registration B should succeed");
-        wait_for_jobs_status(&test_objects.instance_manager, |status| {
+        wait_for_status(&test_objects.instance_manager, |status| {
             status.num_registered_vmms == 2
         })
         .await;
@@ -3832,7 +3911,7 @@ mod tests {
             .await
             .expect("re-registration A should succeed");
         assert_eq!(
-            test_objects.instance_manager.jobs_status().num_registered_vmms,
+            test_objects.instance_manager.status().num_registered_vmms,
             2
         );
 
@@ -3841,7 +3920,7 @@ mod tests {
             .ensure_unregistered(propolis_id_a)
             .await
             .expect("unregistration A should succeed");
-        wait_for_jobs_status(&test_objects.instance_manager, |status| {
+        wait_for_status(&test_objects.instance_manager, |status| {
             status.num_registered_vmms == 1
         })
         .await;
@@ -3851,7 +3930,7 @@ mod tests {
             .ensure_unregistered(propolis_id_b)
             .await
             .expect("unregistration B should succeed");
-        wait_for_jobs_status(&test_objects.instance_manager, |status| {
+        wait_for_status(&test_objects.instance_manager, |status| {
             status.num_registered_vmms == 0
         })
         .await;
