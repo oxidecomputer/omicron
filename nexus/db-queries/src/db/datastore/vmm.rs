@@ -489,10 +489,8 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    /// TODO-K: Fix comment, Lists VMMs that have been marked as needing to be
-    /// stopped in order to update their sled, that have not been deleted, and
-    /// that are still in a state from which they need to be stopped. VMMs that
-    /// are already stopping, stopped, or destroyed are excluded.
+    /// Lists VMMs that have been marked as needing to be stopped for a sled
+    /// update.
     pub async fn vmm_list_marked_stop_for_update(
         &self,
         opctx: &OpContext,
@@ -504,8 +502,6 @@ impl DataStore {
             // TODO-K: change to DbVmmState::SHOULD_STOP_FOR_EVACUATION once
             // that branch is merged
             .filter(dsl::state.eq_any(&[
-                // A VMM in one of these states is on its way, or is already running,
-                // and can be stopped.
                 DbVmmState::Creating,
                 DbVmmState::Starting,
                 DbVmmState::Running,

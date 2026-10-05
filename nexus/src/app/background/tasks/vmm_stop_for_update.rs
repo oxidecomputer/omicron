@@ -2,13 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! TODO-K: Fix comment, Background task that stops the VMMs that have been
-//! marked as needing to be stopped in order to update their sled.
-//!
-//! TODO-K: Fix comment, VMMs are marked (via
-//! `stop_for_update_disposition_generation` on the `vmm` table) by the
-//! `vmm_mark_stop_for_update` background task, which activates this task
-//! whenever it marks one or more VMMs. See RFD 739.
+//! Background task that stops VMMs that have been marked as needing to be
+//! stopped for a sled update.
 
 use crate::app::background::BackgroundTask;
 use futures::future::BoxFuture;
@@ -29,8 +24,7 @@ use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-/// The VMMs on a single sled that are marked to be stopped in order to update
-/// that sled.
+/// The VMMs on a single sled that are marked to be stopped for a sled update
 #[derive(Clone, Debug)]
 struct SledVmmsToStop {
     sled_id: SledUuid,

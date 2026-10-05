@@ -903,9 +903,7 @@ impl BackgroundTasksInitializer {
         //
         // TODO-K: This task is meant to be activated by the
         // `vmm_mark_stop_for_update` task whenever that task marks one or more
-        // VMMs. Once that task lands, pass `task_vmm_stop_for_update.clone()`
-        // to `VmmMarkStopForUpdate::new()` and have it call `.activate()` when
-        // it marks at least one VMM.
+        // VMMs.
         driver.register(TaskDefinition {
             name: "vmm_stop_for_update",
             description: "stops VMMs that are marked to be stopped for a sled \
