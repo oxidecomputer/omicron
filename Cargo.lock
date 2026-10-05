@@ -4397,6 +4397,7 @@ dependencies = [
  "gateway-types",
  "omicron-gateway",
  "omicron-test-utils",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "qorb",
  "slog",
