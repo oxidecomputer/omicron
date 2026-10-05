@@ -1746,6 +1746,7 @@ impl From<BlueprintSledUpdateDisposition> for OmicronSledUpdateDisposition {
     JsonSchema,
 )]
 #[serde(tag = "availability", rename_all = "snake_case")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum BlueprintSledUpdateDispositionKind {
     /// The sled is available for use for all provisions.
     Available,
@@ -2614,6 +2615,23 @@ impl Display for MgsUpdateComponent {
             MgsUpdateComponent::Sp => "SP",
         };
         write!(f, "{s}")
+    }
+}
+
+impl MgsUpdateComponent {
+    /// Whether updating this component requires a reboot of the sled.
+    pub fn update_requires_sled_reboot(&self) -> bool {
+        match self {
+            // Updating the SP or host OS always requires a sled reboot.
+            MgsUpdateComponent::Sp | MgsUpdateComponent::HostOs => true,
+
+            // Currently, updating the RoT or RoT bootloader can be done while
+            // the sled is running. This may change in the future with
+            // additional attestation work.
+            MgsUpdateComponent::Rot | MgsUpdateComponent::RotBootloader => {
+                false
+            }
+        }
     }
 }
 

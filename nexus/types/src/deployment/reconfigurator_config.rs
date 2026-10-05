@@ -241,27 +241,25 @@ impl fmt::Display for ReconfiguratorConfigDiffDisplay<'_, '_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let ReconfiguratorConfigDiff {
             planner_enabled,
-            planner_config:
-                PlannerConfigDiff { disruption_policy, sled_update_reboot_policy },
+            planner_config,
             tuf_repo_pruner_enabled,
             blueprint_pruner_enabled,
             blueprint_pruner_nkeep,
         } = self.diff;
 
-        let list = KvList::new(
-            None,
-            vec![
-                diff_row!(tuf_repo_pruner_enabled, "tuf repo pruner enabled"),
-                diff_row!(planner_enabled, "planner enabled"),
-                diff_row!(disruption_policy, "disruption policy"),
-                diff_row!(
-                    sled_update_reboot_policy,
-                    "sled update reboot policy"
-                ),
-                diff_row!(blueprint_pruner_enabled, "blueprint pruner enabled"),
-                diff_row!(blueprint_pruner_nkeep, "blueprint pruner nkeep"),
-            ],
-        );
+        // Add all our (direct) rows...
+        let mut kv_pairs = vec![
+            diff_row!(tuf_repo_pruner_enabled, "tuf repo pruner enabled"),
+            diff_row!(planner_enabled, "planner enabled"),
+            diff_row!(blueprint_pruner_enabled, "blueprint pruner enabled"),
+            diff_row!(blueprint_pruner_nkeep, "blueprint pruner nkeep"),
+        ];
+
+        // ... then append all the rows under `planner_config`.
+        kv_pairs.append(&mut planner_config.kv_pairs());
+
+        let list = KvList::new(None, kv_pairs);
+
         // No need for writeln! here because KvList adds its own newlines.
         write!(f, "{list}")?;
 
@@ -382,6 +380,35 @@ impl<'a> fmt::Display for PlannerConfigDisplay<'a> {
             "    sled update reboot policy: {}",
             sled_update_reboot_policy
         )?;
+        Ok(())
+    }
+}
+
+impl<'a> PlannerConfigDiff<'a> {
+    pub fn display(&self) -> PlannerConfigDiffDisplay<'a, '_> {
+        PlannerConfigDiffDisplay { diff: self }
+    }
+
+    fn kv_pairs(&self) -> Vec<KvPair> {
+        let Self { disruption_policy, sled_update_reboot_policy } = self;
+        vec![
+            diff_row!(disruption_policy, "disruption policy"),
+            diff_row!(sled_update_reboot_policy, "sled update reboot policy"),
+        ]
+    }
+}
+
+pub struct PlannerConfigDiffDisplay<'a, 'b> {
+    diff: &'b PlannerConfigDiff<'a>,
+}
+
+impl fmt::Display for PlannerConfigDiffDisplay<'_, '_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let list = KvList::new(None, self.diff.kv_pairs());
+
+        // No need for writeln! here because KvList adds its own newlines.
+        write!(f, "{list}")?;
+
         Ok(())
     }
 }

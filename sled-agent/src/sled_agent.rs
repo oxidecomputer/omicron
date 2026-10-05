@@ -47,7 +47,6 @@ use omicron_common::address::{
     Ipv6Subnet, SLED_PREFIX_LENGTH, get_sled_address,
 };
 use omicron_common::api::external::{ByteCount, ByteCountRangeError, Vni};
-use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::shared::DelegatedZvol;
 use omicron_common::api::internal::shared::{
     ExternalIpGatewayMap, ResolvedVpcRouteSet, ResolvedVpcRouteState,
@@ -78,7 +77,6 @@ use sled_agent_types::attached_subnet::AttachedSubnets;
 use sled_agent_types::dataset::LocalStorageDatasetDeleteRequest;
 use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
 use sled_agent_types::disk::CompressionAlgorithm;
-use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::instance::ResolvedVpcFirewallRule;
 use sled_agent_types::instance::{
@@ -714,8 +712,10 @@ impl SledAgent {
             config_reconciler_spawn_token.subscribe_update_disposition(),
         )?;
 
-        let svc_config =
-            services::Config::new(identifiers, config.sidecar_revision.clone());
+        let svc_config = services::Config::new(
+            identifiers,
+            config.deployment.sidecar_revision(),
+        );
 
         // Get our system network config from the bootstore; we cannot proceed
         // until we have this, as we need to set up uplinks inside the switch
@@ -1049,15 +1049,6 @@ impl SledAgent {
         self.inner.config_reconciler.set_sled_config(config).await
     }
 
-    /// Returns whether or not the sled believes itself to be a scrimlet
-    pub fn get_role(&self) -> SledRole {
-        if self.inner.hardware.is_scrimlet() {
-            SledRole::Scrimlet
-        } else {
-            SledRole::Gimlet
-        }
-    }
-
     /// Idempotently ensures that a given instance is registered with this sled,
     /// i.e., that it can be addressed by future calls to
     /// [`Self::instance_ensure_state`].
@@ -1168,19 +1159,6 @@ impl SledAgent {
             .get_instance_state(propolis_id)
             .await
             .map_err(|e| Error::Instance(e))
-    }
-
-    /// Idempotently ensures that the given virtual disk is attached (or not) as
-    /// specified.
-    ///
-    /// NOTE: Not yet implemented.
-    pub async fn disk_ensure(
-        &self,
-        _disk_id: Uuid,
-        _initial_state: DiskRuntimeState,
-        _target: DiskStateRequested,
-    ) -> Result<DiskRuntimeState, Error> {
-        todo!("Disk attachment not yet implemented");
     }
 
     pub fn artifact_store(&self) -> &ArtifactStore<InternalDisksReceiver> {

@@ -37,6 +37,18 @@ mfr_location = "CB6"
 mfr_date = "2023-02-25"
 mfr_serial = "FP1C481050"
 
+# Let's pretend this IBC has no faults...
+[simulated_sps.sidecar.components.pmbus_rails.V12_SYS_A2]
+status_word = 0x0000
+status_vout = 0x00
+status_iout = 0x00
+status_temperature = 0x00
+status_cml = 0x00
+status_input = 0x00
+status_other = 0x00
+# BMR491 does not implement STATUS_MFR_SPECIFIC, STATUS_FAN_1_2, or
+# STATUS_FANS_3_4
+
 [[simulated_sps.gimlet]]
 serial_number = "SimGimlet0"
 manufacturing_root_cert_seed = "01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de"
@@ -104,6 +116,18 @@ mfr_revision = "R1C A"
 mfr_location = "CB6"
 mfr_date = "2023-02-27"
 mfr_serial = "FP1C481052"
+
+# Let's pretend this IBC has no faults...`s
+[simulated_sps.gimlet.components.pmbus_rails.V12_SYS_A2]
+status_word = 0x0000
+status_vout = 0x00
+status_iout = 0x00
+status_temperature = 0x00
+status_cml = 0x00
+status_input = 0x00
+status_other = 0x00
+# BMR491 does not implement STATUS_MFR_SPECIFIC, STATUS_FAN_1_2, or
+# STATUS_FANS_3_4
 
 [[simulated_sps.gimlet.components]]
 id = "fan-tray-vpd"
@@ -222,6 +246,18 @@ mfr_location = "CB6"
 mfr_date = "2023-02-28"
 mfr_serial = "FP1C481053"
 
+# Let's pretend this IBC has no faults...
+[simulated_sps.gimlet.components.pmbus_rails.V12_SYS_A2]
+status_word = 0x0000
+status_vout = 0x00
+status_iout = 0x00
+status_temperature = 0x00
+status_cml = 0x00
+status_input = 0x00
+status_other = 0x00
+# BMR491 does not implement STATUS_MFR_SPECIFIC, STATUS_FAN_1_2, or
+# STATUS_FANS_3_4
+
 [simulated_sps.gimlet.ereport_config]
 restart_id = "55e30cc7-a109-492f-aca9-735ed725df3c"
 
@@ -235,6 +271,334 @@ message = "cat hair detected inside gimlet"
 de = { scheme = "fmd", mod-name = "hubris-thermal-diagnosis", mod-version = "1.0", authority = { "product-id" = "oxide", server-id = "SimGimlet1" }}
 certainty = 0x64
 cat_hair_amount = 10000
+
+[[simulated_sps.psc]]
+serial_number = "SimPsc0"
+manufacturing_root_cert_seed = "01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de"
+device_id_cert_seed = "01de000000000000000000000000000000000000000000000000000000000003"
+
+[[simulated_sps.psc.network_config]]
+[simulated_sps.psc.network_config.simulated]
+bind_addr = "[::1]:33330"
+
+[[simulated_sps.psc.network_config]]
+[simulated_sps.psc.network_config.simulated]
+bind_addr = "[::1]:33331"
+
+[[simulated_sps.psc.ereport_network_config]]
+[simulated_sps.psc.ereport_network_config.simulated]
+bind_addr = "[::1]:44430"
+
+[[simulated_sps.psc.ereport_network_config]]
+[simulated_sps.psc.ereport_network_config.simulated]
+bind_addr = "[::1]:44431"
+
+[[simulated_sps.psc.components]]
+id = "PSU0"
+device = "mwocp68"
+description = "PSU 0 MCU"
+presence = "Present"
+sensors = [
+    { name = "psu0mcu", kind = "Temperature", last_data.value = 23.125, last_data.timestamp = 1234 },
+    { name = "psu0mcu", kind = "Temperature", last_data.value = 54.625, last_data.timestamp = 1234 },
+    { name = "psu0mcu", kind = "Temperature", last_data.value = 44.25, last_data.timestamp = 1234 },
+    { name = "V54_PSU0", kind = "Current", last_data.value = 35.1875, last_data.timestamp = 1234 },
+    { name = "V12_PSU0", kind = "Current", last_data.value = 0.0859375, last_data.timestamp = 1234 },
+    { name = "V54_PSU0", kind = "Voltage", last_data.value = 54.490234, last_data.timestamp = 1234 },
+    { name = "V12_PSU0", kind = "Voltage", last_data.value = 12.0703125, last_data.timestamp = 1234 },
+    { name = "V54_PSU0", kind = "InputCurrent", last_data.value = 8.15625, last_data.timestamp = 1234 },
+    { name = "V12_PSU0", kind = "InputCurrent", last_data.value = 8.15625, last_data.timestamp = 1234 },
+    { name = "V54_PSU0", kind = "InputVoltage", last_data.value = 242.25, last_data.timestamp = 1234 },
+    { name = "V12_PSU0", kind = "InputVoltage", last_data.value = 242.25, last_data.timestamp = 1234 },
+    { name = "psu0mcu", kind = "Speed", last_data.value = 12096.0, last_data.timestamp = 1234 },
+    { name = "psu0mcu", kind = "Speed", last_data.value = 9376.0, last_data.timestamp = 1234 },
+]
+
+[simulated_sps.psc.components.vpd.pmbus]
+mfr_id = "Murata-PS"
+mfr_model = "MWOCP68-3600-D-RM"
+mfr_revision = "0762-0701-0000"
+mfr_location = "China"
+mfr_date = "2216"
+mfr_serial = "LL2216RB000H"
+
+# A MWOCP68 has two PMBus rails, V54_PSU{n} and V12_PSU{n}
+[simulated_sps.psc.components.pmbus_rails.V54_PSU0]
+status_word = 0x0000
+status_vout = 0x00
+status_iout = 0x00
+status_temperature = 0x00
+status_cml = 0x00
+status_input = 0x00
+status_mfr_specific = 0x00
+status_fans_1_2 = 0x00
+# MWOCP68 does not implement STATUS_OTHER or STATUS_FANS_3_4
+
+[simulated_sps.psc.components.pmbus_rails.V12_PSU0]
+status_word = 0x0000
+status_vout = 0x00
+status_iout = 0x00
+status_temperature = 0x00
+status_cml = 0x00
+status_input = 0x00
+status_mfr_specific = 0x00
+status_fans_1_2 = 0x00
+
+
+[[simulated_sps.psc.components]]
+id = "PSU1"
+device = "mwocp68"
+description = "PSU 1 MCU"
+presence = "Present"
+sensors = [
+    { name = "psu1mcu", kind = "Temperature", last_data.value = 23.125, last_data.timestamp = 1234 },
+    { name = "psu1mcu", kind = "Temperature", last_data.value = 54.625, last_data.timestamp = 1234 },
+    { name = "psu1mcu", kind = "Temperature", last_data.value = 44.25, last_data.timestamp = 1234 },
+    { name = "V54_PSU1", kind = "Current", last_data.value = 35.1875, last_data.timestamp = 1234 },
+    { name = "V12_PSU1", kind = "Current", last_data.value = 0.0859375, last_data.timestamp = 1234 },
+    { name = "V54_PSU1", kind = "Voltage", last_data.value = 54.490234, last_data.timestamp = 1234 },
+    { name = "V12_PSU1", kind = "Voltage", last_data.value = 12.0703125, last_data.timestamp = 1234 },
+    { name = "V54_PSU1", kind = "InputCurrent", last_data.value = 8.15625, last_data.timestamp = 1234 },
+    { name = "V12_PSU1", kind = "InputCurrent", last_data.value = 8.15625, last_data.timestamp = 1234 },
+    { name = "V54_PSU1", kind = "InputVoltage", last_data.value = 242.25, last_data.timestamp = 1234 },
+    { name = "V12_PSU1", kind = "InputVoltage", last_data.value = 242.25, last_data.timestamp = 1234 },
+    { name = "psu1mcu", kind = "Speed", last_data.value = 12096.0, last_data.timestamp = 1234 },
+    { name = "psu1mcu", kind = "Speed", last_data.value = 9376.0, last_data.timestamp = 1234 },
+]
+
+[simulated_sps.psc.components.vpd.pmbus]
+mfr_id = "Murata-PS"
+mfr_model = "MWOCP68-3600-D-RM"
+mfr_revision = "0762-0701-0000"
+mfr_location = "China"
+mfr_date = "2216"
+mfr_serial = "LL2216RB003E"
+
+# A MWOCP68 has two PMBus rails, V54_PSU{n} and V12_PSU{n}
+[simulated_sps.psc.components.pmbus_rails.V54_PSU1]
+status_word = 0x0000
+status_vout = 0x00
+status_iout = 0x00
+status_temperature = 0x00
+status_cml = 0x00
+status_input = 0x00
+status_mfr_specific = 0x00
+status_fans_1_2 = 0x00
+# MWOCP68 does not implement STATUS_OTHER or STATUS_FANS_3_4
+
+[simulated_sps.psc.components.pmbus_rails.V12_PSU1]
+status_word = 0x0000
+status_vout = 0x00
+status_iout = 0x00
+status_temperature = 0x00
+status_cml = 0x00
+status_input = 0x00
+status_mfr_specific = 0x00
+status_fans_1_2 = 0x00
+
+[[simulated_sps.psc.components]]
+id = "PSU2"
+device = "mwocp68"
+description = "PSU 2 MCU"
+presence = "Present"
+sensors = [
+    { name = "psu2mcu", kind = "Temperature", last_data.value = 23.125, last_data.timestamp = 1234 },
+    { name = "psu2mcu", kind = "Temperature", last_data.value = 54.625, last_data.timestamp = 1234 },
+    { name = "psu2mcu", kind = "Temperature", last_data.value = 44.25, last_data.timestamp = 1234 },
+    { name = "V54_PSU2", kind = "Current", last_data.value = 35.1875, last_data.timestamp = 1234 },
+    { name = "V12_PSU2", kind = "Current", last_data.value = 0.0859375, last_data.timestamp = 1234 },
+    { name = "V54_PSU2", kind = "Voltage", last_data.value = 54.490234, last_data.timestamp = 1234 },
+    { name = "V12_PSU2", kind = "Voltage", last_data.value = 12.0703125, last_data.timestamp = 1234 },
+    { name = "V54_PSU2", kind = "InputCurrent", last_data.value = 8.15625, last_data.timestamp = 1234 },
+    { name = "V12_PSU2", kind = "InputCurrent", last_data.value = 8.15625, last_data.timestamp = 1234 },
+    { name = "V54_PSU2", kind = "InputVoltage", last_data.value = 242.25, last_data.timestamp = 1234 },
+    { name = "V12_PSU2", kind = "InputVoltage", last_data.value = 242.25, last_data.timestamp = 1234 },
+    { name = "psu2mcu", kind = "Speed", last_data.value = 12096.0, last_data.timestamp = 1234 },
+    { name = "psu2mcu", kind = "Speed", last_data.value = 9376.0, last_data.timestamp = 1234 },
+]
+
+[simulated_sps.psc.components.vpd.pmbus]
+mfr_id = "Murata-PS"
+mfr_model = "MWOCP68-3600-D-RM"
+mfr_revision = "0762-0701-0000"
+mfr_location = "China"
+mfr_date = "2216"
+mfr_serial = "LL2216RB000C"
+
+# A MWOCP68 has two PMBus rails, V54_PSU{n} and V12_PSU{n}
+[simulated_sps.psc.components.pmbus_rails.V54_PSU2]
+status_word = 0x0000
+status_vout = 0x00
+status_iout = 0x00
+status_temperature = 0x00
+status_cml = 0x00
+status_input = 0x00
+status_mfr_specific = 0x00
+status_fans_1_2 = 0x00
+# MWOCP68 does not implement STATUS_OTHER or STATUS_FANS_3_4
+
+[simulated_sps.psc.components.pmbus_rails.V12_PSU2]
+status_word = 0x0000
+status_vout = 0x00
+status_iout = 0x00
+status_temperature = 0x00
+status_cml = 0x00
+status_input = 0x00
+status_mfr_specific = 0x00
+status_fans_1_2 = 0x00
+
+[[simulated_sps.psc.components]]
+id = "PSU3"
+device = "mwocp68"
+description = "PSU 3 MCU"
+presence = "Present"
+sensors = [
+    { name = "psu3mcu", kind = "Temperature", last_data.value = 23.125, last_data.timestamp = 1234 },
+    { name = "psu3mcu", kind = "Temperature", last_data.value = 54.625, last_data.timestamp = 1234 },
+    { name = "psu3mcu", kind = "Temperature", last_data.value = 44.25, last_data.timestamp = 1234 },
+    { name = "V54_PSU3", kind = "Current", last_data.value = 35.1875, last_data.timestamp = 1234 },
+    { name = "V12_PSU3", kind = "Current", last_data.value = 0.0859375, last_data.timestamp = 1234 },
+    { name = "V54_PSU3", kind = "Voltage", last_data.value = 54.490234, last_data.timestamp = 1234 },
+    { name = "V12_PSU3", kind = "Voltage", last_data.value = 12.0703125, last_data.timestamp = 1234 },
+    { name = "V54_PSU3", kind = "InputCurrent", last_data.value = 8.15625, last_data.timestamp = 1234 },
+    { name = "V12_PSU3", kind = "InputCurrent", last_data.value = 8.15625, last_data.timestamp = 1234 },
+    { name = "V54_PSU3", kind = "InputVoltage", last_data.value = 242.25, last_data.timestamp = 1234 },
+    { name = "V12_PSU3", kind = "InputVoltage", last_data.value = 242.25, last_data.timestamp = 1234 },
+    { name = "psu3mcu", kind = "Speed", last_data.value = 12096.0, last_data.timestamp = 1234 },
+    { name = "psu3mcu", kind = "Speed", last_data.value = 9376.0, last_data.timestamp = 1234 },
+]
+
+[simulated_sps.psc.components.vpd.pmbus]
+mfr_id = "Murata-PS"
+mfr_model = "MWOCP68-3600-D-RM"
+mfr_revision = "0762-0701-0000"
+mfr_location = "China"
+mfr_date = "2216"
+mfr_serial = "LL2216RB000D"
+
+# A MWOCP68 has two PMBus rails, V54_PSU{n} and V12_PSU{n}
+[simulated_sps.psc.components.pmbus_rails.V54_PSU3]
+status_word = 0x0000
+status_vout = 0x00
+status_iout = 0x00
+status_temperature = 0x00
+status_cml = 0x00
+status_input = 0x00
+status_mfr_specific = 0x00
+status_fans_1_2 = 0x00
+# MWOCP68 does not implement STATUS_OTHER or STATUS_FANS_3_4
+
+[simulated_sps.psc.components.pmbus_rails.V12_PSU3]
+status_word = 0x0000
+status_vout = 0x00
+status_iout = 0x00
+status_temperature = 0x00
+status_cml = 0x00
+status_input = 0x00
+status_mfr_specific = 0x00
+status_fans_1_2 = 0x00
+
+[[simulated_sps.psc.components]]
+id = "PSU4"
+device = "mwocp68"
+description = "PSU 4 MCU"
+presence = "Present"
+sensors = [
+    { name = "psu4mcu", kind = "Temperature", last_data.value = 23.125, last_data.timestamp = 1234 },
+    { name = "psu4mcu", kind = "Temperature", last_data.value = 54.625, last_data.timestamp = 1234 },
+    { name = "psu4mcu", kind = "Temperature", last_data.value = 44.25, last_data.timestamp = 1234 },
+    { name = "V54_PSU4", kind = "Current", last_data.value = 35.1875, last_data.timestamp = 1234 },
+    { name = "V12_PSU4", kind = "Current", last_data.value = 0.0859375, last_data.timestamp = 1234 },
+    { name = "V54_PSU4", kind = "Voltage", last_data.value = 54.490234, last_data.timestamp = 1234 },
+    { name = "V12_PSU4", kind = "Voltage", last_data.value = 12.0703125, last_data.timestamp = 1234 },
+    { name = "V54_PSU4", kind = "InputCurrent", last_data.value = 8.15625, last_data.timestamp = 1234 },
+    { name = "V12_PSU4", kind = "InputCurrent", last_data.value = 8.15625, last_data.timestamp = 1234 },
+    { name = "V54_PSU4", kind = "InputVoltage", last_data.value = 242.25, last_data.timestamp = 1234 },
+    { name = "V12_PSU4", kind = "InputVoltage", last_data.value = 242.25, last_data.timestamp = 1234 },
+    { name = "psu4mcu", kind = "Speed", last_data.value = 12096.0, last_data.timestamp = 1234 },
+    { name = "psu4mcu", kind = "Speed", last_data.value = 9376.0, last_data.timestamp = 1234 },
+]
+
+[simulated_sps.psc.components.vpd.pmbus]
+mfr_id = "Murata-PS"
+mfr_model = "MWOCP68-3600-D-RM"
+mfr_revision = "0762-0701-0000"
+mfr_location = "China"
+mfr_date = "2216"
+mfr_serial = "LL2216RB000E"
+
+# A MWOCP68 has two PMBus rails, V54_PSU{n} and V12_PSU{n}
+[simulated_sps.psc.components.pmbus_rails.V54_PSU4]
+status_word = 0x0000
+status_vout = 0x00
+status_iout = 0x00
+status_temperature = 0x00
+status_cml = 0x00
+status_input = 0x00
+status_mfr_specific = 0x00
+status_fans_1_2 = 0x00
+# MWOCP68 does not implement STATUS_OTHER or STATUS_FANS_3_4
+
+[simulated_sps.psc.components.pmbus_rails.V12_PSU4]
+status_word = 0x0000
+status_vout = 0x00
+status_iout = 0x00
+status_temperature = 0x00
+status_cml = 0x00
+status_input = 0x00
+status_mfr_specific = 0x00
+status_fans_1_2 = 0x00
+
+[[simulated_sps.psc.components]]
+id = "PSU5"
+device = "mwocp68"
+description = "PSU 5 MCU"
+presence = "Present"
+sensors = [
+    { name = "psu5mcu", kind = "Temperature", last_data.value = 23.125, last_data.timestamp = 1234 },
+    { name = "psu5mcu", kind = "Temperature", last_data.value = 54.625, last_data.timestamp = 1234 },
+    { name = "psu5mcu", kind = "Temperature", last_data.value = 44.25, last_data.timestamp = 1234 },
+    { name = "V54_PSU5", kind = "Current", last_data.value = 35.1875, last_data.timestamp = 1234 },
+    { name = "V12_PSU5", kind = "Current", last_data.value = 0.0859375, last_data.timestamp = 1234 },
+    { name = "V54_PSU5", kind = "Voltage", last_data.value = 54.490234, last_data.timestamp = 1234 },
+    { name = "V12_PSU5", kind = "Voltage", last_data.value = 12.0703125, last_data.timestamp = 1234 },
+    { name = "V54_PSU5", kind = "InputCurrent", last_data.value = 8.15625, last_data.timestamp = 1234 },
+    { name = "V12_PSU5", kind = "InputCurrent", last_data.value = 8.15625, last_data.timestamp = 1234 },
+    { name = "V54_PSU5", kind = "InputVoltage", last_data.value = 242.25, last_data.timestamp = 1234 },
+    { name = "V12_PSU5", kind = "InputVoltage", last_data.value = 242.25, last_data.timestamp = 1234 },
+    { name = "psu5mcu", kind = "Speed", last_data.value = 12096.0, last_data.timestamp = 1234 },
+    { name = "psu5mcu", kind = "Speed", last_data.value = 9376.0, last_data.timestamp = 1234 },
+]
+
+[simulated_sps.psc.components.vpd.pmbus]
+mfr_id = "Murata-PS"
+mfr_model = "MWOCP68-3600-D-RM"
+mfr_revision = "0762-0701-0000"
+mfr_location = "China"
+mfr_date = "2216"
+mfr_serial = "LL2216RB000F"
+
+# A MWOCP68 has two PMBus rails, V54_PSU{n} and V12_PSU{n}
+[simulated_sps.psc.components.pmbus_rails.V54_PSU5]
+status_word = 0x0000
+status_vout = 0x00
+status_iout = 0x00
+status_temperature = 0x00
+status_cml = 0x00
+status_input = 0x00
+status_mfr_specific = 0x00
+status_fans_1_2 = 0x00
+# MWOCP68 does not implement STATUS_OTHER or STATUS_FANS_3_4
+
+[simulated_sps.psc.components.pmbus_rails.V12_PSU5]
+status_word = 0x0000
+status_vout = 0x00
+status_iout = 0x00
+status_temperature = 0x00
+status_cml = 0x00
+status_input = 0x00
+status_mfr_specific = 0x00
+status_fans_1_2 = 0x00
 
 [log]
 # Show log messages of this level and more severe
