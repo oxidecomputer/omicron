@@ -172,6 +172,7 @@ members = [
     "sled-storage/zfs-test-harness",
     "sp-sim",
     "support-bundle-collection",
+    "sush-proxy",
     "test-utils",
     "trust-quorum",
     "trust-quorum/gfss",
@@ -370,6 +371,7 @@ default-members = [
     "sled-storage/zfs-test-harness",
     "sp-sim",
     "support-bundle-collection",
+    "sush-proxy",
     "trust-quorum",
     "trust-quorum/gfss",
     "trust-quorum/protocol",
@@ -863,9 +865,9 @@ subtle = "2.6.1"
 supports-color = "3.0.2"
 support-bundle-collection = { path = "support-bundle-collection" }
 support-bundle-viewer = "0.1.2"
-sush-api = { git = "https://github.com/oxidecomputer/sush", rev = "4254c920049959270864c5c97ef4b23d79ea46e1" }
-sush-common = { git = "https://github.com/oxidecomputer/sush", rev = "4254c920049959270864c5c97ef4b23d79ea46e1" }
-sush-server = { git = "https://github.com/oxidecomputer/sush", rev = "4254c920049959270864c5c97ef4b23d79ea46e1", features = ["embedded"] }
+sush-api = { git = "https://github.com/oxidecomputer/sush", rev = "e96e7190f8bc5a1b54e89153769d4112e64d4280" }
+sush-common = { git = "https://github.com/oxidecomputer/sush", rev = "e96e7190f8bc5a1b54e89153769d4112e64d4280" }
+sush-server = { git = "https://github.com/oxidecomputer/sush", rev = "e96e7190f8bc5a1b54e89153769d4112e64d4280", features = ["embedded"] }
 swrite = "0.1.0"
 sync-ptr = "0.1.4"
 libsw = { version = "3.5.0", features = ["tokio"] }

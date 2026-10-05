@@ -10062,6 +10062,7 @@ dependencies = [
  "cc",
  "chacha20 0.10.0",
  "chrono",
+ "cipher 0.4.4",
  "cipher 0.5.2",
  "clap",
  "clap_builder",
@@ -10155,10 +10156,9 @@ dependencies = [
  "ppv-lite86",
  "predicates",
  "proc-macro2",
+ "qorb",
  "quote",
- "rand 0.8.6",
  "rand 0.9.2",
- "rand_chacha 0.3.1",
  "rand_chacha 0.9.0",
  "regex",
  "regex-automata",
@@ -15757,7 +15757,7 @@ checksum = "b7401a30af6cb5818bb64852270bb722533397edcfc7344954a38f420819ece2"
 [[package]]
 name = "sush-api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sush?rev=4254c920049959270864c5c97ef4b23d79ea46e1#4254c920049959270864c5c97ef4b23d79ea46e1"
+source = "git+https://github.com/oxidecomputer/sush?rev=e96e7190f8bc5a1b54e89153769d4112e64d4280#e96e7190f8bc5a1b54e89153769d4112e64d4280"
 dependencies = [
  "chrono",
  "dropshot",
@@ -15773,7 +15773,7 @@ dependencies = [
 [[package]]
 name = "sush-common"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sush?rev=4254c920049959270864c5c97ef4b23d79ea46e1#4254c920049959270864c5c97ef4b23d79ea46e1"
+source = "git+https://github.com/oxidecomputer/sush?rev=e96e7190f8bc5a1b54e89153769d4112e64d4280#e96e7190f8bc5a1b54e89153769d4112e64d4280"
 dependencies = [
  "bytes",
  "bytesize",
@@ -15806,9 +15806,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "sush-proxy"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "camino",
+ "clap",
+ "futures",
+ "gateway-client",
+ "gateway-types",
+ "omicron-common",
+ "omicron-ddm-admin-client",
+ "omicron-workspace-hack",
+ "oxide-tokio-rt",
+ "reqwest 0.13.2",
+ "sled-hardware-types",
+ "slog",
+ "slog-async",
+ "slog-dtrace",
+ "slog-term",
+ "sush-common",
+ "sush-server",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "sush-server"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sush?rev=4254c920049959270864c5c97ef4b23d79ea46e1#4254c920049959270864c5c97ef4b23d79ea46e1"
+source = "git+https://github.com/oxidecomputer/sush?rev=e96e7190f8bc5a1b54e89153769d4112e64d4280#e96e7190f8bc5a1b54e89153769d4112e64d4280"
 dependencies = [
  "async-trait",
  "atomicwrites",

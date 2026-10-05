@@ -16,6 +16,7 @@ use omicron_common::address::BOOTSTRAP_SLED_SUBNET_PREFIX_LENGTH;
 use omicron_common::address::DDMD_PORT;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX_LENGTH;
+use omicron_common::address::get_sled_address;
 use oxnet::Ipv6Net;
 use sled_hardware_types::underlay::BootstrapInterface;
 use slog::Logger;
@@ -103,6 +104,17 @@ impl Client {
         request: &EnableStatsRequest,
     ) -> Result<(), Error<types::Error>> {
         self.inner.enable_stats(request).await.map(|resp| resp.into_inner())
+    }
+
+    /// Returns the sled address within each subnet
+    /// [`Self::derive_underlay_subnets_from_prefixes`] returns. Since
+    /// those are not all sled subnets, not every address answers as a
+    /// sled.
+    pub async fn derive_sled_addrs_from_prefixes(
+        &self,
+    ) -> Result<impl Iterator<Item = SocketAddrV6> + use<>, DdmError> {
+        let subnets = self.derive_underlay_subnets_from_prefixes().await?;
+        Ok(subnets.map(get_sled_address))
     }
 
     /// Returns every non-bootstrap /64 prefix ddmd has learned. These
