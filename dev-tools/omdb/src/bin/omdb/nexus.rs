@@ -3224,7 +3224,7 @@ fn print_task_alert_dispatcher(details: &serde_json::Value) {
     const GLOBS_REPROCESSED: &str = "glob subscriptions reprocessed:";
     const ALREADY_REPROCESSED: &str =
         "globs already reprocessed by another Nexus:";
-    const GLOB_ERRORS: &str = "globs that failed to be reprocessed";
+    const GLOB_ERRORS: &str = "globs that failed to be reprocessed:";
     const WIDTH: usize = const_max_len(&[
         DISPATCHED,
         NO_RECEIVERS,
@@ -4959,7 +4959,7 @@ async fn cmd_nexus_clickhouse_policy_get(
             }
         }
         Ok(policy) => {
-            println!("Clickhouse Policy: ");
+            println!("Clickhouse Policy:");
             println!("    version: {}", policy.version);
             println!("    creation time: {}", policy.time_created);
             match policy.mode {
@@ -5104,7 +5104,7 @@ async fn cmd_nexus_oximeter_read_policy_get(
             }
         }
         Ok(policy) => {
-            println!("Oximeter Read Policy: ");
+            println!("Oximeter Read Policy:");
             println!("    version: {}", policy.version);
             println!("    creation time: {}", policy.time_created);
             match policy.mode {

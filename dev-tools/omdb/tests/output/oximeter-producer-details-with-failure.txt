@@ -7,13 +7,13 @@
    Successes: 1
     Failures: 1
 
-Last success: 
+Last success:
   Started at: 1970-01-01T00:00:00.000Z
   Queued for: 10ms
     Duration: 100ms
      Samples: 100
 
-Last failure: 
+Last failure:
   Started at: 1970-01-01T00:00:00.000Z
   Queued for: 10ms
     Duration: 100ms

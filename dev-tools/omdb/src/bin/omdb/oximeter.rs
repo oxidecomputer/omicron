@@ -204,7 +204,7 @@ impl fmt::Display for LastSuccessDisplay<'_> {
         let Some(success) = self.0 else {
             return writeln!(f, "{:>WIDTH$}: None", "Last success");
         };
-        writeln!(f, "{:>WIDTH$}: ", "Last success")?;
+        writeln!(f, "{:>WIDTH$}:", "Last success")?;
         writeln!(
             f,
             "{:>WIDTH$}: {}",
@@ -237,7 +237,7 @@ impl fmt::Display for LastFailureDisplay<'_> {
         let Some(failure) = self.0 else {
             return writeln!(f, "{:>WIDTH$}: None", "Last failure");
         };
-        writeln!(f, "{:>WIDTH$}: ", "Last failure")?;
+        writeln!(f, "{:>WIDTH$}:", "Last failure")?;
         writeln!(
             f,
             "{:>WIDTH$}: {}",
