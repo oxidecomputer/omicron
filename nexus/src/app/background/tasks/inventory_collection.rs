@@ -15,9 +15,11 @@ use nexus_db_queries::db::DataStore;
 use nexus_inventory::InventoryError;
 use nexus_networking::GatewayClient;
 use nexus_types::deployment::SledFilter;
+use nexus_types::identity::Asset;
 use nexus_types::inventory::Collection;
 use omicron_cockroach_metrics::CockroachClusterAdminClient;
 use omicron_uuid_kinds::CollectionUuid;
+use omicron_uuid_kinds::RackUuid;
 use serde_json::json;
 use slog::{debug, o, warn};
 use std::net::SocketAddr;
@@ -137,10 +139,33 @@ async fn inventory_activate(
         .context("pruning old collections")?;
 
     // Find MGS clients.
-    let mgs_clients = GatewayClient::resolve_all_gateways(&opctx.log, resolver)
-        .await?
-        .map(|GatewayClient { client, .. }| client)
-        .collect::<Vec<_>>();
+    let mgs_clients = {
+        let clients =
+            GatewayClient::resolve_all_gateways(&opctx.log, resolver).await?;
+        let mut out = Vec::new();
+        for GatewayClient { addr, client } in clients {
+            let Some(rack) = datastore
+                .rack_lookup_by_ip(opctx, *addr.ip())
+                .await
+                .with_context(|| {
+                    format!("failed to query rack ID for MGS address {addr}")
+                })?
+            else {
+                slog::error!(
+                    opctx.log,
+                    "resolved a MGS address that does not correspond to a \
+                     known rack subnet; ignoring it";
+                    "mgs_addr" => %addr,
+                );
+                continue;
+            };
+            out.push(nexus_inventory::GatewayClient {
+                client,
+                rack_id: RackUuid::from_untyped_uuid(rack.identity().id),
+            });
+        }
+        out
+    };
 
     // Find clickhouse-admin-keeper servers if there are any.
     let keeper_admin_clients = match resolver

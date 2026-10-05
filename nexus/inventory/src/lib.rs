@@ -31,6 +31,7 @@ pub use builder::InventoryError;
 pub use builder::now_db_precision;
 
 pub use collector::Collector;
+pub use collector::GatewayClient;
 
 pub use sled_agent_enumerator::SledAgentEnumerator;
 pub use sled_agent_enumerator::StaticSledAgentEnumerator;

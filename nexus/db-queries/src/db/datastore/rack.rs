@@ -28,6 +28,7 @@ use diesel::result::Error as DieselError;
 use diesel::upsert::excluded;
 use iddqd::IdOrdMap;
 use ipnetwork::IpNetwork;
+use ipnetwork::Ipv6Network;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::TransactionError;
 use nexus_db_errors::public_error_from_diesel;
@@ -57,6 +58,7 @@ use nexus_types::identity::Resource;
 use nexus_types::internal_api::background::SledBlueprintAvailabilityRendezvousStats;
 use nexus_types::internal_api::params::InitialTrustQuorumConfig;
 use nexus_types::internal_api::params::ServiceIpPoolConfig;
+use omicron_common::address::{Ipv6Subnet, RACK_PREFIX_LENGTH};
 use omicron_common::api::external::AllowedSourceIps;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -1113,6 +1115,50 @@ impl DataStore {
     ) -> Result<(), Error> {
         self.rack_insert(opctx, &db::model::Rack::new(rack_id)).await?;
         Ok(())
+    }
+
+    pub async fn rack_lookup_by_subnet(
+        &self,
+        opctx: &OpContext,
+        rack_subnet: Ipv6Subnet<RACK_PREFIX_LENGTH>,
+    ) -> Result<Option<Rack>, Error> {
+        use nexus_db_schema::schema::rack::dsl;
+
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
+        let subnet = IpNetwork::from(Ipv6Network::from(rack_subnet));
+
+        dsl::rack
+            .filter(dsl::rack_subnet.eq(subnet))
+            .select(db::model::Rack::as_select())
+            .first_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    pub async fn rack_lookup_by_ip(
+        &self,
+        opctx: &OpContext,
+        addr: impl Into<std::net::Ipv6Addr>,
+    ) -> Result<Option<Rack>, Error> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
+        let addr = addr.into();
+
+        #[cfg(any(test, feature = "testing"))]
+        if addr.is_loopback() {
+            use nexus_db_schema::schema::rack::dsl;
+
+            let rack = dsl::rack.filter(dsl::id.eq(crate::db::pub_test_utils::RACK_UUID.into_untyped_uuid()))
+                .select(db::model::Rack::as_select())
+                .first_async(&*self.pool_connection_authorized(opctx).await?)
+                .await.expect("this is a test, so the test rack should be in the database");
+            return Ok(Some(rack));
+        }
+
+        let subnet = Ipv6Subnet::new(addr);
+        self.rack_lookup_by_subnet(opctx, subnet).await
     }
 }
 

@@ -25,6 +25,7 @@ use nexus_types::inventory::TimeSync;
 use omicron_cockroach_metrics::CockroachClusterAdminClient;
 use omicron_common::address::NTP_ADMIN_PORT;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::RackUuid;
 use parallel_task_set::ParallelTaskSet;
 use sled_agent_types::disk::M2Slot;
 use sled_agent_types::inventory::Inventory;
@@ -47,17 +48,22 @@ const MAX_CONCURRENT_INVENTORY_REQUESTS: usize = 8;
 /// Collect all inventory data from an Oxide system
 pub struct Collector<'a> {
     log: slog::Logger,
-    mgs_clients: Vec<gateway_client::Client>,
+    mgs_clients: Vec<GatewayClient>,
     keeper_admin_clients: Vec<clickhouse_admin_keeper_client::Client>,
     cockroach_admin_client: &'a CockroachClusterAdminClient,
     sled_agent_lister: &'a (dyn SledAgentEnumerator + Send + Sync),
     in_progress: CollectionBuilder,
 }
 
+pub struct GatewayClient {
+    pub client: gateway_client::Client,
+    pub rack_id: RackUuid,
+}
+
 impl<'a> Collector<'a> {
     pub fn new(
         creator: &str,
-        mgs_clients: Vec<gateway_client::Client>,
+        mgs_clients: Vec<GatewayClient>,
         keeper_admin_clients: Vec<clickhouse_admin_keeper_client::Client>,
         cockroach_admin_client: &'a CockroachClusterAdminClient,
         sled_agent_lister: &'a (dyn SledAgentEnumerator + Send + Sync),
@@ -119,12 +125,13 @@ impl<'a> Collector<'a> {
     }
 
     async fn collect_one_mgs(
-        client: &gateway_client::Client,
+        &GatewayClient { ref client, rack_id }: &GatewayClient,
         log: &Logger,
         in_progress: &mut CollectionBuilder,
     ) {
         debug!(log, "begin collection from MGS";
-            "mgs_url" => client.baseurl()
+            "mgs_url" => client.baseurl(),
+            "rack_id" => %rack_id,
         );
 
         // First, see which SPs MGS can see via Ignition.
@@ -772,6 +779,7 @@ async fn collect_one_dns_generation(
 #[cfg(test)]
 mod test {
     use super::Collector;
+    use super::GatewayClient;
     use crate::StaticSledAgentEnumerator;
     use gateway_messages::SpPort;
     use iddqd::IdOrdMap;
@@ -1149,6 +1157,13 @@ mod test {
         mock_server
     }
 
+    fn gateway_client(
+        gwtestctx: &gateway_test_utils::setup::GatewayTestContext,
+    ) -> GatewayClient {
+        let client = gwtestctx.client.clone();
+        GatewayClient { client, rack_id: gwtestctx.rack_id }
+    }
+
     #[tokio::test]
     async fn test_basic() {
         // Set up the stock MGS test setup (which includes a couple of fake SPs)
@@ -1181,7 +1196,7 @@ mod test {
 
         let sled1_url = format!("http://{}/", sled1.http_server.local_addr());
         let sled2_url = format!("http://{}/", sled2.http_server.local_addr());
-        let mgs_client = gwtestctx.client.clone();
+        let mgs_client = gateway_client(&gwtestctx);
         let sled_enum = StaticSledAgentEnumerator::new([sled1_url, sled2_url]);
         // We don't have any mocks for this, and it's unclear how much value
         // there would be in providing them at this juncture.
@@ -1260,8 +1275,7 @@ mod test {
         let sled2_url = format!("http://{}/", sled2.http_server.local_addr());
         let mgs_clients = [&gwtestctx1, &gwtestctx2]
             .into_iter()
-            .map(|g| &g.client)
-            .cloned()
+            .map(gateway_client)
             .collect::<Vec<_>>();
         let sled_enum = StaticSledAgentEnumerator::new([sled1_url, sled2_url]);
         // We don't have any mocks for this, and it's unclear how much value
@@ -1306,11 +1320,14 @@ mod test {
         )
         .await;
         let log = &gwtestctx.logctx.log;
-        let real_client = gwtestctx.client.clone();
+        let real_client = gateway_client(&gwtestctx);
         let bad_client = {
             // This IP range is guaranteed by RFC 6666 to discard traffic.
             let url = "http://[100::1]:12345";
-            gateway_client::Client::new(url, log.clone())
+            GatewayClient {
+                client: gateway_client::Client::new(url, log.clone()),
+                rack_id: gwtestctx.rack_id,
+            }
         };
         let mgs_clients = vec![bad_client, real_client];
         let sled_enum = StaticSledAgentEnumerator::empty();
@@ -1368,7 +1385,7 @@ mod test {
 
         let sled1_url = format!("http://{}/", sled1.http_server.local_addr());
         let sledbogus_url = String::from("http://[100::1]:45678");
-        let mgs_client = gwtestctx.client.clone();
+        let mgs_client = gateway_client(&gwtestctx);
         let sled_enum =
             StaticSledAgentEnumerator::new([sled1_url, sledbogus_url]);
         // We don't have any mocks for this, and it's unclear how much value

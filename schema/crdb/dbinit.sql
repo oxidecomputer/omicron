@@ -153,6 +153,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.rack (
     rack_subnet INET
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS
+    lookup_rack_by_subnet
+ON omicron.public.rack (
+    rack_subnet
+)
+WHERE rack_subnet IS NOT NULL;
+
 /*
  * Sleds
  */
@@ -9555,7 +9562,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '304.0.0', NULL)
+    (TRUE, NOW(), NOW(), '305.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

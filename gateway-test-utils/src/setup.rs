@@ -12,6 +12,8 @@ use omicron_gateway::SwitchPortConfig;
 pub use omicron_gateway::metrics::MetricsConfig;
 use omicron_test_utils::dev::poll;
 use omicron_test_utils::dev::poll::CondCheckError;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::RackUuid;
 use qorb::resolver::AllBackends;
 use qorb::resolver::Resolver;
 use qorb::resolvers::fixed::FixedResolver;
@@ -40,6 +42,7 @@ pub struct GatewayTestContext {
     pub simrack: SimRack,
     pub logctx: LogContext,
     pub gateway_id: Uuid,
+    pub rack_id: RackUuid,
     resolver: FixedResolver,
     resolver_backends: watch::Receiver<AllBackends>,
 }
@@ -208,9 +211,10 @@ pub async fn test_setup_with_config(
     }
 
     // Start gateway server
-    let rack_id = Some(Uuid::parse_str(RACK_UUID).unwrap());
+    let rack_id = Uuid::parse_str(RACK_UUID).unwrap();
     let gateway_id = Uuid::new_v4();
-    let args = MgsArguments { id: gateway_id, addresses, rack_id };
+    let args =
+        MgsArguments { id: gateway_id, addresses, rack_id: Some(rack_id) };
     let server = omicron_gateway::Server::start(
         server_config.clone(),
         args,
@@ -289,5 +293,6 @@ pub async fn test_setup_with_config(
         gateway_id,
         resolver,
         resolver_backends,
+        rack_id: omicron_uuid_kinds::RackUuid::from_untyped_uuid(rack_id),
     }
 }
