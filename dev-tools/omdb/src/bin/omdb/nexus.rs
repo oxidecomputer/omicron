@@ -1517,15 +1517,37 @@ fn print_task_vmm_stop_for_update(details: &serde_json::Value) {
             "warning: failed to interpret task details: {:?}: {:?}",
             error, details
         ),
-        Ok(VmmStopForUpdateStatus { vmms_stopped_by_sled, error }) => {
-            const STOPPED: &str = "VMMs stopped:";
+        Ok(VmmStopForUpdateStatus {
+            vmms_stopped_by_sled,
+            vmms_failed_by_sled,
+            error,
+        }) => {
+            const STOPPED: &str = "VMMs stopped for sled evacuation:";
             const ERROR: &str = "error:";
             const WIDTH: usize = const_max_len(&[STOPPED, ERROR]) + 1;
 
-            let total: usize = vmms_stopped_by_sled.values().sum();
+            let total: usize =
+                vmms_stopped_by_sled.iter().map(|s| s.vmm_ids.len()).sum();
             println!("    {STOPPED:<WIDTH$}{total} total");
-            for (sled_id, count) in vmms_stopped_by_sled {
-                println!("      sled_id={sled_id} n_stopped={count}");
+            for sled in vmms_stopped_by_sled {
+                println!(
+                    "      sled_id={} n_stopped={}",
+                    sled.sled_id,
+                    sled.vmm_ids.len()
+                );
+            }
+            if !vmms_failed_by_sled.is_empty() {
+                for sled in vmms_failed_by_sled {
+                    println!(
+                        "      sled_id={} n_failed={}",
+                        sled.sled_id,
+                        sled.vmm_ids.len()
+                    );
+                    println!("      vmms that failed to stop:");
+                    for vmm in sled.vmm_ids {
+                        println!("        {}", vmm);
+                    }
+                }
             }
             if let Some(error) = error {
                 println!("    {ERROR:<WIDTH$}{error}");

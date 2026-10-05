@@ -7,39 +7,19 @@
 
 use crate::app::background::BackgroundTask;
 use futures::future::BoxFuture;
-use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
-use iddqd::id_upcast;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_types::internal_api::background::VmmStopForUpdateStatus;
+use nexus_types::internal_api::background::VmmsBySled;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PropolisUuid;
-use omicron_uuid_kinds::SledUuid;
 use serde_json::json;
 use slog_error_chain::InlineErrorChain;
-use std::collections::BTreeMap;
 use std::sync::Arc;
-
-/// The VMMs on a single sled that are marked to be stopped for a sled update
-#[derive(Clone, Debug)]
-struct SledVmmsToStop {
-    sled_id: SledUuid,
-    vmm_ids: Vec<PropolisUuid>,
-}
-
-impl IdOrdItem for SledVmmsToStop {
-    type Key<'a> = SledUuid;
-
-    fn key(&self) -> Self::Key<'_> {
-        self.sled_id
-    }
-
-    id_upcast!();
-}
 
 pub struct VmmStopForUpdate {
     datastore: Arc<DataStore>,
@@ -69,7 +49,7 @@ impl VmmStopForUpdate {
                 let sled_id = vmm.sled_id();
                 vmms_by_sled
                     .entry(sled_id)
-                    .or_insert_with(|| SledVmmsToStop {
+                    .or_insert_with(|| VmmsBySled {
                         sled_id,
                         vmm_ids: Vec::new(),
                     })
@@ -87,11 +67,11 @@ impl VmmStopForUpdate {
     /// Stops a batch of VMMs
     async fn stop_batch(
         &self,
-        vmms_by_sled: IdOrdMap<SledVmmsToStop>,
+        vmms_by_sled: IdOrdMap<VmmsBySled>,
         opctx: &OpContext,
     ) {
         for sled in vmms_by_sled {
-            let SledVmmsToStop { sled_id, vmm_ids } = sled;
+            let VmmsBySled { sled_id, vmm_ids } = sled;
             slog::info!(
                 opctx.log,
                 "Stopping VMMs for update";
@@ -114,14 +94,16 @@ impl VmmStopForUpdate {
         let _results = match self.stop_all(opctx).await {
             Ok(results) => results,
             Err(err) => {
+                let err = InlineErrorChain::new(&err);
                 slog::error!(
                     &opctx.log,
                     "failed to stop VMMs marked to stop for a sled update";
                     &err,
                 );
                 return VmmStopForUpdateStatus {
-                    vmms_stopped_by_sled: BTreeMap::new(),
-                    error: Some(InlineErrorChain::new(&err).to_string()),
+                    vmms_stopped_by_sled: IdOrdMap::new(),
+                    vmms_failed_by_sled: IdOrdMap::new(),
+                    error: Some(err.to_string()),
                 };
             }
         };
@@ -141,12 +123,18 @@ impl VmmStopForUpdate {
         //            "sleds" => vmms_by_sled.len(),
         //            "vmms" => vmm_count,
         //        );
+        //      TODO-K: for debug show IDs? also show which failed
         //    }
 
         // TODO-K: Should return a nicely structured struct here instead
-        let vmms_stopped_by_sled = BTreeMap::new();
+        let vmms_stopped_by_sled = IdOrdMap::new();
+        let vmms_failed_by_sled = IdOrdMap::new();
 
-        VmmStopForUpdateStatus { vmms_stopped_by_sled, error: None }
+        VmmStopForUpdateStatus {
+            vmms_stopped_by_sled,
+            vmms_failed_by_sled,
+            error: None,
+        }
     }
 }
 

@@ -15,6 +15,7 @@ use omicron_uuid_kinds::AlertReceiverUuid;
 use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
+use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SitrepUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -106,12 +107,32 @@ pub struct AbandonedVmmReaperStatus {
     pub errors: Vec<String>,
 }
 
+/// VMMs on a single sled
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct VmmsBySled {
+    pub sled_id: SledUuid,
+    pub vmm_ids: Vec<PropolisUuid>,
+}
+
+impl IdOrdItem for VmmsBySled {
+    type Key<'a> = SledUuid;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.sled_id
+    }
+
+    id_upcast!();
+}
+
 /// The status of a `vmm_stop_for_update` background task activation.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct VmmStopForUpdateStatus {
     /// Number of VMMs stopped in this activation, keyed by the sled they were
     /// running on.
-    pub vmms_stopped_by_sled: BTreeMap<SledUuid, usize>,
+    pub vmms_stopped_by_sled: IdOrdMap<VmmsBySled>,
+    /// Number of VMMs that failed to stop in this activation, keyed by the sled
+    /// they are running on.
+    pub vmms_failed_by_sled: IdOrdMap<VmmsBySled>,
     /// Error encountered during this activation, if any.
     pub error: Option<String>,
 }
