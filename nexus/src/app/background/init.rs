@@ -667,6 +667,12 @@ impl BackgroundTasksInitializer {
             activator: task_physical_disk_adoption,
         });
 
+        let bp_rendezvous = blueprint_rendezvous::BlueprintRendezvous::new(
+            datastore.clone(),
+            rx_blueprint.clone(),
+            inventory_load_watcher.clone(),
+        );
+        let bp_rendezvous_watcher = bp_rendezvous.watcher();
         driver.register(TaskDefinition {
             name: "blueprint_rendezvous",
             description:
@@ -675,11 +681,7 @@ impl BackgroundTasksInitializer {
                  consume",
             period: config.blueprints.period_secs_rendezvous,
             task_impl: Box::new(
-                blueprint_rendezvous::BlueprintRendezvous::new(
-                    datastore.clone(),
-                    rx_blueprint.clone(),
-                    inventory_load_watcher.clone(),
-                ),
+                bp_rendezvous
             ),
             opctx: opctx.child(BTreeMap::new()),
             // A new target blueprint must reach the sled availability table
@@ -1346,7 +1348,11 @@ impl BackgroundTasksInitializer {
             period: config.vmm_mark_stop_for_update.period_secs,
             task_impl: Box::new(VmmMarkStopForUpdate::new(datastore)),
             opctx: opctx.child(BTreeMap::new()),
-            watchers: vec![],
+            // We activate this task any time the blueprint_rendezvous task runs.
+            // We want to err on the side of running this task more often than
+            // not, so even if the blueprint rendezvous task reports no changes,
+            // this task is triggered anyway.
+            watchers: vec![Box::new(bp_rendezvous_watcher)],
             activator: task_vmm_mark_stop_for_update,
         });
 
