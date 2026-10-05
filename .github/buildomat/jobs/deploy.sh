@@ -36,6 +36,26 @@ _exit_trap() {
 	local status=$?
 	set +o errexit
 
+	# TODO: temporary diagnostics for the switch-zone readiness timeout.
+	if [[ $status -ne 0 ]]; then
+		echo "== switch zone installer diagnostics"
+		date -u
+		pfexec zoneadm list -civ || true
+		local installer_pid
+		local -a installer_pids
+		installer_pids=( $(pgrep -f '^/usr/sbin/zoneadm -z oxz_switch install ' || true) )
+		while [[ ${#installer_pids[@]} -gt 0 ]]; do
+			installer_pid=${installer_pids[0]}
+			installer_pids=( "${installer_pids[@]:1}" )
+			installer_pids+=( $(pgrep -P "$installer_pid" || true) )
+			echo "== installer PID $installer_pid"
+			pfexec pflags "$installer_pid" || true
+			pfexec pstack "$installer_pid" || true
+			pfexec pfiles "$installer_pid" || true
+		done
+	fi
+	# TODO: remove these diagnostics after identifying the install delay.
+
 	# Restore the override opteadm from /tmp before debug-evidence
 	# collection runs, in case anything earlier in this trap or any
 	# downstream tooling has overwritten the installed binary. The
