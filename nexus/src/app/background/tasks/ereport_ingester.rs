@@ -100,8 +100,9 @@ impl SpEreportIngester {
         // determined. See also the 'TODO-multirack' comment in the
         // `mgs_requests()` function for where the rack ID would be used.
         let mgs_clients = match GatewayClient::resolve_all_gateways(
-            &opctx.log,
+            &self.datastore,
             &self.resolver,
+            &opctx,
         )
         .await
         {
@@ -121,7 +122,9 @@ impl SpEreportIngester {
         let sps = {
             let mut gateways = mgs_clients.iter();
             loop {
-                let Some(GatewayClient { addr, client }) = gateways.next()
+                // TODO(eliza): segment these by rack ID
+                let Some(GatewayClient { addr, client, rack_id: _ }) =
+                    gateways.next()
                 else {
                     const MSG: &str = "no MGS successfully returned SP ID list";
                     error!(opctx.log, "{MSG}");
@@ -373,7 +376,7 @@ impl Ingester {
     ) -> Option<ereport_types::Ereports> {
         // If an attempt to collect ereports from one gateway fails, we will try
         // any other discovered gateways.
-        for GatewayClient { addr, client } in clients.iter() {
+        for GatewayClient { addr, client, rack_id } in clients.iter() {
             slog::debug!(
                 &opctx.log,
                 "attempting ereport collection from MGS";
@@ -381,6 +384,7 @@ impl Ingester {
                 "start_ena" => ?start_ena,
                 "restart_id" => ?restart_id,
                 "gateway_addr" => %addr,
+                "rack_id" => %rack_id,
             );
             let res = client
                 .sp_ereports_ingest(
@@ -404,6 +408,7 @@ impl Ingester {
                         "start_ena" => ?start_ena,
                         "restart_id" => ?restart_id,
                         "gateway_addr" => %addr,
+                        "rack_id" => %rack_id,
                         "error" => ?e,
                     );
                     status.requests += 1;
@@ -848,8 +853,9 @@ mod tests {
         let clients = poll::wait_for_condition(
             || async {
                 let gateways = GatewayClient::resolve_all_gateways(
-                    &opctx.log,
+                    &datastore,
                     &nexus.internal_resolver,
+                    &opctx,
                 )
                 .await
                 .map_err(|e| poll::CondCheckError::<Error>::NotYet {

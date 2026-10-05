@@ -98,7 +98,7 @@ impl InstanceWatcher {
     fn check_instance(
         &self,
         opctx: &OpContext,
-        gateways: &Arc<[GatewayClient]>,
+        gateways: &Arc<Vec<GatewayClient>>,
         client: SledAgentClient,
         target: VirtualMachine,
         instance: Instance,
@@ -411,7 +411,7 @@ async fn is_computer_on(
     // Ask MGS whether the computer is on. If trying to talk to one of the
     // gateways fails for whatever reason, ask any others we were able to
     // resolve as well.
-    for GatewayClient { client, addr } in gateways {
+    for GatewayClient { client, addr, rack_id: _ } in gateways {
         let state = match client.sp_get(&sp.sp_type, sp.sp_slot).await {
             Ok(response) => response.into_inner(),
             Err(error) => {
@@ -622,8 +622,11 @@ impl BackgroundTask for InstanceWatcher {
                 MAX_CONCURRENT_CHECKS,
             );
 
-            let gateways = match GatewayClient::resolve_all_gateways(&opctx.log, &self.resolver).await {
-                Ok(gateways) => gateways.collect::<Arc<[_]>>(),
+
+            let gateways = match GatewayClient::resolve_all_gateways(&self.datastore, &self.resolver, &opctx).await {
+                // TODO-multirack: these should be collected into a multimap of
+                // gateway clients by rack ID...
+                Ok(gateways) => Arc::new(gateways),
                 Err(err) => {
                     // This is a bit sad, but talking to MGS is only necessary
                     // to check if a sled is powered on in the event that the
@@ -638,7 +641,7 @@ impl BackgroundTask for InstanceWatcher {
                          sled-agents be unreachable";
                         "error" => InlineErrorChain::new(&*err),
                     );
-                    Arc::new([])
+                    Arc::new(Vec::new())
                 },
             };
 

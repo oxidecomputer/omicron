@@ -139,33 +139,17 @@ async fn inventory_activate(
         .context("pruning old collections")?;
 
     // Find MGS clients.
-    let mgs_clients = {
-        let clients =
-            GatewayClient::resolve_all_gateways(&opctx.log, resolver).await?;
-        let mut out = Vec::new();
-        for GatewayClient { addr, client } in clients {
-            let Some(rack) = datastore
-                .rack_lookup_by_ip(opctx, *addr.ip())
-                .await
-                .with_context(|| {
-                    format!("failed to query rack ID for MGS address {addr}")
-                })?
-            else {
-                slog::error!(
-                    opctx.log,
-                    "resolved a MGS address that does not correspond to a \
-                     known rack subnet; ignoring it";
-                    "mgs_addr" => %addr,
-                );
-                continue;
-            };
-            out.push(nexus_inventory::GatewayClient {
-                client,
-                rack_id: RackUuid::from_untyped_uuid(rack.identity().id),
-            });
-        }
-        out
-    };
+    let mgs_clients =
+        GatewayClient::resolve_all_gateways(&datastore, &resolver, opctx)
+            .await?
+            .into_iter()
+            // sadly we must convert between these more-or-less-identical types
+            // because `nexus-inventory` does not wish to depend on
+            // `nexus-db-queries`, which `nexus-networking` does...
+            .map(|GatewayClient { rack_id, client, .. }| {
+                nexus_inventory::GatewayClient { rack_id, client }
+            })
+            .collect();
 
     // Find clickhouse-admin-keeper servers if there are any.
     let keeper_admin_clients = match resolver
