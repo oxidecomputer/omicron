@@ -178,9 +178,7 @@ async fn discover(
     }
 }
 
-/// Keep `Targets::cubbies` current from MGS's view of the SPs. Each
-/// round's answers merge into the existing map, so a probe outage
-/// never erases it.
+/// Keep `Targets::cubbies` current from MGS's view of the SPs.
 async fn cubbies(log: Logger, mgs: MgsClient, targets: watch::Sender<Cubbies>) {
     loop {
         let polls = (0..=MAX_CUBBY).map(|cubby| {
@@ -213,7 +211,56 @@ async fn cubbies(log: Logger, mgs: MgsClient, targets: watch::Sender<Cubbies>) {
                 }
             }
         }
-        targets.send_modify(|t| t.extend(cubbies));
+        targets.send_modify(|t| merge_cubbies(t, cubbies));
         sleep(POLL_INTERVAL).await;
+    }
+}
+
+/// Fold one round of SP answers into the cubby map. Cubbies that don't
+/// answer keep their entries (for reboots or transient outages), but a
+/// baseboard that answers from a new cubby leaves its old one (for moved
+/// or swapped sleds).
+fn merge_cubbies(cubbies: &mut Cubbies, answers: Cubbies) {
+    cubbies.retain(|_, b| !answers.values().any(|a| a == b));
+    cubbies.extend(answers);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn baseboard(n: u32) -> BaseboardId {
+        BaseboardId {
+            part_number: "913-0000019".into(),
+            serial_number: format!("BRM{n:08}"),
+        }
+    }
+
+    #[test]
+    fn merged_cubbies_survive_outages_and_moves() {
+        let mut cubbies =
+            Cubbies::from([(14, baseboard(1)), (15, baseboard(2))]);
+
+        // A quiet round erases nothing.
+        merge_cubbies(&mut cubbies, Cubbies::new());
+        assert_eq!(
+            cubbies,
+            Cubbies::from([(14, baseboard(1)), (15, baseboard(2))])
+        );
+
+        // Sled 1 moves to cubby 20 and leaves cubby 14; sled 2
+        // misses the round and keeps its entry.
+        merge_cubbies(&mut cubbies, Cubbies::from([(20, baseboard(1))]));
+        assert_eq!(
+            cubbies,
+            Cubbies::from([(15, baseboard(2)), (20, baseboard(1))])
+        );
+
+        // Sled 3 takes over cubby 15.
+        merge_cubbies(&mut cubbies, Cubbies::from([(15, baseboard(3))]));
+        assert_eq!(
+            cubbies,
+            Cubbies::from([(15, baseboard(3)), (20, baseboard(1))])
+        );
     }
 }
