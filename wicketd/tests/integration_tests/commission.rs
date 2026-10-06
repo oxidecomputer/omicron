@@ -78,6 +78,7 @@ async fn test_commission_inventory() {
     let gateway =
         gateway_setup::test_setup("test_commission_inventory", SpPort::One)
             .await;
+    let n_sps = gateway.simrack.num_sps();
     let ctx = WicketdTestContext::setup(gateway).await;
 
     // Wait for MGS inventory, ignition, and cabooses.
@@ -93,7 +94,7 @@ async fn test_commission_inventory() {
     })
     .await;
 
-    assert_eq!(sps.len(), 4, "four simulated SPs");
+    assert_eq!(sps.len(), n_sps, "{n_sps} simulated SPs");
 
     let sled0 = sps
         .get(&SpIdentifier { typ: SpType::Sled, slot: 0 })
@@ -155,8 +156,8 @@ async fn test_commission_inventory() {
     );
     assert_eq!(
         refreshed.sps.len(),
-        4,
-        "four simulated SPs after forced refresh"
+        n_sps,
+        "{n_sps} simulated SPs after forced refresh"
     );
     assert!(
         refreshed.transceivers.is_empty(),

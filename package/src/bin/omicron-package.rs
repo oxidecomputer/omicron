@@ -134,7 +134,6 @@ async fn do_target(
             preset,
             image,
             machine,
-            switch,
             rack_topology,
             clickhouse_topology,
         } => {
@@ -142,7 +141,6 @@ async fn do_target(
             let target = preset_target.with_overrides(
                 image.clone(),
                 machine.clone(),
-                switch.clone(),
                 rack_topology.clone(),
                 clickhouse_topology.clone(),
             )?;
