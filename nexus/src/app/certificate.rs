@@ -14,8 +14,10 @@ use nexus_db_queries::db::model::ServiceKind;
 use nexus_types::external_api::certificate;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
+use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
+use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use ref_cast::RefCast;
@@ -36,6 +38,36 @@ impl super::Nexus {
         }
     }
 
+    /// Look up a certificate in any silo
+    ///
+    /// The silo must be provided if `certificate` is a name, and must not be
+    /// provided if `certificate` is an ID.
+    pub fn system_certificate_lookup<'a>(
+        &'a self,
+        opctx: &'a OpContext,
+        silo: Option<NameOrId>,
+        certificate: NameOrId,
+    ) -> LookupResult<lookup::Certificate<'a>> {
+        match (silo, certificate) {
+            (None, NameOrId::Id(id)) => {
+                Ok(LookupPath::new(opctx, &self.db_datastore)
+                    .certificate_id(id))
+            }
+            (Some(silo), NameOrId::Name(name)) => Ok(self
+                .silo_lookup(opctx, silo)?
+                .certificate_name_owned(name.into())),
+            (Some(_), NameOrId::Id(_)) => Err(Error::invalid_request(
+                "when providing certificate as an ID, silo should not be \
+                 specified",
+            )),
+            (None, NameOrId::Name(_)) => Err(Error::invalid_request(
+                "certificate should either be a UUID or silo should be \
+                 specified",
+            )),
+        }
+    }
+
+    /// Create a certificate in the current user's silo
     pub(crate) async fn certificate_create(
         &self,
         opctx: &OpContext,
@@ -45,6 +77,31 @@ impl super::Nexus {
             .authn
             .silo_required()
             .internal_context("creating a Certificate")?;
+        self.certificate_create_for_silo(opctx, &authz_silo, params).await
+    }
+
+    /// Create a certificate in the specified silo
+    pub(crate) async fn system_certificate_create(
+        &self,
+        opctx: &OpContext,
+        silo_lookup: &lookup::Silo<'_>,
+        params: certificate::CertificateCreate,
+    ) -> CreateResult<db::model::Certificate> {
+        let (authz_silo,) = silo_lookup.lookup_for(authz::Action::Read).await?;
+        self.certificate_create_for_silo(opctx, &authz_silo, params).await
+    }
+
+    async fn certificate_create_for_silo(
+        &self,
+        opctx: &OpContext,
+        authz_silo: &authz::Silo,
+        params: certificate::CertificateCreate,
+    ) -> CreateResult<db::model::Certificate> {
+        // Check this up front so that we don't use the elevated context below
+        // on behalf of a caller who can't create certificates in this silo.
+        let authz_cert_list =
+            authz::SiloCertificateList::new(authz_silo.clone());
+        opctx.authorize(authz::Action::CreateChild, &authz_cert_list).await?;
 
         // The `opctx` we received is going to be checked for permission to
         // create a cert below in `db_datastore.certificate_create`, but first
@@ -73,7 +130,7 @@ impl super::Nexus {
         )?;
         let cert = self
             .db_datastore
-            .certificate_create(opctx, new_certificate)
+            .certificate_create(opctx, authz_silo, new_certificate)
             .await?;
 
         match kind {
@@ -94,8 +151,24 @@ impl super::Nexus {
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::Certificate> {
+        let authz_silo = opctx
+            .authn
+            .silo_required()
+            .internal_context("listing Certificates")?;
         self.db_datastore
-            .certificate_list_for(opctx, None, pagparams, true)
+            .certificate_list_for(opctx, None, pagparams, Some(&authz_silo))
+            .await
+    }
+
+    pub(crate) async fn system_certificates_list(
+        &self,
+        opctx: &OpContext,
+        silo_lookup: &lookup::Silo<'_>,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<db::model::Certificate> {
+        let (authz_silo,) = silo_lookup.lookup_for(authz::Action::Read).await?;
+        self.db_datastore
+            .certificate_list_for(opctx, None, pagparams, Some(&authz_silo))
             .await
     }
 
