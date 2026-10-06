@@ -100,6 +100,9 @@ async function renderAdoc(src: string) {
 // they pick up the same styles. Languages load on demand in renderMarkdown.
 const highlighter = await createHighlighter({ themes: [oxideTheme], langs: [] })
 
+/** The language of a fenced code block: the first word of its info string */
+const fenceLang = (info: string) => info.trim().split(/\s+/)[0]
+
 function highlightFence(code: string, lang: string) {
   const resolved = highlighter.getLoadedLanguages().includes(lang) ? lang : 'text'
   const html = highlighter.codeToHtml(code.replace(/\n$/, ''), {
@@ -123,7 +126,7 @@ async function renderMarkdown(src: string) {
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i]
     if (token.type === 'fence') {
-      const lang = token.info.trim().split(/\s+/)[0]
+      const lang = fenceLang(token.info)
       if (Object.hasOwn(bundledLanguages, lang) && !highlighter.getLoadedLanguages().includes(lang)) {
         await highlighter.loadLanguage(lang as BundledLanguage)
       }
@@ -156,7 +159,7 @@ async function renderMarkdown(src: string) {
     return `<${tag} id="${id}"><a class="anchor" href="#${id}"></a>`
   }
   md.renderer.rules.fence = (tokens, idx) =>
-    highlightFence(tokens[idx].content, tokens[idx].info.trim().split(/\s+/)[0])
+    highlightFence(tokens[idx].content, fenceLang(tokens[idx].info))
 
   const html = md.renderer.render(tokens, md.options, {})
   const body = `<div id="content" class="asciidoc-body w-full">${html}</div>`
