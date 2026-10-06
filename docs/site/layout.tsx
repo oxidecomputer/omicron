@@ -2,8 +2,8 @@ import path from 'node:path'
 
 import type { ReactNode } from 'react'
 
-import type { Page, Section, TocItem } from './build.tsx'
 import { site } from './nav.ts'
+import type { Page, Section, TocItem } from './types.ts'
 
 // Pagefind's search UI web components
 declare module 'react' {

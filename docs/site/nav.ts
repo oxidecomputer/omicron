@@ -4,16 +4,7 @@
 //
 // See README.md in this directory for how the site is built and deployed.
 
-export type Site = {
-  title: string
-  description: string
-  repo: string
-  sections: {
-    title: string
-    description?: string
-    pages: (string | { path: string; title?: string })[]
-  }[]
-}
+import type { Site } from './types.ts'
 
 export const site: Site = {
   title: 'Omicron',

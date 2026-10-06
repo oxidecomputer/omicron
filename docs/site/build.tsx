@@ -22,26 +22,11 @@ import { bundledLanguages, createHighlighter, type BundledLanguage } from 'shiki
 
 import { DocPage, IndexPage } from './layout.tsx'
 import { site } from './nav.ts'
+import type { Page, Section, TocItem } from './types.ts'
 
 const siteDir = import.meta.dirname
 const repoRoot = path.resolve(siteDir, '../..')
 const outDir = path.join(siteDir, 'dist')
-
-export type TocItem = { id: string; title: string; children: TocItem[] }
-
-export type Page = {
-  /** Source path relative to the repo root, e.g. `docs/how-to-run.adoc` */
-  src: string
-  /** Output path relative to dist/, e.g. `docs/how-to-run.html` */
-  out: string
-  section: string
-  title: string
-  /** HTML body, not yet link-rewritten */
-  body: string
-  toc: TocItem[]
-}
-
-export type Section = { title: string; description?: string; pages: Page[] }
 
 const ad = loadAsciidoctor({})
 
