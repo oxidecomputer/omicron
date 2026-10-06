@@ -127,11 +127,20 @@ pub async fn pstack_oxide_processes(
         Ok(pids) => pids,
         Err(e) => return vec![Err(e.into())],
     };
+    let me = std::process::id() as libc::pid_t;
 
     let mut results = Vec::with_capacity(pids.len());
     let mut commands =
         ParallelTaskSet::new_with_parallelism(MAX_PTOOL_PARALLELISM);
     for pid in pids {
+        // Don't pstack our own pid: per the WARNINGS in `man 1 proc`, `pstack`
+        // and `pfiles` will suspend what the manual page very aptly refers to
+        // as the "victim" process until they exit. So, at the very least, the
+        // timeout is not gonna work! And, depending on who we are, perhaps
+        // other worse things might happen...
+        if pid == me {
+            continue;
+        }
         if let Some(res) = commands
             .spawn(execute_command_with_timeout(
                 pstack_process(pid),
@@ -156,11 +165,16 @@ pub async fn pfiles_oxide_processes(
         Ok(pids) => pids,
         Err(e) => return vec![Err(e.into())],
     };
+    let me = std::process::id() as libc::pid_t;
 
     let mut results = Vec::with_capacity(pids.len());
     let mut commands =
         ParallelTaskSet::new_with_parallelism(MAX_PTOOL_PARALLELISM);
     for pid in pids {
+        // Don't pfiles yourself! You'll go blind!
+        if pid == me {
+            continue;
+        }
         if let Some(res) = commands
             .spawn(execute_command_with_timeout(
                 pfiles_process(pid),
