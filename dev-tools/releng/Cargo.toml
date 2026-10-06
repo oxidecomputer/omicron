@@ -16,10 +16,12 @@ dev-tools-common.workspace = true
 fs-err = { workspace = true, features = ["tokio"] }
 futures.workspace = true
 hex.workspace = true
+iddqd.workspace = true
 omicron-pins.workspace = true
 omicron-workspace-hack.workspace = true
 omicron-zone-package.workspace = true
 rats-corim.workspace = true
+regex.workspace = true
 reqwest.workspace = true
 semver.workspace = true
 serde.workspace = true
