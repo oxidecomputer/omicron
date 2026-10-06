@@ -15,6 +15,8 @@ pub struct GatewayClient {
     pub client: gateway_client::Client,
 }
 
+pub type ClientError = gateway_client::Error<gateway_client::types::Error>;
+
 impl GatewayClient {
     pub fn from_addr(log: &Logger, addr: SocketAddrV6) -> Self {
         let url = format!("http://{addr}");
@@ -44,7 +46,7 @@ impl GatewayClient {
 #[derive(Debug)]
 pub struct GatewaysByRack {
     by_rack: iddqd::IdHashMap<RackGateways>,
-    unknown: Vec<GatewayClient>,
+    unknown: Vec<(GatewayClient, ClientError)>,
 }
 
 impl GatewaysByRack {
@@ -87,7 +89,7 @@ impl GatewaysByRack {
                     )
                     .await;
                     match rack_id {
-                        Ok(rack_id) => (Some(rack_id), gateway),
+                        Ok(rack_id) => (Ok(rack_id), gateway),
                         Err(e) => {
                             slog::warn!(
                                 log,
@@ -96,7 +98,7 @@ impl GatewaysByRack {
                                 "error" => InlineErrorChain::new(&e),
                                 "gateway_addr" => %gateway.addr,
                             );
-                            (None, gateway)
+                            (Err(e), gateway)
                         }
                     }
                 })
@@ -123,11 +125,11 @@ impl GatewaysByRack {
 
     fn insert_discovery_result(
         &mut self,
-        rack_id: Option<RackUuid>,
+        rack_id: Result<RackUuid, ClientError>,
         gateway: GatewayClient,
     ) {
         match rack_id {
-            Some(rack_id) => {
+            Ok(rack_id) => {
                 self.by_rack
                     .entry(&rack_id)
                     .or_insert_with(|| RackGateways {
@@ -137,8 +139,8 @@ impl GatewaysByRack {
                     .gateways
                     .push(gateway);
             }
-            None => {
-                self.unknown.push(gateway);
+            Err(e) => {
+                self.unknown.push((gateway, e));
             }
         }
     }
@@ -160,8 +162,10 @@ impl GatewaysByRack {
         })
     }
 
-    /// Borrows the set of resolved clients for which the rack ID is unknown.
-    pub fn unknown(&self) -> &[GatewayClient] {
+    /// Borrows the set of resolved clients for which the rack ID is unknown,
+    /// along with the last error encountered while trying to discover the rack
+    /// ID.
+    pub fn unknown(&self) -> &[(GatewayClient, ClientError)] {
         &self.unknown
     }
 }
