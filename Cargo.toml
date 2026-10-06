@@ -554,7 +554,7 @@ gateway-client = { path = "clients/gateway-client" }
 # functionality.)
 #
 gateway-ereport-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "c29e6832c4b230e361253bc9b5e1ae73413a124f", default-features = false, features = ["debug-impls"] }
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "c29e6832c4b230e361253bc9b5e1ae73413a124f", default-features = false, features = ["std"] }
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "c29e6832c4b230e361253bc9b5e1ae73413a124f", features = ["std"] }
 gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "c29e6832c4b230e361253bc9b5e1ae73413a124f" }
 gateway-test-utils = { path = "gateway-test-utils" }
 gateway-types = { path = "gateway-types" }
@@ -893,7 +893,7 @@ transceiver-controller = { git = "https://github.com/oxidecomputer/transceiver-c
 transient-dns-server = { path = "dns-server/transient" }
 trybuild = "1.0.106"
 tufaceous = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
-tufaceous-artifact = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", features = ["proptest", "schemars"] }
+tufaceous-artifact = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", features = ["hubtools", "proptest", "schemars"] }
 tufaceous-brand-metadata = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
 tui-tree-widget = "0.23.1"
 typed-rng = { path = "typed-rng" }

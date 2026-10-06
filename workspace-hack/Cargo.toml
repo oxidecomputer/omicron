@@ -38,7 +38,6 @@ chrono = { version = "0.4.45", features = ["serde"] }
 cipher = { version = "0.5.2", default-features = false, features = ["block-padding", "rand_core", "stream-wrapper"] }
 clap = { version = "4.6.1", features = ["cargo", "derive", "env", "wrap_help"] }
 clap_builder = { version = "4.6.0", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
-const-oid = { version = "0.9.6", default-features = false, features = ["db", "std"] }
 crossbeam-epoch = { version = "0.9.18" }
 crossbeam-utils = { version = "0.8.21" }
 crossterm = { version = "0.28.1", features = ["event-stream", "serde"] }
@@ -48,14 +47,12 @@ ctutils = { version = "0.4.2", default-features = false, features = ["subtle"] }
 curve25519-dalek = { version = "4.1.3", features = ["digest", "legacy_compatibility", "rand_core"] }
 daft = { version = "0.1.8", features = ["derive", "newtype-uuid1", "oxnet01", "uuid1"] }
 data-encoding = { version = "2.10.0" }
-der = { version = "0.7.10", default-features = false, features = ["derive", "flagset", "oid", "pem", "std"] }
 derive_more = { version = "2.1.1", features = ["as_ref", "is_variant"] }
 digest-93f6ce9d446188ac = { package = "digest", version = "0.10.7", features = ["mac", "oid", "std"] }
 digest-a6292c17cd707f01 = { package = "digest", version = "0.11.3", features = ["alloc", "mac", "oid", "rand_core"] }
 ed25519-dalek = { version = "2.2.0", features = ["digest", "pem", "rand_core"] }
 either = { version = "1.15.0", features = ["use_std"] }
 elliptic-curve = { version = "0.13.8", features = ["ecdh", "hazmat", "pem", "std"] }
-env_logger = { version = "0.11.11", default-features = false, features = ["auto-color"] }
 ff = { version = "0.13.1", default-features = false, features = ["alloc"] }
 flate2 = { version = "1.1.9", features = ["zlib-rs"] }
 foldhash = { version = "0.2.0" }
@@ -66,7 +63,6 @@ futures-core = { version = "0.3.32" }
 futures-sink = { version = "0.3.32" }
 futures-task = { version = "0.3.32", default-features = false, features = ["std"] }
 futures-util = { version = "0.3.32", features = ["channel", "io", "sink"] }
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "c29e6832c4b230e361253bc9b5e1ae73413a124f", features = ["std"] }
 generic-array = { version = "0.14.7", default-features = false, features = ["more_lengths", "zeroize"] }
 getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.17", default-features = false, features = ["js", "rdrand", "std"] }
 getrandom-9fbad63c4bcf4a8f = { package = "getrandom", version = "0.4.3", default-features = false, features = ["std", "sys_rng", "wasm_js"] }
@@ -89,7 +85,6 @@ itertools-3575ec1268b04181 = { package = "itertools", version = "0.15.0" }
 itertools-594e8ee84c453af0 = { package = "itertools", version = "0.13.0" }
 jiff = { version = "0.2.34", features = ["serde"] }
 lalrpop-util = { version = "0.19.12" }
-lazy_static = { version = "1.5.0", default-features = false, features = ["spin_no_std"] }
 libc = { version = "0.2.185", features = ["extra_traits"] }
 log = { version = "0.4.33", default-features = false, features = ["std"] }
 managed = { version = "0.8.0", default-features = false, features = ["alloc", "map"] }
@@ -141,7 +136,6 @@ slab = { version = "0.4.12" }
 slog = { version = "2.8.2", features = ["dynamic-keys", "max_level_trace", "release_max_level_debug", "release_max_level_trace"] }
 smallvec = { version = "1.15.1", default-features = false, features = ["const_new"] }
 spin = { version = "0.9.8" }
-spki = { version = "0.7.3", default-features = false, features = ["pem", "std"] }
 string_cache = { version = "0.8.9" }
 strum-2f80eeee3b1b6c7e = { package = "strum", version = "0.26.3", features = ["derive"] }
 strum-754bda37e0fb3874 = { package = "strum", version = "0.27.2", features = ["derive"] }
@@ -159,7 +153,6 @@ toml_datetime = { version = "0.6.11", default-features = false, features = ["ser
 toml_edit-3c51e837cfc5589a = { package = "toml_edit", version = "0.22.27", features = ["serde"] }
 toml_parser = { version = "1.1.2" }
 tracing = { version = "0.1.44", features = ["log"] }
-tufaceous-artifact = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", default-features = false, features = ["hubtools", "proptest", "schemars"] }
 typenum = { version = "1.20.1", default-features = false, features = ["const-generics"] }
 url = { version = "2.5.8", features = ["serde"] }
 usdt = { version = "0.6.0" }
@@ -194,7 +187,6 @@ chrono = { version = "0.4.45", features = ["serde"] }
 cipher = { version = "0.5.2", default-features = false, features = ["block-padding", "rand_core", "stream-wrapper"] }
 clap = { version = "4.6.1", features = ["cargo", "derive", "env", "wrap_help"] }
 clap_builder = { version = "4.6.0", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
-const-oid = { version = "0.9.6", default-features = false, features = ["db", "std"] }
 crossbeam-epoch = { version = "0.9.18" }
 crossbeam-utils = { version = "0.8.21" }
 crossterm = { version = "0.28.1", features = ["event-stream", "serde"] }
@@ -204,7 +196,6 @@ ctutils = { version = "0.4.2", default-features = false, features = ["subtle"] }
 curve25519-dalek = { version = "4.1.3", features = ["digest", "legacy_compatibility", "rand_core"] }
 daft = { version = "0.1.8", features = ["derive", "newtype-uuid1", "oxnet01", "uuid1"] }
 data-encoding = { version = "2.10.0" }
-der = { version = "0.7.10", default-features = false, features = ["derive", "flagset", "oid", "pem", "std"] }
 derive_more = { version = "2.1.1", features = ["as_ref", "is_variant"] }
 derive_more-impl = { version = "2.1.1", features = ["as_ref", "is_variant"] }
 digest-93f6ce9d446188ac = { package = "digest", version = "0.10.7", features = ["mac", "oid", "std"] }
@@ -212,7 +203,6 @@ digest-a6292c17cd707f01 = { package = "digest", version = "0.11.3", features = [
 ed25519-dalek = { version = "2.2.0", features = ["digest", "pem", "rand_core"] }
 either = { version = "1.15.0", features = ["use_std"] }
 elliptic-curve = { version = "0.13.8", features = ["ecdh", "hazmat", "pem", "std"] }
-env_logger = { version = "0.11.11", default-features = false, features = ["auto-color"] }
 ff = { version = "0.13.1", default-features = false, features = ["alloc"] }
 flate2 = { version = "1.1.9", features = ["zlib-rs"] }
 foldhash = { version = "0.2.0" }
@@ -223,7 +213,6 @@ futures-core = { version = "0.3.32" }
 futures-sink = { version = "0.3.32" }
 futures-task = { version = "0.3.32", default-features = false, features = ["std"] }
 futures-util = { version = "0.3.32", features = ["channel", "io", "sink"] }
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "c29e6832c4b230e361253bc9b5e1ae73413a124f", features = ["std"] }
 generic-array = { version = "0.14.7", default-features = false, features = ["more_lengths", "zeroize"] }
 getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.17", default-features = false, features = ["js", "rdrand", "std"] }
 getrandom-9fbad63c4bcf4a8f = { package = "getrandom", version = "0.4.3", default-features = false, features = ["std", "sys_rng", "wasm_js"] }
@@ -247,7 +236,6 @@ itertools-3575ec1268b04181 = { package = "itertools", version = "0.15.0" }
 itertools-594e8ee84c453af0 = { package = "itertools", version = "0.13.0" }
 jiff = { version = "0.2.34", features = ["serde"] }
 lalrpop-util = { version = "0.19.12" }
-lazy_static = { version = "1.5.0", default-features = false, features = ["spin_no_std"] }
 libc = { version = "0.2.185", features = ["extra_traits"] }
 log = { version = "0.4.33", default-features = false, features = ["std"] }
 managed = { version = "0.8.0", default-features = false, features = ["alloc", "map"] }
@@ -300,7 +288,6 @@ slab = { version = "0.4.12" }
 slog = { version = "2.8.2", features = ["dynamic-keys", "max_level_trace", "release_max_level_debug", "release_max_level_trace"] }
 smallvec = { version = "1.15.1", default-features = false, features = ["const_new"] }
 spin = { version = "0.9.8" }
-spki = { version = "0.7.3", default-features = false, features = ["pem", "std"] }
 string_cache = { version = "0.8.9" }
 strum-2f80eeee3b1b6c7e = { package = "strum", version = "0.26.3", features = ["derive"] }
 strum-754bda37e0fb3874 = { package = "strum", version = "0.27.2", features = ["derive"] }
@@ -321,7 +308,6 @@ toml_datetime = { version = "0.6.11", default-features = false, features = ["ser
 toml_edit-3c51e837cfc5589a = { package = "toml_edit", version = "0.22.27", features = ["serde"] }
 toml_parser = { version = "1.1.2" }
 tracing = { version = "0.1.44", features = ["log"] }
-tufaceous-artifact = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", default-features = false, features = ["hubtools", "proptest", "schemars"] }
 typenum = { version = "1.20.1", default-features = false, features = ["const-generics"] }
 url = { version = "2.5.8", features = ["serde"] }
 usdt = { version = "0.6.0" }
