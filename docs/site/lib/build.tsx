@@ -1,10 +1,12 @@
 // Builds a docs site: renders every page listed in the site config to static
 // HTML in outDir, mirroring each page's path in the repo so relative links and
-// images keep working. Tailwind and Pagefind run over the output afterward.
+// images keep working, then indexes it for search. Tailwind runs over the
+// output afterward.
 
 import fs from 'node:fs'
 import path from 'node:path'
 
+import * as pagefind from 'pagefind'
 import type { ReactNode } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 
@@ -79,5 +81,22 @@ export async function buildSite({ site, repoRoot, outDir, fontsDir }: BuildOptio
     fs.cpSync(fontsDir, path.join(outDir, 'fonts'), { recursive: true })
   }
 
+  await writeSearchIndex(outDir)
+
   console.log(`Built ${pages.length} pages and ${links.assets.size} assets into ${outDir}`)
+}
+
+/**
+ * Index the HTML in `outDir` with Pagefind, which writes the index and the
+ * search UI's script and styles to outDir/pagefind. Only the part of each page
+ * marked `data-pagefind-body` is indexed, and pages without it are skipped.
+ */
+async function writeSearchIndex(outDir: string) {
+  const { index, errors } = await pagefind.createIndex()
+  if (!index) throw new Error(`Pagefind: ${errors.join('\n')}`)
+  const added = await index.addDirectory({ path: outDir })
+  const written = await index.writeFiles({ outputPath: path.join(outDir, 'pagefind') })
+  await pagefind.close()
+  const allErrors = [...added.errors, ...written.errors]
+  if (allErrors.length > 0) throw new Error(`Pagefind: ${allErrors.join('\n')}`)
 }

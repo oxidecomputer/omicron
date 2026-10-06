@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node --import tsx build.ts && tailwindcss --input style.css --output dist/style.css --minify && pagefind --site dist",
+    "build": "node --import tsx build.ts && tailwindcss --input style.css --output dist/style.css --minify",
     "tsc": "tsc",
     "unlisted": "node --import tsx unlisted.ts",
     "serve": "npm run build && pagefind --site dist --serve"
