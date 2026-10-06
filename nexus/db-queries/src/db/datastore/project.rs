@@ -355,3 +355,216 @@ impl DataStore {
             })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::net::Ipv4Addr;
+
+    use crate::db::DataStore;
+    use crate::db::datastore::DnsVersionUpdateBuilder;
+    use crate::db::pub_test_utils::TestDatabase;
+    use nexus_auth::authz;
+    use nexus_db_model::DnsGroup;
+    use nexus_db_model::InitialDnsGroup;
+    use nexus_db_model::Project;
+    use nexus_types::external_api::external_subnet::ExternalSubnetAllocator;
+    use nexus_types::external_api::external_subnet::ExternalSubnetCreate;
+    use nexus_types::external_api::ip_pool::PoolSelector;
+    use nexus_types::external_api::project::ProjectCreate;
+    use nexus_types::external_api::silo::SiloCreate;
+    use nexus_types::external_api::silo::SiloIdentityMode;
+    use nexus_types::external_api::silo::SiloQuotasCreate;
+    use nexus_types::external_api::subnet_pool::SubnetPoolCreate;
+    use nexus_types::external_api::subnet_pool::SubnetPoolMemberAdd;
+    use nexus_types::identity::Resource as _;
+    use omicron_common::address::IpVersion;
+    use omicron_common::api::external::ByteCount;
+    use omicron_common::api::external::Error;
+    use omicron_common::api::external::IdentityMetadataCreateParams;
+    use omicron_common::api::external::LookupType;
+    use omicron_test_utils::dev;
+    use omicron_uuid_kinds::GenericUuid as _;
+    use oxnet::IpNet;
+    use oxnet::Ipv4Net;
+
+    #[tokio::test]
+    async fn cannot_delete_project_with_outstanding_external_subnet() {
+        let logctx = dev::test_setup_log(
+            "cannot_delete_project_with_outstanding_external_subnet",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let opctx = db.opctx();
+
+        // Create the resource hierarchy. This starts with some dummy DNS data,
+        // and then the Silo itself.
+        let initial = InitialDnsGroup::new(
+            DnsGroup::External,
+            "dummy.oxide.test",
+            "test suite",
+            "test suite",
+            HashMap::new(),
+        );
+        DataStore::load_dns_data(
+            &db.datastore().pool_connection_for_tests().await.unwrap(),
+            initial,
+        )
+        .await
+        .expect("failed to load initial DNS zone");
+        let silo = db
+            .datastore()
+            .silo_create(
+                opctx,
+                opctx,
+                SiloCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: "silo".parse().unwrap(),
+                        description: String::new(),
+                    },
+                    identity_mode: SiloIdentityMode::LocalOnly,
+                    admin_group_name: None,
+                    tls_certificates: vec![],
+                    quotas: SiloQuotasCreate {
+                        cpus: i64::MAX,
+                        memory: ByteCount::try_from(u64::from(u32::MAX))
+                            .unwrap(),
+                        storage: ByteCount::try_from(u64::from(u32::MAX))
+                            .unwrap(),
+                    },
+                    mapped_fleet_roles: Default::default(),
+                },
+                &[],
+                DnsVersionUpdateBuilder::new(
+                    DnsGroup::External,
+                    String::new(),
+                    String::new(),
+                ),
+            )
+            .await
+            .expect("able to create silo");
+        let authz_silo = authz::Silo::new(
+            authz::FLEET,
+            silo.id(),
+            LookupType::ById(silo.id()),
+        );
+
+        // Then the project
+        let params = ProjectCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "proj".parse().unwrap(),
+                description: String::new(),
+            },
+            defaults: None,
+        };
+        let project = Project::new(silo.id(), params);
+        let (authz_project, db_project) = db
+            .datastore()
+            .project_create(opctx, project)
+            .await
+            .expect("able to create project");
+
+        // Then the subnet pool, linked to the silo as a default pool.
+        let subnet_pool = db
+            .datastore()
+            .create_subnet_pool(
+                opctx,
+                SubnetPoolCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: "subnet-pool".parse().unwrap(),
+                        description: String::new(),
+                    },
+                    ip_version: IpVersion::V4,
+                },
+            )
+            .await
+            .expect("able to create subnet pool");
+        let authz_pool = authz::SubnetPool::new(
+            authz::FLEET,
+            subnet_pool.id(),
+            LookupType::ById(subnet_pool.id().into_untyped_uuid()),
+        );
+        db.datastore()
+            .link_subnet_pool_to_silo(opctx, &authz_pool, &authz_silo, true)
+            .await
+            .expect("able to link subnet pool to silo");
+
+        // Next the subnet pool member.
+        let _pool_member = db
+            .datastore()
+            .add_subnet_pool_member(
+                opctx,
+                &authz_pool,
+                &subnet_pool,
+                &SubnetPoolMemberAdd {
+                    subnet: IpNet::V4(
+                        Ipv4Net::new(Ipv4Addr::new(10, 0, 0, 0), 24).unwrap(),
+                    ),
+                    min_prefix_length: Some(24),
+                    max_prefix_length: Some(28),
+                },
+            )
+            .await
+            .expect("able to create subnet pool member");
+
+        // Finally the actual subnet, in the project.
+        let subnet_name = "subnet";
+        let subnet = db
+            .datastore()
+            .create_external_subnet(
+                opctx,
+                &silo.id(),
+                &authz_project,
+                ExternalSubnetCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: subnet_name.parse().unwrap(),
+                        description: String::new(),
+                    },
+                    allocator: ExternalSubnetAllocator::Auto {
+                        prefix_length: 26,
+                        pool_selector: PoolSelector::Auto { ip_version: None },
+                    },
+                },
+            )
+            .await
+            .expect("able to create subnet in project");
+        let authz_subnet = authz::ExternalSubnet::new(
+            authz_project.clone(),
+            subnet.id(),
+            LookupType::ById(subnet.id().into_untyped_uuid()),
+        );
+
+        // We should not be able to delete the project now.
+        let err = db
+            .datastore()
+            .project_delete(opctx, &authz_project, &db_project)
+            .await
+            .expect_err("should not be able to delete project");
+        let Error::InvalidRequest { message } = &err else {
+            panic!(
+                "Expected an InvalidRequest when deleting \
+                a project while it still has an outstanding \
+                external subnet, but found: {err:#?}",
+            );
+        };
+        assert_eq!(
+            message.external_message(),
+            &format!(
+                "project to be deleted contains an external subnet: \
+                {subnet_name}"
+            ),
+        );
+
+        // Delete the subnet and try again, which should work.
+        db.datastore()
+            .delete_external_subnet(opctx, &authz_subnet)
+            .await
+            .expect("able to delete external subnet from project");
+        db.datastore()
+            .project_delete(opctx, &authz_project, &db_project)
+            .await
+            .expect("should be able to delete project after deleting subnet");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+}
