@@ -46,8 +46,9 @@ page chrome. Each doc's URL mirrors its path in the repo: `docs/how-to-run.adoc`
 is published at `docs/how-to-run/`, and a README at its directory, so
 `wicket/README.md` is at `wicket/`. Relative links and images in a doc are
 rewritten to match. The builder then runs [Pagefind](https://pagefind.app/) over
-the HTML in `dist/`, which writes the search index and UI to `dist/pagefind/`,
-all loaded client-side, so search needs no server. Last, Tailwind compiles
+the HTML in `dist/`, which writes the search index and its JS search API to
+`dist/pagefind/`, all loaded client-side, so search needs no server. The search
+modal is our own, in `lib/search.ts`, which the build copies to `dist/search.js` with its types stripped. Last, Tailwind compiles
 `style.css`, which pulls in the shared styles from `lib/site.css`, against the
 generated HTML.
 
@@ -56,8 +57,9 @@ generated HTML.
 The pages are static. React only runs at build time to render HTML; the pages
 aren't hydrated, so design system components render in their initial state, and
 anything that depends on React state or effects needs to be redone in small
-inline scripts in `lib/layout.tsx`. So far that's the mobile nav, the sidebar's
-scroll position, and the outline's active item.
+scripts. So far that's the mobile nav, the sidebar's scroll position, and the
+outline's active item, inline in `lib/layout.tsx`, and search, a custom element
+in `lib/search.ts` around markup that `lib/layout.tsx` renders.
 
 Hydrating would mean shipping about 60KB of React plus a client bundle and
 serialized page data, in place of under 2KB of inline script, and adding a

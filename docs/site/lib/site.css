@@ -7,7 +7,9 @@
 @import '@oxide/design-system/styles/dark.css';
 @import '@oxide/design-system/styles/light.css';
 @import '@oxide/design-system/components/asciidoc.css';
-@import './pagefind.css';
+
+/* Search results are rendered by lib/search.ts */
+@source './search.ts';
 
 /* Paths are relative to the built stylesheet. buildSite copies the fonts into
    dist/fonts when given a fontsDir; without them, these fall back to system fonts. */
@@ -90,4 +92,68 @@ body:has(#mobile-nav:popover-open) .menu-icon-close {
    instead of scrolling. */
 .admonitionblock .admonition-content {
   min-width: 0;
+}
+
+/* The search modal (lib/search.ts). The dialog's content fills it, so a click
+   on the backdrop is a click on the dialog itself. */
+oxide-search dialog {
+  margin: 10vh auto auto;
+  width: calc(100% - 2rem);
+  max-width: 640px;
+  max-height: 80vh;
+  padding: 0;
+  overflow: hidden;
+  &[open] {
+    display: flex;
+    flex-direction: column;
+  }
+  /* Once there's a query, hold the modal at its full height, so it doesn't
+     jump around as the number of results changes */
+  &:has([data-search-body]:not([hidden])) {
+    height: min(80vh, 640px);
+  }
+  &::backdrop {
+    background: var(--surface-scrim);
+  }
+}
+[data-search-body]:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+[data-search-list] {
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+/* Full screen on a phone, with room for the notch and home indicator */
+@media (max-width: 599px) {
+  oxide-search dialog {
+    margin: 0;
+    width: 100%;
+    max-width: none;
+    height: 100dvh;
+    max-height: none;
+    border: none;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
+      env(safe-area-inset-left);
+    &:has([data-search-body]:not([hidden])) {
+      height: 100dvh;
+    }
+  }
+}
+html:has(oxide-search dialog[open]) {
+  overflow: hidden;
+}
+[data-search-list] mark {
+  background: none;
+  color: var(--content-accent-secondary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+@media (min-width: 600px) {
+  [data-search-list] [aria-selected='true'] mark {
+    color: var(--content-accent);
+  }
 }

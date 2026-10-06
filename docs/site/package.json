@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node --import tsx build.ts && tailwindcss --input style.css --output dist/style.css --minify",
+    "build": "node --disable-warning=ExperimentalWarning --import tsx build.ts && tailwindcss --input style.css --output dist/style.css --minify",
     "fmt": "oxfmt",
     "tsc": "tsc",
     "unlisted": "node unlisted.ts",

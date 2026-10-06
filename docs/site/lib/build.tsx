@@ -4,6 +4,7 @@
 // output afterward.
 
 import fs from 'node:fs'
+import { stripTypeScriptTypes } from 'node:module'
 import path from 'node:path'
 
 import * as pagefind from 'pagefind'
@@ -93,13 +94,18 @@ export async function buildSite({ site, repoRoot, outDir, fontsDir }: BuildOptio
   }
 
   await writeSearchIndex(outDir)
+  // The search script is one module with no imports, so it only needs its types
+  // removed. tsconfig's erasableSyntaxOnly keeps it to syntax that allows that.
+  const searchTs = fs.readFileSync(path.join(import.meta.dirname, 'search.ts'), 'utf8')
+  fs.writeFileSync(path.join(outDir, 'search.js'), stripTypeScriptTypes(searchTs))
 
   console.log(`Built ${pages.length} pages and ${links.assets.size} assets into ${outDir}`)
 }
 
 /**
- * Index the HTML in `outDir` with Pagefind, which writes the index and the
- * search UI's script and styles to outDir/pagefind. Only the part of each page
+ * Index the HTML in `outDir` with Pagefind, which writes the index and its
+ * search API (pagefind.js) to outDir/pagefind, along with its own search UI,
+ * which the site doesn't use. Only the part of each page
  * marked `data-pagefind-body` is indexed, and pages without it are skipped.
  */
 async function writeSearchIndex(outDir: string) {
