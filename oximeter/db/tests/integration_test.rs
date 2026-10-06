@@ -8,6 +8,7 @@ use dropshot::test_util::log_prefix_for_test;
 use omicron_test_utils::dev::file_checksum;
 use omicron_test_utils::dev::poll;
 use omicron_test_utils::dev::test_setup_log;
+use oximeter_db::User;
 use oximeter_db::oxql::query::QueryAuthzScope;
 use oximeter_db::{Client, DbWrite, OxqlResult, Sample, TestDbWrite};
 use oximeter_test_utils::wait_for_keepers;
@@ -104,6 +105,7 @@ async fn test_schemas_disjoint() -> anyhow::Result<()> {
     deployment.deploy().context("failed to deploy")?;
 
     let client1 = Client::new_with_request_timeout(
+        User::Admin,
         deployment.native_addr(1.into()),
         log,
         request_timeout,
@@ -199,11 +201,13 @@ async fn test_cluster() -> anyhow::Result<()> {
     deployment.deploy().context("failed to deploy")?;
 
     let client1 = Client::new_with_request_timeout(
+        User::Admin,
         deployment.native_addr(1.into()),
         log,
         request_timeout,
     );
     let client2 = Client::new_with_request_timeout(
+        User::Admin,
         deployment.native_addr(2.into()),
         log,
         request_timeout,
@@ -289,6 +293,7 @@ async fn test_cluster() -> anyhow::Result<()> {
     // Add a 3rd clickhouse server and wait for it to come up
     deployment.add_server().expect("failed to launch a 3rd clickhouse server");
     let client3 = Client::new_with_request_timeout(
+        User::Admin,
         deployment.native_addr(3.into()),
         log,
         request_timeout,
@@ -390,6 +395,7 @@ async fn test_cluster() -> anyhow::Result<()> {
     // few hundred milliseconds. To shorten the length of our test, we create a
     // new client with a shorter timeout.
     let client1_short_timeout = Client::new_with_request_timeout(
+        User::Admin,
         deployment.native_addr(1.into()),
         log,
         Duration::from_secs(2),

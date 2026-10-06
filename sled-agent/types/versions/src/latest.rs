@@ -28,30 +28,25 @@ pub mod bootstore {
 }
 
 pub mod dataset {
-    pub use crate::v9::dataset::LocalStoragePathParam;
     pub use crate::v17::dataset::LocalStorageDatasetDeleteRequest;
     pub use crate::v17::dataset::LocalStorageDatasetEnsureRequest;
 }
 
 pub mod debug {
-    pub use crate::v1::debug::ChickenSwitchDestroyOrphanedDatasets;
-
     pub use crate::v3::debug::OperatorSwitchZonePolicy;
 }
 
 pub mod diagnostics {
     pub use crate::v1::diagnostics::SledDiagnosticsLogsDownloadPathParam;
     pub use crate::v1::diagnostics::SledDiagnosticsLogsDownloadPathParm;
-    pub use crate::v1::diagnostics::SledDiagnosticsLogsDownloadQueryParam;
+
+    pub use crate::v54::diagnostics::SledDiagnosticsLogsDownloadQueryParam;
 }
 
 pub mod disk {
     pub use crate::v1::disk::CompressionAlgorithm;
     pub use crate::v1::disk::DatasetConfig;
-    pub use crate::v1::disk::DiskEnsureBody;
     pub use crate::v1::disk::DiskIdentity;
-    pub use crate::v1::disk::DiskPathParam;
-    pub use crate::v1::disk::DiskStateRequested;
     pub use crate::v1::disk::DiskVariant;
     pub use crate::v1::disk::GzipLevel;
     pub use crate::v1::disk::M2Slot;
@@ -204,12 +199,15 @@ pub mod inventory {
     pub use crate::v51::inventory::ConfigReconcilerInventory;
     pub use crate::v51::inventory::ConfigReconcilerInventoryStatus;
     pub use crate::v51::inventory::ExternalDnsAddrs;
+    pub use crate::v51::inventory::MAX_ZONE_EXTERNAL_IPS;
     pub use crate::v51::inventory::NexusExternalIps;
     pub use crate::v51::inventory::OmicronSledConfig;
     pub use crate::v51::inventory::OmicronZoneConfig;
     pub use crate::v51::inventory::OmicronZoneType;
     pub use crate::v51::inventory::OmicronZonesConfig;
+    pub use crate::v51::inventory::ZoneExternalAddrsError;
     pub use crate::v51::inventory::ZoneSnatConfig;
+    pub use crate::v51::inventory::check_external_ip_count;
 
     pub use crate::v53::inventory::CurrentUpdateDisposition;
     pub use crate::v53::inventory::InstanceManagerStatus;

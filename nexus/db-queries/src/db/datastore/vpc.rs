@@ -3287,10 +3287,11 @@ mod tests {
 
         // Helper to convert a zone's nic into an insertable nic.
         let db_nic_from_zone = |zone_config: &BlueprintZoneConfig| {
-            let (_, nic) = zone_config
+            let nic = zone_config
                 .zone_type
                 .external_networking()
-                .expect("external networking for zone type");
+                .expect("external networking for zone type")
+                .nic();
             let ip = nic
                 .ip_config
                 .ipv4_addr()

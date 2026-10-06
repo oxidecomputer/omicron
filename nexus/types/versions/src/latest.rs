@@ -397,7 +397,6 @@ pub mod silo {
     pub use crate::v2025_11_20_00::silo::Silo;
     pub use crate::v2025_11_20_00::silo::SiloAuthSettings;
     pub use crate::v2025_11_20_00::silo::SiloAuthSettingsUpdate;
-    pub use crate::v2025_11_20_00::silo::SiloCreate;
     pub use crate::v2025_11_20_00::silo::SiloIdentityMode;
     pub use crate::v2025_11_20_00::silo::SiloQuotas;
     pub use crate::v2025_11_20_00::silo::SiloQuotasCreate;
@@ -407,6 +406,8 @@ pub mod silo {
     pub use crate::v2025_11_20_00::silo::UserProvisionType;
     pub use crate::v2025_11_20_00::silo::Utilization;
     pub use crate::v2025_11_20_00::silo::VirtualResourceCounts;
+
+    pub use crate::v2026_09_15_00::silo::SiloCreate;
 }
 
 pub mod snapshot {

@@ -169,13 +169,17 @@ impl<'a> From<&'a BTreeMap<SiloRole, BTreeSet<FleetRole>>>
 
 impl Silo {
     /// Creates a new database Silo object.
-    pub fn new(params: silo_types::SiloCreate) -> Result<Self, Error> {
-        Self::new_with_id(Uuid::new_v4(), params)
+    pub fn new(
+        params: silo_types::SiloCreate,
+        discoverable: bool,
+    ) -> Result<Self, Error> {
+        Self::new_with_id(Uuid::new_v4(), params, discoverable)
     }
 
     pub fn new_with_id(
         id: Uuid,
         params: silo_types::SiloCreate,
+        discoverable: bool,
     ) -> Result<Self, Error> {
         let mapped_fleet_roles = serde_json::to_value(
             &SerializedMappedFleetRoles::from(&params.mapped_fleet_roles).0,
@@ -188,7 +192,7 @@ impl Silo {
         })?;
         Ok(Self {
             identity: SiloIdentity::new(id, params.identity),
-            discoverable: params.discoverable,
+            discoverable,
             authentication_mode: params
                 .identity_mode
                 .authentication_mode()

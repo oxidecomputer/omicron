@@ -1,0 +1,193 @@
+CASE: all fields populated
+---------------------------------------------
+stdout:
+dpd reconciler:
+    current status:
+        currently running:
+            activation reason: periodic timer fired
+            started at: 1970-01-01T00:01:00.000Z
+            running for: 250ms
+    last completion:
+        activation reason: first execution on start
+        activation count: 1
+        completed at: 1970-01-01T00:00:00.000Z
+        ran for: 1.5s
+        detailed status:
+            port settings:
+                reconciliation completed
+                    ports unchanged: qsfp0, qsfp1
+                    ports cleared: qsfp2
+                    ports applied: qsfp5
+                    clear failures:
+                        * qsfp3: clear failed
+                        * qsfp4: clear failed again
+                    apply failures:
+                        * qsfp6: no
+                        * qsfp7: nope
+            NAT:
+                reconciliation completed
+                    zones unchanged:
+                        * zone 00000000-0000-0000-0000-000000000001
+                        * zone 00000000-0000-0000-0000-000000000002
+                    NAT entries removed:
+                        * 192.0.2.1 (ports 0-16383)
+                        * 192.0.2.3 (ports 0-16383)
+                    NAT entries created:
+                        * zone 00000000-0000-0000-0000-000000000003: 192.0.2.2 (ports 0-16383)
+                    remove failures:
+                        * 192.0.2.4 (ports 0-16383): remove failed
+                        * 192.0.2.5 (ports 0-16383): remove failed again
+                    create failures:
+                        * zone 00000000-0000-0000-0000-000000000004, 192.0.2.6 (ports 0-16383): create failed
+                        * zone 00000000-0000-0000-0000-000000000005, 192.0.2.7 (ports 0-16383): create failed again
+
+mgd reconciler:
+    current status:
+        idle
+    last completion:
+        activation reason: first execution on start
+        activation count: 1
+        completed at: 1970-01-01T00:00:00.000Z
+        ran for: 1.5s
+        detailed status:
+            static routes:
+                reconciliation completed
+                    routes left unchanged: 4
+                    failed to delete v4 routes: delete failed
+                    v4 routes added: 2
+                    v6 routes:
+                        deleted: 3
+                        added: 5
+            BGP:
+                reconciliation completed
+                    did change max paths: true
+                    routers:
+                        created: 1
+                        updated: 0
+                        deleted: 0
+                    origin4: unchanged
+                    origin6: unchanged
+                    shapers: unchanged
+                    checkers: unchanged
+                    numbered peers:
+                        created: 0
+                        updated: 2
+                        deleted: 1
+                    unnumbered peers: unchanged
+                    errors:
+                        * bgp failed
+                        * bgp failed again
+            BFD:
+                reconciliation completed
+                    peers unchanged: 198.51.100.1, 198.51.100.2
+                    peers added: 198.51.100.6
+                    peers removed: 198.51.100.3
+                    remove failures:
+                        * 198.51.100.4: remove failed
+                        * 198.51.100.5: remove failed again
+                    add failures:
+                        * 198.51.100.7: add failed
+                        * 198.51.100.8: add failed again
+
+lldpd reconciler:
+    current status:
+        idle
+    last completion:
+        activation reason: first execution on start
+        activation count: 1
+        completed at: 1970-01-01T00:00:00.000Z
+        ran for: 1.5s
+        detailed status:
+            successfully reconciled 2 ports:
+                * qsfp0: Enabled
+                * qsfp1: Disabled
+
+uplinkd reconciler:
+    current status:
+        idle
+    last completion:
+        activation reason: first execution on start
+        activation count: 1
+        completed at: 1970-01-01T00:00:00.000Z
+        ran for: 1.5s
+        detailed status:
+            successfully reconciled 2 ports:
+                * qsfp0: 192.0.2.10/24, 2001:db8::10/64
+                * qsfp1: 192.0.2.11/24
+
+---------------------------------------------
+stderr:
+=============================================
+CASE: all fields empty
+---------------------------------------------
+stdout:
+dpd reconciler:
+    current status:
+        idle
+    last completion:
+        activation reason: first execution on start
+        activation count: 1
+        completed at: 1970-01-01T00:00:00.000Z
+        ran for: 1.5s
+        detailed status:
+            port settings:
+                reconciliation completed
+                    clear failures: none
+                    apply failures: none
+            NAT:
+                reconciliation completed
+                    zones unchanged: none
+                    NAT entries removed: none
+                    NAT entries created: none
+                    remove failures: none
+                    create failures: none
+
+mgd reconciler:
+    current status:
+        idle
+    last completion:
+        activation reason: first execution on start
+        activation count: 1
+        completed at: 1970-01-01T00:00:00.000Z
+        ran for: 1.5s
+        detailed status:
+            static routes:
+                reconciliation completed
+                    routes left unchanged: 0
+                    v4 routes modified: none
+                    v6 routes modified: none
+            BGP:
+                reconciliation completed
+                    did change max paths: false
+                    routers: unchanged
+                    origin4: unchanged
+                    origin6: unchanged
+                    shapers: unchanged
+                    checkers: unchanged
+                    numbered peers: unchanged
+                    unnumbered peers: unchanged
+                    errors: none
+            BFD:
+                reconciliation completed
+                    remove failures: none
+                    add failures: none
+
+lldpd reconciler:
+    current status:
+        idle
+    last completion:
+        activation reason: first execution on start
+        activation count: 1
+        completed at: 1970-01-01T00:00:00.000Z
+        ran for: 1.5s
+        detailed status:
+            successfully reconciled 0 ports
+
+uplinkd reconciler:
+    current status:
+        idle
+    last completion: none
+
+---------------------------------------------
+stderr:
+=============================================

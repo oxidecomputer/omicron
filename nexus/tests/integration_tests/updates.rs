@@ -700,7 +700,7 @@ async fn test_update_status() -> Result<()> {
 
     let counts = status.components_by_release_version;
     assert_eq!(counts.get("install dataset").unwrap(), &7);
-    assert_eq!(counts.get("unknown").unwrap(), &11);
+    assert_eq!(counts.get("unknown").unwrap(), &14);
 
     // hold onto this to compare it to later values
     let time_last_step_planned = status.time_last_step_planned;
@@ -732,7 +732,7 @@ async fn test_update_status() -> Result<()> {
 
     let counts = status.components_by_release_version;
     assert_eq!(counts.get("install dataset").unwrap(), &7);
-    assert_eq!(counts.get("unknown").unwrap(), &11);
+    assert_eq!(counts.get("unknown").unwrap(), &14);
 
     // do it again so there are two, so both versions are associated with tuf
     // repos
@@ -761,7 +761,7 @@ async fn test_update_status() -> Result<()> {
 
     let counts = status.components_by_release_version;
     assert_eq!(counts.get("install dataset").unwrap(), &7);
-    assert_eq!(counts.get("unknown").unwrap(), &11);
+    assert_eq!(counts.get("unknown").unwrap(), &14);
 
     // Setting the target release for mupdate recovery only updates the
     // target_release row, but the blueprint stays in its initial

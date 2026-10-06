@@ -1030,12 +1030,16 @@ impl ExampleSystemBuilder {
         for sled_cfg in blueprint.sleds.values() {
             for zone in sled_cfg.zones.iter() {
                 let service_id = zone.id;
-                if let Some((external_ip, nic)) =
-                    zone.zone_type.external_networking()
-                {
-                    input_builder
-                        .add_omicron_zone_external_ip(service_id, external_ip)
-                        .expect("failed to add Omicron zone external IP");
+                if let Some(networking) = zone.zone_type.external_networking() {
+                    for external_ip in networking.external_ips() {
+                        input_builder
+                            .add_omicron_zone_external_ip(
+                                service_id,
+                                external_ip,
+                            )
+                            .expect("failed to add Omicron zone external IP");
+                    }
+                    let nic = networking.nic();
                     input_builder
                         .add_omicron_zone_nic(
                             service_id,

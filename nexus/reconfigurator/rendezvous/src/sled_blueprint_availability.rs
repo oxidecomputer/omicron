@@ -25,7 +25,7 @@ use slog_error_chain::InlineErrorChain;
 ///
 /// `blueprint_sleds` should contain a [`SledBlueprintAvailabilityInput`] for
 /// every sled in the blueprint, including decommissioned sleds.
-pub(crate) async fn reconcile_sled_blueprint_availability(
+pub(crate) async fn reconcile(
     opctx: &OpContext,
     datastore: &DataStore,
     blueprint_id: BlueprintUuid,
@@ -542,7 +542,7 @@ mod tests {
                     &prep,
                 ).await;
 
-                let result_stats = reconcile_sled_blueprint_availability(
+                let result_stats = reconcile(
                     opctx,
                     datastore,
                     blueprint_id,
@@ -621,14 +621,9 @@ mod tests {
             .expect("distinct sled IDs")
         };
 
-        let err = reconcile_sled_blueprint_availability(
-            opctx,
-            datastore,
-            bp,
-            inputs(),
-        )
-        .await
-        .expect_err("the injected constraint fails the pass");
+        let err = reconcile(opctx, datastore, bp, inputs())
+            .await
+            .expect_err("the injected constraint fails the pass");
         let message = format!("{err:#}");
         let expected_prefix = format!(
             "failed to write availability for sled {rejected} after 2 \
@@ -673,14 +668,9 @@ mod tests {
         .await
         .expect("dropped the test constraint");
 
-        let stats = reconcile_sled_blueprint_availability(
-            opctx,
-            datastore,
-            bp,
-            inputs(),
-        )
-        .await
-        .expect("the retry succeeds once the constraint is gone");
+        let stats = reconcile(opctx, datastore, bp, inputs())
+            .await
+            .expect("the retry succeeds once the constraint is gone");
         assert_eq!(
             stats,
             SledBlueprintAvailabilityRendezvousStats {
@@ -743,7 +733,7 @@ mod tests {
             .await
             .expect("seeded the stored row");
 
-        let stats = reconcile_sled_blueprint_availability(
+        let stats = reconcile(
             opctx,
             datastore,
             bp_reconciled,

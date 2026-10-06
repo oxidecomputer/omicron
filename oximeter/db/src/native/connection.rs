@@ -9,7 +9,6 @@ use super::Error;
 use super::block::Block;
 use super::io::packet::client::Encoder;
 use super::io::packet::server::Decoder;
-use super::packets::client::OXIMETER_HELLO;
 use super::packets::client::Packet as ClientPacket;
 use super::packets::client::Query;
 use super::packets::client::QueryResult;
@@ -21,6 +20,7 @@ use super::packets::server::Packet as ServerPacket;
 use super::packets::server::Progress;
 use super::packets::server::REVISION;
 use crate::native::packets::client::Settings;
+pub use crate::native::packets::client::User;
 use crate::native::probes;
 use futures::SinkExt as _;
 use futures::StreamExt as _;
@@ -39,7 +39,9 @@ pub type Pool = qorb::pool::Pool<Connection>;
 
 /// A type for making connections to a ClickHouse server.
 #[derive(Clone, Copy, Debug)]
-pub struct Connector;
+pub struct Connector {
+    pub user: User,
+}
 
 impl From<Error> for QorbError {
     fn from(e: Error) -> Self {
@@ -55,7 +57,9 @@ impl backend::Connector for Connector {
         &self,
         backend: &backend::Backend,
     ) -> Result<Self::Connection, QorbError> {
-        Connection::new(backend.address).await.map_err(QorbError::from)
+        Connection::new(backend.address, self.user)
+            .await
+            .map_err(QorbError::from)
     }
 
     async fn is_valid(
@@ -106,6 +110,8 @@ pub enum CancelResult {
 pub struct Connection {
     /// Our local socket address.
     address: SocketAddr,
+    /// Our user name.
+    user: User,
     /// The identity of the server we're talking to.
     server_info: ServerHello,
     /// A reader for decoding packets from the server.
@@ -139,7 +145,7 @@ impl Connection {
     ///
     /// This will connect to the server and exchange the initial handshake
     /// messages.
-    pub async fn new(address: SocketAddr) -> Result<Self, Error> {
+    pub async fn new(address: SocketAddr, user: User) -> Result<Self, Error> {
         let addr = address.ip();
         let stream = TcpStream::connect(address).await?;
         let address = stream.local_addr()?;
@@ -147,9 +153,10 @@ impl Connection {
         let mut reader = FramedRead::new(reader, Decoder { addr });
         let mut writer = FramedWrite::new(writer, Encoder { addr });
         let server_info =
-            Self::exchange_hello(&mut reader, &mut writer).await?;
+            Self::exchange_hello(user, &mut reader, &mut writer).await?;
         Ok(Self {
             address,
+            user,
             server_info,
             reader,
             writer,
@@ -167,12 +174,11 @@ impl Connection {
     ///
     /// This is run automatically at the time we connnect to it.
     async fn exchange_hello(
+        user: User,
         reader: &mut FramedRead<OwnedReadHalf, Decoder>,
         writer: &mut FramedWrite<OwnedWriteHalf, Encoder>,
     ) -> Result<ServerHello, Error> {
-        writer
-            .send(ClientPacket::Hello(Box::new(OXIMETER_HELLO.clone())))
-            .await?;
+        writer.send(ClientPacket::Hello(Box::new(user.hello()))).await?;
         let hello = match reader.next().await {
             Some(Ok(ServerPacket::Hello(hello))) => hello,
             Some(Ok(packet)) => {
@@ -411,6 +417,7 @@ impl Connection {
         let query = Query::new_with_settings(
             query_result.id,
             self.address,
+            self.user,
             query,
             settings,
         );
@@ -512,18 +519,23 @@ impl Connection {
 #[cfg(test)]
 mod tests {
     use super::Connector;
+    use crate::User;
+    use crate::native::Error;
     use crate::native::block::Block;
     use crate::native::block::Column;
     use crate::native::block::DataType;
     use crate::native::block::ValueArray;
     use crate::native::connection::Connection;
+    use crate::native::packets::client::QueryResult;
     use crate::native::packets::client::Setting;
     use crate::native::packets::client::Settings;
     use indexmap::IndexMap;
     use omicron_test_utils::dev::clickhouse::ClickHouseDeployment;
     use omicron_test_utils::dev::test_setup_log;
     use qorb::backend::Connector as _;
+    use std::net::SocketAddr;
     use std::sync::Arc;
+    use strum::IntoEnumIterator as _;
     use tokio::sync::Mutex;
     use tokio::sync::oneshot;
     use uuid::Uuid;
@@ -534,7 +546,11 @@ mod tests {
         let mut db = ClickHouseDeployment::new_single_node(&logctx)
             .await
             .expect("Failed to start ClickHouse");
-        let _ = Connection::new(db.native_address().into()).await.unwrap();
+        for user in User::iter() {
+            let _ = Connection::new(db.native_address().into(), user)
+                .await
+                .unwrap();
+        }
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -545,8 +561,9 @@ mod tests {
         let mut db = ClickHouseDeployment::new_single_node(&logctx)
             .await
             .expect("Failed to start ClickHouse");
-        let mut conn =
-            Connection::new(db.native_address().into()).await.unwrap();
+        let mut conn = Connection::new(db.native_address().into(), User::Admin)
+            .await
+            .unwrap();
         let data = conn
             .query(
                 Uuid::new_v4(),
@@ -575,8 +592,9 @@ mod tests {
         let mut db = ClickHouseDeployment::new_single_node(&logctx)
             .await
             .expect("Failed to start ClickHouse");
-        let mut conn =
-            Connection::new(db.native_address().into()).await.unwrap();
+        let mut conn = Connection::new(db.native_address().into(), User::Admin)
+            .await
+            .unwrap();
         let data = conn
             .query(Uuid::new_v4(), "SELECT toNullable(number) as number FROM system.numbers LIMIT 10;")
             .await
@@ -611,8 +629,9 @@ mod tests {
         let mut db = ClickHouseDeployment::new_single_node(&logctx)
             .await
             .expect("Failed to start ClickHouse");
-        let mut conn =
-            Connection::new(db.native_address().into()).await.unwrap();
+        let mut conn = Connection::new(db.native_address().into(), User::Admin)
+            .await
+            .unwrap();
         let data = conn
             .query(
                 Uuid::new_v4(),
@@ -651,8 +670,9 @@ mod tests {
         let mut db = ClickHouseDeployment::new_single_node(&logctx)
             .await
             .expect("Failed to start ClickHouse");
-        let mut conn =
-            Connection::new(db.native_address().into()).await.unwrap();
+        let mut conn = Connection::new(db.native_address().into(), User::Admin)
+            .await
+            .unwrap();
         let data = conn
             .query(Uuid::new_v4(), "SELECT [1, NULL] AS arr;")
             .await
@@ -692,8 +712,9 @@ mod tests {
         let mut db = ClickHouseDeployment::new_single_node(&logctx)
             .await
             .expect("Failed to start ClickHouse");
-        let mut conn =
-            Connection::new(db.native_address().into()).await.unwrap();
+        let mut conn = Connection::new(db.native_address().into(), User::Admin)
+            .await
+            .unwrap();
         tokio::time::timeout(
             std::time::Duration::from_millis(100),
             conn.cancel(),
@@ -722,7 +743,9 @@ mod tests {
         let mut db = ClickHouseDeployment::new_single_node(&logctx)
             .await
             .expect("Failed to start ClickHouse");
-        let conn = Connection::new(db.native_address().into()).await.unwrap();
+        let conn = Connection::new(db.native_address().into(), User::Admin)
+            .await
+            .unwrap();
 
         // All methods on `Connection` take an exclusive reference to self,
         // which means you can't really cancel a query without a bit of
@@ -789,8 +812,9 @@ mod tests {
         let mut db = ClickHouseDeployment::new_single_node(&logctx)
             .await
             .expect("Failed to start ClickHouse");
-        let mut conn =
-            Connection::new(db.native_address().into()).await.unwrap();
+        let mut conn = Connection::new(db.native_address().into(), User::Admin)
+            .await
+            .unwrap();
         conn.query(
             Uuid::new_v4(),
             "CREATE TABLE tmp (x UInt8, name String) ENGINE = Memory",
@@ -846,8 +870,9 @@ mod tests {
         let mut db = ClickHouseDeployment::new_single_node(&logctx)
             .await
             .expect("Failed to start ClickHouse");
-        let mut conn =
-            Connection::new(db.native_address().into()).await.unwrap();
+        let mut conn = Connection::new(db.native_address().into(), User::Admin)
+            .await
+            .unwrap();
         conn.query(Uuid::new_v4(), "CREATE TABLE tmp (x UUID) ENGINE = Memory")
             .await
             .expect("Failed to create test table");
@@ -892,8 +917,9 @@ mod tests {
         let mut db = ClickHouseDeployment::new_single_node(&logctx)
             .await
             .expect("Failed to start ClickHouse");
-        let mut conn =
-            Connection::new(db.native_address().into()).await.unwrap();
+        let mut conn = Connection::new(db.native_address().into(), User::Admin)
+            .await
+            .unwrap();
         assert!(!conn.is_poisoned, "new connection should not be poisoned");
 
         // Run a query that gives us an unsupported data type. We only learn
@@ -912,7 +938,7 @@ mod tests {
 
         // Sanity check, but make sure we report to qorb that the connections
         // are unhealthy.
-        let connector = Connector;
+        let connector = Connector { user: User::Admin };
         assert!(connector.is_valid(&mut conn).await.is_err());
         assert!(connector.on_recycle(&mut conn).await.is_err());
 
@@ -927,8 +953,9 @@ mod tests {
         let mut db = ClickHouseDeployment::new_single_node(&logctx)
             .await
             .expect("Failed to start ClickHouse");
-        let mut conn =
-            Connection::new(db.native_address().into()).await.unwrap();
+        let mut conn = Connection::new(db.native_address().into(), User::Admin)
+            .await
+            .unwrap();
         assert!(!conn.is_poisoned, "new connection should not be poisoned");
 
         // Run an infinite query and drop it right away. We should poison the
@@ -955,7 +982,9 @@ mod tests {
             .await
             .expect("Failed to start ClickHouse");
         let mut conn =
-            Connection::new(db.native_address().into()).await.unwrap();
+            Connection::new(db.native_address().into(), User::Reader)
+                .await
+                .unwrap();
 
         // Simple query with some non-empty settings.
         let mut settings = Settings::new();
@@ -981,6 +1010,352 @@ mod tests {
         };
         assert_eq!(values.len(), 1);
         assert_eq!(values[0], "1", "server failed to apply settings");
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    // ClickHouse error codes that indicate a query was refused for
+    // access-control, read-only, or settings-constraint reasons -- i.e. the
+    // permission model in `smf/clickhouse/config.xml` did its job, rather than
+    // the query failing for some unrelated reason (a syntax error, a missing
+    // table, etc.).
+    const DENIED_CODES: &[i32] = &[
+        crate::native::errors::READONLY,
+        crate::native::errors::QUERY_IS_PROHIBITED,
+        crate::native::errors::SETTING_CONSTRAINT_VIOLATION,
+        crate::native::errors::ACCESS_DENIED,
+    ];
+
+    // Assert that a query was rejected by the server for a permission-related
+    // reason, rather than succeeding or failing for some other cause.
+    #[track_caller]
+    fn assert_denied(
+        user: User,
+        label: &str,
+        result: Result<QueryResult, Error>,
+    ) {
+        let user = user.username();
+        match result {
+            Ok(_) => panic!(
+                "{user}: {label}: expected the query to be rejected, but it \
+                 succeeded"
+            ),
+            Err(Error::Exception { exceptions }) => {
+                let code = exceptions
+                    .first()
+                    .expect("server exception should have at least one entry")
+                    .code;
+                assert!(
+                    DENIED_CODES.contains(&code),
+                    "{user}: {label}: expected a permission/read-only error \
+                     (one of {DENIED_CODES:?}), but got code {code}:\n\
+                     {exceptions:#?}",
+                );
+            }
+            Err(other) => panic!(
+                "{user}: {label}: expected a server exception rejecting the \
+                 query, but got a different error: {other:?}"
+            ),
+        }
+    }
+
+    // Build a single-column `UInt8` block, for inserting test data.
+    fn u8_block(name: &str, values: Vec<u8>) -> Block {
+        Block {
+            name: String::new(),
+            info: Default::default(),
+            columns: IndexMap::from([(
+                String::from(name),
+                Column::from(ValueArray::from(values)),
+            )]),
+        }
+    }
+
+    async fn setup_database_for_permission_test(addr: SocketAddr) {
+        let mut admin = Connection::new(addr, User::Admin).await.unwrap();
+        admin
+            .query(Uuid::new_v4(), "CREATE DATABASE IF NOT EXISTS oximeter")
+            .await
+            .expect("admin setup: create database");
+        admin
+            .query(
+                Uuid::new_v4(),
+                "CREATE TABLE oximeter.samples (x UInt8) \
+                 ENGINE = MergeTree ORDER BY x",
+            )
+            .await
+            .expect("admin setup: create table");
+        admin
+            .insert(
+                Uuid::new_v4(),
+                "INSERT INTO oximeter.samples FORMAT Native",
+                u8_block("x", vec![0, 1, 2]),
+            )
+            .await
+            .expect("admin setup: insert data");
+
+        // A second database the reader has no grant on, to prove its
+        // access is scoped to `oximeter`.
+        admin
+            .query(Uuid::new_v4(), "CREATE DATABASE IF NOT EXISTS not_oximeter")
+            .await
+            .expect("admin setup: create other database");
+        admin
+            .query(
+                Uuid::new_v4(),
+                "CREATE TABLE not_oximeter.samples (x UInt8) \
+                 ENGINE = MergeTree ORDER BY x",
+            )
+            .await
+            .expect("admin setup: create table in other database");
+
+        // Force `system.query_log` to exist (it is created lazily on the
+        // first flush), so we're testing perms not missing tables.
+        admin
+            .query(Uuid::new_v4(), "SELECT 1")
+            .await
+            .expect("admin setup: warm query");
+        admin
+            .query(Uuid::new_v4(), "SYSTEM FLUSH LOGS")
+            .await
+            .expect("admin setup: flush logs");
+    }
+
+    // Assert the permissions shared by the `reader` and `writer` users.
+    //
+    // Both have nearly the same restrictions, with the writer only allowed to
+    // write into oximeter tables.
+    async fn assert_shared_permissions(conn: &mut Connection, user: User) {
+        // Allowed: read the `oximeter` database.
+        let result = conn
+            .query(Uuid::new_v4(), "SELECT x FROM oximeter.samples ORDER BY x")
+            .await
+            .expect("should be able to SELECT from oximeter");
+        assert_eq!(
+            result.data.as_ref().expect("expected a data block").n_rows(),
+            3,
+        );
+
+        // Denied: reading any *other* user database.
+        assert_denied(
+            user,
+            "SELECT from another database",
+            conn.query(Uuid::new_v4(), "SELECT x FROM not_oximeter.samples")
+                .await,
+        );
+
+        // Denied: reading `system` tables such as `system.query_log`.
+        assert_denied(
+            user,
+            "SELECT from system.query_log",
+            conn.query(Uuid::new_v4(), "SELECT * FROM system.query_log").await,
+        );
+
+        // Denied: creating databases or tables, inside `oximeter` or out.
+        assert_denied(
+            user,
+            "CREATE DATABASE oximeter",
+            conn.query(
+                Uuid::new_v4(),
+                "CREATE DATABASE IF NOT EXISTS oximeter",
+            )
+            .await,
+        );
+        assert_denied(
+            user,
+            "CREATE DATABASE outside oximeter",
+            conn.query(Uuid::new_v4(), "CREATE DATABASE some_other_db").await,
+        );
+        assert_denied(
+            user,
+            "CREATE TABLE in oximeter",
+            conn.query(
+                Uuid::new_v4(),
+                "CREATE TABLE oximeter.other (x UInt8) ENGINE = Memory",
+            )
+            .await,
+        );
+        assert_denied(
+            user,
+            "CREATE TABLE outside oximeter",
+            conn.query(
+                Uuid::new_v4(),
+                "CREATE TABLE default.foo (x UInt8) ENGINE = Memory",
+            )
+            .await,
+        );
+
+        // Denied: mutating or dropping data.
+        assert_denied(
+            user,
+            "ALTER UPDATE",
+            conn.query(
+                Uuid::new_v4(),
+                "ALTER TABLE oximeter.samples UPDATE x = 0 WHERE 1",
+            )
+            .await,
+        );
+        assert_denied(
+            user,
+            "DROP TABLE",
+            conn.query(Uuid::new_v4(), "DROP TABLE oximeter.samples").await,
+        );
+        assert_denied(
+            user,
+            "DROP DATABASE",
+            conn.query(Uuid::new_v4(), "DROP DATABASE oximeter").await,
+        );
+
+        // Denied: modifying access control.
+        assert_denied(
+            user,
+            "GRANT to self",
+            conn.query(
+                Uuid::new_v4(),
+                &format!("GRANT SELECT ON oximeter.* TO {}", user.username()),
+            )
+            .await,
+        );
+        assert_denied(
+            user,
+            "CREATE USER",
+            conn.query(Uuid::new_v4(), "CREATE USER eve").await,
+        );
+
+        // Denied: table functions, which might need temporary tables.
+        assert_table_functions_denied(conn, user).await;
+    }
+
+    async fn assert_table_functions_denied(conn: &mut Connection, user: User) {
+        assert_denied(
+            user,
+            "url() table function",
+            conn.query(
+                Uuid::new_v4(),
+                "SELECT * FROM url('http://localhost:1/', 'CSV', 'a UInt8')",
+            )
+            .await,
+        );
+        assert_denied(
+            user,
+            "meilisearch() table function",
+            conn.query(
+                Uuid::new_v4(),
+                "SELECT * FROM meilisearch('http://localhost:1/', 'index', 'key')",
+            )
+            .await,
+        );
+        assert_denied(
+            user,
+            "postgresql() table function",
+            conn.query(
+                Uuid::new_v4(),
+                "SELECT * FROM postgresql('https://localhost:1/', 'my_db', \
+                'my_table', 'user', 'pass')",
+            )
+            .await,
+        );
+        assert_denied(
+            user,
+            "file() table function",
+            conn.query(
+                Uuid::new_v4(),
+                "SELECT * FROM file('nonexistent.csv', 'CSV', 'a UInt8')",
+            )
+            .await,
+        );
+
+        // A source-backed table function needs BOTH the `CREATE TEMPORARY
+        // TABLE` privilege and the relevant SOURCES privilege, and neither user
+        assert_denied(
+            user,
+            "CREATE TEMPORARY TABLE",
+            conn.query(
+                Uuid::new_v4(),
+                "CREATE TEMPORARY TABLE t (x UInt8) ENGINE = Memory",
+            )
+            .await,
+        );
+    }
+
+    #[tokio::test]
+    async fn test_writer_user_permissions() {
+        let logctx = test_setup_log("test_writer_user_permissions");
+        let mut db = ClickHouseDeployment::new_single_node(&logctx)
+            .await
+            .expect("Failed to start ClickHouse");
+        setup_database_for_permission_test(db.native_address().into()).await;
+        let mut conn =
+            Connection::new(db.native_address().into(), User::Writer)
+                .await
+                .unwrap();
+
+        assert_shared_permissions(&mut conn, User::Writer).await;
+
+        // Writing into `oximeter` tables that already exist is the only thing
+        // the writer can do that the reader can't.
+        conn.insert(
+            Uuid::new_v4(),
+            "INSERT INTO oximeter.samples FORMAT Native",
+            u8_block("x", vec![0, 1, 2]),
+        )
+        .await
+        .expect("writer should be able to insert into oximeter tables");
+        let result = conn
+            .query(Uuid::new_v4(), "SELECT x FROM oximeter.samples ORDER BY x")
+            .await
+            .expect("writer should be able to read oximeter tables");
+        assert_eq!(
+            result.data.as_ref().expect("expected a data block").n_rows(),
+            6, // 3 from setup, 3 inserted above.
+        );
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_reader_user_permissions() {
+        let logctx = test_setup_log("test_reader_user_permissions");
+        let mut db = ClickHouseDeployment::new_single_node(&logctx)
+            .await
+            .expect("Failed to start ClickHouse");
+
+        setup_database_for_permission_test(db.native_address().into()).await;
+        let mut conn =
+            Connection::new(db.native_address().into(), User::Reader)
+                .await
+                .unwrap();
+
+        assert_shared_permissions(&mut conn, User::Reader).await;
+
+        // Unlike the writer, the reader cannot insert.
+        assert_denied(
+            User::Reader,
+            "INSERT",
+            conn.query(Uuid::new_v4(), "INSERT INTO oximeter.samples SELECT 3")
+                .await,
+        );
+
+        // The reader cannot escape its read-only/DDL constraints via SET, since
+        // those settings are marked `<readonly/>` in its profile's
+        // `<constraints>`.
+        assert_denied(
+            User::Reader,
+            "escalate allow_ddl",
+            conn.query(Uuid::new_v4(), "SET allow_ddl = 1").await,
+        );
+        assert_denied(
+            User::Reader,
+            "escape readonly",
+            conn.query(Uuid::new_v4(), "SET readonly = 0").await,
+        );
+        assert_denied(
+            User::Reader,
+            "raise max_execution_time",
+            conn.query(Uuid::new_v4(), "SET max_execution_time = 0").await,
+        );
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();

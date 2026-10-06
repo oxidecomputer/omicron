@@ -828,7 +828,6 @@ mod test {
                 description: String::new(),
             },
             quotas: silo::SiloQuotasCreate::empty(),
-            discoverable: false,
             identity_mode,
             admin_group_name: None,
             tls_certificates: vec![],
@@ -836,9 +835,9 @@ mod test {
         };
 
         if let Some(silo_id) = silo_id {
-            Silo::new_with_id(silo_id, params)
+            Silo::new_with_id(silo_id, params, false)
         } else {
-            Silo::new(params)
+            Silo::new(params, false)
         }
         .unwrap()
     }

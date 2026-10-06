@@ -86,3 +86,10 @@ pub async fn ensure_partition_layout(
 pub fn is_oxide_sled() -> anyhow::Result<bool> {
     Ok(false)
 }
+
+/// No-op for non-illumos systems.
+pub fn find_softnpu_device(
+    _log: &Logger,
+) -> Result<bool, crate::SwitchDetectError> {
+    Ok(false)
+}

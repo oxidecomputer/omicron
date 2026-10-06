@@ -107,3 +107,5 @@ pub mod v2026_08_14_01;
 pub mod v2026_09_08_00;
 #[path = "alert_payload/mod.rs"]
 pub mod v2026_09_11_00;
+#[path = "remove_silo_discoverable/mod.rs"]
+pub mod v2026_09_15_00;

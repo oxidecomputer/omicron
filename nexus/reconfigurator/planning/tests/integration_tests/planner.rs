@@ -34,10 +34,14 @@ use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::CockroachDbSettings;
-use nexus_types::deployment::OmicronZoneExternalSnatIp;
+use nexus_types::deployment::OmicronZoneExternalSnat;
+use nexus_types::deployment::OmicronZoneExternalSnatIpv6;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdates;
+use nexus_types::deployment::PlannerConfig;
+use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
 use nexus_types::deployment::SledDisk;
+use nexus_types::deployment::SledUpdateRebootPolicy;
 use nexus_types::deployment::TargetReleaseDescription;
 use nexus_types::deployment::ZoneRunningStatus;
 use nexus_types::deployment::blueprint_zone_type;
@@ -85,7 +89,7 @@ use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
 use sled_agent_types::inventory::NetworkInterface;
 use sled_agent_types::inventory::NetworkInterfaceKind;
 use sled_agent_types::inventory::OmicronZoneType;
-use sled_agent_types::inventory::SourceNatConfigGeneric;
+use sled_agent_types::inventory::SourceNatConfigV6;
 use sled_agent_types::inventory::ZoneKind;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
@@ -685,17 +689,23 @@ fn test_reuse_external_ips_from_expunged_zones() {
     println!("2 -> 3 (maximum Nexus):\n{}", diff.display());
 
     // Planning succeeded, but let's prove that we reused the IP address!
-    let expunged_ip = zone.zone_type.external_networking().unwrap().0.ip();
+    let expunged_ip = zone
+        .zone_type
+        .external_networking()
+        .unwrap()
+        .external_ips()
+        .next()
+        .unwrap()
+        .ip();
     let new_zone = blueprint3
         .sleds
         .values()
         .flat_map(|c| c.zones.iter())
         .find(|zone| {
             zone.disposition == BlueprintZoneDisposition::InService
-                && zone
-                    .zone_type
-                    .external_networking()
-                    .map_or(false, |(ip, _)| expunged_ip == ip.ip())
+                && zone.zone_type.external_networking().map_or(false, |net| {
+                    net.external_ips().any(|ip| expunged_ip == ip.ip())
+                })
         })
         .expect("couldn't find that the external IP was reused");
     println!(
@@ -887,9 +897,15 @@ fn test_reuse_external_dns_ips_from_expunged_zones() {
     let mut ips = blueprint3
         .in_service_zones()
         .filter_map(|(_id, zone)| {
-            zone.zone_type
-                .is_external_dns()
-                .then(|| zone.zone_type.external_networking().unwrap().0.ip())
+            zone.zone_type.is_external_dns().then(|| {
+                zone.zone_type
+                    .external_networking()
+                    .unwrap()
+                    .external_ips()
+                    .next()
+                    .unwrap()
+                    .ip()
+            })
         })
         .collect::<Vec<IpAddr>>();
     ips.sort();
@@ -4111,15 +4127,17 @@ fn test_update_boundary_ntp() {
                         primary: true,
                         slot: 0,
                     },
-                    external_ip: OmicronZoneExternalSnatIp {
-                        id: ExternalIpUuid::new_v4(),
-                        snat_cfg: SourceNatConfigGeneric::new(
-                            IpAddr::V6(Ipv6Addr::LOCALHOST),
-                            0,
-                            0x4000 - 1,
-                        )
-                        .unwrap(),
-                    },
+                    external_ip: OmicronZoneExternalSnat::Ipv6Only(
+                        OmicronZoneExternalSnatIpv6 {
+                            id: ExternalIpUuid::new_v4(),
+                            snat_cfg: SourceNatConfigV6::new(
+                                Ipv6Addr::LOCALHOST,
+                                0,
+                                0x4000 - 1,
+                            )
+                            .unwrap(),
+                        },
+                    ),
                 },
             );
             Ok(())
@@ -4275,7 +4293,7 @@ fn test_update_boundary_ntp() {
             let config = &sled
                 .last_reconciliation
                 .as_ref()
-                .expect("Sled missing ledger? {sled:?}")
+                .unwrap_or_else(|| panic!("Sled missing ledger? {sled:?}"))
                 .last_reconciled_config;
 
             let Some(zone_id) =
@@ -5513,6 +5531,16 @@ fn test_zone_update_ordering_respects_dependency_dag() {
     .expect("loaded example system");
     let blueprint1 = sim.assert_latest_blueprint_is_blippy_clean();
 
+    // Ensure the simulator is set to evacuate sleds.
+    sim.change_description("set planner config to evacuate sleds", |desc| {
+        desc.set_planner_config(PlannerConfig {
+            sled_update_reboot_policy: SledUpdateRebootPolicy::Evacuate,
+            disruption_policy: ReconfiguratorDisruptionPolicy::default(),
+        });
+        Ok(())
+    })
+    .unwrap();
+
     // In order to walk through a complete update of the example system, we need
     // to first assemble metadata for a target release that we're updating to.
     // We use made-up version strings and artifact hashes.
@@ -5545,7 +5573,7 @@ fn test_zone_update_ordering_respects_dependency_dag() {
 
     /// The maximum number of iterations of the planner before we give up,
     /// assuming it must be in an infinite loop.
-    const MAX_PLANNING_ITERATIONS: usize = 100;
+    const MAX_PLANNING_ITERATIONS: usize = 200;
 
     // Next, walk through a complete system update by running the planner in a
     // loop and updating the example system each time to reflect the change that
@@ -5596,9 +5624,14 @@ fn test_zone_update_ordering_respects_dependency_dag() {
                 }
             };
         } else if let Some(p) = trace.get_mut(&units.host_os) {
-            // No pending host OS updates and we've previously seen
-            // activity: all host OS updates are complete.
-            if p.all_at_target.is_none() {
+            // No pending host OS updates and we've previously seen activity. We
+            // might be done, but also need to check for any evacuating sleds -
+            // a sled still marked as evacuating will get an update in a future
+            // planning pass.
+            let any_sled_evacuating = blueprint.sleds.values().any(|sled| {
+                !sled.update_disposition.kind.is_available_for_provisioning()
+            });
+            if p.all_at_target.is_none() && !any_sled_evacuating {
                 p.all_at_target = Some(i);
             }
         }
@@ -5719,6 +5752,25 @@ fn test_zone_update_ordering_respects_dependency_dag() {
         PendingMgsUpdates::new(),
         "after the blueprint stopped changing, no pending MGS updates should \
          remain",
+    );
+
+    // Every sled that was evacuated for its host OS update should have been
+    // restored to `Available`.
+    let still_evacuating: Vec<_> = final_blueprint
+        .sleds
+        .iter()
+        .filter(|(_, sled)| {
+            !sled.update_disposition.kind.is_available_for_provisioning()
+        })
+        .map(|(sled_id, sled)| {
+            format!("  sled {sled_id}: {}", sled.update_disposition)
+        })
+        .collect();
+    assert!(
+        still_evacuating.is_empty(),
+        "after the blueprint stopped changing, no sleds should still be \
+         evacuating:\n{}",
+        still_evacuating.join("\n"),
     );
 
     // Verify the trace against the DAG: every zone-based unit and host_os
