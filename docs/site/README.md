@@ -45,11 +45,12 @@ theme. `lib/links.ts` rewrites links between docs, and `lib/layout.tsx` is the
 page chrome. Each doc's URL mirrors its path in the repo: `docs/how-to-run.adoc`
 is published at `docs/how-to-run/`, and a README at its directory, so
 `wicket/README.md` is at `wicket/`. Relative links and images in a doc are
-rewritten to match. The builder then runs [Pagefind](https://pagefind.app/) over
-the HTML in `dist/`, which writes the search index and its JS search API to
-`dist/pagefind/`, all loaded client-side, so search needs no server. The search
-modal is our own, in `lib/search.ts`, and gets its results from
-`lib/search-api.ts`; the build copies both to `dist/` with their types stripped.
+rewritten to match. The builder then indexes the pages with the search provider
+named in `nav.ts`, which writes its index and its client script to
+`dist/search/`, all loaded client-side, so search needs no server. Providers are
+in `lib/search/`, and `lib/search/types.ts` is the interface between them and
+the site. The search modal, in `lib/search.ts`, loads the provider's client the
+first time it opens; the build copies both to `dist/` with their types stripped.
 Last, Tailwind compiles `style.css`, which pulls in the shared styles from
 `lib/site.css`, against the generated HTML.
 
@@ -71,12 +72,12 @@ regions, not whole pages.
 
 ## Search quality
 
-`lib/search-api.ts` adjusts Pagefind's results: it drops matches that only come
-from Pagefind's fallback to a short prefix of the query (so "sdfsdf" doesn't
-match every `-s` flag), and for queries of two or more words it puts pages and
-sections with the query as a phrase in a heading first. `search-eval/` checks
-that against queries in `search-eval/cases.ts`, running the same code in Node
-against the built site:
+`lib/search/pagefind-client.ts` adjusts Pagefind's results: it drops matches
+that only come from Pagefind's fallback to a short prefix of the query (so
+"sdfsdf" doesn't match every `-s` flag), and for queries of two or more words it
+puts pages and sections with the query as a phrase in a heading first.
+`search-eval/` checks that against queries in `search-eval/cases.ts`, running the
+site's search provider's client in Node against the built index:
 
 ```
 npm run build
@@ -88,6 +89,6 @@ A case only checks that a good page is somewhere in the top few results, so a
 ranking change can pass every case and still make results worse. Each run saves
 the top 3 results for every case, with their sections, and prints the cases
 whose top 3 changed since the previous run. So run the eval before and after
-changing `lib/search-api.ts`, and read what moved. The eval imports that file
-directly, so there's no need to rebuild in between. When a search gives a bad
+changing the ranking, and read what moved. The eval imports the client
+directly, so a change to it needs no rebuild in between. When a search gives a bad
 result, add it as a case.

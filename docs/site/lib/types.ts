@@ -1,5 +1,7 @@
 import type { ComponentType, SVGProps } from 'react'
 
+import type { SearchProvider } from './search/types.ts'
+
 /** Site config: the pages to publish and how to present them */
 export type Site = {
   /** Project name, e.g. `Omicron` */
@@ -10,6 +12,8 @@ export type Site = {
   repo: string
   /** Branch that source links point at */
   branch: string
+  /** Leave out for no search */
+  search?: SearchProvider
   sections: {
     title: string
     /** 16px icon from `@oxide/design-system/icons/react`, shown on the homepage */

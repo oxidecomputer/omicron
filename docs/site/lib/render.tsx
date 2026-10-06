@@ -69,23 +69,7 @@ async function renderAdoc(file: string, src: string): Promise<Rendered> {
       }}
     />,
   )
-  // Section headings carry their ID on an empty span inside the heading. Move
-  // it to the heading itself, which is where Pagefind looks for anchors when it
-  // splits a page into per-section search results.
-  // If react-asciidoc's markup changes and this stops matching, search results
-  // lose their section links with no error, so warn.
-  let moved = 0
-  const body = html.replace(
-    /<(h[1-6])([^>]*)><span class="anchor" id="([^"]+)" aria-hidden="true"><\/span>/g,
-    (_, tag: string, rest: string, id: string) => {
-      moved++
-      return `<${tag} id="${id}"${rest}>`
-    },
-  )
-  if (document.sections.length > 0 && moved === 0) {
-    console.warn(`${src}: no heading anchors found; Pagefind won't link to sections`)
-  }
-  return { title: document.title, body, toc: document.sections.map(toToc) }
+  return { title: document.title, body: html, toc: document.sections.map(toToc) }
 }
 
 // Code blocks get the same shiki theme and markup as AsciiDoc listings, so

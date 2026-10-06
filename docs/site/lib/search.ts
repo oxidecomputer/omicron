@@ -1,14 +1,17 @@
 // The search modal, a custom element around markup that layout.tsx renders.
 // buildSite compiles this file to search.js at the site root. Results come
-// from Pagefind's JS API through search-api.ts and are rendered here, not by
-// Pagefind's own UI, which clears the list on every keystroke and is hard to
-// restyle.
+// from the site's search engine (see search/types.ts), which this loads the
+// first time the modal opens.
 //
 // The input is an ARIA combobox: focus stays in it while the arrow keys move
 // the selected option (aria-activedescendant) and Enter opens it. Class names
 // in this file are picked up by Tailwind through an @source in site.css.
 
-import { loadPagefind, search, type Pagefind, type Result } from './search-api.js'
+import type { Engine, LoadEngine, Result } from './search/types.ts'
+
+const root = new URL('./', import.meta.url)
+/** Where the build puts the search engine's client and index */
+const dir = new URL('search/', root)
 
 // Selection styles only apply from 600px up, like the oxide.computer docs:
 // on a phone there are no arrow keys and tapping is the way in.
@@ -34,7 +37,7 @@ function el<K extends keyof HTMLElementTagNameMap>(
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform)
 
 class OxideSearch extends HTMLElement {
-  #pagefind?: Promise<Pagefind>
+  #engine?: Promise<Engine>
   #search = 0
   #options: HTMLAnchorElement[] = []
   #selected = -1
@@ -105,12 +108,14 @@ class OxideSearch extends HTMLElement {
     this.#dialog.showModal()
     this.#input.select()
     this.#setExpanded(this.#options.length > 0)
-    this.#loadPagefind()
+    this.#loadEngine()
   }
 
-  #loadPagefind() {
-    this.#pagefind ??= loadPagefind(new URL('pagefind/', import.meta.url))
-    return this.#pagefind
+  #loadEngine() {
+    this.#engine ??= import(new URL('engine.js', dir).href).then(({ load }: { load: LoadEngine }) =>
+      load(dir),
+    )
+    return this.#engine
   }
 
   async #update() {
@@ -135,8 +140,8 @@ class OxideSearch extends HTMLElement {
     }, 300)
     this.#list.setAttribute('aria-busy', 'true')
 
-    const shown = await search(await this.#loadPagefind(), query, 100)
-    if (!shown || id !== this.#search) return
+    const shown = await (await this.#loadEngine()).search(query)
+    if (id !== this.#search) return
     clearTimeout(slow)
 
     this.#render(shown)
@@ -172,12 +177,12 @@ class OxideSearch extends HTMLElement {
       title.setAttribute('aria-hidden', 'true')
       const group = el('div', cls.group, { role: 'group' } as Partial<HTMLDivElement>)
       group.setAttribute('aria-labelledby', titleId)
-      const [page, pageText] = option(r.url, titleId, r.excerpt)
+      const [page, pageText] = option(new URL(r.url, root).href, titleId, r.excerpt)
       page.append(pageText)
       group.append(title, page)
       for (const sub of r.sections) {
         const headingId = `search-option-${n}-heading`
-        const [a, text] = option(sub.url, headingId, sub.excerpt)
+        const [a, text] = option(new URL(sub.url, root).href, headingId, sub.excerpt)
         a.append(el('span', cls.heading, { id: headingId, textContent: sub.title }), text)
         group.append(a)
       }

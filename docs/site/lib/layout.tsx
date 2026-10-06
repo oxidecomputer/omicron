@@ -162,7 +162,7 @@ function Shell({
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>{title}</title>
         <link rel="stylesheet" href={`${root}/style.css`} />
-        <script type="module" src={`${root}/search.js`} />
+        {site.search && <script type="module" src={`${root}/search.js`} />}
         {/* Dark by default, like other Oxide sites, unless the OS asks for light */}
         <script>{`if (matchMedia('(prefers-color-scheme: light)').matches) document.documentElement.dataset.theme = 'light'`}</script>
       </head>
@@ -177,7 +177,7 @@ function Shell({
             </span>
           </a>
           <div className="ml-auto flex items-center gap-2">
-            <Search />
+            {site.search && <Search />}
             <a
               href={site.repo}
               aria-label="GitHub"
@@ -430,15 +430,13 @@ export function DocPage({
           <main className="600:px-6 900:px-12 px-4 py-10">
             <div className="mx-auto max-w-[760px]">
               <div className="text-mono-sm text-tertiary mb-2">{page.section}</div>
-              {/* Only this part of the page goes in the search index */}
-              <div data-pagefind-body="" className="wrap-break-word">
+              <div className="wrap-break-word">
                 <h1 className="text-sans-2xl 600:text-sans-3xl text-raise mb-2">
                   <Html html={page.title} />
                 </h1>
                 <a
                   href={sourceUrl(site, page.src)}
                   className="text-mono-xs text-tertiary hover:text-secondary mb-10 inline-block"
-                  data-pagefind-ignore=""
                 >
                   {page.src}
                 </a>

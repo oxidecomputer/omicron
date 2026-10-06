@@ -13,6 +13,7 @@ import {
   SoftwareUpdate16Icon,
 } from '@oxide/design-system/icons/react'
 
+import { pagefindSearch } from './lib/search/pagefind.ts'
 import type { Site } from './lib/types.ts'
 
 export const site: Site = {
@@ -20,6 +21,7 @@ export const site: Site = {
   tagline: 'developer docs',
   repo: 'https://github.com/oxidecomputer/omicron',
   branch: 'main',
+  search: pagefindSearch,
   sections: [
     {
       title: 'Getting started',

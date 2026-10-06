@@ -7,13 +7,13 @@ import fs from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import path from 'node:path'
 
-import * as pagefind from 'pagefind'
 import type { ReactNode } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 import { DocPage, IndexPage } from './layout.tsx'
 import { createLinkRewriter, outPath } from './links.ts'
 import { renderDoc } from './render.tsx'
+import type { SearchPage, SearchProvider } from './search/types.ts'
 import type { Section, Site } from './types.ts'
 
 export type BuildOptions = {
@@ -51,7 +51,7 @@ export async function buildSite({ site, repoRoot, outDir, fontsDir }: BuildOptio
   // foo.adoc and foo/README.md would both be foo/. The build also writes the
   // search index and fonts to directories of their own.
   const bySrc = new Map([
-    ['pagefind/', 'the search index'],
+    ['search/', 'the search index'],
     ['fonts/', 'the fonts'],
   ])
   for (const { out, src } of pages) {
@@ -70,14 +70,17 @@ export async function buildSite({ site, repoRoot, outDir, fontsDir }: BuildOptio
 
   const links = createLinkRewriter({ site, repoRoot, pages })
   writeHtml('index.html', <IndexPage site={site} sections={sections} />)
+  const searchPages: SearchPage[] = []
   for (const [i, page] of pages.entries()) {
+    const body = links.rewrite(page.body, page)
+    searchPages.push({ url: page.out, title: page.title, html: body })
     writeHtml(
       `${page.out}index.html`,
       <DocPage
         site={site}
         sections={sections}
         page={page}
-        body={links.rewrite(page.body, page)}
+        body={body}
         prev={pages[i - 1]}
         next={pages[i + 1]}
       />,
@@ -93,30 +96,25 @@ export async function buildSite({ site, repoRoot, outDir, fontsDir }: BuildOptio
     fs.cpSync(fontsDir, path.join(outDir, 'fonts'), { recursive: true })
   }
 
-  await writeSearchIndex(outDir)
-  // The search scripts only need their types removed: search.ts imports
-  // search-api.ts as './search-api.js', which is its name once built, and
-  // tsconfig's erasableSyntaxOnly keeps them to syntax that allows that
-  for (const name of ['search', 'search-api']) {
-    const ts = fs.readFileSync(path.join(import.meta.dirname, `${name}.ts`), 'utf8')
-    fs.writeFileSync(path.join(outDir, `${name}.js`), stripTypeScriptTypes(ts))
-  }
+  if (site.search) await writeSearch(site.search, searchPages, outDir)
 
   console.log(`Built ${pages.length} pages and ${links.assets.size} assets into ${outDir}`)
 }
 
 /**
- * Index the HTML in `outDir` with Pagefind, which writes the index and its
- * search API (pagefind.js) to outDir/pagefind, along with its own search UI,
- * which the site doesn't use. Only the part of each page
- * marked `data-pagefind-body` is indexed, and pages without it are skipped.
+ * Index the pages with the site's search provider into outDir/search, and
+ * write the scripts the browser runs: the search modal, and the provider's
+ * client. Both only need their types removed (tsconfig's erasableSyntaxOnly
+ * keeps them to syntax that allows that) since they only import types.
  */
-async function writeSearchIndex(outDir: string) {
-  const { index, errors } = await pagefind.createIndex()
-  if (!index) throw new Error(`Pagefind: ${errors.join('\n')}`)
-  const added = await index.addDirectory({ path: outDir })
-  const written = await index.writeFiles({ outputPath: path.join(outDir, 'pagefind') })
-  await pagefind.close()
-  const allErrors = [...added.errors, ...written.errors]
-  if (allErrors.length > 0) throw new Error(`Pagefind: ${allErrors.join('\n')}`)
+async function writeSearch(provider: SearchProvider, pages: SearchPage[], outDir: string) {
+  const dir = path.join(outDir, 'search')
+  fs.mkdirSync(dir, { recursive: true })
+  await provider.build(pages, dir)
+  const strip = (file: string) => stripTypeScriptTypes(fs.readFileSync(file, 'utf8'))
+  fs.writeFileSync(
+    path.join(outDir, 'search.js'),
+    strip(path.join(import.meta.dirname, 'search.ts')),
+  )
+  fs.writeFileSync(path.join(dir, 'engine.js'), strip(provider.client))
 }

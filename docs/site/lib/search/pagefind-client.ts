@@ -1,17 +1,16 @@
-// Search on Pagefind's JS API: loading it, and turning a query into the pages
-// and sections to show, in order. The search modal (search.ts) renders what
-// this returns. No DOM here, so the search eval (search-eval/) runs the same
-// code in Node.
+// The client for Pagefind search (pagefind.ts): loading Pagefind's JS API, and
+// turning a query into the pages and sections to show, in order.
+
+import type { LoadEngine, Result, SectionResult } from './types.ts'
 
 /** The parts of Pagefind's search API used here */
-export type Pagefind = {
-  options(opts: { basePath: string }): Promise<void>
+type Pagefind = {
+  options(opts: { basePath: string; baseUrl: string }): Promise<void>
   init(): Promise<void>
   search(term: string): Promise<SearchResponse>
-  debouncedSearch(term: string, opts: object, ms: number): Promise<SearchResponse | null>
 }
 type SearchResponse = { results: { words: number[]; data(): Promise<ResultData> }[] }
-export type SubResult = { title: string; url: string; excerpt: string; locations: number[] }
+type SubResult = SectionResult & { locations: number[] }
 type ResultData = {
   url: string
   content: string
@@ -21,9 +20,6 @@ type ResultData = {
 }
 /** `words` are the indexes Pagefind matched in `tokens`, the page text split on whitespace */
 type Match = ResultData & { words: number[]; tokens: string[] }
-
-/** A page to show, with up to 3 of its sections */
-export type Result = { url: string; title: string; excerpt: string; sections: SubResult[] }
 
 const parts = (s: string) =>
   s
@@ -97,28 +93,11 @@ function sectionsToShow(terms: string[], r: Match) {
   return subs.filter((s) => top.includes(s))
 }
 
-/** Load Pagefind from `dir`, the URL of the pagefind/ directory the build writes */
-export async function loadPagefind(dir: URL): Promise<Pagefind> {
-  const pagefind: Pagefind = await import(new URL('pagefind.js', dir).href)
-  await pagefind.options({ basePath: dir.pathname })
-  await pagefind.init()
-  return pagefind
-}
+/** Pagefind's URLs start with `/`, its base URL */
+const relative = (url: string) => url.slice(1)
 
-/**
- * Search for `query`, or return null if a later call superseded this one
- * during the debounce. The site is small enough to load every result up front,
- * so a caller can swap its list in one go.
- */
-export async function search(
-  pagefind: Pagefind,
-  query: string,
-  debounceMs = 0,
-): Promise<Result[] | null> {
-  const response = debounceMs
-    ? await pagefind.debouncedSearch(query, {}, debounceMs)
-    : await pagefind.search(query)
-  if (!response) return null
+async function search(pagefind: Pagefind, query: string): Promise<Result[]> {
+  const response = await pagefind.search(query)
   const matches: Match[] = await Promise.all(
     response.results.map(async (r) => {
       const data = await r.data()
@@ -128,9 +107,20 @@ export async function search(
   const terms = parts(query)
   const real = matches.filter((r) => isRealMatch(terms, r))
   return putFirst(real, (r) => pageHasPhrase(terms, r)).map((r) => ({
-    url: r.url,
+    url: relative(r.url),
     title: r.meta.title ?? r.url,
     excerpt: r.excerpt,
-    sections: sectionsToShow(terms, r),
+    sections: sectionsToShow(terms, r).map((s) => ({
+      title: s.title,
+      url: relative(s.url),
+      excerpt: s.excerpt,
+    })),
   }))
+}
+
+export const load: LoadEngine = async (dir) => {
+  const pagefind: Pagefind = await import(new URL('pagefind.js', dir).href)
+  await pagefind.options({ basePath: dir.pathname, baseUrl: '/' })
+  await pagefind.init()
+  return { search: (query) => search(pagefind, query) }
 }
