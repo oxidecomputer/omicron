@@ -1,3 +1,4 @@
+    total racks:                  2
     total ereports received:     15
       new ereports ingested:      9
     total HTTP requests sent:    12

@@ -1111,7 +1111,6 @@ pub struct SpEreportIngesterStatus {
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct SpEreporterStatus {
-    pub rack_id: RackUuid,
     pub sp_type: SpType,
     pub slot: u16,
     pub ignition_type: gateway_types::ignition::SpIgnitionSystemType,
@@ -1119,8 +1118,10 @@ pub struct SpEreporterStatus {
     pub status: EreporterStatus,
 }
 
-#[derive(Serialize, Deserialize, Default, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct EreporterStatus {
+    /// the UUID of the rack in which this thing lives.
+    pub rack_id: RackUuid,
     /// total number of ereports received from this reporter
     pub ereports_received: usize,
     /// number of new ereports ingested from this reporter (this may be less

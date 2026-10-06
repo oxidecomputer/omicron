@@ -276,7 +276,6 @@ impl SpEreportIngester {
                             )
                             .await;
                         SpEreporterStatus {
-                            rack_id,
                             sp_type: type_,
                             slot,
                             ignition_type,
@@ -332,13 +331,22 @@ impl Ingester {
                         errors: vec![format!(
                             "failed to query for latest ereport: {error:#}"
                         )],
-                        ..Default::default()
+                        rack_id,
+                        ereports_received: 0,
+                        new_ereports: 0,
+                        requests: 0,
                     };
                 }
             };
 
         let mut params = EreportQueryParams::from_latest(latest);
-        let mut status = EreporterStatus::default();
+        let mut status = EreporterStatus {
+            rack_id,
+            ereports_received: 0,
+            new_ereports: 0,
+            requests: 0,
+            errors: Vec::new(),
+        };
 
         // Continue requesting ereports from this SP in a loop until we have
         // received all its ereports.
