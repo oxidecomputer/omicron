@@ -2,8 +2,7 @@ import path from 'node:path'
 
 import type { ReactNode } from 'react'
 
-import { site } from './nav.ts'
-import type { Page, Section, TocItem } from './types.ts'
+import type { Page, Section, Site, TocItem } from './types.ts'
 
 // Pagefind's search UI web components
 declare module 'react' {
@@ -35,10 +34,12 @@ const relHref = (from: string, to: string) => path.posix.relative(path.posix.dir
 const rootFrom = (from: string) => relHref(from, '.') || '.'
 
 function Shell({
+  site,
   title,
   root,
   children,
 }: {
+  site: Site
   title: string
   root: string
   children: ReactNode
@@ -115,17 +116,19 @@ function Nav({ sections, current }: { sections: Section[]; current: Page }) {
  * it runs before the sidebar is painted at the wrong position. The key includes
  * the repo because every site on a GitHub Pages domain shares one origin.
  */
-const sidebarScrollKey = JSON.stringify(`sidebar-scroll:${site.repo}`)
-const sidebarScrollScript = `{
+const sidebarScrollScript = (site: Site) => {
+  const key = JSON.stringify(`sidebar-scroll:${site.repo}`)
+  return `{
   const nav = document.getElementById('sidebar')
-  try { nav.scrollTop = Number(sessionStorage.getItem(${sidebarScrollKey})) } catch {}
+  try { nav.scrollTop = Number(sessionStorage.getItem(${key})) } catch {}
   const n = nav.getBoundingClientRect()
   const l = nav.querySelector('[aria-current=page]').getBoundingClientRect()
   if (l.top < n.top || l.bottom > n.bottom) nav.scrollTop += l.top - n.top - (n.height - l.height) / 2
   addEventListener('pagehide', () => {
-    try { sessionStorage.setItem(${sidebarScrollKey}, nav.scrollTop) } catch {}
+    try { sessionStorage.setItem(${key}, nav.scrollTop) } catch {}
   })
 }`
+}
 
 const Toc = ({ items }: { items: TocItem[] }) => (
   <ul className="space-y-1.5">
@@ -145,12 +148,14 @@ const Toc = ({ items }: { items: TocItem[] }) => (
 )
 
 export function DocPage({
+  site,
   sections,
   page,
   body,
   prev,
   next,
 }: {
+  site: Site
   sections: Section[]
   page: Page
   body: string
@@ -158,7 +163,7 @@ export function DocPage({
   next?: Page
 }) {
   return (
-    <Shell title={`${plain(page.title)} | ${site.title}`} root={rootFrom(page.out)}>
+    <Shell site={site} title={`${plain(page.title)} | ${site.title}`} root={rootFrom(page.out)}>
       <div className="flex">
         <nav
           id="sidebar"
@@ -166,7 +171,7 @@ export function DocPage({
         >
           <Nav sections={sections} current={page} />
         </nav>
-        <script>{sidebarScrollScript}</script>
+        <script>{sidebarScrollScript(site)}</script>
         <main className="900:px-12 min-w-0 flex-1 px-6 py-10">
           <div className="mx-auto max-w-[760px]">
             <details className="900:hidden border-secondary mb-8 rounded border px-4 py-3">
@@ -223,9 +228,9 @@ export function DocPage({
   )
 }
 
-export function IndexPage({ sections }: { sections: Section[] }) {
+export function IndexPage({ site, sections }: { site: Site; sections: Section[] }) {
   return (
-    <Shell title={`${site.title} developer docs`} root=".">
+    <Shell site={site} title={`${site.title} developer docs`} root=".">
       <main className="mx-auto max-w-[1100px] px-6 py-16">
         <h1 className="text-sans-4xl text-raise mb-4">{site.title} developer docs</h1>
         <p className="text-sans-xl text-secondary mb-14 max-w-[640px]">{site.description}</p>

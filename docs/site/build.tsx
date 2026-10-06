@@ -236,12 +236,13 @@ function writeHtml(out: string, element: ReactNode) {
 
 fs.rmSync(outDir, { recursive: true, force: true })
 
-writeHtml('index.html', <IndexPage sections={sections} />)
+writeHtml('index.html', <IndexPage site={site} sections={sections} />)
 for (const [i, page] of pages.entries()) {
   const body = rewriteUrls(page.body, page)
   writeHtml(
     page.out,
     <DocPage
+      site={site}
       sections={sections}
       page={page}
       body={body}
