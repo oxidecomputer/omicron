@@ -14,6 +14,7 @@ use crate::switch_zone_slot::ThisSledSwitchSlot;
 use bootstrap_agent_lockstep_types::scrimlet_reconcilers::ddmd::DdmdReconcilerStatus;
 use ddm_admin_client::Client;
 use ddm_api_types::external_peers::ExternalPeers;
+use illumos_utils::addrobj::AddrObject;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use slog::Logger;
 use slog::info;
@@ -82,14 +83,15 @@ impl Reconciler for DdmdReconciler {
 /// Put the port in the addrobj format that dendrite expects as a string. This
 /// string passes through maghemite into dendrite without being interpreted by
 /// maghemite. Since the string is user specified and maghemite should not know
-/// about the format of addrobjs, but should just use them directly, it cannot create
-/// this string on its own.
+/// about the format of addrobjs, but should just use them directly, it cannot
+/// create this string on its own.
 ///
-/// A better solution would be for there to be a specific addrobj type that can
-/// be passed directly from omicron through maghemite to dendrite and which can
-/// encode the correct format itself.
+/// A better solution would be to pass the `AddrObject` down directly and pass
+// it through to dendrite. This requires changes to dendrite and maghemite APIs.
 fn ddmd_specific_addrobj(port: &str) -> String {
-    format!("tfport{}_0/ll", port)
+    AddrObject::link_local(&format!("tfport{port}_0"))
+        .expect("no slash in interface name")
+        .to_string()
 }
 
 #[cfg(test)]

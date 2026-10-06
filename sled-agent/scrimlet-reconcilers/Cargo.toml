@@ -21,6 +21,7 @@ gateway-client.workspace = true
 gateway-types.workspace = true
 http.workspace = true
 iddqd.workspace = true
+illumos-utils.workspace = true
 macaddr.workspace = true
 mg-admin-client.workspace = true
 mg-api-types.workspace = true
