@@ -4,7 +4,7 @@
 //
 // See README.md in this directory for how the site is built and deployed.
 
-import type { Site } from './types.ts'
+import type { Site } from './lib/types.ts'
 
 export const site: Site = {
   title: 'Omicron',

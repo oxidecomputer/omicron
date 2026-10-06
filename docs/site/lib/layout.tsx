@@ -1,7 +1,6 @@
-import path from 'node:path'
-
 import type { ReactNode } from 'react'
 
+import { relHref } from './links.ts'
 import type { Page, Section, Site, TocItem } from './types.ts'
 
 // Pagefind's search UI web components
@@ -26,9 +25,6 @@ const plain = (html: string) =>
     .replace(/&amp;/g, '&')
 
 const Html = ({ html }: { html: string }) => <span dangerouslySetInnerHTML={{ __html: html }} />
-
-/** Relative URL from the page at `from` to the file at `to`, both relative to dist/ */
-const relHref = (from: string, to: string) => path.posix.relative(path.posix.dirname(from), to)
 
 /** Relative path from the page at `from` to the site root, e.g. `../..` */
 const rootFrom = (from: string) => relHref(from, '.') || '.'

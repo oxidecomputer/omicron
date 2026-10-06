@@ -35,11 +35,13 @@ console checkout).
 
 ## How it works
 
-`build.tsx` renders AsciiDoc the same way the RFD site and docs.oxide.computer do,
-with `@oxide/react-asciidoc` and the AsciiDoc components and styles from
-`@oxide/design-system`. Markdown goes through `markdown-exit`, with code blocks
-highlighted by shiki in the design system's theme. `layout.tsx` is the page
-chrome. The output mirrors each doc's path in the repo, so `docs/how-to-run.adoc`
+`build.ts` passes the config in `nav.ts` to the builder in `lib/`, which has
+nothing Omicron-specific in it. `lib/render.tsx` renders AsciiDoc the same way the
+RFD site and docs.oxide.computer do, with `@oxide/react-asciidoc` and the AsciiDoc
+components and styles from `@oxide/design-system`. Markdown goes through
+`markdown-exit`, with code blocks highlighted by shiki in the design system's theme.
+`lib/links.ts` rewrites links between docs, and `lib/layout.tsx` is the page chrome.
+The output mirrors each doc's path in the repo, so `docs/how-to-run.adoc`
 becomes `dist/docs/how-to-run.html` and relative links keep working. Tailwind
 compiles `style.css` against the generated HTML. [Pagefind](https://pagefind.app/)
 then indexes the HTML in `dist/` and writes the search index and UI to

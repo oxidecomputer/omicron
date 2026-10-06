@@ -8,7 +8,7 @@
 @import '@oxide/design-system/styles/light.css';
 @import '@oxide/design-system/components/asciidoc.css';
 
-/* Font files are copied into dist/fonts in CI; see build.tsx */
+/* Font files are copied into dist/fonts in CI; see build.ts */
 @font-face {
   font-family: 'GT America Mono';
   src: url('fonts/GT-America-Mono-Regular-OCC.woff2') format('woff2');
