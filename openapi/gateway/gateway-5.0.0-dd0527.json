@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "4.0.0"
+    "version": "5.0.0"
   },
   "paths": {
     "/ignition": {
@@ -147,6 +147,31 @@
                   "items": {
                     "$ref": "#/components/schemas/SpIdentifier"
                   }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/local/rack-id": {
+      "get": {
+        "summary": "Returns the rack UUID of the rack this management gateway service is",
+        "description": "located in.\n\nAll service processors accessed via this gateway can be assumed to be located in the rack with this ID.\n\nIf the rack UUID has not yet been set (i.e. because RSS has not yet run), this endpoint returns a 503 Service Unavailable error.",
+        "operationId": "rack_id_get",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RackId"
                 }
               }
             }
@@ -3136,6 +3161,27 @@
           "A1",
           "A2"
         ]
+      },
+      "RackId": {
+        "description": "The rack ID of the rack in which this management gateway is located.",
+        "type": "object",
+        "properties": {
+          "rack_id": {
+            "$ref": "#/components/schemas/RackUuid"
+          }
+        },
+        "required": [
+          "rack_id"
+        ]
+      },
+      "RackUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::RackUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
       },
       "RotCfpa": {
         "type": "object",

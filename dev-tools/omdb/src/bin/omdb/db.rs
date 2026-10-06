@@ -4456,6 +4456,9 @@ async fn cmd_db_region_replacement_status(
                         .await?;
 
                 if let Some(repair_progress) = maybe_repair_progress {
+                    // {wide_bar:.green}, etc. are indicatif template
+                    // placeholders, not Rust format args.
+                    #[expect(clippy::literal_string_with_formatting_args)]
                     let bar = ProgressBar::with_draw_target(
                         Some(repair_progress.total_items as u64),
                         ProgressDrawTarget::stdout(),
@@ -4556,6 +4559,9 @@ async fn cmd_db_region_replacement_info(
                     .await?;
 
             if let Some(repair_progress) = maybe_repair_progress {
+                // {wide_bar:.green}, etc. are indicatif template
+                // placeholders, not Rust format args.
+                #[expect(clippy::literal_string_with_formatting_args)]
                 let bar = ProgressBar::with_draw_target(
                     Some(repair_progress.total_items as u64),
                     ProgressDrawTarget::stdout(),
@@ -4985,11 +4991,10 @@ async fn cmd_db_instance_info(
     const TARGET_VMM: &'static str = "target VMM ID";
     const MIGRATION_ID: &'static str = "migration ID";
     const UPDATER_LOCK: &'static str = "updater lock";
-    const ACTIVE_VMM_RECORD: &'static str = "active VMM record";
     const MIGRATION_RECORD: &'static str = "migration record";
-    const TARGET_VMM_RECORD: &'static str = "target VMM record";
     const WIDTH: usize = crate::helpers::const_max_len(&[
         ID,
+        PROJECT_ID,
         NAME,
         DESCRIPTION,
         CREATED,
@@ -5011,9 +5016,7 @@ async fn cmd_db_instance_info(
         TARGET_VMM,
         MIGRATION_ID,
         UPDATER_LOCK,
-        ACTIVE_VMM_RECORD,
         MIGRATION_RECORD,
-        TARGET_VMM_RECORD,
     ]);
 
     fn print_multiline_debug(slug: &str, thing: &impl core::fmt::Debug) {

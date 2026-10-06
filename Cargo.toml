@@ -435,6 +435,9 @@ declare_interior_mutable_const = "warn"
 # We'd like to warn on lossy casts in the future, but lossless casts are the
 # easiest ones to convert over.
 cast_lossless = "warn"
+# This lint catches format-style placeholders in string literals outside format
+# macros, e.g. `.context("failed to read {path}")`.
+literal_string_with_formatting_args = "warn"
 
 [workspace.dependencies]
 anyhow = "1.0"
@@ -795,7 +798,7 @@ rustls = "0.23.40"
 rustls-pemfile = "2.2.0"
 rustyline = "14.0.0"
 rustix = "1.1.2"
-samael = { version = "0.0.19", features = ["xmlsec"] }
+samael = { version = "0.0.22", features = ["xmlsec"] }
 schemars = "0.8.22"
 scopeguard = "1.2.0"
 scuffle = { version = "0.1.0", features = ["daft", "smf-by-instance"] }
@@ -1180,3 +1183,4 @@ path = "workspace-hack"
 omicron-common = { path = "common" }
 omicron-generation-kinds = { path = "generation-kinds" }
 omicron-uuid-kinds = { path = "uuid-kinds" }
+
