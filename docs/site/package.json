@@ -2,6 +2,9 @@
   "name": "omicron-docs-site",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "build": "node --import tsx build.ts && tailwindcss --input style.css --output dist/style.css --minify",
     "tsc": "tsc",
