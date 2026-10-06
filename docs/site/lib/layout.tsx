@@ -80,10 +80,14 @@ function Shell({
       </head>
       <body className="bg-default text-default">
         <header className="bg-default border-secondary 600:px-6 sticky top-0 z-10 flex h-14 items-center gap-3 border-b px-4">
-          <a href={`${root}/`} className="text-sans-xl text-raise">
-            {site.title}
+          <a href={`${root}/`} className="flex items-baseline gap-3">
+            <span className="text-sans-xl text-raise">{site.title}</span>
+            {/* Nudged up so the caps look centered on the title's lowercase letters,
+                not just sitting on its baseline */}
+            <span className="text-mono-sm text-tertiary relative -top-px 600:inline hidden">
+              {site.tagline}
+            </span>
           </a>
-          <span className="text-mono-sm text-tertiary 600:inline hidden">{site.tagline}</span>
           <div className="ml-auto flex items-center gap-2">
             <pagefind-modal-trigger placeholder="Search" />
             <a
