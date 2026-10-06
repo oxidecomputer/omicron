@@ -225,6 +225,8 @@ function rewriteUrls(html: string, page: Page) {
         : target
     if (!fs.existsSync(path.join(repoRoot, srcTarget))) {
       console.warn(`${page.src}: broken link ${url}`)
+      // A GitHub page URL can't render as an image anyway
+      if (attr === 'src') return match
     } else if (attr === 'src') {
       assets.add(srcTarget)
       return match
