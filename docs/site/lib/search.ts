@@ -23,7 +23,8 @@ type ResultData = {
   meta: { title?: string }
   sub_results: SubResult[]
 }
-type Result = ResultData & { words: number[] }
+/** `words` are the indexes Pagefind matched in `tokens`, the page text split on whitespace */
+type Result = ResultData & { words: number[]; tokens: string[] }
 
 const parts = (s: string) =>
   s
@@ -38,29 +39,62 @@ function commonPrefix(a: string, b: string) {
 }
 
 /**
+ * Whether a page word counts as a match for a query term: they share at least
+ * half the term's length, and at least 3 characters. Stemmed matches like
+ * "installations" → "install" share enough.
+ */
+function termMatches(term: string, word: string) {
+  return commonPrefix(term, word) >= Math.min(term.length, Math.max(3, Math.ceil(term.length / 2)))
+}
+
+/**
  * When no indexed word starts with a query term, Pagefind falls back to the
  * longest indexed word the term starts with, so "sdfsdf" matches every `-s`
- * flag on the site. Drop a result unless every term shares at least half its
- * length (and at least 3 characters) with a word Pagefind matched on the page.
- * Stemmed matches like "installations" → "install" share enough to stay.
+ * flag on the site. Drop a result unless every term matches a word Pagefind
+ * matched on the page, or a word of its title.
  */
-function isRealMatch(query: string, r: Result) {
-  const words = r.content.split(/\s+/)
-  const matched = [...r.words.map((i) => words[i] ?? ''), r.meta.title ?? ''].flatMap(parts)
-  return parts(query).every((term) => {
-    const need = Math.min(term.length, Math.max(3, Math.ceil(term.length / 2)))
-    return matched.some((w) => commonPrefix(term, w) >= need)
-  })
+function isRealMatch(terms: string[], r: Result) {
+  const matched = [...r.words.map((i) => r.tokens[i] ?? ''), r.meta.title ?? ''].flatMap(parts)
+  return terms.every((term) => matched.some((w) => termMatches(term, w)))
+}
+
+/** Whether the terms appear in order and adjacent in a title or heading */
+function hasPhrase(terms: string[], heading: string) {
+  const words = parts(heading)
+  return words.some((_, start) => terms.every((t, i) => termMatches(t, words[start + i] ?? '')))
+}
+
+/**
+ * Pagefind scores each term on its own and penalizes long pages, so "bad
+ * update" ranks a short page that says "update" a lot over the long one with a
+ * section called "Recovering from a bad update". For queries of two or more
+ * words, pages and sections with the query as a phrase in their title or a
+ * heading go first. A phrase in the body text is too weak a signal: it put a
+ * passing mention of "run simulated omicron" ahead of the page on running
+ * simulated Omicron.
+ */
+const sectionHasPhrase = (terms: string[], s: SubResult) =>
+  terms.length > 1 && hasPhrase(terms, s.title)
+
+const pageHasPhrase = (terms: string[], r: Result) =>
+  (terms.length > 1 && hasPhrase(terms, r.meta.title ?? '')) ||
+  r.sub_results.some((s) => sectionHasPhrase(terms, s))
+
+/** Stable sort with the items `first` picks ahead of the rest */
+function putFirst<T>(items: T[], first: (item: T) => boolean) {
+  return [...items.filter(first), ...items.filter((item) => !first(item))]
 }
 
 /**
  * Sections to show under a page, like Pagefind's UI: skip the first one if
  * it's the page itself (text before the first heading), and keep the 3 with
- * the most matches, in page order.
+ * the most matches, in page order. Sections with the query as a phrase in
+ * their heading come before the rest.
  */
-function sectionsToShow(r: Result) {
+function sectionsToShow(terms: string[], r: Result) {
   const subs = r.sub_results[0]?.url === r.url ? r.sub_results.slice(1) : r.sub_results
-  const top = [...subs].sort((a, b) => b.locations.length - a.locations.length).slice(0, 3)
+  const byMatches = [...subs].sort((a, b) => b.locations.length - a.locations.length)
+  const top = putFirst(byMatches, (s) => sectionHasPhrase(terms, s)).slice(0, 3)
   return subs.filter((s) => top.includes(s))
 }
 
@@ -201,13 +235,18 @@ class OxideSearch extends HTMLElement {
     // The site is small enough to load every result up front, so the list can
     // be swapped in one go
     const results = await Promise.all(
-      response.results.map(async (r) => ({ ...(await r.data()), words: r.words })),
+      response.results.map(async (r) => {
+        const data = await r.data()
+        return { ...data, words: r.words, tokens: data.content.split(/\s+/) }
+      }),
     )
     if (id !== this.#search) return
     clearTimeout(slow)
 
-    const shown = results.filter((r) => isRealMatch(query, r))
-    this.#render(shown)
+    const terms = parts(query)
+    const real = results.filter((r) => isRealMatch(terms, r))
+    const shown = putFirst(real, (r) => pageHasPhrase(terms, r))
+    this.#render(shown, terms)
     body.hidden = false
     this.#list.removeAttribute('aria-busy')
     summary.textContent =
@@ -216,7 +255,7 @@ class OxideSearch extends HTMLElement {
         : `${shown.length} ${shown.length === 1 ? 'result' : 'results'} for “${query}”`
   }
 
-  #render(results: Result[]) {
+  #render(results: Result[], terms: string[] = []) {
     // Each option is named by its section heading, or the page title for the
     // page's own row, and described by its excerpt, so a screen reader reads
     // "Scheme V0" and then the text around the match. The page title bar is
@@ -243,7 +282,7 @@ class OxideSearch extends HTMLElement {
       const [page, pageText] = option(r.url, titleId, r.excerpt)
       page.append(pageText)
       group.append(title, page)
-      for (const sub of sectionsToShow(r)) {
+      for (const sub of sectionsToShow(terms, r)) {
         const headingId = `search-option-${n}-heading`
         const [a, text] = option(sub.url, headingId, sub.excerpt)
         a.append(el('span', cls.heading, { id: headingId, textContent: sub.title }), text)
