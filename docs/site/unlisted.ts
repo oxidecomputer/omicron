@@ -29,6 +29,8 @@ const files = execFileSync(
   }))
   .sort((a, b) => b.lines - a.lines)
 
+console.log('Docs in the repo that are not in nav.ts, so not on the site:\n')
+console.log(`${'Lines'.padStart(5)}  Path`)
 for (const f of files) {
   console.log(`${String(f.lines).padStart(5)}  ${f.path}`)
 }
