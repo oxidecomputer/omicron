@@ -37,19 +37,19 @@ unless `docs/site/fonts` contains the Oxide font files (for example, a symlink t
 
 `build.ts` passes the config in `nav.ts` to the builder in `lib/`, which has
 nothing Omicron-specific in it so it can move to `@oxide/design-system` once
-we're happy with it. `lib/render.tsx` renders AsciiDoc the same way the
-RFD site and docs.oxide.computer do, with `@oxide/react-asciidoc` and the AsciiDoc
+we're happy with it. `lib/render.tsx` renders AsciiDoc the same way the RFD site
+and docs.oxide.computer do, with `@oxide/react-asciidoc` and the AsciiDoc
 components and styles from `@oxide/design-system`. Markdown goes through
-`markdown-exit`, with code blocks highlighted by shiki in the design system's theme.
-`lib/links.ts` rewrites links between docs, and `lib/layout.tsx` is the page chrome.
-Each doc's URL mirrors its path in the repo: `docs/how-to-run.adoc` is
-published at `docs/how-to-run/`, and a README at its directory, so
+`markdown-exit`, with code blocks highlighted by shiki in the design system's
+theme. `lib/links.ts` rewrites links between docs, and `lib/layout.tsx` is the
+page chrome. Each doc's URL mirrors its path in the repo: `docs/how-to-run.adoc`
+is published at `docs/how-to-run/`, and a README at its directory, so
 `wicket/README.md` is at `wicket/`. Relative links and images in a doc are
-rewritten to match. The builder
-then runs [Pagefind](https://pagefind.app/) over the HTML in `dist/`, which writes
-the search index and UI to `dist/pagefind/`, all loaded client-side, so search needs
-no server. Last, Tailwind compiles `style.css`, which pulls in the shared styles
-from `lib/site.css`, against the generated HTML.
+rewritten to match. The builder then runs [Pagefind](https://pagefind.app/) over
+the HTML in `dist/`, which writes the search index and UI to `dist/pagefind/`,
+all loaded client-side, so search needs no server. Last, Tailwind compiles
+`style.css`, which pulls in the shared styles from `lib/site.css`, against the
+generated HTML.
 
 ## No client-side React
 

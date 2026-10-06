@@ -45,9 +45,34 @@
   .pf-modal-body {
     padding: 0;
   }
-  /* No keyboard to use the ⌘K hint with on a phone, and the header needs the
-     room */
+  /* Flat until hovered, like the icon buttons next to it, and without
+     Pagefind's accent border on hover */
+  .pf-trigger-btn {
+    background: none;
+  }
+  .pf-trigger-btn:hover {
+    background: var(--surface-raise);
+    border-color: var(--pf-border);
+  }
+  /* On a phone the header doesn't have room for a search box (and there's no
+     keyboard for the ⌘K hint), so the trigger is a square icon button like the
+     menu button next to it. The button keeps its aria-label. */
   @media (max-width: 599px) {
+    .pf-trigger-btn {
+      width: 32px;
+      padding: 0;
+      border-radius: var(--radius-lg);
+      justify-content: center;
+    }
+    .pf-trigger-icon {
+      width: 16px;
+      height: 16px;
+      background: var(--content-secondary);
+    }
+    .pf-trigger-btn:hover .pf-trigger-icon {
+      background: var(--content-default);
+    }
+    .pf-trigger-text,
     .pf-trigger-shortcut {
       display: none;
     }

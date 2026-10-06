@@ -73,7 +73,7 @@ async function renderAdoc(file: string, src: string): Promise<Rendered> {
   // it to the heading itself, which is where Pagefind looks for anchors when it
   // splits a page into per-section search results.
   // If react-asciidoc's markup changes and this stops matching, search results
-  // quietly lose their section links, so say so.
+  // lose their section links with no error, so warn.
   let moved = 0
   const body = html.replace(
     /<(h[1-6])([^>]*)><span class="anchor" id="([^"]+)" aria-hidden="true"><\/span>/g,
