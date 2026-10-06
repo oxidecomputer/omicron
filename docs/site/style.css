@@ -179,6 +179,18 @@ html {
     display: none;
   }
 
+  /* Arrow keys move focus to the result link, and Pagefind rings the focused
+     card. The selected style below already marks it. */
+  .pf-result-card:has(.pf-result-link:focus-visible),
+  .pf-heading-chip:has(.pf-heading-link:focus-visible) {
+    border-color: var(--stroke-secondary);
+    box-shadow: none;
+  }
+  .pf-result-link:focus-visible,
+  .pf-heading-link:focus-visible {
+    outline: none;
+  }
+
   /* Selected row in accent, and its page's header bar inverted */
   .pf-result:has([data-pf-selected]) .pf-result-title {
     background: var(--surface-accent-inverse);
