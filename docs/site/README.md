@@ -43,6 +43,7 @@ components and styles from `@oxide/design-system`. Markdown goes through
 `lib/links.ts` rewrites links between docs, and `lib/layout.tsx` is the page chrome.
 The output mirrors each doc's path in the repo, so `docs/how-to-run.adoc`
 becomes `dist/docs/how-to-run.html` and relative links keep working. Tailwind
-compiles `style.css` against the generated HTML. [Pagefind](https://pagefind.app/)
+compiles `style.css`, which pulls in the shared styles from `lib/site.css`, against
+the generated HTML. [Pagefind](https://pagefind.app/)
 then indexes the HTML in `dist/` and writes the search index and UI to
 `dist/pagefind/`, all loaded client-side, so search needs no server.
