@@ -130,7 +130,10 @@ const Toc = ({ items }: { items: TocItem[] }) => (
   <ul className="space-y-1.5">
     {items.map((item) => (
       <li key={item.id}>
-        <a href={`#${item.id}`} className="text-sans-sm text-secondary hover:text-default block leading-tight">
+        <a
+          href={`#${item.id}`}
+          className="text-sans-sm text-secondary hover:text-default block leading-tight"
+        >
           <Html html={item.title} />
         </a>
         {item.children.length > 0 && (
@@ -232,7 +235,10 @@ export function IndexPage({ site, sections }: { site: Site; sections: Section[] 
         <p className="text-sans-xl text-secondary mb-14 max-w-[640px]">{site.description}</p>
         <div className="700:grid-cols-2 1000:grid-cols-3 grid grid-cols-1 gap-6">
           {sections.map((section) => (
-            <section key={section.title} className="bg-raise border-secondary rounded-lg border p-6">
+            <section
+              key={section.title}
+              className="bg-raise border-secondary rounded-lg border p-6"
+            >
               <h2 className="text-sans-xl text-raise mb-1">{section.title}</h2>
               {section.description && (
                 <p className="text-sans-md text-tertiary mb-4">{section.description}</p>
@@ -240,7 +246,10 @@ export function IndexPage({ site, sections }: { site: Site; sections: Section[] 
               <ul className="space-y-1.5">
                 {section.pages.map((p) => (
                   <li key={p.out}>
-                    <a href={p.out} className="text-sans-md text-accent-secondary hover:text-accent">
+                    <a
+                      href={p.out}
+                      className="text-sans-md text-accent-secondary hover:text-accent"
+                    >
                       {plain(p.title)}
                     </a>
                   </li>

@@ -2,11 +2,9 @@
   "name": "omicron-docs-site",
   "private": true,
   "type": "module",
-  "engines": {
-    "node": ">=24"
-  },
   "scripts": {
     "build": "node --import tsx build.ts && tailwindcss --input style.css --output dist/style.css --minify",
+    "fmt": "oxfmt",
     "tsc": "tsc",
     "unlisted": "node unlisted.ts",
     "serve": "npm run build && pagefind --site dist --serve"
@@ -29,6 +27,10 @@
     "@types/node": "^24.0.0",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "oxfmt": "^0.72.0",
     "typescript": "^7.0.2"
+  },
+  "engines": {
+    "node": ">=24"
   }
 }
