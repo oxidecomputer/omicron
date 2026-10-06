@@ -690,10 +690,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "fc9563cea463926d1a7f57b9c920044246cc8b63"
+source.commit = "e28fa1c2b6001aa6cace05eeb567a09491371ab0"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm-gz.sha256.txt
-source.sha256 = "4c908ba0b7b12568ce3860fe75f34678cdb54c44bc417dadf2feec8cbd26cd80"
+source.sha256 = "caab27591e09b1e75ef2774787d2dba7a31c4ff70bd11543d2595470b0da5d0f"
 output.type = "tarball"
 
 [package.mg-ddm]
@@ -706,10 +706,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "fc9563cea463926d1a7f57b9c920044246cc8b63"
+source.commit = "e28fa1c2b6001aa6cace05eeb567a09491371ab0"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "7109e1d4ab26bfd8880ae85b3007d4837a0c6459edd1346713f8e12e7dbbdb30"
+source.sha256 = "59a1749c3b83efd11dbaf714482ce87c7b189335669311ff1a8a96f016159f1d"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -721,10 +721,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "fc9563cea463926d1a7f57b9c920044246cc8b63"
+source.commit = "e28fa1c2b6001aa6cace05eeb567a09491371ab0"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mgd.sha256.txt
-source.sha256 = "7ef75ecf5cb9eafa290fa84f9c20e7418154046bb8c478558268672460ac9aed"
+source.sha256 = "fa483e47b71e60ed75d343a19741f807aa6f534ec3316bf44a02fc01758f1ea3"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -772,8 +772,8 @@ only_for_targets.image = "standard"
 # the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "247502812015b409d33240b836d5bf242817453d"
-source.sha256 = "e878b070c1a3ae26decaa9194d4d785c125f72864c95c14b020770da14fb0b1b"
+source.commit = "2386374fce7bd8124dfc1e8c9576904b978863df"
+source.sha256 = "fc866d32fffbc80c5ab021939a7bbb886217c7e20029539ddf8e612990dc3888"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -799,8 +799,8 @@ only_for_targets.image = "standard"
 # the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "247502812015b409d33240b836d5bf242817453d"
-source.sha256 = "3f383cfbfd4c0af2f4e56eca7bc6376412617f8b78de3d3465718adb0dd668a7"
+source.commit = "2386374fce7bd8124dfc1e8c9576904b978863df"
+source.sha256 = "cc0be8e078962549f048079de58ae0f86edaba2bdafd70a94f96fbc5e9c6007e"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -819,8 +819,8 @@ only_for_targets.image = "standard"
 # the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "247502812015b409d33240b836d5bf242817453d"
-source.sha256 = "df1d007e4f90f260a343e7231e6bff2ce61f9d1e73e17765365b8c9f95b2a3d0"
+source.commit = "2386374fce7bd8124dfc1e8c9576904b978863df"
+source.sha256 = "1c04911de251164a064b5f82d46ddbd6e64970e6839e564da810d15e0d9d106e"
 output.type = "zone"
 output.intermediate_only = true
 

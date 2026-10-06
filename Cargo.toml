@@ -523,7 +523,7 @@ digest = "0.10.7"
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
-dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "247502812015b409d33240b836d5bf242817453d" }
+dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "2386374fce7bd8124dfc1e8c9576904b978863df" }
 dropshot = { version = "0.17.1", features = [ "usdt-probes" ] }
 dropshot-api-manager = "0.8.0"
 dropshot-api-manager-types = "0.8.0"
@@ -636,8 +636,8 @@ ntp-admin-api = { path = "ntp-admin/api" }
 ntp-admin-client = { path = "clients/ntp-admin-client" }
 ntp-admin-types = { path = "ntp-admin/types" }
 ntp-admin-types-versions = { path = "ntp-admin/types/versions" }
-mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "fc9563cea463926d1a7f57b9c920044246cc8b63" }
-ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "fc9563cea463926d1a7f57b9c920044246cc8b63" }
+mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "e28fa1c2b6001aa6cace05eeb567a09491371ab0" }
+ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "e28fa1c2b6001aa6cace05eeb567a09491371ab0" }
 multimap = "0.10.1"
 nexus-auth = { path = "nexus/auth" }
 nexus-background-task-interface = { path = "nexus/background-task-interface" }
@@ -782,7 +782,7 @@ rats-corim = { git = "https://github.com/oxidecomputer/rats-corim.git", rev = "f
 raw-cpuid = { git = "https://github.com/oxidecomputer/rust-cpuid.git", rev = "a4cf01df76f35430ff5d39dc2fe470bcb953503b" }
 rayon = "1.10"
 rcgen = { version = "0.12.1", default-features = false, features = ["aws_lc_rs", "pem"] }
-mg-api-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "fc9563cea463926d1a7f57b9c920044246cc8b63" }
+mg-api-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "e28fa1c2b6001aa6cace05eeb567a09491371ab0" }
 reconfigurator-cli = { path = "dev-tools/reconfigurator-cli" }
 reedline = "0.40.0"
 ref-cast = "1.0"
