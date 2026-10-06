@@ -1358,13 +1358,13 @@ impl InstanceRunner {
             );
         }
 
-        // Ensure that no zone exists. The running zone is always installed
-        // immediately after it exists, so there's always a zone to shut down
-        // here.
+        // There's always a zone here, so halt it.
         //
         // We're using `Zones::halt_and_remove_logged()` directly, because
         // `RunningZone::stop()` cannot be retried. See
-        // https://github.com/oxidecomputer/omicron/issues/7881.
+        // https://github.com/oxidecomputer/omicron/issues/7881. Also, calling
+        // `RunningZone::stop()` squashes errors into strings, and we need to
+        // handle invalid state transitions.
         warn!(self.log, "Halting and removing zone: {}", zname);
         const MAX_SHUTDOWN_TIMEOUT: Duration = Duration::from_mins(5);
         let result = tokio::time::timeout(
@@ -4275,7 +4275,7 @@ mod tests {
             .expect("able to queue put_state request");
 
         // Wait until the zone actually starts halting.
-        let zname = timeout(Duration::from_mins(1), handle.halt_started())
+        let zname = timeout(TIMEOUT_DURATION, handle.halt_started())
             .await
             .expect("timed out waiting for zone halt to start")
             .expect("zone did not start halting");
@@ -4309,7 +4309,7 @@ mod tests {
         handle.release();
 
         // Now we should have an error on the instance state channel.
-        let err = timeout(Duration::from_mins(1), put_rx)
+        let err = timeout(TIMEOUT_DURATION, put_rx)
             .await
             .expect("didn't receive state update within timeout")
             .expect("put_rx failed to recv")
@@ -4321,14 +4321,14 @@ mod tests {
         );
 
         // Now we _should_ have updated Nexus at some point.
-        timeout(Duration::from_mins(1), state_rx.changed())
+        timeout(TIMEOUT_DURATION, state_rx.changed())
             .await
             .expect("timed out waiting for Nexus state change")
             .expect("failed to recv Nexus state change");
         let state = state_rx.borrow();
         let ReceivedInstanceState::InstancePut(state) = &*state else {
             panic!(
-                "Expected Nexus to get a InstancePut response,\
+                "Expected Nexus to get an InstancePut response, \
                 but found none"
             );
         };

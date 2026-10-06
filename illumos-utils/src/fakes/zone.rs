@@ -44,8 +44,9 @@ struct HaltControl {
 /// can proceed. This sort of acts as a waitable barrier in the middle of
 /// `Zones::halt_and_remove()`.
 ///
-/// NOTE: This cannot be used reliably when there are multiple zones. It only
-/// tracks when halt is called on the _first_ zone.
+/// NOTE: This cannot be used reliably when there are multiple zones. Every halt
+/// is reported, but `release()` allows every zone's halt to proceed, so it's
+/// only useful in tests with a single zone.
 pub struct HaltController {
     /// Which zones have started halting.
     started: mpsc::UnboundedReceiver<String>,
