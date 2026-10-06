@@ -101,8 +101,8 @@ Sled serial0
     part number: 913-0000019
     power:    A2
     revision: 0
-    MGS slot: Sled 0
     rack ID:  c19a698f-c6f9-4a17-ae30-20d711b8f7dc
+    MGS slot: Sled 0
     found at: <REDACTED_TIMESTAMP> from fake MGS 1
     host phase 1 active slot: A
     host phase 1 hashes:
@@ -127,8 +127,8 @@ Sled serial1
     part number: 913-0000019
     power:    A2
     revision: 0
-    MGS slot: Sled 1
     rack ID:  c19a698f-c6f9-4a17-ae30-20d711b8f7dc
+    MGS slot: Sled 1
     found at: <REDACTED_TIMESTAMP> from fake MGS 1
     host phase 1 active slot: A
     host phase 1 hashes:
@@ -153,8 +153,8 @@ Sled serial2
     part number: 913-0000019
     power:    A2
     revision: 0
-    MGS slot: Sled 2
     rack ID:  c19a698f-c6f9-4a17-ae30-20d711b8f7dc
+    MGS slot: Sled 2
     found at: <REDACTED_TIMESTAMP> from fake MGS 1
     host phase 1 active slot: A
     host phase 1 hashes:
