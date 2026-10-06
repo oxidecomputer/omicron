@@ -254,37 +254,15 @@ impl OmicronDatasets {
         }
     }
 
-    /// Ensure the datasets in `datasets`.
-    ///
-    /// For any zpool in `zone_root_cleanup_pending`, the transient zone root
-    /// dataset is still created (so that its former contents can be cleaned
-    /// up), but it and the transient zone datasets within it are reported as
-    /// unavailable, which prevents any zones from being placed on that zpool.
     pub(super) async fn ensure_datasets_if_needed(
         &mut self,
         datasets: IdOrdMap<DatasetConfig>,
         currently_managed_zpools: Arc<CurrentlyManagedZpools>,
-        zone_root_cleanup_pending: &BTreeSet<ZpoolName>,
         log: &Logger,
     ) {
-        // Don't try to create transient zone datasets on zpools whose former
-        // zone roots have not yet been cleaned up: that cleanup would destroy
-        // them.
-        let mut to_ensure = IdOrdMap::new();
-        let mut deferred = Vec::new();
-        for config in datasets {
-            if matches!(config.name.kind(), DatasetKind::TransientZone { .. })
-                && zone_root_cleanup_pending.contains(config.name.pool())
-            {
-                deferred.push(config);
-            } else {
-                to_ensure.insert_overwrite(config);
-            }
-        }
-
         let results = match self
             .dataset_task
-            .datasets_ensure(to_ensure, currently_managed_zpools)
+            .datasets_ensure(datasets, currently_managed_zpools)
             .await
         {
             Ok(results) => results,
@@ -301,31 +279,11 @@ impl OmicronDatasets {
             }
         };
 
-        let cleanup_pending = |zpool: &ZpoolName| {
-            DatasetState::FailedToEnsure(Arc::new(
-                DatasetEnsureError::TransientZoneRootCleanupPending(*zpool),
-            ))
-        };
-
         for DatasetEnsureResult { config, result } in results {
-            let zpool = config.name.pool();
             let state = match result {
-                Ok(())
-                    if matches!(
-                        config.name.kind(),
-                        DatasetKind::TransientZoneRoot
-                    ) && zone_root_cleanup_pending.contains(zpool) =>
-                {
-                    cleanup_pending(zpool)
-                }
                 Ok(()) => DatasetState::Ensured,
                 Err(err) => DatasetState::FailedToEnsure(err),
             };
-            self.datasets.insert_overwrite(OmicronDataset { config, state });
-        }
-
-        for config in deferred {
-            let state = cleanup_pending(config.name.pool());
             self.datasets.insert_overwrite(OmicronDataset { config, state });
         }
     }
@@ -408,10 +366,7 @@ enum DatasetState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::CurrentlyManagedZpoolsReceiver;
     use crate::dataset_serialization_task::RekeyResult;
-    use assert_matches::assert_matches;
-    use omicron_test_utils::dev;
     use omicron_uuid_kinds::ZpoolUuid;
     use sled_agent_types::disk::SharedDatasetConfig;
 
@@ -423,122 +378,31 @@ mod tests {
         }
     }
 
-    fn dataset_state<'a>(
-        datasets: &'a OmicronDatasets,
-        config: &DatasetConfig,
-    ) -> &'a DatasetState {
-        &datasets
-            .datasets
-            .get(&config.id)
-            .expect("dataset has a recorded state")
-            .state
-    }
+    #[test]
+    fn ensured_debug_dataset_zpools_only_includes_ensured_debug_datasets() {
+        let ensured = ZpoolName::new_external(ZpoolUuid::new_v4());
+        let failed = ZpoolName::new_external(ZpoolUuid::new_v4());
+        let no_debug = ZpoolName::new_external(ZpoolUuid::new_v4());
 
-    // Transient zone datasets on zpools whose former zone roots haven't been
-    // cleaned up must not be created (cleanup would destroy them), and zones
-    // must not be placed on those zpools; other datasets on those zpools
-    // (e.g., debug datasets, which cleanup needs) should be ensured normally.
-    #[tokio::test]
-    async fn zone_root_cleanup_pending_defers_transient_zone_datasets() {
-        let logctx = dev::test_setup_log(
-            "zone_root_cleanup_pending_defers_transient_zone_datasets",
-        );
-        let mut datasets = OmicronDatasets::new(
-            DatasetTaskHandle::spawn_in_memory(&logctx.log),
-        );
-
-        let pending_zpool = ZpoolName::new_external(ZpoolUuid::new_v4());
-        let ready_zpool = ZpoolName::new_external(ZpoolUuid::new_v4());
-        let managed_zpools = CurrentlyManagedZpoolsReceiver::fake_static(
-            [pending_zpool, ready_zpool].into_iter(),
-        )
-        .current();
-
-        let configs_for = |zpool| {
+        let datasets = OmicronDatasets::with_datasets(
             [
-                dataset_config(zpool, DatasetKind::Debug),
-                dataset_config(zpool, DatasetKind::TransientZoneRoot),
-                dataset_config(
-                    zpool,
-                    DatasetKind::TransientZone { name: "oxz_test".to_string() },
+                (dataset_config(ensured, DatasetKind::Debug), Ok(())),
+                (
+                    dataset_config(failed, DatasetKind::Debug),
+                    Err(DatasetEnsureError::TestError("failed")),
+                ),
+                (
+                    dataset_config(no_debug, DatasetKind::TransientZoneRoot),
+                    Ok(()),
                 ),
             ]
-        };
-        let [pending_debug, pending_root, pending_zone] =
-            configs_for(pending_zpool);
-        let [ready_debug, ready_root, ready_zone] = configs_for(ready_zpool);
-        let config: IdOrdMap<_> = [
-            &pending_debug,
-            &pending_root,
-            &pending_zone,
-            &ready_debug,
-            &ready_root,
-            &ready_zone,
-        ]
-        .into_iter()
-        .cloned()
-        .collect();
+            .into_iter(),
+        );
 
-        // With cleanup pending on one zpool, its debug dataset is ensured but
-        // its transient zone root and transient zone datasets are not
-        // available.
-        datasets
-            .ensure_datasets_if_needed(
-                config.clone(),
-                Arc::clone(&managed_zpools),
-                &BTreeSet::from([pending_zpool]),
-                &logctx.log,
-            )
-            .await;
-        for ensured in [&pending_debug, &ready_debug, &ready_root, &ready_zone]
-        {
-            assert_matches!(
-                dataset_state(&datasets, ensured),
-                DatasetState::Ensured
-            );
-        }
-        for deferred in [&pending_root, &pending_zone] {
-            assert_matches!(
-                dataset_state(&datasets, deferred),
-                DatasetState::FailedToEnsure(err)
-                    if matches!(
-                        **err,
-                        DatasetEnsureError::TransientZoneRootCleanupPending(z)
-                            if z == pending_zpool
-                    )
-            );
-        }
         assert_eq!(
             datasets.ensured_debug_dataset_zpools(),
-            BTreeSet::from([pending_zpool, ready_zpool])
+            BTreeSet::from([ensured])
         );
-        assert!(datasets.has_retryable_error());
-
-        // Once cleanup is no longer pending, everything is ensured.
-        datasets
-            .ensure_datasets_if_needed(
-                config,
-                managed_zpools,
-                &BTreeSet::new(),
-                &logctx.log,
-            )
-            .await;
-        for ensured in [
-            &pending_debug,
-            &pending_root,
-            &pending_zone,
-            &ready_debug,
-            &ready_root,
-            &ready_zone,
-        ] {
-            assert_matches!(
-                dataset_state(&datasets, ensured),
-                DatasetState::Ensured
-            );
-        }
-        assert!(!datasets.has_retryable_error());
-
-        logctx.cleanup_successful();
     }
 
     #[test]

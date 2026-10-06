@@ -10,12 +10,14 @@ use either::Either;
 use futures::future;
 use iddqd::IdOrdMap;
 use illumos_utils::zpool::PathInPool;
+use illumos_utils::zpool::ZpoolName;
 use illumos_utils::zpool::ZpoolOrRamdisk;
 use key_manager::StorageKeyRequester;
 use omicron_common::disk::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
+use sled_agent_types::disk::DatasetConfig;
 use sled_agent_types::inventory::BootPartitionContents as BootPartitionContentsInventory;
 use sled_agent_types::inventory::ConfigReconcilerInventory;
 use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
@@ -303,6 +305,23 @@ impl LatestReconciliationResult {
     }
 }
 
+/// Returns the datasets from `datasets` that we should ensure before cleaning
+/// up former zone roots on `newly_adopted_zpools`, omitting the transient zone
+/// datasets on those zpools (that cleanup would destroy them).
+fn datasets_to_ensure(
+    datasets: &IdOrdMap<DatasetConfig>,
+    newly_adopted_zpools: &BTreeSet<ZpoolName>,
+) -> IdOrdMap<DatasetConfig> {
+    datasets
+        .iter()
+        .filter(|config| {
+            !(matches!(config.name.kind(), DatasetKind::TransientZone { .. })
+                && newly_adopted_zpools.contains(config.name.pool()))
+        })
+        .cloned()
+        .collect()
+}
+
 struct ReconcilerTask {
     key_requester: StorageKeyRequester,
     current_config_rx: watch::Receiver<CurrentSledConfig>,
@@ -574,7 +593,8 @@ impl ReconcilerTask {
         // ---
 
         // Start managing disks.
-        self.external_disks
+        let newly_adopted_disks = self
+            .external_disks
             .start_managing_if_needed(
                 &current_raw_disks,
                 &sled_config.disks,
@@ -595,38 +615,44 @@ impl ReconcilerTask {
 
         // Ensure all the datasets we want exist.
         //
-        // Disks we've just adopted may contain former zone roots, which must
-        // be archived and destroyed before we place any zones on those disks.
-        // Archival requires debug datasets, so we first ensure datasets
-        // (deferring the transient zone datasets on those disks), then clean
-        // up the former zone roots, then ensure the deferred datasets.
-        let zone_root_cleanup_pending =
-            self.external_disks.zone_root_cleanup_pending_zpools();
+        // Newly-adopted disks may contain former zone roots, which must be
+        // archived and destroyed before we place any zones on those disks.
+        // Archival requires debug datasets, so:
+        //
+        // 1. Ensure datasets, except for transient zone datasets on those
+        //    disks (cleanup would destroy them).
+        // 2. Archive and destroy the former zone roots. Any disk on which this
+        //    fails is no longer managed.
+        // 3. Ensure datasets again. This creates the transient zone datasets
+        //    on disks we cleaned up, and marks datasets on disks we failed to
+        //    clean up as unavailable.
         self.datasets
             .ensure_datasets_if_needed(
-                sled_config.datasets.clone(),
+                datasets_to_ensure(
+                    &sled_config.datasets,
+                    &newly_adopted_disks.zpools(),
+                ),
                 self.external_disks.currently_managed_zpools(),
-                &zone_root_cleanup_pending,
                 &self.log,
             )
             .await;
         self.external_disks.update_debug_dataset_zpools(
             self.datasets.ensured_debug_dataset_zpools(),
         );
-        if !zone_root_cleanup_pending.is_empty()
-            && self
-                .external_disks
-                .clean_up_former_zone_roots_if_needed(&self.log)
-                .await
-        {
+        if !newly_adopted_disks.is_empty() {
+            self.external_disks
+                .clean_up_former_zone_roots(newly_adopted_disks, &self.log)
+                .await;
             self.datasets
                 .ensure_datasets_if_needed(
                     sled_config.datasets.clone(),
                     self.external_disks.currently_managed_zpools(),
-                    &self.external_disks.zone_root_cleanup_pending_zpools(),
                     &self.log,
                 )
                 .await;
+            self.external_disks.update_debug_dataset_zpools(
+                self.datasets.ensured_debug_dataset_zpools(),
+            );
         }
 
         // Collect the current timesync status (needed to start any new zones,
@@ -837,4 +863,51 @@ impl ReconcilerTask {
 enum ReconciliationResult {
     NoRetryNeeded,
     ShouldRetry,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use omicron_common::disk::DatasetName;
+    use omicron_uuid_kinds::ZpoolUuid;
+    use sled_agent_types::disk::SharedDatasetConfig;
+
+    fn dataset_config(zpool: ZpoolName, kind: DatasetKind) -> DatasetConfig {
+        DatasetConfig {
+            id: DatasetUuid::new_v4(),
+            name: DatasetName::new(zpool, kind),
+            inner: SharedDatasetConfig::default(),
+        }
+    }
+
+    fn transient_zone(zpool: ZpoolName) -> DatasetConfig {
+        dataset_config(
+            zpool,
+            DatasetKind::TransientZone { name: "oxz_test".to_string() },
+        )
+    }
+
+    #[test]
+    fn datasets_to_ensure_skips_transient_zones_on_newly_adopted_zpools() {
+        let newly_adopted = ZpoolName::new_external(ZpoolUuid::new_v4());
+        let ready = ZpoolName::new_external(ZpoolUuid::new_v4());
+
+        let skipped = transient_zone(newly_adopted);
+        let kept = [
+            dataset_config(newly_adopted, DatasetKind::Debug),
+            dataset_config(newly_adopted, DatasetKind::TransientZoneRoot),
+            dataset_config(ready, DatasetKind::Debug),
+            dataset_config(ready, DatasetKind::TransientZoneRoot),
+            transient_zone(ready),
+        ];
+        let datasets: IdOrdMap<_> =
+            kept.iter().chain([&skipped]).cloned().collect();
+
+        let to_ensure =
+            datasets_to_ensure(&datasets, &BTreeSet::from([newly_adopted]));
+        assert_eq!(to_ensure, kept.into_iter().collect::<IdOrdMap<_>>());
+
+        // With no newly-adopted zpools, everything is ensured.
+        assert_eq!(datasets_to_ensure(&datasets, &BTreeSet::new()), datasets);
+    }
 }
