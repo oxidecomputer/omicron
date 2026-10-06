@@ -22,13 +22,15 @@ use crate::v2026_06_05_00::instance::InstanceDiskAttachment;
 use crate::v2026_06_08_00;
 use crate::v2026_06_08_00::instance::InstanceCpuPlatform;
 
-// TODO proper doc
+/// Instance-stopping method choices
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum InstanceShutdownPolicy {
-    // instance is forcefully terminated
+    /// Instance's VM is forcefully terminated immediately.
     HardOff,
-    // sends PWRBTN_STS as described in ACPI ch. 4, instance hard terminated if not stopped after timeout
+    /// Instance is sent PWRBTN_STS as described in ACPI chapter 4. If the VM
+    /// guest has not stopped itself with a power event within the given timeout,
+    /// it is *then* forcefully terminated.
     PowerButton { timeout_secs: u64 },
 }
 
@@ -69,7 +71,9 @@ pub struct Instance {
     /// take effect on the next instance restart.
     pub enable_jumbo_frames: bool,
 
-    // TODO doc
+    /// The method by which the instance will be powered down when transitioning
+    /// to the stopped state, either forcefully or by giving the guest an ACPI
+    /// power button signal first.
     pub shutdown_policy: Option<InstanceShutdownPolicy>,
 }
 
@@ -220,7 +224,8 @@ pub struct InstanceCreate {
     /// effect on the next instance restart.
     #[serde(default)]
     pub enable_jumbo_frames: bool,
-    // TODO: doc
+    /// The method by which the instance should be stopped.
+    /// If not provided, new instances will be created with a 10-minute timeout.
     #[serde(default)]
     pub shutdown_policy: Option<InstanceShutdownPolicy>,
 }
@@ -316,7 +321,7 @@ pub struct InstanceUpdate {
     /// take effect on the next instance restart.
     pub enable_jumbo_frames: bool,
 
-    // TODO doc
+    /// The method by which the instance should be stopped.
     pub shutdown_policy: Option<InstanceShutdownPolicy>,
 }
 

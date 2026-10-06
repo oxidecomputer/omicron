@@ -14,7 +14,9 @@ pub mod instance {
     pub struct VmmPutStateBody {
         /// The state into which the instance should be driven.
         pub state: VmmStateRequested,
-        // TODO doc
+        /// The number of seconds to wait between sending the VM guest a power
+        /// button signal and forcefully terminating it, if it does not power
+        /// itself down by then after receiving the signal.
         pub acpi_timeout_secs: Option<u64>,
     }
 
