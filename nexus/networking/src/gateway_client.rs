@@ -2,7 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use omicron_common::backoff::{self, BackoffError};
+use omicron_uuid_kinds::RackUuid;
+use parallel_task_set::ParallelTaskSet;
 use slog::{Logger, o};
+use slog_error_chain::InlineErrorChain;
 use std::net::SocketAddrV6;
 
 #[derive(Clone, Debug)]
@@ -34,4 +38,146 @@ impl GatewayClient {
 
         Ok(addrs.into_iter().map(move |addr| Self::from_addr(log, addr)))
     }
+}
+
+/// A map of [`RackUuid`]s to [`GatewayClient`]s.
+#[derive(Debug)]
+pub struct GatewaysByRack {
+    by_rack: iddqd::IdHashMap<RackGateways>,
+    unknown: Vec<GatewayClient>,
+}
+
+impl GatewaysByRack {
+    pub async fn resolve_all_gateways(
+        log: &Logger,
+        resolver: &internal_dns_resolver::Resolver,
+    ) -> Result<Self, anyhow::Error> {
+        let gateways =
+            GatewayClient::resolve_all_gateways(log, resolver).await?;
+
+        // Now that we've resolved all the gateways, ask them what racks they
+        // are part of. We'll do this in parallel, with a concurrency limit. The
+        // default limit from `ParallelTaskSet` ought to be plenty.
+        let mut tasks = ParallelTaskSet::new();
+        let mut this =
+            Self { by_rack: iddqd::IdHashMap::default(), unknown: Vec::new() };
+        for gateway in gateways {
+            let log = log.clone();
+            let joined = tasks
+                .spawn(async move {
+                    const MAX_TRIES: usize = 3;
+                    let mut tries = 0;
+                    let client = &gateway.client;
+                    let rack_id = backoff::retry(
+                        backoff::retry_policy_internal_service(),
+                        || async move {
+                            client
+                                .rack_id_get()
+                                .await
+                                .map(|rsp| rsp.into_inner().rack_id)
+                                .map_err(|e| {
+                                    if tries >= MAX_TRIES {
+                                        BackoffError::permanent(e)
+                                    } else {
+                                        tries += 1;
+                                        BackoffError::transient(e)
+                                    }
+                                })
+                        },
+                    )
+                    .await;
+                    match rack_id {
+                        Ok(rack_id) => (Some(rack_id), gateway),
+                        Err(e) => {
+                            slog::warn!(
+                                log,
+                                "failed to determine rack ID for resolved MGS \
+                                 after {MAX_TRIES} attempts";
+                                "error" => InlineErrorChain::new(&e),
+                                "gateway_addr" => %gateway.addr,
+                            );
+                            (None, gateway)
+                        }
+                    }
+                })
+                .await;
+            if let Some((maybe_id, gateway)) = joined {
+                this.insert_discovery_result(maybe_id, gateway);
+            }
+        }
+
+        // wait for the last set of tasks to come back...
+        while let Some((maybe_id, gateway)) = tasks.join_next().await {
+            this.insert_discovery_result(maybe_id, gateway);
+        }
+
+        anyhow::ensure!(
+            !this.by_rack.is_empty(),
+            "no gateways had their rack IDs discovered ({} were resolved but \
+             have unknown rack IDs)",
+            this.unknown.len()
+        );
+
+        Ok(this)
+    }
+
+    fn insert_discovery_result(
+        &mut self,
+        rack_id: Option<RackUuid>,
+        gateway: GatewayClient,
+    ) {
+        match rack_id {
+            Some(rack_id) => {
+                self.by_rack
+                    .entry(&rack_id)
+                    .or_insert_with(|| RackGateways {
+                        rack_id,
+                        gateways: Vec::new(),
+                    })
+                    .gateways
+                    .push(gateway);
+            }
+            None => {
+                self.unknown.push(gateway);
+            }
+        }
+    }
+
+    /// Borrows the discovered gateway clients for the given rack ID, if any
+    /// were discovered.
+    pub fn for_rack(&self, rack_id: &RackUuid) -> Option<&[GatewayClient]> {
+        self.by_rack.get(rack_id).map(|r| &r.gateways[..])
+    }
+
+    /// Returns an iterator over all gateway clients with discovered rack IDs,
+    /// along with their rack IDs.
+    pub fn all_discovered(
+        &self,
+    ) -> impl Iterator<Item = (RackUuid, &GatewayClient)> + '_ {
+        self.by_rack.iter().flat_map(|rack| {
+            let id = rack.rack_id;
+            rack.gateways.iter().map(move |gateway| (id, gateway))
+        })
+    }
+
+    /// Borrows the set of resolved clients for which the rack ID is unknown.
+    pub fn unknown(&self) -> &[GatewayClient] {
+        &self.unknown
+    }
+}
+
+#[derive(Debug)]
+struct RackGateways {
+    rack_id: RackUuid,
+    gateways: Vec<GatewayClient>,
+}
+
+impl iddqd::IdHashItem for RackGateways {
+    type Key<'k> = &'k RackUuid;
+
+    fn key(&self) -> Self::Key<'_> {
+        &self.rack_id
+    }
+
+    iddqd::id_upcast! {}
 }
