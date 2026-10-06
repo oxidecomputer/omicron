@@ -1,102 +1,14 @@
 // The search modal, a custom element around markup that layout.tsx renders.
-// buildSite compiles this file to search.js at the site root. Searching uses
-// Pagefind's JS API (pagefind/pagefind.js, written by the build) and the
-// results are rendered here, not by Pagefind's own UI, which clears the list
-// on every keystroke and is hard to restyle.
+// buildSite compiles this file to search.js at the site root. Results come
+// from Pagefind's JS API through search-api.ts and are rendered here, not by
+// Pagefind's own UI, which clears the list on every keystroke and is hard to
+// restyle.
 //
 // The input is an ARIA combobox: focus stays in it while the arrow keys move
 // the selected option (aria-activedescendant) and Enter opens it. Class names
 // in this file are picked up by Tailwind through an @source in site.css.
 
-/** The parts of Pagefind's search API used here */
-type Pagefind = {
-  options(opts: { basePath: string }): Promise<void>
-  init(): Promise<void>
-  debouncedSearch(term: string, opts: object, ms: number): Promise<SearchResponse | null>
-}
-type SearchResponse = { results: { words: number[]; data(): Promise<ResultData> }[] }
-type SubResult = { title: string; url: string; excerpt: string; locations: number[] }
-type ResultData = {
-  url: string
-  content: string
-  excerpt: string
-  meta: { title?: string }
-  sub_results: SubResult[]
-}
-/** `words` are the indexes Pagefind matched in `tokens`, the page text split on whitespace */
-type Result = ResultData & { words: number[]; tokens: string[] }
-
-const parts = (s: string) =>
-  s
-    .toLowerCase()
-    .split(/[^\p{L}\p{N}]+/u)
-    .filter(Boolean)
-
-function commonPrefix(a: string, b: string) {
-  let i = 0
-  while (i < a.length && i < b.length && a[i] === b[i]) i++
-  return i
-}
-
-/**
- * Whether a page word counts as a match for a query term: they share at least
- * half the term's length, and at least 3 characters. Stemmed matches like
- * "installations" → "install" share enough.
- */
-function termMatches(term: string, word: string) {
-  return commonPrefix(term, word) >= Math.min(term.length, Math.max(3, Math.ceil(term.length / 2)))
-}
-
-/**
- * When no indexed word starts with a query term, Pagefind falls back to the
- * longest indexed word the term starts with, so "sdfsdf" matches every `-s`
- * flag on the site. Drop a result unless every term matches a word Pagefind
- * matched on the page, or a word of its title.
- */
-function isRealMatch(terms: string[], r: Result) {
-  const matched = [...r.words.map((i) => r.tokens[i] ?? ''), r.meta.title ?? ''].flatMap(parts)
-  return terms.every((term) => matched.some((w) => termMatches(term, w)))
-}
-
-/** Whether the terms appear in order and adjacent in a title or heading */
-function hasPhrase(terms: string[], heading: string) {
-  const words = parts(heading)
-  return words.some((_, start) => terms.every((t, i) => termMatches(t, words[start + i] ?? '')))
-}
-
-/**
- * Pagefind scores each term on its own and penalizes long pages, so "bad
- * update" ranks a short page that says "update" a lot over the long one with a
- * section called "Recovering from a bad update". For queries of two or more
- * words, pages and sections with the query as a phrase in their title or a
- * heading go first. A phrase in the body text is too weak a signal: it put a
- * passing mention of "run simulated omicron" ahead of the page on running
- * simulated Omicron.
- */
-const sectionHasPhrase = (terms: string[], s: SubResult) =>
-  terms.length > 1 && hasPhrase(terms, s.title)
-
-const pageHasPhrase = (terms: string[], r: Result) =>
-  (terms.length > 1 && hasPhrase(terms, r.meta.title ?? '')) ||
-  r.sub_results.some((s) => sectionHasPhrase(terms, s))
-
-/** Stable sort with the items `first` picks ahead of the rest */
-function putFirst<T>(items: T[], first: (item: T) => boolean) {
-  return [...items.filter(first), ...items.filter((item) => !first(item))]
-}
-
-/**
- * Sections to show under a page, like Pagefind's UI: skip the first one if
- * it's the page itself (text before the first heading), and keep the 3 with
- * the most matches, in page order. Sections with the query as a phrase in
- * their heading come before the rest.
- */
-function sectionsToShow(terms: string[], r: Result) {
-  const subs = r.sub_results[0]?.url === r.url ? r.sub_results.slice(1) : r.sub_results
-  const byMatches = [...subs].sort((a, b) => b.locations.length - a.locations.length)
-  const top = putFirst(byMatches, (s) => sectionHasPhrase(terms, s)).slice(0, 3)
-  return subs.filter((s) => top.includes(s))
-}
+import { loadPagefind, search, type Pagefind, type Result } from './search-api.js'
 
 // Selection styles only apply from 600px up, like the oxide.computer docs:
 // on a phone there are no arrow keys and tapping is the way in.
@@ -197,13 +109,7 @@ class OxideSearch extends HTMLElement {
   }
 
   #loadPagefind() {
-    this.#pagefind ??= (async () => {
-      const base = new URL('pagefind/', import.meta.url)
-      const pagefind: Pagefind = await import(new URL('pagefind.js', base).href)
-      await pagefind.options({ basePath: base.pathname })
-      await pagefind.init()
-      return pagefind
-    })()
+    this.#pagefind ??= loadPagefind(new URL('pagefind/', import.meta.url))
     return this.#pagefind
   }
 
@@ -229,24 +135,11 @@ class OxideSearch extends HTMLElement {
     }, 300)
     this.#list.setAttribute('aria-busy', 'true')
 
-    const pagefind = await this.#loadPagefind()
-    const response = await pagefind.debouncedSearch(query, {}, 100)
-    if (!response || id !== this.#search) return
-    // The site is small enough to load every result up front, so the list can
-    // be swapped in one go
-    const results = await Promise.all(
-      response.results.map(async (r) => {
-        const data = await r.data()
-        return { ...data, words: r.words, tokens: data.content.split(/\s+/) }
-      }),
-    )
-    if (id !== this.#search) return
+    const shown = await search(await this.#loadPagefind(), query, 100)
+    if (!shown || id !== this.#search) return
     clearTimeout(slow)
 
-    const terms = parts(query)
-    const real = results.filter((r) => isRealMatch(terms, r))
-    const shown = putFirst(real, (r) => pageHasPhrase(terms, r))
-    this.#render(shown, terms)
+    this.#render(shown)
     body.hidden = false
     this.#list.removeAttribute('aria-busy')
     summary.textContent =
@@ -255,7 +148,7 @@ class OxideSearch extends HTMLElement {
         : `${shown.length} ${shown.length === 1 ? 'result' : 'results'} for “${query}”`
   }
 
-  #render(results: Result[], terms: string[] = []) {
+  #render(results: Result[]) {
     // Each option is named by its section heading, or the page title for the
     // page's own row, and described by its excerpt, so a screen reader reads
     // "Scheme V0" and then the text around the match. The page title bar is
@@ -275,14 +168,14 @@ class OxideSearch extends HTMLElement {
     }
     const groups = results.map((r, i) => {
       const titleId = `search-result-${i}`
-      const title = el('div', cls.title, { id: titleId, textContent: r.meta.title ?? r.url })
+      const title = el('div', cls.title, { id: titleId, textContent: r.title })
       title.setAttribute('aria-hidden', 'true')
       const group = el('div', cls.group, { role: 'group' } as Partial<HTMLDivElement>)
       group.setAttribute('aria-labelledby', titleId)
       const [page, pageText] = option(r.url, titleId, r.excerpt)
       page.append(pageText)
       group.append(title, page)
-      for (const sub of sectionsToShow(terms, r)) {
+      for (const sub of r.sections) {
         const headingId = `search-option-${n}-heading`
         const [a, text] = option(sub.url, headingId, sub.excerpt)
         a.append(el('span', cls.heading, { id: headingId, textContent: sub.title }), text)

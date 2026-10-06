@@ -48,9 +48,10 @@ is published at `docs/how-to-run/`, and a README at its directory, so
 rewritten to match. The builder then runs [Pagefind](https://pagefind.app/) over
 the HTML in `dist/`, which writes the search index and its JS search API to
 `dist/pagefind/`, all loaded client-side, so search needs no server. The search
-modal is our own, in `lib/search.ts`, which the build copies to `dist/search.js` with its types stripped. Last, Tailwind compiles
-`style.css`, which pulls in the shared styles from `lib/site.css`, against the
-generated HTML.
+modal is our own, in `lib/search.ts`, and gets its results from
+`lib/search-api.ts`; the build copies both to `dist/` with their types stripped.
+Last, Tailwind compiles `style.css`, which pulls in the shared styles from
+`lib/site.css`, against the generated HTML.
 
 ## No client-side React
 
@@ -66,3 +67,26 @@ serialized page data, in place of under 2KB of inline script, and adding a
 second build step (Vite) to produce that bundle alongside the HTML. If we end up
 wanting more interactive pieces, like a collapsible outline on small screens,
 try plain HTML first and then hydrating just those regions, not whole pages.
+
+## Search quality
+
+`lib/search-api.ts` adjusts Pagefind's results: it drops matches that only come
+from Pagefind's fallback to a short prefix of the query (so "sdfsdf" doesn't
+match every `-s` flag), and for queries of two or more words it puts pages and
+sections with the query as a phrase in a heading first. `search-eval/` checks
+that against queries in `search-eval/cases.ts`, running the same code in Node
+against the built site:
+
+```
+npm run build
+npm run search-eval                             # pass/fail, and what changed since the last run
+node search-eval/eval.ts --query 'bad update'   # results and sections for one query
+```
+
+A case only checks that a good page is somewhere in the top few results, so a
+ranking change can pass every case and still make results worse. Each run saves
+the top 3 results for every case, with their sections, and prints the cases
+whose top 3 changed since the previous run. So run the eval before and after
+changing `lib/search-api.ts`, and read what moved. The eval imports that file
+directly, so there's no need to rebuild in between. When a search gives a bad
+result, add it as a case.

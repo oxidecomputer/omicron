@@ -94,10 +94,13 @@ export async function buildSite({ site, repoRoot, outDir, fontsDir }: BuildOptio
   }
 
   await writeSearchIndex(outDir)
-  // The search script is one module with no imports, so it only needs its types
-  // removed. tsconfig's erasableSyntaxOnly keeps it to syntax that allows that.
-  const searchTs = fs.readFileSync(path.join(import.meta.dirname, 'search.ts'), 'utf8')
-  fs.writeFileSync(path.join(outDir, 'search.js'), stripTypeScriptTypes(searchTs))
+  // The search scripts only need their types removed: search.ts imports
+  // search-api.ts as './search-api.js', which is its name once built, and
+  // tsconfig's erasableSyntaxOnly keeps them to syntax that allows that
+  for (const name of ['search', 'search-api']) {
+    const ts = fs.readFileSync(path.join(import.meta.dirname, `${name}.ts`), 'utf8')
+    fs.writeFileSync(path.join(outDir, `${name}.js`), stripTypeScriptTypes(ts))
+  }
 
   console.log(`Built ${pages.length} pages and ${links.assets.size} assets into ${outDir}`)
 }
