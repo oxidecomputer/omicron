@@ -31,7 +31,7 @@ const BUILDOMAT_URL: &'static str =
     "https://buildomat.eng.oxide.computer/public/file";
 const CARGO_HACK_URL: &'static str =
     "https://github.com/taiki-e/cargo-hack/releases/download";
-const MAGHEMITE_REPO: &'static str = "oxidecomputer/maghemite";
+const MACOS_AARCH64_SERIES: &'static str = "macos-aarch64";
 
 const RETRY_ATTEMPTS: usize = 3;
 
@@ -201,6 +201,21 @@ fn arch() -> Result<Arch> {
         other => bail!("Architecture not supported: {other}"),
     };
     Ok(arch)
+}
+
+// TODO-RAINCLAUDE: an Oxide repo whose CI publishes standalone binaries to buildomat, pinned at one commit; `project` is its name under github.com/oxidecomputer, used for both buildomat downloads and source builds.
+struct BinarySource<'a> {
+    project: &'a str,
+    commit: &'a str,
+    linux_series: &'a str,
+}
+
+// TODO-RAINCLAUDE: one binary from a `BinarySource`: its published checksum on each platform that has one, and the cargo args to build it where nothing is published.
+struct PublishedBinary<'a> {
+    name: &'a str,
+    linux_sha2: &'a str,
+    macos_aarch64_sha2: &'a str,
+    source_build_args: &'a [&'a str],
 }
 
 struct Downloader<'a> {
@@ -772,11 +787,19 @@ impl Downloader<'_> {
         let stub_checksums_path =
             self.versions_dir.join("dendrite_stub_checksums");
 
-        let [sha2, dpd_sha2, swadm_sha2] = get_values_from_file(
+        let [
+            sha2,
+            dpd_linux_sha2,
+            swadm_linux_sha2,
+            dpd_macos_aarch64_sha2,
+            swadm_macos_aarch64_sha2,
+        ] = get_values_from_file(
             [
                 "CIDL_SHA256_ILLUMOS",
                 "CIDL_SHA256_LINUX_DPD",
                 "CIDL_SHA256_LINUX_SWADM",
+                "CIDL_SHA256_MACOS_AARCH64_DPD",
+                "CIDL_SHA256_MACOS_AARCH64_SWADM",
             ],
             &stub_checksums_path,
         )
@@ -820,77 +843,44 @@ impl Downloader<'_> {
         )
         .context("Failed to create a symlink to dendrite's bin directory")?;
 
-        match os_name()? {
-            Os::Linux => {
-                let base_url =
-                    format!("{BUILDOMAT_URL}/{repo}/linux-bin/{commit}");
-                let filename = "dpd";
-                let path = download_dir.join(filename);
-                download_file_and_verify(
-                    &self.log,
-                    &path,
-                    &format!("{base_url}/{filename}"),
-                    ChecksumAlgorithm::Sha2,
-                    &dpd_sha2,
-                )
-                .await?;
-                set_permissions(&path, 0o755).await?;
-                tokio::fs::copy(path, bin_dir.join(filename)).await?;
-
-                let filename = "swadm";
-                let path = download_dir.join(filename);
-                download_file_and_verify(
-                    &self.log,
-                    &path,
-                    &format!("{base_url}/{filename}"),
-                    ChecksumAlgorithm::Sha2,
-                    &swadm_sha2,
-                )
-                .await?;
-                set_permissions(&path, 0o755).await?;
-                tokio::fs::copy(path, bin_dir.join(filename)).await?;
-            }
-            Os::Illumos => {}
-            Os::Mac => {
-                info!(self.log, "Building dendrite from source for macOS");
-
-                let binaries = [
-                    ("dpd", &["--features=tofino_stub"][..]),
-                    ("swadm", &[][..]),
-                ];
-
-                let built_binaries =
-                    self.build_from_git("dendrite", &commit, &binaries).await?;
-
-                // Copy built binaries to bin_dir
-                for (binary_path, (binary_name, _)) in
-                    built_binaries.iter().zip(binaries.iter())
-                {
-                    let dest = bin_dir.join(binary_name);
-                    tokio::fs::copy(binary_path, &dest).await?;
-                    set_permissions(&dest, 0o755).await?;
-                }
-            }
-        }
-
-        Ok(())
+        let source = BinarySource {
+            project: "dendrite",
+            commit: &commit,
+            linux_series: "linux-bin",
+        };
+        let binaries = [
+            PublishedBinary {
+                name: "dpd",
+                linux_sha2: &dpd_linux_sha2,
+                macos_aarch64_sha2: &dpd_macos_aarch64_sha2,
+                source_build_args: &["--features=tofino_stub"],
+            },
+            PublishedBinary {
+                name: "swadm",
+                linux_sha2: &swadm_linux_sha2,
+                macos_aarch64_sha2: &swadm_macos_aarch64_sha2,
+                source_build_args: &[],
+            },
+        ];
+        self.install_published_binaries(&source, &binaries, &bin_dir).await
     }
 
-    // TODO-RAINCLAUDE: fetches one standalone binary that maghemite CI publishes at `{series}/{commit}/{name}`, installs it, executable, into `binary_dir`, and returns the installed path.
-    async fn download_maghemite_binary(
+    // TODO-RAINCLAUDE: fetches the binary that `source`'s CI publishes at `{series}/{commit}/{name}`, installs it, executable, into `binary_dir`, and returns the installed path.
+    async fn download_published_binary(
         &self,
+        source: &BinarySource<'_>,
         series: &str,
-        commit: &str,
         name: &str,
         sha2: &str,
         binary_dir: &Utf8Path,
     ) -> Result<Utf8PathBuf> {
+        let BinarySource { project, commit, linux_series: _ } = source;
         let path = self.output_dir.join("downloads").join(name);
         download_file_and_verify(
             &self.log,
             &path,
             &format!(
-                "{BUILDOMAT_URL}/{MAGHEMITE_REPO}/{series}/{commit}/{name}"
+                "{BUILDOMAT_URL}/oxidecomputer/{project}/{series}/{commit}/{name}"
             ),
             ChecksumAlgorithm::Sha2,
             sha2,
@@ -904,53 +894,71 @@ impl Downloader<'_> {
         Ok(dest)
     }
 
-    // TODO-RAINCLAUDE: installs the maghemite daemon `name` for the host into `binary_dir`: prebuilt where maghemite CI publishes one, built from source otherwise; on illumos the image tarball already provides it.
-    async fn install_maghemite_binary(
+    // TODO-RAINCLAUDE: installs `binaries` for the host into `binary_dir`: prebuilt where `source`'s CI publishes them, built from source otherwise; on illumos the image tarball already provides them.
+    async fn install_published_binaries(
         &self,
-        name: &str,
-        commit: &str,
-        linux_sha2: &str,
-        macos_aarch64_sha2: &str,
+        source: &BinarySource<'_>,
+        binaries: &[PublishedBinary<'_>],
         binary_dir: &Utf8Path,
     ) -> Result<()> {
         match os_name()? {
             Os::Linux => {
-                self.download_maghemite_binary(
-                    "linux", commit, name, linux_sha2, binary_dir,
-                )
-                .await?;
+                for binary in binaries {
+                    self.download_published_binary(
+                        source,
+                        source.linux_series,
+                        binary.name,
+                        binary.linux_sha2,
+                        binary_dir,
+                    )
+                    .await?;
+                }
             }
             Os::Mac => match arch()? {
                 Arch::Aarch64 => {
-                    let dest = self
-                        .download_maghemite_binary(
-                            "macos-aarch64",
-                            commit,
-                            name,
-                            macos_aarch64_sha2,
-                            binary_dir,
-                        )
-                        .await?;
+                    for binary in binaries {
+                        let dest = self
+                            .download_published_binary(
+                                source,
+                                MACOS_AARCH64_SERIES,
+                                binary.name,
+                                binary.macos_aarch64_sha2,
+                                binary_dir,
+                            )
+                            .await?;
 
-                    // TODO-RAINCLAUDE: unlike a source build, a prebuilt binary can be incompatible with this host (macOS version, linked libraries); run it so that surfaces here and not as a later test failure.
-                    info!(self.log, "Checking that binary works");
-                    confirm_binary_works(&dest, &["--help"]).await?;
+                        // TODO-RAINCLAUDE: unlike a source build, a prebuilt binary can be incompatible with this host (macOS version, linked libraries); run it so that surfaces here and not as a later test failure.
+                        info!(self.log, "Checking that {} works", binary.name);
+                        confirm_binary_works(&dest, &["--help"]).await?;
+                    }
                 }
                 Arch::X86_64 => {
                     info!(
                         self.log,
-                        "No prebuilt {name} for x86_64 macOS; building from source"
+                        "No prebuilt {} binaries for x86_64 macOS; building from source",
+                        source.project,
                     );
 
-                    let binaries = [(name, &["--no-default-features"][..])];
-
+                    // TODO-RAINCLAUDE: one `build_from_git` call for all of them, so they share a checkout and its target directory.
+                    let to_build: Vec<_> = binaries
+                        .iter()
+                        .map(|binary| (binary.name, binary.source_build_args))
+                        .collect();
                     let built_binaries = self
-                        .build_from_git("maghemite", commit, &binaries)
+                        .build_from_git(
+                            source.project,
+                            source.commit,
+                            &to_build,
+                        )
                         .await?;
 
-                    let dest = binary_dir.join(name);
-                    tokio::fs::copy(&built_binaries[0], &dest).await?;
-                    set_permissions(&dest, 0o755).await?;
+                    for (built_path, binary) in
+                        built_binaries.iter().zip(binaries)
+                    {
+                        let dest = binary_dir.join(binary.name);
+                        tokio::fs::copy(built_path, &dest).await?;
+                        set_permissions(&dest, 0o755).await?;
+                    }
                 }
             },
             Os::Illumos => (),
@@ -974,8 +982,8 @@ impl Downloader<'_> {
             self.versions_dir.join("maghemite_mg_openapi_version");
         let [commit] = get_values_from_file(["COMMIT"], &commit_path).await?;
 
-        let base_url =
-            format!("{BUILDOMAT_URL}/{MAGHEMITE_REPO}/image/{commit}");
+        let repo = "oxidecomputer/maghemite";
+        let base_url = format!("{BUILDOMAT_URL}/{repo}/image/{commit}");
 
         let filename = "mgd.tar.gz";
         let tarball_path = download_dir.join(filename);
@@ -999,14 +1007,18 @@ impl Downloader<'_> {
 
         let binary_dir = destination_dir.join("root/opt/oxide/mgd/bin");
 
-        self.install_maghemite_binary(
-            "mgd",
-            &commit,
-            &mgd_linux_sha2,
-            &mgd_macos_aarch64_sha2,
-            &binary_dir,
-        )
-        .await
+        let source = BinarySource {
+            project: "maghemite",
+            commit: &commit,
+            linux_series: "linux",
+        };
+        let binaries = [PublishedBinary {
+            name: "mgd",
+            linux_sha2: &mgd_linux_sha2,
+            macos_aarch64_sha2: &mgd_macos_aarch64_sha2,
+            source_build_args: &["--no-default-features"],
+        }];
+        self.install_published_binaries(&source, &binaries, &binary_dir).await
     }
 
     async fn download_maghemite_ddmd(&self) -> Result<()> {
@@ -1028,8 +1040,8 @@ impl Downloader<'_> {
             self.versions_dir.join("maghemite_ddm_openapi_version");
         let [commit] = get_values_from_file(["COMMIT"], &commit_path).await?;
 
-        let base_url =
-            format!("{BUILDOMAT_URL}/{MAGHEMITE_REPO}/image/{commit}");
+        let repo = "oxidecomputer/maghemite";
+        let base_url = format!("{BUILDOMAT_URL}/{repo}/image/{commit}");
 
         let filename = "mg-ddm.tar.gz";
         let tarball_path = download_dir.join(filename);
@@ -1053,14 +1065,18 @@ impl Downloader<'_> {
 
         let binary_dir = destination_dir.join("root/opt/oxide/mg-ddm/bin");
 
-        self.install_maghemite_binary(
-            "ddmd",
-            &commit,
-            &ddmd_linux_sha2,
-            &ddmd_macos_aarch64_sha2,
-            &binary_dir,
-        )
-        .await
+        let source = BinarySource {
+            project: "maghemite",
+            commit: &commit,
+            linux_series: "linux",
+        };
+        let binaries = [PublishedBinary {
+            name: "ddmd",
+            linux_sha2: &ddmd_linux_sha2,
+            macos_aarch64_sha2: &ddmd_macos_aarch64_sha2,
+            source_build_args: &["--no-default-features"],
+        }];
+        self.install_published_binaries(&source, &binaries, &binary_dir).await
     }
 
     async fn download_softnpu(&self) -> Result<()> {

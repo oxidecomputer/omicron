@@ -31,13 +31,6 @@ CRATES=(
 REPO="oxidecomputer/maghemite"
 . "$SOURCE_DIR/update_helpers.sh"
 
-function no_macos_artifacts {
-    echo "ERROR: Maghemite commit $1 has no macos-aarch64 artifacts"
-    echo "Its \"macos\" buildomat job may still be running or may have failed, or the commit predates that job."
-    echo "Check https://github.com/$REPO/commit/$1, then retry or pick a newer commit."
-    exit 1
-}
-
 function update_openapi {
     TARGET_COMMIT="$1"
     DRY_RUN="$2"
@@ -66,7 +59,7 @@ function update_mgd {
     OUTPUT_LINUX=$(printf "MGD_LINUX_SHA256=\"%s\"\n" "$SHA_LINUX")
 
     SHA_MACOS_AARCH64=$(get_sha "$REPO" "$TARGET_COMMIT" "mgd" "macos-aarch64") \
-        || no_macos_artifacts "$TARGET_COMMIT"
+        || no_macos_artifacts "$REPO" "$TARGET_COMMIT"
     OUTPUT_MACOS_AARCH64=$(printf "MGD_MACOS_AARCH64_SHA256=\"%s\"\n" "$SHA_MACOS_AARCH64")
 
     SHA_MG_DDM=$(get_sha "$REPO" "$TARGET_COMMIT" "mg-ddm" "image")
@@ -76,7 +69,7 @@ function update_mgd {
     OUTPUT_DDMD_LINUX=$(printf "DDMD_LINUX_SHA256=\"%s\"\n" "$SHA_DDMD_LINUX")
 
     SHA_DDMD_MACOS_AARCH64=$(get_sha "$REPO" "$TARGET_COMMIT" "ddmd" "macos-aarch64") \
-        || no_macos_artifacts "$TARGET_COMMIT"
+        || no_macos_artifacts "$REPO" "$TARGET_COMMIT"
     OUTPUT_DDMD_MACOS_AARCH64=$(printf "DDMD_MACOS_AARCH64_SHA256=\"%s\"\n" "$SHA_DDMD_MACOS_AARCH64")
 
     if [ -n "$DRY_RUN" ]; then

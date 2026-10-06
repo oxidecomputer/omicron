@@ -22,6 +22,15 @@ bad_target_commit() {
     exit 1
 }
 
+no_macos_artifacts() {
+    REPO="$1"
+    COMMIT="$2"
+    echo "ERROR: $REPO commit $COMMIT has no macos-aarch64 artifacts"
+    echo "Its \"macos\" buildomat job may still be running or may have failed, or the commit predates that job."
+    echo "Check https://github.com/$REPO/commit/$COMMIT, then retry or pick a newer commit."
+    exit 1
+}
+
 # Get the SHA for a Buildomat artifact.
 #
 # Note the "series" component of the Buildomat public file hierarchy
