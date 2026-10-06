@@ -104,6 +104,7 @@ impl Vmm {
     ///
     /// The new VMM record will be in [`VmmState::Creating`] until it is
     /// registered with a sled-agent.
+    // TODO-K: Is the above something we care about here?
     pub fn new(
         id: PropolisUuid,
         instance_id: InstanceUuid,

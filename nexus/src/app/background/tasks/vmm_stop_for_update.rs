@@ -6,6 +6,7 @@
 //! stopped for a sled update.
 
 use crate::app::background::BackgroundTask;
+use crate::app::instance::SledAgentInstanceError;
 use futures::future::BoxFuture;
 use iddqd::IdOrdMap;
 use nexus_db_queries::context::OpContext;
@@ -18,6 +19,11 @@ use omicron_common::api::external::Error;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use serde_json::json;
+use sled_agent_client::types::VmmPutStateBody;
+use sled_agent_client::types::VmmStateRequested;
+use sled_agent_types::instance::SledVmmState;
+use sled_agent_types::instance::VmmRuntimeState;
+use sled_agent_types::instance::VmmState;
 use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
 
@@ -120,6 +126,8 @@ impl VmmStopForUpdate {
         vmms_by_sled: IdOrdMap<VmmsBySled>,
         opctx: &OpContext,
     ) -> VmmStopForUpdateResult {
+        let mut result = VmmStopForUpdateResult::new();
+
         for VmmsBySled { sled_id, vmm_ids } in &vmms_by_sled {
             slog::info!(
                 opctx.log,
@@ -127,12 +135,136 @@ impl VmmStopForUpdate {
                 "sled_id" => %sled_id,
                 "vmms" => ?vmm_ids,
             );
-            // TODO-K: actually stop the VMMs in `vmms_by_sled` and record
-            // how many were stopped on each sled, how many failed, whatever
+
+            // Since we're using IdOrdMap, each sled id will only appear once.
+            // Because of this it's not a big deal to start a new sled agent
+            // client per sled id.
+            let sled_client = match nexus_networking::sled_client(
+                &self.datastore,
+                &opctx,
+                *sled_id,
+                &opctx.log,
+            )
+            .await
+            {
+                Ok(client) => client,
+                Err(e) => {
+                    slog::error!(
+                        opctx.log,
+                        "Failed to create sled agent client";
+                        "sled_id" => %sled_id,
+                        InlineErrorChain::new(&e),
+                    );
+
+                    result.errors.push(e.clone());
+
+                    continue;
+                }
+            };
+
+            for id in vmm_ids {
+                let response = match sled_client
+                    .vmm_put_state(
+                        id,
+                        &VmmPutStateBody { state: VmmStateRequested::Stopped },
+                    )
+                    .await
+                {
+                    Ok(res) => res.into_inner().updated_runtime,
+                    Err(e) => {
+                        let err = SledAgentInstanceError(e);
+
+                        slog::error!(
+                            opctx.log,
+                            "Failed to mark VMM as Stopped";
+                            "sled_id" => %sled_id,
+                            "vmm_id" => %id,
+                            InlineErrorChain::new(&err),
+                        );
+
+                        result.errors.push(err.into());
+                        result
+                            .vmms_failed_by_sled
+                            .entry(*sled_id)
+                            .or_insert_with(|| VmmsBySled {
+                                sled_id: *sled_id,
+                                vmm_ids: Vec::new(),
+                            })
+                            .vmm_ids
+                            .push(*id);
+
+                        continue;
+                    }
+                };
+
+                match response {
+                    None => {
+                        slog::debug!(opctx.log, "VMM already stopped, no changes to state"; "sled_id" => %sled_id,
+                            "vmm_id" => %id);
+                    }
+                    Some(vmm) => {
+                        let SledVmmState {
+                            vmm_state,
+                            migration_in: _,
+                            migration_out: _,
+                        } = vmm;
+                        let VmmRuntimeState { state, generation, time_updated } =
+                            vmm_state;
+
+                        match state {
+                            // TODO-K: A VMM could have been set to stopped and
+                            // then propolis destroyed it because another nexus
+                            // told it to? Is this even possible? Does it
+                            // matter? Check my claims here
+                            VmmState::Stopped
+                            | VmmState::Stopping
+                            | VmmState::Destroyed
+                            | VmmState::Failed => {
+                                // TODO-K: Success!
+                                result
+                                    .vmms_stopped_by_sled
+                                    .entry(*sled_id)
+                                    .or_insert_with(|| VmmsBySled {
+                                        sled_id: *sled_id,
+                                        vmm_ids: Vec::new(),
+                                    })
+                                    .vmm_ids
+                                    .push(*id);
+
+                                slog::debug!(
+                                    opctx.log,
+                                    "Stopped VMM for sled evacuation during \
+                                    an update";
+                                    "sled_id" => %sled_id,
+                                    "vmm_id" => %id,
+                                    "vmm_generation" => ?generation,
+                                    "time_updated" => ?time_updated,
+                                );
+                            }
+                            VmmState::Migrating
+                            | VmmState::Rebooting
+                            | VmmState::Starting
+                            | VmmState::Running => {
+                                // TODO-K: Bollocks
+
+                                slog::error!(
+                                    opctx.log,
+                                    "Failed to mark VMM as Stopped, \
+                                    state did not change";
+                                    "sled_id" => %sled_id,
+                                    "vmm_id" => %id,
+                                    "state" => ?state,
+                                    "vmm_generation" => ?generation,
+                                    "time_updated" => ?time_updated,
+                                );
+                            }
+                        }
+                    }
+                }
+            }
         }
 
-        // TODO-K: actually return the results of the stopped vmms
-        VmmStopForUpdateResult::new()
+        result
     }
 
     pub(crate) async fn actually_activate(

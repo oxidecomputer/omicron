@@ -568,6 +568,11 @@ impl UpdatesRequired {
                         == InstanceIntendedState::Running
                         && snapshot.migration.is_none()
                     {
+                        // TODO-K: We definitely don't want the
+                        // InstanceIntendedState to change if we're stopping for
+                        // an update. We should make sure it doesn't. The best
+                        // way to do this is to use the marker
+
                         // Did the active VMM shut itself down, when it was
                         // intended to be running *and* we were not migrating
                         // out? If so, update the instance's intended state to

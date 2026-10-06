@@ -502,6 +502,9 @@ impl DataStore {
             // TODO-K: change to DbVmmState::SHOULD_STOP_FOR_EVACUATION once
             // that branch is merged
             .filter(dsl::state.eq_any(&[
+                // TODO-K: Caveat that a VMM in Creating state will not be
+                // registered with a sled agent yet. Does this affect what we're
+                // doing here?
                 DbVmmState::Creating,
                 DbVmmState::Starting,
                 DbVmmState::Running,
