@@ -3384,14 +3384,7 @@ impl fmt::Display for BlueprintDatasetDisposition {
 
 /// Information about a dataset as recorded in a blueprint
 #[derive(
-    Debug,
-    Clone,
-    Eq,
-    PartialEq,
-    JsonSchema,
-    Deserialize,
-    Serialize,
-    Diffable,
+    Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
 )]
 pub struct BlueprintDatasetConfig {
     pub disposition: BlueprintDatasetDisposition,
