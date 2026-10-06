@@ -35,6 +35,13 @@
    Pagefind's own :is(#\#) prefix matches its specificity, so these win by
    coming later. */
 :is(*, #\#):is(*, #\#):is(*, #\#) {
+  /* Pagefind empties the results list while each search runs, so the modal
+     collapsed to the summary line and sprang back, which read as a flash. Once
+     there's a query, hold the modal at its full height. min-height, not height,
+     so the full-screen modal on small screens keeps its own height. */
+  .pf-modal:has(.pf-summary:not(:empty)) {
+    min-height: var(--pf-modal-max-height);
+  }
   .pf-modal-body {
     padding: 0;
   }
