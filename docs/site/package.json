@@ -8,7 +8,7 @@
     "fmt": "oxfmt",
     "tsc": "tsc",
     "unlisted": "node unlisted.ts",
-    "serve": "npm run build && pagefind --site dist --serve"
+    "serve": "npm run build && node serve.ts"
   },
   "dependencies": {
     "@asciidoctor/core": "^3.0.4",
@@ -18,7 +18,6 @@
     "github-slugger": "^2.0.0",
     "markdown-exit": "^1.3.0",
     "minisearch": "^7.2.0",
-    "pagefind": "^1.5.2",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "shiki": "^4.5.0",

@@ -11,8 +11,7 @@
 // the previous run. Run it before and after changing the ranking.
 //
 // This loads the site's search provider's client, like the search modal does,
-// with `fetch` stubbed to read the index from dist/. Pagefind's pagefind.js
-// runs in Node as is: with no `window` it skips its Web Worker.
+// with `fetch` stubbed to read the index from dist/.
 
 import fs from 'node:fs/promises'
 import path from 'node:path'
@@ -31,14 +30,9 @@ const { values: args } = parseArgs({
   },
 })
 
-// Clients fetch by file URL, or by path for Pagefind, which fetches by its
-// basePath, the search/ directory's path here
-globalThis.fetch = (async (url: string | URL) => {
-  const file = String(url).split('?')[0]
-  return new Response(
-    await fs.readFile(file.startsWith('file:') ? fileURLToPath(file) : decodeURIComponent(file)),
-  )
-}) as typeof fetch
+// Clients fetch relative to the search/ directory's file URL
+globalThis.fetch = (async (url: string | URL) =>
+  new Response(await fs.readFile(fileURLToPath(url)))) as typeof fetch
 
 if (!site.search) throw new Error('The site has no search provider')
 const { load }: { load: LoadEngine } = await import(pathToFileURL(site.search.client).href)
