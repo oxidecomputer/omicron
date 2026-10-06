@@ -1,3 +1,4 @@
+import { MenuClose12Icon, MenuOpen12Icon } from '@oxide/design-system/icons/react'
 import type { ReactNode } from 'react'
 
 import { relHref, sourceUrl } from './links.ts'
@@ -29,15 +30,28 @@ const Html = ({ html }: { html: string }) => <span dangerouslySetInnerHTML={{ __
 /** Relative path from the page at `from` to the site root, e.g. `../..` */
 const rootFrom = (from: string) => relHref(from, '.')
 
+/** When the mobile nav opens, center the current page's link in it */
+const mobileNavScript = `{
+  const nav = document.getElementById('mobile-nav')
+  nav.addEventListener('toggle', (e) => {
+    if (e.newState !== 'open') return
+    const l = nav.querySelector('[aria-current=page]')
+    nav.scrollTop = l.offsetTop - (nav.clientHeight - l.offsetHeight) / 2
+  })
+}`
+
 function Shell({
   site,
   title,
   root,
+  menu,
   children,
 }: {
   site: Site
   title: string
   root: string
+  /** Shown in a drawer from the header's menu button on small screens */
+  menu?: ReactNode
   children: ReactNode
 }) {
   return (
@@ -56,18 +70,42 @@ function Shell({
         <script>{`if (matchMedia('(prefers-color-scheme: light)').matches) document.documentElement.dataset.theme = 'light'`}</script>
       </head>
       <body className="bg-default text-default">
-        <header className="bg-default border-secondary sticky top-0 z-10 flex h-14 items-center gap-3 border-b px-6">
+        <header className="bg-default border-secondary 600:px-6 sticky top-0 z-10 flex h-14 items-center gap-3 border-b px-4">
           <a href={`${root}/`} className="text-sans-xl text-raise">
             {site.title}
           </a>
           <span className="text-mono-sm text-tertiary 600:inline hidden">{site.tagline}</span>
-          <div className="ml-auto flex items-center gap-6">
+          <div className="600:gap-6 ml-auto flex items-center gap-3">
             <pagefind-modal-trigger placeholder="Search" />
             <a href={site.repo} className="text-mono-sm text-secondary hover:text-default">
               GitHub
             </a>
+            {menu && (
+              <button
+                popoverTarget="mobile-nav"
+                aria-label="Menu"
+                className="900:hidden border-default text-default flex h-8 w-8 items-center justify-center rounded-md border"
+              >
+                <MenuOpen12Icon className="menu-icon-open" />
+                <MenuClose12Icon className="menu-icon-close" />
+              </button>
+            )}
           </div>
         </header>
+        {menu && (
+          <>
+            {/* A popover, so the browser handles opening, closing on Escape or a
+                click outside, and focus. Positioned in site.css */}
+            <nav
+              id="mobile-nav"
+              popover=""
+              className="bg-default border-secondary text-default overflow-y-auto overscroll-contain border-0 border-r px-4 py-6"
+            >
+              {menu}
+            </nav>
+            <script>{mobileNavScript}</script>
+          </>
+        )}
         <pagefind-modal />
         {children}
       </body>
@@ -165,7 +203,12 @@ export function DocPage({
   next?: Page
 }) {
   return (
-    <Shell site={site} title={`${plain(page.title)} | ${site.title}`} root={rootFrom(page.out)}>
+    <Shell
+      site={site}
+      title={`${plain(page.title)} | ${site.title}`}
+      root={rootFrom(page.out)}
+      menu={<Nav sections={sections} current={page} />}
+    >
       <div className="flex">
         <nav
           id="sidebar"
@@ -174,18 +217,12 @@ export function DocPage({
           <Nav sections={sections} current={page} />
         </nav>
         <script>{sidebarScrollScript(site)}</script>
-        <main className="900:px-12 min-w-0 flex-1 px-6 py-10">
+        <main className="600:px-6 900:px-12 min-w-0 flex-1 px-4 py-10">
           <div className="mx-auto max-w-[760px]">
-            <details className="900:hidden border-secondary mb-8 rounded border px-4 py-3">
-              <summary className="text-mono-sm text-secondary">Menu</summary>
-              <div className="mt-4">
-                <Nav sections={sections} current={page} />
-              </div>
-            </details>
             <div className="text-mono-sm text-tertiary mb-2">{page.section}</div>
             {/* Only this part of the page goes in the search index */}
-            <div data-pagefind-body="">
-              <h1 className="text-sans-3xl text-raise mb-2">
+            <div data-pagefind-body="" className="wrap-break-word">
+              <h1 className="text-sans-2xl 600:text-sans-3xl text-raise mb-2">
                 <Html html={page.title} />
               </h1>
               <a
@@ -233,20 +270,20 @@ export function DocPage({
 export function IndexPage({ site, sections }: { site: Site; sections: Section[] }) {
   return (
     <Shell site={site} title={`${site.title} ${site.tagline}`} root=".">
-      <main className="mx-auto max-w-[1100px] px-6 py-16">
-        <h1 className="text-sans-4xl mb-10">
+      <main className="600:px-6 700:py-16 mx-auto max-w-[1100px] px-4 py-8">
+        <h1 className="text-sans-3xl 700:text-sans-4xl 700:mb-10 mb-6 text-balance">
           <span className="text-accent">{site.title}</span>{' '}
           <span className="text-raise">{site.tagline}</span>
         </h1>
-        <div className="700:grid-cols-2 1000:grid-cols-3 grid grid-cols-1 gap-6">
+        <div className="700:grid-cols-2 1000:grid-cols-3 700:gap-6 grid grid-cols-1 gap-3">
           {sections.map((section) => (
             <section
               key={section.title}
-              className="bg-raise border-secondary rounded-lg border p-6"
+              className="bg-raise border-secondary 700:p-6 rounded-lg border p-5"
             >
-              <h2 className="text-sans-xl text-raise mb-4 flex items-center gap-3">
+              <h2 className="text-sans-lg 700:text-sans-xl text-raise 700:mb-4 700:gap-3 mb-3 flex items-center gap-2.5">
                 {section.icon && (
-                  <span className="text-accent bg-accent inline-flex rounded-md p-1.5">
+                  <span className="text-accent bg-accent 700:p-1.5 inline-flex rounded-md p-1">
                     <section.icon />
                   </span>
                 )}

@@ -45,6 +45,13 @@
   .pf-modal-body {
     padding: 0;
   }
+  /* No keyboard to use the ⌘K hint with on a phone, and the header needs the
+     room */
+  @media (max-width: 599px) {
+    .pf-trigger-shortcut {
+      display: none;
+    }
+  }
   .pf-summary {
     padding: 8px 16px;
   }

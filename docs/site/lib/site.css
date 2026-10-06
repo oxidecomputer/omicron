@@ -47,3 +47,37 @@ html {
   -webkit-font-smoothing: antialiased;
   scroll-padding-top: 4.5rem;
 }
+
+/* Mobile nav drawer (a popover), below the header so its menu button stays
+   usable for closing it. */
+#mobile-nav {
+  inset: 3.5rem auto 0 0;
+  margin: 0;
+  width: min(80vw, 400px);
+  height: auto;
+  max-height: none;
+}
+#mobile-nav::backdrop {
+  top: 3.5rem;
+  background: var(--surface-scrim);
+}
+@media (min-width: 900px) {
+  #mobile-nav,
+  #mobile-nav::backdrop {
+    display: none;
+  }
+}
+.menu-icon-close,
+body:has(#mobile-nav:popover-open) .menu-icon-open {
+  display: none;
+}
+body:has(#mobile-nav:popover-open) .menu-icon-close {
+  display: block;
+}
+
+/* Admonition content is a flex item, which won't shrink below its content's
+   width by default, so a code block in a note widened the whole page on phones
+   instead of scrolling. */
+.admonitionblock .admonition-content {
+  min-width: 0;
+}
