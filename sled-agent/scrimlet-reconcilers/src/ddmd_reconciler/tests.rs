@@ -119,11 +119,10 @@ async fn server_error_reports_failed() {
     let mut reconciler = test_reconciler(&server, &logctx.log);
     let status = reconciler
         .do_reconciliation(
-            &networking_config(rack_network_config(vec![port(
-                "qsfp0",
-                SwitchSlot::Switch0,
-                true,
-            )])),
+            &networking_config(rack_network_config(vec![
+                port("qsfp0", SwitchSlot::Switch0, true),
+                port("qsfp1", SwitchSlot::Switch0, false),
+            ])),
             &logctx.log,
         )
         .await;
