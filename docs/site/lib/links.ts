@@ -57,12 +57,15 @@ export function createLinkRewriter({
       return linked ? `<a href="${url}">${linked.title}</a>` : match
     })
 
-    return html.replace(/(href|src)="([^"]*)"/g, (match, attr: string, url: string) => {
+    // Only in tags: code blocks can contain href="..." as text, and shiki doesn't
+    // escape the quotes
+    const attrRe = /(<[a-z][^>]*?\s)(href|src)="([^"]*)"/gi
+    return html.replace(attrRe, (match, start: string, attr: string, url: string) => {
       const resolved = resolve(page, url)
       if (!resolved) return match
       const { target, hash, linked } = resolved
 
-      if (linked) return `${attr}="${relHref(page.out, linked.out)}${hash}"`
+      if (linked) return `${start}${attr}="${relHref(page.out, linked.out)}${hash}"`
 
       // Asciidoctor turns xref:foo.adoc[] into foo.html. If foo.adoc exists but
       // isn't on the site, link to the source on GitHub instead.
@@ -79,7 +82,7 @@ export function createLinkRewriter({
         assets.add(srcTarget)
         return match
       }
-      return `${attr}="${sourceUrl(site, srcTarget, { dir: stat?.isDirectory() })}${hash}"`
+      return `${start}${attr}="${sourceUrl(site, srcTarget, { dir: stat?.isDirectory() })}${hash}"`
     })
   }
 

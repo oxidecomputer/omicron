@@ -29,14 +29,15 @@ Search doesn't work from `file://`. To try it, run `npm run serve`, which builds
 site and serves it at http://localhost:1414.
 
 The build warns about broken links and Asciidoctor errors. To see which docs in the
-repo aren't on the site, run `npm run unlisted`. The site uses system fonts locally unless `docs/site/fonts`
-contains the Oxide font files (for example, a symlink to `app/ui/assets/fonts` in a
-console checkout).
+repo aren't on the site, run `npm run unlisted`. The site uses system fonts locally
+unless `docs/site/fonts` contains the Oxide font files (for example, a symlink to
+`app/ui/assets/fonts` in a console checkout).
 
 ## How it works
 
 `build.ts` passes the config in `nav.ts` to the builder in `lib/`, which has
-nothing Omicron-specific in it. `lib/render.tsx` renders AsciiDoc the same way the
+nothing Omicron-specific in it so it can move to `@oxide/design-system` once
+we're happy with it. `lib/render.tsx` renders AsciiDoc the same way the
 RFD site and docs.oxide.computer do, with `@oxide/react-asciidoc` and the AsciiDoc
 components and styles from `@oxide/design-system`. Markdown goes through
 `markdown-exit`, with code blocks highlighted by shiki in the design system's theme.

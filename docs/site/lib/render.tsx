@@ -1,6 +1,6 @@
 // Renders one AsciiDoc or Markdown file to a page title, HTML body, and table
-// of contents. Both formats come out with the same markup for headings and
-// code blocks, so the design system's AsciiDoc styles cover both.
+// of contents. Markdown code blocks get the same markup as AsciiDoc listings,
+// so the design system's AsciiDoc styles cover both.
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -17,12 +17,7 @@ import { oxideTheme } from '@oxide/design-system/syntax'
 import GithubSlugger from 'github-slugger'
 import { createMarkdownExit } from 'markdown-exit'
 import { renderToStaticMarkup } from 'react-dom/server'
-import {
-  bundledLanguages,
-  createHighlighter,
-  type BundledLanguage,
-  type Highlighter,
-} from 'shiki'
+import { bundledLanguages, createHighlighter, type BundledLanguage } from 'shiki'
 
 import type { TocItem } from './types.ts'
 
@@ -88,16 +83,17 @@ async function renderAdoc(file: string, src: string): Promise<Rendered> {
 }
 
 // Code blocks get the same shiki theme and markup as AsciiDoc listings, so
-// they pick up the same styles. Created on first use; languages load on demand
-// in renderMarkdown.
-let highlighter: Promise<Highlighter> | undefined
-const getHighlighter = () =>
-  (highlighter ??= createHighlighter({ themes: [oxideTheme], langs: [] }))
+// they pick up the same styles. Languages load on demand.
+const highlighter = await createHighlighter({ themes: [oxideTheme], langs: [] })
 
 /** The language of a fenced code block: the first word of its info string */
 const fenceLang = (info: string) => info.trim().split(/\s+/)[0]
 
-function highlightFence(highlighter: Highlighter, code: string, lang: string) {
+async function highlightFence(code: string, info: string) {
+  const lang = fenceLang(info)
+  if (Object.hasOwn(bundledLanguages, lang) && !highlighter.getLoadedLanguages().includes(lang)) {
+    await highlighter.loadLanguage(lang as BundledLanguage)
+  }
   const resolved = highlighter.getLoadedLanguages().includes(lang) ? lang : 'text'
   const html = highlighter.codeToHtml(code.replace(/\n$/, ''), {
     lang: resolved,
@@ -107,25 +103,20 @@ function highlightFence(highlighter: Highlighter, code: string, lang: string) {
   return `<div class="listingblock"><div class="content"><pre class="highlight"><code class="language-${resolved}" data-lang="${resolved}">${html}</code></pre></div></div>\n`
 }
 
+const md = createMarkdownExit({ html: true, linkify: true })
+md.renderer.rules.fence = (tokens, idx) => highlightFence(tokens[idx].content, tokens[idx].info)
+
 async function renderMarkdown(file: string): Promise<Rendered> {
-  const highlighter = await getHighlighter()
   let title = ''
   const toc: TocItem[] = []
   // IDs match GitHub's, so links to Markdown headings written against GitHub
   // keep working
   const slugger = new GithubSlugger()
 
-  const md = createMarkdownExit({ html: true, linkify: true })
   const tokens = md.parse(fs.readFileSync(file, 'utf8'), {})
 
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i]
-    if (token.type === 'fence') {
-      const lang = fenceLang(token.info)
-      if (Object.hasOwn(bundledLanguages, lang) && !highlighter.getLoadedLanguages().includes(lang)) {
-        await highlighter.loadLanguage(lang as BundledLanguage)
-      }
-    }
     if (token.type !== 'heading_open') continue
     const depth = Number(token.tag.slice(1))
     const children = tokens[i + 1].children ?? []
@@ -148,15 +139,7 @@ async function renderMarkdown(file: string): Promise<Rendered> {
     if (depth === 3) toc.at(-1)?.children.push({ id, title: text, children: [] })
   }
 
-  md.renderer.rules.heading_open = (tokens, idx) => {
-    const { tag, attrs } = tokens[idx]
-    const id = attrs?.find(([name]) => name === 'id')?.[1]
-    return `<${tag} id="${id}"><a class="anchor" href="#${id}"></a>`
-  }
-  md.renderer.rules.fence = (tokens, idx) =>
-    highlightFence(highlighter, tokens[idx].content, fenceLang(tokens[idx].info))
-
-  const html = md.renderer.render(tokens, md.options, {})
+  const html = await md.renderer.renderAsync(tokens, md.options, {})
   const body = `<div id="content" class="asciidoc-body w-full">${html}</div>`
   return { title, body, toc }
 }
