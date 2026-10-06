@@ -72,12 +72,14 @@ regions, not whole pages.
 
 ## Search quality
 
-`lib/search/pagefind-client.ts` adjusts Pagefind's results: it drops matches
-that only come from Pagefind's fallback to a short prefix of the query (so
-"sdfsdf" doesn't match every `-s` flag), and for queries of two or more words it
-puts pages and sections with the query as a phrase in a heading first.
-`search-eval/` checks that against queries in `search-eval/cases.ts`, running the
-site's search provider's client in Node against the built index:
+The site searches with MiniSearch. Each section of a page is its own document
+in the index, and a page ranks by its best section, so a long page with a
+section about the query beats a short page that mentions it a lot. Every query
+term has to match, as a prefix of a stemmed word, and pages where one section
+has every term come before pages that only have them across sections.
+`lib/search/minisearch-client.ts` has the details. `search-eval/` checks the
+results against queries in `search-eval/cases.ts`, running the site's search
+provider's client in Node against the built index:
 
 ```
 npm run build
@@ -90,5 +92,6 @@ ranking change can pass every case and still make results worse. Each run saves
 the top 3 results for every case, with their sections, and prints the cases
 whose top 3 changed since the previous run. So run the eval before and after
 changing the ranking, and read what moved. The eval imports the client
-directly, so a change to it needs no rebuild in between. When a search gives a bad
+directly, so a change to it needs no rebuild in between, unless it changes the
+index options. When a search gives a bad
 result, add it as a case.

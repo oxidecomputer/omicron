@@ -104,8 +104,10 @@ export async function buildSite({ site, repoRoot, outDir, fontsDir }: BuildOptio
 /**
  * Index the pages with the site's search provider into outDir/search, and
  * write the scripts the browser runs: the search modal, and the provider's
- * client. Both only need their types removed (tsconfig's erasableSyntaxOnly
- * keeps them to syntax that allows that) since they only import types.
+ * client and the modules it imports. The first two only need their types
+ * removed (tsconfig's erasableSyntaxOnly keeps them to syntax that allows
+ * that), since the modal only imports types, and the client's imports resolve
+ * through the import map in layout.tsx.
  */
 async function writeSearch(provider: SearchProvider, pages: SearchPage[], outDir: string) {
   const dir = path.join(outDir, 'search')
@@ -117,4 +119,8 @@ async function writeSearch(provider: SearchProvider, pages: SearchPage[], outDir
     strip(path.join(import.meta.dirname, 'search.ts')),
   )
   fs.writeFileSync(path.join(dir, 'engine.js'), strip(provider.client))
+  for (const [name, file] of Object.entries(provider.modules ?? {})) {
+    const js = fs.readFileSync(file, 'utf8').replace(/^\/\/# sourceMappingURL=.*$/m, '')
+    fs.writeFileSync(path.join(dir, `${name}.js`), js)
+  }
 }

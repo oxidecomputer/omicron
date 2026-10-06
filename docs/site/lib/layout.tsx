@@ -162,6 +162,21 @@ function Shell({
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>{title}</title>
         <link rel="stylesheet" href={`${root}/style.css`} />
+        {site.search?.modules && (
+          <script
+            type="importmap"
+            dangerouslySetInnerHTML={{
+              __html: JSON.stringify({
+                imports: Object.fromEntries(
+                  Object.keys(site.search.modules).map((name) => [
+                    name,
+                    `${root}/search/${name}.js`,
+                  ]),
+                ),
+              }),
+            }}
+          />
+        )}
         {site.search && <script type="module" src={`${root}/search.js`} />}
         {/* Dark by default, like other Oxide sites, unless the OS asks for light */}
         <script>{`if (matchMedia('(prefers-color-scheme: light)').matches) document.documentElement.dataset.theme = 'light'`}</script>

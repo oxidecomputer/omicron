@@ -23,6 +23,12 @@ export type SearchProvider = {
    * `dir` as engine.js.
    */
   client: string
+  /**
+   * Bare imports in the client, each mapped to an ES module file with no
+   * imports of its own. The build copies them to `dir`, and an import map in
+   * every page points the bare imports at the copies.
+   */
+  modules?: Record<string, string>
 }
 
 /** A section to show under a page. `excerpt` is HTML with matches in `<mark>`. */

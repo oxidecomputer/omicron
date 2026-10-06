@@ -16,11 +16,7 @@ export const cases: Case[] = [
   { q: 'foobarbaz', none: true },
   { q: 'sdfsdf test', none: true, note: 'all terms must match' },
   { q: 'clickhouse sdfsdf', none: true },
-  {
-    q: 'tests1234',
-    none: true,
-    note: 'falls back to "tests"; looks the same as installations → install to a prefix filter',
-  },
+  { q: 'tests1234', none: true },
 
   // Title-ish queries
   { q: 'clickhouse', top: ['/docs/clickhouse-debugging/', '/oximeter/db/schema/'] },
@@ -94,8 +90,8 @@ export const cases: Case[] = [
   { q: 'db', top: ['/nexus/db-queries/src/db/', '/schema/crdb/'], k: 5 },
   { q: 'tuf', top: ['/docs/tuf-artifact-replication/'] },
 
-  // Phrases that name a section in a long page. Pagefind has no phrase or
-  // proximity scoring and its length normalization sinks long pages.
+  // Phrases that name a section in a long page. Indexing each section as its
+  // own document is what ranks these well.
   { q: 'bad update', top: ['/docs/reconfigurator-ops-guide/'], k: 1 },
   { q: 'planning reports', top: ['/docs/reconfigurator-ops-guide/'], k: 1 },
   {
@@ -116,7 +112,7 @@ export const cases: Case[] = [
   {
     q: 'how-to-run helios',
     top: ['/docs/how-to-run/'],
-    note: 'known miss: Pagefind does not match the page',
+    note: 'known miss: no one section has every term, so it ranks after pages with one that does',
   },
   { q: 'omicron-dev run-all', top: ['/docs/how-to-run-simulated/'] },
   { q: 'install prerequisites', top: ['/docs/how-to-run/', '/docs/how-to-run-simulated/'] },
@@ -125,13 +121,13 @@ export const cases: Case[] = [
   {
     q: 'api versioning',
     top: ['/docs/control-plane-architecture/'],
-    note: 'known miss: Pagefind does not match the page',
+    note: 'known miss: the page matches, but far down',
   },
   { q: 'dbinit.sql', top: ['/schema/crdb/'] },
   {
     q: 'diesel query datastore',
     top: ['/nexus/db-queries/src/db/'],
-    note: 'known miss: Pagefind does not match the page',
+    note: 'known miss: the page never says "datastore"',
   },
   { q: 'omdb', top: ['/docs/reconfigurator-ops-guide/'] },
   { q: 'omdb nexus background-tasks', top: ['/docs/reconfigurator-ops-guide/'] },
