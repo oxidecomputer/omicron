@@ -101,7 +101,7 @@ impl SpEreportIngester {
             .await
             {
                 Err(error) => {
-                    const MSG: &str = "no MGS successfully returned SP ID list";
+                    const MSG: &str = "no MGS DNS records resolved";
                     let error = InlineErrorChain::new(&*error);
                     error!(opctx.log, "{MSG}"; "error" => &error);
                     status.errors.push(format!("{MSG}: {error}"));
