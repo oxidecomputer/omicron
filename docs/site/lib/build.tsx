@@ -47,8 +47,12 @@ export async function buildSite({ site, repoRoot, outDir, fontsDir }: BuildOptio
     }
   }
   const pages = sections.flatMap((s) => s.pages)
-  // foo.adoc and foo/README.md would both be foo/
-  const bySrc = new Map<string, string>()
+  // foo.adoc and foo/README.md would both be foo/. The build also writes the
+  // search index and fonts to directories of their own.
+  const bySrc = new Map([
+    ['pagefind/', 'the search index'],
+    ['fonts/', 'the fonts'],
+  ])
   for (const { out, src } of pages) {
     const other = bySrc.get(out)
     if (other) throw new Error(`${other} and ${src} would both be published at ${out}`)
