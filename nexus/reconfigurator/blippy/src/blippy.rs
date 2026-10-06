@@ -25,7 +25,6 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use sled_agent_types::disk::M2Slot;
-use std::cmp::Ordering;
 use std::collections::BTreeSet;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
@@ -39,7 +38,7 @@ pub struct Note {
     pub kind: Kind,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Severity {
     /// Indicates an issue with a blueprint that should be corrected by a future
     /// planning run.
@@ -57,8 +56,7 @@ impl fmt::Display for Severity {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, EnumDiscriminants)]
-#[strum_discriminants(derive(Ord, PartialOrd))]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Kind {
     Blueprint(BlueprintKind),
     Sled { sled_id: SledUuid, kind: Box<SledKind> },
@@ -114,27 +112,34 @@ impl Kind {
         }
     }
 
-    // For sorting notes by kind, we want to provide an ordering, similar to
-    // `Ord` and `PartialOrd`.  However, the variants here include data that
-    // does not itself impl `Ord`/`PartialOrd`.  We could impl our own
-    // `Ord`/`PartialOrd` that ignores these, but we'd have to ignore them for
-    // `Eq`/`PartialEq`, too.  That's not right.  These fields do matter, just
-    // not for sorting notes.  So we impl our own little pattern for comparing
-    // these for the purpose of sorting them.
-    pub fn compare_to(&self, other: &Kind) -> Ordering {
-        match (self, other) {
-            (Kind::Blueprint(l), Kind::Blueprint(r)) => l.compare_to(r),
-            (
-                Kind::Sled { sled_id: left_sled_id, kind: left_kind },
-                Kind::Sled { sled_id: right_sled_id, kind: right_kind },
-            ) => left_sled_id
-                .cmp(right_sled_id)
-                .then_with(|| left_kind.compare_to(right_kind)),
-            (Kind::PlanningInput(l), Kind::PlanningInput(r)) => l.compare_to(r),
-            _ => KindDiscriminants::from(self)
-                .cmp(&KindDiscriminants::from(other)),
+    /// Returns a value that can be used to sort notes by kind
+    pub fn as_ord(&self) -> KindOrd {
+        match self {
+            Kind::Blueprint(kind) => KindOrd::Blueprint(kind.into()),
+            Kind::Sled { sled_id, kind } => {
+                KindOrd::Sled(*sled_id, (&**kind).into())
+            }
+            Kind::PlanningInput(kind) => KindOrd::PlanningInput(kind.into()),
         }
     }
+}
+
+/// Describes the sort order of a [`Kind`]
+///
+/// For sorting notes by kind, we want an ordering on `Kind`.  We cannot impl
+/// `Ord` on `Kind` itself because its variants include data that does not impl
+/// `Ord`.  We could impl `Ord` by hand and ignore that data, but `Ord` requires
+/// that two values compare equal exactly when `Eq` says they are equal, and
+/// that data does matter for `Eq`.  It just doesn't matter for sorting notes.
+/// So we instead provide this type, which contains only the parts of a `Kind`
+/// that determine its sort order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum KindOrd {
+    // The order of these variants determines how notes about different
+    // components sort relative to each other.
+    Blueprint(BlueprintKindDiscriminants),
+    Sled(SledUuid, SledKindDiscriminants),
+    PlanningInput(PlanningInputKindDiscriminants),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, EnumDiscriminants)]
@@ -142,13 +147,6 @@ impl Kind {
 pub enum BlueprintKind {
     /// No zones exist in the blueprint using the active Nexus generation
     NoZonesWithActiveNexusGeneration(NexusGeneration),
-}
-
-impl BlueprintKind {
-    pub fn compare_to(&self, other: &BlueprintKind) -> Ordering {
-        BlueprintKindDiscriminants::from(self)
-            .cmp(&BlueprintKindDiscriminants::from(other))
-    }
 }
 
 impl fmt::Display for BlueprintKind {
@@ -286,13 +284,6 @@ pub enum SledKind {
         zone2: BlueprintZoneConfig,
         generation: NexusGeneration,
     },
-}
-
-impl SledKind {
-    pub fn compare_to(&self, other: &SledKind) -> Ordering {
-        SledKindDiscriminants::from(self)
-            .cmp(&SledKindDiscriminants::from(other))
-    }
 }
 
 impl fmt::Display for SledKind {
@@ -587,13 +578,6 @@ pub enum PlanningInputKind {
         expected_child_generation: Generation,
         actual_child_generation: Generation,
     },
-}
-
-impl PlanningInputKind {
-    pub fn compare_to(&self, other: &PlanningInputKind) -> Ordering {
-        PlanningInputKindDiscriminants::from(self)
-            .cmp(&PlanningInputKindDiscriminants::from(other))
-    }
 }
 
 impl fmt::Display for PlanningInputKind {
