@@ -12,13 +12,14 @@ import {
   inlineOverrides,
   loadAsciidoctor,
 } from '@oxide/design-system/asciidoc'
-import { Asciidoc } from '@oxide/react-asciidoc'
+import { Asciidoc, type DocumentBlock } from '@oxide/react-asciidoc'
 import { oxideTheme } from '@oxide/design-system/syntax'
 import GithubSlugger from 'github-slugger'
 import { createMarkdownExit } from 'markdown-exit'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { bundledLanguages, createHighlighter, type BundledLanguage } from 'shiki'
 
+import { Footnotes } from './footnotes.tsx'
 import type { TocItem } from './types.ts'
 
 export type Rendered = { title: string; body: string; toc: TocItem[] }
@@ -59,7 +60,12 @@ async function renderAdoc(file: string, src: string): Promise<Rendered> {
           table: AsciiDocBlocks.Table,
         },
         inlineOverrides,
-        customDocument: AsciiDocBlocks.MinimalDocument,
+        customDocument: ({ document }: { document: DocumentBlock }) => (
+          <>
+            <AsciiDocBlocks.MinimalDocument document={document} />
+            <Footnotes document={document} />
+          </>
+        ),
       }}
     />,
   )
