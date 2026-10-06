@@ -210,7 +210,7 @@ impl BundleDataSelection {
             .with_ereports(EreportFilters::new())
     }
 
-    /// Ensures the bundle-wide time range has a start bound.
+    /// Ensures the bundle-wide time range has a start bound, returning it.
     ///
     /// When the range has no start bound, the start is filled in `lookback`
     /// before the range's end bound, or before `now` when the range has no
@@ -219,18 +219,16 @@ impl BundleDataSelection {
         &mut self,
         now: DateTime<Utc>,
         lookback: chrono::Days,
-    ) {
+    ) -> DateTime<Utc> {
         let range = &mut self.time_range;
-        if range.start.is_none() {
+        *range.start.get_or_insert_with(|| {
             let anchor = range.end.unwrap_or(now);
             // Checked subtraction: an end bound near the minimum
             // representable time would otherwise underflow.
-            range.start = Some(
-                anchor
-                    .checked_sub_days(lookback)
-                    .unwrap_or(DateTime::<Utc>::MIN_UTC),
-            );
-        }
+            anchor
+                .checked_sub_days(lookback)
+                .unwrap_or(DateTime::<Utc>::MIN_UTC)
+        })
     }
 
     /// Adds reconfigurator state collection.
@@ -529,9 +527,10 @@ mod tests {
 
         // The default (unbounded) range: the lookback anchors to `now`.
         let mut selection = BundleDataSelection::new();
-        selection.ensure_start_bound(now, lookback);
+        let start = selection.ensure_start_bound(now, lookback);
+        assert_eq!(start, ts(9 * WEEK_SECS));
         let range = selection.time_range();
-        assert_eq!(range.start(), Some(ts(9 * WEEK_SECS)));
+        assert_eq!(range.start(), Some(start));
         assert_eq!(range.end(), None);
 
         // With only an end bound, the lookback anchors to it instead, and
@@ -539,17 +538,19 @@ mod tests {
         let mut selection = BundleDataSelection::new().with_time_range(
             BundleTimeRange::new(None, Some(ts(5 * WEEK_SECS))).unwrap(),
         );
-        selection.ensure_start_bound(now, lookback);
+        let start = selection.ensure_start_bound(now, lookback);
+        assert_eq!(start, ts(4 * WEEK_SECS));
         let range = selection.time_range();
-        assert_eq!(range.start(), Some(ts(4 * WEEK_SECS)));
+        assert_eq!(range.start(), Some(start));
         assert_eq!(range.end(), Some(ts(5 * WEEK_SECS)));
 
         // An existing start bound is left alone.
         let mut selection = BundleDataSelection::new()
             .with_time_range(BundleTimeRange::new(Some(ts(50)), None).unwrap());
-        selection.ensure_start_bound(now, lookback);
+        let start = selection.ensure_start_bound(now, lookback);
+        assert_eq!(start, ts(50));
         let range = selection.time_range();
-        assert_eq!(range.start(), Some(ts(50)));
+        assert_eq!(range.start(), Some(start));
         assert_eq!(range.end(), None);
 
         // An end bound at the minimum representable time saturates rather
@@ -557,9 +558,10 @@ mod tests {
         let mut selection = BundleDataSelection::new().with_time_range(
             BundleTimeRange::new(None, Some(DateTime::<Utc>::MIN_UTC)).unwrap(),
         );
-        selection.ensure_start_bound(now, lookback);
+        let start = selection.ensure_start_bound(now, lookback);
+        assert_eq!(start, DateTime::<Utc>::MIN_UTC);
         let range = selection.time_range();
-        assert_eq!(range.start(), Some(DateTime::<Utc>::MIN_UTC));
+        assert_eq!(range.start(), Some(start));
         assert_eq!(range.end(), Some(DateTime::<Utc>::MIN_UTC));
     }
 

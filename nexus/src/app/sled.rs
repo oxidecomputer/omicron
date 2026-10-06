@@ -164,6 +164,10 @@ impl super::Nexus {
         // for the next periodic activation before they can be cleaned up.
         self.background_tasks.task_instance_watcher.activate();
 
+        // The blueprint planner is going to perform actions based on the
+        // expungement, so kick it off now.
+        self.background_tasks.task_blueprint_planner.activate();
+
         Ok(prev_policy)
     }
 
@@ -371,9 +375,9 @@ impl super::Nexus {
                     || existing_disk.serial != request.serial
                     || existing_disk.model != request.model
                 {
-                    return Err(Error::internal_error(
-                        "Invalid Physical Disk update (was: {existing_disk:?}, asking for {request:?})",
-                    ));
+                    return Err(Error::internal_error(&format!(
+                        "Invalid Physical Disk update (was: {existing_disk:?}, asking for {request:?})"
+                    )));
                 }
                 return Ok(());
             }

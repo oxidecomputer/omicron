@@ -12,6 +12,7 @@ use omicron_gateway::SwitchPortConfig;
 pub use omicron_gateway::metrics::MetricsConfig;
 use omicron_test_utils::dev::poll;
 use omicron_test_utils::dev::poll::CondCheckError;
+use omicron_uuid_kinds::RackUuid;
 use qorb::resolver::AllBackends;
 use qorb::resolver::Resolver;
 use qorb::resolvers::fixed::FixedResolver;
@@ -190,7 +191,10 @@ pub async fn test_setup_with_config(
                 let sled = &simrack.gimlets[usize::from(target_sp.slot)];
                 (sled.local_addr(sp_port), sled.local_ereport_addr(sp_port))
             }
-            SpType::Power => todo!(),
+            SpType::Power => {
+                let psc = &simrack.pscs[usize::from(target_sp.slot)];
+                (psc.local_addr(sp_port), psc.local_ereport_addr(sp_port))
+            }
         };
         match &mut port_description.config {
             SwitchPortConfig::Simulated { addr, ereport_addr, .. } => {
@@ -205,7 +209,7 @@ pub async fn test_setup_with_config(
     }
 
     // Start gateway server
-    let rack_id = Some(Uuid::parse_str(RACK_UUID).unwrap());
+    let rack_id = Some(RACK_UUID.parse::<RackUuid>().unwrap());
     let gateway_id = Uuid::new_v4();
     let args = MgsArguments { id: gateway_id, addresses, rack_id };
     let server = omicron_gateway::Server::start(

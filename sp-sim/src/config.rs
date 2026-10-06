@@ -5,11 +5,11 @@
 //! Interfaces for parsing configuration files and working with a simulated SP
 //! configuration
 
-use crate::FAKE_GIMLET_MODEL;
 use crate::sensors;
 use dropshot::ConfigLogging;
 use gateway_messages::DeviceCapabilities;
 use gateway_messages::DevicePresence;
+use gateway_messages::vpd as gw_vpd;
 use nexus_types::inventory::Caboose;
 use serde::Deserialize;
 use serde::Serialize;
@@ -84,10 +84,6 @@ pub struct SpCabooses {
     pub stage0_next: Caboose,
 }
 
-fn default_part_number() -> String {
-    FAKE_GIMLET_MODEL.to_string()
-}
-
 /// Common configuration for all flavors of SP
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct SpCommonConfig {
@@ -97,9 +93,12 @@ pub struct SpCommonConfig {
     /// Network config for the (fake) ereport UDP ports.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub ereport_network_config: Option<[NetworkConfig; 2]>,
-    /// Fake part number
-    #[serde(default = "default_part_number")]
-    pub part_number: String,
+    /// Fake part number.
+    ///
+    /// If this is not provided, this defaults to `a suitable value depending
+    /// on the board.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub part_number: Option<String>,
     /// Fake serial number
     pub serial_number: String,
     /// 32-byte seed to create a manufacturing root certificate.
@@ -135,15 +134,113 @@ pub struct SpComponentConfig {
     pub id: String,
     pub device: String,
     pub description: String,
-    pub capabilities: DeviceCapabilities,
     pub presence: DevicePresence,
     /// Socket address to emulate a serial console.
     ///
     /// Only supported for components inside a [`GimletConfig`].
     pub serial_console: Option<SocketAddrV6>,
 
+    /// Simulated vital product data returned for this component.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub vpd: Option<ComponentVpdConfig>,
+
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub sensors: Vec<SensorConfig>,
+
+    /// Simulated PMBus rail statuses.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty", default)]
+    pub pmbus_rails: BTreeMap<String, PmbusStatusConfig>,
+}
+
+impl SpComponentConfig {
+    /// Determines the capabilities to advertise from the behaviors this
+    /// component is configured to simulate.
+    ///
+    /// For example, if the component is configured to simulate sensors, we add
+    /// `HAS_MEASUREMENT_CHANNELS`.
+    pub(crate) fn capabilities(&self) -> DeviceCapabilities {
+        let mut capabilities = DeviceCapabilities::empty();
+
+        // If this component is configured to report VPD, add the capability.
+        if let Some(ref vpd) = self.vpd {
+            capabilities |= DeviceCapabilities::HAS_VPD;
+
+            if let ComponentVpdConfig::Pmbus(_) = vpd {
+                capabilities |= DeviceCapabilities::IS_PMBUS;
+            }
+        }
+
+        // If this component has sensors, add the corresponding capability.
+        if !self.sensors.is_empty() {
+            capabilities |= DeviceCapabilities::HAS_MEASUREMENT_CHANNELS;
+        }
+
+        // If this component has a simulated serial console, well, you know the
+        // drill.
+        if self.serial_console.is_some() {
+            capabilities |= DeviceCapabilities::HAS_SERIAL_CONSOLE;
+        }
+
+        // If this component has simulated PMBus rails, add the corresponding
+        // capability.
+        if !self.pmbus_rails.is_empty() {
+            capabilities |= DeviceCapabilities::IS_PMBUS;
+        }
+
+        capabilities
+    }
+}
+
+/// Vital product data returned for a simulated component.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ComponentVpdConfig {
+    Pmbus(Box<PmbusVpdConfig>),
+    Barcode(gw_vpd::Barcode),
+    SledFanTray(Box<gw_vpd::SledFanTrayVpd>),
+    Tmp11x(gw_vpd::Tmp11xVpd),
+}
+
+/// One PMBus block-read response for a simulated PMBus device's VPD.
+///
+/// This can be configured either as a  string or a byte array, to make it
+/// easier to configure simulated VPD for devices which are expected to respond
+/// to VPD commands with strings.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(untagged)]
+pub enum PmbusBlockConfig {
+    String(String),
+    Bytes(Vec<u8>),
+}
+
+impl PmbusBlockConfig {
+    pub(crate) fn as_bytes(&self) -> &[u8] {
+        match self {
+            Self::String(value) => value.as_bytes(),
+            Self::Bytes(value) => value,
+        }
+    }
+}
+
+/// PMBus vital product data returned for a simulated component.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+pub struct PmbusVpdConfig {
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub mfr_id: Option<PmbusBlockConfig>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub mfr_model: Option<PmbusBlockConfig>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub mfr_revision: Option<PmbusBlockConfig>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub mfr_location: Option<PmbusBlockConfig>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub mfr_date: Option<PmbusBlockConfig>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub mfr_serial: Option<PmbusBlockConfig>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub ic_device_id: Option<PmbusBlockConfig>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub ic_device_rev: Option<PmbusBlockConfig>,
 }
 
 /// Configuration of a simulated sidecar SP
@@ -160,6 +257,13 @@ pub struct GimletConfig {
     pub common: SpCommonConfig,
 }
 
+/// Configuration of a simulated power shelf controller SP
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct PscConfig {
+    #[serde(flatten)]
+    pub common: SpCommonConfig,
+}
+
 /// Configuration of a set of simulated SPs
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct SimulatedSpsConfig {
@@ -167,6 +271,9 @@ pub struct SimulatedSpsConfig {
     pub sidecar: Vec<SidecarConfig>,
     /// Simulated gimlet(s)
     pub gimlet: Vec<GimletConfig>,
+    /// Simulated power shelf controller(s)
+    #[serde(default)]
+    pub psc: Vec<PscConfig>,
 }
 
 /// Configuration for a sp-sim
@@ -186,6 +293,30 @@ pub struct SensorConfig {
 
     #[serde(flatten)]
     pub state: sensors::SensorState,
+}
+
+/// Configuration for a component's simulated PMBus rail status.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct PmbusStatusConfig {
+    pub status_word: u16,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub status_vout: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub status_iout: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub status_temperature: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub status_cml: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub status_other: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub status_input: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub status_mfr_specific: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub status_fans_1_2: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub status_fans_3_4: Option<u8>,
 }
 
 impl Config {
@@ -272,8 +403,11 @@ pub struct EreportRestart {
     #[serde(default = "uuid::Uuid::new_v4")]
     pub restart_id: uuid::Uuid,
 
-    #[serde(skip_serializing_if = "toml::map::Map::is_empty", default)]
-    pub metadata: toml::map::Map<String, toml::Value>,
+    #[serde(
+        skip_serializing_if = "crate::ereport::Metadata::is_empty",
+        default
+    )]
+    pub metadata: crate::ereport::Metadata,
 }
 
 impl Default for EreportRestart {
@@ -289,4 +423,46 @@ pub struct Ereport {
     pub uptime: u64,
     #[serde(flatten)]
     pub data: BTreeMap<String, serde_cbor::Value>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Config;
+    use crate::sensors::Sensors;
+    use crate::vpd::ComponentVpds;
+
+    #[test]
+    fn example_config_is_valid() {
+        let config =
+            toml::from_str::<Config>(include_str!("../examples/config.toml"))
+                .expect("example config must parse");
+
+        for (i, gimlet) in config.simulated_sps.gimlet.iter().enumerate() {
+            eprintln!("validating gimlet {i}...");
+            let components = &gimlet.common.components;
+            // this doesn't return an error, so just hope it doesn't panic, and
+            // hope the fact that we printed which config we're checking helps
+            // figure out the bug...
+            Sensors::from_component_configs(components);
+            if let Err(e) = ComponentVpds::from_component_configs(components) {
+                panic!(
+                    "example config has an invalid sensor config for sim \
+                     gimlet {i}: {e:?}"
+                )
+            }
+        }
+
+        for (i, sidecar) in config.simulated_sps.sidecar.iter().enumerate() {
+            eprintln!("validating sidecar {i}...");
+            let components = &sidecar.common.components;
+            // as above
+            Sensors::from_component_configs(components);
+            if let Err(e) = ComponentVpds::from_component_configs(components) {
+                panic!(
+                    "example config has an invalid sensor config for sim \
+                     sidecar {i}: {e:?}"
+                )
+            }
+        }
+    }
 }

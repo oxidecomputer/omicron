@@ -31,6 +31,7 @@ use nexus_types::deployment::{
 };
 use nexus_types::deployment::{
     BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZoneType,
+    OmicronZoneExternalFloatingAddrs, OmicronZoneExternalFloatingIps,
 };
 use omicron_common::FileKv;
 use omicron_common::address::IpRange;
@@ -45,7 +46,7 @@ use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
 };
-use omicron_generation_kinds::Generation;
+use omicron_generation_kinds::{Generation, NexusGeneration};
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -186,7 +187,7 @@ impl Server {
                         &NexusTypes::SledAgentInfo {
                             sa_address: sa_address.to_string(),
                             repo_depot_port,
-                            role: NexusTypes::SledRole::Scrimlet,
+                            role: config.sled_role,
                             baseboard: NexusTypes::Baseboard {
                                 serial: config
                                     .hardware
@@ -458,7 +459,7 @@ pub async fn run_standalone_server(
                 blueprint_zone_type::InternalDns {
                     dataset: OmicronZoneDataset { pool_name },
                     http_address: http_bound,
-                    dns_address: match dns.dns_server.local_address() {
+                    dns_address: match dns.dns_server.sole_local_address()? {
                         SocketAddr::V4(_) => {
                             panic!("did not expect v4 address")
                         }
@@ -500,9 +501,12 @@ pub async fn run_standalone_server(
                             SocketAddr::V6(a) => a,
                         },
                         lockstep_port: nexus_lockstep_port,
-                        external_ip: from_ipaddr_to_external_floating_ip(
-                            external_ip,
-                        ),
+                        external_ips:
+                            OmicronZoneExternalFloatingIps::from_single(
+                                from_ipaddr_to_external_floating_ip(
+                                    external_ip,
+                                ),
+                            ),
                         nic: NetworkInterface {
                             id: Uuid::new_v4(),
                             kind: NetworkInterfaceKind::Service {
@@ -517,7 +521,7 @@ pub async fn run_standalone_server(
                         },
                         external_tls: false,
                         external_dns_servers: vec![],
-                        nexus_generation: Generation::new(),
+                        nexus_generation: NexusGeneration::new(),
                     },
                 ),
                 filesystem_pool: get_random_zpool(),
@@ -557,9 +561,12 @@ pub async fn run_standalone_server(
                     blueprint_zone_type::ExternalDns {
                         dataset: OmicronZoneDataset { pool_name },
                         http_address: external_dns_internal_addr,
-                        dns_address: from_sockaddr_to_external_floating_addr(
-                            SocketAddr::V6(external_dns_internal_addr),
-                        ),
+                        dns_addresses:
+                            OmicronZoneExternalFloatingAddrs::from_single(
+                                from_sockaddr_to_external_floating_addr(
+                                    SocketAddr::V6(external_dns_internal_addr),
+                                ),
+                            ),
                         nic: NetworkInterface {
                             id: Uuid::new_v4(),
                             kind: NetworkInterfaceKind::Service {
@@ -647,7 +654,8 @@ pub async fn run_standalone_server(
                 .expect("no zones are included in the plan"),
         );
 
-        let inventory = server.sled_agent.inventory(underlay_address.into())?;
+        let inventory =
+            server.sled_agent.inventory(underlay_address.into()).await?;
         let mut all_sleds = IdOrdMap::new();
         all_sleds.insert_overwrite(PlannedSledDescription {
             underlay_address,

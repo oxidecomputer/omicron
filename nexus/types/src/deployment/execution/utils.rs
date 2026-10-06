@@ -6,7 +6,7 @@ use std::net::{IpAddr, SocketAddrV6};
 
 use iddqd::{IdOrdItem, id_upcast};
 use omicron_common::address::{Ipv6Subnet, SLED_PREFIX_LENGTH};
-use omicron_generation_kinds::Generation;
+use omicron_generation_kinds::NexusGeneration;
 use omicron_uuid_kinds::SledUuid;
 use sled_agent_types_versions::latest::inventory::SledRole;
 
@@ -82,13 +82,15 @@ impl IdOrdItem for Sled {
 /// Return the active Nexus external addresses according to the given blueprint
 pub fn blueprint_nexus_external_ips(
     blueprint: &Blueprint,
-    active_generation: Generation,
+    active_generation: NexusGeneration,
 ) -> Vec<IpAddr> {
     blueprint
         .in_service_nexus_zones()
-        .filter_map(|(_sled_id, _zone_config, nexus_config)| {
-            (nexus_config.nexus_generation == active_generation)
-                .then_some(nexus_config.external_ip.ip)
+        .filter(|(_sled_id, _zone_config, nexus_config)| {
+            nexus_config.nexus_generation == active_generation
+        })
+        .flat_map(|(_sled_id, _zone_config, nexus_config)| {
+            nexus_config.external_ips.iter().map(|e| e.ip)
         })
         .collect()
 }
@@ -100,11 +102,14 @@ pub fn blueprint_external_dns_nameserver_ips(
 ) -> Vec<IpAddr> {
     blueprint
         .in_service_zones()
-        .filter_map(|(_, z)| match z.zone_type {
-            BlueprintZoneType::ExternalDns(
-                blueprint_zone_type::ExternalDns { dns_address, .. },
-            ) => Some(dns_address.addr.ip()),
-            _ => None,
+        .flat_map(|(_, z)| {
+            let addrs = match &z.zone_type {
+                BlueprintZoneType::ExternalDns(
+                    blueprint_zone_type::ExternalDns { dns_addresses, .. },
+                ) => Some(dns_addresses.iter().map(|a| a.addr.ip())),
+                _ => None,
+            };
+            addrs.into_iter().flatten()
         })
         .collect()
 }

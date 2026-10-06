@@ -53,7 +53,7 @@ impl Literal {
         match self {
             Literal::Integer(inner) => format!("{inner}"),
             Literal::Double(inner) => format!("{inner}"),
-            Literal::String(inner) => format!("'{inner}'"),
+            Literal::String(inner) => crate::quoted_string_literal(inner),
             Literal::Boolean(inner) => format!("{inner}"),
             Literal::Uuid(inner) => format!("'{inner}'"),
             Literal::Duration(inner) => {
@@ -328,6 +328,26 @@ mod tests {
     use super::duration_to_db_interval;
     use crate::oxql::ast::cmp::Comparison;
     use oximeter::FieldValue;
+
+    #[test]
+    fn test_string_literal_as_db_safe_string_is_escaped() {
+        assert_eq!(
+            Literal::String(String::from("it's")).as_db_safe_string(),
+            r"'it\'s'"
+        );
+        assert_eq!(
+            Literal::String(String::from(r"back\slash")).as_db_safe_string(),
+            r"'back\\slash'"
+        );
+        assert_eq!(
+            Literal::String(String::from(r"a\'b")).as_db_safe_string(),
+            r"'a\\\'b'"
+        );
+        assert_eq!(
+            Literal::String(String::from("plain")).as_db_safe_string(),
+            "'plain'"
+        );
+    }
 
     #[test]
     fn test_duration_to_db_interval() {

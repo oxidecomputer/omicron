@@ -349,7 +349,6 @@ use crate::app::db::datastore::InstanceGestalt;
 use crate::app::db::datastore::VmmStateUpdateResult;
 use crate::app::db::datastore::instance;
 use crate::app::db::model::ByteCount;
-use crate::app::db::model::Generation;
 use crate::app::db::model::InstanceIntendedState;
 use crate::app::db::model::InstanceRuntimeState;
 use crate::app::db::model::InstanceState;
@@ -370,6 +369,7 @@ use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::Error;
 use omicron_common::backoff;
 use omicron_common::backoff::BackoffError;
+use omicron_generation_kinds::InstanceStateGeneration;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
@@ -537,7 +537,8 @@ impl UpdatesRequired {
         snapshot: &InstanceGestalt,
     ) -> Option<Self> {
         let mut new_runtime = snapshot.instance.runtime().clone();
-        new_runtime.generation = Generation(new_runtime.generation.next());
+        new_runtime.generation =
+            InstanceStateGeneration::from(new_runtime.generation).next().into();
         new_runtime.time_updated = Utc::now();
         let mut new_intent = None;
         let instance_id = snapshot.instance.id();
@@ -1978,9 +1979,11 @@ mod test {
                 &instance_id,
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    generation: Generation(
-                        instance.runtime().generation.0.next(),
-                    ),
+                    generation: InstanceStateGeneration::from(
+                        instance.runtime().generation,
+                    )
+                    .next()
+                    .into(),
                     propolis_id: None,
                     dst_propolis_id: None,
                     migration_id: None,
@@ -2220,9 +2223,11 @@ mod test {
                 &instance_id,
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    generation: Generation(
-                        instance.runtime().generation.0.next(),
-                    ),
+                    generation: InstanceStateGeneration::from(
+                        instance.runtime().generation,
+                    )
+                    .next()
+                    .into(),
                     propolis_id: None,
                     dst_propolis_id: None,
                     migration_id: None,

@@ -41,14 +41,12 @@ use illumos_utils::zfs::SizeDetails;
 use illumos_utils::zfs::Zfs;
 use illumos_utils::zpool::PathInPool;
 use illumos_utils::zpool::ZpoolOrRamdisk;
-use internal_dns_resolver::Resolver;
 use itertools::Itertools as _;
 use omicron_common::address::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use omicron_common::address::{
     Ipv6Subnet, SLED_PREFIX_LENGTH, get_sled_address,
 };
 use omicron_common::api::external::{ByteCount, ByteCountRangeError, Vni};
-use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::shared::DelegatedZvol;
 use omicron_common::api::internal::shared::{
     ExternalIpGatewayMap, ResolvedVpcRouteSet, ResolvedVpcRouteState,
@@ -79,7 +77,6 @@ use sled_agent_types::attached_subnet::AttachedSubnets;
 use sled_agent_types::dataset::LocalStorageDatasetDeleteRequest;
 use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
 use sled_agent_types::disk::CompressionAlgorithm;
-use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::instance::ResolvedVpcFirewallRule;
 use sled_agent_types::instance::{
@@ -323,8 +320,20 @@ impl From<Error> for dropshot::HttpError {
                 HttpError::for_not_found(
                     Some(NO_SUCH_INSTANCE.to_string()),
                     // NoSuchVmm has no source error, so it's currently not
-                    // necessary to use a chain-logging adapter here, but if that
-                    // changes in the future, the compiler won't complain.
+                    // necessary to use a chain-logging adapter here, but if
+                    // that changes in the future, the compiler won't complain.
+                    InlineErrorChain::new(&e).to_string(),
+                )
+            }
+            Error::Instance(
+                e @ InstanceManagerError::VmmRegistrationDisallowed(reason),
+            ) => {
+                HttpError::for_unavail(
+                    Some(reason.http_error_code().to_string()),
+                    // VmmRegistrationDisallowed has no source error, so it's
+                    // currently not necessary to use a chain-logging adapter
+                    // here, but if that changes in the future, the compiler
+                    // won't complain.
                     InlineErrorChain::new(&e).to_string(),
                 )
             }
@@ -700,10 +709,13 @@ impl SledAgent {
             long_running_task_handles.zone_bundler.clone(),
             vmm_reservoir_manager.clone(),
             metrics_manager.request_queue(),
+            config_reconciler_spawn_token.subscribe_update_disposition(),
         )?;
 
-        let svc_config =
-            services::Config::new(identifiers, config.sidecar_revision.clone());
+        let svc_config = services::Config::new(
+            identifiers,
+            config.deployment.sidecar_revision(),
+        );
 
         // Get our system network config from the bootstore; we cannot proceed
         // until we have this, as we need to set up uplinks inside the switch
@@ -776,7 +788,7 @@ impl SledAgent {
         long_running_task_handles
             .scrimlet_reconcilers
             .set_sled_agent_networking_info_once(SledAgentNetworkingInfo {
-                system_networking_config_rx: network_config_rx.clone(),
+                system_networking_config_rx: network_config_rx,
                 mode: ScrimletReconcilersMode::SwitchZone(
                     this_sled_switch_zone_ip,
                 ),
@@ -800,14 +812,9 @@ impl SledAgent {
             .sled_agent_started(SledAgentInfo {
                 config: svc_config,
                 port_manager: port_manager.clone(),
-                resolver: Resolver::new_from_ip(
-                    parent_log.new(o!("component" => "DnsResolver")),
-                    *sled_address.ip(),
-                )?,
                 underlay_address: *sled_address.ip(),
                 local_switch_zone_ip: this_sled_switch_zone_ip,
                 rack_id: request.body.rack_id,
-                network_config_rx,
                 metrics_queue: metrics_manager.request_queue(),
             })
             .await?;
@@ -1042,15 +1049,6 @@ impl SledAgent {
         self.inner.config_reconciler.set_sled_config(config).await
     }
 
-    /// Returns whether or not the sled believes itself to be a scrimlet
-    pub fn get_role(&self) -> SledRole {
-        if self.inner.hardware.is_scrimlet() {
-            SledRole::Scrimlet
-        } else {
-            SledRole::Gimlet
-        }
-    }
-
     /// Idempotently ensures that a given instance is registered with this sled,
     /// i.e., that it can be addressed by future calls to
     /// [`Self::instance_ensure_state`].
@@ -1161,19 +1159,6 @@ impl SledAgent {
             .get_instance_state(propolis_id)
             .await
             .map_err(|e| Error::Instance(e))
-    }
-
-    /// Idempotently ensures that the given virtual disk is attached (or not) as
-    /// specified.
-    ///
-    /// NOTE: Not yet implemented.
-    pub async fn disk_ensure(
-        &self,
-        _disk_id: Uuid,
-        _initial_state: DiskRuntimeState,
-        _target: DiskStateRequested,
-    ) -> Result<DiskRuntimeState, Error> {
-        todo!("Disk attachment not yet implemented");
     }
 
     pub fn artifact_store(&self) -> &ArtifactStore<InternalDisksReceiver> {
@@ -1384,6 +1369,7 @@ impl SledAgent {
             reconciler_status,
             last_reconciliation,
             file_source_resolver,
+            instance_manager_status: self.inner.instances.status(),
             smf_services_enabled_not_online,
             reference_measurements: self.inner.measurements.to_inventory(),
             fmd,

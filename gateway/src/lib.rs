@@ -30,6 +30,7 @@ pub use management_switch::SwitchConfig;
 pub use management_switch::SwitchPortConfig;
 pub use management_switch::SwitchPortDescription;
 use omicron_common::FileKv;
+use omicron_uuid_kinds::RackUuid;
 
 use dropshot::ConfigDropshot;
 use dropshot::HandlerTaskMode;
@@ -51,7 +52,7 @@ use uuid::Uuid;
 pub struct MgsArguments {
     pub id: Uuid,
     pub addresses: Vec<SocketAddrV6>,
-    pub rack_id: Option<Uuid>,
+    pub rack_id: Option<RackUuid>,
 }
 
 type HttpServer = dropshot::HttpServer<Arc<ServerContext>>;
@@ -306,7 +307,7 @@ impl Server {
 
     /// The rack_id will be set on a refresh of the SMF property when the sled
     /// agent starts.
-    pub fn set_rack_id(&mut self, rack_id: Option<Uuid>) {
+    pub fn set_rack_id(&mut self, rack_id: Option<RackUuid>) {
         if let Some(rack_id) = rack_id {
             let val = self.apictx.rack_id.get_or_init(|| rack_id);
             if *val != rack_id {

@@ -19,10 +19,8 @@ use crate::v1::inventory::InventoryZpool;
 use crate::v1::inventory::SledRole;
 use crate::v12::inventory::SvcsInMaintenanceResult;
 use crate::v14::inventory::ConfigReconcilerInventoryStatus;
-use crate::v14::inventory::HealthMonitorInventory;
 use crate::v14::inventory::OmicronFileSourceResolverInventory;
 use crate::v14::inventory::OmicronSledConfig;
-use crate::v16;
 use crate::v16::inventory::ConfigReconcilerInventory;
 use crate::v16::inventory::SingleMeasurementInventory;
 
@@ -50,49 +48,4 @@ pub struct Inventory {
     )]
     pub smf_services_in_maintenance: Result<SvcsInMaintenanceResult, String>,
     pub reference_measurements: IdOrdMap<SingleMeasurementInventory>,
-}
-
-impl From<Inventory> for v16::inventory::Inventory {
-    fn from(value: Inventory) -> Self {
-        let Inventory {
-            sled_id,
-            sled_agent_address,
-            sled_role,
-            baseboard,
-            usable_hardware_threads,
-            usable_physical_ram,
-            cpu_family,
-            reservoir_size,
-            disks,
-            zpools,
-            datasets,
-            ledgered_sled_config,
-            reconciler_status,
-            last_reconciliation,
-            file_source_resolver,
-            smf_services_in_maintenance,
-            reference_measurements,
-        } = value;
-        Self {
-            sled_id,
-            sled_agent_address,
-            sled_role,
-            baseboard,
-            usable_hardware_threads,
-            usable_physical_ram,
-            cpu_family,
-            reservoir_size,
-            disks,
-            zpools,
-            datasets,
-            ledgered_sled_config,
-            reconciler_status,
-            last_reconciliation,
-            file_source_resolver,
-            health_monitor: HealthMonitorInventory {
-                smf_services_in_maintenance,
-            },
-            reference_measurements,
-        }
-    }
 }

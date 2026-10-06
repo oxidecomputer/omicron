@@ -24,8 +24,8 @@ use dropshot::{ClientErrorStatusCode, HttpError};
 use flume::{Receiver, Sender, TrySendError};
 use illumos_utils::svcadm::Svcadm;
 use omicron_generation_kinds::Generation;
-use oximeter_db::Client as OximeterDbClient;
 use oximeter_db::OXIMETER_VERSION;
+use oximeter_db::{Client as OximeterDbClient, User};
 use slog::{Logger, debug, warn};
 use slog::{error, info};
 use slog_error_chain::InlineErrorChain;
@@ -500,7 +500,8 @@ async fn init_db(
 ) -> Result<(), HttpError> {
     // We initialise the Oximeter client here instead of keeping it as part of the context as
     // this client is not cloneable, copyable by design.
-    let client = OximeterDbClient::new(clickhouse_address.into(), &log);
+    let client =
+        OximeterDbClient::new(User::Admin, clickhouse_address.into(), &log);
 
     // Initialize the database only if it was not previously initialized.
     // TODO: Migrate schema to newer version without wiping data.
@@ -614,7 +615,8 @@ async fn long_running_retention_task(
     log: Logger,
 ) {
     debug!(log, "task starting, creating Oximeter client");
-    let client = OximeterDbClient::new(clickhouse_address.into(), &log);
+    let client =
+        OximeterDbClient::new(User::Admin, clickhouse_address.into(), &log);
     debug!(log, "created client, starting recv loop");
     while let Ok(request) = rx.recv_async().await {
         debug!(
@@ -741,7 +743,8 @@ async fn long_running_usage_task(
 ) {
     let mut timer = tokio::time::interval(USAGE_UPDATE_INTERVAL);
     timer.set_missed_tick_behavior(MissedTickBehavior::Delay);
-    let client = OximeterDbClient::new(clickhouse_address.into(), &log);
+    let client =
+        OximeterDbClient::new(User::Admin, clickhouse_address.into(), &log);
     loop {
         timer.tick().await;
         let database_result = compute_database_table_usage(&client, &log).await;
@@ -792,6 +795,7 @@ mod tests {
     use dropshot::ErrorStatusCode;
     use omicron_generation_kinds::Generation;
     use omicron_test_utils::dev;
+    use oximeter_db::User;
     use oximeter_db::native::block::Block;
     use oximeter_db::native::block::Column;
     use oximeter_db::native::block::Precision;
@@ -1028,6 +1032,7 @@ mod tests {
         let timestamp = Tz::UTC.from_local_datetime(&naive_dt).unwrap();
         oximeter_db::native::Connection::new(
             clickhouse.native_address().into(),
+            User::Admin,
         )
         .await
         .expect("Should be able to make client")

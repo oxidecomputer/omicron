@@ -24,9 +24,10 @@ use nexus_types::deployment::{
     BlueprintSledConfig, BlueprintSledUpdateDisposition, BlueprintSource,
     BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZoneImageSource,
     BlueprintZoneType, CockroachDbPreserveDowngrade,
-    OmicronZoneExternalFloatingAddr, OmicronZoneExternalFloatingIp,
-    OmicronZoneExternalSnatIp, OximeterReadMode, PendingMgsUpdates,
-    blueprint_zone_type,
+    OmicronZoneExternalFloatingAddr, OmicronZoneExternalFloatingAddrs,
+    OmicronZoneExternalFloatingIp, OmicronZoneExternalFloatingIps,
+    OmicronZoneExternalSnat, OmicronZoneExternalSnatIp, OximeterReadMode,
+    PendingMgsUpdates, blueprint_zone_type,
 };
 use nexus_types::external_api::sled::SledState;
 use omicron_common::address::{
@@ -51,7 +52,7 @@ use omicron_common::policy::{
     SINGLE_NODE_CLICKHOUSE_REDUNDANCY,
 };
 use omicron_generation_kinds::{
-    Generation, SledConfigGeneration, TargetReleaseGeneration,
+    Generation, NexusGeneration, SledConfigGeneration, TargetReleaseGeneration,
 };
 use omicron_uuid_kinds::{
     BlueprintUuid, DatasetUuid, ExternalIpUuid, GenericUuid, OmicronZoneUuid,
@@ -600,7 +601,10 @@ impl ServicePlan {
                                 pool_name: *dataset_name.pool(),
                             },
                             http_address,
-                            dns_address,
+                            dns_addresses:
+                                OmicronZoneExternalFloatingAddrs::from_single(
+                                    dns_address,
+                                ),
                             nic,
                         },
                     ),
@@ -634,9 +638,12 @@ impl ServicePlan {
                         blueprint_zone_type::Nexus {
                             internal_address,
                             lockstep_port: NEXUS_LOCKSTEP_PORT,
-                            external_ip: from_ipaddr_to_external_floating_ip(
-                                external_ip,
-                            ),
+                            external_ips:
+                                OmicronZoneExternalFloatingIps::from_single(
+                                    from_ipaddr_to_external_floating_ip(
+                                        external_ip,
+                                    ),
+                                ),
                             nic,
                             // Tell Nexus to use TLS if and only if the caller
                             // provided TLS certificates.  This effectively
@@ -648,7 +655,7 @@ impl ServicePlan {
                                 .external_certificates
                                 .is_empty(),
                             external_dns_servers: config.dns_servers.clone(),
-                            nexus_generation: Generation::new(),
+                            nexus_generation: NexusGeneration::new(),
                         },
                     ),
                     filesystem_pool,
@@ -824,10 +831,11 @@ impl ServicePlan {
                             dns_servers: config.dns_servers.clone(),
                             domain: None,
                             nic,
-                            external_ip:
+                            external_ip: OmicronZoneExternalSnat::from_single(
                                 from_source_nat_config_to_external_snat_ip(
                                     snat_cfg,
                                 ),
+                            ),
                         },
                     ),
                     ServiceName::BoundaryNtp,
@@ -994,7 +1002,7 @@ impl ServicePlan {
             // external DNS (including creating the recovery silo).
             external_dns_version: Generation::new(),
             target_release_minimum_generation: TargetReleaseGeneration::new(),
-            nexus_generation: Generation::new(),
+            nexus_generation: NexusGeneration::new(),
             external_networking_generation: Generation::new(),
             // Nexus will fill in the CockroachDB values during initialization.
             cockroachdb_fingerprint: String::new(),
@@ -1396,6 +1404,7 @@ mod tests {
     use sled_agent_types::early_networking::UplinkPorts;
     use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
     use sled_agent_types::inventory::FmdInventory;
+    use sled_agent_types::inventory::InstanceManagerStatus;
     use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
     use sled_agent_types::inventory::SledCpuFamily;
     use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
@@ -1615,6 +1624,7 @@ mod tests {
                 ledgered_sled_config: None,
                 reconciler_status: ConfigReconcilerInventoryStatus::NotYetRun,
                 last_reconciliation: None,
+                instance_manager_status: InstanceManagerStatus::available(0),
                 file_source_resolver:
                     OmicronFileSourceResolverInventory::new_fake(),
                 smf_services_enabled_not_online:
