@@ -15,6 +15,10 @@ export const outPath = (src: string) => src.replace(/\.(adoc|md)$/, '.html')
 export const relHref = (from: string, to: string) =>
   path.posix.relative(path.posix.dirname(from), to)
 
+/** URL of a file or directory in the repo on GitHub */
+export const sourceUrl = (site: Site, repoPath: string, { dir = false } = {}) =>
+  `${site.repo}/${dir ? 'tree' : 'blob'}/${site.branch}/${repoPath}`
+
 /**
  * Rewrites links in page bodies. Collects the images they reference in
  * `assets`, as paths relative to the repo root, for the build to copy.
@@ -66,7 +70,8 @@ export function createLinkRewriter({
         target.endsWith('.html') && !fs.existsSync(path.join(repoRoot, target))
           ? target.replace(/\.html$/, '.adoc')
           : target
-      if (!fs.existsSync(path.join(repoRoot, srcTarget))) {
+      const stat = fs.statSync(path.join(repoRoot, srcTarget), { throwIfNoEntry: false })
+      if (!stat) {
         console.warn(`${page.src}: broken link ${url}`)
         // A GitHub page URL can't render as an image anyway
         if (attr === 'src') return match
@@ -74,7 +79,7 @@ export function createLinkRewriter({
         assets.add(srcTarget)
         return match
       }
-      return `${attr}="${site.repo}/blob/main/${srcTarget}${hash}"`
+      return `${attr}="${sourceUrl(site, srcTarget, { dir: stat?.isDirectory() })}${hash}"`
     })
   }
 

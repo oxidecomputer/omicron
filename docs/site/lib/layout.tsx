@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 
-import { relHref } from './links.ts'
+import { relHref, sourceUrl } from './links.ts'
 import type { Page, Section, Site, TocItem } from './types.ts'
 
 // Pagefind's search UI web components
@@ -60,7 +60,7 @@ function Shell({
           <a href={`${root}/index.html`} className="text-sans-semi-xl text-raise">
             {site.title}
           </a>
-          <span className="text-mono-sm text-tertiary 600:inline hidden">developer docs</span>
+          <span className="text-mono-sm text-tertiary 600:inline hidden">{site.tagline}</span>
           <div className="ml-auto flex items-center gap-6">
             <pagefind-modal-trigger placeholder="Search" />
             <a href={site.repo} className="text-mono-sm text-secondary hover:text-default">
@@ -183,7 +183,7 @@ export function DocPage({
                 <Html html={page.title} />
               </h1>
               <a
-                href={`${site.repo}/blob/main/${page.src}`}
+                href={sourceUrl(site, page.src)}
                 className="text-mono-xs text-tertiary hover:text-secondary mb-10 inline-block"
                 data-pagefind-ignore=""
               >
@@ -226,9 +226,9 @@ export function DocPage({
 
 export function IndexPage({ site, sections }: { site: Site; sections: Section[] }) {
   return (
-    <Shell site={site} title={`${site.title} developer docs`} root=".">
+    <Shell site={site} title={`${site.title} ${site.tagline}`} root=".">
       <main className="mx-auto max-w-[1100px] px-6 py-16">
-        <h1 className="text-sans-4xl text-raise mb-4">{site.title} developer docs</h1>
+        <h1 className="text-sans-4xl text-raise mb-4">{`${site.title} ${site.tagline}`}</h1>
         <p className="text-sans-xl text-secondary mb-14 max-w-[640px]">{site.description}</p>
         <div className="700:grid-cols-2 1000:grid-cols-3 grid grid-cols-1 gap-6">
           {sections.map((section) => (

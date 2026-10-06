@@ -8,9 +8,11 @@ import type { Site } from './lib/types.ts'
 
 export const site: Site = {
   title: 'Omicron',
+  tagline: 'developer docs',
   description:
     'Developer documentation for the Oxide control plane: how it is put together, how to run it, and how to work on it.',
   repo: 'https://github.com/oxidecomputer/omicron',
+  branch: 'main',
   sections: [
     {
       title: 'Getting started',

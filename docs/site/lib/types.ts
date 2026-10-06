@@ -1,8 +1,14 @@
 /** Site config: the pages to publish and how to present them */
 export type Site = {
+  /** Project name, e.g. `Omicron` */
   title: string
+  /** Shown after the title, e.g. `developer docs` */
+  tagline: string
   description: string
+  /** GitHub URL, e.g. `https://github.com/oxidecomputer/omicron` */
   repo: string
+  /** Branch that source links point at */
+  branch: string
   sections: {
     title: string
     description?: string
