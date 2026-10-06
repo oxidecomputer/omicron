@@ -55,6 +55,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
+use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 // The depth of the request queue for the instance.
@@ -1267,17 +1268,12 @@ impl InstanceRunner {
     }
 
     /// Given a freshly-created Propolis process, this launches all of the tasks
-    /// needed to monitor the resulting Propolis VM.
-    ///
-    /// # Panics
-    ///
-    /// Panics if this routine is called without a running Propolis zone.
-    async fn install_instance_state_monitor(&mut self) {
-        let state = &self
-            .running_state
-            .as_ref()
-            .expect("Must be called with a running Propolis zone");
-
+    /// needed to monitor the resulting Propolis VM, and returns a handle to the
+    /// monitor tasks.
+    async fn spawn_instance_state_monitor(
+        &self,
+        state: &RunningState,
+    ) -> JoinHandle<()> {
         // Monitor propolis for state changes in the background.
         //
         // This task exits after its associated Propolis has been terminated
@@ -1298,7 +1294,7 @@ impl InstanceRunner {
                 Ok(()) => info!(log, "State monitoring task complete"),
             }
         });
-        self.monitor_handle = Some(monitor_handle);
+        monitor_handle
     }
 
     /// Immediately terminates this instance's Propolis zone and cleans up any
@@ -2213,7 +2209,8 @@ impl InstanceRunner {
         }
 
         // Set up the state monitor for the running instance.
-        self.install_instance_state_monitor().await;
+        self.monitor_handle =
+            Some(self.spawn_instance_state_monitor(&state).await);
         Ok(())
     }
 
@@ -2222,9 +2219,9 @@ impl InstanceRunner {
         state: VmmStateRequested,
     ) -> Result<SledVmmState, Error> {
         use propolis_client::types::InstanceStateRequested as PropolisRequest;
+        let already_had_zone = self.running_state.is_some();
         let (propolis_request, next_published) = match state {
             VmmStateRequested::MigrationTarget(migration_params) => {
-                let already_had_zone = self.running_state.is_some();
                 if let Err(e) =
                     self.propolis_ensure(Some(migration_params)).await
                 {
@@ -2241,7 +2238,6 @@ impl InstanceRunner {
                 (None, None)
             }
             VmmStateRequested::Running => {
-                let already_had_zone = self.running_state.is_some();
                 if let Err(e) = self.propolis_ensure(None).await {
                     // As above, if the ensure call installed a new Propolis
                     // zone, then VM creation has failed entirely and this VMM
@@ -2261,7 +2257,7 @@ impl InstanceRunner {
                 // this case, force the VMM into a terminal Destroyed state,
                 // which is what it would have reached if it *had* existed and
                 // then stopped in an orderly manner.
-                if self.running_state.is_none() {
+                if !already_had_zone {
                     self.state.force_state_to_destroyed();
                     self.terminate().await;
                     (None, None)
@@ -2273,7 +2269,7 @@ impl InstanceRunner {
                 }
             }
             VmmStateRequested::Reboot => {
-                if self.running_state.is_none() {
+                if !already_had_zone {
                     return Err(Error::VmNotRunning(self.propolis_id));
                 }
                 (
@@ -2336,11 +2332,16 @@ impl InstanceRunner {
     ///
     /// # Important
     ///
-    /// As soon as the zone is booted, this stores it in `self`. That means that
-    /// the zone will _not_ be torn down if an internal call in the function
-    /// fails after that (e.g., waiting for Propolis's HTTP server to start).
-    /// Callers must destroy the instance themselves, though it will be
-    /// eventually destroyed by the drop impl on `RunningZone` as a last-resort.
+    /// As soon as the zone is booted, this stores the `RunningZone` in `self`.
+    /// That means that the zone will _not_ be torn down if an internal call in
+    /// the function fails after that (e.g., waiting for Propolis's HTTP server
+    /// to start). Callers must destroy the instance themselves, though it will
+    /// be eventually destroyed by the drop impl on `RunningZone` as a
+    /// last-resort.
+    ///
+    /// # Panics
+    ///
+    /// This method panics if called more than once on the same instance.
     async fn setup_propolis_zone(&mut self) -> Result<(), Error> {
         // Create OPTE ports for the instance. We also store the names of all
         // those ports to notify the metrics task to start collecting statistics
@@ -2457,7 +2458,10 @@ impl InstanceRunner {
         ));
         let old =
             self.running_state.replace(RunningState { client, running_zone });
-        assert!(old.is_none());
+        assert!(
+            old.is_none(),
+            "InstanceRunner::setup_propolis_zone called multiple times",
+        );
         let running_state = self.running_state.as_ref().unwrap();
         let running_zone = &running_state.running_zone;
         let client = &running_state.client;
