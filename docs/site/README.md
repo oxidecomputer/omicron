@@ -21,12 +21,12 @@ Requires Node 24.
 ```
 cd docs/site
 npm install
-npm run build
-open dist/index.html
+npm run serve
 ```
 
-Search doesn't work from `file://`. To try it, run `npm run serve`, which builds the
-site and serves it at http://localhost:1414.
+That builds the site into `dist/` and serves it at http://localhost:1414. Pages
+live at directory URLs, so opening the HTML from `file://` doesn't work. To build
+without serving, run `npm run build`.
 
 The build warns about broken links and Asciidoctor errors. To see which docs in the
 repo aren't on the site, run `npm run unlisted`. The site uses system fonts locally
@@ -42,8 +42,10 @@ RFD site and docs.oxide.computer do, with `@oxide/react-asciidoc` and the AsciiD
 components and styles from `@oxide/design-system`. Markdown goes through
 `markdown-exit`, with code blocks highlighted by shiki in the design system's theme.
 `lib/links.ts` rewrites links between docs, and `lib/layout.tsx` is the page chrome.
-The output mirrors each doc's path in the repo, so `docs/how-to-run.adoc`
-becomes `dist/docs/how-to-run.html` and relative links keep working. The builder
+Each doc's URL mirrors its path in the repo: `docs/how-to-run.adoc` is
+published at `docs/how-to-run/`, and a README at its directory, so
+`wicket/README.md` is at `wicket/`. Relative links and images in a doc are
+rewritten to match. The builder
 then runs [Pagefind](https://pagefind.app/) over the HTML in `dist/`, which writes
 the search index and UI to `dist/pagefind/`, all loaded client-side, so search needs
 no server. Last, Tailwind compiles `style.css`, which pulls in the shared styles

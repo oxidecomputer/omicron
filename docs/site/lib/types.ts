@@ -25,7 +25,7 @@ export type TocItem = { id: string; title: string; children: TocItem[] }
 export type Page = {
   /** Source path relative to the repo root, e.g. `docs/how-to-run.adoc` */
   src: string
-  /** Output path relative to dist/, e.g. `docs/how-to-run.html` */
+  /** URL path relative to the site root, e.g. `docs/how-to-run/`. See `outPath` */
   out: string
   section: string
   title: string

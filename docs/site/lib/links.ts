@@ -1,19 +1,38 @@
-// URL handling. The site mirrors each doc's path in the repo, so a relative
-// link that works on GitHub resolves the same way here. This module decides
-// whether its target is a page on the site, an image to copy, or a file to
-// link to on GitHub.
+// URL handling. Each doc gets a directory URL that mirrors its path in the
+// repo, so links on the site look like the paths people know from GitHub.
+// Relative links in a doc are written against its location in the repo, so
+// this module resolves each one there, decides whether its target is a page on
+// the site, an image to copy, or a file to link to on GitHub, and rewrites it
+// relative to the page's URL.
 
 import fs from 'node:fs'
 import path from 'node:path'
 
 import type { Page, Site } from './types.ts'
 
-/** Output path of the doc at `src`, e.g. `docs/foo.adoc` → `docs/foo.html` */
-export const outPath = (src: string) => src.replace(/\.(adoc|md)$/, '.html')
+/**
+ * URL path of the doc at `src`, relative to the site root: `docs/foo.adoc` →
+ * `docs/foo/`. A README is its directory's page, `wicket/README.md` →
+ * `wicket/`, except the root README, which can't take the homepage's place and
+ * gets `readme/`. Also maps the `.html` links Asciidoctor makes from xrefs.
+ */
+export function outPath(src: string) {
+  const dir = path.posix.dirname(src)
+  const name = path.posix.basename(src).replace(/\.(adoc|md|html)$/, '')
+  if (name === 'README') return dir === '.' ? 'readme/' : `${dir}/`
+  return dir === '.' ? `${name}/` : `${dir}/${name}/`
+}
 
-/** Relative URL from the page at `from` to the file at `to`, both relative to dist/ */
-export const relHref = (from: string, to: string) =>
-  path.posix.relative(path.posix.dirname(from), to)
+/**
+ * Relative URL from the page at `from` to `to`, both relative to the site
+ * root. A path ending in `/` is a page's directory URL; anything else is a file.
+ */
+export function relHref(from: string, to: string) {
+  const base = from.endsWith('/') ? from : path.posix.dirname(from)
+  const rel = path.posix.relative(base, to)
+  if (!to.endsWith('/')) return rel
+  return rel ? `${rel}/` : './'
+}
 
 /** URL of a file or directory in the repo on GitHub */
 export const sourceUrl = (site: Site, repoPath: string, { dir = false } = {}) =>
@@ -80,7 +99,7 @@ export function createLinkRewriter({
         if (attr === 'src') return match
       } else if (attr === 'src') {
         assets.add(srcTarget)
-        return match
+        return `${start}${attr}="${relHref(page.out, srcTarget)}"`
       }
       return `${start}${attr}="${sourceUrl(site, srcTarget, { dir: stat?.isDirectory() })}${hash}"`
     })

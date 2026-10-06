@@ -27,7 +27,7 @@ const plain = (html: string) =>
 const Html = ({ html }: { html: string }) => <span dangerouslySetInnerHTML={{ __html: html }} />
 
 /** Relative path from the page at `from` to the site root, e.g. `../..` */
-const rootFrom = (from: string) => relHref(from, '.') || '.'
+const rootFrom = (from: string) => relHref(from, '.')
 
 function Shell({
   site,
@@ -57,7 +57,7 @@ function Shell({
       </head>
       <body className="bg-default text-default">
         <header className="bg-default border-secondary sticky top-0 z-10 flex h-14 items-center gap-3 border-b px-6">
-          <a href={`${root}/index.html`} className="text-sans-semi-xl text-raise">
+          <a href={`${root}/`} className="text-sans-semi-xl text-raise">
             {site.title}
           </a>
           <span className="text-mono-sm text-tertiary 600:inline hidden">{site.tagline}</span>

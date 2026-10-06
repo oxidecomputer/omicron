@@ -47,6 +47,13 @@ export async function buildSite({ site, repoRoot, outDir, fontsDir }: BuildOptio
     }
   }
   const pages = sections.flatMap((s) => s.pages)
+  // foo.adoc and foo/README.md would both be foo/
+  const bySrc = new Map<string, string>()
+  for (const { out, src } of pages) {
+    const other = bySrc.get(out)
+    if (other) throw new Error(`${other} and ${src} would both be published at ${out}`)
+    bySrc.set(out, src)
+  }
 
   const writeHtml = (out: string, element: ReactNode) => {
     const file = path.join(outDir, out)
@@ -60,7 +67,7 @@ export async function buildSite({ site, repoRoot, outDir, fontsDir }: BuildOptio
   writeHtml('index.html', <IndexPage site={site} sections={sections} />)
   for (const [i, page] of pages.entries()) {
     writeHtml(
-      page.out,
+      `${page.out}index.html`,
       <DocPage
         site={site}
         sections={sections}
