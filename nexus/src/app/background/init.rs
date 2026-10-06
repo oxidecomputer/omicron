@@ -794,7 +794,7 @@ impl BackgroundTasksInitializer {
                 producer_registry,
                 resolver.clone(),
                 inventory_load_watcher.clone(),
-                instance_watcher::WatcherIdentity { nexus_id, rack_id },
+                nexus_id,
             );
             driver.register(TaskDefinition {
                 name: "instance_watcher",

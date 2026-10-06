@@ -18,6 +18,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_networking::GatewayClient;
+use nexus_networking::GatewaysByRack;
 use nexus_types::external_api::instance::InstanceState;
 use nexus_types::external_api::sled::SledPolicy;
 use nexus_types::identity::Asset;
@@ -30,7 +31,6 @@ use omicron_common::api::external::Error;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PropolisUuid;
-use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use oximeter::types::ProducerRegistry;
 use parallel_task_set::ParallelTaskSet;
@@ -55,7 +55,7 @@ pub(crate) struct InstanceWatcher {
     resolver: internal_dns_resolver::Resolver,
     metrics: Arc<Mutex<metrics::Metrics>>,
     inv_rx: watch::Receiver<Option<Arc<inventory::Collection>>>,
-    id: WatcherIdentity,
+    nexus_id: OmicronZoneUuid,
 }
 
 /// Determines how many instance checks and their subsequent update sagas (if
@@ -85,20 +85,20 @@ impl InstanceWatcher {
         producer_registry: &ProducerRegistry,
         resolver: internal_dns_resolver::Resolver,
         inv_rx: watch::Receiver<Option<Arc<inventory::Collection>>>,
-        id: WatcherIdentity,
+        nexus_id: OmicronZoneUuid,
     ) -> Self {
         let metrics = Arc::new(Mutex::new(metrics::Metrics::default()));
         producer_registry
             .register_producer(metrics::Producer(metrics.clone()))
             .unwrap();
-        Self { datastore, sagas, metrics, id, resolver, inv_rx }
+        Self { datastore, sagas, metrics, nexus_id, resolver, inv_rx }
     }
 
     #[allow(clippy::too_many_arguments)] // i also don't love it, buddy...
     fn check_instance(
         &self,
         opctx: &OpContext,
-        gateways: &Arc<[GatewayClient]>,
+        gateways: &Option<Arc<GatewaysByRack>>,
         client: SledAgentClient,
         target: VirtualMachine,
         instance: Instance,
@@ -139,7 +139,7 @@ impl InstanceWatcher {
             };
 
             let Some(state) = check
-                .run(&opctx, inv_rx, &instance, &vmm, &sled, &gateways, &client)
+                .run(&opctx, inv_rx, &instance, &vmm, &sled, gateways, &client)
                 .await
             else {
                 // Check did not result in an updated state, nothing else to
@@ -205,7 +205,7 @@ impl Check {
         instance: &Instance,
         vmm: &Vmm,
         sled: &Sled,
-        gateways: &[GatewayClient],
+        gateways: Option<Arc<GatewaysByRack>>,
         client: &SledAgentClient,
     ) -> Option<SledVmmState> {
         let mk_failed = |reason: VmmFailureReason| {
@@ -380,7 +380,7 @@ impl Check {
 async fn is_computer_on(
     opctx: &OpContext,
     inv_rx: &watch::Receiver<Option<Arc<inventory::Collection>>>,
-    gateways: &[GatewayClient],
+    gateways: &Option<Arc<GatewaysByRack>>,
     sled: &Sled,
 ) -> anyhow::Result<PowerState> {
     let Some(inv) = inv_rx.borrow().clone() else {
@@ -407,6 +407,23 @@ async fn is_computer_on(
              inventory"
         );
     };
+
+    // Find the MGS clients for the rack containing this sled.
+    let rack_id = &sp.rack_id;
+    let gateways = gateways
+        .as_ref()
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "no gateways resolved; cannot check sled power state"
+            )
+        })?
+        .for_rack(&rack_id)
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "no gateways discovered for rack {rack_id}, which contains \
+                 {part_number}:{rev}:{serial_number}"
+            )
+        })?;
 
     // Ask MGS whether the computer is on. If trying to talk to one of the
     // gateways fails for whatever reason, ask any others we were able to
@@ -449,20 +466,9 @@ async fn is_computer_on(
     ))
 }
 
-/// The identity of the process performing the health check, for distinguishing
-/// health check metrics emitted by different Nexus instances.
-///
-/// This is a struct just to ensure that the two UUIDs are named arguments
-/// (rather than positional arguments) and can't be swapped accidentally.
-#[derive(Copy, Clone)]
-pub struct WatcherIdentity {
-    pub nexus_id: OmicronZoneUuid,
-    pub rack_id: RackUuid,
-}
-
 impl VirtualMachine {
     fn new(
-        WatcherIdentity { rack_id, nexus_id }: WatcherIdentity,
+        nexus_id: OmicronZoneUuid,
         sled: &Sled,
         instance: &Instance,
         vmm: &Vmm,
@@ -470,7 +476,7 @@ impl VirtualMachine {
     ) -> Self {
         let addr = sled.address();
         Self {
-            rack_id: rack_id.into_untyped_uuid(),
+            rack_id: sled.rack_id.into_untyped_uuid(),
             nexus_id: nexus_id.into_untyped_uuid(),
             instance_id: instance.id(),
             silo_id: project.silo_id,
@@ -622,8 +628,8 @@ impl BackgroundTask for InstanceWatcher {
                 MAX_CONCURRENT_CHECKS,
             );
 
-            let gateways = match GatewayClient::resolve_all_gateways(&opctx.log, &self.resolver).await {
-                Ok(gateways) => gateways.collect::<Arc<[_]>>(),
+            let gateways = match GatewaysByRack::resolve_all_gateways(&opctx.log, &self.resolver).await {
+                Ok(gateways) => Some(Arc::new(gateways)),
                 Err(err) => {
                     // This is a bit sad, but talking to MGS is only necessary
                     // to check if a sled is powered on in the event that the
@@ -638,7 +644,7 @@ impl BackgroundTask for InstanceWatcher {
                          sled-agents be unreachable";
                         "error" => InlineErrorChain::new(&*err),
                     );
-                    Arc::new([])
+                    None
                 },
             };
 
@@ -701,7 +707,7 @@ impl BackgroundTask for InstanceWatcher {
                         },
                     };
 
-                    let target = VirtualMachine::new(self.id, &sled, &instance, &vmm, &project);
+                    let target = VirtualMachine::new(self.nexus_id, &sled, &instance, &vmm, &project);
                     tasks.spawn(self.check_instance(opctx, &gateways, client, target, instance, vmm, sled)).await
                 } else {
                     // If there are no remaining instances to check, wait for
