@@ -77,8 +77,11 @@
       display: none;
     }
   }
-  .pf-summary {
+  /* No margin, which Pagefind adds below the padding in the modal, so the
+     count is centered between the dividers. .pf-modal-body to beat that rule */
+  .pf-modal-body .pf-summary {
     padding: 8px 16px;
+    margin: 0;
   }
   .pf-results {
     gap: 0;
