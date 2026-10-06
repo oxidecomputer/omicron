@@ -23,7 +23,7 @@ use tokio::sync::watch;
 /// See the comment in debug_collector/mod.rs for details.
 pub(crate) fn spawn(
     internal_disks_rx: InternalDisksReceiver,
-    external_disks_rx: watch::Receiver<HashSet<Disk>>,
+    debug_dataset_disks_rx: watch::Receiver<HashSet<Disk>>,
     mount_config: Arc<MountConfig>,
     base_log: &Logger,
 ) -> FormerZoneRootArchiver {
@@ -35,7 +35,7 @@ pub(crate) fn spawn(
 
     let debug_collector_task = DebugCollectorTask {
         internal_disks_rx,
-        external_disks_rx,
+        debug_dataset_disks_rx,
         archive_rx,
         debug_collector: DebugCollector::new(base_log, mount_config),
         last_disks_used: HashSet::new(),
@@ -62,9 +62,11 @@ pub(crate) fn spawn(
 ///
 /// See the comment in debug_collector/mod.rs for details.
 struct DebugCollectorTask {
-    // Input channels on which we receive updates about disk changes.
+    // Input channels on which we receive updates about disk changes: all
+    // internal disks, and the external disks whose debug dataset has been
+    // ensured by the config reconciler.
     internal_disks_rx: InternalDisksReceiver,
-    external_disks_rx: watch::Receiver<HashSet<Disk>>,
+    debug_dataset_disks_rx: watch::Receiver<HashSet<Disk>>,
     // Input channel on which we receive requests to archive zone roots.
     archive_rx: mpsc::Receiver<FormerZoneRootArchiveRequest>,
 
@@ -100,11 +102,11 @@ impl DebugCollectorTask {
                 }
 
                 // Cancel-safe per docs on `changed()`
-                res = self.external_disks_rx.changed() => {
+                res = self.debug_dataset_disks_rx.changed() => {
                     if res.is_err() {
                         error!(
                             self.log,
-                            "external disks channel closed: exiting task"
+                            "debug dataset disks channel closed: exiting task"
                         );
                         return;
                     }
@@ -118,10 +120,11 @@ impl DebugCollectorTask {
                 // channel is closed.
                 Some(request) = self.archive_rx.recv() => {
                     // One of the cases where we're asked to archive former zone
-                    // roots is that we've just imported a disk.  That disk may
-                    // also have the only debug datasets that we can use for
-                    // archival.  So before we send the request to archive the
-                    // former zone root, update the disk information.
+                    // roots is that we've just adopted a disk.  The reconciler
+                    // may have just ensured the only debug datasets that we can
+                    // use for archival.  So before we send the request to
+                    // archive the former zone root, update the disk
+                    // information.
                     self.update_setup_if_needed().await;
 
                     let FormerZoneRootArchiveRequest {
@@ -144,7 +147,9 @@ impl DebugCollectorTask {
             .borrow_and_update_raw_disks()
             .iter()
             .map(|d| d.deref().clone())
-            .chain(self.external_disks_rx.borrow_and_update().iter().cloned())
+            .chain(
+                self.debug_dataset_disks_rx.borrow_and_update().iter().cloned(),
+            )
             .collect::<HashSet<_>>();
 
         if disks_avail != self.last_disks_used {

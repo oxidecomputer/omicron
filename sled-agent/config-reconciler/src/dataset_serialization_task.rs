@@ -79,6 +79,11 @@ pub enum DatasetEnsureError {
         err: Arc<DatasetEnsureError>,
     },
     #[error(
+        "former zone roots on zpool {0} have not yet been archived and \
+         destroyed"
+    )]
+    TransientZoneRootCleanupPending(ZpoolName),
+    #[error(
         "dataset {name} exists with unexpected ID \
          (expected {expected}, got {got})"
     )]
@@ -105,6 +110,9 @@ impl DatasetEnsureError {
             // retried.
             DatasetEnsureError::ZpoolNotFound(_)
             | DatasetEnsureError::EnsureFailed { .. } => true,
+
+            // We retry zone root cleanup on each reconciliation attempt.
+            DatasetEnsureError::TransientZoneRootCleanupPending(_) => true,
 
             // Errors that we know aren't retryable: recovering from these
             // require config changes, so there's no need to retry until that
@@ -1722,6 +1730,17 @@ mod tests {
             synthetic_disk_root: "/tmp/test-dataset-serialization/bogus/disk"
                 .into(),
         })
+    }
+
+    impl DatasetTaskHandle {
+        /// Spawn a dataset task that operates on an in-memory fake of ZFS.
+        pub(crate) fn spawn_in_memory(log: &Logger) -> Self {
+            Self::spawn_with_zfs_impl(
+                nonexistent_mount_config(),
+                log,
+                InMemoryZfs::default(),
+            )
+        }
     }
 
     fn with_test_runtime<Fut, T>(fut: Fut) -> T

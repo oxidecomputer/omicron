@@ -79,7 +79,7 @@ pub(crate) fn spawn<T: SledAgentFacilities, U: SledAgentArtifactStore>(
     reconciler_result_tx: watch::Sender<ReconcilerResult>,
     currently_managed_zpools_tx: watch::Sender<Arc<CurrentlyManagedZpools>>,
     internal_disks_rx: InternalDisksReceiver,
-    external_disks_tx: watch::Sender<HashSet<Disk>>,
+    debug_dataset_disks_tx: watch::Sender<HashSet<Disk>>,
     former_zone_root_archiver: FormerZoneRootArchiver,
     raw_disks_rx: RawDisksReceiver,
     committed_epoch_rx: watch::Receiver<Option<Epoch>>,
@@ -90,7 +90,7 @@ pub(crate) fn spawn<T: SledAgentFacilities, U: SledAgentArtifactStore>(
     let external_disks = ExternalDisks::new(
         Arc::clone(&mount_config),
         currently_managed_zpools_tx,
-        external_disks_tx,
+        debug_dataset_disks_tx,
         former_zone_root_archiver.clone(),
     );
     let datasets = OmicronDatasets::new(dataset_task);
@@ -594,13 +594,40 @@ impl ReconcilerTask {
         };
 
         // Ensure all the datasets we want exist.
+        //
+        // Disks we've just adopted may contain former zone roots, which must
+        // be archived and destroyed before we place any zones on those disks.
+        // Archival requires debug datasets, so we first ensure datasets
+        // (deferring the transient zone datasets on those disks), then clean
+        // up the former zone roots, then ensure the deferred datasets.
+        let zone_root_cleanup_pending =
+            self.external_disks.zone_root_cleanup_pending_zpools();
         self.datasets
             .ensure_datasets_if_needed(
                 sled_config.datasets.clone(),
                 self.external_disks.currently_managed_zpools(),
+                &zone_root_cleanup_pending,
                 &self.log,
             )
             .await;
+        self.external_disks.update_debug_dataset_zpools(
+            self.datasets.ensured_debug_dataset_zpools(),
+        );
+        if !zone_root_cleanup_pending.is_empty()
+            && self
+                .external_disks
+                .clean_up_former_zone_roots_if_needed(&self.log)
+                .await
+        {
+            self.datasets
+                .ensure_datasets_if_needed(
+                    sled_config.datasets.clone(),
+                    self.external_disks.currently_managed_zpools(),
+                    &self.external_disks.zone_root_cleanup_pending_zpools(),
+                    &self.log,
+                )
+                .await;
+        }
 
         // Collect the current timesync status (needed to start any new zones,
         // and also we want to report it as part of each reconciler result).
