@@ -151,8 +151,8 @@ impl GatewaysByRack {
         self.by_rack.get(rack_id).map(|r| &r.gateways[..])
     }
 
-    /// Returns an iterator over all racks for which one or more gateway client
-    /// was discovered.
+    /// Returns a borrowing iterator over all racks for which one or more
+    /// gateway client was discovered.
     ///
     /// Note that the iteration order here is intentionally non-deterministic,
     /// since the clients are stored in an `iddqd::IdHashMap` keyed by the rack
@@ -163,6 +163,20 @@ impl GatewaysByRack {
     /// distribute load.
     pub fn all_discovered(&self) -> impl Iterator<Item = &RackGateways> + '_ {
         self.by_rack.iter()
+    }
+
+    /// Returns an iterator over all racks for which one or more gateway client
+    /// was discovered, by value.
+    ///
+    /// Note that the iteration order here is intentionally non-deterministic,
+    /// since the clients are stored in an `iddqd::IdHashMap` keyed by the rack
+    /// ID. In general, we try to use deterministic ordering for maps. Here, we
+    /// *intentionally* do the opposite, since this is used by background tasks
+    /// that perform operations on all racks in the cluster, and we would like
+    /// these background tasks to start at different positions to evenly
+    /// distribute load.
+    pub fn into_discovered(self) -> impl Iterator<Item = RackGateways> {
+        self.by_rack.into_iter()
     }
 
     /// Borrows the set of resolved clients for which the rack ID is unknown,
