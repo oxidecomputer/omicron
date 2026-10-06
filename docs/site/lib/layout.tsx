@@ -1,4 +1,6 @@
+import { DesktopOutline } from '@oxide/design-system/asciidoc'
 import { MenuClose12Icon, MenuOpen12Icon } from '@oxide/design-system/icons/react'
+import type { DocumentSection } from '@oxide/react-asciidoc'
 import type { ReactNode } from 'react'
 
 import { relHref, sourceUrl } from './links.ts'
@@ -167,25 +169,53 @@ const sidebarScrollScript = (site: Site) => {
 }`
 }
 
-const Toc = ({ items }: { items: TocItem[] }) => (
-  <ul className="space-y-1.5">
-    {items.map((item) => (
-      <li key={item.id}>
-        <a
-          href={`#${item.id}`}
-          className="text-sans-sm text-secondary hover:text-default block leading-tight"
-        >
-          <Html html={item.title} />
-        </a>
-        {item.children.length > 0 && (
-          <div className="mt-1.5 ml-3">
-            <Toc items={item.children} />
-          </div>
-        )}
-      </li>
-    ))}
-  </ul>
-)
+/** The shape `DesktopOutline` takes, which shows levels 1 and 2 */
+const toOutline = (items: TocItem[], level = 1): DocumentSection[] =>
+  items.map((item) => ({
+    id: item.id,
+    title: item.title,
+    level,
+    num: '',
+    numbered: false,
+    hasCaption: false,
+    sections: toOutline(item.children, level + 1),
+  }))
+
+/**
+ * `DesktopOutline` expects React state to say which item is active, but these
+ * pages aren't hydrated, i.e., we only use React at build time to generate
+ * HTML, and the resulting page is static. The page renders with the first item
+ * active, so this reads the active and inactive class lists off the links
+ * (which also keeps them in the HTML for Tailwind to find) and swaps them as
+ * you scroll. The active section is the last one whose heading has scrolled
+ * past the top fifth of the viewport, or the last one when you hit the bottom
+ * of the page. The outline renders deeper levels hidden, so skip those, leaving
+ * their parent active.
+ */
+const outlineScript = `{
+  const links = [...document.querySelectorAll('#outline .toc li:not(.hidden) a')]
+  const on = links[0].className
+  const off = links.find((l) => l.className !== on)?.className
+  const heads = links.map((l) => document.getElementById(l.getAttribute('href').slice(1)))
+  let current = links[0]
+  const update = () => {
+    const atBottom = innerHeight + scrollY >= document.documentElement.scrollHeight - 1
+    let i = 0
+    heads.forEach((h, j) => { if (h && h.getBoundingClientRect().top < innerHeight / 5) i = j })
+    const next = links[atBottom ? links.length - 1 : i]
+    if (next === current) return
+    current.className = off
+    next.className = on
+    current = next
+  }
+  let queued = false
+  if (off) addEventListener('scroll', () => {
+    if (queued) return
+    queued = true
+    requestAnimationFrame(() => { queued = false; update() })
+  }, { passive: true })
+  if (off) update()
+}`
 
 export function DocPage({
   site,
@@ -257,9 +287,13 @@ export function DocPage({
           </div>
         </main>
         {page.toc.length > 0 && (
-          <aside className="1200:block sticky top-14 hidden h-[calc(100vh-3.5rem)] w-64 shrink-0 overflow-y-auto px-6 py-10">
+          <aside
+            id="outline"
+            className="1200:block sticky top-14 hidden h-[calc(100vh-3.5rem)] w-64 shrink-0 overflow-y-auto px-6 py-10"
+          >
             <div className="text-mono-xs text-tertiary mb-3">On this page</div>
-            <Toc items={page.toc} />
+            <DesktopOutline toc={toOutline(page.toc)} activeItem={page.toc[0].id} />
+            <script>{outlineScript}</script>
           </aside>
         )}
       </div>
