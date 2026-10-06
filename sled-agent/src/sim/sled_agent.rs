@@ -426,6 +426,7 @@ impl SledAgent {
         self: &Arc<Self>,
         propolis_id: PropolisUuid,
         state: VmmStateRequested,
+        acpi_timeout_secs: Option<u64>,
     ) -> Result<VmmPutStateResponse, HttpError> {
         if let Some(e) =
             self.instance_ensure_state_error.lock().unwrap().as_ref()
@@ -480,7 +481,7 @@ impl SledAgent {
             };
             let body = propolis_client::types::InstanceStateChange {
                 state: p_state,
-                acpi_timeout_secs: None, /* TODO(lif) */
+                acpi_timeout_secs,
             };
             client.instance_state_put().body(body).send().await.map_err(
                 |e| {

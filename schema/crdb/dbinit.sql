@@ -1380,9 +1380,14 @@ CREATE TYPE IF NOT EXISTS omicron.public.instance_intended_state AS ENUM (
     'destroyed'
 );
 
-/* TODO doc */
+/*
+ * Represents the method by which an instance VM should be stopped.
+ */
 CREATE TYPE IF NOT EXISTS omicron.public.instance_shutdown_action AS ENUM (
+    /* Terminate the instance immediately, without giving the guest warning */
     'hard_off',
+    /* Send the ACPI fixed power button signal, giving the VM guest up to a
+     * configured timeout to shut itself down gracefully. */
     'power_button'
 );
 
@@ -1498,10 +1503,20 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
      */
     enable_jumbo_frames BOOL NOT NULL,
 
-    /* TODO: doc. note the above 'intended_state' has a 'guest_shutdown' already
+    /* TODO(?) note the above 'intended_state' has a 'guest_shutdown' already
     so we may want this field's value to decide that gets set accordingly whenever
-    a stop request comes in.  interval(0) means seconds */
+    a stop request comes in? */
+    /*
+     * When shutdown_policy_action is 'power_button', this represents the time
+     * in seconds (the unit of `INTERVAL(0)`) propolis will wait for the guest
+     * to power itself down after sending it the power button event, before
+     * forcefully terminating it. Must be NULL if the action is 'hard_off'.
+     */
     shutdown_policy_timeout INTERVAL(0),
+
+    /*
+     * The means by which to stop the instance.
+     */
     shutdown_policy_action omicron.public.instance_shutdown_action NOT NULL default 'hard_off',
 
     CONSTRAINT vmm_iff_active_propolis CHECK (

@@ -151,8 +151,13 @@ pub struct Instance {
     /// Changes to this field only take effect on the next instance restart.
     pub enable_jumbo_frames: bool,
 
-    // TODO doc
+    /// When `shutdown_policy_action` is `PowerButton`, this represents the time
+    /// propolis will wait for the guest to power itself down after sending it
+    /// the power button event, before forcefully terminating it.
+    /// Must be None if the action is `HardOff`.
     pub shutdown_policy_timeout: Option<TimeDelta>,
+
+    /// The means by which to stop the instance.
     pub shutdown_policy_action: InstanceShutdownAction,
 }
 
