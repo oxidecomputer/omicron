@@ -14,6 +14,7 @@ import {
 } from '@oxide/design-system/asciidoc'
 import { Asciidoc } from '@oxide/react-asciidoc'
 import { oxideTheme } from '@oxide/design-system/syntax'
+import GithubSlugger from 'github-slugger'
 import { createMarkdownExit } from 'markdown-exit'
 import type { ReactNode } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
@@ -101,13 +102,9 @@ function highlightFence(code: string, lang: string) {
 async function renderMarkdown(src: string) {
   let title = ''
   const toc: TocItem[] = []
-  const ids = new Set<string>()
-  const slug = (text: string) =>
-    text
-      .toLowerCase()
-      .replace(/<[^>]+>/g, '')
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-|-$/g, '')
+  // IDs match GitHub's, so links to Markdown headings written against GitHub
+  // keep working
+  const slugger = new GithubSlugger()
 
   const md = createMarkdownExit({ html: true, linkify: true })
   const tokens = md.parse(fs.readFileSync(path.join(repoRoot, src), 'utf8'), {})
@@ -122,7 +119,8 @@ async function renderMarkdown(src: string) {
     }
     if (token.type !== 'heading_open') continue
     const depth = Number(token.tag.slice(1))
-    const text = md.renderer.renderInline(tokens[i + 1].children ?? [], md.options, {})
+    const children = tokens[i + 1].children ?? []
+    const text = md.renderer.renderInline(children, md.options, {})
     // The first h1 is the page title, which the layout renders itself
     if (depth === 1 && !title) {
       title = text
@@ -130,9 +128,12 @@ async function renderMarkdown(src: string) {
       i--
       continue
     }
-    let id = slug(text)
-    while (ids.has(id)) id += '-'
-    ids.add(id)
+    const id = slugger.slug(
+      children
+        .filter((t) => t.type === 'text' || t.type === 'code_inline')
+        .map((t) => t.content)
+        .join(''),
+    )
     token.attrSet('id', id)
     if (depth === 2) toc.push({ id, title: text, children: [] })
     if (depth === 3) toc.at(-1)?.children.push({ id, title: text, children: [] })
