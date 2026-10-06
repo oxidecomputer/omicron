@@ -26,12 +26,13 @@ const plain = (html: string) =>
     .replace(/&quot;/g, '"')
     .replace(/&amp;/g, '&')
 
-const Html = ({ children }: { children: ReactNode }) => (
-  <span dangerouslySetInnerHTML={{ __html: children as string }} />
-)
+const Html = ({ html }: { html: string }) => <span dangerouslySetInnerHTML={{ __html: html }} />
+
+/** Relative URL from the page at `from` to the file at `to`, both relative to dist/ */
+const relHref = (from: string, to: string) => path.posix.relative(path.posix.dirname(from), to)
 
 /** Relative path from the page at `from` to the site root, e.g. `../..` */
-const rootFrom = (from: string) => path.posix.relative(path.posix.dirname(from), '.') || '.'
+const rootFrom = (from: string) => relHref(from, '.') || '.'
 
 function Shell({
   title,
@@ -87,7 +88,7 @@ function Nav({ sections, current }: { sections: Section[]; current: Page }) {
             {section.pages.map((p) => (
               <li key={p.out}>
                 <a
-                  href={path.posix.relative(path.posix.dirname(current.out), p.out)}
+                  href={relHref(current.out, p.out)}
                   aria-current={p === current ? 'page' : undefined}
                   className={
                     p === current
@@ -131,7 +132,7 @@ const Toc = ({ items }: { items: TocItem[] }) => (
     {items.map((item) => (
       <li key={item.id}>
         <a href={`#${item.id}`} className="text-sans-sm text-secondary hover:text-default block leading-tight">
-          <Html>{item.title}</Html>
+          <Html html={item.title} />
         </a>
         {item.children.length > 0 && (
           <div className="mt-1.5 ml-3">
@@ -156,7 +157,6 @@ export function DocPage({
   prev?: Page
   next?: Page
 }) {
-  const href = (p: Page) => path.posix.relative(path.posix.dirname(page.out), p.out)
   return (
     <Shell title={`${plain(page.title)} | ${site.title}`} root={rootFrom(page.out)}>
       <div className="flex">
@@ -179,7 +179,7 @@ export function DocPage({
             {/* Only this part of the page goes in the search index */}
             <div data-pagefind-body="">
               <h1 className="text-sans-3xl text-raise mb-2">
-                <Html>{page.title}</Html>
+                <Html html={page.title} />
               </h1>
               <a
                 href={`${site.repo}/blob/main/${page.src}`}
@@ -192,7 +192,7 @@ export function DocPage({
             </div>
             <div className="border-secondary mt-16 flex justify-between gap-4 border-t pt-6">
               {prev ? (
-                <a href={href(prev)} className="group">
+                <a href={relHref(page.out, prev.out)} className="group">
                   <div className="text-mono-xs text-tertiary">Previous</div>
                   <div className="text-sans-md text-secondary group-hover:text-default">
                     {plain(prev.title)}
@@ -202,7 +202,7 @@ export function DocPage({
                 <span />
               )}
               {next && (
-                <a href={href(next)} className="group text-right">
+                <a href={relHref(page.out, next.out)} className="group text-right">
                   <div className="text-mono-xs text-tertiary">Next</div>
                   <div className="text-sans-md text-secondary group-hover:text-default">
                     {plain(next.title)}
