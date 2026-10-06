@@ -1,3 +1,5 @@
+import type { ComponentType, SVGProps } from 'react'
+
 /** Site config: the pages to publish and how to present them */
 export type Site = {
   /** Project name, e.g. `Omicron` */
@@ -10,6 +12,8 @@ export type Site = {
   branch: string
   sections: {
     title: string
+    /** 16px icon from `@oxide/design-system/icons/react`, shown on the homepage */
+    icon?: ComponentType<SVGProps<SVGSVGElement>>
     /** Paths relative to the repo root, optionally with a title override */
     pages: (string | { path: string; title?: string })[]
   }[]
@@ -30,4 +34,4 @@ export type Page = {
   toc: TocItem[]
 }
 
-export type Section = { title: string; pages: Page[] }
+export type Section = Omit<Site['sections'][number], 'pages'> & { pages: Page[] }

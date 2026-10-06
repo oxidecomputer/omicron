@@ -4,6 +4,15 @@
 //
 // See README.md in this directory for how the site is built and deployed.
 
+import {
+  Action16Icon,
+  Cloud16Icon,
+  Compass16Icon,
+  Repair16Icon,
+  Servers16Icon,
+  SoftwareUpdate16Icon,
+} from '@oxide/design-system/icons/react'
+
 import type { Site } from './lib/types.ts'
 
 export const site: Site = {
@@ -14,6 +23,7 @@ export const site: Site = {
   sections: [
     {
       title: 'Getting started',
+      icon: Compass16Icon,
       pages: [
         { path: 'README.adoc', title: 'Overview' },
         'docs/repo.adoc',
@@ -25,6 +35,7 @@ export const site: Site = {
     },
     {
       title: 'Architecture',
+      icon: Servers16Icon,
       pages: [
         'docs/control-plane-architecture.adoc',
         'docs/networking.adoc',
@@ -39,6 +50,7 @@ export const site: Site = {
     },
     {
       title: 'Working on Nexus',
+      icon: Cloud16Icon,
       pages: [
         'docs/adding-an-endpoint.adoc',
         'docs/http-status-codes.adoc',
@@ -54,6 +66,7 @@ export const site: Site = {
     },
     {
       title: 'Reconfigurator and update',
+      icon: SoftwareUpdate16Icon,
       pages: [
         'docs/reconfigurator.adoc',
         'docs/reconfigurator-dev-guide.adoc',
@@ -66,6 +79,7 @@ export const site: Site = {
     },
     {
       title: 'Testing',
+      icon: Action16Icon,
       pages: [
         'docs/flake-patterns.adoc',
         'live-tests/README.adoc',
@@ -76,6 +90,7 @@ export const site: Site = {
     },
     {
       title: 'Debugging and operations',
+      icon: Repair16Icon,
       pages: [
         'docs/debugging-authz.adoc',
         'docs/crdb-debugging.adoc',

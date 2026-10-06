@@ -234,20 +234,30 @@ export function IndexPage({ site, sections }: { site: Site; sections: Section[] 
   return (
     <Shell site={site} title={`${site.title} ${site.tagline}`} root=".">
       <main className="mx-auto max-w-[1100px] px-6 py-16">
-        <h1 className="text-sans-4xl text-raise mb-10">{`${site.title} ${site.tagline}`}</h1>
+        <h1 className="text-sans-4xl mb-10">
+          <span className="text-accent">{site.title}</span>{' '}
+          <span className="text-raise">{site.tagline}</span>
+        </h1>
         <div className="700:grid-cols-2 1000:grid-cols-3 grid grid-cols-1 gap-6">
           {sections.map((section) => (
             <section
               key={section.title}
               className="bg-raise border-secondary rounded-lg border p-6"
             >
-              <h2 className="text-sans-xl text-raise mb-4">{section.title}</h2>
+              <h2 className="text-sans-xl text-raise mb-4 flex items-center gap-3">
+                {section.icon && (
+                  <span className="text-accent bg-accent inline-flex rounded-md p-1.5">
+                    <section.icon />
+                  </span>
+                )}
+                {section.title}
+              </h2>
               <ul className="-mx-2">
                 {section.pages.map((p) => (
                   <li key={p.out} className="py-px">
                     <a
                       href={p.out}
-                      className="text-sans-md text-default hover:bg-hover block rounded-md px-2 py-0.75"
+                      className="text-sans-md text-default hover:bg-hover hover:text-raise block rounded-md px-2 py-0.75"
                     >
                       {plain(p.title)}
                     </a>
