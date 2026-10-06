@@ -198,7 +198,8 @@ html {
       color: var(--content-inverse);
     }
   }
-  .pf-result-card:has([data-pf-selected]),
+  /* .pf-modal-body to beat Pagefind's modal-specific selected background */
+  .pf-modal-body .pf-result-card:has([data-pf-selected]),
   .pf-heading-chip:has([data-pf-selected]) {
     background: var(--surface-accent);
     outline: 1px solid var(--stroke-accent);
