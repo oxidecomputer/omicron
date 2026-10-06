@@ -52,7 +52,22 @@ export function createLinkRewriter({
   pages: Page[]
 }) {
   const pagesByOut = new Map(pages.map((p) => [p.out, p]))
+  const idsByPage = new Map(
+    pages.map((p) => [
+      p,
+      new Set([...p.body.matchAll(/<[a-z][^>]*?\sid="([^"]*)"/gi)].map((m) => m[1])),
+    ]),
+  )
   const assets = new Set<string>()
+
+  // Docs written for GitHub use #some-heading; Asciidoctor's default is
+  // #_some_heading. Keep exact matches, and only rewrite to an existing ID.
+  function rewriteHash(hash: string, page: Page) {
+    const ids = idsByPage.get(page)!
+    if (!hash || !page.src.endsWith('.adoc') || ids.has(hash.slice(1))) return hash
+    const id = `_${hash.slice(1).replaceAll('-', '_')}`
+    return ids.has(id) ? `#${id}` : hash
+  }
 
   /** Resolve a relative URL in `page` to a repo path, or undefined if external */
   function resolve(page: Page, url: string) {
@@ -80,11 +95,16 @@ export function createLinkRewriter({
     // escape the quotes
     const attrRe = /(<[a-z][^>]*?\s)(href|src)="([^"]*)"/gi
     return html.replace(attrRe, (match, start: string, attr: string, url: string) => {
+      if (attr === 'href' && url.startsWith('#')) {
+        return `${start}${attr}="${rewriteHash(url, page)}"`
+      }
       const resolved = resolve(page, url)
       if (!resolved) return match
       const { target, hash, linked } = resolved
 
-      if (linked) return `${start}${attr}="${relHref(page.out, linked.out)}${hash}"`
+      if (linked) {
+        return `${start}${attr}="${relHref(page.out, linked.out)}${rewriteHash(hash, linked)}"`
+      }
 
       // Asciidoctor turns xref:foo.adoc[] into foo.html. If foo.adoc exists but
       // isn't on the site, link to the source on GitHub instead.
