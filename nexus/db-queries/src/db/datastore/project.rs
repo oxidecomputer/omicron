@@ -227,6 +227,7 @@ impl DataStore {
     generate_fn_to_ensure_none_in_project!(vpc, name, String);
     generate_fn_to_ensure_none_in_project!(affinity_group, name, String);
     generate_fn_to_ensure_none_in_project!(anti_affinity_group, name, String);
+    generate_fn_to_ensure_none_in_project!(external_subnet, name, String);
 
     /// Delete a project
     pub async fn project_delete(
@@ -246,6 +247,8 @@ impl DataStore {
         self.ensure_no_vpcs_in_project(opctx, authz_project).await?;
         self.ensure_no_affinity_groups_in_project(opctx, authz_project).await?;
         self.ensure_no_anti_affinity_groups_in_project(opctx, authz_project)
+            .await?;
+        self.ensure_no_external_subnets_in_project(opctx, authz_project)
             .await?;
 
         use nexus_db_schema::schema::project::dsl;
@@ -364,6 +367,8 @@ mod tests {
     use crate::db::DataStore;
     use crate::db::datastore::DnsVersionUpdateBuilder;
     use crate::db::pub_test_utils::TestDatabase;
+    use async_bb8_diesel::AsyncRunQueryDsl as _;
+    use diesel::prelude::*;
     use nexus_auth::authz;
     use nexus_db_model::DnsGroup;
     use nexus_db_model::InitialDnsGroup;
@@ -559,6 +564,42 @@ mod tests {
             .delete_external_subnet(opctx, &authz_subnet)
             .await
             .expect("able to delete external subnet from project");
+
+        // Creating the subnet bumped the project's rcgen, so deleting with the
+        // stale record we got at creation time should fail.
+        let err = db
+            .datastore()
+            .project_delete(opctx, &authz_project, &db_project)
+            .await
+            .expect_err(
+                "should not be able to delete project with stale rcgen",
+            );
+        let Error::InvalidRequest { message } = &err else {
+            panic!(
+                "Expected an InvalidRequest when deleting a project \
+                with a stale rcgen, but found: {err:#?}",
+            );
+        };
+        assert_eq!(
+            message.external_message(),
+            "deletion failed due to concurrent modification",
+        );
+
+        // Refetching the project and deleting it should work.
+        //
+        // We can't use a `LookupPath` here, since the test `OpContext` has no
+        // role in the new silo, so we read the record directly.
+        let db_project = {
+            use nexus_db_schema::schema::project::dsl;
+            dsl::project
+                .filter(dsl::id.eq(authz_project.id()))
+                .select(Project::as_select())
+                .get_result_async(
+                    &*db.datastore().pool_connection_for_tests().await.unwrap(),
+                )
+                .await
+                .expect("able to refetch project")
+        };
         db.datastore()
             .project_delete(opctx, &authz_project, &db_project)
             .await
