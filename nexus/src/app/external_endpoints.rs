@@ -543,7 +543,7 @@ pub(crate) async fn read_all_endpoints(
                 opctx,
                 Some(ServiceKind::Nexus),
                 &PaginatedBy::Id(p.current_pagparams()),
-                false,
+                None,
             )
             .await?;
         paginator = p.found_batch(&batch, &|s: &Certificate| s.id());
