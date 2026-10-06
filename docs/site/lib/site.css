@@ -87,6 +87,13 @@ body:has(#mobile-nav:popover-open) .menu-icon-close {
   display: block;
 }
 
+/* In docs without numbered sections, headings still get an empty
+   data-sectnum, and the design system's ::before for the number still takes up
+   its margin, indenting the heading. */
+.asciidoc-body [data-sectnum='']::before {
+  display: none;
+}
+
 /* Admonition content is a flex item, which won't shrink below its content's
    width by default, so a code block in a note widened the whole page on phones
    instead of scrolling. */
@@ -155,5 +162,40 @@ html:has(oxide-search dialog[open]) {
 @media (min-width: 600px) {
   [data-search-list] [aria-selected='true'] mark {
     color: var(--content-accent);
+  }
+}
+
+/* Outline popover for narrow screens (MobileOutline in lib/layout.tsx), below
+   the header and the outline bar so the bar stays usable for closing it, and
+   right of the sidebar when that's showing */
+#mobile-outline {
+  inset: 6rem 0 auto 0;
+  margin: 0;
+  width: auto;
+  max-height: 60vh;
+}
+#mobile-outline::backdrop {
+  top: 6rem;
+  background: var(--surface-scrim);
+}
+@media (min-width: 900px) {
+  #mobile-outline,
+  #mobile-outline::backdrop {
+    left: 16rem;
+  }
+}
+@media (min-width: 1200px) {
+  #mobile-outline,
+  #mobile-outline::backdrop {
+    display: none;
+  }
+}
+body:has(#mobile-outline:popover-open) .outline-chevron {
+  rotate: 180deg;
+}
+/* Clear the outline bar too when jumping to a heading */
+@media (max-width: 1199px) {
+  html:has(#mobile-outline) {
+    scroll-padding-top: 7rem;
   }
 }

@@ -1,6 +1,7 @@
 import { DesktopOutline } from '@oxide/design-system/asciidoc'
 import {
   Close12Icon,
+  DirectionDownIcon,
   MenuClose12Icon,
   MenuOpen12Icon,
   Search16Icon,
@@ -282,39 +283,116 @@ const toOutline = (items: TocItem[], level = 1): DocumentSection[] =>
     sections: toOutline(item.children, level + 1),
   }))
 
+/** The outline's first two levels in order, which is what both outlines show */
+const outlineItems = (toc: TocItem[]) =>
+  toc.flatMap((item) => [
+    { item, level: 1 },
+    ...item.children.map((child) => ({ item: child, level: 2 })),
+  ])
+
 /**
- * `DesktopOutline` expects React state to say which item is active, but these
- * pages aren't hydrated (see the README). The page renders with the first item
- * active, so this reads the active and inactive class lists off the links
- * (which also keeps them in the HTML for Tailwind to find) and swaps them as
- * you scroll. The active section is the last one whose heading has scrolled
- * past the top fifth of the viewport, or the last one when you hit the bottom
- * of the page. The outline renders deeper levels hidden, so skip those, leaving
- * their parent active.
+ * Below the width where the desktop outline shows, a bar under the header
+ * names the current section (or says "Contents" above the first one) and
+ * opens the outline in a popover. Like the mobile nav, the popover gives us
+ * closing on Escape or a click outside.
+ */
+function MobileOutline({ toc }: { toc: TocItem[] }) {
+  const items = outlineItems(toc)
+  // Same padding and width as the page content, so the text lines up with it
+  const gutter = '600:px-6 900:px-12 block px-4'
+  return (
+    <div className="1200:hidden bg-default border-secondary sticky top-14 z-5 border-b print:hidden">
+      <button popoverTarget="mobile-outline" className="hover:bg-hover block h-10 w-full text-left">
+        <span className={gutter}>
+          <span className="mx-auto flex max-w-[760px] items-center gap-3">
+            <span id="outline-current" className="text-sans-md text-secondary truncate">
+              Contents
+            </span>
+            <DirectionDownIcon className="outline-chevron text-tertiary ml-auto shrink-0" />
+          </span>
+        </span>
+      </button>
+      {/* Positioned in site.css */}
+      <nav
+        id="mobile-outline"
+        popover=""
+        aria-label="Contents"
+        className="bg-default border-secondary overflow-y-auto overscroll-contain border-0 border-b"
+      >
+        <div className={gutter}>
+          <div className="mx-auto max-w-[760px] py-4">
+            {/* While you're in a section, the bar names it, so without this the
+                list could read as that section's subsections */}
+            <div className="text-mono-xs text-tertiary mb-2">Contents</div>
+            <ul>
+              {items.map(({ item, level }) => (
+                <li key={item.id}>
+                  <a
+                    href={`#${item.id}`}
+                    className={`text-sans-md text-secondary hover:text-default aria-[current=true]:text-accent block py-1.5 ${level === 2 ? 'pl-4' : ''}`}
+                  >
+                    <Html html={item.title} />
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      </nav>
+    </div>
+  )
+}
+
+/**
+ * The outlines expect React state to say which item is active, but these
+ * pages aren't hydrated (see the README), so this tracks it as you scroll. The
+ * active section is the last one whose heading has scrolled past the top fifth
+ * of the viewport, or the last one when you hit the bottom of the page.
+ * Deeper levels than the outlines show leave their parent active.
+ *
+ * The mobile outline marks its link with `aria-current` and puts the
+ * section's title in its bar, or "Contents" above the first section.
+ * `DesktopOutline` always has an item active, the first one to start with, as
+ * it renders. This reads the active and inactive class lists off its links
+ * (which also keeps them in the HTML for Tailwind to find) and swaps them.
  */
 const outlineScript = `{
-  const links = [...document.querySelectorAll('#outline .toc li:not(.hidden) a')]
-  const on = links[0].className
-  const off = links.find((l) => l.className !== on)?.className
-  const heads = links.map((l) => document.getElementById(l.getAttribute('href').slice(1)))
-  let current = links[0]
+  const mobile = [...document.querySelectorAll('#mobile-outline a')]
+  const desktop = [...document.querySelectorAll('#outline .toc a')]
+  const popover = document.getElementById('mobile-outline')
+  const label = document.getElementById('outline-current')
+  const on = desktop[0].className
+  const off = desktop.find((l) => l.className !== on)?.className
+  const hrefs = mobile.map((l) => l.getAttribute('href'))
+  const heads = hrefs.map((h) => document.getElementById(h.slice(1)))
+  const desktopLink = new Map(desktop.map((l) => [l.getAttribute('href'), l]))
+  let current = -1
+  let active = desktop[0]
   const update = () => {
     const atBottom = innerHeight + scrollY >= document.documentElement.scrollHeight - 1
-    let i = 0
+    let i = -1
     heads.forEach((h, j) => { if (h && h.getBoundingClientRect().top < innerHeight / 5) i = j })
-    const next = links[atBottom ? links.length - 1 : i]
-    if (next === current) return
-    current.className = off
-    next.className = on
-    current = next
+    if (atBottom) i = heads.length - 1
+    if (i === current) return
+    mobile[current]?.removeAttribute('aria-current')
+    mobile[i]?.setAttribute('aria-current', 'true')
+    label.textContent = i < 0 ? 'Contents' : mobile[i].textContent
+    current = i
+    const next = desktopLink.get(hrefs[Math.max(i, 0)])
+    if (next && next !== active) {
+      active.className = off
+      next.className = on
+      active = next
+    }
   }
+  for (const l of mobile) l.addEventListener('click', () => popover.hidePopover())
   let queued = false
-  if (off) addEventListener('scroll', () => {
+  addEventListener('scroll', () => {
     if (queued) return
     queued = true
     requestAnimationFrame(() => { queued = false; update() })
   }, { passive: true })
-  if (off) update()
+  update()
 }`
 
 export function DocPage({
@@ -347,45 +425,48 @@ export function DocPage({
           <Nav sections={sections} current={page} />
         </nav>
         <script>{sidebarScrollScript(site)}</script>
-        <main className="600:px-6 900:px-12 min-w-0 flex-1 px-4 py-10">
-          <div className="mx-auto max-w-[760px]">
-            <div className="text-mono-sm text-tertiary mb-2">{page.section}</div>
-            {/* Only this part of the page goes in the search index */}
-            <div data-pagefind-body="" className="wrap-break-word">
-              <h1 className="text-sans-2xl 600:text-sans-3xl text-raise mb-2">
-                <Html html={page.title} />
-              </h1>
-              <a
-                href={sourceUrl(site, page.src)}
-                className="text-mono-xs text-tertiary hover:text-secondary mb-10 inline-block"
-                data-pagefind-ignore=""
-              >
-                {page.src}
-              </a>
-              <div dangerouslySetInnerHTML={{ __html: body }} />
-            </div>
-            <div className="border-secondary mt-16 flex justify-between gap-4 border-t pt-6">
-              {prev ? (
-                <a href={relHref(page.out, prev.out)} className="group">
-                  <div className="text-mono-xs text-tertiary">Previous</div>
-                  <div className="text-sans-md text-secondary group-hover:text-default">
-                    {plain(prev.title)}
-                  </div>
+        <div className="min-w-0 flex-1">
+          {page.toc.length > 0 && <MobileOutline toc={page.toc} />}
+          <main className="600:px-6 900:px-12 px-4 py-10">
+            <div className="mx-auto max-w-[760px]">
+              <div className="text-mono-sm text-tertiary mb-2">{page.section}</div>
+              {/* Only this part of the page goes in the search index */}
+              <div data-pagefind-body="" className="wrap-break-word">
+                <h1 className="text-sans-2xl 600:text-sans-3xl text-raise mb-2">
+                  <Html html={page.title} />
+                </h1>
+                <a
+                  href={sourceUrl(site, page.src)}
+                  className="text-mono-xs text-tertiary hover:text-secondary mb-10 inline-block"
+                  data-pagefind-ignore=""
+                >
+                  {page.src}
                 </a>
-              ) : (
-                <span />
-              )}
-              {next && (
-                <a href={relHref(page.out, next.out)} className="group text-right">
-                  <div className="text-mono-xs text-tertiary">Next</div>
-                  <div className="text-sans-md text-secondary group-hover:text-default">
-                    {plain(next.title)}
-                  </div>
-                </a>
-              )}
+                <div dangerouslySetInnerHTML={{ __html: body }} />
+              </div>
+              <div className="border-secondary mt-16 flex justify-between gap-4 border-t pt-6">
+                {prev ? (
+                  <a href={relHref(page.out, prev.out)} className="group">
+                    <div className="text-mono-xs text-tertiary">Previous</div>
+                    <div className="text-sans-md text-secondary group-hover:text-default">
+                      {plain(prev.title)}
+                    </div>
+                  </a>
+                ) : (
+                  <span />
+                )}
+                {next && (
+                  <a href={relHref(page.out, next.out)} className="group text-right">
+                    <div className="text-mono-xs text-tertiary">Next</div>
+                    <div className="text-sans-md text-secondary group-hover:text-default">
+                      {plain(next.title)}
+                    </div>
+                  </a>
+                )}
+              </div>
             </div>
-          </div>
-        </main>
+          </main>
+        </div>
         {page.toc.length > 0 && (
           <aside
             id="outline"

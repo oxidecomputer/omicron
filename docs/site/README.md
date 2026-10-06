@@ -59,14 +59,15 @@ The pages are static. React only runs at build time to render HTML; the pages
 aren't hydrated, so design system components render in their initial state, and
 anything that depends on React state or effects needs to be redone in small
 scripts. So far that's the mobile nav, the sidebar's scroll position, and the
-outline's active item, inline in `lib/layout.tsx`, and search, a custom element
+outlines' active item, inline in `lib/layout.tsx`, and search, a custom element
 in `lib/search.ts` around markup that `lib/layout.tsx` renders.
 
 Hydrating would mean shipping about 60KB of React plus a client bundle and
 serialized page data, in place of under 2KB of inline script, and adding a
 second build step (Vite) to produce that bundle alongside the HTML. If we end up
-wanting more interactive pieces, like a collapsible outline on small screens,
-try plain HTML first and then hydrating just those regions, not whole pages.
+wanting more interactive pieces, try plain HTML first, as the mobile nav and the
+outline on small screens do with popovers, and then hydrating just those
+regions, not whole pages.
 
 ## Search quality
 
