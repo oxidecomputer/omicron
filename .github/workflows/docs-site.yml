@@ -23,7 +23,9 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # Superseded PR builds can go, but a deploy cut off partway can leave Pages
+  # in a bad state
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
