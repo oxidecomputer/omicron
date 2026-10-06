@@ -57,6 +57,16 @@ html {
   height: auto;
   max-height: none;
 }
+/* On mobile, the sidebar's link rows are a little taller, to be easier to
+   tap. The extra 1px under each group heading keeps the space between it and
+   the first link equal to the space between links. Padding, because margins
+   would collapse into the heading's margin. */
+#mobile-nav a {
+  padding-block: 4px;
+}
+#mobile-nav ul {
+  padding-top: 1px;
+}
 #mobile-nav::backdrop {
   top: 3.5rem;
   background: var(--surface-scrim);
