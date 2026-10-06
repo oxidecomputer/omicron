@@ -75,23 +75,26 @@ function Shell({
   )
 }
 
+// Sidebar link rows styled like the guides sidebar on docs.oxide.computer. The
+// row padding hangs outside the parent so the text lines up with what's around it.
+const linkRow = (current: boolean) =>
+  `text-sans-md block rounded-md px-2 py-0.75 ${
+    current ? 'bg-accent text-accent hover:bg-accent-hover' : 'text-secondary hover:bg-hover'
+  }`
+
 function Nav({ sections, current }: { sections: Section[]; current: Page }) {
   return (
-    <div className="space-y-6">
+    <div className="-mx-2 space-y-6">
       {sections.map((section) => (
         <div key={section.title}>
-          <div className="text-mono-xs text-tertiary mb-2">{section.title}</div>
-          <ul className="space-y-1.5">
+          <div className="text-sans-md text-raise mb-1 ml-2">{section.title}</div>
+          <ul>
             {section.pages.map((p) => (
-              <li key={p.out}>
+              <li key={p.out} className="py-px">
                 <a
                   href={relHref(current.out, p.out)}
                   aria-current={p === current ? 'page' : undefined}
-                  className={
-                    p === current
-                      ? 'text-sans-md text-accent block leading-tight'
-                      : 'text-sans-md text-secondary hover:text-default block leading-tight'
-                  }
+                  className={linkRow(p === current)}
                 >
                   {plain(p.title)}
                 </a>
@@ -239,12 +242,12 @@ export function IndexPage({ site, sections }: { site: Site; sections: Section[] 
               className="bg-raise border-secondary rounded-lg border p-6"
             >
               <h2 className="text-sans-xl text-raise mb-4">{section.title}</h2>
-              <ul className="space-y-1.5">
+              <ul className="-mx-2">
                 {section.pages.map((p) => (
-                  <li key={p.out}>
+                  <li key={p.out} className="py-px">
                     <a
                       href={p.out}
-                      className="text-sans-md text-accent-secondary hover:text-accent"
+                      className="text-sans-md text-default hover:bg-hover block rounded-md px-2 py-0.75"
                     >
                       {plain(p.title)}
                     </a>
