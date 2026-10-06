@@ -563,6 +563,11 @@ impl Drop for RunningZone {
 
             // Take the OPTE ports and move them into the scope of the spawned
             // task below, where we'll drop them _after_ the zone is removed.
+            // The order matters, because deleting the ports while the zone owns
+            // them will return `EBUSY`. See
+            // https://github.com/oxidecomputer/omicron/issues/7726#issuecomment-2702320286
+            // and the surrounding thread for context.
+            //
             // Drop the tickets right away, which removes the ports from the
             // manager, so the only live reference is the one in the spawned
             // task.

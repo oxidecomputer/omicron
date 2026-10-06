@@ -1270,7 +1270,7 @@ impl InstanceRunner {
     /// Given a freshly-created Propolis process, this launches all of the tasks
     /// needed to monitor the resulting Propolis VM, and returns a handle to the
     /// monitor tasks.
-    async fn spawn_instance_state_monitor(
+    fn spawn_instance_state_monitor(
         &self,
         state: &RunningState,
     ) -> JoinHandle<()> {
