@@ -5,8 +5,7 @@ name: docs-site
 
 on:
   push:
-    # TODO: drop docs-site before merging; it's here to preview the PR on Pages
-    branches: [main, docs-site]
+    branches: [main]
     paths:
       - '**/*.adoc'
       - '**/*.md'
