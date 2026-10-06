@@ -68,6 +68,34 @@ pub(super) enum ZoneDatasetDependencyError {
     DurableDatasetNotAvailable(DatasetName),
 }
 
+/// Per-disk datasets that contain other datasets. A newly-adopted disk is only
+/// put into service once these have been ensured.
+const REQUIRED_PER_DISK_DATASETS: [DatasetKind; 2] =
+    [DatasetKind::Debug, DatasetKind::TransientZoneRoot];
+
+#[derive(Debug, thiserror::Error)]
+pub(super) enum RequiredDatasetError {
+    #[error("{kind:?} dataset on zpool {zpool} is not in the sled config")]
+    NotInConfig { zpool: ZpoolName, kind: DatasetKind },
+    #[error("{kind:?} dataset on zpool {zpool} was not ensured")]
+    NotEnsured {
+        zpool: ZpoolName,
+        kind: DatasetKind,
+        #[source]
+        err: Arc<DatasetEnsureError>,
+    },
+}
+
+impl RequiredDatasetError {
+    pub(super) fn is_retryable(&self) -> bool {
+        match self {
+            // Retrying won't help until the config changes.
+            RequiredDatasetError::NotInConfig { .. } => false,
+            RequiredDatasetError::NotEnsured { err, .. } => err.is_retryable(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub(super) struct OmicronDatasets {
     datasets: IdOrdMap<OmicronDataset>,
@@ -288,6 +316,36 @@ impl OmicronDatasets {
         }
     }
 
+    /// Confirm that the per-disk datasets that contain other datasets (see
+    /// [`REQUIRED_PER_DISK_DATASETS`]) have been ensured on `zpool`.
+    pub(super) fn check_required_datasets(
+        &self,
+        zpool: &ZpoolName,
+    ) -> Result<(), RequiredDatasetError> {
+        for kind in REQUIRED_PER_DISK_DATASETS {
+            let name = DatasetName::new(*zpool, kind.clone());
+            let Some(dataset) =
+                self.datasets.iter().find(|d| d.config.name == name)
+            else {
+                return Err(RequiredDatasetError::NotInConfig {
+                    zpool: *zpool,
+                    kind,
+                });
+            };
+            match &dataset.state {
+                DatasetState::Ensured => (),
+                DatasetState::FailedToEnsure(err) => {
+                    return Err(RequiredDatasetError::NotEnsured {
+                        zpool: *zpool,
+                        kind,
+                        err: Arc::clone(err),
+                    });
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Returns the zpools on which the debug dataset has been ensured.
     pub(super) fn ensured_debug_dataset_zpools(&self) -> BTreeSet<ZpoolName> {
         self.datasets
@@ -367,6 +425,7 @@ enum DatasetState {
 mod tests {
     use super::*;
     use crate::dataset_serialization_task::RekeyResult;
+    use assert_matches::assert_matches;
     use omicron_uuid_kinds::ZpoolUuid;
     use sled_agent_types::disk::SharedDatasetConfig;
 
@@ -376,6 +435,44 @@ mod tests {
             name: DatasetName::new(zpool, kind),
             inner: SharedDatasetConfig::default(),
         }
+    }
+
+    #[test]
+    fn check_required_datasets() {
+        let ok = ZpoolName::new_external(ZpoolUuid::new_v4());
+        let failed = ZpoolName::new_external(ZpoolUuid::new_v4());
+        let missing = ZpoolName::new_external(ZpoolUuid::new_v4());
+
+        let datasets = OmicronDatasets::with_datasets(
+            [
+                (dataset_config(ok, DatasetKind::Debug), Ok(())),
+                (dataset_config(ok, DatasetKind::TransientZoneRoot), Ok(())),
+                (dataset_config(failed, DatasetKind::Debug), Ok(())),
+                (
+                    dataset_config(failed, DatasetKind::TransientZoneRoot),
+                    Err(DatasetEnsureError::TestError("failed")),
+                ),
+                // `missing` has no transient zone root in its config.
+                (dataset_config(missing, DatasetKind::Debug), Ok(())),
+            ]
+            .into_iter(),
+        );
+
+        datasets.check_required_datasets(&ok).expect("datasets ensured");
+        assert_matches!(
+            datasets.check_required_datasets(&failed),
+            Err(RequiredDatasetError::NotEnsured {
+                kind: DatasetKind::TransientZoneRoot,
+                ..
+            })
+        );
+        assert_matches!(
+            datasets.check_required_datasets(&missing),
+            Err(RequiredDatasetError::NotInConfig {
+                kind: DatasetKind::TransientZoneRoot,
+                ..
+            })
+        );
     }
 
     #[test]

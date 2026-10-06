@@ -52,6 +52,7 @@ use tokio::sync::watch;
 use trust_quorum_types::types::Epoch;
 
 use super::datasets::DiskRekeyInfo;
+use super::datasets::RequiredDatasetError;
 use crate::dataset_serialization_task::RekeyResult;
 use crate::debug_collector::FormerZoneRootArchiver;
 use crate::disks_common::MaybeUpdatedDisk;
@@ -90,6 +91,15 @@ enum DiskManagementError {
 
     #[error(transparent)]
     SetValues(#[from] SetValueError),
+
+    #[error(transparent)]
+    RequiredDataset(RequiredDatasetError),
+
+    #[error(
+        "Not destroying former zone roots: \
+         no debug dataset is available to archive their logs into"
+    )]
+    DebugDatasetUnavailable,
 }
 
 impl DiskManagementError {
@@ -120,7 +130,10 @@ impl DiskManagementError {
                 name: _,
                 err: DestroyDatasetErrorVariant::Other(_),
             })
-            | Self::SetValues(_) => true,
+            | Self::SetValues(_)
+            | Self::DebugDatasetUnavailable => true,
+
+            Self::RequiredDataset(err) => err.is_retryable(),
         }
     }
 }
@@ -301,20 +314,20 @@ impl CurrentlyManagedZpoolsReceiver {
     }
 }
 
-/// Disks that were adopted by a call to
-/// [`ExternalDisks::start_managing_if_needed()`], whose former zone roots
-/// must be cleaned up via [`ExternalDisks::clean_up_former_zone_roots()`].
-#[derive(Debug, Default)]
-pub(super) struct NewlyAdoptedDisks(Vec<(PhysicalDiskUuid, ZpoolName)>);
-
-impl NewlyAdoptedDisks {
-    pub(super) fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
-    pub(super) fn zpools(&self) -> BTreeSet<ZpoolName> {
-        self.0.iter().map(|(_, zpool)| *zpool).collect()
-    }
+/// How far a newly-adopted disk has progressed toward being put into service.
+///
+/// A disk we've just adopted is not published as managed (to the rest of
+/// sled-agent) until its required datasets have been ensured and its former
+/// zone roots have been cleaned up. See [`ExternalDisks::verify_adopted_disks()`]
+/// and [`ExternalDisks::finish_adopting_disks()`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AdoptionPhase {
+    /// We've just adopted this disk.
+    Adopted,
+    /// This disk's required datasets have been ensured. Its debug dataset is
+    /// visible to `DebugCollectorTask` (so former zone roots can be archived
+    /// into it), but it is otherwise not yet in service.
+    Verified,
 }
 
 #[derive(Debug)]
@@ -336,6 +349,9 @@ pub(super) struct ExternalDisks {
     // `update_debug_dataset_zpools()`.
     debug_dataset_zpools: BTreeSet<ZpoolName>,
 
+    // Managed disks that we've adopted but not yet put into service.
+    adopting: BTreeMap<PhysicalDiskUuid, AdoptionPhase>,
+
     // For requesting archival of former zone root directories.
     archiver: FormerZoneRootArchiver,
 }
@@ -353,6 +369,7 @@ impl ExternalDisks {
             currently_managed_zpools_tx,
             debug_dataset_disks_tx,
             debug_dataset_zpools: BTreeSet::new(),
+            adopting: BTreeMap::new(),
             archiver,
         }
     }
@@ -374,74 +391,159 @@ impl ExternalDisks {
         self.update_output_watch_channels();
     }
 
-    /// Archive and destroy any former zone roots on `newly_adopted` disks.
+    /// Returns the zpools of disks we've adopted but not yet put into service.
+    pub(super) fn zpools_being_adopted(&self) -> BTreeSet<ZpoolName> {
+        self.adopting
+            .keys()
+            .filter_map(|disk_id| self.managed_zpool(disk_id))
+            .collect()
+    }
+
+    /// Returns the zpools of all managed disks, including those we've adopted
+    /// but not yet put into service.
     ///
-    /// Callers must ensure the transient zone root datasets on these disks
-    /// first, and must publish the available debug datasets via
-    /// `update_debug_dataset_zpools()` (archival requires them). Any disk on
-    /// which this fails is no longer managed; we'll try to adopt it (and
-    /// clean it up) again on a later reconciliation attempt.
-    pub(super) async fn clean_up_former_zone_roots(
+    /// This is only for creating datasets on newly-adopted disks; everything
+    /// else should use [`Self::currently_managed_zpools()`].
+    pub(super) fn all_managed_zpools(&self) -> Arc<CurrentlyManagedZpools> {
+        Arc::new(CurrentlyManagedZpools(
+            self.disks
+                .iter()
+                .filter_map(|disk| match &disk.state {
+                    DiskState::Managed(disk) => Some(*disk.zpool_name()),
+                    DiskState::FailedToManage(_) => None,
+                })
+                .collect(),
+        ))
+    }
+
+    /// Returns true if `DebugCollectorTask` has any debug datasets to archive
+    /// logs into.
+    pub(super) fn has_debug_datasets(&self) -> bool {
+        !self.debug_dataset_disks_tx.borrow().is_empty()
+    }
+
+    fn managed_zpool(&self, disk_id: &PhysicalDiskUuid) -> Option<ZpoolName> {
+        match &self.disks.get(disk_id)?.state {
+            DiskState::Managed(disk) => Some(*disk.zpool_name()),
+            DiskState::FailedToManage(_) => None,
+        }
+    }
+
+    /// Un-adopt `disk_id` (which we'll retry on a later reconciliation
+    /// attempt) because we couldn't put it into service.
+    fn fail_adoption(
         &mut self,
-        newly_adopted: NewlyAdoptedDisks,
+        disk_id: PhysicalDiskUuid,
+        error: DiskManagementError,
+    ) {
+        self.adopting.remove(&disk_id);
+        // unwrap(): Callers only pass IDs of disks we're adopting.
+        let mut disk = self.disks.get_mut(&disk_id).unwrap();
+        *disk = ExternalDiskState::failed(disk.config.clone(), error);
+    }
+
+    /// Check that newly-adopted disks' required datasets (as reported by
+    /// `check`) have been ensured.
+    ///
+    /// Disks that pass may have their former zone roots cleaned up, via
+    /// [`Self::finish_adopting_disks()`]. Disks that fail are un-adopted
+    /// without ever having been put into service.
+    pub(super) fn verify_adopted_disks<F>(&mut self, check: F, log: &Logger)
+    where
+        F: Fn(&ZpoolName) -> Result<(), RequiredDatasetError>,
+    {
+        for (disk_id, phase) in self.adopting.clone() {
+            if phase != AdoptionPhase::Adopted {
+                continue;
+            }
+            let Some(zpool) = self.managed_zpool(&disk_id) else {
+                self.adopting.remove(&disk_id);
+                continue;
+            };
+            match check(&zpool) {
+                Ok(()) => {
+                    self.adopting.insert(disk_id, AdoptionPhase::Verified);
+                }
+                Err(err) => {
+                    warn!(
+                        log,
+                        "not putting disk into service: \
+                         required dataset unavailable";
+                        "pool" => %zpool,
+                        InlineErrorChain::new(&err),
+                    );
+                    self.fail_adoption(
+                        disk_id,
+                        DiskManagementError::RequiredDataset(err),
+                    );
+                }
+            }
+        }
+        self.update_output_watch_channels();
+    }
+
+    /// Archive and destroy any former zone roots on verified, newly-adopted
+    /// disks, and put the ones that succeed into service.
+    ///
+    /// `can_archive` reports whether there are any debug datasets to archive
+    /// logs into; if not, we won't destroy any former zone roots. Disks that
+    /// fail are un-adopted without ever having been put into service.
+    pub(super) async fn finish_adopting_disks(
+        &mut self,
+        can_archive: bool,
         log: &Logger,
     ) {
-        self.clean_up_former_zone_roots_with_cleaner(
-            newly_adopted,
+        self.finish_adopting_disks_with_cleaner(
+            can_archive,
             log,
             &RealZoneRootCleaner,
         )
         .await
     }
 
-    async fn clean_up_former_zone_roots_with_cleaner<T: ZoneRootCleaner>(
+    async fn finish_adopting_disks_with_cleaner<T: ZoneRootCleaner>(
         &mut self,
-        newly_adopted: NewlyAdoptedDisks,
+        can_archive: bool,
         log: &Logger,
         cleaner: &T,
     ) {
-        let mut failed = Vec::new();
-        for (disk_id, zpool_name) in newly_adopted.0 {
-            if let Err(error) = cleaner
+        for (disk_id, phase) in self.adopting.clone() {
+            if phase != AdoptionPhase::Verified {
+                continue;
+            }
+            let Some(zpool_name) = self.managed_zpool(&disk_id) else {
+                self.adopting.remove(&disk_id);
+                continue;
+            };
+            match cleaner
                 .archive_and_destroy_former_zone_roots(
                     &zpool_name,
                     &self.mount_config,
                     &self.archiver,
+                    can_archive,
                     log,
                 )
                 .await
             {
-                // This situation is really unfortunate.  We adopted the disk,
-                // but couldn't clean up its zone root.  We now want to go back
-                // and un-adopt it.
-                //
-                // The right long-term answer is to destroy these zone roots not
-                // here, after adoption, but when starting zones.  See
-                // oxidecomputer/omicron#8316.  This too is complicated.
-                //
-                // Fortunately, this case should be nearly impossible in
-                // practice.  But if we get here, mark the disk accordingly.
-                error!(
-                    log,
-                    "failed to destroy former zone roots on pool";
-                    "pool" => %zpool_name,
-                    InlineErrorChain::new(&error),
-                );
-                failed.push((disk_id, error));
+                Ok(()) => {
+                    // This disk is now in service.
+                    self.adopting.remove(&disk_id);
+                }
+                Err(error) => {
+                    // The right long-term answer is to destroy these zone
+                    // roots not here, after adoption, but when starting zones.
+                    // See oxidecomputer/omicron#8316.  This too is complicated.
+                    error!(
+                        log,
+                        "failed to destroy former zone roots on pool";
+                        "pool" => %zpool_name,
+                        InlineErrorChain::new(&error),
+                    );
+                    self.fail_adoption(disk_id, error);
+                }
             }
         }
-
-        // Un-adopt any disks that we failed to clean up.
-        if !failed.is_empty() {
-            for (disk_id, error) in failed {
-                // unwrap(): We got these disk IDs from disks we adopted, and
-                // we haven't removed any disks since.
-                let mut disk = self.disks.get_mut(&disk_id).unwrap();
-                *disk = ExternalDiskState::failed(disk.config.clone(), error);
-            }
-
-            self.update_output_watch_channels();
-        }
+        self.update_output_watch_channels();
     }
 
     pub(crate) fn to_inventory(
@@ -497,26 +599,28 @@ impl ExternalDisks {
     }
 
     fn update_output_watch_channels(&self) {
-        let current_disks = self
-            .disks
-            .iter()
-            .filter_map(|disk| match &disk.state {
-                DiskState::Managed(disk) => Some(disk.clone()),
+        // Disks we're still adopting are not yet in service. Verified ones
+        // are visible to `DebugCollectorTask`, so that it can archive former
+        // zone roots into their debug datasets.
+        let managed_disks =
+            self.disks.iter().filter_map(|disk| match &disk.state {
+                DiskState::Managed(d) => {
+                    Some((self.adopting.get(&disk.config.id), d))
+                }
                 DiskState::FailedToManage(_) => None,
-            })
-            .collect::<HashSet<_>>();
-        let current_zpools = current_disks
-            .iter()
-            .map(|disk| *disk.zpool_name())
-            .collect::<BTreeSet<_>>();
-
-        let debug_dataset_disks = current_disks
-            .iter()
-            .filter(|disk| {
-                self.debug_dataset_zpools.contains(disk.zpool_name())
-            })
-            .cloned()
-            .collect::<HashSet<_>>();
+            });
+        let mut current_zpools = BTreeSet::new();
+        let mut debug_dataset_disks = HashSet::new();
+        for (phase, disk) in managed_disks {
+            if phase.is_none() {
+                current_zpools.insert(*disk.zpool_name());
+            }
+            if phase != Some(&AdoptionPhase::Adopted)
+                && self.debug_dataset_zpools.contains(disk.zpool_name())
+            {
+                debug_dataset_disks.insert(disk.clone());
+            }
+        }
         self.debug_dataset_disks_tx.send_if_modified(|disks| {
             if *disks == debug_dataset_disks {
                 false
@@ -576,6 +680,7 @@ impl ExternalDisks {
                     disk.state = DiskState::FailedToManage(
                         DiskManagementError::NotFound,
                     );
+                    self.adopting.remove(&disk_id);
                     marked_disk_not_found = true;
                 }
             }
@@ -584,6 +689,7 @@ impl ExternalDisks {
         // Remove the disks not present in `config`.
         for disk_id in &disk_ids_to_remove {
             self.disks.remove(disk_id);
+            self.adopting.remove(disk_id);
         }
 
         // If we made any changes, update the set of disks visbile to external
@@ -598,16 +704,16 @@ impl ExternalDisks {
     /// Attempt to start managing any disks specified by `config` that we aren't
     /// already managing.
     ///
-    /// The caller must pass the returned newly-adopted disks to
-    /// `clean_up_former_zone_roots()` before placing any zones on them.
-    #[must_use]
+    /// Newly-adopted disks are not put into service until they've been
+    /// verified ([`Self::verify_adopted_disks()`]) and their former zone roots
+    /// have been cleaned up ([`Self::finish_adopting_disks()`]).
     pub(super) async fn start_managing_if_needed(
         &mut self,
         raw_disks: &IdOrdMap<RawDisk>,
         config: &IdOrdMap<OmicronPhysicalDiskConfig>,
         key_requester: &StorageKeyRequester,
         log: &Logger,
-    ) -> NewlyAdoptedDisks {
+    ) {
         self.start_managing_if_needed_with_disk_adopter(
             raw_disks,
             config,
@@ -623,7 +729,7 @@ impl ExternalDisks {
         config: &IdOrdMap<OmicronPhysicalDiskConfig>,
         log: &Logger,
         disk_adopter: &T,
-    ) -> NewlyAdoptedDisks {
+    ) {
         // Loop over all the disks in `config`, and collect for each either a
         // future to ensure we're managing the disk (the common case) or an
         // error (if we know we can't manage it based on just our inputs alone).
@@ -688,9 +794,7 @@ impl ExternalDisks {
                 Entry::Vacant(vacant) => {
                     let new_state = vacant.insert(disk_state);
                     match &new_state.state {
-                        DiskState::Managed(disk) => {
-                            Some((disk_id, *disk.zpool_name()))
-                        }
+                        DiskState::Managed(_) => Some(disk_id),
                         DiskState::FailedToManage(..) => None,
                     }
                 }
@@ -702,25 +806,25 @@ impl ExternalDisks {
                         (_, DiskState::FailedToManage(_)) => None,
                         (
                             DiskState::FailedToManage(_),
-                            DiskState::Managed(disk),
-                        ) => Some((disk_id, *disk.zpool_name())),
+                            DiskState::Managed(_),
+                        ) => Some(disk_id),
                     }
                 }
             };
 
-            if let Some(info) = newly_adopted_disk {
-                newly_adopted.push(info);
+            if let Some(disk_id) = newly_adopted_disk {
+                newly_adopted.push(disk_id);
             }
         }
 
-        self.update_output_watch_channels();
+        // Newly-adopted disks aren't put into service until their datasets
+        // have been ensured and their former zone roots cleaned up, both of
+        // which happen later in reconciliation.
+        for disk_id in newly_adopted {
+            self.adopting.insert(disk_id, AdoptionPhase::Adopted);
+        }
 
-        // Former zone roots on newly-adopted disks must be archived and
-        // destroyed before we place any zones on them. That can't happen yet:
-        // archival requires debug datasets, which (like the transient zone
-        // root datasets themselves) are created later in reconciliation. Our
-        // caller is responsible for calling `clean_up_former_zone_roots()`.
-        NewlyAdoptedDisks(newly_adopted)
+        self.update_output_watch_channels();
     }
 
     async fn try_ensure_disk_managed<T: DiskAdopter>(
@@ -919,6 +1023,7 @@ trait ZoneRootCleaner {
         zpool_name: &ZpoolName,
         mount_config: &MountConfig,
         archiver: &FormerZoneRootArchiver,
+        can_archive: bool,
         log: &Logger,
     ) -> impl Future<Output = Result<(), DiskManagementError>> + Send;
 }
@@ -996,11 +1101,14 @@ impl DiskAdopter for RealDiskAdopter<'_> {
 struct RealZoneRootCleaner;
 
 impl ZoneRootCleaner for RealZoneRootCleaner {
+    /// If `can_archive` is false, there's nowhere to archive logs, so this
+    /// fails rather than destroying any former zone roots it finds.
     async fn archive_and_destroy_former_zone_roots(
         &self,
         zpool_name: &ZpoolName,
         mount_config: &MountConfig,
         archiver: &FormerZoneRootArchiver,
+        can_archive: bool,
         log: &Logger,
     ) -> Result<(), DiskManagementError> {
         // Attempt to archive and then wipe the contents of the zones dataset.
@@ -1073,6 +1181,7 @@ impl ZoneRootCleaner for RealZoneRootCleaner {
                     log,
                     mount_config,
                     archiver,
+                    can_archive,
                     &zpool_name,
                 )
                 .await?;
@@ -1095,12 +1204,17 @@ async fn cleanup_former_zone_roots(
     log: &Logger,
     mount_config: &MountConfig,
     archiver: &FormerZoneRootArchiver,
+    can_archive: bool,
     zpool_name: &ZpoolName,
 ) -> Result<(), DiskManagementError> {
     // Within each pool, ZONE_DATASET is the name of the dataset that's the
     // parent of all the zone root filesystems' datasets.
     let parent_dataset_name = format!("{}/{}", zpool_name, ZONE_DATASET);
     let child_datasets = Zfs::list_datasets(&parent_dataset_name).await?;
+
+    if !child_datasets.is_empty() && !can_archive {
+        return Err(DiskManagementError::DebugDatasetUnavailable);
+    }
 
     for child_name in child_datasets {
         // Determine the mountpoint of the child dataset.
@@ -1161,6 +1275,7 @@ mod tests {
     use super::*;
     use assert_matches::assert_matches;
     use illumos_utils::zpool::ZpoolName;
+    use omicron_common::disk::DatasetKind;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::ZpoolUuid;
     use sled_agent_types::disk::DiskIdentity;
@@ -1252,6 +1367,7 @@ mod tests {
         let expected_current_pools = external_disks
             .disks
             .iter()
+            .filter(|d| !external_disks.adopting.contains_key(&d.config.id))
             .filter_map(|d| match &d.state {
                 DiskState::Managed(disk) => Some(*disk.zpool_name()),
                 DiskState::FailedToManage(_) => None,
@@ -1675,11 +1791,13 @@ mod tests {
         logctx.cleanup_successful();
     }
 
-    /// Zone root cleaner that fails on a fixed set of zpools.
+    /// Zone root cleaner that fails on a fixed set of zpools, and records the
+    /// zpools it cleaned (and whether it was told it could archive).
     #[derive(Debug, Default)]
     struct TestZoneRootCleaner {
         fail_on: Mutex<BTreeSet<ZpoolName>>,
         cleaned: Mutex<Vec<ZpoolName>>,
+        can_archive: Mutex<Vec<bool>>,
     }
 
     impl ZoneRootCleaner for TestZoneRootCleaner {
@@ -1688,8 +1806,10 @@ mod tests {
             zpool_name: &ZpoolName,
             _mount_config: &MountConfig,
             _archiver: &FormerZoneRootArchiver,
+            can_archive: bool,
             _log: &Logger,
         ) -> Result<(), DiskManagementError> {
+            self.can_archive.lock().unwrap().push(can_archive);
             if self.fail_on.lock().unwrap().contains(zpool_name) {
                 return Err(DiskManagementError::DestroyDataset(
                     DestroyDatasetError {
@@ -1708,128 +1828,338 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn disks_that_fail_zone_root_cleanup_are_unadopted() {
-        let logctx = dev::test_setup_log(
-            "disks_that_fail_zone_root_cleanup_are_unadopted",
-        );
+    struct AdoptionTest {
+        logctx: omicron_test_utils::dev::LogContext,
+        external_disks: ExternalDisks,
+        debug_dataset_disks_rx: watch::Receiver<HashSet<Disk>>,
+        raw_disks: IdOrdMap<RawDisk>,
+        config_disks: IdOrdMap<OmicronPhysicalDiskConfig>,
+    }
 
-        let (currently_managed_zpools_tx, _rx) = watch::channel(Arc::default());
-        let (debug_dataset_disks_tx, debug_dataset_disks_rx) =
-            watch::channel(HashSet::default());
-        let mut external_disks = ExternalDisks::new(
-            nonexistent_mount_config(),
-            currently_managed_zpools_tx,
-            debug_dataset_disks_tx,
-            FormerZoneRootArchiver::noop(&logctx.log),
-        );
-
-        let mut raw_disks = IdOrdMap::default();
-        let mut config_disks = IdOrdMap::default();
-        for serial in ["ok", "fails"] {
-            let raw_disk = make_raw_test_disk(DiskVariant::U2, serial);
-            config_disks.insert_overwrite(OmicronPhysicalDiskConfig {
-                identity: raw_disk.identity().clone(),
-                id: PhysicalDiskUuid::new_v4(),
-                pool_id: ZpoolUuid::new_v4(),
-            });
-            raw_disks.insert_overwrite(raw_disk);
+    impl AdoptionTest {
+        fn new(test_name: &str, serials: &[&str]) -> Self {
+            let logctx = dev::test_setup_log(test_name);
+            let (currently_managed_zpools_tx, _rx) =
+                watch::channel(Arc::default());
+            let (debug_dataset_disks_tx, debug_dataset_disks_rx) =
+                watch::channel(HashSet::default());
+            let external_disks = ExternalDisks::new(
+                nonexistent_mount_config(),
+                currently_managed_zpools_tx,
+                debug_dataset_disks_tx,
+                FormerZoneRootArchiver::noop(&logctx.log),
+            );
+            let mut raw_disks = IdOrdMap::default();
+            let mut config_disks = IdOrdMap::default();
+            for serial in serials {
+                let raw_disk = make_raw_test_disk(DiskVariant::U2, serial);
+                config_disks.insert_overwrite(OmicronPhysicalDiskConfig {
+                    identity: raw_disk.identity().clone(),
+                    id: PhysicalDiskUuid::new_v4(),
+                    pool_id: ZpoolUuid::new_v4(),
+                });
+                raw_disks.insert_overwrite(raw_disk);
+            }
+            Self {
+                logctx,
+                external_disks,
+                debug_dataset_disks_rx,
+                raw_disks,
+                config_disks,
+            }
         }
-        let zpool_for = |serial: &str| {
-            let config = config_disks
+
+        fn zpool(&self, serial: &str) -> ZpoolName {
+            let config = self
+                .config_disks
                 .iter()
                 .find(|d| d.identity.serial == serial)
                 .unwrap();
             ZpoolName::new_external(config.pool_id)
-        };
-        let ok_zpool = zpool_for("ok");
-        let fails_zpool = zpool_for("fails");
-        let disk_adopter = TestDiskAdopter::default();
+        }
 
-        // Both disks are newly adopted. Neither is published to the debug
-        // collector until its debug dataset is reported as ensured.
-        let newly_adopted = external_disks
-            .start_managing_if_needed_with_disk_adopter(
-                &raw_disks,
-                &config_disks,
-                &logctx.log,
-                &disk_adopter,
-            )
-            .await;
-        assert_eq!(
-            newly_adopted.zpools(),
-            BTreeSet::from([ok_zpool, fails_zpool])
-        );
-        assert!(debug_dataset_disks_rx.borrow().is_empty());
-        external_disks.update_debug_dataset_zpools(BTreeSet::from([
-            ok_zpool,
-            fails_zpool,
-        ]));
-        assert_eq!(debug_dataset_disks_rx.borrow().len(), 2);
-
-        // Cleanup succeeds on one disk and fails on the other, which is no
-        // longer managed (or published to the debug collector).
-        let cleaner = TestZoneRootCleaner::default();
-        cleaner.fail_on.lock().unwrap().insert(fails_zpool);
-        external_disks
-            .clean_up_former_zone_roots_with_cleaner(
-                newly_adopted,
-                &logctx.log,
-                &cleaner,
-            )
-            .await;
-        assert_eq!(
-            external_disks
-                .currently_managed_zpools()
+        fn disk_id(&self, serial: &str) -> PhysicalDiskUuid {
+            self.config_disks
                 .iter()
-                .collect::<Vec<_>>(),
-            [ok_zpool]
-        );
-        assert_eq!(
-            debug_dataset_disks_rx
+                .find(|d| d.identity.serial == serial)
+                .unwrap()
+                .id
+        }
+
+        async fn adopt(&mut self) {
+            self.external_disks
+                .start_managing_if_needed_with_disk_adopter(
+                    &self.raw_disks,
+                    &self.config_disks,
+                    &self.logctx.log,
+                    &TestDiskAdopter::default(),
+                )
+                .await;
+        }
+
+        fn published_zpools(&self) -> BTreeSet<ZpoolName> {
+            self.external_disks.currently_managed_zpools().iter().collect()
+        }
+
+        fn debug_collector_zpools(&self) -> BTreeSet<ZpoolName> {
+            self.debug_dataset_disks_rx
                 .borrow()
                 .iter()
                 .map(|d| *d.zpool_name())
-                .collect::<Vec<_>>(),
-            [ok_zpool]
+                .collect()
+        }
+    }
+
+    #[tokio::test]
+    async fn adopted_disks_are_put_into_service_in_phases() {
+        let mut t = AdoptionTest::new(
+            "adopted_disks_are_put_into_service_in_phases",
+            &["a", "b"],
         );
-        assert!(external_disks.has_retryable_error());
-        assert_currently_managed_zpools_is_consistent(&external_disks);
+        let both = BTreeSet::from([t.zpool("a"), t.zpool("b")]);
 
-        // On the next attempt, only the disk that failed is newly adopted, so
-        // only it is cleaned up again.
-        cleaner.fail_on.lock().unwrap().clear();
-        let newly_adopted = external_disks
-            .start_managing_if_needed_with_disk_adopter(
-                &raw_disks,
-                &config_disks,
-                &logctx.log,
-                &disk_adopter,
-            )
-            .await;
-        assert_eq!(newly_adopted.zpools(), BTreeSet::from([fails_zpool]));
-        external_disks
-            .clean_up_former_zone_roots_with_cleaner(
-                newly_adopted,
-                &logctx.log,
-                &cleaner,
-            )
-            .await;
-        assert_eq!(*cleaner.cleaned.lock().unwrap(), [ok_zpool, fails_zpool]);
-        assert_eq!(external_disks.currently_managed_zpools().iter().count(), 2);
-        assert!(!external_disks.has_retryable_error());
+        // Newly-adopted disks are not visible to anything else yet, even if
+        // their debug datasets have been ensured.
+        t.adopt().await;
+        assert_eq!(t.external_disks.zpools_being_adopted(), both);
+        assert_eq!(
+            t.external_disks
+                .all_managed_zpools()
+                .iter()
+                .collect::<BTreeSet<_>>(),
+            both
+        );
+        t.external_disks.update_debug_dataset_zpools(both.clone());
+        assert!(t.published_zpools().is_empty());
+        assert!(t.debug_collector_zpools().is_empty());
 
-        // Once both are managed, neither is newly adopted again.
-        let newly_adopted = external_disks
-            .start_managing_if_needed_with_disk_adopter(
-                &raw_disks,
-                &config_disks,
-                &logctx.log,
-                &disk_adopter,
-            )
-            .await;
-        assert!(newly_adopted.is_empty());
+        // Once verified, their debug datasets are visible to the debug
+        // collector (for archival), but they're not yet in service.
+        t.external_disks.verify_adopted_disks(|_| Ok(()), &t.logctx.log);
+        assert_eq!(t.debug_collector_zpools(), both);
+        assert!(t.published_zpools().is_empty());
+        assert!(t.external_disks.has_debug_datasets());
 
+        // Once cleaned up, they're in service.
+        let cleaner = TestZoneRootCleaner::default();
+        t.external_disks
+            .finish_adopting_disks_with_cleaner(true, &t.logctx.log, &cleaner)
+            .await;
+        assert_eq!(*cleaner.can_archive.lock().unwrap(), [true, true]);
+        assert_eq!(t.published_zpools(), both);
+        assert!(t.external_disks.zpools_being_adopted().is_empty());
+        assert_currently_managed_zpools_is_consistent(&t.external_disks);
+
+        // They aren't adopted (or cleaned up) again.
+        t.adopt().await;
+        assert!(t.external_disks.zpools_being_adopted().is_empty());
+
+        t.logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn disks_that_fail_verification_are_never_published() {
+        let mut t = AdoptionTest::new(
+            "disks_that_fail_verification_are_never_published",
+            &["ok", "bad"],
+        );
+        let (ok, bad) = (t.zpool("ok"), t.zpool("bad"));
+
+        t.adopt().await;
+        t.external_disks.update_debug_dataset_zpools(BTreeSet::from([ok, bad]));
+        t.external_disks.verify_adopted_disks(
+            |zpool| {
+                if *zpool == bad {
+                    Err(RequiredDatasetError::NotInConfig {
+                        zpool: *zpool,
+                        kind: DatasetKind::TransientZoneRoot,
+                    })
+                } else {
+                    Ok(())
+                }
+            },
+            &t.logctx.log,
+        );
+
+        // The disk that failed verification is no longer managed, and was
+        // never visible to the debug collector or published as managed.
+        assert_matches!(
+            &t.external_disks.disks.get(&t.disk_id("bad")).unwrap().state,
+            DiskState::FailedToManage(DiskManagementError::RequiredDataset(
+                RequiredDatasetError::NotInConfig { .. }
+            ))
+        );
+        assert_eq!(t.debug_collector_zpools(), BTreeSet::from([ok]));
+        assert!(t.published_zpools().is_empty());
+
+        let cleaner = TestZoneRootCleaner::default();
+        t.external_disks
+            .finish_adopting_disks_with_cleaner(true, &t.logctx.log, &cleaner)
+            .await;
+        assert_eq!(*cleaner.cleaned.lock().unwrap(), [ok]);
+        assert_eq!(t.published_zpools(), BTreeSet::from([ok]));
+
+        // We'll try to adopt it again later.
+        t.adopt().await;
+        assert_eq!(
+            t.external_disks.zpools_being_adopted(),
+            BTreeSet::from([bad])
+        );
+
+        t.logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn disks_that_fail_cleanup_are_unadopted() {
+        let mut t = AdoptionTest::new(
+            "disks_that_fail_cleanup_are_unadopted",
+            &["ok", "bad"],
+        );
+        let (ok, bad) = (t.zpool("ok"), t.zpool("bad"));
+
+        t.adopt().await;
+        t.external_disks.update_debug_dataset_zpools(BTreeSet::from([ok, bad]));
+        t.external_disks.verify_adopted_disks(|_| Ok(()), &t.logctx.log);
+
+        let cleaner = TestZoneRootCleaner::default();
+        cleaner.fail_on.lock().unwrap().insert(bad);
+        t.external_disks
+            .finish_adopting_disks_with_cleaner(false, &t.logctx.log, &cleaner)
+            .await;
+
+        // We passed along that archival isn't possible, and the disk that
+        // failed cleanup is no longer managed (and will be retried).
+        assert_eq!(*cleaner.can_archive.lock().unwrap(), [false, false]);
+        assert_eq!(t.published_zpools(), BTreeSet::from([ok]));
+        assert_eq!(t.debug_collector_zpools(), BTreeSet::from([ok]));
+        assert!(t.external_disks.has_retryable_error());
+        assert_currently_managed_zpools_is_consistent(&t.external_disks);
+
+        t.logctx.cleanup_successful();
+    }
+}
+
+#[cfg(all(test, target_os = "illumos"))]
+mod illumos_tests {
+    use super::*;
+    use crate::dataset_serialization_task::DatasetTaskHandle;
+    use crate::dataset_serialization_task::illumos_tests::RealZfsTestHarness;
+    use assert_matches::assert_matches;
+    use omicron_common::disk::DatasetKind;
+    use omicron_common::disk::DatasetName;
+    use omicron_common::zpool_name::ZpoolKind;
+    use omicron_test_utils::dev;
+    use omicron_uuid_kinds::DatasetUuid;
+    use sled_agent_types::disk::DatasetConfig;
+    use sled_agent_types::disk::SharedDatasetConfig;
+
+    fn zone_dataset(zpool: ZpoolName) -> String {
+        format!("{zpool}/{ZONE_DATASET}")
+    }
+
+    fn former_zone_root(zpool: ZpoolName) -> String {
+        format!("{zpool}/{ZONE_DATASET}/oxz_former")
+    }
+
+    // Create the transient zone root dataset on `zpool`, optionally
+    // containing a former zone root.
+    async fn create_zone_dataset(
+        harness: &RealZfsTestHarness,
+        zpool: ZpoolName,
+        with_former_zone_root: bool,
+        log: &Logger,
+    ) {
+        let config = |kind| DatasetConfig {
+            id: DatasetUuid::new_v4(),
+            name: DatasetName::new(zpool, kind),
+            inner: SharedDatasetConfig::default(),
+        };
+        let task = DatasetTaskHandle::spawn_dataset_task(
+            Arc::new(harness.mount_config.clone()),
+            log,
+        );
+        let mut configs = vec![config(DatasetKind::TransientZoneRoot)];
+        if with_former_zone_root {
+            configs.push(config(DatasetKind::TransientZone {
+                name: "oxz_former".to_string(),
+            }));
+        }
+        let results = task
+            .datasets_ensure(
+                configs.into_iter().collect(),
+                harness.current_zpools(),
+            )
+            .await
+            .expect("dataset task responded");
+        for result in &results {
+            assert_matches!(result.result, Ok(()));
+        }
+    }
+
+    async fn clean_up(
+        harness: &RealZfsTestHarness,
+        zpool: ZpoolName,
+        can_archive: bool,
+        log: &Logger,
+    ) -> Result<(), DiskManagementError> {
+        RealZoneRootCleaner
+            .archive_and_destroy_former_zone_roots(
+                &zpool,
+                &harness.mount_config,
+                &FormerZoneRootArchiver::noop(log),
+                can_archive,
+                log,
+            )
+            .await
+    }
+
+    async fn exists(name: &str) -> bool {
+        Zfs::dataset_exists(name).await.expect("checked dataset existence")
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn cleanup_succeeds_without_former_zone_roots() {
+        let logctx =
+            dev::test_setup_log("cleanup_succeeds_without_former_zone_roots");
+        let mut harness = RealZfsTestHarness::new(logctx.log.clone());
+        let zpool = harness.add_zpool(ZpoolKind::External).await;
+
+        // An empty zone dataset (e.g., because we just created it on a new
+        // disk) has nothing to clean up, even if we couldn't archive.
+        create_zone_dataset(&harness, zpool, false, &logctx.log).await;
+        clean_up(&harness, zpool, false, &logctx.log)
+            .await
+            .expect("cleanup succeeded");
+        assert!(exists(&zone_dataset(zpool)).await);
+
+        harness.cleanup().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn cleanup_refuses_to_destroy_without_archival() {
+        let logctx =
+            dev::test_setup_log("cleanup_refuses_to_destroy_without_archival");
+        let mut harness = RealZfsTestHarness::new(logctx.log.clone());
+        let zpool = harness.add_zpool(ZpoolKind::External).await;
+        create_zone_dataset(&harness, zpool, true, &logctx.log).await;
+
+        // With nowhere to archive logs, we refuse to destroy the former zone
+        // root.
+        let err = clean_up(&harness, zpool, false, &logctx.log)
+            .await
+            .expect_err("cleanup refused");
+        assert_matches!(err, DiskManagementError::DebugDatasetUnavailable);
+        assert!(exists(&former_zone_root(zpool)).await);
+
+        // Once archival is possible, we destroy it.
+        clean_up(&harness, zpool, true, &logctx.log)
+            .await
+            .expect("cleanup succeeded");
+        assert!(!exists(&former_zone_root(zpool)).await);
+        assert!(exists(&zone_dataset(zpool)).await);
+
+        harness.cleanup().await;
         logctx.cleanup_successful();
     }
 }

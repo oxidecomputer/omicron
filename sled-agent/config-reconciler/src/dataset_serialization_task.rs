@@ -2555,7 +2555,7 @@ mod tests {
 // On illumos, run a set of tests that use the `RealZfs` implementation on
 // zpools backed by vdevs.
 #[cfg(all(test, target_os = "illumos"))]
-mod illumos_tests {
+pub(crate) mod illumos_tests {
     use super::tests::make_dataset_config;
     use super::*;
     use crate::CurrentlyManagedZpoolsReceiver;
@@ -2606,13 +2606,13 @@ mod illumos_tests {
     }
 
     #[derive(Debug)]
-    struct RealZfsTestHarness {
+    pub(crate) struct RealZfsTestHarness {
         // `Some(_)` until `cleanup()` is called.
         vdev_dir: Option<Utf8TempDir>,
         next_slot: i64,
         currently_managed_zpools_tx: watch::Sender<BTreeSet<ZpoolName>>,
         currently_managed_zpools_rx: CurrentlyManagedZpoolsReceiver,
-        mount_config: MountConfig,
+        pub(crate) mount_config: MountConfig,
         key_requester: StorageKeyRequester,
         key_manager_task: tokio::task::JoinHandle<()>,
         log: Logger,
@@ -2646,7 +2646,7 @@ mod illumos_tests {
     impl RealZfsTestHarness {
         pub const DEFAULT_VDEV_SIZE: u64 = 64 * (1 << 20);
 
-        fn new(log: Logger) -> Self {
+        pub(crate) fn new(log: Logger) -> Self {
             assert_eq!(
                 tokio::runtime::Handle::current().runtime_flavor(),
                 tokio::runtime::RuntimeFlavor::MultiThread,
@@ -2684,11 +2684,11 @@ mod illumos_tests {
             }
         }
 
-        fn current_zpools(&self) -> Arc<CurrentlyManagedZpools> {
+        pub(crate) fn current_zpools(&self) -> Arc<CurrentlyManagedZpools> {
             self.currently_managed_zpools_rx.current()
         }
 
-        async fn add_zpool(&mut self, kind: ZpoolKind) -> ZpoolName {
+        pub(crate) async fn add_zpool(&mut self, kind: ZpoolKind) -> ZpoolName {
             self.add_zpool_with_size(kind, Self::DEFAULT_VDEV_SIZE).await
         }
 
@@ -2745,7 +2745,7 @@ mod illumos_tests {
             zpool
         }
 
-        async fn cleanup(&mut self) {
+        pub(crate) async fn cleanup(&mut self) {
             let Some(vdev_dir) = self.vdev_dir.take() else {
                 // Already terminated
                 return;

@@ -306,17 +306,17 @@ impl LatestReconciliationResult {
 }
 
 /// Returns the datasets from `datasets` that we should ensure before cleaning
-/// up former zone roots on `newly_adopted_zpools`, omitting the transient zone
+/// up former zone roots on `zpools_being_adopted`, omitting the transient zone
 /// datasets on those zpools (that cleanup would destroy them).
 fn datasets_to_ensure(
     datasets: &IdOrdMap<DatasetConfig>,
-    newly_adopted_zpools: &BTreeSet<ZpoolName>,
+    zpools_being_adopted: &BTreeSet<ZpoolName>,
 ) -> IdOrdMap<DatasetConfig> {
     datasets
         .iter()
         .filter(|config| {
             !(matches!(config.name.kind(), DatasetKind::TransientZone { .. })
-                && newly_adopted_zpools.contains(config.name.pool()))
+                && zpools_being_adopted.contains(config.name.pool()))
         })
         .cloned()
         .collect()
@@ -467,6 +467,23 @@ impl ReconcilerTask {
         }
     }
 
+    /// Ensure `datasets`, and publish the resulting set of debug datasets.
+    ///
+    /// Datasets are ensured on all managed disks, including those we've
+    /// adopted but not yet put into service.
+    async fn ensure_datasets(&mut self, datasets: IdOrdMap<DatasetConfig>) {
+        self.datasets
+            .ensure_datasets_if_needed(
+                datasets,
+                self.external_disks.all_managed_zpools(),
+                &self.log,
+            )
+            .await;
+        self.external_disks.update_debug_dataset_zpools(
+            self.datasets.ensured_debug_dataset_zpools(),
+        );
+    }
+
     async fn do_reconcilation<
         T: SledAgentFacilities,
         U: SledAgentArtifactStore,
@@ -593,8 +610,7 @@ impl ReconcilerTask {
         // ---
 
         // Start managing disks.
-        let newly_adopted_disks = self
-            .external_disks
+        self.external_disks
             .start_managing_if_needed(
                 &current_raw_disks,
                 &sled_config.disks,
@@ -615,44 +631,34 @@ impl ReconcilerTask {
 
         // Ensure all the datasets we want exist.
         //
-        // Newly-adopted disks may contain former zone roots, which must be
-        // archived and destroyed before we place any zones on those disks.
-        // Archival requires debug datasets, so:
+        // Disks we've just adopted aren't put into service until:
         //
-        // 1. Ensure datasets, except for transient zone datasets on those
-        //    disks (cleanup would destroy them).
-        // 2. Archive and destroy the former zone roots. Any disk on which this
-        //    fails is no longer managed.
-        // 3. Ensure datasets again. This creates the transient zone datasets
-        //    on disks we cleaned up, and marks datasets on disks we failed to
-        //    clean up as unavailable.
-        self.datasets
-            .ensure_datasets_if_needed(
-                datasets_to_ensure(
-                    &sled_config.datasets,
-                    &newly_adopted_disks.zpools(),
-                ),
-                self.external_disks.currently_managed_zpools(),
+        // * their per-disk datasets that contain other datasets (debug,
+        //   transient zone root) have been ensured, and
+        // * any former zone roots on them have been archived and destroyed
+        //   (which requires debug datasets to archive into).
+        //
+        // So: ensure datasets (except transient zone datasets on those disks,
+        // which cleanup would destroy), verify those disks, clean them up, and
+        // then ensure datasets again. That last step creates the remaining
+        // datasets on disks now in service, and marks datasets on disks we
+        // gave up on as unavailable.
+        let zpools_being_adopted = self.external_disks.zpools_being_adopted();
+        self.ensure_datasets(datasets_to_ensure(
+            &sled_config.datasets,
+            &zpools_being_adopted,
+        ))
+        .await;
+        if !zpools_being_adopted.is_empty() {
+            self.external_disks.verify_adopted_disks(
+                |zpool| self.datasets.check_required_datasets(zpool),
                 &self.log,
-            )
-            .await;
-        self.external_disks.update_debug_dataset_zpools(
-            self.datasets.ensured_debug_dataset_zpools(),
-        );
-        if !newly_adopted_disks.is_empty() {
-            self.external_disks
-                .clean_up_former_zone_roots(newly_adopted_disks, &self.log)
-                .await;
-            self.datasets
-                .ensure_datasets_if_needed(
-                    sled_config.datasets.clone(),
-                    self.external_disks.currently_managed_zpools(),
-                    &self.log,
-                )
-                .await;
-            self.external_disks.update_debug_dataset_zpools(
-                self.datasets.ensured_debug_dataset_zpools(),
             );
+            let can_archive = self.external_disks.has_debug_datasets();
+            self.external_disks
+                .finish_adopting_disks(can_archive, &self.log)
+                .await;
+            self.ensure_datasets(sled_config.datasets.clone()).await;
         }
 
         // Collect the current timesync status (needed to start any new zones,
