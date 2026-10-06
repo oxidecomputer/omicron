@@ -25,7 +25,7 @@ pub struct Zones {
 struct HaltControl {
     /// Requests to _start_ halting a named zone.
     started: mpsc::UnboundedSender<String>,
-    /// Whether any zone can continue halting.
+    /// Whether a zone can continue halting.
     //
     // NOTE: We ask to control a specific zone for testing, but all zones are
     // released. If we want to control individual zones, this could be a hashmap
@@ -34,9 +34,20 @@ struct HaltControl {
     released: watch::Receiver<bool>,
 }
 
-/// Handle to control when specific zones may be halted.
+/// Handle to control when a zone starts and finishes halting.
+///
+/// This is used to instrument and control zone shutdown. Callers should use
+/// `Zones::new_with_halt_control()` to construct an instance. Callers can then
+/// use `halt_started()` to wait until a zone has _started_ halting, i.e.,
+/// `Zones::halt_and_remove()` has been called. That routine will then pause
+/// until `HaltController::release()` is called, indicating that zone shutdown
+/// can proceed. This sort of acts as a waitable barrier in the middle of
+/// `Zones::halt_and_remove()`.
+///
+/// NOTE: This cannot be used reliably when there are multiple zones. It only
+/// tracks when halt is called on the _first_ zone.
 pub struct HaltController {
-    /// Which zones have had started halting.
+    /// Which zones have started halting.
     started: mpsc::UnboundedReceiver<String>,
     /// Ask to release the halting zone.
     release: watch::Sender<bool>,
@@ -48,7 +59,8 @@ impl HaltController {
         self.started.recv().await
     }
 
-    /// Let all future halts continue running, actually shutting down the zones.
+    /// Let the currently-blocked halt of a zone continue, as well as any
+    /// future calls to it.
     pub fn release(&self) {
         let _ = self.release.send(true);
     }
@@ -59,6 +71,8 @@ impl Zones {
         Arc::new(Self { zones: Mutex::new(vec![]), halt_ctl: None })
     }
 
+    /// Construct a fake zones impl that lets callers instrument the shutdown
+    /// of a single zone.
     pub fn new_with_halt_control() -> (Arc<Self>, HaltController) {
         let (started_tx, started_rx) = mpsc::unbounded_channel();
         let (released_tx, released_rx) = watch::channel(false);
@@ -121,12 +135,11 @@ impl Api for Zones {
         &self,
         name: &str,
     ) -> Result<Option<zone::State>, crate::zone::AdmError> {
-        // Check if we need to notify some caller about halts.
+        // Check if we need to notify a caller about halts.
         if let Some(ctl) = &self.halt_ctl {
-            // If so, indicate that we've _started_ halting this zone.
+            // Indicate that we've started halting this zone.
             let _ = ctl.started.send(name.to_string());
-
-            // Now wait for us to be released by the test code.
+            // Now wait for us to be released by the caller.
             let mut released = ctl.released.clone();
             let _ = released.wait_for(|r| *r).await;
         }

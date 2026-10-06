@@ -560,6 +560,16 @@ impl Drop for RunningZone {
             let log = self.inner.log.clone();
             let name = self.name().to_string();
             let zones_api = self.inner.zones_api.clone();
+
+            // Take the OPTE ports and move them into the scope of the spawned
+            // task below, where we'll drop them _after_ the zone is removed.
+            // Drop the tickets right away, which removes the ports from the
+            // manager, so the only live reference is the one in the spawned
+            // task.
+            let ports_and_tickets = std::mem::take(&mut self.inner.opte_ports);
+            let (opte_ports, tickets): (Vec<_>, Vec<_>) =
+                ports_and_tickets.into_iter().unzip();
+            drop(tickets);
             tokio::task::spawn(async move {
                 match zones_api.halt_and_remove_logged(&log, &name).await {
                     Ok(()) => {
@@ -569,6 +579,7 @@ impl Drop for RunningZone {
                         warn!(log, "Failed to stop zone: {}", e)
                     }
                 }
+                drop(opte_ports);
             });
         }
     }
