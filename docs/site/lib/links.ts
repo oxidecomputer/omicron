@@ -8,7 +8,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 
-import type { Page, Site } from './types.ts'
+import type { Page, Site, TocItem } from './types.ts'
 
 /**
  * URL path of the doc at `src`, relative to the site root: `docs/foo.adoc` →
@@ -58,10 +58,27 @@ export function createLinkRewriter({
       new Set([...p.body.matchAll(/<[a-z][^>]*?\sid="([^"]*)"/gi)].map((m) => m[1])),
     ]),
   )
+  const flatToc = (items: TocItem[]): TocItem[] =>
+    items.flatMap((item) => [item, ...flatToc(item.children)])
+  const sectionTitlesByPage = new Map(
+    pages.map((p) => [p, new Map(flatToc(p.toc).map((s) => [s.id, s.title]))]),
+  )
   const assets = new Set<string>()
 
-  // Docs written for GitHub use #some-heading; Asciidoctor's default is
-  // #_some_heading. Keep exact matches, and only rewrite to an existing ID.
+  // A section titled "External networking" has the ID `external-networking` on
+  // GitHub and `_external_networking` on this site, because we render with
+  // Asciidoctor's default idprefix and idseparator, which are both `_`.
+  //
+  // The docs link to sections both ways, sometimes in one file (see
+  // how-to-run.adoc). <<external-networking>> works on GitHub but not here, and
+  // <<_external_networking>> works here but not on GitHub. Setting idprefix and
+  // idseparator to match GitHub would break the second kind here, so instead we
+  // rewrite #external-networking to #_external_networking.
+  //
+  // A hash that's already an ID on the page is left alone (explicit anchors
+  // like [[task-omdb-export]] keep their hyphens), and we only rewrite to an ID
+  // that exists. Markdown pages are skipped: github-slugger already gives them
+  // GitHub's IDs.
   function rewriteHash(hash: string, page: Page) {
     const ids = idsByPage.get(page)!
     if (!hash || !page.src.endsWith('.adoc') || ids.has(hash.slice(1))) return hash
@@ -89,6 +106,14 @@ export function createLinkRewriter({
     html = html.replace(/<a href="([^"]*)">\1<\/a>/g, (match, url: string) => {
       const linked = resolve(page, url)?.linked
       return linked ? `<a href="${url}">${linked.title}</a>` : match
+    })
+
+    // Asciidoctor can't resolve a GitHub-style <<some-heading>>, so with no
+    // label it renders the ID in brackets. Use the section's title instead.
+    html = html.replace(/<a href="#([^"]*)">\[\1\]<\/a>/g, (match, id: string) => {
+      const hash = rewriteHash(`#${id}`, page)
+      const title = sectionTitlesByPage.get(page)!.get(hash.slice(1))
+      return hash !== `#${id}` && title ? `<a href="${hash}">${title}</a>` : match
     })
 
     // Only in tags: code blocks can contain href="..." as text, and shiki doesn't
