@@ -41,6 +41,8 @@ export type Page = {
   toc: TocItem[]
 }
 
+export type Section = { title: string; description?: string; pages: Page[] }
+
 const ad = loadAsciidoctor({})
 
 async function renderAdoc(src: string) {
@@ -163,16 +165,18 @@ async function renderMarkdown(src: string) {
 
 const outPath = (src: string) => src.replace(/\.(adoc|md)$/, '.html')
 
-const pages: Page[] = []
-for (const section of site.sections) {
-  for (const entry of section.pages) {
+const sections: Section[] = []
+for (const { pages: entries, ...meta } of site.sections) {
+  const section: Section = { ...meta, pages: [] }
+  sections.push(section)
+  for (const entry of entries) {
     const { path: src, title } = typeof entry === 'string' ? { path: entry } : entry
     if (!fs.existsSync(path.join(repoRoot, src))) {
       console.warn(`nav.ts: ${src} does not exist, skipping`)
       continue
     }
     const rendered = src.endsWith('.md') ? await renderMarkdown(src) : await renderAdoc(src)
-    pages.push({
+    section.pages.push({
       ...rendered,
       src,
       out: outPath(src),
@@ -182,6 +186,7 @@ for (const section of site.sections) {
   }
 }
 
+const pages = sections.flatMap((s) => s.pages)
 const pagesByOut = new Map(pages.map((p) => [p.out, p]))
 const assets = new Set<string>()
 
@@ -243,13 +248,13 @@ function writeHtml(out: string, element: ReactNode) {
 
 fs.rmSync(outDir, { recursive: true, force: true })
 
-writeHtml('index.html', <IndexPage pages={pages} />)
+writeHtml('index.html', <IndexPage sections={sections} />)
 for (const [i, page] of pages.entries()) {
   const body = rewriteUrls(page.body, page)
   writeHtml(
     page.out,
     <DocPage
-      pages={pages}
+      sections={sections}
       page={page}
       body={body}
       prev={pages[i - 1]}

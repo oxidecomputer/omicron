@@ -2,7 +2,7 @@ import path from 'node:path'
 
 import type { ReactNode } from 'react'
 
-import type { Page, TocItem } from './build.tsx'
+import type { Page, Section, TocItem } from './build.tsx'
 import { site } from './nav.ts'
 
 // Pagefind's search UI web components
@@ -77,30 +77,28 @@ function Shell({
   )
 }
 
-function Nav({ pages, current }: { pages: Page[]; current: Page }) {
+function Nav({ sections, current }: { sections: Section[]; current: Page }) {
   return (
     <div className="space-y-6">
-      {site.sections.map((section) => (
+      {sections.map((section) => (
         <div key={section.title}>
           <div className="text-mono-xs text-tertiary mb-2">{section.title}</div>
           <ul className="space-y-1.5">
-            {pages
-              .filter((p) => p.section === section.title)
-              .map((p) => (
-                <li key={p.out}>
-                  <a
-                    href={path.posix.relative(path.posix.dirname(current.out), p.out)}
-                    aria-current={p === current ? 'page' : undefined}
-                    className={
-                      p === current
-                        ? 'text-sans-md text-accent block leading-tight'
-                        : 'text-sans-md text-secondary hover:text-default block leading-tight'
-                    }
-                  >
-                    {plain(p.title)}
-                  </a>
-                </li>
-              ))}
+            {section.pages.map((p) => (
+              <li key={p.out}>
+                <a
+                  href={path.posix.relative(path.posix.dirname(current.out), p.out)}
+                  aria-current={p === current ? 'page' : undefined}
+                  className={
+                    p === current
+                      ? 'text-sans-md text-accent block leading-tight'
+                      : 'text-sans-md text-secondary hover:text-default block leading-tight'
+                  }
+                >
+                  {plain(p.title)}
+                </a>
+              </li>
+            ))}
           </ul>
         </div>
       ))}
@@ -146,13 +144,13 @@ const Toc = ({ items }: { items: TocItem[] }) => (
 )
 
 export function DocPage({
-  pages,
+  sections,
   page,
   body,
   prev,
   next,
 }: {
-  pages: Page[]
+  sections: Section[]
   page: Page
   body: string
   prev?: Page
@@ -166,7 +164,7 @@ export function DocPage({
           id="sidebar"
           className="border-secondary 900:block sticky top-14 hidden h-[calc(100vh-3.5rem)] w-64 shrink-0 overflow-y-auto border-r px-6 py-8 [overflow-anchor:none]"
         >
-          <Nav pages={pages} current={page} />
+          <Nav sections={sections} current={page} />
         </nav>
         <script>{sidebarScrollScript}</script>
         <main className="900:px-12 min-w-0 flex-1 px-6 py-10">
@@ -174,7 +172,7 @@ export function DocPage({
             <details className="900:hidden border-secondary mb-8 rounded border px-4 py-3">
               <summary className="text-mono-sm text-secondary">Menu</summary>
               <div className="mt-4">
-                <Nav pages={pages} current={page} />
+                <Nav sections={sections} current={page} />
               </div>
             </details>
             <div className="text-mono-sm text-tertiary mb-2">{page.section}</div>
@@ -225,29 +223,27 @@ export function DocPage({
   )
 }
 
-export function IndexPage({ pages }: { pages: Page[] }) {
+export function IndexPage({ sections }: { sections: Section[] }) {
   return (
     <Shell title={`${site.title} developer docs`} root=".">
       <main className="mx-auto max-w-[1100px] px-6 py-16">
         <h1 className="text-sans-4xl text-raise mb-4">{site.title} developer docs</h1>
         <p className="text-sans-xl text-secondary mb-14 max-w-[640px]">{site.description}</p>
         <div className="700:grid-cols-2 1000:grid-cols-3 grid grid-cols-1 gap-6">
-          {site.sections.map((section) => (
+          {sections.map((section) => (
             <section key={section.title} className="bg-raise border-secondary rounded-lg border p-6">
               <h2 className="text-sans-xl text-raise mb-1">{section.title}</h2>
               {section.description && (
                 <p className="text-sans-md text-tertiary mb-4">{section.description}</p>
               )}
               <ul className="space-y-1.5">
-                {pages
-                  .filter((p) => p.section === section.title)
-                  .map((p) => (
-                    <li key={p.out}>
-                      <a href={p.out} className="text-sans-md text-accent-secondary hover:text-accent">
-                        {plain(p.title)}
-                      </a>
-                    </li>
-                  ))}
+                {section.pages.map((p) => (
+                  <li key={p.out}>
+                    <a href={p.out} className="text-sans-md text-accent-secondary hover:text-accent">
+                      {plain(p.title)}
+                    </a>
+                  </li>
+                ))}
               </ul>
             </section>
           ))}
