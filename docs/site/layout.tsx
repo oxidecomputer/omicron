@@ -113,16 +113,18 @@ function Nav({ pages, current }: { pages: Page[]; current: Page }) {
  * previous page. That keeps the link you clicked where it was. If the current
  * page's link still isn't visible (you got here from a link in a page body, or
  * by loading the page directly), center it. Inline right after the sidebar so
- * it runs before the sidebar is painted at the wrong position.
+ * it runs before the sidebar is painted at the wrong position. The key includes
+ * the repo because every site on a GitHub Pages domain shares one origin.
  */
+const sidebarScrollKey = JSON.stringify(`sidebar-scroll:${site.repo}`)
 const sidebarScrollScript = `{
   const nav = document.getElementById('sidebar')
-  try { nav.scrollTop = Number(sessionStorage.getItem('sidebar-scroll')) } catch {}
+  try { nav.scrollTop = Number(sessionStorage.getItem(${sidebarScrollKey})) } catch {}
   const n = nav.getBoundingClientRect()
   const l = nav.querySelector('[aria-current=page]').getBoundingClientRect()
   if (l.top < n.top || l.bottom > n.bottom) nav.scrollTop += l.top - n.top - (n.height - l.height) / 2
   addEventListener('pagehide', () => {
-    try { sessionStorage.setItem('sidebar-scroll', nav.scrollTop) } catch {}
+    try { sessionStorage.setItem(${sidebarScrollKey}, nav.scrollTop) } catch {}
   })
 }`
 
