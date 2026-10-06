@@ -153,6 +153,26 @@
   .pf-heading-link::before {
     display: none;
   }
+  /* A big input on the page background, like the oxide.computer docs search.
+     The 16px header padding Pagefind sets around it (more on phones, for the
+     safe area) makes a 64px header. */
+  .pf-modal-header {
+    background: var(--surface-default);
+  }
+  /* The header is now about as dark as the dimmed page behind it, so outline
+     the modal to keep its edge */
+  dialog.pf-modal {
+    border: 1px solid var(--stroke-default);
+  }
+  .pf-modal-header .pf-input {
+    height: 32px;
+    padding-inline-start: 0;
+    font-size: 1.5625rem;
+    color: var(--content-raise);
+  }
+  .pf-modal-header .pf-input-wrapper::before {
+    display: none;
+  }
   /* The modal input is the only thing focusable, so a focus ring adds nothing */
   .pf-modal .pf-input,
   .pf-modal .pf-input:focus-visible {
