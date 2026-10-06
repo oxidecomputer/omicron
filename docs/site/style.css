@@ -108,6 +108,7 @@ html {
   .pf-result-card:hover,
   .pf-heading-chip:hover {
     background: var(--surface-secondary);
+    border-color: var(--stroke-secondary);
   }
   .pf-result-title {
     padding: 0 12px;
