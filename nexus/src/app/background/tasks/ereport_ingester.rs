@@ -560,13 +560,8 @@ mod tests {
         fm_analysis_activator
             .assert_activated("fm analysis task should be activated");
 
-        for SpEreporterStatus {
-            sp_type,
-            slot,
-            status,
-            ignition_type: _,
-            rack_id: _,
-        } in &activation1.sps
+        for SpEreporterStatus { sp_type, slot, status, ignition_type: _ } in
+            &activation1.sps
         {
             assert_eq!(
                 &status.errors,
@@ -801,13 +796,8 @@ mod tests {
              ereports were observed: {:?}",
             activation2.sps,
         );
-        for SpEreporterStatus {
-            sp_type,
-            slot,
-            status,
-            ignition_type: _,
-            rack_id: _,
-        } in &activation2.sps
+        for SpEreporterStatus { sp_type, slot, status, ignition_type: _ } in
+            &activation2.sps
         {
             assert_eq!(
                 status.ereports_received, 0,
