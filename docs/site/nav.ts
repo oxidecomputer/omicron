@@ -9,14 +9,11 @@ import type { Site } from './lib/types.ts'
 export const site: Site = {
   title: 'Omicron',
   tagline: 'developer docs',
-  description:
-    'Developer documentation for the Oxide control plane: how it is put together, how to run it, and how to work on it.',
   repo: 'https://github.com/oxidecomputer/omicron',
   branch: 'main',
   sections: [
     {
       title: 'Getting started',
-      description: 'Build, run, and find your way around the repo.',
       pages: [
         { path: 'README.adoc', title: 'Overview' },
         'docs/repo.adoc',
@@ -28,7 +25,6 @@ export const site: Site = {
     },
     {
       title: 'Architecture',
-      description: 'The major components of the control plane and how they fit together.',
       pages: [
         'docs/control-plane-architecture.adoc',
         'docs/networking.adoc',
@@ -43,7 +39,6 @@ export const site: Site = {
     },
     {
       title: 'Working on Nexus',
-      description: 'Conventions and guides for adding to the control plane API server.',
       pages: [
         'docs/adding-an-endpoint.adoc',
         'docs/http-status-codes.adoc',
@@ -59,7 +54,6 @@ export const site: Site = {
     },
     {
       title: 'Reconfigurator and update',
-      description: 'How the system plans and executes changes to its own deployment.',
       pages: [
         'docs/reconfigurator.adoc',
         'docs/reconfigurator-dev-guide.adoc',
@@ -82,7 +76,6 @@ export const site: Site = {
     },
     {
       title: 'Debugging and operations',
-      description: 'Diagnosing problems in running systems.',
       pages: [
         'docs/debugging-authz.adoc',
         'docs/crdb-debugging.adoc',

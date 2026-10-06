@@ -231,18 +231,14 @@ export function IndexPage({ site, sections }: { site: Site; sections: Section[] 
   return (
     <Shell site={site} title={`${site.title} ${site.tagline}`} root=".">
       <main className="mx-auto max-w-[1100px] px-6 py-16">
-        <h1 className="text-sans-4xl text-raise mb-4">{`${site.title} ${site.tagline}`}</h1>
-        <p className="text-sans-xl text-secondary mb-14 max-w-[640px]">{site.description}</p>
+        <h1 className="text-sans-4xl text-raise mb-10">{`${site.title} ${site.tagline}`}</h1>
         <div className="700:grid-cols-2 1000:grid-cols-3 grid grid-cols-1 gap-6">
           {sections.map((section) => (
             <section
               key={section.title}
               className="bg-raise border-secondary rounded-lg border p-6"
             >
-              <h2 className="text-sans-xl text-raise mb-1">{section.title}</h2>
-              {section.description && (
-                <p className="text-sans-md text-tertiary mb-4">{section.description}</p>
-              )}
+              <h2 className="text-sans-xl text-raise mb-4">{section.title}</h2>
               <ul className="space-y-1.5">
                 {section.pages.map((p) => (
                   <li key={p.out}>

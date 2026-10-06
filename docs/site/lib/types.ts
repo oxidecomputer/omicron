@@ -4,14 +4,12 @@ export type Site = {
   title: string
   /** Shown after the title, e.g. `developer docs` */
   tagline: string
-  description: string
   /** GitHub URL, e.g. `https://github.com/oxidecomputer/omicron` */
   repo: string
   /** Branch that source links point at */
   branch: string
   sections: {
     title: string
-    description?: string
     /** Paths relative to the repo root, optionally with a title override */
     pages: (string | { path: string; title?: string })[]
   }[]
@@ -32,4 +30,4 @@ export type Page = {
   toc: TocItem[]
 }
 
-export type Section = { title: string; description?: string; pages: Page[] }
+export type Section = { title: string; pages: Page[] }
