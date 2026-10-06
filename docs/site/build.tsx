@@ -113,7 +113,7 @@ async function renderMarkdown(src: string) {
     const token = tokens[i]
     if (token.type === 'fence') {
       const lang = token.info.trim().split(/\s+/)[0]
-      if (lang in bundledLanguages && !highlighter.getLoadedLanguages().includes(lang)) {
+      if (Object.hasOwn(bundledLanguages, lang) && !highlighter.getLoadedLanguages().includes(lang)) {
         await highlighter.loadLanguage(lang as BundledLanguage)
       }
     }
