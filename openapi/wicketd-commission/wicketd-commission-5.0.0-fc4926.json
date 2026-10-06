@@ -4843,27 +4843,39 @@
             "description": "A front port intended for use as an uplink",
             "type": "object",
             "properties": {
-              "uplink": {
+              "tag": {
+                "type": "string",
+                "enum": [
+                  "uplink"
+                ]
+              },
+              "val": {
                 "$ref": "#/components/schemas/UplinkPortConfig"
               }
             },
             "required": [
-              "uplink"
-            ],
-            "additionalProperties": false
+              "tag",
+              "val"
+            ]
           },
           {
             "description": "A front port running DDM for multirack",
             "type": "object",
             "properties": {
-              "ddm": {
+              "tag": {
+                "type": "string",
+                "enum": [
+                  "ddm"
+                ]
+              },
+              "val": {
                 "$ref": "#/components/schemas/L1PortConfig"
               }
             },
             "required": [
-              "ddm"
-            ],
-            "additionalProperties": false
+              "tag",
+              "val"
+            ]
           }
         ]
       },

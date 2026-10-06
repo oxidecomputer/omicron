@@ -259,7 +259,12 @@ pub struct L1PortConfig {
 
 /// A user-specified port configuration.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(try_from = "UnvalidatedPortConfig", rename_all = "snake_case")]
+#[serde(
+    try_from = "UnvalidatedPortConfig",
+    tag = "tag",
+    content = "val",
+    rename_all = "snake_case"
+)]
 #[allow(clippy::large_enum_variant)]
 pub enum UserSpecifiedPortConfig {
     /// A front port intended for use as an uplink
@@ -289,64 +294,64 @@ impl TryFrom<v3::rack_setup::UserSpecifiedPortConfig>
 
 /// A representation of a serialized tag for `UserSpecifiedPortConfig`
 ///
-/// This is used to allow deserializing from legacy untagged data into
-/// `UnvalidatedPortConfig`, which we can then convert via `TryFrom` into
-/// `UserSpecifiedPortConfig`.
-#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
+/// This is used to allow deserializing `UserSpecifiedPortConfig` or untagged
+/// `UplinkPortConfig` into `UnvalidatedPortConfig`, which we can then convert
+/// via `TryFrom` into `UserSpecifiedPortConfig`.
+#[derive(Deserialize, Debug)]
 #[serde(rename_all = "snake_case")]
 enum PortConfigTag {
-    #[default]
     Uplink,
     Ddm,
 }
 
-// A tagged struct used solely for deserializing `UserSpecifiedPortConfig`.
-//
-// It indicates which variant of `UserSpecifiedPortConfig` is present in the
-// serialized version which allows us to deal with untagged serialization of
-// a `UserSpecifiedPortConfig` as well. In the case the serialized form is
-// untagged, we default to assuming it is an `UplinkPortConfig`.
-//
+// Allow serde to deserialize `UserSpecifiedPortConfig` into an untagged or
+// tagged form so that it can automatically convert legacy untagged uplinks into
+// a form that can be converted to a `UserSpecifiedPortConfig`.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum UnvalidatedPortConfig {
+    Tagged(TaggedPortConfig),
+    LegacyUplink(UplinkPortConfig),
+}
+
+// An alternate representation of a tagged `UserSpecifiedPortConfig`. This can be used
+// to deserialize the tagged form with an explicit tag, so we can tell if the
+// tag exists. If not, we deserialize into the untagged `UplinkPortConfig`.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct UnvalidatedPortConfig {
-    // Automatically defaults to `PortConfigTag::Uplink` if the key is missing.
-    // This allows us to provide backwards compatibility for untagged `rss_config.toml`,
-    // but move forward with tagging for multirack usecases.
-    #[serde(default)]
+struct TaggedPortConfig {
     tag: PortConfigTag,
-    uplink: Option<UplinkPortConfig>,
-    ddm: Option<L1PortConfig>,
+    val: TaggedPortConfigVal,
+}
+
+// An untagged representation of `UserSpecifiedPortConfig` used as in
+// intermediate value for deserialization.
+#[derive(Deserialize, Debug)]
+#[serde(untagged)]
+enum TaggedPortConfigVal {
+    Uplink(UplinkPortConfig),
+    Ddm(L1PortConfig),
 }
 
 impl TryFrom<UnvalidatedPortConfig> for UserSpecifiedPortConfig {
     type Error = anyhow::Error;
 
     fn try_from(value: UnvalidatedPortConfig) -> Result<Self, Self::Error> {
-        let UnvalidatedPortConfig { tag, uplink, ddm } = value;
-
-        // I don't think this is actually possible, but it doesn't hurt to
-        // defend against it.
-        if uplink.is_some() && ddm.is_some() {
-            bail!(
-                "cannot have both uplink and ddm data in one table. tag = {:?}",
-                tag
-            );
-        }
-
-        match tag {
-            PortConfigTag::Uplink => {
-                if uplink.is_none() {
-                    bail!("tag does not match uplink data")
-                }
-                Ok(UserSpecifiedPortConfig::Uplink(uplink.unwrap()))
+        let TaggedPortConfig { tag, val } = match value {
+            UnvalidatedPortConfig::LegacyUplink(uplink) => {
+                return Ok(UserSpecifiedPortConfig::Uplink(uplink));
             }
-            PortConfigTag::Ddm => {
-                if ddm.is_none() {
-                    bail!("tag does not match ddm data")
-                }
-                Ok(UserSpecifiedPortConfig::Ddm(ddm.unwrap()))
+            UnvalidatedPortConfig::Tagged(tagged) => tagged,
+        };
+
+        match (tag, val) {
+            (PortConfigTag::Uplink, TaggedPortConfigVal::Uplink(uplink)) => {
+                Ok(UserSpecifiedPortConfig::Uplink(uplink))
             }
+            (PortConfigTag::Ddm, TaggedPortConfigVal::Ddm(ddm)) => {
+                Ok(UserSpecifiedPortConfig::Ddm(ddm))
+            }
+            (tag, val) => bail!("Tag {tag:?} does not match value {val:?}"),
         }
     }
 }
@@ -372,4 +377,128 @@ pub struct RunMultirackJoinResponse {
     /// A query for the state of rack setup reports this same ID, in untyped
     /// form, as `RackOperation::id` with `kind` set to `multirack-join`.
     pub id: MultirackJoinUuid,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn uplink_port_config() -> UplinkPortConfig {
+        UplinkPortConfig {
+            routes: vec![RouteConfig {
+                destination: "0.0.0.0/0".parse().unwrap(),
+                nexthop: "172.30.0.10".parse().unwrap(),
+                vlan_id: Some(1),
+                rib_priority: None,
+            }],
+            addresses: vec![UserSpecifiedUplinkAddressConfig::without_vlan(
+                "1.1.1.0/24".parse().unwrap(),
+            )],
+            uplink_port_speed: LinkSpeed::Speed40G,
+            uplink_port_fec: Some(LinkFec::Rs),
+            autoneg: false,
+            bgp_peers: vec![],
+            lldp: None,
+            tx_eq: None,
+        }
+    }
+
+    fn l1_port_config() -> L1PortConfig {
+        L1PortConfig {
+            speed: LinkSpeed::Speed100G,
+            fec: Some(LinkFec::Rs),
+            autoneg: true,
+            lldp: None,
+            tx_eq: None,
+        }
+    }
+
+    #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+    struct PortConfigWrapper {
+        port: UserSpecifiedPortConfig,
+    }
+
+    fn assert_roundtrips(config: UserSpecifiedPortConfig) {
+        let json = serde_json::to_string(&config).unwrap();
+        let from_json: UserSpecifiedPortConfig = serde_json::from_str(&json)
+            .unwrap_or_else(|err| panic!("JSON {json}: {err}"));
+        assert_eq!(from_json, config);
+
+        let wrapper = PortConfigWrapper { port: config };
+        let toml_str = toml::to_string(&wrapper).unwrap();
+        let from_toml: PortConfigWrapper = toml::from_str(&toml_str)
+            .unwrap_or_else(|err| panic!("TOML {toml_str}: {err}"));
+        assert_eq!(from_toml, wrapper);
+    }
+
+    #[test]
+    fn uplink_roundtrips() {
+        assert_roundtrips(
+            UserSpecifiedPortConfig::Uplink(uplink_port_config()),
+        );
+    }
+
+    #[test]
+    fn ddm_roundtrips() {
+        assert_roundtrips(UserSpecifiedPortConfig::Ddm(l1_port_config()));
+    }
+
+    #[test]
+    fn untagged_uplink_deserializes_to_uplink_variant() {
+        let expected = UserSpecifiedPortConfig::Uplink(uplink_port_config());
+
+        let json = serde_json::to_string(&uplink_port_config()).unwrap();
+        let from_json: UserSpecifiedPortConfig = serde_json::from_str(&json)
+            .unwrap_or_else(|err| panic!("JSON {json}: {err}"));
+        assert_eq!(from_json, expected);
+
+        let toml_str = r#"
+            [port]
+            uplink_port_speed = "speed40_g"
+            uplink_port_fec = "rs"
+            autoneg = false
+
+            [[port.routes]]
+            destination = "0.0.0.0/0"
+            nexthop = "172.30.0.10"
+            vlan_id = 1
+
+            [[port.addresses]]
+            address = "1.1.1.0/24"
+        "#;
+        let from_toml: PortConfigWrapper = toml::from_str(toml_str)
+            .unwrap_or_else(|err| panic!("TOML {toml_str}: {err}"));
+        assert_eq!(from_toml.port, expected);
+    }
+
+    #[test]
+    fn tagged_ddm_deserializes_to_ddm_variant() {
+        let json = serde_json::json!({
+            "tag": "ddm",
+            "val": {
+                "speed": "speed100_g",
+                "fec": "rs",
+                "autoneg": true,
+            },
+        });
+        assert_eq!(
+            serde_json::from_value::<UserSpecifiedPortConfig>(json).unwrap(),
+            UserSpecifiedPortConfig::Ddm(l1_port_config()),
+        );
+    }
+
+    #[test]
+    fn tag_payload_mismatch_is_rejected() {
+        let json = serde_json::json!({
+            "tag": "ddm",
+            "val": serde_json::to_value(uplink_port_config()).unwrap(),
+        });
+
+        let err = serde_json::from_value::<UserSpecifiedPortConfig>(json)
+            .expect_err("a ddm tag over uplink data should fail");
+        assert!(
+            err.to_string().contains("does not match"),
+            "unexpected error: {err}"
+        );
+    }
 }

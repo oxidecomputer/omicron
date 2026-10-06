@@ -431,32 +431,6 @@ mod tests {
     }
 
     #[test]
-    fn l1_only_map_deserializes_to_ddm() {
-        let expected = UserSpecifiedPortConfig::Ddm(ddm_l1_config());
-
-        let from_json: UserSpecifiedPortConfig = serde_json::from_str(
-            r#"{
-                "speed": "speed100_g",
-                "fec": "rs",
-                "autoneg": true
-            }"#,
-        )
-        .unwrap();
-        assert_eq!(from_json, expected);
-
-        let from_toml: PortConfigWrapper = toml::from_str(
-            r#"
-            [port]
-            speed = "speed100_g"
-            fec = "rs"
-            autoneg = true
-            "#,
-        )
-        .unwrap();
-        assert_eq!(from_toml.port, expected);
-    }
-
-    #[test]
     fn ddm_roundtrips() {
         let config = UserSpecifiedPortConfig::Ddm(ddm_l1_config());
 
@@ -470,59 +444,6 @@ mod tests {
         let roundtripped: PortConfigWrapper =
             toml::from_str(&toml_str).unwrap();
         assert_eq!(roundtripped.port, config);
-    }
-
-    // `uplink_port_speed` selects the uplink variant, so a half-written uplink
-    // config must be rejected rather than falling back to DDM.
-    #[test]
-    fn partial_uplink_config_does_not_fall_back_to_ddm() {
-        let err = serde_json::from_str::<UserSpecifiedPortConfig>(
-            r#"{
-                "routes": [],
-                "uplink_port_speed": "speed100_g",
-                "uplink_port_fec": "rs",
-                "autoneg": true
-            }"#,
-        )
-        .expect_err("an uplink config without `addresses` should fail");
-        let err = err.to_string();
-        assert!(
-            err.contains("`routes` and `addresses`"),
-            "error should name the missing field, got: {err}"
-        );
-    }
-
-    // The two variants are told apart by which speed key is present, so a map
-    // carrying both or neither is ambiguous and must be rejected.
-    #[test]
-    fn ambiguous_speed_keys_are_rejected() {
-        let both = serde_json::from_str::<UserSpecifiedPortConfig>(
-            r#"{
-                "routes": [],
-                "addresses": [],
-                "uplink_port_speed": "speed100_g",
-                "uplink_port_fec": "rs",
-                "speed": "speed100_g",
-                "fec": "rs",
-                "autoneg": true
-            }"#,
-        )
-        .expect_err("setting both speed keys should fail")
-        .to_string();
-        assert!(
-            both.contains("both `uplink_port_speed` and `speed`"),
-            "error should report the ambiguity, got: {both}"
-        );
-
-        let neither = serde_json::from_str::<UserSpecifiedPortConfig>(
-            r#"{ "autoneg": true }"#,
-        )
-        .expect_err("setting neither speed key should fail")
-        .to_string();
-        assert!(
-            neither.contains("`uplink_port_speed` (uplink) or `speed` (DDM)"),
-            "error should name both keys, got: {neither}"
-        );
     }
 
     #[test]
@@ -559,34 +480,6 @@ mod tests {
         let from_toml: UserSpecifiedPortConfig =
             toml::from_str(toml_uplink).unwrap();
         assert_eq!(from_toml, expected);
-    }
-
-    #[test]
-    fn misspelled_field_names_unknown_field() {
-        let err =
-            serde_json::from_str::<UserSpecifiedPortConfig>(r#"{"route": []}"#)
-                .expect_err("misspelled field should fail to deserialize");
-        let err = err.to_string();
-        assert!(
-            err.contains("unknown field `route`"),
-            "error should name the unknown field, got: {err}"
-        );
-        assert!(
-            err.contains("expected one of"),
-            "error should list the expected fields, got: {err}"
-        );
-    }
-
-    #[test]
-    fn non_map_input_fails_cleanly() {
-        let err =
-            serde_json::from_str::<UserSpecifiedPortConfig>(r#""not-a-map""#)
-                .expect_err("a string is not a valid port configuration");
-        let err = err.to_string();
-        assert!(
-            err.contains("invalid type: string"),
-            "error should report an invalid type, got: {err}"
-        );
     }
 
     #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
