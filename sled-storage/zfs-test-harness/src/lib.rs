@@ -17,13 +17,16 @@ use illumos_utils::zfs::Mountpoint;
 use illumos_utils::zfs::Zfs;
 use key_manager::KeyManager;
 use key_manager::StorageKeyRequester;
+use omicron_common::disk::DatasetName;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ExternalZpoolUuid;
 use omicron_uuid_kinds::InternalZpoolUuid;
 use sled_agent_types::disk::DatasetConfig;
 use sled_agent_types::disk::DiskVariant;
+use sled_agent_types::disk::PER_DISK_DATASET_KINDS;
 use sled_agent_types::disk::SharedDatasetConfig;
+use sled_agent_types::disk::per_disk_dataset_config;
 use sled_storage::config::MountConfig;
 use sled_storage::dataset::M2_DEBUG_DATASET;
 use sled_storage::disk::Disk;
@@ -276,7 +279,33 @@ impl Inner {
         )
         .await
         .expect("adopted disk for new vdev");
+        let zpool = *disk.zpool_name();
         self.disks.push(disk);
+
+        // In production, the config reconciler creates the per-disk datasets
+        // on U.2s after adopting them; do the same here.
+        if variant == DiskVariant::U2 {
+            for kind in PER_DISK_DATASET_KINDS {
+                let inner = per_disk_dataset_config(&kind)
+                    .expect("per-disk dataset kinds have configs");
+                let name = DatasetName::new(zpool, kind);
+                let details = DatasetCreationDetails {
+                    zoned: name.kind().zoned(),
+                    mountpoint: Mountpoint(
+                        name.mountpoint(&self.mount_config.root),
+                    ),
+                    full_name: name.full_name(),
+                };
+                self.ensure_dataset(
+                    &zpool,
+                    DatasetUuid::new_v4(),
+                    &inner,
+                    &details,
+                )
+                .await
+                .expect("created per-disk dataset");
+            }
+        }
     }
 
     fn pools(&self) -> Vec<ZpoolName> {

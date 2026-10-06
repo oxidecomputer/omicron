@@ -2975,6 +2975,19 @@ mod illumos_tests {
         );
         let dataset = make_dataset_config(zpool, kind);
 
+        // Because `dataset` has kind `TransientZone { .. }`, we also need to
+        // supply its parent root. Create that first, so that the data we
+        // place below lands within it.
+        let root = make_dataset_config(zpool, DatasetKind::TransientZoneRoot);
+        let result = task_handle
+            .datasets_ensure(
+                id_ord_map! { root.clone() },
+                harness.current_zpools(),
+            )
+            .await
+            .expect("task should not fail");
+        assert_matches!(result.get(&root.id).unwrap().result, Ok(()));
+
         // Before we actually make the dataset - create the mountpoint, and
         // stick a file there.
         let mountpoint = dataset.name.mountpoint(&harness.mount_config.root);
@@ -2982,12 +2995,7 @@ mod illumos_tests {
         std::fs::write(mountpoint.join("marker.txt"), "hello").unwrap();
         assert!(mountpoint.join("marker.txt").exists());
 
-        // Because `dataset` has kind `TransientZone { .. }`, we also need to
-        // supply its parent root.
-        let dataset_configs = id_ord_map! {
-            dataset.clone(),
-            make_dataset_config(zpool, DatasetKind::TransientZoneRoot),
-        };
+        let dataset_configs = id_ord_map! { dataset.clone(), root };
 
         // Create the datasets.
         let result = task_handle
