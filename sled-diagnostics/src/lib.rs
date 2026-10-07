@@ -34,6 +34,29 @@ use queries::*;
 /// Max number of ptool commands to run in parallel
 const MAX_PTOOL_PARALLELISM: usize = 50;
 
+/// Configures whether or not the calling process's PID should be filtered out
+/// by [`contract::find_oxide_pids`].
+#[derive(Copy, Clone, Debug)]
+enum PidFilter {
+    All,
+    Skip(libc::pid_t),
+}
+
+impl PidFilter {
+    pub fn should_include_pid(&self, pid: libc::pid_t) -> bool {
+        match self {
+            PidFilter::All => true,
+            PidFilter::Skip(skipped) => *skipped != pid,
+        }
+    }
+
+    /// Returns a [`PidFilter::SkipMe`] filter that skips the calling process's
+    /// PID.
+    pub fn skip_me() -> Self {
+        PidFilter::Skip(std::process::id() as libc::pid_t)
+    }
+}
+
 /// List all zones on a sled.
 pub async fn zoneadm_info()
 -> Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError> {
@@ -90,10 +113,14 @@ pub async fn nvmeadm_info()
 pub async fn pargs_oxide_processes(
     log: &Logger,
 ) -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
+    // Since `pargs` opens the process readonly, it does not involve the agent
+    // LWP and is safe to use against the calling process, so include all Oxide
+    // PIDs.
+    let pid_filter = PidFilter::All;
     // In a diagnostics context we care about looping over every pid we find,
     // but on failure we should just return a single error in a vec that
     // represents the entire failed operation.
-    let pids = match contract::find_oxide_pids(log) {
+    let pids = match contract::find_oxide_pids(log, pid_filter) {
         Ok(pids) => pids,
         Err(e) => return vec![Err(e.into())],
     };
@@ -120,27 +147,24 @@ pub async fn pargs_oxide_processes(
 pub async fn pstack_oxide_processes(
     log: &Logger,
 ) -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
+    // Don't pstack our own pid: per the WARNINGS in `man 1 proc`, `pstack`
+    // and `pfiles` will suspend what the manual page very aptly refers to
+    // as the "victim" process until they exit. So, at the very least, the
+    // timeout is not gonna work! And, depending on who we are, perhaps
+    // other worse things might happen...
+    let pid_filter = PidFilter::skip_me();
     // In a diagnostics context we care about looping over every pid we find,
     // but on failure we should just return a single error in a vec that
     // represents the entire failed operation.
-    let pids = match contract::find_oxide_pids(log) {
+    let pids = match contract::find_oxide_pids(log, pid_filter) {
         Ok(pids) => pids,
         Err(e) => return vec![Err(e.into())],
     };
-    let me = std::process::id() as libc::pid_t;
 
     let mut results = Vec::with_capacity(pids.len());
     let mut commands =
         ParallelTaskSet::new_with_parallelism(MAX_PTOOL_PARALLELISM);
     for pid in pids {
-        // Don't pstack our own pid: per the WARNINGS in `man 1 proc`, `pstack`
-        // and `pfiles` will suspend what the manual page very aptly refers to
-        // as the "victim" process until they exit. So, at the very least, the
-        // timeout is not gonna work! And, depending on who we are, perhaps
-        // other worse things might happen...
-        if pid == me {
-            continue;
-        }
         if let Some(res) = commands
             .spawn(execute_command_with_timeout(
                 pstack_process(pid),
@@ -158,23 +182,20 @@ pub async fn pstack_oxide_processes(
 pub async fn pfiles_oxide_processes(
     log: &Logger,
 ) -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
+    // Don't pfiles yourself! You'll go blind!
+    let pid_filter = PidFilter::skip_me();
     // In a diagnostics context we care about looping over every pid we find,
     // but on failure we should just return a single error in a vec that
     // represents the entire failed operation.
-    let pids = match contract::find_oxide_pids(log) {
+    let pids = match contract::find_oxide_pids(log, pid_filter) {
         Ok(pids) => pids,
         Err(e) => return vec![Err(e.into())],
     };
-    let me = std::process::id() as libc::pid_t;
 
     let mut results = Vec::with_capacity(pids.len());
     let mut commands =
         ParallelTaskSet::new_with_parallelism(MAX_PTOOL_PARALLELISM);
     for pid in pids {
-        // Don't pfiles yourself! You'll go blind!
-        if pid == me {
-            continue;
-        }
         if let Some(res) = commands
             .spawn(execute_command_with_timeout(
                 pfiles_process(pid),
