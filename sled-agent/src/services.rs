@@ -3886,6 +3886,17 @@ fn internal_dns_addrobj_name(gz_address_index: u32) -> String {
     format!("internaldns{gz_address_index}")
 }
 
+// DDM does path breaking based on router ID. Distinct routers need distinct
+// router IDs. For DDM routers running in the global zone, the router ID comes
+// from the hostname which is a regular baseboard identifier. For DDM routers
+// running in the switch zone, the baseboard identifier of the scrimlet is
+// used with the `sw` prefix to distinguish them from routers with the same
+// baseboard identifier in the global zone.
+//
+// The `sw` prefix itself is somewhat arbitrary and stands for "switch". Any
+// other unique prefix could have been chosen as long as its concatination with
+// the baseboard identifier did not collide with a baseboard identifier used by
+// ddmd elsewhere.
 fn switch_zone_ddm_router_id(baseboard: &Baseboard) -> String {
     format!("sw{}", baseboard.identifier())
 }

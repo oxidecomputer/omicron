@@ -15,10 +15,13 @@ use bootstrap_agent_lockstep_types::scrimlet_reconcilers::ddmd::DdmdReconcilerSt
 use ddm_admin_client::Client;
 use ddm_api_types::external_peers::ExternalPeers;
 use illumos_utils::addrobj::AddrObject;
+use illumos_utils::addrobj::ParseError;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use slog::Logger;
+use slog::error;
 use slog::info;
 use slog_error_chain::InlineErrorChain;
+use std::collections::BTreeSet;
 use std::time::Duration;
 
 #[derive(Debug)]
@@ -46,15 +49,29 @@ impl Reconciler for DdmdReconciler {
         system_networking_config: &SystemNetworkingConfig,
         log: &Logger,
     ) -> Self::Status {
-        let address_objects = system_networking_config
-            .rack_network_config
-            .ports
-            .iter()
-            .filter(|port| {
-                port.switch == self.switch_slot && port.allow_ddm_traffic
-            })
-            .map(|port| ddmd_specific_addrobj(&port.port))
-            .collect();
+        let mut address_objects = BTreeSet::new();
+        for port in
+            system_networking_config.rack_network_config.ports.iter().filter(
+                |port| {
+                    port.switch == self.switch_slot && port.allow_ddm_traffic
+                },
+            )
+        {
+            match ddmd_specific_addrobj(&port.port) {
+                Ok(addrobj) => {
+                    address_objects.insert(addrobj);
+                }
+
+                Err(err) => {
+                    error!(
+                        log,
+                        "Invalid port name: {}. Ports cannot have slashes.",
+                         port.port;
+                        "err" => %err
+                    );
+                }
+            }
+        }
 
         // Set which external ports should carry DDM traffic unconditionally.
         // The endpoint is idempotent, and reapplying every pass allows recovery
@@ -89,10 +106,8 @@ impl Reconciler for DdmdReconciler {
 /// A better solution would be to pass the `AddrObject` down directly and pass
 /// it through to dendrite. This requires changes to dendrite and maghemite
 /// APIs.
-fn ddmd_specific_addrobj(port: &str) -> String {
-    AddrObject::link_local(&format!("tfport{port}_0"))
-        .expect("no slash in interface name")
-        .to_string()
+fn ddmd_specific_addrobj(port: &str) -> Result<String, ParseError> {
+    AddrObject::link_local(&format!("tfport{port}_0")).map(|a| a.to_string())
 }
 
 #[cfg(test)]
