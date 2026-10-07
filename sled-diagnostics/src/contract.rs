@@ -184,6 +184,7 @@ pub fn find_oxide_pids(
             let members = status
                 .get_members()?
                 .iter()
+                .copied()
                 .filter(|pid| pid_filter.should_include_pid(*pid));
             pids.extend(members);
         }
