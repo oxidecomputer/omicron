@@ -519,10 +519,10 @@ impl ReconcilerTask {
         self.external_disks.verify_adopted_disks(&self.datasets, &self.log);
         self.external_disks.finish_adopting_disks(&self.log).await;
         // Now that newly-adopted disks are in service, ensure all datasets,
-        // including the ones we skipped on them above. If this fails, those
-        // datasets won't exist yet, and zones that need them will fail to
-        // start (and be retried), as with any other failure to ensure
-        // datasets.
+        // including the ones we skipped on them above. If we can't reach the
+        // dataset task, those datasets won't exist yet; `self.datasets`
+        // records that, so we'll retry (see
+        // `OmicronDatasets::has_retryable_error()`).
         let _ = self.ensure_datasets(datasets.clone()).await;
     }
 

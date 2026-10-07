@@ -108,6 +108,10 @@ pub(super) struct OmicronDatasets {
     datasets: IdOrdMap<OmicronDataset>,
     orphaned_datasets: IdOrdMap<OrphanedDataset>,
     dataset_task: DatasetTaskHandle,
+    // Set if our most recent attempt to ensure datasets couldn't reach the
+    // dataset task, in which case `datasets` may be missing entries (or have
+    // out-of-date ones).
+    last_ensure_failed: Option<DatasetTaskError>,
 }
 
 impl OmicronDatasets {
@@ -126,7 +130,12 @@ impl OmicronDatasets {
                 },
             })
             .collect();
-        Self { datasets, orphaned_datasets: IdOrdMap::new(), dataset_task }
+        Self {
+            datasets,
+            orphaned_datasets: IdOrdMap::new(),
+            dataset_task,
+            last_ensure_failed: None,
+        }
     }
 
     pub(super) fn new(dataset_task: DatasetTaskHandle) -> Self {
@@ -134,6 +143,7 @@ impl OmicronDatasets {
             datasets: IdOrdMap::default(),
             orphaned_datasets: IdOrdMap::new(),
             dataset_task,
+            last_ensure_failed: None,
         }
     }
 
@@ -310,9 +320,11 @@ impl OmicronDatasets {
                     log, "failed to contact dataset task";
                     InlineErrorChain::new(&err),
                 );
+                self.last_ensure_failed = Some(err.clone());
                 return Err(err);
             }
         };
+        self.last_ensure_failed = None;
 
         for DatasetEnsureResult { config, result } in results {
             let state = match result {
@@ -355,10 +367,13 @@ impl OmicronDatasets {
     }
 
     pub(super) fn has_retryable_error(&self) -> bool {
-        self.datasets.iter().any(|d| match &d.state {
-            DatasetState::Ensured => false,
-            DatasetState::FailedToEnsure(err) => err.is_retryable(),
-        })
+        // If we couldn't reach the dataset task, `datasets` may be missing
+        // entries (or have out-of-date ones), so we need to try again.
+        self.last_ensure_failed.is_some()
+            || self.datasets.iter().any(|d| match &d.state {
+                DatasetState::Ensured => false,
+                DatasetState::FailedToEnsure(err) => err.is_retryable(),
+            })
     }
 
     pub(crate) fn to_inventory(
@@ -422,6 +437,7 @@ mod tests {
     use super::*;
     use crate::dataset_serialization_task::RekeyResult;
     use assert_matches::assert_matches;
+    use omicron_test_utils::dev;
     use omicron_uuid_kinds::ZpoolUuid;
     use sled_agent_types::disk::SharedDatasetConfig;
     use std::collections::BTreeSet;
@@ -470,6 +486,35 @@ mod tests {
                 ..
             })
         );
+    }
+
+    #[tokio::test]
+    async fn failing_to_reach_dataset_task_is_retryable() {
+        let logctx =
+            dev::test_setup_log("failing_to_reach_dataset_task_is_retryable");
+        let zpool = ZpoolName::new_external(ZpoolUuid::new_v4());
+
+        // `with_datasets()` uses a dataset task that we can't reach.
+        let mut datasets = OmicronDatasets::with_datasets(std::iter::empty());
+        assert!(!datasets.has_retryable_error());
+
+        let err = datasets
+            .ensure_datasets_if_needed(
+                [dataset_config(zpool, DatasetKind::Debug)]
+                    .into_iter()
+                    .collect(),
+                Arc::default(),
+                &logctx.log,
+            )
+            .await
+            .expect_err("dataset task unreachable");
+        assert_matches!(err, DatasetTaskError::Exited);
+
+        // We didn't learn anything about the dataset, but we know to retry.
+        assert!(datasets.check_required_datasets(&zpool).is_err());
+        assert!(datasets.has_retryable_error());
+
+        logctx.cleanup_successful();
     }
 
     #[test]
