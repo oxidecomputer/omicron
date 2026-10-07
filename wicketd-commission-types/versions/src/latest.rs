@@ -113,9 +113,10 @@ pub mod update {
     pub use crate::v1::update::UpdateStepStatus;
     pub use crate::v1::update::UpdateTargets;
 
-    pub use crate::v4::update::GetUpdateProgressResponse;
     pub use crate::v4::update::SpUpdateProgress;
     pub use crate::v4::update::UpdateProgress;
     pub use crate::v4::update::UpdateState;
     pub use crate::v4::update::UpdateStep;
+
+    pub use crate::v5::update::GetUpdateProgressResponse;
 }

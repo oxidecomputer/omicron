@@ -438,8 +438,14 @@ impl UpdateTracker {
         self.sp_update_data.lock().await.artifact_store.system_version()
     }
 
-    pub(crate) async fn event_reports(&self) -> IdOrdMap<SpEventReport> {
-        self.sp_update_data.lock().await.event_reports()
+    pub(crate) async fn system_version_and_event_reports(
+        &self,
+    ) -> SystemVersionAndEventReports {
+        let update_data = self.sp_update_data.lock().await;
+        SystemVersionAndEventReports {
+            system_version: update_data.artifact_store.system_version(),
+            event_reports: update_data.event_reports(),
+        }
     }
 
     pub(crate) async fn event_report(&self, sp: SpIdentifier) -> EventReport {
@@ -451,6 +457,12 @@ impl UpdateTracker {
             }
         }
     }
+}
+
+#[derive(Debug)]
+pub(crate) struct SystemVersionAndEventReports {
+    pub(crate) system_version: Option<Version>,
+    pub(crate) event_reports: IdOrdMap<SpEventReport>,
 }
 
 /// A trait that represents a backend implementation for spawning the update

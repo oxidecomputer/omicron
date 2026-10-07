@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "4.0.0"
+    "version": "5.0.0"
   },
   "paths": {
     "/bootstrap-sleds": {
@@ -388,7 +388,7 @@
       },
       "put": {
         "summary": "Upload a TUF repository to wicketd",
-        "description": "At any given time, wicketd holds at most one TUF repository, extracted to ephemeral storage; any previously-uploaded repository is discarded. This request is rejected with a 400 while any MUPdate is in progress. A successful upload clears all update progress state, so a subsequent `GET /update-progress` returns an empty list.",
+        "description": "At any given time, wicketd holds at most one TUF repository, extracted to ephemeral storage; any previously-uploaded repository is discarded. This request is rejected with a 400 while any MUPdate is in progress. A successful upload clears all update progress state, so a subsequent `GET /update-progress` returns an empty set of current updates.",
         "operationId": "put_repository",
         "requestBody": {
           "content": {
@@ -444,7 +444,7 @@
     },
     "/update-progress": {
       "get": {
-        "summary": "Report the progress of every MUPdate",
+        "summary": "Report the uploaded system version and the progress of every MUPdate",
         "operationId": "get_update_progress",
         "responses": {
           "200": {
@@ -1162,9 +1162,17 @@
         "description": "The response to a request for update progress.",
         "type": "object",
         "properties": {
+          "repository": {
+            "description": "Information about the uploaded repository.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RepositoryDescription"
+              }
+            ]
+          },
           "sps": {
             "title": "IdOrdMap",
-            "description": "The service processors that have update state, and their progress.\n\nA service processor appears here only once an update has been started for it, and disappears when its update state is cleared.",
+            "description": "The service processors that have update state, and their progress.\n\nA service processor appears here only once an update has been started for it, and disappears when any of the following occur:\n\n* The update state is cleared.\n\n* A TUF repository is uploaded.",
             "x-rust-type": {
               "crate": "iddqd",
               "parameters": [
@@ -1183,6 +1191,7 @@
           }
         },
         "required": [
+          "repository",
           "sps"
         ]
       },
