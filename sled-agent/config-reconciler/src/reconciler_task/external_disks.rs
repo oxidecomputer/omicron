@@ -52,6 +52,7 @@ use tokio::sync::watch;
 use trust_quorum_types::types::Epoch;
 
 use super::datasets::DiskRekeyInfo;
+use super::datasets::OmicronDatasets;
 use super::datasets::RequiredDatasetError;
 use crate::dataset_serialization_task::RekeyResult;
 use crate::debug_collector::FormerZoneRootArchiver;
@@ -442,16 +443,17 @@ impl ExternalDisks {
         *disk = ExternalDiskState::failed(disk.config.clone(), error);
     }
 
-    /// Check that newly-adopted disks' required datasets (as reported by
-    /// `check`) have been ensured.
+    /// Check that newly-adopted disks' required datasets have been ensured
+    /// (see [`OmicronDatasets::check_required_datasets()`]).
     ///
     /// Disks that pass may have their former zone roots cleaned up, via
     /// [`Self::finish_adopting_disks()`]. Disks that fail are un-adopted
     /// without ever having been put into service.
-    pub(super) fn verify_adopted_disks<F>(&mut self, check: F, log: &Logger)
-    where
-        F: Fn(&ZpoolName) -> Result<(), RequiredDatasetError>,
-    {
+    pub(super) fn verify_adopted_disks(
+        &mut self,
+        datasets: &OmicronDatasets,
+        log: &Logger,
+    ) {
         for (disk_id, phase) in self.adopting.clone() {
             if phase != AdoptionPhase::Adopted {
                 continue;
@@ -460,7 +462,7 @@ impl ExternalDisks {
                 self.adopting.remove(&disk_id);
                 continue;
             };
-            match check(&zpool) {
+            match datasets.check_required_datasets(&zpool) {
                 Ok(()) => {
                     self.adopting.insert(disk_id, AdoptionPhase::Verified);
                 }
@@ -1275,8 +1277,11 @@ mod tests {
     use super::*;
     use assert_matches::assert_matches;
     use illumos_utils::zpool::ZpoolName;
+    use omicron_common::disk::DatasetName;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::ZpoolUuid;
+    use sled_agent_types::disk::DatasetConfig;
     use sled_agent_types::disk::DiskIdentity;
     use sled_agent_types::disk::PerDiskDatasetKind;
     use sled_hardware::DiskFirmware;
@@ -1285,6 +1290,7 @@ mod tests {
     use sled_hardware::UnparsedDisk;
     use std::collections::BTreeMap;
     use std::sync::Mutex;
+    use strum::IntoEnumIterator;
     use test_strategy::proptest;
 
     #[derive(Debug, Default)]
@@ -1828,6 +1834,24 @@ mod tests {
         }
     }
 
+    /// Returns datasets where all the per-disk datasets on each of `zpools`
+    /// have been ensured.
+    fn required_datasets_on<'a>(
+        zpools: impl IntoIterator<Item = &'a ZpoolName>,
+    ) -> OmicronDatasets {
+        let datasets = zpools.into_iter().flat_map(|zpool| {
+            PerDiskDatasetKind::iter().map(|kind| {
+                let config = DatasetConfig {
+                    id: DatasetUuid::new_v4(),
+                    name: DatasetName::new(*zpool, kind.into()),
+                    inner: kind.config(),
+                };
+                (config, Ok(()))
+            })
+        });
+        OmicronDatasets::with_datasets(datasets)
+    }
+
     struct AdoptionTest {
         logctx: omicron_test_utils::dev::LogContext,
         external_disks: ExternalDisks,
@@ -1935,7 +1959,8 @@ mod tests {
 
         // Once verified, their debug datasets are visible to the debug
         // collector (for archival), but they're not yet in service.
-        t.external_disks.verify_adopted_disks(|_| Ok(()), &t.logctx.log);
+        t.external_disks
+            .verify_adopted_disks(&required_datasets_on(&both), &t.logctx.log);
         assert_eq!(t.debug_collector_zpools(), both);
         assert!(t.published_zpools().is_empty());
         assert!(t.external_disks.has_debug_datasets());
@@ -1967,19 +1992,9 @@ mod tests {
 
         t.adopt().await;
         t.external_disks.update_debug_dataset_zpools(BTreeSet::from([ok, bad]));
-        t.external_disks.verify_adopted_disks(
-            |zpool| {
-                if *zpool == bad {
-                    Err(RequiredDatasetError::NotInConfig {
-                        zpool: *zpool,
-                        kind: PerDiskDatasetKind::TransientZoneRoot,
-                    })
-                } else {
-                    Ok(())
-                }
-            },
-            &t.logctx.log,
-        );
+        // `bad` has none of its required datasets in the config.
+        t.external_disks
+            .verify_adopted_disks(&required_datasets_on(&[ok]), &t.logctx.log);
 
         // The disk that failed verification is no longer managed, and was
         // never visible to the debug collector or published as managed.
@@ -2019,7 +2034,10 @@ mod tests {
 
         t.adopt().await;
         t.external_disks.update_debug_dataset_zpools(BTreeSet::from([ok, bad]));
-        t.external_disks.verify_adopted_disks(|_| Ok(()), &t.logctx.log);
+        t.external_disks.verify_adopted_disks(
+            &required_datasets_on(&[ok, bad]),
+            &t.logctx.log,
+        );
 
         let cleaner = TestZoneRootCleaner::default();
         cleaner.fail_on.lock().unwrap().insert(bad);

@@ -305,9 +305,14 @@ impl LatestReconciliationResult {
     }
 }
 
-/// Returns the datasets from `datasets` that we should ensure before cleaning
-/// up former zone roots on `zpools_being_adopted`, omitting the transient zone
-/// datasets on those zpools (that cleanup would destroy them).
+/// Returns `datasets`, minus any transient zone datasets on
+/// `zpools_being_adopted`.
+///
+/// A newly adopted zpool may still contain zone roots left over from a
+/// previous sled-agent. We destroy those once the zpool's per-disk datasets
+/// are ensured, and that cleanup would also destroy any transient zone datasets
+/// we had just created on it. So we skip them on the first round of ensuring
+/// datasets, and create them on the second round, after cleanup.
 fn datasets_to_ensure(
     datasets: &IdOrdMap<DatasetConfig>,
     zpools_being_adopted: &BTreeSet<ZpoolName>,
@@ -650,10 +655,7 @@ impl ReconcilerTask {
         ))
         .await;
         if !zpools_being_adopted.is_empty() {
-            self.external_disks.verify_adopted_disks(
-                |zpool| self.datasets.check_required_datasets(zpool),
-                &self.log,
-            );
+            self.external_disks.verify_adopted_disks(&self.datasets, &self.log);
             let can_archive = self.external_disks.has_debug_datasets();
             self.external_disks
                 .finish_adopting_disks(can_archive, &self.log)
