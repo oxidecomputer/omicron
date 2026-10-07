@@ -42,7 +42,6 @@ use slog::info;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
-use std::collections::BTreeSet;
 use std::sync::Arc;
 use trust_quorum_types::types::Epoch;
 
@@ -347,18 +346,6 @@ impl OmicronDatasets {
         Ok(())
     }
 
-    /// Returns the zpools on which the debug dataset has been ensured.
-    pub(super) fn ensured_debug_dataset_zpools(&self) -> BTreeSet<ZpoolName> {
-        self.datasets
-            .iter()
-            .filter(|d| {
-                matches!(d.state, DatasetState::Ensured)
-                    && matches!(d.config.name.kind(), DatasetKind::Debug)
-            })
-            .map(|d| *d.config.name.pool())
-            .collect()
-    }
-
     pub(super) fn has_retryable_error(&self) -> bool {
         self.datasets.iter().any(|d| match &d.state {
             DatasetState::Ensured => false,
@@ -429,6 +416,7 @@ mod tests {
     use assert_matches::assert_matches;
     use omicron_uuid_kinds::ZpoolUuid;
     use sled_agent_types::disk::SharedDatasetConfig;
+    use std::collections::BTreeSet;
 
     fn dataset_config(zpool: ZpoolName, kind: DatasetKind) -> DatasetConfig {
         DatasetConfig {
@@ -473,33 +461,6 @@ mod tests {
                 kind: PerDiskDatasetKind::TransientZoneRoot,
                 ..
             })
-        );
-    }
-
-    #[test]
-    fn ensured_debug_dataset_zpools_only_includes_ensured_debug_datasets() {
-        let ensured = ZpoolName::new_external(ZpoolUuid::new_v4());
-        let failed = ZpoolName::new_external(ZpoolUuid::new_v4());
-        let no_debug = ZpoolName::new_external(ZpoolUuid::new_v4());
-
-        let datasets = OmicronDatasets::with_datasets(
-            [
-                (dataset_config(ensured, DatasetKind::Debug), Ok(())),
-                (
-                    dataset_config(failed, DatasetKind::Debug),
-                    Err(DatasetEnsureError::TestError("failed")),
-                ),
-                (
-                    dataset_config(no_debug, DatasetKind::TransientZoneRoot),
-                    Ok(()),
-                ),
-            ]
-            .into_iter(),
-        );
-
-        assert_eq!(
-            datasets.ensured_debug_dataset_zpools(),
-            BTreeSet::from([ensured])
         );
     }
 

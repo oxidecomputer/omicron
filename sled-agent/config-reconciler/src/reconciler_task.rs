@@ -472,7 +472,7 @@ impl ReconcilerTask {
         }
     }
 
-    /// Ensure `datasets`, and publish the resulting set of debug datasets.
+    /// Ensure `datasets`.
     ///
     /// Datasets are ensured on all managed disks, including those we've
     /// adopted but not yet put into service.
@@ -484,7 +484,6 @@ impl ReconcilerTask {
                 &self.log,
             )
             .await;
-        self.external_disks.update_output_watch_channels(&self.datasets);
     }
 
     async fn do_reconcilation<
@@ -593,7 +592,6 @@ impl ReconcilerTask {
         self.external_disks.stop_managing_if_needed(
             &current_raw_disks,
             &sled_config.disks,
-            &self.datasets,
             &self.log,
         );
 
@@ -607,8 +605,6 @@ impl ReconcilerTask {
                 &self.log,
             )
             .await;
-        // Removing datasets may have changed which debug datasets are ensured.
-        self.external_disks.update_output_watch_channels(&self.datasets);
 
         // ---
         // Now go through the add process: start managing disks, create
@@ -620,7 +616,6 @@ impl ReconcilerTask {
             .start_managing_if_needed(
                 &current_raw_disks,
                 &sled_config.disks,
-                &self.datasets,
                 &self.key_requester,
                 &self.log,
             )
@@ -658,9 +653,7 @@ impl ReconcilerTask {
         .await;
         if !zpools_being_adopted.is_empty() {
             self.external_disks.verify_adopted_disks(&self.datasets, &self.log);
-            self.external_disks
-                .finish_adopting_disks(&self.datasets, &self.log)
-                .await;
+            self.external_disks.finish_adopting_disks(&self.log).await;
             // Now that former zone roots are cleaned up, ensure all datasets,
             // including the transient zone datasets we skipped above.
             self.ensure_datasets(sled_config.datasets.clone()).await;
