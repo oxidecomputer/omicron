@@ -313,7 +313,7 @@ impl LatestReconciliationResult {
 /// are ensured, and that cleanup would also destroy any transient zone datasets
 /// we had just created on it. So we skip them on the first round of ensuring
 /// datasets, and create them on the second round, after cleanup.
-fn datasets_to_ensure(
+fn skip_transient_zones_on_adopting_zpools(
     datasets: &IdOrdMap<DatasetConfig>,
     zpools_being_adopted: &BTreeSet<ZpoolName>,
 ) -> IdOrdMap<DatasetConfig> {
@@ -651,7 +651,7 @@ impl ReconcilerTask {
         // datasets on disks now in service, and marks datasets on disks we
         // gave up on as unavailable.
         let zpools_being_adopted = self.external_disks.zpools_being_adopted();
-        self.ensure_datasets(datasets_to_ensure(
+        self.ensure_datasets(skip_transient_zones_on_adopting_zpools(
             &sled_config.datasets,
             &zpools_being_adopted,
         ))
@@ -661,6 +661,8 @@ impl ReconcilerTask {
             self.external_disks
                 .finish_adopting_disks(&self.datasets, &self.log)
                 .await;
+            // Now that former zone roots are cleaned up, ensure all datasets,
+            // including the transient zone datasets we skipped above.
             self.ensure_datasets(sled_config.datasets.clone()).await;
         }
 
@@ -897,7 +899,7 @@ mod tests {
     }
 
     #[test]
-    fn datasets_to_ensure_skips_transient_zones_on_newly_adopted_zpools() {
+    fn skip_transient_zones_on_adopting_zpools_keeps_other_zpools() {
         let newly_adopted = ZpoolName::new_external(ZpoolUuid::new_v4());
         let ready = ZpoolName::new_external(ZpoolUuid::new_v4());
 
@@ -912,11 +914,19 @@ mod tests {
         let datasets: IdOrdMap<_> =
             kept.iter().chain([&skipped]).cloned().collect();
 
-        let to_ensure =
-            datasets_to_ensure(&datasets, &BTreeSet::from([newly_adopted]));
+        let to_ensure = skip_transient_zones_on_adopting_zpools(
+            &datasets,
+            &BTreeSet::from([newly_adopted]),
+        );
         assert_eq!(to_ensure, kept.into_iter().collect::<IdOrdMap<_>>());
 
         // With no newly-adopted zpools, everything is ensured.
-        assert_eq!(datasets_to_ensure(&datasets, &BTreeSet::new()), datasets);
+        assert_eq!(
+            skip_transient_zones_on_adopting_zpools(
+                &datasets,
+                &BTreeSet::new()
+            ),
+            datasets
+        );
     }
 }
