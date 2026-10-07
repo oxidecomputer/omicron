@@ -73,6 +73,13 @@ pub(super) enum ZoneDatasetDependencyError {
 const REQUIRED_PER_DISK_DATASETS: [PerDiskDatasetKind; 2] =
     [PerDiskDatasetKind::Debug, PerDiskDatasetKind::TransientZoneRoot];
 
+/// Returns true if `kind` is one of the [`REQUIRED_PER_DISK_DATASETS`].
+pub(super) fn is_required_per_disk_dataset(kind: &DatasetKind) -> bool {
+    REQUIRED_PER_DISK_DATASETS
+        .iter()
+        .any(|required| DatasetKind::from(*required) == *kind)
+}
+
 #[derive(Debug, thiserror::Error)]
 pub(super) enum RequiredDatasetError {
     #[error("{kind:?} dataset on zpool {zpool} is not in the sled config")]

@@ -306,23 +306,25 @@ impl LatestReconciliationResult {
     }
 }
 
-/// Returns `datasets`, minus any transient zone datasets on
-/// `zpools_being_adopted`.
+/// Returns `datasets`, minus any datasets on `zpools_being_adopted` other
+/// than the ones adoption needs (debug and transient zone root; see
+/// [`datasets::is_required_per_disk_dataset()`]).
 ///
-/// A newly adopted zpool may still contain zone roots left over from a
-/// previous sled-agent. We destroy those once the zpool's per-disk datasets
-/// are ensured, and that cleanup would also destroy any transient zone datasets
-/// we had just created on it. So we skip them on the first round of ensuring
-/// datasets, and create them on the second round, after cleanup.
-fn skip_transient_zones_on_adopting_zpools(
+/// We don't set up anything else on a disk until we've put it into service.
+/// If adoption fails (e.g., because we can't clean up its former zone roots),
+/// it shouldn't be left with datasets created or mounted on it. (This also
+/// keeps us from creating transient zone datasets that cleaning up former
+/// zone roots would then destroy.) We create the rest on the second round of
+/// ensuring datasets, once the disk is in service.
+fn limit_adopting_zpools_to_required_datasets(
     datasets: &IdOrdMap<DatasetConfig>,
     zpools_being_adopted: &BTreeSet<ZpoolName>,
 ) -> IdOrdMap<DatasetConfig> {
     datasets
         .iter()
         .filter(|config| {
-            !(matches!(config.name.kind(), DatasetKind::TransientZone { .. })
-                && zpools_being_adopted.contains(config.name.pool()))
+            !zpools_being_adopted.contains(config.name.pool())
+                || datasets::is_required_per_disk_dataset(config.name.kind())
         })
         .cloned()
         .collect()
@@ -499,7 +501,7 @@ impl ReconcilerTask {
     ) {
         let zpools_being_adopted = self.external_disks.zpools_being_adopted();
         if let Err(err) = self
-            .ensure_datasets(skip_transient_zones_on_adopting_zpools(
+            .ensure_datasets(limit_adopting_zpools_to_required_datasets(
                 datasets,
                 &zpools_being_adopted,
             ))
@@ -516,11 +518,11 @@ impl ReconcilerTask {
         }
         self.external_disks.verify_adopted_disks(&self.datasets, &self.log);
         self.external_disks.finish_adopting_disks(&self.log).await;
-        // Now that former zone roots are cleaned up, ensure all datasets,
-        // including the transient zone datasets we skipped above. If this
-        // fails, those transient zone datasets won't exist yet, and zones that
-        // need them will fail to start (and be retried), as with any other
-        // failure to ensure datasets.
+        // Now that newly-adopted disks are in service, ensure all datasets,
+        // including the ones we skipped on them above. If this fails, those
+        // datasets won't exist yet, and zones that need them will fail to
+        // start (and be retried), as with any other failure to ensure
+        // datasets.
         let _ = self.ensure_datasets(datasets.clone()).await;
     }
 
@@ -678,8 +680,8 @@ impl ReconcilerTask {
         // * any former zone roots on them have been archived and destroyed
         //   (which requires debug datasets to archive into).
         //
-        // So: ensure datasets (except transient zone datasets on those disks,
-        // which cleanup would destroy), verify those disks, clean them up, and
+        // So: ensure datasets (but only the debug and transient zone root
+        // datasets on those disks), verify those disks, clean them up, and
         // then ensure datasets again. That last step creates the remaining
         // datasets on disks now in service, and marks datasets on disks we
         // gave up on as unavailable.
@@ -919,22 +921,30 @@ mod tests {
     }
 
     #[test]
-    fn skip_transient_zones_on_adopting_zpools_keeps_other_zpools() {
+    fn limit_adopting_zpools_to_required_datasets_keeps_other_zpools() {
         let newly_adopted = ZpoolName::new_external(ZpoolUuid::new_v4());
         let ready = ZpoolName::new_external(ZpoolUuid::new_v4());
 
-        let skipped = transient_zone(newly_adopted);
+        // On the zpool being adopted, only the required datasets are kept.
+        let skipped = [
+            dataset_config(newly_adopted, DatasetKind::Crucible),
+            dataset_config(newly_adopted, DatasetKind::LocalStorage),
+            transient_zone(newly_adopted),
+        ];
         let kept = [
             dataset_config(newly_adopted, DatasetKind::Debug),
             dataset_config(newly_adopted, DatasetKind::TransientZoneRoot),
+            // Everything on other zpools is kept.
             dataset_config(ready, DatasetKind::Debug),
             dataset_config(ready, DatasetKind::TransientZoneRoot),
+            dataset_config(ready, DatasetKind::Crucible),
+            dataset_config(ready, DatasetKind::LocalStorage),
             transient_zone(ready),
         ];
         let datasets: IdOrdMap<_> =
-            kept.iter().chain([&skipped]).cloned().collect();
+            kept.iter().chain(&skipped).cloned().collect();
 
-        let to_ensure = skip_transient_zones_on_adopting_zpools(
+        let to_ensure = limit_adopting_zpools_to_required_datasets(
             &datasets,
             &BTreeSet::from([newly_adopted]),
         );
@@ -942,7 +952,7 @@ mod tests {
 
         // With no newly-adopted zpools, everything is ensured.
         assert_eq!(
-            skip_transient_zones_on_adopting_zpools(
+            limit_adopting_zpools_to_required_datasets(
                 &datasets,
                 &BTreeSet::new()
             ),
