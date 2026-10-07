@@ -405,6 +405,7 @@ fn populate_ddm_table(cfg: &L1PortConfig) -> Table {
     let L1PortConfig { speed, fec, autoneg, lldp, tx_eq } = cfg;
     let mut ddm = Table::new();
     ddm.decor_mut().set_prefix("\n# This port routes DDM traffic.\n");
+    ddm.insert("tag", string_item("ddm"));
     ddm.insert("speed", string_item(enum_to_toml_string(&speed)));
     if let Some(fec) = fec {
         ddm.insert("fec", string_item(enum_to_toml_string(&fec)));
