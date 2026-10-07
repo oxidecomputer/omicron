@@ -121,7 +121,8 @@ impl NexusSaga for SagaDiskDelete {
                 // disks backed by local storage.
 
                 return Err(SagaInitError::InvalidParameter(format!(
-                    "disk {} is of type local storage",
+                    "disk {} is of type local storage, deletion is now done \
+                    in a background task",
                     params.disk.id(),
                 )));
             }
