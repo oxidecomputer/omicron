@@ -8,6 +8,7 @@ use parallel_task_set::ParallelTaskSet;
 use slog::{Logger, o};
 use slog_error_chain::InlineErrorChain;
 use std::net::SocketAddrV6;
+use std::time::Duration;
 
 #[derive(Clone, Debug)]
 pub struct GatewayClient {
@@ -67,23 +68,33 @@ impl GatewaysByRack {
             let log = log.clone();
             let joined = tasks
                 .spawn(async move {
-                    const MAX_TRIES: usize = 3;
-                    let mut tries = 0;
+                    // Bound the amount of time we will spend retrying our
+                    // attempt to determine the gateway's rack ID. We set a
+                    // fairly short timeout here because we don't want one
+                    // discovered gateway we are unable to communicate with to
+                    // block discovering other, healthy gateways for too long.
+                    const TIMEOUT: Duration = Duration::from_secs(5);
+                    
                     let client = &gateway.client;
                     let rack_id = backoff::retry(
-                        backoff::retry_policy_internal_service(),
+                        backoff::retry_policy_internal_service_timeout(TIMEOUT),
                         || async move {
                             client
                                 .rack_id_get()
                                 .await
                                 .map(|rsp| rsp.into_inner().rack_id)
-                                .map_err(|e| {
-                                    if tries >= MAX_TRIES {
+                                .map_err(|e| match e {
+                                    // If this gateway has indicated
+                                    // affirmatively that it does not have a
+                                    // rack ID, don't bother retrying for
+                                    // another 5 seconds...
+                                    ClientError::ErrorResponse(ref rsp)
+                                        if rsp.error_code.as_deref()
+                                            == Some("RackIdNotSet") =>
+                                    {
                                         BackoffError::permanent(e)
-                                    } else {
-                                        tries += 1;
-                                        BackoffError::transient(e)
                                     }
+                                    e => BackoffError::transient(e),
                                 })
                         },
                     )
@@ -93,8 +104,7 @@ impl GatewaysByRack {
                         Err(e) => {
                             slog::warn!(
                                 log,
-                                "failed to determine rack ID for resolved MGS \
-                                 after {MAX_TRIES} attempts";
+                                "failed to determine rack ID for resolved MGS";
                                 "error" => InlineErrorChain::new(&e),
                                 "gateway_addr" => %gateway.addr,
                             );
