@@ -95,12 +95,6 @@ enum DiskManagementError {
 
     #[error(transparent)]
     RequiredDataset(RequiredDatasetError),
-
-    #[error(
-        "Not destroying former zone roots: \
-         no debug dataset is available to archive their logs into"
-    )]
-    DebugDatasetUnavailable,
 }
 
 impl DiskManagementError {
@@ -131,8 +125,7 @@ impl DiskManagementError {
                 name: _,
                 err: DestroyDatasetErrorVariant::Other(_),
             })
-            | Self::SetValues(_)
-            | Self::DebugDatasetUnavailable => true,
+            | Self::SetValues(_) => true,
 
             Self::RequiredDataset(err) => err.is_retryable(),
         }
@@ -498,7 +491,6 @@ impl ExternalDisks {
         log: &Logger,
         cleaner: &T,
     ) {
-        let can_archive = !self.debug_dataset_disks(datasets).is_empty();
         for (disk_id, phase) in self.adopting.clone() {
             if phase != AdoptionPhase::AwaitingZoneRootCleanup {
                 continue;
@@ -512,7 +504,6 @@ impl ExternalDisks {
                     &zpool_name,
                     &self.mount_config,
                     &self.archiver,
-                    can_archive,
                     log,
                 )
                 .await
@@ -1048,7 +1039,6 @@ trait ZoneRootCleaner {
         zpool_name: &ZpoolName,
         mount_config: &MountConfig,
         archiver: &FormerZoneRootArchiver,
-        can_archive: bool,
         log: &Logger,
     ) -> impl Future<Output = Result<(), DiskManagementError>> + Send;
 }
@@ -1126,14 +1116,11 @@ impl DiskAdopter for RealDiskAdopter<'_> {
 struct RealZoneRootCleaner;
 
 impl ZoneRootCleaner for RealZoneRootCleaner {
-    /// If `can_archive` is false, there's nowhere to archive logs, so this
-    /// fails rather than destroying any former zone roots it finds.
     async fn archive_and_destroy_former_zone_roots(
         &self,
         zpool_name: &ZpoolName,
         mount_config: &MountConfig,
         archiver: &FormerZoneRootArchiver,
-        can_archive: bool,
         log: &Logger,
     ) -> Result<(), DiskManagementError> {
         // Attempt to archive and then wipe the contents of the zones dataset.
@@ -1206,7 +1193,6 @@ impl ZoneRootCleaner for RealZoneRootCleaner {
                     log,
                     mount_config,
                     archiver,
-                    can_archive,
                     &zpool_name,
                 )
                 .await?;
@@ -1229,17 +1215,12 @@ async fn cleanup_former_zone_roots(
     log: &Logger,
     mount_config: &MountConfig,
     archiver: &FormerZoneRootArchiver,
-    can_archive: bool,
     zpool_name: &ZpoolName,
 ) -> Result<(), DiskManagementError> {
     // Within each pool, ZONE_DATASET is the name of the dataset that's the
     // parent of all the zone root filesystems' datasets.
     let parent_dataset_name = format!("{}/{}", zpool_name, ZONE_DATASET);
     let child_datasets = Zfs::list_datasets(&parent_dataset_name).await?;
-
-    if !child_datasets.is_empty() && !can_archive {
-        return Err(DiskManagementError::DebugDatasetUnavailable);
-    }
 
     for child_name in child_datasets {
         // Determine the mountpoint of the child dataset.
@@ -1827,12 +1808,11 @@ mod tests {
     }
 
     /// Zone root cleaner that fails on a fixed set of zpools, and records the
-    /// zpools it cleaned (and whether it was told it could archive).
+    /// zpools it cleaned.
     #[derive(Debug, Default)]
     struct TestZoneRootCleaner {
         fail_on: Mutex<BTreeSet<ZpoolName>>,
         cleaned: Mutex<Vec<ZpoolName>>,
-        can_archive: Mutex<Vec<bool>>,
     }
 
     impl ZoneRootCleaner for TestZoneRootCleaner {
@@ -1841,10 +1821,8 @@ mod tests {
             zpool_name: &ZpoolName,
             _mount_config: &MountConfig,
             _archiver: &FormerZoneRootArchiver,
-            can_archive: bool,
             _log: &Logger,
         ) -> Result<(), DiskManagementError> {
-            self.can_archive.lock().unwrap().push(can_archive);
             if self.fail_on.lock().unwrap().contains(zpool_name) {
                 return Err(DiskManagementError::DestroyDataset(
                     DestroyDatasetError {
@@ -2009,7 +1987,16 @@ mod tests {
                 &cleaner,
             )
             .await;
-        assert_eq!(*cleaner.can_archive.lock().unwrap(), [true, true]);
+        assert_eq!(
+            cleaner
+                .cleaned
+                .lock()
+                .unwrap()
+                .iter()
+                .copied()
+                .collect::<BTreeSet<_>>(),
+            both
+        );
         assert_eq!(t.published_zpools(), both);
         assert!(t.external_disks.zpools_being_adopted().is_empty());
         assert_currently_managed_zpools_is_consistent(&t.external_disks);
@@ -2084,21 +2071,18 @@ mod tests {
 
         let cleaner = TestZoneRootCleaner::default();
         cleaner.fail_on.lock().unwrap().insert(bad);
-        // By the time we clean up, there are no debug datasets to archive
-        // into.
         t.external_disks
             .finish_adopting_disks_with_cleaner(
-                &no_datasets(),
+                &required_datasets_on(&[ok, bad]),
                 &t.logctx.log,
                 &cleaner,
             )
             .await;
 
-        // We passed along that archival isn't possible, and the disk that
-        // failed cleanup is no longer managed (and will be retried).
-        assert_eq!(*cleaner.can_archive.lock().unwrap(), [false, false]);
+        // The disk that failed cleanup is no longer managed (and will be
+        // retried).
         assert_eq!(t.published_zpools(), BTreeSet::from([ok]));
-        assert!(t.debug_collector_zpools().is_empty());
+        assert_eq!(t.debug_collector_zpools(), BTreeSet::from([ok]));
         assert!(t.external_disks.has_retryable_error());
         assert_currently_managed_zpools_is_consistent(&t.external_disks);
 
@@ -2166,7 +2150,6 @@ mod illumos_tests {
     async fn clean_up(
         harness: &RealZfsTestHarness,
         zpool: ZpoolName,
-        can_archive: bool,
         log: &Logger,
     ) -> Result<(), DiskManagementError> {
         RealZoneRootCleaner
@@ -2174,7 +2157,6 @@ mod illumos_tests {
                 &zpool,
                 &harness.mount_config,
                 &FormerZoneRootArchiver::noop(log),
-                can_archive,
                 log,
             )
             .await
@@ -2192,9 +2174,9 @@ mod illumos_tests {
         let zpool = harness.add_zpool(ZpoolKind::External).await;
 
         // An empty zone dataset (e.g., because we just created it on a new
-        // disk) has nothing to clean up, even if we couldn't archive.
+        // disk) has nothing to clean up.
         create_zone_dataset(&harness, zpool, false, &logctx.log).await;
-        clean_up(&harness, zpool, false, &logctx.log)
+        clean_up(&harness, zpool, &logctx.log)
             .await
             .expect("cleanup succeeded");
         assert!(exists(&zone_dataset(zpool)).await);
@@ -2204,23 +2186,14 @@ mod illumos_tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn cleanup_refuses_to_destroy_without_archival() {
-        let logctx =
-            dev::test_setup_log("cleanup_refuses_to_destroy_without_archival");
+    async fn cleanup_destroys_former_zone_roots() {
+        let logctx = dev::test_setup_log("cleanup_destroys_former_zone_roots");
         let mut harness = RealZfsTestHarness::new(logctx.log.clone());
         let zpool = harness.add_zpool(ZpoolKind::External).await;
         create_zone_dataset(&harness, zpool, true, &logctx.log).await;
-
-        // With nowhere to archive logs, we refuse to destroy the former zone
-        // root.
-        let err = clean_up(&harness, zpool, false, &logctx.log)
-            .await
-            .expect_err("cleanup refused");
-        assert_matches!(err, DiskManagementError::DebugDatasetUnavailable);
         assert!(exists(&former_zone_root(zpool)).await);
 
-        // Once archival is possible, we destroy it.
-        clean_up(&harness, zpool, true, &logctx.log)
+        clean_up(&harness, zpool, &logctx.log)
             .await
             .expect("cleanup succeeded");
         assert!(!exists(&former_zone_root(zpool)).await);
