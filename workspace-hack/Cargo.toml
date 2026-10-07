@@ -31,6 +31,7 @@ bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.11.0", default-
 bstr = { version = "1.12.1" }
 buf-list = { version = "1.1.2", default-features = false, features = ["tokio1"] }
 byte-wrapper = { version = "0.1.0", features = ["schemars08", "serde"] }
+byteorder = { version = "1.5.0" }
 bytes = { version = "1.11.1", features = ["serde"] }
 camino = { version = "1.2.5", default-features = false, features = ["serde1"] }
 chacha20 = { version = "0.10.0", default-features = false, features = ["legacy", "rng", "zeroize"] }
@@ -127,6 +128,7 @@ semver = { version = "1.0.28", features = ["serde"] }
 serde = { version = "1.0.229", features = ["alloc", "derive", "rc"] }
 serde_core = { version = "1.0.229", features = ["alloc", "rc"] }
 serde_json = { version = "1.0.151", features = ["alloc", "raw_value", "unbounded_depth"] }
+serde_spanned = { version = "1.1.1", default-features = false, features = ["serde", "std"] }
 serde_with = { version = "3.21.0", features = ["hex", "schemars_0_8"] }
 sha2 = { version = "0.10.9", features = ["oid"] }
 sha3 = { version = "0.10.8", features = ["oid"] }
@@ -148,8 +150,9 @@ tokio-postgres = { version = "0.7.18", features = ["with-chrono-0_4", "with-serd
 tokio-rustls = { version = "0.26.4" }
 tokio-stream = { version = "0.1.18", features = ["sync"] }
 tokio-util = { version = "0.7.18", features = ["codec", "io-util", "rt", "time"] }
-toml = { version = "0.7.8" }
-toml_datetime = { version = "0.6.11", default-features = false, features = ["serde"] }
+toml = { version = "1.1.2" }
+toml_datetime-3b31131e45eafb45 = { package = "toml_datetime", version = "0.6.11", default-features = false, features = ["serde"] }
+toml_datetime-dff4ba8e3ae991db = { package = "toml_datetime", version = "1.1.1", default-features = false, features = ["serde", "std"] }
 toml_edit-3c51e837cfc5589a = { package = "toml_edit", version = "0.22.27", features = ["serde"] }
 toml_parser = { version = "1.1.2" }
 tracing = { version = "0.1.44", features = ["log"] }
@@ -179,6 +182,7 @@ bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.11.0", default-
 bstr = { version = "1.12.1" }
 buf-list = { version = "1.1.2", default-features = false, features = ["tokio1"] }
 byte-wrapper = { version = "0.1.0", features = ["schemars08", "serde"] }
+byteorder = { version = "1.5.0" }
 bytes = { version = "1.11.1", features = ["serde"] }
 camino = { version = "1.2.5", default-features = false, features = ["serde1"] }
 cc = { version = "1.2.56", default-features = false, features = ["parallel"] }
@@ -278,6 +282,7 @@ semver = { version = "1.0.28", features = ["serde"] }
 serde = { version = "1.0.229", features = ["alloc", "derive", "rc"] }
 serde_core = { version = "1.0.229", features = ["alloc", "rc"] }
 serde_json = { version = "1.0.151", features = ["alloc", "raw_value", "unbounded_depth"] }
+serde_spanned = { version = "1.1.1", default-features = false, features = ["serde", "std"] }
 serde_with = { version = "3.21.0", features = ["hex", "schemars_0_8"] }
 serde_with_macros = { version = "3.21.0", default-features = false, features = ["schemars_0_8"] }
 sha2 = { version = "0.10.9", features = ["oid"] }
@@ -303,8 +308,9 @@ tokio-postgres = { version = "0.7.18", features = ["with-chrono-0_4", "with-serd
 tokio-rustls = { version = "0.26.4" }
 tokio-stream = { version = "0.1.18", features = ["sync"] }
 tokio-util = { version = "0.7.18", features = ["codec", "io-util", "rt", "time"] }
-toml = { version = "0.7.8" }
-toml_datetime = { version = "0.6.11", default-features = false, features = ["serde"] }
+toml = { version = "1.1.2" }
+toml_datetime-3b31131e45eafb45 = { package = "toml_datetime", version = "0.6.11", default-features = false, features = ["serde"] }
+toml_datetime-dff4ba8e3ae991db = { package = "toml_datetime", version = "1.1.1", default-features = false, features = ["serde", "std"] }
 toml_edit-3c51e837cfc5589a = { package = "toml_edit", version = "0.22.27", features = ["serde"] }
 toml_parser = { version = "1.1.2" }
 tracing = { version = "0.1.44", features = ["log"] }
