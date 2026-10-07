@@ -12,6 +12,7 @@ use nexus_lockstep_client::types::BackgroundTask;
 use nexus_lockstep_client::types::CurrentStatus;
 use nexus_lockstep_client::types::LastResult;
 use nexus_types::internal_api::background::*;
+use omicron_common::api::external::DataPageParams;
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use omicron_uuid_kinds::CollectionUuid;
 use slog::info;
@@ -760,7 +761,10 @@ async fn wait_for_all_local_storage_deletes_impl(
                 }
 
                 let disks_requiring_work = datastore
-                    .deleted_disks_with_undeleted_local_storage(&opctx)
+                    .deleted_disks_with_undeleted_local_storage(
+                        &opctx,
+                        &DataPageParams::max_page(),
+                    )
                     .await
                     .unwrap();
 

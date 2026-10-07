@@ -366,6 +366,19 @@ impl LocalStorageDisk {
             }
         }
     }
+
+    /// If this disk has an allocation, return the ID.
+    pub fn allocation_id(&self) -> Option<DatasetUuid> {
+        let Some(allocation) = &self.local_storage_dataset_allocation else {
+            return None;
+        };
+
+        Some(match allocation {
+            LocalStorageAllocation::Unencrypted(allocation) => allocation.id(),
+
+            LocalStorageAllocation::Encrypted(allocation) => allocation.id(),
+        })
+    }
 }
 
 /// Conversion to the external API type.

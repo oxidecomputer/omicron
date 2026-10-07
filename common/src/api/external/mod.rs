@@ -132,6 +132,14 @@ pub struct DataPageParams<'a, NameType> {
 }
 
 impl<'a, NameType> DataPageParams<'a, NameType> {
+    pub fn ascending_with_limit(limit: NonZeroU32) -> Self {
+        Self {
+            marker: None,
+            direction: dropshot::PaginationOrder::Ascending,
+            limit,
+        }
+    }
+
     pub fn max_page() -> Self {
         Self {
             marker: None,
@@ -139,6 +147,7 @@ impl<'a, NameType> DataPageParams<'a, NameType> {
             limit: NonZeroU32::new(u32::MAX).unwrap(),
         }
     }
+
     /// Maps the marker type to a new type.
     ///
     /// Equivalent to [std::option::Option::map], because that's what it calls.

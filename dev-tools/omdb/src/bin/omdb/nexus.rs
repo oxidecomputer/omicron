@@ -4399,22 +4399,10 @@ fn print_task_local_storage_delete(details: &serde_json::Value) {
 
         Ok(status) => {
             let LocalStorageDeleteStatus {
-                total_allocations_to_delete,
-                page_size,
                 delete_results,
                 deallocate_results,
                 errors,
             } = &status;
-
-            println!(
-                "    total allocations left to delete: \
-                {total_allocations_to_delete}"
-            );
-
-            println!(
-                "    number of allocations deleted per invoked task: \
-                {page_size}"
-            );
 
             println!("    results of deleting local storage:");
             for result in delete_results {

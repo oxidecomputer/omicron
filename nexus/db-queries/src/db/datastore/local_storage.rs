@@ -44,6 +44,7 @@ use uuid::Uuid;
 
 // XXX is it bad that Numeric -> BigInt here?
 define_sql_function! { fn coalesce(x: Nullable<Numeric>, y: BigInt) -> BigInt; }
+define_sql_function! { fn random() -> BigInt; }
 
 impl DataStore {
     /// List all LocalStorage datasets, making as many queries as needed to get
@@ -454,10 +455,12 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    /// Return all deleted disks that have undeleted local storage allocations
+    /// Return a page deleted disks, ordered randomly, that have undeleted local
+    /// storage allocations.
     pub async fn deleted_disks_with_undeleted_local_storage(
         &self,
         opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
     ) -> Result<Vec<datastore::LocalStorageDisk>, Error> {
         opctx.authorize(authz::Action::Delete, &authz::FLEET).await?;
         opctx.check_complex_operations_allowed()?;
@@ -468,25 +471,28 @@ impl DataStore {
         use nexus_db_schema::schema::disk_type_local_storage::dsl as dtls_dsl;
         use nexus_db_schema::schema::local_storage_unencrypted_dataset_allocation::dsl as lsuda_dsl;
 
-        // Find all deleted disks where the unencrypted local storage allocation
-        // is not yet deleted.
-        let found_disks: Vec<model::Disk> = dsl::disk
-            .inner_join(
-                dtls_dsl::disk_type_local_storage
-                    .on(dsl::id.eq(dtls_dsl::disk_id)),
-            )
-            .inner_join(
-                lsuda_dsl::local_storage_unencrypted_dataset_allocation.on(
-                    dtls_dsl::local_storage_unencrypted_dataset_allocation_id
-                        .eq(lsuda_dsl::id.nullable()),
-                ),
-            )
-            .filter(lsuda_dsl::time_deleted.is_null())
-            .filter(dsl::time_deleted.is_not_null())
-            .select(model::Disk::as_select())
-            .load_async(&*conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        // Query for deleted disks where the unencrypted local storage
+        // allocation is not yet deleted.
+        let found_disks: Vec<model::Disk> = paginated(
+            dsl::disk,
+            dsl::id,
+            pagparams,
+        )
+        .inner_join(
+            dtls_dsl::disk_type_local_storage.on(dsl::id.eq(dtls_dsl::disk_id)),
+        )
+        .inner_join(
+            lsuda_dsl::local_storage_unencrypted_dataset_allocation
+                .on(dtls_dsl::local_storage_unencrypted_dataset_allocation_id
+                    .eq(lsuda_dsl::id.nullable())),
+        )
+        .order(random())
+        .filter(lsuda_dsl::time_deleted.is_null())
+        .filter(dsl::time_deleted.is_not_null())
+        .select(model::Disk::as_select())
+        .load_async(&*conn)
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         let mut disks = Vec::with_capacity(found_disks.len());
 

@@ -12,13 +12,14 @@ use futures::future::BoxFuture;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::LocalStorageAllocation;
-use nexus_db_queries::db::model::LocalStorageUnencryptedDatasetAllocation;
+use nexus_db_queries::db::datastore::LocalStorageDisk;
 use nexus_types::internal_api::background::LocalStorageDeleteStatus;
-use rand::prelude::*;
+use omicron_common::api::external::DataPageParams;
 use serde_json::json;
 use sled_agent_client::types::LocalStorageDatasetDeleteRequest;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
+use std::num::NonZeroU32;
 use std::sync::Arc;
 
 pub struct LocalStorageDeleter {
@@ -26,10 +27,20 @@ pub struct LocalStorageDeleter {
     reqwest_client: reqwest::Client,
 }
 
-#[derive(PartialEq)]
 enum DeleteResult {
     /// This invocation of the task deleted the local storage allocation
     Deleted,
+
+    /// This invocation of the task requested deletion but needs to wait
+    TimedOut,
+
+    /// Error while making delete request
+    Error { message: String },
+}
+
+enum DeleteShortCircuitReason {
+    /// This local storage disk does not have an allocation
+    NoAllocation,
 
     /// No delete is required as the sled hosting the local storage allocation
     /// was expunged.
@@ -38,22 +49,29 @@ enum DeleteResult {
     /// No delete is required as the zpool hosting the local storage allocation
     /// was expunged.
     ZpoolExpunged,
+}
 
-    /// This invocation of the task requested deletion but needs to wait
-    WaitForNextActivation,
+enum DeleteRequest {
+    /// No delete request was made.
+    ShortCircuit { disk: LocalStorageDisk, reason: DeleteShortCircuitReason },
 
-    Error {
-        message: String,
+    /// Error before making a delete request
+    Error { disk: LocalStorageDisk, message: String },
+
+    /// A delete is being performed in a spawned tokio task
+    Spawned {
+        disk: LocalStorageDisk,
+        result: tokio::task::JoinHandle<DeleteResult>,
     },
 }
 
 impl LocalStorageDeleter {
     pub fn new(datastore: Arc<DataStore>) -> Self {
-        let duration = std::time::Duration::from_millis(250);
+        let duration = std::time::Duration::from_secs(15);
 
         LocalStorageDeleter {
             datastore,
-            // Create a client with a _short_ timeout, don't block this task
+            // Create a client with a short timeout, don't block this task
             // waiting for request responses.
             reqwest_client: reqwest::ClientBuilder::new()
                 .connect_timeout(duration)
@@ -63,17 +81,44 @@ impl LocalStorageDeleter {
         }
     }
 
-    async fn delete_unencrypted_allocation(
+    async fn request_disk_allocation_deletion(
         &self,
         log: &Logger,
         opctx: &OpContext,
-        allocation: &LocalStorageUnencryptedDatasetAllocation,
-    ) -> DeleteResult {
+        disk: LocalStorageDisk,
+    ) -> DeleteRequest {
+        let Some(allocation) = &disk.local_storage_dataset_allocation else {
+            // No allocation was made for this disk
+            return DeleteRequest::ShortCircuit {
+                disk,
+                reason: DeleteShortCircuitReason::NoAllocation,
+            };
+        };
+
+        match allocation {
+            LocalStorageAllocation::Unencrypted(_) => {
+                // continue with rest of function
+            }
+
+            LocalStorageAllocation::Encrypted(allocation) => {
+                // Until encrypted local storage is supported, seeing a request
+                // to clean up disks of that type should be noted as a error.
+                let message = format!(
+                    "request to delete disk {} encrypted allocation {}",
+                    disk.id(),
+                    allocation.id(),
+                );
+
+                return DeleteRequest::Error { disk, message };
+            }
+        }
+
         let sled_id = allocation.sled_id();
         let zpool_id = allocation.pool_id().upcast();
 
         // Check if either the sled or disk backing the zpool was expunged. If
-        // we can't determine then bail and wait for the next task activation.
+        // we can't determine this then bail and wait for the next task
+        // activation.
 
         let sled_in_service =
             match self.datastore.check_sled_in_service(&opctx, sled_id).await {
@@ -86,13 +131,16 @@ impl LocalStorageDeleter {
                         InlineErrorChain::new(&e),
                     );
 
-                    return DeleteResult::Error { message };
+                    return DeleteRequest::Error { disk, message };
                 }
             };
 
         if !sled_in_service {
             // Sled's been expunged, so consider the local storage deleted.
-            return DeleteResult::SledExpunged;
+            return DeleteRequest::ShortCircuit {
+                disk,
+                reason: DeleteShortCircuitReason::SledExpunged,
+            };
         }
 
         let zpool_in_service =
@@ -107,14 +155,17 @@ impl LocalStorageDeleter {
                         InlineErrorChain::new(&e),
                     );
 
-                    return DeleteResult::Error { message };
+                    return DeleteRequest::Error { disk, message };
                 }
             };
 
         if !zpool_in_service {
             // The disk backing the zpool's been expunged, so consider the local
             // storage deleted.
-            return DeleteResult::ZpoolExpunged;
+            return DeleteRequest::ShortCircuit {
+                disk,
+                reason: DeleteShortCircuitReason::ZpoolExpunged,
+            };
         }
 
         // Now that all checks are done, get a sled agent client and make the
@@ -123,7 +174,7 @@ impl LocalStorageDeleter {
         let request = LocalStorageDatasetDeleteRequest {
             zpool_id: allocation.pool_id(),
             dataset_id: allocation.id(),
-            encrypted_at_rest: false,
+            encrypted_at_rest: allocation.encrypted_at_rest(),
         };
 
         let sled_agent_client = match nexus_networking::sled_client_ext(
@@ -143,29 +194,37 @@ impl LocalStorageDeleter {
                     InlineErrorChain::new(&e),
                 );
 
-                return DeleteResult::Error { message };
+                return DeleteRequest::Error { disk, message };
             }
         };
 
-        match sled_agent_client.local_storage_dataset_delete(&request).await {
-            Ok(_) => DeleteResult::Deleted,
+        DeleteRequest::Spawned {
+            disk,
+            result: tokio::spawn(async move {
+                match sled_agent_client
+                    .local_storage_dataset_delete(&request)
+                    .await
+                {
+                    Ok(_) => DeleteResult::Deleted,
 
-            Err(progenitor_client::Error::CommunicationError(e))
-                if e.is_timeout() =>
-            {
-                // The request timed out but is still being processed by the
-                // remote sled-agent.
-                DeleteResult::WaitForNextActivation
-            }
+                    Err(progenitor_client::Error::CommunicationError(e))
+                        if e.is_timeout() =>
+                    {
+                        // The request timed out but is still being processed by the
+                        // remote sled-agent.
+                        DeleteResult::TimedOut
+                    }
 
-            Err(e) => {
-                let message = format!(
-                    "error sending local_storage_dataset_delete: {}",
-                    InlineErrorChain::new(&e),
-                );
+                    Err(e) => {
+                        let message = format!(
+                            "error sending local_storage_dataset_delete: {}",
+                            InlineErrorChain::new(&e),
+                        );
 
-                DeleteResult::Error { message }
-            }
+                        DeleteResult::Error { message }
+                    }
+                }
+            }),
         }
     }
 
@@ -176,9 +235,21 @@ impl LocalStorageDeleter {
         let log = &opctx.log;
         let mut status = LocalStorageDeleteStatus::default();
 
-        let mut disks_needing_clean_up = match self
+        let disks_needing_clean_up = match self
             .datastore
-            .deleted_disks_with_undeleted_local_storage(opctx)
+            .deleted_disks_with_undeleted_local_storage(
+                opctx,
+                // Operate on a maximum of 128 disks per task invocation. If
+                // users create disks very quickly during the time between this
+                // task's periodic invocation (and then deletes them all), we
+                // could be faced with many disks to delete. Each Nexus that
+                // then activates this task would fetch all those disks for
+                // deletion, potentially causing each of the tasks to take a
+                // long time.
+                &DataPageParams::ascending_with_limit(
+                    NonZeroU32::new(128).unwrap(),
+                ),
+            )
             .await
         {
             Ok(v) => v,
@@ -197,128 +268,83 @@ impl LocalStorageDeleter {
             }
         };
 
-        // Report the remaining work to do in the status.
+        let mut delete_requests =
+            Vec::with_capacity(disks_needing_clean_up.len());
 
-        status.total_allocations_to_delete = disks_needing_clean_up.len();
+        // Attempt deleting the local storage allocation before marking the
+        // allocation's database record as deleted. If the delete request to the
+        // sled agent does not succeed, try again in the next task activation.
+        // The delete requests themselves are spawned into tokio tasks.
 
-        // Operate on a maximum of 128 disks per task invocation. If users
-        // create disks very quickly during the time between this task's
-        // periodic invocation (and then deletes them all), we could be faced
-        // with many disks to delete. Each Nexus that then activates this task
-        // would fetch all those disks for deletion, potentially causing each of
-        // the tasks to take a long time.
-        //
-        // The timeout for the reqwest client created by this task is 250
-        // milliseconds, so the maximum time (assuming the requests to all
-        // sled-agents time out) is 128 * 250 ms = 32 seconds, roughly
-        // approximating the periodic task wakeup time. Note that each local
-        // storage disk delete will activate this task, so the latency between
-        // the delete request and the actual deletion should remain low,
-        // assuming there aren't too many lingering problematic allocations.
+        for disk in disks_needing_clean_up {
+            delete_requests.push(
+                self.request_disk_allocation_deletion(log, opctx, disk).await,
+            );
+        }
 
-        status.page_size = 128;
+        for request in delete_requests {
+            let disk = match request {
+                DeleteRequest::ShortCircuit { disk, reason } => {
+                    match reason {
+                        DeleteShortCircuitReason::NoAllocation => {
+                            // `deleted_disks_with_undeleted_local_storage`
+                            // should not be returning these disks! Return an
+                            // error.
 
-        // Randomize the list: if there are lingering problematic allocations
-        // at the beginning of `disks_needing_clean_up` it could wedge the task.
-
-        disks_needing_clean_up.shuffle(&mut rand::rng());
-
-        for disk in disks_needing_clean_up.into_iter().take(status.page_size) {
-            let Some(allocation) = &disk.local_storage_dataset_allocation
-            else {
-                // No allocation was made for this disk
-                continue;
-            };
-
-            // Attempt deleting the local storage before removing the
-            // database record. If the delete does not succeed, try again in
-            // the next task activation.
-
-            match allocation {
-                LocalStorageAllocation::Unencrypted(allocation) => {
-                    match self
-                        .delete_unencrypted_allocation(log, opctx, &allocation)
-                        .await
-                    {
-                        DeleteResult::Deleted => {
                             let s = format!(
-                                "deleted disk {} allocation {}",
+                                "disk {} does not have a local storage \
+                                allocation",
                                 disk.id(),
-                                allocation.id(),
                             );
 
-                            info!(log, "{s}");
-                            status.delete_results.push(s);
+                            error!(log, "{s}");
+                            status.errors.push(s);
 
-                            // Drop through to deallocation once deletion
-                            // succeeds.
-                        }
-
-                        DeleteResult::SledExpunged => {
-                            let s = format!(
-                                "disk {} allocation {} sled expunged, \
-                                considering deleted",
-                                disk.id(),
-                                allocation.id(),
-                            );
-
-                            info!(log, "{s}");
-                            status.delete_results.push(s);
-
-                            // Drop through to deallocation, deletion not
-                            // required.
-                        }
-
-                        DeleteResult::ZpoolExpunged => {
-                            let s = format!(
-                                "disk {} allocation {} zpool expunged, \
-                                considering deleted",
-                                disk.id(),
-                                allocation.id(),
-                            );
-
-                            info!(log, "{s}");
-                            status.delete_results.push(s);
-
-                            // Drop through to deallocation, deletion not
-                            // required.
-                        }
-
-                        DeleteResult::WaitForNextActivation => {
-                            let s = format!(
-                                "requested deletion of disk {} allocation \
-                                {}",
-                                disk.id(),
-                                allocation.id(),
-                            );
-
-                            info!(log, "{s}");
-                            status.delete_results.push(s);
-
-                            // Cannot deallocate the record until deletion
-                            // succeeds.
                             continue;
                         }
 
-                        DeleteResult::Error { message } => {
-                            info!(log, "{message}");
-                            status.errors.push(message);
+                        DeleteShortCircuitReason::SledExpunged => {
+                            let s = format!(
+                                "disk {} allocation {:?} sled expunged, \
+                                considering deleted",
+                                disk.id(),
+                                disk.allocation_id(),
+                            );
 
-                            // Cannot deallocate the record until deletion
-                            // succeeds.
-                            continue;
+                            info!(log, "{s}");
+                            status.delete_results.push(s);
+
+                            // Continue through to allocation record deletion,
+                            // Nexus can treat this disks' allocation as gone.
+
+                            disk
+                        }
+
+                        DeleteShortCircuitReason::ZpoolExpunged => {
+                            let s = format!(
+                                "disk {} allocation {:?} zpool expunged, \
+                                considering deleted",
+                                disk.id(),
+                                disk.allocation_id(),
+                            );
+
+                            info!(log, "{s}");
+                            status.delete_results.push(s);
+
+                            // Continue through to allocation record deletion,
+                            // Nexus can treat this disks' allocation as gone.
+
+                            disk
                         }
                     }
                 }
 
-                LocalStorageAllocation::Encrypted(allocation) => {
-                    // Until encrypted local storage is supported, seeing a
-                    // request to clean up disks of that type should be
-                    // noted as a error.
+                DeleteRequest::Error { disk, message } => {
                     let s = format!(
-                        "request to delete disk {} encrypted allocation {}",
+                        "could not request deletion of disk {} allocation \
+                        {:?}: {message}",
                         disk.id(),
-                        allocation.id(),
+                        disk.allocation_id(),
                     );
 
                     error!(log, "{s}");
@@ -326,7 +352,73 @@ impl LocalStorageDeleter {
 
                     continue;
                 }
-            }
+
+                DeleteRequest::Spawned { disk, result } => {
+                    // Check the returned DeleteResult to see if allocation
+                    // record can be deleted.
+
+                    let result = match result.await {
+                        Ok(result) => result,
+                        Err(join_error) => {
+                            let s = format!(
+                                "request to delete disk {} allocation {:?} \
+                                failed with join error {:?}",
+                                disk.id(),
+                                disk.allocation_id(),
+                                join_error,
+                            );
+
+                            error!(log, "{s}");
+                            status.errors.push(s);
+                            continue;
+                        }
+                    };
+
+                    match result {
+                        DeleteResult::Deleted => {
+                            let s = format!(
+                                "deleted disk {} allocation {:?}",
+                                disk.id(),
+                                disk.allocation_id(),
+                            );
+
+                            info!(log, "{s}");
+                            status.delete_results.push(s);
+
+                            // Continue through to allocation record deletion.
+
+                            disk
+                        }
+
+                        DeleteResult::TimedOut => {
+                            let s = format!(
+                                "requested deletion of disk {} allocation \
+                                {:?} timed out",
+                                disk.id(),
+                                disk.allocation_id(),
+                            );
+
+                            info!(log, "{s}");
+                            status.delete_results.push(s);
+
+                            // Cannot delete allocation record until the
+                            // deletion request to the sled agent succeeds.
+
+                            continue;
+                        }
+
+                        DeleteResult::Error { message } => {
+                            info!(log, "{message}");
+                            status.errors.push(message);
+
+                            // Cannot delete allocation record until the
+                            // deletion request to the sled agent succeeds.
+
+                            continue;
+                        }
+                    }
+                }
+            };
 
             match self
                 .datastore
@@ -335,9 +427,9 @@ impl LocalStorageDeleter {
             {
                 Ok(()) => {
                     let s = format!(
-                        "deallocated disk {} allocation {}",
+                        "deleted disk {} allocation {:?} record",
                         disk.id(),
-                        allocation.id(),
+                        disk.allocation_id(),
                     );
 
                     info!(log, "{s}");

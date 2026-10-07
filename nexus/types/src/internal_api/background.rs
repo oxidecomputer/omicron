@@ -1644,8 +1644,6 @@ pub struct PhysicalDiskAdoptionStatus {
 /// The status of a `local_storage_delete` background task activation
 #[derive(Serialize, Deserialize, Default, Debug, PartialEq, Eq)]
 pub struct LocalStorageDeleteStatus {
-    pub total_allocations_to_delete: usize,
-    pub page_size: usize,
     pub delete_results: Vec<String>,
     pub deallocate_results: Vec<String>,
     pub errors: Vec<String>,
