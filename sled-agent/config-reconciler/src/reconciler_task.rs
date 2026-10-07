@@ -309,9 +309,8 @@ impl LatestReconciliationResult {
 /// Returns `datasets`, minus any on `zpools_being_adopted` that adoption
 /// doesn't need (see [`datasets::is_required_per_disk_dataset()`]).
 ///
-/// Otherwise, we'd create transient zone datasets that cleaning up former
-/// zone roots would then destroy, and leave datasets on disks that fail
-/// adoption.
+/// Cleaning up former zone roots would destroy any transient zone datasets
+/// we created on those zpools, so the rest wait until cleanup is done.
 fn limit_adopting_zpools_to_required_datasets(
     datasets: &IdOrdMap<DatasetConfig>,
     zpools_being_adopted: &BTreeSet<ZpoolName>,
