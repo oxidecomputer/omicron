@@ -16,7 +16,15 @@ pub struct GatewayClient {
     pub client: gateway_client::Client,
 }
 
-pub type ClientError = gateway_client::Error<gateway_client::types::Error>;
+#[derive(Debug, thiserror::Error)]
+pub enum RackIdError {
+    #[error("this MGS' rack ID has not been set")]
+    RackIdNotSet,
+    #[error(transparent)]
+    Other(#[from] ClientError),
+}
+
+type ClientError = gateway_client::Error<gateway_client::types::Error>;
 
 impl GatewayClient {
     pub fn from_addr(log: &Logger, addr: SocketAddrV6) -> Self {
@@ -41,13 +49,83 @@ impl GatewayClient {
 
         Ok(addrs.into_iter().map(move |addr| Self::from_addr(log, addr)))
     }
+
+    /// Attempt to determine this gateway's rack ID. This method returns an
+    /// error if the gateway cannot be contacted within `timeout`, or
+    /// immediately if the gateway indicates that it does not yet have a rack
+    /// ID.
+    pub async fn discover_rack_id(
+        &self,
+        log: &Logger,
+        timeout: Duration,
+    ) -> Result<RackUuid, RackIdError> {
+        let client = &self.client;
+        backoff::retry_notify_ext(
+            backoff::retry_policy_internal_service_timeout(timeout),
+            || async move {
+                client
+                    .rack_id_get()
+                    .await
+                    .map(|rsp| rsp.into_inner().rack_id)
+                    .map_err(|e| match e {
+                        // If this gateway has indicated affirmatively that it
+                        // does not have a rack ID, don't bother retrying any
+                        // longer.
+                        ClientError::ErrorResponse(ref rsp)
+                            if rsp.error_code.as_deref()
+                                == Some("RackIdNotSet") =>
+                        {
+                            BackoffError::permanent(RackIdError::RackIdNotSet)
+                        }
+                        e => BackoffError::transient(RackIdError::Other(e)),
+                    })
+            },
+            |e, count, duration| {
+                if matches!(e, RackIdError::RackIdNotSet) {
+                    slog::debug!(
+                        log,
+                        "MGS {} has not had its rack ID set", self.addr;
+                        "addr" => %self.addr,
+                        "attempts" => count,
+                        "elapsed" => ?duration,
+                        "timeout" => ?timeout,
+                    );
+                    return;
+                }
+                const MSG: &str = "failed to determine rack ID for MGS; \
+                    retrying...";
+                if duration < timeout / 2 {
+                    slog::debug!(
+                        log,
+                        "{MSG}";
+                        "error" => InlineErrorChain::new(&e),
+                        "addr" => %self.addr,
+                        "attempts" => count,
+                        "elapsed" => ?duration,
+                        "timeout" => ?timeout,
+                    );
+                } else {
+                    slog::warn!(
+                        log,
+                        "{MSG}";
+                        "error" => InlineErrorChain::new(&e),
+                        "addr" => %self.addr,
+                        "attempts" => count,
+                        "elapsed" => ?duration,
+                        "timeout" => ?timeout,
+                    );
+                }
+            },
+        )
+        .await
+    }
 }
 
 /// A map of [`RackUuid`]s to [`GatewayClient`]s.
 #[derive(Debug)]
 pub struct GatewaysByRack {
     by_rack: iddqd::IdHashMap<RackGateways>,
-    unknown: Vec<(GatewayClient, ClientError)>,
+    unknown: Vec<(GatewayClient, RackIdError)>,
 }
 
 impl GatewaysByRack {
@@ -73,44 +151,10 @@ impl GatewaysByRack {
                     // fairly short timeout here because we don't want one
                     // discovered gateway we are unable to communicate with to
                     // block discovering other, healthy gateways for too long.
-                    const TIMEOUT: Duration = Duration::from_secs(5);
-                    
-                    let client = &gateway.client;
-                    let rack_id = backoff::retry(
-                        backoff::retry_policy_internal_service_timeout(TIMEOUT),
-                        || async move {
-                            client
-                                .rack_id_get()
-                                .await
-                                .map(|rsp| rsp.into_inner().rack_id)
-                                .map_err(|e| match e {
-                                    // If this gateway has indicated
-                                    // affirmatively that it does not have a
-                                    // rack ID, don't bother retrying for
-                                    // another 5 seconds...
-                                    ClientError::ErrorResponse(ref rsp)
-                                        if rsp.error_code.as_deref()
-                                            == Some("RackIdNotSet") =>
-                                    {
-                                        BackoffError::permanent(e)
-                                    }
-                                    e => BackoffError::transient(e),
-                                })
-                        },
-                    )
-                    .await;
-                    match rack_id {
-                        Ok(rack_id) => (Ok(rack_id), gateway),
-                        Err(e) => {
-                            slog::warn!(
-                                log,
-                                "failed to determine rack ID for resolved MGS";
-                                "error" => InlineErrorChain::new(&e),
-                                "gateway_addr" => %gateway.addr,
-                            );
-                            (Err(e), gateway)
-                        }
-                    }
+                    let maybe_id = gateway
+                        .discover_rack_id(&log, Duration::from_secs(5))
+                        .await;
+                    (maybe_id, gateway)
                 })
                 .await;
             if let Some((maybe_id, gateway)) = joined {
@@ -135,7 +179,7 @@ impl GatewaysByRack {
 
     fn insert_discovery_result(
         &mut self,
-        rack_id: Result<RackUuid, ClientError>,
+        rack_id: Result<RackUuid, RackIdError>,
         gateway: GatewayClient,
     ) {
         match rack_id {
@@ -192,7 +236,7 @@ impl GatewaysByRack {
     /// Borrows the set of resolved clients for which the rack ID is unknown,
     /// along with the last error encountered while trying to discover the rack
     /// ID.
-    pub fn unknown(&self) -> &[(GatewayClient, ClientError)] {
+    pub fn unknown(&self) -> &[(GatewayClient, RackIdError)] {
         &self.unknown
     }
 }
