@@ -34,7 +34,7 @@ pub enum PerDiskDatasetKind {
 
 // TODO-correctness: This value of 100GiB is a pretty wild guess, and should be
 // tuned as needed.
-const DEBUG_DATASET_QUOTA: ByteCount = ByteCount::from_gibibytes_u32(100);
+const U2_DEBUG_DATASET_QUOTA: ByteCount = ByteCount::from_gibibytes_u32(100);
 
 impl PerDiskDatasetKind {
     /// Returns the properties of this dataset.
@@ -44,7 +44,7 @@ impl PerDiskDatasetKind {
                 compression: CompressionAlgorithm::GzipN {
                     level: GzipLevel::new::<9>(),
                 },
-                quota: Some(DEBUG_DATASET_QUOTA),
+                quota: Some(U2_DEBUG_DATASET_QUOTA),
                 reservation: None,
             },
             Self::TransientZoneRoot
