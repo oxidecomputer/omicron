@@ -21,8 +21,8 @@ workspace = true
 ahash = { version = "0.8.12" }
 aho-corasick = { version = "1.1.4" }
 anyhow = { version = "1.0.104", features = ["backtrace"] }
-aws-lc-rs = { version = "1.16.3", features = ["prebuilt-nasm"] }
-aws-lc-sys = { version = "0.40.0", default-features = false, features = ["prebuilt-nasm"] }
+aws-lc-rs = { version = "1.18.1", features = ["prebuilt-nasm"] }
+aws-lc-sys = { version = "0.45.0", default-features = false, features = ["prebuilt-nasm"] }
 base16ct = { version = "0.2.0", default-features = false, features = ["alloc"] }
 base64 = { version = "0.22.1" }
 base64ct = { version = "1.8.3", default-features = false, features = ["std"] }
@@ -66,7 +66,7 @@ futures-core = { version = "0.3.32" }
 futures-sink = { version = "0.3.32" }
 futures-task = { version = "0.3.32", default-features = false, features = ["std"] }
 futures-util = { version = "0.3.32", features = ["channel", "io", "sink"] }
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "438cd185666d5f164548885873f0f5df9a38eed1", features = ["std"] }
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "c29e6832c4b230e361253bc9b5e1ae73413a124f", features = ["std"] }
 generic-array = { version = "0.14.7", default-features = false, features = ["more_lengths", "zeroize"] }
 getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.17", default-features = false, features = ["js", "rdrand", "std"] }
 getrandom-9fbad63c4bcf4a8f = { package = "getrandom", version = "0.4.3", default-features = false, features = ["std", "sys_rng", "wasm_js"] }
@@ -122,11 +122,10 @@ rand_chacha-468e82937335b1c9 = { package = "rand_chacha", version = "0.3.1", def
 regex = { version = "1.12.3" }
 regex-automata = { version = "0.4.14", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "std", "unicode"] }
 regex-syntax = { version = "0.8.10" }
-reqwest-594e8ee84c453af0 = { package = "reqwest", version = "0.13.2", features = ["blocking", "cookies", "json", "query", "stream"] }
-reqwest-5ef9efb8ec2df382 = { package = "reqwest", version = "0.12.28", features = ["blocking", "json", "stream"] }
+reqwest = { version = "0.13.5", features = ["blocking", "cookies", "json", "query", "stream"] }
 rsa = { version = "0.9.10", features = ["serde", "sha2"] }
 rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.1.4", features = ["fs"] }
-rustls = { version = "0.23.41" }
+rustls = { version = "0.23.45" }
 schemars = { version = "0.8.22", features = ["bytes", "chrono", "semver", "url", "uuid1"] }
 scopeguard = { version = "1.2.0" }
 semver = { version = "1.0.28", features = ["serde"] }
@@ -159,7 +158,6 @@ toml = { version = "0.7.8" }
 toml_datetime = { version = "0.6.11", default-features = false, features = ["serde"] }
 toml_edit-3c51e837cfc5589a = { package = "toml_edit", version = "0.22.27", features = ["serde"] }
 toml_parser = { version = "1.1.2" }
-tough = { version = "0.22.0", default-features = false, features = ["http"] }
 tracing = { version = "0.1.44", features = ["log"] }
 tufaceous-artifact = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", default-features = false, features = ["hubtools", "proptest", "schemars"] }
 typenum = { version = "1.20.1", default-features = false, features = ["const-generics"] }
@@ -178,8 +176,8 @@ zip-181b0d20215bb231 = { package = "zip", version = "8.6.0", default-features = 
 ahash = { version = "0.8.12" }
 aho-corasick = { version = "1.1.4" }
 anyhow = { version = "1.0.104", features = ["backtrace"] }
-aws-lc-rs = { version = "1.16.3", features = ["prebuilt-nasm"] }
-aws-lc-sys = { version = "0.40.0", default-features = false, features = ["prebuilt-nasm"] }
+aws-lc-rs = { version = "1.18.1", features = ["prebuilt-nasm"] }
+aws-lc-sys = { version = "0.45.0", default-features = false, features = ["prebuilt-nasm"] }
 base16ct = { version = "0.2.0", default-features = false, features = ["alloc"] }
 base64 = { version = "0.22.1" }
 base64ct = { version = "1.8.3", default-features = false, features = ["std"] }
@@ -225,7 +223,7 @@ futures-core = { version = "0.3.32" }
 futures-sink = { version = "0.3.32" }
 futures-task = { version = "0.3.32", default-features = false, features = ["std"] }
 futures-util = { version = "0.3.32", features = ["channel", "io", "sink"] }
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "438cd185666d5f164548885873f0f5df9a38eed1", features = ["std"] }
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "c29e6832c4b230e361253bc9b5e1ae73413a124f", features = ["std"] }
 generic-array = { version = "0.14.7", default-features = false, features = ["more_lengths", "zeroize"] }
 getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.17", default-features = false, features = ["js", "rdrand", "std"] }
 getrandom-9fbad63c4bcf4a8f = { package = "getrandom", version = "0.4.3", default-features = false, features = ["std", "sys_rng", "wasm_js"] }
@@ -282,11 +280,10 @@ rand_chacha-468e82937335b1c9 = { package = "rand_chacha", version = "0.3.1", def
 regex = { version = "1.12.3" }
 regex-automata = { version = "0.4.14", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "std", "unicode"] }
 regex-syntax = { version = "0.8.10" }
-reqwest-594e8ee84c453af0 = { package = "reqwest", version = "0.13.2", features = ["blocking", "cookies", "json", "query", "stream"] }
-reqwest-5ef9efb8ec2df382 = { package = "reqwest", version = "0.12.28", features = ["blocking", "json", "stream"] }
+reqwest = { version = "0.13.5", features = ["blocking", "cookies", "json", "query", "stream"] }
 rsa = { version = "0.9.10", features = ["serde", "sha2"] }
 rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.1.4", features = ["fs"] }
-rustls = { version = "0.23.41" }
+rustls = { version = "0.23.45" }
 schemars = { version = "0.8.22", features = ["bytes", "chrono", "semver", "url", "uuid1"] }
 scopeguard = { version = "1.2.0" }
 semver = { version = "1.0.28", features = ["serde"] }
@@ -323,7 +320,6 @@ toml = { version = "0.7.8" }
 toml_datetime = { version = "0.6.11", default-features = false, features = ["serde"] }
 toml_edit-3c51e837cfc5589a = { package = "toml_edit", version = "0.22.27", features = ["serde"] }
 toml_parser = { version = "1.1.2" }
-tough = { version = "0.22.0", default-features = false, features = ["http"] }
 tracing = { version = "0.1.44", features = ["log"] }
 tufaceous-artifact = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", default-features = false, features = ["hubtools", "proptest", "schemars"] }
 typenum = { version = "1.20.1", default-features = false, features = ["const-generics"] }

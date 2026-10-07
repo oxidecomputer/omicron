@@ -71,7 +71,7 @@ allow_local_sled_sp_reset = true
 # if there is a miscabling that results in an unsolvable system (e.g.,
 # determination 0 reports "switch0" and determination 1 reports "switch1").
 [[switch.location.determination]]
-interfaces = ["fake-sled0", "fake-sled1"]
+interfaces = ["fake-sled0", "fake-sled1", "fake-psc0"]
 sp_port_1 = ["switch0"]
 sp_port_2 = ["switch1"]
 
@@ -115,6 +115,14 @@ addr = "[::1]:0"
 ereport-addr = "[::1]:0"
 ignition-target = 3
 location = { switch0 = ["sled", 1], switch1 = ["sled", 1] }
+
+[[switch.port]]
+kind = "simulated"
+fake-interface = "fake-psc0"
+addr = "[::1]:0"
+ereport-addr = "[::1]:0"
+ignition-target = 4
+location = { switch0 = ["power", 0], switch1 = ["power", 0] }
 
 #
 # Configuration for SP sensor metrics polling
