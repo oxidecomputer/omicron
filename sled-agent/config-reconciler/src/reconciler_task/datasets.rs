@@ -108,10 +108,9 @@ pub(super) struct OmicronDatasets {
     datasets: IdOrdMap<OmicronDataset>,
     orphaned_datasets: IdOrdMap<OrphanedDataset>,
     dataset_task: DatasetTaskHandle,
-    // Set if our most recent attempt to ensure datasets couldn't reach the
-    // dataset task, in which case `datasets` may be missing entries (or have
-    // out-of-date ones).
-    last_ensure_failed: Option<DatasetTaskError>,
+    // Set if we couldn't reach the dataset task on our last attempt, in which
+    // case `datasets` may be missing or out-of-date entries.
+    dataset_task_unavailable: bool,
 }
 
 impl OmicronDatasets {
@@ -134,7 +133,7 @@ impl OmicronDatasets {
             datasets,
             orphaned_datasets: IdOrdMap::new(),
             dataset_task,
-            last_ensure_failed: None,
+            dataset_task_unavailable: false,
         }
     }
 
@@ -143,7 +142,7 @@ impl OmicronDatasets {
             datasets: IdOrdMap::default(),
             orphaned_datasets: IdOrdMap::new(),
             dataset_task,
-            last_ensure_failed: None,
+            dataset_task_unavailable: false,
         }
     }
 
@@ -320,11 +319,11 @@ impl OmicronDatasets {
                     log, "failed to contact dataset task";
                     InlineErrorChain::new(&err),
                 );
-                self.last_ensure_failed = Some(err.clone());
+                self.dataset_task_unavailable = true;
                 return Err(err);
             }
         };
-        self.last_ensure_failed = None;
+        self.dataset_task_unavailable = false;
 
         for DatasetEnsureResult { config, result } in results {
             let state = match result {
@@ -367,9 +366,7 @@ impl OmicronDatasets {
     }
 
     pub(super) fn has_retryable_error(&self) -> bool {
-        // If we couldn't reach the dataset task, `datasets` may be missing
-        // entries (or have out-of-date ones), so we need to try again.
-        self.last_ensure_failed.is_some()
+        self.dataset_task_unavailable
             || self.datasets.iter().any(|d| match &d.state {
                 DatasetState::Ensured => false,
                 DatasetState::FailedToEnsure(err) => err.is_retryable(),
