@@ -1309,14 +1309,24 @@ impl InstanceRunner {
         //
         // If there is nothing here, then there is no `RunningZone`, and so
         // there's no zone or resources to clean up at all.
-        let mut running_state = if let Some(state) = self.running_state.take() {
-            state
-        } else {
+        //
+        // IMPORTANT: We don't take out of the zone here, only at the end of the
+        // method, after all fallible operations have completed. This method can
+        // be called in a few different ways, including from futures that can be
+        // _cancelled_. See the construction of the `op` inside the
+        // `Self::run()` method's select!, for example. If we're handling an
+        // external request to operate on an instance, we construct a future to
+        // effect that change. But we then immediately select! over that future,
+        // and also a cancellation request. Should one arrive, the first future
+        // is dropped, and this method is eventually called. So if we're already
+        // in this method, we need to leave the running state alone for the
+        // second future to find it and continue to clean up.
+        let Some(running_state) = self.running_state.as_mut() else {
             debug!(
                 self.log,
-                "Instance::terminate() called with no running state"
+                "InstanceRunner::remove_propolis_zone() called with \
+                no running state"
             );
-
             return;
         };
 
@@ -1361,48 +1371,46 @@ impl InstanceRunner {
         // https://github.com/oxidecomputer/omicron/issues/7881. Also, calling
         // `RunningZone::stop()` squashes errors into strings, and we need to
         // handle invalid state transitions.
+        //
+        // Note that we're intentionally trying forever here, which does have
+        // some justification. We really, really don't want to report to Nexus
+        // that the zone is gone until we're sure it is. Otherwise, it can
+        // either report the incorrect state or even retry creating the instance
+        // in the first place, which will cause conflicts when trying to start a
+        // zone of the same name.
+        //
+        // It's also not clear what to do if removing the zone fails. We could
+        // panic (which is what previous code has done), but that has a huge
+        // blast radius since the sled-agent restarts and destroys all zones.
+        // But there aren't any other great choices, so retrying forever seems
+        // slightly better.
         warn!(self.log, "Halting and removing zone: {}", zname);
-        const MAX_SHUTDOWN_TIMEOUT: Duration = Duration::from_mins(5);
-        let result = tokio::time::timeout(
-            MAX_SHUTDOWN_TIMEOUT,
-            omicron_common::backoff::retry(
-                omicron_common::backoff::retry_policy_local(),
-                || async {
-                    self.zone_builder_factory
-                        .zones_api()
-                        .halt_and_remove_logged(&self.log, &zname)
-                        .await
-                        .map_err(|e| {
-                            if e.is_invalid_state() {
-                                BackoffError::transient(e)
-                            } else {
-                                BackoffError::permanent(e)
-                            }
-                        })
-                },
-            ),
+        omicron_common::backoff::retry(
+            omicron_common::backoff::retry_policy_local(),
+            || async {
+                self.zone_builder_factory
+                    .zones_api()
+                    .halt_and_remove_logged(&self.log, &zname)
+                    .await
+                    .map_err(BackoffError::transient)
+            },
         )
-        .await;
-        match result {
-            Ok(Ok(_)) => debug!(
-                self.log,
-                "Stopped Propolis zone";
-                "zone_name" => zname,
-            ),
-            Ok(Err(e)) => panic!("{e}"),
-            Err(_) => panic!(
-                "Zone {zname:?} could not be halted within \
-                {MAX_SHUTDOWN_TIMEOUT:?}",
-            ),
-        }
+        .await
+        .expect("infinite retry loop stopping propolis zone");
+        info!(self.log, "Stopped Propolis zone"; "zone_name" => zname);
 
         // See if there are any runtime objects to clean up.
         //
-        // We already removed the zone above but mark it as stopped.
+        // We already removed the zone above, but directly through the `Zones`
+        // interface. That doesn't actually update the in-memory representation
+        // of the zone here, so do that now.
         running_state.running_zone.stop().await.unwrap();
 
         // Remove any OPTE ports from the port manager.
         running_state.running_zone.release_opte_ports();
+
+        // Now that we're completely done, actually remove the zone and drop it.
+        self.running_state.take();
     }
 
     fn merge_existing_ip_stack_with_request(
