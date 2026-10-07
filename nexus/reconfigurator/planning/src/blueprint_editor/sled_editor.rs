@@ -53,11 +53,12 @@ use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use scalar::ScalarEditor;
 use sled_agent_types::disk::M2Slot;
-use sled_agent_types::disk::PER_DISK_DATASET_KINDS;
+use sled_agent_types::disk::PerDiskDatasetKind;
 use sled_agent_types::inventory::MupdateOverrideBootInventory;
 use sled_agent_types::inventory::ZoneKind;
 use std::mem;
 use std::net::Ipv6Addr;
+use strum::IntoEnumIterator;
 use underlay_ip_allocator::SledUnderlayIpAllocator;
 
 mod datasets;
@@ -445,7 +446,7 @@ impl SledEditor {
         self.disks.ensure(disk)?;
 
         // Every disk also gets the per-disk datasets.
-        for kind in PER_DISK_DATASET_KINDS {
+        for kind in PerDiskDatasetKind::iter() {
             self.datasets.ensure_in_service(
                 PartialDatasetConfig::for_per_disk_dataset(zpool, kind),
                 rng,

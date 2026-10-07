@@ -24,9 +24,8 @@ use omicron_uuid_kinds::ExternalZpoolUuid;
 use omicron_uuid_kinds::InternalZpoolUuid;
 use sled_agent_types::disk::DatasetConfig;
 use sled_agent_types::disk::DiskVariant;
-use sled_agent_types::disk::PER_DISK_DATASET_KINDS;
+use sled_agent_types::disk::PerDiskDatasetKind;
 use sled_agent_types::disk::SharedDatasetConfig;
-use sled_agent_types::disk::per_disk_dataset_config;
 use sled_storage::config::MountConfig;
 use sled_storage::dataset::M2_DEBUG_DATASET;
 use sled_storage::disk::Disk;
@@ -40,6 +39,7 @@ use std::io;
 use std::io::BufRead;
 use std::process::Command;
 use std::sync::Arc;
+use strum::IntoEnumIterator;
 
 pub struct ZfsTestHarness {
     // Always `Some(_)`, except in `cleanup()` and `drop()`.
@@ -285,10 +285,9 @@ impl Inner {
         // In production, the config reconciler creates the per-disk datasets
         // on U.2s after adopting them; do the same here.
         if variant == DiskVariant::U2 {
-            for kind in PER_DISK_DATASET_KINDS {
-                let inner = per_disk_dataset_config(&kind)
-                    .expect("per-disk dataset kinds have configs");
-                let name = DatasetName::new(zpool, kind);
+            for kind in PerDiskDatasetKind::iter() {
+                let inner = kind.config();
+                let name = DatasetName::new(zpool, kind.into());
                 let details = DatasetCreationDetails {
                     zoned: name.kind().zoned(),
                     mountpoint: Mountpoint(

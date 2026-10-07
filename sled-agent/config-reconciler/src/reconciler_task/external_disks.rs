@@ -1275,10 +1275,10 @@ mod tests {
     use super::*;
     use assert_matches::assert_matches;
     use illumos_utils::zpool::ZpoolName;
-    use omicron_common::disk::DatasetKind;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::ZpoolUuid;
     use sled_agent_types::disk::DiskIdentity;
+    use sled_agent_types::disk::PerDiskDatasetKind;
     use sled_hardware::DiskFirmware;
     use sled_hardware::DiskPaths;
     use sled_hardware::PooledDisk;
@@ -1972,7 +1972,7 @@ mod tests {
                 if *zpool == bad {
                     Err(RequiredDatasetError::NotInConfig {
                         zpool: *zpool,
-                        kind: DatasetKind::TransientZoneRoot,
+                        kind: PerDiskDatasetKind::TransientZoneRoot,
                     })
                 } else {
                     Ok(())

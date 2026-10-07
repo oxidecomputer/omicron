@@ -67,9 +67,8 @@ use sled_agent_client::{
 use sled_agent_types::disk::CompressionAlgorithm;
 use sled_agent_types::disk::DatasetConfig;
 use sled_agent_types::disk::DiskVariant;
-use sled_agent_types::disk::PER_DISK_DATASET_KINDS;
+use sled_agent_types::disk::PerDiskDatasetKind;
 use sled_agent_types::disk::SharedDatasetConfig;
-use sled_agent_types::disk::per_disk_dataset_config;
 use sled_agent_types::inventory::NetworkInterface;
 use sled_agent_types::inventory::NetworkInterfaceKind;
 use sled_agent_types::inventory::SourceNatConfigError;
@@ -82,6 +81,7 @@ use slog_error_chain::SlogInlineError;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::num::Wrapping;
+use strum::IntoEnumIterator;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -396,13 +396,11 @@ impl ServicePlan {
             // Add the datasets that every U.2 has to the blueprint. After RSS,
             // the Reconfigurator planner maintains these same datasets.
             for zpool in &sled_info.u2_zpools {
-                for kind in PER_DISK_DATASET_KINDS {
-                    let inner = per_disk_dataset_config(&kind)
-                        .expect("per-disk dataset kinds have configs");
+                for kind in PerDiskDatasetKind::iter() {
                     let config = DatasetConfig {
                         id: DatasetUuid::new_v4(),
-                        name: DatasetName::new(*zpool, kind),
-                        inner,
+                        name: DatasetName::new(*zpool, kind.into()),
+                        inner: kind.config(),
                     };
                     sled_info.request.datasets.insert(config.id, config);
                 }

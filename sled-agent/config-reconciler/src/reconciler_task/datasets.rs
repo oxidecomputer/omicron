@@ -30,6 +30,7 @@ use omicron_common::disk::DatasetName;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use sled_agent_types::disk::DatasetConfig;
+use sled_agent_types::disk::PerDiskDatasetKind;
 use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
 use sled_agent_types::inventory::OmicronZoneConfig;
 use sled_agent_types::inventory::OrphanedDataset;
@@ -70,17 +71,17 @@ pub(super) enum ZoneDatasetDependencyError {
 
 /// Per-disk datasets that contain other datasets. A newly-adopted disk is only
 /// put into service once these have been ensured.
-const REQUIRED_PER_DISK_DATASETS: [DatasetKind; 2] =
-    [DatasetKind::Debug, DatasetKind::TransientZoneRoot];
+const REQUIRED_PER_DISK_DATASETS: [PerDiskDatasetKind; 2] =
+    [PerDiskDatasetKind::Debug, PerDiskDatasetKind::TransientZoneRoot];
 
 #[derive(Debug, thiserror::Error)]
 pub(super) enum RequiredDatasetError {
     #[error("{kind:?} dataset on zpool {zpool} is not in the sled config")]
-    NotInConfig { zpool: ZpoolName, kind: DatasetKind },
+    NotInConfig { zpool: ZpoolName, kind: PerDiskDatasetKind },
     #[error("{kind:?} dataset on zpool {zpool} was not ensured")]
     NotEnsured {
         zpool: ZpoolName,
-        kind: DatasetKind,
+        kind: PerDiskDatasetKind,
         #[source]
         err: Arc<DatasetEnsureError>,
     },
@@ -323,7 +324,7 @@ impl OmicronDatasets {
         zpool: &ZpoolName,
     ) -> Result<(), RequiredDatasetError> {
         for kind in REQUIRED_PER_DISK_DATASETS {
-            let name = DatasetName::new(*zpool, kind.clone());
+            let name = DatasetName::new(*zpool, kind.into());
             let Some(dataset) =
                 self.datasets.iter().find(|d| d.config.name == name)
             else {
@@ -462,14 +463,14 @@ mod tests {
         assert_matches!(
             datasets.check_required_datasets(&failed),
             Err(RequiredDatasetError::NotEnsured {
-                kind: DatasetKind::TransientZoneRoot,
+                kind: PerDiskDatasetKind::TransientZoneRoot,
                 ..
             })
         );
         assert_matches!(
             datasets.check_required_datasets(&missing),
             Err(RequiredDatasetError::NotInConfig {
-                kind: DatasetKind::TransientZoneRoot,
+                kind: PerDiskDatasetKind::TransientZoneRoot,
                 ..
             })
         );

@@ -15,8 +15,8 @@ use omicron_common::disk::DatasetName;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use sled_agent_types::disk::CompressionAlgorithm;
+use sled_agent_types::disk::PerDiskDatasetKind;
 use sled_agent_types::disk::SharedDatasetConfig;
-use sled_agent_types::disk::per_disk_dataset_config;
 use std::collections::BTreeMap;
 use std::collections::btree_map::Entry;
 use std::net::SocketAddrV6;
@@ -63,18 +63,15 @@ impl PartialDatasetConfig {
     }
 
     /// Construct the config for one of the datasets every in-service disk
-    /// has (see [`sled_agent_types::disk::PER_DISK_DATASET_KINDS`]).
-    ///
-    /// # Panics
-    ///
-    /// Panics if `kind` is not a per-disk dataset kind.
-    pub fn for_per_disk_dataset(zpool: ZpoolName, kind: DatasetKind) -> Self {
+    /// has.
+    pub fn for_per_disk_dataset(
+        zpool: ZpoolName,
+        kind: PerDiskDatasetKind,
+    ) -> Self {
         let SharedDatasetConfig { compression, quota, reservation } =
-            per_disk_dataset_config(&kind).unwrap_or_else(|| {
-                panic!("{kind:?} is not a per-disk dataset kind")
-            });
+            kind.config();
         Self {
-            name: DatasetName::new(zpool, kind),
+            name: DatasetName::new(zpool, kind.into()),
             address: None,
             quota,
             reservation,
