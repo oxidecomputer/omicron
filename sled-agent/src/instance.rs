@@ -2209,8 +2209,7 @@ impl InstanceRunner {
         }
 
         // Set up the state monitor for the running instance.
-        self.monitor_handle =
-            Some(self.spawn_instance_state_monitor(&state).await);
+        self.monitor_handle = Some(self.spawn_instance_state_monitor(&state));
         Ok(())
     }
 
