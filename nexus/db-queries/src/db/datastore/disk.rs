@@ -2169,8 +2169,17 @@ impl DataStore {
                 }
             })?;
 
-        self.virtual_provisioning_collection_producer
-            .append_disk_metrics(&provisions)?;
+        // Failing to append the updated number of provisioned disk bytes should
+        // not cause the disk delete to fail.
+        if let Err(metrics_error) = self
+            .virtual_provisioning_collection_producer
+            .append_disk_metrics(&provisions)
+        {
+            error!(
+                &self.log,
+                "error appending disk metrics after delete: {metrics_error}"
+            );
+        }
 
         Ok(())
     }
