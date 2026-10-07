@@ -20,6 +20,7 @@ use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::UplinkIpNet;
 use sled_agent_types::early_networking::UplinkPorts;
 use std::collections::BTreeMap;
+use std::net::SocketAddrV4;
 use test_strategy::proptest;
 use tokio::task::block_in_place;
 
@@ -1128,10 +1129,13 @@ async fn proptest_full_reconciliation() {
         SpPort::One,
     )
     .await;
-    let mut mgdctx =
-        dev::maghemite::MgdInstance::start(0, mgsctx.address().into())
-            .await
-            .expect("started mgd");
+    let mut mgdctx = dev::maghemite::MgdInstance::start(
+        0,
+        SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0).into(),
+        Some(mgsctx.address().into()),
+    )
+    .await
+    .expect("started mgd");
     let client = Client::new(
         &format!("http://{}", mgdctx.address()),
         logctx.log.clone(),

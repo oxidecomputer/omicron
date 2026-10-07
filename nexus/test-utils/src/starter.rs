@@ -65,6 +65,7 @@ use nexus_types::deployment::ReconfiguratorConfig;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::external_api::sled::SledState;
 use nexus_types::internal_api::params::DnsConfigParams;
+use omicron_common::address::BGP_LISTEN_PORT;
 use omicron_common::address::DNS_OPTE_IPV4_SUBNET;
 use omicron_common::address::DNS_OPTE_IPV6_SUBNET;
 use omicron_common::address::Ipv6Subnet;
@@ -125,10 +126,11 @@ use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::iter::{once, repeat, zip};
+use std::net::SocketAddrV4;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::sync::atomic::AtomicU16;
 use std::sync::atomic::Ordering;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 use transient_dns_server::TransientDnsServer;
 use uuid::Uuid;
@@ -191,6 +193,13 @@ pub struct ControlPlaneStarter<'a, N: NexusServer> {
 
     pub simulated_upstairs: Arc<sim::SimulatedUpstairs>,
 
+    /// When set, `start_mgd` allocates a unique loopback IP for each switch
+    /// slot's mgd BGP dispatcher from `mgd_bgp_addrs` instead of using
+    /// 127.0.0.1. Normal integration tests leave this `None`.
+    pub mgd_bgp_loopback:
+        Option<Arc<Mutex<loopback_ip_mgr::LoopbackIpManager>>>,
+    pub mgd_bgp_addrs: BTreeMap<SwitchSlot, Ipv4Addr>,
+
     debug_dropbox_dir: TestTempDir,
 }
 
@@ -247,6 +256,8 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             simulated_upstairs: Arc::new(sim::SimulatedUpstairs::new(
                 simulated_upstairs_log,
             )),
+            mgd_bgp_loopback: None,
+            mgd_bgp_addrs: BTreeMap::new(),
             debug_dropbox_dir,
         }
     }
@@ -477,11 +488,37 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
     pub async fn start_mgd(&mut self, switch_slot: SwitchSlot) {
         let log = &self.logctx.log;
         debug!(log, "Starting mgd"; "switch_slot" => ?switch_slot);
-        let mgs_addr = self.gateway.get(&switch_slot).unwrap().address().into();
+        let mgs_addr = self.gateway.get(&switch_slot).unwrap().address();
 
-        // Set up an instance of mgd
-        let mgd =
-            dev::maghemite::MgdInstance::start(0, mgs_addr).await.unwrap();
+        // If a loopback manager and per-slot address were provided, allocate a
+        // unique loopback IP for this instance's BGP dispatcher so that
+        // multiple control plane instances can coexist on the same host.
+        // Otherwise, fall back to 127.0.0.1, which is always present and
+        // sufficient for single-mgd development and normal integration tests.
+        let (bgp_addr, bgp_loopback_allocation) = match (
+            &self.mgd_bgp_loopback,
+            self.mgd_bgp_addrs.get(&switch_slot),
+        ) {
+            (Some(mgr), Some(&ip)) => {
+                let alloc = loopback_ip_mgr::LoopbackIpManager::allocate(
+                    mgr.clone(),
+                    &[IpAddr::V4(ip)],
+                )
+                .expect("allocate loopback IP for mgd BGP dispatcher");
+                (SocketAddr::new(IpAddr::V4(ip), BGP_LISTEN_PORT), Some(alloc))
+            }
+            _ => (SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0).into(), None),
+        };
+
+        let mut mgd = dev::maghemite::MgdInstance::start(
+            0,
+            bgp_addr,
+            Some(mgs_addr.into()),
+        )
+        .await
+        .unwrap();
+        mgd.bgp_loopback_allocation = bgp_loopback_allocation;
+
         let port = mgd.port;
         self.mgd.insert(switch_slot, mgd);
         let address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, port, 0, 0);
