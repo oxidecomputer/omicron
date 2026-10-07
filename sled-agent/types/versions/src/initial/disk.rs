@@ -62,16 +62,7 @@ pub enum M2Slot {
 }
 
 #[derive(
-    Clone,
-    Debug,
-    Deserialize,
-    Serialize,
-    JsonSchema,
-    PartialEq,
-    Eq,
-    Hash,
-    PartialOrd,
-    Ord,
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
 )]
 pub struct OmicronPhysicalDiskConfig {
     pub identity: DiskIdentity,

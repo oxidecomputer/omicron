@@ -184,7 +184,7 @@ omicron-dev: using /tmp/.tmpFH6v8h and /tmp/.tmpkUjDji for ClickHouse data stora
 ----
 $ cargo run --bin=nexus -- nexus/examples/config.toml
 ----
-Nexus can also serve the web console. Instructions for downloading (or building) the console's static assets and pointing Nexus to them are https://github.com/oxidecomputer/console/blob/main/docs/serve-from-nexus.md[here]. Without console assets, Nexus will still start and run normally as an API. A few link:./nexus/src/external_api/console_api.rs[console-specific routes] will 404.
+Nexus can also serve the web console. Instructions for downloading (or building) the console's static assets and pointing Nexus to them are https://github.com/oxidecomputer/console/blob/main/docs/serve-from-nexus.md[here]. Without console assets, Nexus will still start and run normally as an API. A few link:../nexus/src/external_api/console_api.rs[console-specific routes] will 404.
 +
 CAUTION: This step does not currently work.  See https://github.com/oxidecomputer/omicron/issues/4421[omicron#4421] for details.
 
