@@ -891,8 +891,6 @@ task: "local_storage_delete"
   configured period: every <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    total allocations left to delete: 0
-    number of allocations deleted per invoked task: 128
     results of deleting local storage:
     results of deallocating local storage:
     errors: 0
@@ -1629,8 +1627,6 @@ task: "local_storage_delete"
   configured period: every <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    total allocations left to delete: 0
-    number of allocations deleted per invoked task: 128
     results of deleting local storage:
     results of deallocating local storage:
     errors: 0
