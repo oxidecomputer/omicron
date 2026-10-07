@@ -497,11 +497,13 @@ impl DataStore {
         let mut disks = Vec::with_capacity(found_disks.len());
 
         for found_disk in found_disks {
+            let found_disk_id = found_disk.id();
+
             match self
                 .disk_get_with_model_on_connection(&conn, found_disk)
-                .await?
+                .await
             {
-                datastore::Disk::Crucible(crucible_disk) => {
+                Ok(datastore::Disk::Crucible(crucible_disk)) => {
                     // The query above joins the disk table with the
                     // disk_type_local_storage table, meaning the higher level
                     // Disk can never be the Crucible type, unless there's a
@@ -517,8 +519,25 @@ impl DataStore {
                     );
                 }
 
-                datastore::Disk::LocalStorage(local_storage_disk) => {
+                Ok(datastore::Disk::LocalStorage(local_storage_disk)) => {
                     disks.push(local_storage_disk);
+                }
+
+                Err(Error::NotFound { .. }) => {
+                    // The disk was likely deleted between when the found_disks
+                    // query ran, and when `disk_get_with_model_on_connection`
+                    // ran. Skip this one.
+                    info!(
+                        self.log,
+                        "disk {found_disk_id} was deleted after the \
+                        found_disks query, skipping",
+                    );
+
+                    continue;
+                }
+
+                Err(e) => {
+                    return Err(e);
                 }
             }
         }
