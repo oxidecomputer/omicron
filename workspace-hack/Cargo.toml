@@ -21,8 +21,8 @@ workspace = true
 ahash = { version = "0.8.12" }
 aho-corasick = { version = "1.1.4" }
 anyhow = { version = "1.0.104", features = ["backtrace"] }
-aws-lc-rs = { version = "1.16.3", features = ["prebuilt-nasm"] }
-aws-lc-sys = { version = "0.40.0", default-features = false, features = ["prebuilt-nasm"] }
+aws-lc-rs = { version = "1.18.1", features = ["prebuilt-nasm"] }
+aws-lc-sys = { version = "0.45.0", default-features = false, features = ["prebuilt-nasm"] }
 base16ct = { version = "0.2.0", default-features = false, features = ["alloc"] }
 base64 = { version = "0.22.1" }
 base64ct = { version = "1.8.3", default-features = false, features = ["std"] }
@@ -125,7 +125,7 @@ regex-syntax = { version = "0.8.10" }
 reqwest = { version = "0.13.5", features = ["blocking", "cookies", "json", "query", "stream"] }
 rsa = { version = "0.9.10", features = ["serde", "sha2"] }
 rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.1.4", features = ["fs"] }
-rustls = { version = "0.23.41" }
+rustls = { version = "0.23.45" }
 schemars = { version = "0.8.22", features = ["bytes", "chrono", "semver", "url", "uuid1"] }
 scopeguard = { version = "1.2.0" }
 semver = { version = "1.0.28", features = ["serde"] }
@@ -176,8 +176,8 @@ zip-181b0d20215bb231 = { package = "zip", version = "8.6.0", default-features = 
 ahash = { version = "0.8.12" }
 aho-corasick = { version = "1.1.4" }
 anyhow = { version = "1.0.104", features = ["backtrace"] }
-aws-lc-rs = { version = "1.16.3", features = ["prebuilt-nasm"] }
-aws-lc-sys = { version = "0.40.0", default-features = false, features = ["prebuilt-nasm"] }
+aws-lc-rs = { version = "1.18.1", features = ["prebuilt-nasm"] }
+aws-lc-sys = { version = "0.45.0", default-features = false, features = ["prebuilt-nasm"] }
 base16ct = { version = "0.2.0", default-features = false, features = ["alloc"] }
 base64 = { version = "0.22.1" }
 base64ct = { version = "1.8.3", default-features = false, features = ["std"] }
@@ -283,7 +283,7 @@ regex-syntax = { version = "0.8.10" }
 reqwest = { version = "0.13.5", features = ["blocking", "cookies", "json", "query", "stream"] }
 rsa = { version = "0.9.10", features = ["serde", "sha2"] }
 rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.1.4", features = ["fs"] }
-rustls = { version = "0.23.41" }
+rustls = { version = "0.23.45" }
 schemars = { version = "0.8.22", features = ["bytes", "chrono", "semver", "url", "uuid1"] }
 scopeguard = { version = "1.2.0" }
 semver = { version = "1.0.28", features = ["serde"] }
