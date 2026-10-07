@@ -184,9 +184,13 @@ impl TqdbRepl {
             DefaultPromptSegment::Empty,
         );
 
-        run_repl_on_stdin_customized(ed, &prompt, &mut |cmd: TopLevelArgs| {
-            process_command(&mut tqdb, cmd, &log_capture)
-        })
+        run_repl_on_stdin_customized(
+            ed,
+            &prompt,
+            &mut |cmd: TopLevelArgs, _| {
+                process_command(&mut tqdb, cmd, &log_capture)
+            },
+        )
     }
 
     // Update this with each new subcommand

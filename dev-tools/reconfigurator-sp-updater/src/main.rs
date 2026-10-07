@@ -158,7 +158,7 @@ impl ReconfiguratorSpUpdater {
         let mut updater_state =
             UpdaterState { requests_tx, status_rx, inventory };
 
-        run_repl_on_stdin(&mut |cmd: TopLevelArgs| {
+        run_repl_on_stdin(&mut |cmd: TopLevelArgs, _| {
             process_cmd(&mut updater_state, cmd)
         })?;
 
