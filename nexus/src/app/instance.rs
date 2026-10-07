@@ -249,8 +249,8 @@ impl From<InstanceStateChangeError> for dropshot::HttpError {
 /// VMM (i.e. the VMM pointed to be the instance's `propolis_id` field).
 pub(crate) enum InstanceStateChangeRequest {
     Run,
-    Reboot,
-    Stop,
+    Reboot { skip_os_shutdown: bool },
+    Stop { skip_os_shutdown: bool },
     Migrate(InstanceMigrationTargetParams),
 }
 
@@ -260,8 +260,8 @@ impl From<InstanceStateChangeRequest>
     fn from(value: InstanceStateChangeRequest) -> Self {
         match value {
             InstanceStateChangeRequest::Run => Self::Running,
-            InstanceStateChangeRequest::Reboot => Self::Reboot,
-            InstanceStateChangeRequest::Stop => Self::Stopped,
+            InstanceStateChangeRequest::Reboot { .. } => Self::Reboot,
+            InstanceStateChangeRequest::Stop { .. } => Self::Stopped,
             InstanceStateChangeRequest::Migrate(params) => {
                 Self::MigrationTarget(params)
             }
@@ -1063,6 +1063,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
+        skip_os_shutdown: bool,
     ) -> Result<InstanceAndActiveVmm, InstanceStateChangeError> {
         let (.., authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
@@ -1085,7 +1086,7 @@ impl super::Nexus {
                 opctx,
                 state.instance(),
                 state.vmm(),
-                InstanceStateChangeRequest::Reboot,
+                InstanceStateChangeRequest::Reboot { skip_os_shutdown },
             )
             .await
         {
@@ -1170,6 +1171,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
+        skip_os_shutdown: bool,
     ) -> Result<InstanceAndActiveVmm, InstanceStateChangeError> {
         let (.., authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
@@ -1192,7 +1194,7 @@ impl super::Nexus {
                 opctx,
                 state.instance(),
                 state.vmm(),
-                InstanceStateChangeRequest::Stop,
+                InstanceStateChangeRequest::Stop { skip_os_shutdown },
             )
             .await
         {
@@ -1283,12 +1285,12 @@ impl super::Nexus {
                             effective_state
                         )));
                     }
-                    InstanceStateChangeRequest::Stop => {
+                    InstanceStateChangeRequest::Stop { .. } => {
                         return Ok(
                             InstanceStateChangeRequestAction::AlreadyDone,
                         );
                     }
-                    InstanceStateChangeRequest::Reboot => {
+                    InstanceStateChangeRequest::Reboot { .. } => {
                         return Err(Error::invalid_request(&format!(
                             "cannot reboot an instance in state {} with no VMM",
                             effective_state
@@ -1327,7 +1329,7 @@ impl super::Nexus {
                 InstanceState::Failed
                     if matches!(
                         requested,
-                        InstanceStateChangeRequest::Stop
+                        InstanceStateChangeRequest::Stop { .. }
                     ) =>
                 {
                     // As discussed above, this shouldn't happen, so return an
@@ -1385,18 +1387,20 @@ impl super::Nexus {
         // TODO(#2825): Failed instances should be allowed to stop. See above.
         let allowed = match requested {
             InstanceStateChangeRequest::Run
-            | InstanceStateChangeRequest::Reboot
-            | InstanceStateChangeRequest::Stop => match effective_state {
-                InstanceState::Creating
-                | InstanceState::Starting
-                | InstanceState::Running
-                | InstanceState::Stopping
-                | InstanceState::Stopped
-                | InstanceState::Rebooting
-                | InstanceState::Migrating => true,
-                InstanceState::Repairing | InstanceState::Failed => false,
-                InstanceState::Destroyed => false,
-            },
+            | InstanceStateChangeRequest::Reboot { .. }
+            | InstanceStateChangeRequest::Stop { .. } => {
+                match effective_state {
+                    InstanceState::Creating
+                    | InstanceState::Starting
+                    | InstanceState::Running
+                    | InstanceState::Stopping
+                    | InstanceState::Stopped
+                    | InstanceState::Rebooting
+                    | InstanceState::Migrating => true,
+                    InstanceState::Repairing | InstanceState::Failed => false,
+                    InstanceState::Destroyed => false,
+                }
+            }
             InstanceStateChangeRequest::Migrate(_) => match effective_state {
                 InstanceState::Running
                 | InstanceState::Rebooting
@@ -1464,16 +1468,21 @@ impl super::Nexus {
                 propolis_id,
             } => {
                 let sa = self.sled_client(&sled_id).await?;
-                let acpi_timeout_secs = match prev_instance_state
-                    .shutdown_policy_action
-                {
-                    nexus_db_model::InstanceShutdownAction::HardOff => None,
-                    nexus_db_model::InstanceShutdownAction::PowerButton => {
-                        prev_instance_state.shutdown_policy_timeout.and_then(
-                            // TODO: double-tap? we're verifying non-negative at the DB level
-                            |delta| delta.num_seconds().try_into().ok(),
-                        )
-                    }
+                let acpi_timeout_secs = match requested {
+                    InstanceStateChangeRequest::Reboot { skip_os_shutdown }
+                    | InstanceStateChangeRequest::Stop { skip_os_shutdown }
+                    if !skip_os_shutdown => match prev_instance_state.shutdown_policy_action {
+                        nexus_db_model::InstanceShutdownAction::HardOff => None,
+                        nexus_db_model::InstanceShutdownAction::PowerButton => {
+                            prev_instance_state
+                                .shutdown_policy_timeout
+                                .and_then(
+                                    // TODO: double-tap? we're verifying non-negative at the DB level
+                                    |delta| delta.num_seconds().try_into().ok(),
+                                )
+                        }
+                    },
+                    _ => None
                 };
                 let instance_put_result = sa
                     .vmm_put_state(

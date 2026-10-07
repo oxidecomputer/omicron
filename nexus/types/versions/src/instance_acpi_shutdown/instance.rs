@@ -339,3 +339,11 @@ impl From<v2026_06_08_00::instance::InstanceUpdate> for InstanceUpdate {
         }
     }
 }
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct InstanceStopOrRebootParams {
+    /// Name or ID of the project
+    pub project: Option<NameOrId>,
+    /// Whether to override the instance's configured Shutdown Policy, if any,
+    /// and hard-cut the power of the VM guest for this stop or reboot request.
+    pub skip_os_shutdown: Option<bool>,
+}

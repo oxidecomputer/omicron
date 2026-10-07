@@ -2930,7 +2930,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn instance_reboot(
         rqctx: RequestContext<ApiContext>,
-        query_params: Query<project::OptionalProjectSelector>,
+        query_params: Query<instance::InstanceStopOrRebootParams>,
         path_params: Path<path_params::InstancePath>,
     ) -> Result<HttpResponseAccepted<instance::Instance>, HttpError> {
         let path = path_params.into_inner();
@@ -2942,8 +2942,13 @@ impl NexusExternalApi for NexusExternalApiImpl {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let instance_lookup =
                 nexus.instance_lookup(&opctx, instance_selector)?;
-            let instance =
-                nexus.instance_reboot(&opctx, &instance_lookup).await?;
+            let instance = nexus
+                .instance_reboot(
+                    &opctx,
+                    &instance_lookup,
+                    query.skip_os_shutdown.unwrap_or(false),
+                )
+                .await?;
             Ok(HttpResponseAccepted(instance.into()))
         })
         .await
@@ -2977,7 +2982,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn instance_stop(
         rqctx: RequestContext<ApiContext>,
-        query_params: Query<project::OptionalProjectSelector>,
+        query_params: Query<instance::InstanceStopOrRebootParams>,
         path_params: Path<path_params::InstancePath>,
     ) -> Result<HttpResponseAccepted<instance::Instance>, HttpError> {
         let path = path_params.into_inner();
@@ -2989,8 +2994,13 @@ impl NexusExternalApi for NexusExternalApiImpl {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let instance_lookup =
                 nexus.instance_lookup(&opctx, instance_selector)?;
-            let instance =
-                nexus.instance_stop(&opctx, &instance_lookup).await?;
+            let instance = nexus
+                .instance_stop(
+                    &opctx,
+                    &instance_lookup,
+                    query.skip_os_shutdown.unwrap_or(false),
+                )
+                .await?;
             Ok(HttpResponseAccepted(instance.into()))
         })
         .await
