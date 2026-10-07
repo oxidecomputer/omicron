@@ -372,7 +372,7 @@ pub fn identify_datasets_with_less_than_300_gib_avail() -> Command {
 }
 
 pub fn dimm_check() -> Command {
-    let mut cmd = std::process::Command::new("/bin/sh");
+    let mut cmd = std::process::Command::new(SH);
     cmd.env_clear().args([
         "-c",
         "prtconf -m | \
