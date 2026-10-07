@@ -87,7 +87,8 @@ impl Reconciler for DdmdReconciler {
 /// create this string on its own.
 ///
 /// A better solution would be to pass the `AddrObject` down directly and pass
-// it through to dendrite. This requires changes to dendrite and maghemite APIs.
+/// it through to dendrite. This requires changes to dendrite and maghemite
+/// APIs.
 fn ddmd_specific_addrobj(port: &str) -> String {
     AddrObject::link_local(&format!("tfport{port}_0"))
         .expect("no slash in interface name")

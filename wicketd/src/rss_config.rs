@@ -532,8 +532,14 @@ fn validate_rack_network_config(
         Err(e) => bail!(e),
     };
 
-    let ports = UplinkPorts::new(ports)
-        .context("rack network config must specify at least one uplink port")?;
+    // We only want to run this check in RSS, because it's not necessarily true
+    // that joining multiracks will each have an uplink. Therfore we don't make
+    // it part of the `UplinkPorts` constructor .
+    if !ports.iter().any(|p| !p.allow_ddm_traffic) {
+        bail!("rack network config must specify at least one uplink port");
+    }
+
+    let ports = UplinkPorts::new(ports).expect("ports not empty");
 
     Ok(bootstrap_agent_lockstep_client::types::RackNetworkConfig {
         rack_subnet,

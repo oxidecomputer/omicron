@@ -566,6 +566,7 @@ struct ArbitraryPortSettings {
         0..=4,
     ))]
     addrs: BTreeSet<UplinkAddressConfig>,
+    allow_ddm_traffic: bool,
 }
 
 impl ArbitraryPortSettings {
@@ -584,7 +585,7 @@ impl ArbitraryPortSettings {
                     UplinkAddress::Static { ip_net } => Some(ip_net.addr()),
                 })
                 .collect(),
-            allow_ddm_traffic: false,
+            allow_ddm_traffic: self.allow_ddm_traffic,
         })
     }
 }
@@ -848,7 +849,14 @@ fn diffable_to_port_config(
     port_id: &PortId,
     config: &ArbitraryPortSettings,
 ) -> PortConfig {
-    let ArbitraryPortSettings { autoneg, tx_eq, fec, speed, addrs } = config;
+    let ArbitraryPortSettings {
+        autoneg,
+        tx_eq,
+        fec,
+        speed,
+        addrs,
+        allow_ddm_traffic,
+    } = config;
     PortConfig {
         addresses: addrs.into_iter().copied().collect(),
         switch,
@@ -862,7 +870,7 @@ fn diffable_to_port_config(
         routes: Vec::new(),
         bgp_peers: Vec::new(),
         lldp: None,
-        allow_ddm_traffic: false,
+        allow_ddm_traffic: *allow_ddm_traffic,
     }
 }
 

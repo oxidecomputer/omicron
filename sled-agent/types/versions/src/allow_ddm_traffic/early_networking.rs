@@ -92,9 +92,9 @@ pub struct UplinkPorts(pub(crate) Vec<PortConfig>);
 
 impl UplinkPorts {
     /// Constructs an `UplinkPorts` from a list of ports, returning an error if
-    /// there are no actual uplink ports.
+    /// the list is empty.
     pub fn new(ports: Vec<PortConfig>) -> Result<Self, EmptyUplinkPortsError> {
-        if !ports.iter().any(|p| !p.allow_ddm_traffic) {
+        if ports.is_empty() {
             return Err(EmptyUplinkPortsError);
         }
         Ok(Self(ports))
