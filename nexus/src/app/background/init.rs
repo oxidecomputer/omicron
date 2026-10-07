@@ -143,6 +143,7 @@ use super::tasks::trust_quorum;
 use super::tasks::tuf_artifact_replication;
 use super::tasks::tuf_repo_pruner;
 use super::tasks::v2p_mappings::V2PManager;
+use super::tasks::vmm_mark_stop_for_update::VmmMarkStopForUpdate;
 use super::tasks::vpc_routes;
 use super::tasks::webhook_deliverator;
 use crate::Nexus;
@@ -284,6 +285,7 @@ impl BackgroundTasksInitializer {
             task_attached_subnet_manager: Activator::new(),
             task_session_cleanup: Activator::new(),
             task_populate_switch_ports: Activator::new(),
+            task_vmm_mark_stop_for_update: Activator::new(),
 
             // Handles to activate background tasks that do not get used by Nexus
             // at-large.  These background tasks are implementation details as far as
@@ -382,6 +384,7 @@ impl BackgroundTasksInitializer {
             task_audit_log_timeout_incomplete,
             task_audit_log_cleanup,
             task_populate_switch_ports,
+            task_vmm_mark_stop_for_update,
             // Add new background tasks here.  Be sure to use this binding in a
             // call to `Driver::register()` below.  That's what actually wires
             // up the Activator to the corresponding background task.
@@ -667,6 +670,12 @@ impl BackgroundTasksInitializer {
             activator: task_physical_disk_adoption,
         });
 
+        let bp_rendezvous = blueprint_rendezvous::BlueprintRendezvous::new(
+            datastore.clone(),
+            rx_blueprint.clone(),
+            inventory_load_watcher.clone(),
+        );
+        let bp_rendezvous_watcher = bp_rendezvous.watcher();
         driver.register(TaskDefinition {
             name: "blueprint_rendezvous",
             description:
@@ -675,11 +684,7 @@ impl BackgroundTasksInitializer {
                  consume",
             period: config.blueprints.period_secs_rendezvous,
             task_impl: Box::new(
-                blueprint_rendezvous::BlueprintRendezvous::new(
-                    datastore.clone(),
-                    rx_blueprint.clone(),
-                    inventory_load_watcher.clone(),
-                ),
+                bp_rendezvous
             ),
             opctx: opctx.child(BTreeMap::new()),
             // A new target blueprint must reach the sled availability table
@@ -1356,6 +1361,21 @@ impl BackgroundTasksInitializer {
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
             activator: task_populate_switch_ports,
+        });
+
+        driver.register(TaskDefinition {
+            name: "vmm_mark_stop_for_update",
+            description: "marks VMMs on evacuating sleds as needing to be \
+            stopped for an update",
+            period: config.vmm_mark_stop_for_update.period_secs,
+            task_impl: Box::new(VmmMarkStopForUpdate::new(datastore)),
+            opctx: opctx.child(BTreeMap::new()),
+            // We activate this task any time the blueprint_rendezvous task runs.
+            // We want to err on the side of running this task more often than
+            // not, so even if the blueprint rendezvous task reports no changes,
+            // this task is triggered anyway.
+            watchers: vec![Box::new(bp_rendezvous_watcher)],
+            activator: task_vmm_mark_stop_for_update,
         });
 
         driver

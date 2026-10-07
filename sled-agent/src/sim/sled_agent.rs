@@ -19,6 +19,7 @@ use crate::support_bundle::storage::SupportBundleQueryType;
 use anyhow::Context;
 use anyhow::bail;
 use bootstore::schemes::v0 as bootstore;
+use bootstrap_agent_lockstep_types::scrimlet_reconcilers::ScrimletReconcilersStatus;
 use bytes::Bytes;
 use chrono::Utc;
 use dropshot::Body;
@@ -285,10 +286,7 @@ impl SledAgent {
     }
 
     /// Returns the current status of the scrimlet reconcilers.
-    pub fn scrimlet_reconcilers_status(
-        &self,
-    ) -> bootstrap_agent_lockstep_types::scrimlet_reconcilers::ScrimletReconcilersStatus
-    {
+    pub fn scrimlet_reconcilers_status(&self) -> ScrimletReconcilersStatus {
         self.scrimlet_reconcilers.status()
     }
 
@@ -633,7 +631,7 @@ impl SledAgent {
     }
 
     pub(super) fn check_local_storage_error(&self) -> Result<(), HttpError> {
-        let prev = self.local_storage_error_count.fetch_update(
+        let prev = self.local_storage_error_count.try_update(
             Ordering::Relaxed,
             Ordering::Relaxed,
             |n| {
