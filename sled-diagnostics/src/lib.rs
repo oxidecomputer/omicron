@@ -38,6 +38,7 @@ const MAX_PTOOL_PARALLELISM: usize = 50;
 /// by [`contract::find_oxide_pids`].
 #[derive(Copy, Clone, Debug)]
 enum PidFilter {
+    #[allow(dead_code)] // may be used later
     All,
     Skip(libc::pid_t),
 }
@@ -53,7 +54,7 @@ impl PidFilter {
         }
     }
 
-    /// Returns a [`PidFilter::SkipMe`] filter that skips the calling process's
+    /// Returns a [`PidFilter::Skip`] filter that skips the calling process's
     /// PID.
     fn skip_me() -> Self {
         PidFilter::Skip(std::process::id() as libc::pid_t)
@@ -116,10 +117,11 @@ pub async fn nvmeadm_info()
 pub async fn pargs_oxide_processes(
     log: &Logger,
 ) -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
-    // Since `pargs` opens the process readonly, it does not involve the agent
-    // LWP and is safe to use against the calling process. Therefore, include
-    // all Oxide PIDs.
-    let pid_filter = PidFilter::All;
+    // `pargs`, like `pstack` and `pfiles`, may stop the process, which could
+    // cause problems when the timeout on the command fires if we are `pargs`ing
+    // ourself. So, skip this process' PID when determining which pids to invoke
+    // `pargs` with.
+    let pid_filter = PidFilter::skip_me();
     // In a diagnostics context we care about looping over every pid we find,
     // but on failure we should just return a single error in a vec that
     // represents the entire failed operation.
