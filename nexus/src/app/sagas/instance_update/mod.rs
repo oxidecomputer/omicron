@@ -555,8 +555,8 @@ impl UpdatesRequired {
                     let id = PropolisUuid::from_untyped_uuid(active_vmm.id);
                     // Unlink the active VMM ID. If the active VMM was destroyed
                     // because a migration out completed, the next block, which
-                    // handles migration updates, will set this to the new VMM's ID,
-                    // instead.
+                    // handles migration updates, will set this to the new VMM's
+                    // ID, instead.
                     new_runtime.propolis_id = None;
                     update_required = true;
 
@@ -567,15 +567,14 @@ impl UpdatesRequired {
                     } else if snapshot.instance.intended_state
                         == InstanceIntendedState::Running
                         && snapshot.migration.is_none()
+                        && active_vmm
+                            .stop_for_update_disposition_generation
+                            .is_none()
                     {
-                        // TODO-K: We definitely don't want the
-                        // InstanceIntendedState to change if we're stopping for
-                        // an update. We should make sure it doesn't. The best
-                        // way to do this is to use the marker
-
                         // Did the active VMM shut itself down, when it was
                         // intended to be running *and* we were not migrating
-                        // out? If so, update the instance's intended state to
+                        // out, or destroying it intentionally for an update?
+                        // If so, update the instance's intended state to
                         // indicate that it stopped itself.
                         new_intent = Some(InstanceIntendedState::GuestShutdown);
                         info!(

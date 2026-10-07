@@ -93,8 +93,6 @@ impl VmmStopForUpdate {
             {
                 Ok(vmms) => vmms,
                 Err(err) => {
-                    // TODO-K: Verify how the paginator actually works. Should
-                    // I break here or not?
                     result.errors.push(err);
                     break;
                 }
@@ -199,8 +197,12 @@ impl VmmStopForUpdate {
 
                 match response {
                     None => {
-                        slog::debug!(opctx.log, "VMM already stopped, no changes to state"; "sled_id" => %sled_id,
-                            "vmm_id" => %id);
+                        slog::debug!(
+                            opctx.log,
+                            "VMM already stopped, no changes to state";
+                            "sled_id" => %sled_id,
+                            "vmm_id" => %id
+                        );
                     }
                     Some(vmm) => {
                         let SledVmmState {
@@ -208,6 +210,7 @@ impl VmmStopForUpdate {
                             migration_in: _,
                             migration_out: _,
                         } = vmm;
+
                         let VmmRuntimeState { state, generation, time_updated } =
                             vmm_state;
 
@@ -353,7 +356,9 @@ impl BackgroundTask for VmmStopForUpdate {
             match serde_json::to_value(status) {
                 Ok(val) => val,
                 Err(err) => {
-                    json!({ "error": format!("failed to serialize status: {err}") })
+                    json!({
+                        "error": format!("failed to serialize status: {err}")
+                    })
                 }
             }
         })

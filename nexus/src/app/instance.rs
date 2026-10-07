@@ -1421,7 +1421,6 @@ impl super::Nexus {
                 }
             }
 
-            // TODO-K: Do something like this to stop? Most likely yes I think
             InstanceStateChangeRequestAction::SendToSled {
                 sled_id,
                 propolis_id,
@@ -1816,8 +1815,6 @@ impl super::Nexus {
             "reason" => %reason,
         );
 
-        // TODO-K: Do something like this to stop? Probably not, I'd have to
-        // retrieve the entire VMM instead of just the ids
         let new_runtime = vmm
             .runtime()
             .transition(nexus_types::instance::VmmState::Failed(reason.into()));
