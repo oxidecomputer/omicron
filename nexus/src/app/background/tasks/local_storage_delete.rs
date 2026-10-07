@@ -408,7 +408,7 @@ impl LocalStorageDeleter {
                         }
 
                         DeleteResult::Error { message } => {
-                            info!(log, "{message}");
+                            error!(log, "{message}");
                             status.errors.push(message);
 
                             // Cannot delete allocation record until the
