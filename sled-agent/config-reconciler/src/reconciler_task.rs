@@ -470,8 +470,7 @@ impl ReconcilerTask {
         }
     }
 
-    /// Ensure `datasets` on all managed disks, including those still being
-    /// adopted.
+    /// Ensure `datasets` on all adopted disks.
     async fn ensure_datasets(
         &mut self,
         datasets: IdOrdMap<DatasetConfig>,
@@ -479,7 +478,7 @@ impl ReconcilerTask {
         self.datasets
             .ensure_datasets_if_needed(
                 datasets,
-                self.external_disks.all_managed_zpools(),
+                self.external_disks.adopted_zpools(),
                 &self.log,
             )
             .await

@@ -352,7 +352,7 @@ pub(super) struct ExternalDisks {
     // that were running on a zpool that's no longer available).
     currently_managed_zpools_tx: watch::Sender<Arc<CurrentlyManagedZpools>>,
 
-    // Output channel for the managed disks whose debug dataset is available
+    // Output channel for the adopted disks whose debug dataset is available
     // (see `debug_dataset_disks()`). This is only consumed within this crate
     // by `DebugCollectorTask` (for managing dump devices and archiving logs).
     debug_dataset_disks_tx: watch::Sender<HashSet<Disk>>,
@@ -386,20 +386,18 @@ impl ExternalDisks {
 
     /// Returns the zpools of disks we've adopted but not yet put into service.
     pub(super) fn zpools_being_adopted(&self) -> BTreeSet<ZpoolName> {
-        self.managed_disks()
+        self.adopted_disks()
             .filter(|(phase, _)| phase.is_some())
             .map(|(_, disk)| *disk.zpool_name())
             .collect()
     }
 
-    /// Returns the zpools of all managed disks, including those we've adopted
-    /// but not yet put into service.
-    ///
-    /// This is only for ensuring datasets; everything else should use
+    /// Returns the zpools of all adopted disks, including those not yet in
+    /// service. This is only for ensuring datasets; everything else should use
     /// [`Self::currently_managed_zpools()`].
-    pub(super) fn all_managed_zpools(&self) -> Arc<CurrentlyManagedZpools> {
+    pub(super) fn adopted_zpools(&self) -> Arc<CurrentlyManagedZpools> {
         Arc::new(CurrentlyManagedZpools(
-            self.managed_disks().map(|(_, disk)| *disk.zpool_name()).collect(),
+            self.adopted_disks().map(|(_, disk)| *disk.zpool_name()).collect(),
         ))
     }
 
@@ -603,7 +601,7 @@ impl ExternalDisks {
         Arc::clone(&*self.currently_managed_zpools_tx.borrow())
     }
 
-    /// Returns rekey info for all managed disks.
+    /// Returns rekey info for all adopted disks.
     pub(super) fn disk_rekey_info(
         &self,
     ) -> impl Iterator<Item = DiskRekeyInfo<'_>> {
@@ -629,9 +627,9 @@ impl ExternalDisks {
         }
     }
 
-    /// Returns each managed disk, along with its adoption phase if we're
-    /// still adopting it.
-    fn managed_disks(
+    /// Returns each adopted disk, along with its adoption phase if it's not
+    /// yet in service.
+    fn adopted_disks(
         &self,
     ) -> impl Iterator<Item = (Option<&AdoptionPhase>, &Disk)> {
         self.disks.iter().filter_map(|disk| match &disk.state {
@@ -641,13 +639,13 @@ impl ExternalDisks {
         })
     }
 
-    /// Returns the managed disks to make visible to `DebugCollectorTask`:
+    /// Returns the adopted disks to make visible to `DebugCollectorTask`:
     /// those whose required datasets have been verified.
     ///
     /// Once verified, a debug dataset stays mounted, so we don't re-check it
     /// (e.g., after a later failure to update its properties).
     fn debug_dataset_disks(&self) -> HashSet<Disk> {
-        self.managed_disks()
+        self.adopted_disks()
             .filter(|(phase, _)| {
                 *phase != Some(&AdoptionPhase::AwaitingRequiredDatasets)
             })
@@ -658,7 +656,7 @@ impl ExternalDisks {
     fn update_output_watch_channels(&self) {
         // Disks we're still adopting are not yet in service.
         let current_zpools: BTreeSet<_> = self
-            .managed_disks()
+            .adopted_disks()
             .filter(|(phase, _)| phase.is_none())
             .map(|(_, disk)| *disk.zpool_name())
             .collect();
@@ -2061,10 +2059,7 @@ mod tests {
         t.adopt().await;
         assert_eq!(t.external_disks.zpools_being_adopted(), both);
         assert_eq!(
-            t.external_disks
-                .all_managed_zpools()
-                .iter()
-                .collect::<BTreeSet<_>>(),
+            t.external_disks.adopted_zpools().iter().collect::<BTreeSet<_>>(),
             both
         );
         assert!(t.published_zpools().is_empty());
