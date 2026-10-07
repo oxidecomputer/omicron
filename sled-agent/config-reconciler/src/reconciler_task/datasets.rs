@@ -68,8 +68,8 @@ pub(super) enum ZoneDatasetDependencyError {
     DurableDatasetNotAvailable(DatasetName),
 }
 
-/// Per-disk datasets that contain other datasets. A newly-adopted disk is only
-/// put into service once these have been ensured.
+/// Per-disk datasets needed to adopt a disk: debug (to archive former zone
+/// roots into) and transient zone root (which holds those zone roots).
 const REQUIRED_PER_DISK_DATASETS: [PerDiskDatasetKind; 2] =
     [PerDiskDatasetKind::Debug, PerDiskDatasetKind::TransientZoneRoot];
 
@@ -336,8 +336,8 @@ impl OmicronDatasets {
         Ok(())
     }
 
-    /// Confirm that the per-disk datasets that contain other datasets (see
-    /// [`REQUIRED_PER_DISK_DATASETS`]) have been ensured on `zpool`.
+    /// Confirm that [`REQUIRED_PER_DISK_DATASETS`] have been ensured on
+    /// `zpool`.
     pub(super) fn check_required_datasets(
         &self,
         zpool: &ZpoolName,

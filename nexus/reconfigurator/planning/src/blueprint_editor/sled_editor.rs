@@ -445,7 +445,7 @@ impl SledEditor {
 
         self.disks.ensure(disk)?;
 
-        // Every disk also gets the per-disk datasets.
+        // Every disk also gets each `PerDiskDatasetKind`.
         for kind in PerDiskDatasetKind::iter() {
             self.datasets.ensure_in_service(
                 PartialDatasetConfig::for_per_disk_dataset(zpool, kind),

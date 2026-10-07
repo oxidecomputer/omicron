@@ -21,9 +21,14 @@ use omicron_common::disk::DatasetKind;
 /// Use [`strum::IntoEnumIterator::iter`] to visit every kind.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, strum::EnumIter)]
 pub enum PerDiskDatasetKind {
+    /// Long-term storage for debug data (crash dumps, core dumps, logs, etc.).
+    /// See `DebugCollector`.
     Debug,
+    /// Parent of transient zone root filesystems.
     TransientZoneRoot,
+    /// Parent of encrypted local storage datasets.
     LocalStorage,
+    /// Parent of unencrypted local storage datasets.
     LocalStorageUnencrypted,
 }
 
@@ -35,9 +40,6 @@ impl PerDiskDatasetKind {
     /// Returns the properties of this dataset.
     pub fn config(self) -> SharedDatasetConfig {
         match self {
-            // For long-term storage of miscellaneous debug data, including
-            // kernel crash dumps, process core dumps, log files, etc. See
-            // `DebugCollector`.
             Self::Debug => SharedDatasetConfig {
                 compression: CompressionAlgorithm::GzipN {
                     level: GzipLevel::new::<9>(),

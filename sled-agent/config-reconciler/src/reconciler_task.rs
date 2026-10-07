@@ -306,16 +306,12 @@ impl LatestReconciliationResult {
     }
 }
 
-/// Returns `datasets`, minus any datasets on `zpools_being_adopted` other
-/// than the ones adoption needs (debug and transient zone root; see
-/// [`datasets::is_required_per_disk_dataset()`]).
+/// Returns `datasets`, minus any on `zpools_being_adopted` that adoption
+/// doesn't need (see [`datasets::is_required_per_disk_dataset()`]).
 ///
-/// We don't set up anything else on a disk until we've put it into service.
-/// If adoption fails (e.g., because we can't clean up its former zone roots),
-/// it shouldn't be left with datasets created or mounted on it. (This also
-/// keeps us from creating transient zone datasets that cleaning up former
-/// zone roots would then destroy.) We create the rest on the second round of
-/// ensuring datasets, once the disk is in service.
+/// Otherwise, we'd create transient zone datasets that cleaning up former
+/// zone roots would then destroy, and leave datasets on disks that fail
+/// adoption.
 fn limit_adopting_zpools_to_required_datasets(
     datasets: &IdOrdMap<DatasetConfig>,
     zpools_being_adopted: &BTreeSet<ZpoolName>,
@@ -475,10 +471,8 @@ impl ReconcilerTask {
         }
     }
 
-    /// Ensure `datasets`.
-    ///
-    /// Datasets are ensured on all managed disks, including those we've
-    /// adopted but not yet put into service.
+    /// Ensure `datasets` on all managed disks, including those still being
+    /// adopted.
     async fn ensure_datasets(
         &mut self,
         datasets: IdOrdMap<DatasetConfig>,
@@ -492,9 +486,12 @@ impl ReconcilerTask {
             .await
     }
 
-    /// Ensure `datasets`, and put any newly-adopted disks into service once
-    /// their required datasets exist (see the comment in
-    /// `do_reconcilation()`).
+    /// Ensure `datasets`, and put newly-adopted disks into service.
+    ///
+    /// Newly-adopted disks need their required datasets before their former
+    /// zone roots can be cleaned up, and must be cleaned up before anything
+    /// else is created on them. So: ensure only required datasets on those
+    /// disks, verify and clean them up, then ensure everything.
     async fn ensure_datasets_and_finish_adopting_disks(
         &mut self,
         datasets: &IdOrdMap<DatasetConfig>,
@@ -518,11 +515,7 @@ impl ReconcilerTask {
         }
         self.external_disks.verify_adopted_disks(&self.datasets, &self.log);
         self.external_disks.finish_adopting_disks(&self.log).await;
-        // Now that newly-adopted disks are in service, ensure all datasets,
-        // including the ones we skipped on them above. If we can't reach the
-        // dataset task, those datasets won't exist yet; `self.datasets`
-        // records that, so we'll retry (see
-        // `OmicronDatasets::has_retryable_error()`).
+        // On failure, `self.datasets` records that we need to retry.
         let _ = self.ensure_datasets(datasets.clone()).await;
     }
 
@@ -672,19 +665,6 @@ impl ReconcilerTask {
         };
 
         // Ensure all the datasets we want exist.
-        //
-        // Disks we've just adopted aren't put into service until:
-        //
-        // * their per-disk datasets that contain other datasets (debug,
-        //   transient zone root) have been ensured, and
-        // * any former zone roots on them have been archived and destroyed
-        //   (which requires debug datasets to archive into).
-        //
-        // So: ensure datasets (but only the debug and transient zone root
-        // datasets on those disks), verify those disks, clean them up, and
-        // then ensure datasets again. That last step creates the remaining
-        // datasets on disks now in service, and marks datasets on disks we
-        // gave up on as unavailable.
         self.ensure_datasets_and_finish_adopting_disks(&sled_config.datasets)
             .await;
 

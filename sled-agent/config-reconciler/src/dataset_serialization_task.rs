@@ -2957,8 +2957,8 @@ pub(crate) mod illumos_tests {
         let dataset = make_dataset_config(zpool, kind);
 
         // Because `dataset` has kind `TransientZone { .. }`, we also need to
-        // supply its parent root. Create that first, so that the data we
-        // place below lands within it.
+        // supply its parent root. Create it first, so the marker file below
+        // isn't hidden when the root is mounted over its directory.
         let root = make_dataset_config(zpool, DatasetKind::TransientZoneRoot);
         let result = task_handle
             .datasets_ensure(

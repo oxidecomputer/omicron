@@ -395,8 +395,8 @@ impl ExternalDisks {
     /// Returns the zpools of all managed disks, including those we've adopted
     /// but not yet put into service.
     ///
-    /// This is only for creating datasets on newly-adopted disks; everything
-    /// else should use [`Self::currently_managed_zpools()`].
+    /// This is only for ensuring datasets; everything else should use
+    /// [`Self::currently_managed_zpools()`].
     pub(super) fn all_managed_zpools(&self) -> Arc<CurrentlyManagedZpools> {
         Arc::new(CurrentlyManagedZpools(
             self.managed_disks().map(|(_, disk)| *disk.zpool_name()).collect(),
@@ -497,6 +497,8 @@ impl ExternalDisks {
                 }
             }
         }
+        // `DebugCollectorTask` must see verified disks' debug datasets before
+        // `finish_adopting_disks()` archives former zone roots into them.
         self.update_output_watch_channels();
     }
 
@@ -563,8 +565,7 @@ impl ExternalDisks {
                 DiskState::Managed(_) => {
                     (disk.config.id, ConfigReconcilerInventoryResult::Ok)
                 }
-                // We finish (or give up on) adopting disks within a single
-                // reconciliation pass, so we shouldn't see these here.
+                // Shouldn't happen (see `DiskState::Adopting`).
                 DiskState::Adopting(_, phase) => (
                     disk.config.id,
                     ConfigReconcilerInventoryResult::Err {
@@ -631,15 +632,8 @@ impl ExternalDisks {
     /// Returns the managed disks to make visible to `DebugCollectorTask`:
     /// those that have passed [`Self::verify_adopted_disks()`].
     ///
-    /// Verification confirms that a disk's debug dataset has been ensured
-    /// (and so mounted) during the lifetime of this sled agent, and nothing
-    /// unmounts or destroys it afterwards, so we don't check it again here.
-    /// (In particular, a later failure to update its properties doesn't make
-    /// it unusable.)
-    ///
-    /// This includes disks awaiting zone root cleanup, so that
-    /// `DebugCollectorTask` can archive former zone roots into their debug
-    /// datasets.
+    /// Once verified, a debug dataset stays mounted, so we don't re-check it
+    /// (e.g., after a later failure to update its properties).
     fn debug_dataset_disks(&self) -> HashSet<Disk> {
         self.managed_disks()
             .filter(|(phase, _)| {
@@ -690,7 +684,7 @@ impl ExternalDisks {
             self.disks
                 .iter()
                 .all(|d| !matches!(d.state, DiskState::Adopting(..))),
-            "disks are adopted within a single reconciliation pass",
+            "disks should not be left in `DiskState::Adopting`",
         );
 
         let mut disk_ids_to_remove = Vec::new();
@@ -821,10 +815,7 @@ impl ExternalDisks {
         // Run all the disk management futures concurrently...
         let disk_states = future::join_all(try_ensure_managed_futures).await;
 
-        // Then record the new states for each disk in `config`. Newly-adopted
-        // disks are in `DiskState::Adopting`: they aren't put into service
-        // until their datasets have been ensured and their former zone roots
-        // cleaned up, both of which happen later in reconciliation.
+        // Then record the new states for each disk in `config`.
         for disk_state in failed_disk_states.into_iter().chain(disk_states) {
             self.disks.insert_overwrite(disk_state);
         }
@@ -853,9 +844,8 @@ impl ExternalDisks {
                 Ok(disk) => ExternalDiskState::managed(config, disk, *epoch),
                 Err(err) => ExternalDiskState::failed(config, err),
             },
-            // We finish (or give up on) adopting disks within a single
-            // reconciliation pass, so we shouldn't see this. If we do, update
-            // its properties, but leave it where it was in adoption.
+            // Shouldn't happen (see `DiskState::Adopting`). If it does, update
+            // its properties, but leave its adoption phase alone.
             Some(ExternalDiskState {
                 state: DiskState::Adopting(disk, phase),
                 epoch,
