@@ -323,12 +323,14 @@ impl CurrentlyManagedZpoolsReceiver {
 /// and [`ExternalDisks::finish_adopting_disks()`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AdoptionPhase {
-    /// We've just adopted this disk.
-    Adopted,
+    /// We've just adopted this disk, and are waiting for its required
+    /// datasets to be ensured.
+    AwaitingRequiredDatasets,
     /// This disk's required datasets have been ensured. Its debug dataset is
     /// visible to `DebugCollectorTask` (so former zone roots can be archived
-    /// into it), but it is otherwise not yet in service.
-    Verified,
+    /// into it), but we're waiting to clean up its former zone roots before
+    /// putting it into service.
+    AwaitingZoneRootCleanup,
 }
 
 #[derive(Debug)]
@@ -455,7 +457,7 @@ impl ExternalDisks {
         log: &Logger,
     ) {
         for (disk_id, phase) in self.adopting.clone() {
-            if phase != AdoptionPhase::Adopted {
+            if phase != AdoptionPhase::AwaitingRequiredDatasets {
                 continue;
             }
             let Some(zpool) = self.managed_zpool(&disk_id) else {
@@ -464,7 +466,10 @@ impl ExternalDisks {
             };
             match datasets.check_required_datasets(&zpool) {
                 Ok(()) => {
-                    self.adopting.insert(disk_id, AdoptionPhase::Verified);
+                    self.adopting.insert(
+                        disk_id,
+                        AdoptionPhase::AwaitingZoneRootCleanup,
+                    );
                 }
                 Err(err) => {
                     warn!(
@@ -484,8 +489,9 @@ impl ExternalDisks {
         self.update_output_watch_channels();
     }
 
-    /// Archive and destroy any former zone roots on verified, newly-adopted
-    /// disks, and put the ones that succeed into service.
+    /// Archive and destroy any former zone roots on newly-adopted disks whose
+    /// required datasets have been ensured, and put the ones that succeed into
+    /// service.
     ///
     /// `can_archive` reports whether there are any debug datasets to archive
     /// logs into; if not, we won't destroy any former zone roots. Disks that
@@ -510,7 +516,7 @@ impl ExternalDisks {
         cleaner: &T,
     ) {
         for (disk_id, phase) in self.adopting.clone() {
-            if phase != AdoptionPhase::Verified {
+            if phase != AdoptionPhase::AwaitingZoneRootCleanup {
                 continue;
             }
             let Some(zpool_name) = self.managed_zpool(&disk_id) else {
@@ -601,9 +607,9 @@ impl ExternalDisks {
     }
 
     fn update_output_watch_channels(&self) {
-        // Disks we're still adopting are not yet in service. Verified ones
-        // are visible to `DebugCollectorTask`, so that it can archive former
-        // zone roots into their debug datasets.
+        // Disks we're still adopting are not yet in service. Ones awaiting
+        // zone root cleanup are visible to `DebugCollectorTask`, so that it
+        // can archive former zone roots into their debug datasets.
         let managed_disks =
             self.disks.iter().filter_map(|disk| match &disk.state {
                 DiskState::Managed(d) => {
@@ -617,7 +623,7 @@ impl ExternalDisks {
             if phase.is_none() {
                 current_zpools.insert(*disk.zpool_name());
             }
-            if phase != Some(&AdoptionPhase::Adopted)
+            if phase != Some(&AdoptionPhase::AwaitingRequiredDatasets)
                 && self.debug_dataset_zpools.contains(disk.zpool_name())
             {
                 debug_dataset_disks.insert(disk.clone());
@@ -823,7 +829,8 @@ impl ExternalDisks {
         // have been ensured and their former zone roots cleaned up, both of
         // which happen later in reconciliation.
         for disk_id in newly_adopted {
-            self.adopting.insert(disk_id, AdoptionPhase::Adopted);
+            self.adopting
+                .insert(disk_id, AdoptionPhase::AwaitingRequiredDatasets);
         }
 
         self.update_output_watch_channels();
@@ -1957,8 +1964,9 @@ mod tests {
         assert!(t.published_zpools().is_empty());
         assert!(t.debug_collector_zpools().is_empty());
 
-        // Once verified, their debug datasets are visible to the debug
-        // collector (for archival), but they're not yet in service.
+        // Once their required datasets are ensured, their debug datasets are
+        // visible to the debug collector (for archival), but they're not yet
+        // in service.
         t.external_disks
             .verify_adopted_disks(&required_datasets_on(&both), &t.logctx.log);
         assert_eq!(t.debug_collector_zpools(), both);
