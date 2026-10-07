@@ -522,9 +522,8 @@ impl ExternalDisks {
                     self.adopting.remove(&disk_id);
                 }
                 Err(error) => {
-                    // The right long-term answer is to destroy these zone
-                    // roots not here, after adoption, but when starting zones.
-                    // See oxidecomputer/omicron#8316.  This too is complicated.
+                    // Un-adopt this disk. It was never put into service, and
+                    // we'll try to adopt it again on a later reconciliation.
                     error!(
                         log,
                         "failed to destroy former zone roots on pool";
