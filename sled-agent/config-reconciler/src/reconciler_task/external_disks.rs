@@ -53,7 +53,6 @@ use trust_quorum_types::types::Epoch;
 use super::datasets::DiskRekeyInfo;
 use super::datasets::OmicronDatasets;
 use super::datasets::RequiredDatasetError;
-use crate::dataset_serialization_task::DatasetTaskError;
 use crate::dataset_serialization_task::RekeyResult;
 use crate::debug_collector::FormerZoneRootArchiver;
 use crate::disks_common::MaybeUpdatedDisk;
@@ -95,9 +94,6 @@ enum DiskManagementError {
 
     #[error(transparent)]
     RequiredDataset(RequiredDatasetError),
-
-    #[error("Could not check disk's required datasets")]
-    DatasetTaskUnavailable(#[source] DatasetTaskError),
 }
 
 impl DiskManagementError {
@@ -128,8 +124,7 @@ impl DiskManagementError {
                 name: _,
                 err: DestroyDatasetErrorVariant::Other(_),
             })
-            | Self::SetValues(_)
-            | Self::DatasetTaskUnavailable(_) => true,
+            | Self::SetValues(_) => true,
 
             Self::RequiredDataset(err) => err.is_retryable(),
         }
@@ -429,33 +424,6 @@ impl ExternalDisks {
         *disk = ExternalDiskState::failed(disk.config.clone(), error);
     }
 
-    /// Un-adopt all disks we're still adopting, because we couldn't learn
-    /// whether their required datasets exist.
-    ///
-    /// They'll be adopted again on a later reconciliation attempt.
-    pub(super) fn fail_adopting_disks(
-        &mut self,
-        error: DatasetTaskError,
-        log: &Logger,
-    ) {
-        for (disk_id, zpool) in
-            self.disks_in_phase(AdoptionPhase::AwaitingRequiredDatasets)
-        {
-            warn!(
-                log,
-                "not putting disk into service: \
-                 could not check required datasets";
-                "pool" => %zpool,
-                InlineErrorChain::new(&error),
-            );
-            self.fail_adoption(
-                disk_id,
-                DiskManagementError::DatasetTaskUnavailable(error.clone()),
-            );
-        }
-        self.update_output_watch_channels();
-    }
-
     /// Put newly-adopted disks into service, once their required datasets
     /// have been ensured (see [`OmicronDatasets::check_required_datasets()`])
     /// and their former zone roots have been archived and destroyed.
@@ -631,10 +599,10 @@ impl ExternalDisks {
     /// yet in service.
     fn adopted_disks(
         &self,
-    ) -> impl Iterator<Item = (Option<&AdoptionPhase>, &Disk)> {
+    ) -> impl Iterator<Item = (Option<AdoptionPhase>, &Disk)> {
         self.disks.iter().filter_map(|disk| match &disk.state {
             DiskState::Managed(d) => Some((None, d)),
-            DiskState::Adopting(d, phase) => Some((Some(phase), d)),
+            DiskState::Adopting(d, phase) => Some((Some(*phase), d)),
             DiskState::FailedToManage(_) => None,
         })
     }
@@ -647,7 +615,7 @@ impl ExternalDisks {
     fn debug_dataset_disks(&self) -> HashSet<Disk> {
         self.adopted_disks()
             .filter(|(phase, _)| {
-                *phase != Some(&AdoptionPhase::AwaitingRequiredDatasets)
+                *phase != Some(AdoptionPhase::AwaitingRequiredDatasets)
             })
             .map(|(_, disk)| disk.clone())
             .collect()
@@ -2136,21 +2104,39 @@ mod tests {
         let both = BTreeSet::from([t.zpool("a"), t.zpool("b")]);
 
         t.adopt().await;
-        t.external_disks
-            .fail_adopting_disks(DatasetTaskError::Busy, &t.logctx.log);
 
-        // The disks are no longer managed, were never published, and will be
-        // retried.
+        // Even if earlier results say the required datasets were ensured, we
+        // can't trust them once we fail to reach the dataset task.
+        let mut datasets = required_datasets_on(&both);
+        datasets
+            .ensure_datasets_if_needed(
+                IdOrdMap::new(),
+                t.external_disks.adopted_zpools(),
+                &t.logctx.log,
+            )
+            .await;
+        let cleaner = t.cleaner();
+        t.external_disks
+            .finish_adopting_disks_with_cleaner(
+                &datasets,
+                &t.logctx.log,
+                &cleaner,
+            )
+            .await;
+
+        // The disks are no longer managed, were never cleaned up or published,
+        // and will be retried.
         for serial in ["a", "b"] {
             assert_matches!(
                 &t.external_disks.disks.get(&t.disk_id(serial)).unwrap().state,
                 DiskState::FailedToManage(
-                    DiskManagementError::DatasetTaskUnavailable(
-                        DatasetTaskError::Busy
+                    DiskManagementError::RequiredDataset(
+                        RequiredDatasetError::DatasetTaskUnavailable
                     )
                 )
             );
         }
+        assert!(cleaner.cleaned.lock().unwrap().is_empty());
         assert!(t.published_zpools().is_empty());
         assert!(t.debug_collector_zpools().is_empty());
         assert!(t.external_disks.has_retryable_error());

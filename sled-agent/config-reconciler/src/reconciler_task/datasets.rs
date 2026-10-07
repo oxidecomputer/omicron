@@ -82,6 +82,8 @@ pub(super) fn is_required_per_disk_dataset(kind: &DatasetKind) -> bool {
 
 #[derive(Debug, thiserror::Error)]
 pub(super) enum RequiredDatasetError {
+    #[error("could not reach dataset task")]
+    DatasetTaskUnavailable,
     #[error("{kind:?} dataset on zpool {zpool} is not in the sled config")]
     NotInConfig { zpool: ZpoolName, kind: PerDiskDatasetKind },
     #[error("{kind:?} dataset on zpool {zpool} was not ensured")]
@@ -96,6 +98,7 @@ pub(super) enum RequiredDatasetError {
 impl RequiredDatasetError {
     pub(super) fn is_retryable(&self) -> bool {
         match self {
+            RequiredDatasetError::DatasetTaskUnavailable => true,
             // Retrying won't help until the config changes.
             RequiredDatasetError::NotInConfig { .. } => false,
             RequiredDatasetError::NotEnsured { err, .. } => err.is_retryable(),
@@ -303,7 +306,7 @@ impl OmicronDatasets {
         datasets: IdOrdMap<DatasetConfig>,
         currently_managed_zpools: Arc<CurrentlyManagedZpools>,
         log: &Logger,
-    ) -> Result<(), DatasetTaskError> {
+    ) {
         let results = match self
             .dataset_task
             .datasets_ensure(datasets, currently_managed_zpools)
@@ -320,7 +323,7 @@ impl OmicronDatasets {
                     InlineErrorChain::new(&err),
                 );
                 self.dataset_task_unavailable = true;
-                return Err(err);
+                return;
             }
         };
         self.dataset_task_unavailable = false;
@@ -332,7 +335,6 @@ impl OmicronDatasets {
             };
             self.datasets.insert_overwrite(OmicronDataset { config, state });
         }
-        Ok(())
     }
 
     /// Confirm that [`REQUIRED_PER_DISK_DATASETS`] have been ensured on
@@ -341,6 +343,11 @@ impl OmicronDatasets {
         &self,
         zpool: &ZpoolName,
     ) -> Result<(), RequiredDatasetError> {
+        // If we couldn't reach the dataset task, `self.datasets` may be out of
+        // date.
+        if self.dataset_task_unavailable {
+            return Err(RequiredDatasetError::DatasetTaskUnavailable);
+        }
         for kind in REQUIRED_PER_DISK_DATASETS {
             let name = DatasetName::new(*zpool, kind.into());
             let Some(dataset) =
@@ -491,11 +498,18 @@ mod tests {
             dev::test_setup_log("failing_to_reach_dataset_task_is_retryable");
         let zpool = ZpoolName::new_external(ZpoolUuid::new_v4());
 
-        // `with_datasets()` uses a dataset task that we can't reach.
-        let mut datasets = OmicronDatasets::with_datasets(std::iter::empty());
+        // `with_datasets()` uses a dataset task that we can't reach. Start
+        // with the required datasets ensured, as though from an earlier
+        // attempt.
+        let mut datasets = OmicronDatasets::with_datasets(
+            REQUIRED_PER_DISK_DATASETS
+                .into_iter()
+                .map(|kind| (dataset_config(zpool, kind.into()), Ok(()))),
+        );
+        datasets.check_required_datasets(&zpool).expect("datasets ensured");
         assert!(!datasets.has_retryable_error());
 
-        let err = datasets
+        datasets
             .ensure_datasets_if_needed(
                 [dataset_config(zpool, DatasetKind::Debug)]
                     .into_iter()
@@ -503,12 +517,13 @@ mod tests {
                 Arc::default(),
                 &logctx.log,
             )
-            .await
-            .expect_err("dataset task unreachable");
-        assert_matches!(err, DatasetTaskError::Exited);
+            .await;
 
-        // We didn't learn anything about the dataset, but we know to retry.
-        assert!(datasets.check_required_datasets(&zpool).is_err());
+        // We can't trust the earlier results, and we know to retry.
+        assert_matches!(
+            datasets.check_required_datasets(&zpool),
+            Err(RequiredDatasetError::DatasetTaskUnavailable)
+        );
         assert!(datasets.has_retryable_error());
 
         logctx.cleanup_successful();

@@ -50,7 +50,6 @@ use crate::InternalDisksReceiver;
 use crate::SledAgentArtifactStore;
 use crate::TimeSyncConfig;
 use crate::dataset_serialization_task::DatasetRekeyInfo;
-use crate::dataset_serialization_task::DatasetTaskError;
 use crate::dataset_serialization_task::DatasetTaskHandle;
 use crate::dataset_serialization_task::RekeyRequest;
 use crate::debug_collector::FormerZoneRootArchiver;
@@ -471,10 +470,7 @@ impl ReconcilerTask {
     }
 
     /// Ensure `datasets` on all adopted disks.
-    async fn ensure_datasets(
-        &mut self,
-        datasets: IdOrdMap<DatasetConfig>,
-    ) -> Result<(), DatasetTaskError> {
+    async fn ensure_datasets(&mut self, datasets: IdOrdMap<DatasetConfig>) {
         self.datasets
             .ensure_datasets_if_needed(
                 datasets,
@@ -495,27 +491,18 @@ impl ReconcilerTask {
         datasets: &IdOrdMap<DatasetConfig>,
     ) {
         let zpools_being_adopted = self.external_disks.zpools_being_adopted();
-        if let Err(err) = self
-            .ensure_datasets(limit_adopting_zpools_to_required_datasets(
-                datasets,
-                &zpools_being_adopted,
-            ))
-            .await
-        {
-            // We can't tell whether newly-adopted disks' required datasets
-            // exist, so give up on them for now; we'll adopt them again on a
-            // later reconciliation attempt.
-            self.external_disks.fail_adopting_disks(err, &self.log);
-            return;
-        }
+        self.ensure_datasets(limit_adopting_zpools_to_required_datasets(
+            datasets,
+            &zpools_being_adopted,
+        ))
+        .await;
         if zpools_being_adopted.is_empty() {
             return;
         }
         self.external_disks
             .finish_adopting_disks(&self.datasets, &self.log)
             .await;
-        // On failure, `self.datasets` records that we need to retry.
-        let _ = self.ensure_datasets(datasets.clone()).await;
+        self.ensure_datasets(datasets.clone()).await;
     }
 
     async fn do_reconcilation<
