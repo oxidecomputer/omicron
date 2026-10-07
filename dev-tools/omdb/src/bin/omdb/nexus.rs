@@ -1554,11 +1554,10 @@ fn print_task_vmm_stop_for_update(details: &serde_json::Value) {
                 }
             }
 
-            // TODO-K: double check this is actually what I want the errors to
-            // look like
             if !error_messages.is_empty() {
+                println!("      errors:");
                 for error in error_messages {
-                    println!("    {ERROR:<WIDTH$}{error}");
+                    println!("        {error}");
                 }
             }
         }

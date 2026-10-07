@@ -312,23 +312,36 @@ impl VmmStopForUpdate {
             .map(|err| InlineErrorChain::new(err).to_string())
             .collect();
 
-        // TODO-K: Once we have useful information log it
-        //    if results.vmms_by_sled.is_empty() {
-        //        slog::debug!(
-        //            &opctx.log,
-        //            "no VMMs were stopped for a sled update";
-        //        );
-        //    } else {
-        //        let vmm_count: usize =
-        //            vmms_by_sled.iter().map(|sled| sled.vmm_ids.len()).sum();
-        //        slog::info!(
-        //            &opctx.log,
-        //            "stopped VMMs marked to stop for a sled update";
-        //            "sleds" => vmms_by_sled.len(),
-        //            "vmms" => vmm_count,
-        //        );
-        //      TODO-K: for debug show IDs? also show which failed
-        //    }
+        if vmms_stopped_by_sled.is_empty() {
+            slog::info!(
+                &opctx.log,
+                "no VMMs were stopped for a sled update";
+            );
+        } else {
+            for sled in &vmms_stopped_by_sled {
+                let VmmsBySled { sled_id, vmm_ids } = sled;
+                slog::info!(
+                    &opctx.log,
+                    "stopped {} VMMs marked to stop for a sled update",
+                    vmm_ids.len();
+                    "sled_id" => %sled_id,
+                    "vmms" => ?vmm_ids,
+                );
+            }
+        }
+
+        if !vmms_failed_by_sled.is_empty() {
+            for sled in &vmms_failed_by_sled {
+                let VmmsBySled { sled_id, vmm_ids } = sled;
+                slog::info!(
+                    &opctx.log,
+                    "failed to stop {} VMMs marked to stop for a sled update",
+                    vmm_ids.len();
+                    "sled_id" => %sled_id,
+                    "vmms" => ?vmm_ids,
+                );
+            }
+        }
 
         if !error_messages.is_empty() {
             slog::error!(
