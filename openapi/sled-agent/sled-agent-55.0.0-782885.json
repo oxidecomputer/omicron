@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "54.0.0"
+    "version": "55.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -753,6 +753,28 @@
         "summary": "This endpoint returns a list of known zones on a sled that have service",
         "description": "logs that can be collected into a support bundle.",
         "operationId": "support_logs",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "end_time",
+            "description": "Upper bound (inclusive) on log content. A zone is omitted when every one of its log files has content beginning after this. If absent, no upper bound is applied.",
+            "schema": {
+              "nullable": true,
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start_time",
+            "description": "Lower bound (inclusive) on log content. A zone is omitted when the last modification (`mtime`) of every one of its log files predates this; a file's `mtime` is the timestamp of its newest content, so an omitted zone has no log data from the window. If absent, no lower bound is applied.",
+            "schema": {
+              "nullable": true,
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "successful operation",

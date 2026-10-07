@@ -37,7 +37,8 @@ use sled_agent_types::dataset::{
 };
 use sled_agent_types::debug::OperatorSwitchZonePolicy;
 use sled_agent_types::diagnostics::{
-    SledDiagnosticsLogsDownloadPathParam, SledDiagnosticsLogsDownloadQueryParam,
+    SledDiagnosticsLogZonesQueryParam, SledDiagnosticsLogsDownloadPathParam,
+    SledDiagnosticsLogsDownloadQueryParam,
 };
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::firewall_rules::VpcFirewallRulesEnsureBody;
@@ -1349,12 +1350,18 @@ impl SledAgentApi for SledAgentImpl {
 
     async fn support_logs(
         request_context: RequestContext<Self::Context>,
+        query_params: Query<SledDiagnosticsLogZonesQueryParam>,
     ) -> Result<HttpResponseOk<Vec<String>>, HttpError> {
         let sa = request_context.context();
+        let SledDiagnosticsLogZonesQueryParam { start_time, end_time } =
+            query_params.into_inner();
         sa.latencies()
             .instrument_dropshot_handler(&request_context, async {
                 sa.as_support_bundle_logs()
-                    .zones_list()
+                    .zones_list(sled_diagnostics::LogTimeWindow {
+                        start: start_time,
+                        end: end_time,
+                    })
                     .await
                     .map(HttpResponseOk)
                     .map_err(HttpError::from)

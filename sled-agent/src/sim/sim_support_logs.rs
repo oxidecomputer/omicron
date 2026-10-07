@@ -13,10 +13,32 @@
 //! of capping rotated logs per service, and zip paths are flat rather
 //! than nested by service and log type.
 
+use super::sled_agent::SimLogEntry;
 use super::sled_agent::SledAgent;
 use dropshot::HttpError;
 use sled_diagnostics::LogTimeWindow;
 use std::io::Write;
+
+/// Returns true if `entry`'s mtime falls inside `window` (inclusive on
+/// both ends). Shared by the zone-listing and download endpoints so the
+/// two can't drift: a zone is listed exactly when at least one of its
+/// entries would be served.
+pub(super) fn entry_in_window(
+    entry: &SimLogEntry,
+    window: &LogTimeWindow,
+) -> bool {
+    if let Some(start) = window.start {
+        if entry.mtime < start {
+            return false;
+        }
+    }
+    if let Some(end) = window.end {
+        if entry.mtime > end {
+            return false;
+        }
+    }
+    true
+}
 
 /// Build a zip of synthetic log entries for `zone` and return it as an
 /// `application/zip` HTTP response. See the module docs for how the
@@ -32,19 +54,7 @@ pub(super) fn serve_zip(
         logs.get(zone).cloned().unwrap_or_default()
     };
 
-    entries.retain(|e| {
-        if let Some(start) = window.start {
-            if e.mtime < start {
-                return false;
-            }
-        }
-        if let Some(end) = window.end {
-            if e.mtime > end {
-                return false;
-            }
-        }
-        true
-    });
+    entries.retain(|e| entry_in_window(e, &window));
 
     // Sort newest-first so the count cap takes the most recent.
     entries.sort_by_key(|e| std::cmp::Reverse(e.mtime));

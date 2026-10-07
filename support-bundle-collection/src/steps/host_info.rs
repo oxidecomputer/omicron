@@ -237,9 +237,22 @@ async fn collect_data_from_sled(
         }
     }
 
+    // Ask the sled-agent only for zones with log content in the bundle's
+    // time window: a sled accumulates log directories for every zone that
+    // has ever run on it, and there is no point requesting logs from zones
+    // whose files all fall outside the window.
+    //
+    // Bind with names so the positional Progenitor call below can't
+    // accidentally swap start and end: query parameters are supplied in
+    // alphabetical order, which is why "end time" comes before
+    // "start time".
+    let (start, end) = (time_range.start(), time_range.end());
     let zones = tokio::select! {
         _ = collection.cancelled() => return Ok(CollectionStepOutput::None),
-        result = sled_client.support_logs() => result?.into_inner(),
+        result = sled_client.support_logs(
+            end.as_ref(),
+            start.as_ref(),
+        ) => result?.into_inner(),
     };
 
     // For each zone we fire off a request to its sled-agent to collect
@@ -363,12 +376,13 @@ async fn save_zone_log_zip_or_error(
         Ok(res) => {
             let bytestream = res.into_inner();
             let output_dir = path.join(format!("logs/{zone}"));
-            let zipfile_path = output_dir.join("logs.zip");
 
-            // Ensure the logs output directory exists.
-            tokio::fs::create_dir_all(&output_dir).await.with_context(
-                || format!("failed to create output directory: {output_dir}"),
-            )?;
+            // Stream the zip somewhere outside the zone's output directory:
+            // a zone can legitimately produce an empty archive (its listing
+            // and its download race against log rotation and archival), and
+            // an empty archive must leave no trace in the bundle, not even
+            // an empty directory.
+            let zipfile_path = path.join(format!("{zone}.logs.zip.partial"));
 
             // Stream the log zip file to disk.
             let mut file =
@@ -383,7 +397,8 @@ async fn save_zone_log_zip_or_error(
             let _nbytes = tokio::io::copy(&mut reader, &mut file).await?;
             file.flush().await?;
 
-            // Unzip the log file into the same directory.
+            // Unzip the log file into the zone's output directory, unless
+            // the archive turns out to be empty.
             let zip_path = zipfile_path.clone();
             tokio::task::spawn_blocking(move || {
                 extract_zip_file(&output_dir, &zip_path)
@@ -422,8 +437,57 @@ fn extract_zip_file(
     let mut zip = std::fs::File::open(&zip_file)
         .with_context(|| format!("failed to open zip file: {zip_file}"))?;
     let mut archive = zip::ZipArchive::new(&mut zip)?;
+    // An empty archive contributes nothing to the bundle; extraction would
+    // only leave an empty directory behind.
+    if archive.is_empty() {
+        return Ok(());
+    }
     archive.extract(&output_dir).with_context(|| {
         format!("failed to extract log zip file to: {output_dir}")
     })?;
     Ok(())
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use std::io::Write;
+
+    fn write_zip(path: &Utf8Path, entries: &[(&str, &str)]) {
+        let file = std::fs::File::create(path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        for (name, contents) in entries {
+            let opts: zip::write::FileOptions<'_, ()> =
+                zip::write::FileOptions::default();
+            zip.start_file(*name, opts).unwrap();
+            zip.write_all(contents.as_bytes()).unwrap();
+        }
+        zip.finish().unwrap();
+    }
+
+    #[test]
+    fn extract_zip_file_skips_empty_archives() {
+        let dir = camino_tempfile::tempdir().unwrap();
+        let zip_path = dir.path().join("logs.zip");
+        let output_dir = dir.path().join("logs/oxz_test");
+
+        // An empty archive leaves nothing behind, not even the output
+        // directory: an empty logs/<zone>/ entry would otherwise survive
+        // into the final bundle.
+        write_zip(&zip_path, &[]);
+        extract_zip_file(&output_dir, &zip_path).unwrap();
+        assert!(
+            !output_dir.exists(),
+            "empty archive must not create {output_dir}"
+        );
+
+        // A non-empty archive extracts under the output directory as usual.
+        write_zip(&zip_path, &[("svc/current/svc.log", "hello")]);
+        extract_zip_file(&output_dir, &zip_path).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(output_dir.join("svc/current/svc.log"))
+                .unwrap(),
+            "hello"
+        );
+    }
 }

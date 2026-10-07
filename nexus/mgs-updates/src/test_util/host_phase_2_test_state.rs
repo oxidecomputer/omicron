@@ -218,6 +218,7 @@ mod api_impl {
     use sled_agent_types::dataset::LocalStorageDatasetDeleteRequest;
     use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
     use sled_agent_types::debug::OperatorSwitchZonePolicy;
+    use sled_agent_types::diagnostics::SledDiagnosticsLogZonesQueryParam;
     use sled_agent_types::diagnostics::SledDiagnosticsLogsDownloadPathParm;
     use sled_agent_types::diagnostics::SledDiagnosticsLogsDownloadQueryParam;
     use sled_agent_types::firewall_rules::VpcFirewallRulesEnsureBody;
@@ -924,6 +925,7 @@ mod api_impl {
 
         async fn support_logs(
             _request_context: RequestContext<Self::Context>,
+            _query_params: dropshot::Query<SledDiagnosticsLogZonesQueryParam>,
         ) -> Result<HttpResponseOk<Vec<String>>, HttpError> {
             unimplemented!()
         }
