@@ -512,8 +512,9 @@ impl ReconcilerTask {
         if zpools_being_adopted.is_empty() {
             return;
         }
-        self.external_disks.verify_adopted_disks(&self.datasets, &self.log);
-        self.external_disks.finish_adopting_disks(&self.log).await;
+        self.external_disks
+            .finish_adopting_disks(&self.datasets, &self.log)
+            .await;
         // On failure, `self.datasets` records that we need to retry.
         let _ = self.ensure_datasets(datasets.clone()).await;
     }

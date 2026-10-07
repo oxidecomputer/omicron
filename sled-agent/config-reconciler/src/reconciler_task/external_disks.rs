@@ -317,8 +317,8 @@ impl CurrentlyManagedZpoolsReceiver {
 ///
 /// A disk we've just adopted is not published as managed (to the rest of
 /// sled-agent) until its required datasets have been ensured and its former
-/// zone roots have been cleaned up. See [`ExternalDisks::verify_adopted_disks()`]
-/// and [`ExternalDisks::finish_adopting_disks()`].
+/// zone roots have been cleaned up. See
+/// [`ExternalDisks::finish_adopting_disks()`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AdoptionPhase {
     /// We've just adopted this disk, and are waiting for its required
@@ -432,8 +432,7 @@ impl ExternalDisks {
     }
 
     /// Un-adopt all disks we're still adopting, because we couldn't learn
-    /// whether their required datasets exist (see
-    /// [`Self::verify_adopted_disks()`]).
+    /// whether their required datasets exist.
     ///
     /// They'll be adopted again on a later reconciliation attempt.
     pub(super) fn fail_adopting_disks(
@@ -459,13 +458,36 @@ impl ExternalDisks {
         self.update_output_watch_channels();
     }
 
-    /// Check that newly-adopted disks' required datasets have been ensured
-    /// (see [`OmicronDatasets::check_required_datasets()`]).
+    /// Put newly-adopted disks into service, once their required datasets
+    /// have been ensured (see [`OmicronDatasets::check_required_datasets()`])
+    /// and their former zone roots have been archived and destroyed.
     ///
-    /// Disks that pass may have their former zone roots cleaned up, via
-    /// [`Self::finish_adopting_disks()`]. Disks that fail are un-adopted
-    /// without ever having been put into service.
-    pub(super) fn verify_adopted_disks(
+    /// Disks that fail either step are un-adopted without ever having been put
+    /// into service.
+    pub(super) async fn finish_adopting_disks(
+        &mut self,
+        datasets: &OmicronDatasets,
+        log: &Logger,
+    ) {
+        self.finish_adopting_disks_with_cleaner(
+            datasets,
+            log,
+            &RealZoneRootCleaner,
+        )
+        .await
+    }
+
+    async fn finish_adopting_disks_with_cleaner<T: ZoneRootCleaner>(
+        &mut self,
+        datasets: &OmicronDatasets,
+        log: &Logger,
+        cleaner: &T,
+    ) {
+        self.verify_adopted_disks(datasets, log);
+        self.clean_up_adopted_disks(log, cleaner).await;
+    }
+
+    fn verify_adopted_disks(
         &mut self,
         datasets: &OmicronDatasets,
         log: &Logger,
@@ -498,21 +520,11 @@ impl ExternalDisks {
             }
         }
         // `DebugCollectorTask` must see verified disks' debug datasets before
-        // `finish_adopting_disks()` archives former zone roots into them.
+        // we archive former zone roots into them.
         self.update_output_watch_channels();
     }
 
-    /// Archive and destroy any former zone roots on newly-adopted disks whose
-    /// required datasets have been ensured, and put the ones that succeed into
-    /// service.
-    ///
-    /// Disks that fail are un-adopted without ever having been put into
-    /// service.
-    pub(super) async fn finish_adopting_disks(&mut self, log: &Logger) {
-        self.finish_adopting_disks_with_cleaner(log, &RealZoneRootCleaner).await
-    }
-
-    async fn finish_adopting_disks_with_cleaner<T: ZoneRootCleaner>(
+    async fn clean_up_adopted_disks<T: ZoneRootCleaner>(
         &mut self,
         log: &Logger,
         cleaner: &T,
@@ -630,7 +642,7 @@ impl ExternalDisks {
     }
 
     /// Returns the managed disks to make visible to `DebugCollectorTask`:
-    /// those that have passed [`Self::verify_adopted_disks()`].
+    /// those whose required datasets have been verified.
     ///
     /// Once verified, a debug dataset stays mounted, so we don't re-check it
     /// (e.g., after a later failure to update its properties).
@@ -739,9 +751,8 @@ impl ExternalDisks {
     /// Attempt to start managing any disks specified by `config` that we aren't
     /// already managing.
     ///
-    /// Newly-adopted disks are not put into service until they've been
-    /// verified ([`Self::verify_adopted_disks()`]) and their former zone roots
-    /// have been cleaned up ([`Self::finish_adopting_disks()`]).
+    /// Newly-adopted disks are not put into service until
+    /// [`Self::finish_adopting_disks()`].
     pub(super) async fn start_managing_if_needed(
         &mut self,
         raw_disks: &IdOrdMap<RawDisk>,
@@ -1415,9 +1426,9 @@ mod tests {
             .await;
         let datasets =
             required_datasets_on(&external_disks.zpools_being_adopted());
-        external_disks.verify_adopted_disks(&datasets, log);
         external_disks
             .finish_adopting_disks_with_cleaner(
+                &datasets,
                 log,
                 &TestZoneRootCleaner::default(),
             )
@@ -1862,6 +1873,11 @@ mod tests {
     struct TestZoneRootCleaner {
         fail_on: Mutex<BTreeSet<ZpoolName>>,
         cleaned: Mutex<Vec<ZpoolName>>,
+        // If set, assert that each zpool is visible to `DebugCollectorTask`
+        // but not yet in service when it's cleaned.
+        debug_dataset_disks_rx: Option<watch::Receiver<HashSet<Disk>>>,
+        currently_managed_zpools_rx:
+            Option<watch::Receiver<Arc<CurrentlyManagedZpools>>>,
     }
 
     impl ZoneRootCleaner for TestZoneRootCleaner {
@@ -1872,6 +1888,18 @@ mod tests {
             _archiver: &FormerZoneRootArchiver,
             _log: &Logger,
         ) -> Result<(), DiskManagementError> {
+            if let Some(rx) = &self.debug_dataset_disks_rx {
+                assert!(
+                    rx.borrow().iter().any(|d| d.zpool_name() == zpool_name),
+                    "{zpool_name} not visible to DebugCollectorTask",
+                );
+            }
+            if let Some(rx) = &self.currently_managed_zpools_rx {
+                assert!(
+                    !rx.borrow().contains(zpool_name),
+                    "{zpool_name} in service before cleanup",
+                );
+            }
             if self.fail_on.lock().unwrap().contains(zpool_name) {
                 return Err(DiskManagementError::DestroyDataset(
                     DestroyDatasetError {
@@ -1912,6 +1940,8 @@ mod tests {
         logctx: omicron_test_utils::dev::LogContext,
         external_disks: ExternalDisks,
         debug_dataset_disks_rx: watch::Receiver<HashSet<Disk>>,
+        currently_managed_zpools_rx:
+            watch::Receiver<Arc<CurrentlyManagedZpools>>,
         raw_disks: IdOrdMap<RawDisk>,
         config_disks: IdOrdMap<OmicronPhysicalDiskConfig>,
     }
@@ -1919,7 +1949,7 @@ mod tests {
     impl AdoptionTest {
         fn new(test_name: &str, serials: &[&str]) -> Self {
             let logctx = dev::test_setup_log(test_name);
-            let (currently_managed_zpools_tx, _rx) =
+            let (currently_managed_zpools_tx, currently_managed_zpools_rx) =
                 watch::channel(Arc::default());
             let (debug_dataset_disks_tx, debug_dataset_disks_rx) =
                 watch::channel(HashSet::default());
@@ -1944,9 +1974,38 @@ mod tests {
                 logctx,
                 external_disks,
                 debug_dataset_disks_rx,
+                currently_managed_zpools_rx,
                 raw_disks,
                 config_disks,
             }
+        }
+
+        fn cleaner(&self) -> TestZoneRootCleaner {
+            TestZoneRootCleaner {
+                debug_dataset_disks_rx: Some(
+                    self.debug_dataset_disks_rx.clone(),
+                ),
+                currently_managed_zpools_rx: Some(
+                    self.currently_managed_zpools_rx.clone(),
+                ),
+                ..Default::default()
+            }
+        }
+
+        /// Finish adopting disks, as though only the required datasets on
+        /// `zpools` have been ensured.
+        async fn finish_adopting<'a>(
+            &mut self,
+            zpools: impl IntoIterator<Item = &'a ZpoolName>,
+            cleaner: &TestZoneRootCleaner,
+        ) {
+            self.external_disks
+                .finish_adopting_disks_with_cleaner(
+                    &required_datasets_on(zpools),
+                    &self.logctx.log,
+                    cleaner,
+                )
+                .await;
         }
 
         fn zpool(&self, serial: &str) -> ZpoolName {
@@ -2011,19 +2070,11 @@ mod tests {
         assert!(t.published_zpools().is_empty());
         assert!(t.debug_collector_zpools().is_empty());
 
-        // Once their required datasets are ensured, their debug datasets are
-        // visible to the debug collector (for archival), but they're not yet
-        // in service.
-        t.external_disks
-            .verify_adopted_disks(&required_datasets_on(&both), &t.logctx.log);
-        assert_eq!(t.debug_collector_zpools(), both);
-        assert!(t.published_zpools().is_empty());
-
-        // Once cleaned up, they're in service.
-        let cleaner = TestZoneRootCleaner::default();
-        t.external_disks
-            .finish_adopting_disks_with_cleaner(&t.logctx.log, &cleaner)
-            .await;
+        // `cleaner` checks that each disk's debug dataset is visible to the
+        // debug collector (for archival), but the disk isn't in service, when
+        // it's cleaned up. Afterwards, they're in service.
+        let cleaner = t.cleaner();
+        t.finish_adopting(&both, &cleaner).await;
         assert_eq!(
             cleaner
                 .cleaned
@@ -2056,25 +2107,19 @@ mod tests {
 
         t.adopt().await;
         // `bad` has none of its required datasets in the config.
-        t.external_disks
-            .verify_adopted_disks(&required_datasets_on(&[ok]), &t.logctx.log);
+        let cleaner = t.cleaner();
+        t.finish_adopting(&[ok], &cleaner).await;
 
         // The disk that failed verification is no longer managed, and was
-        // never visible to the debug collector or published as managed.
+        // never cleaned up or published.
         assert_matches!(
             &t.external_disks.disks.get(&t.disk_id("bad")).unwrap().state,
             DiskState::FailedToManage(DiskManagementError::RequiredDataset(
                 RequiredDatasetError::NotInConfig { .. }
             ))
         );
-        assert_eq!(t.debug_collector_zpools(), BTreeSet::from([ok]));
-        assert!(t.published_zpools().is_empty());
-
-        let cleaner = TestZoneRootCleaner::default();
-        t.external_disks
-            .finish_adopting_disks_with_cleaner(&t.logctx.log, &cleaner)
-            .await;
         assert_eq!(*cleaner.cleaned.lock().unwrap(), [ok]);
+        assert_eq!(t.debug_collector_zpools(), BTreeSet::from([ok]));
         assert_eq!(t.published_zpools(), BTreeSet::from([ok]));
 
         // We'll try to adopt it again later.
@@ -2131,16 +2176,9 @@ mod tests {
         let (ok, bad) = (t.zpool("ok"), t.zpool("bad"));
 
         t.adopt().await;
-        t.external_disks.verify_adopted_disks(
-            &required_datasets_on(&[ok, bad]),
-            &t.logctx.log,
-        );
-
-        let cleaner = TestZoneRootCleaner::default();
+        let cleaner = t.cleaner();
         cleaner.fail_on.lock().unwrap().insert(bad);
-        t.external_disks
-            .finish_adopting_disks_with_cleaner(&t.logctx.log, &cleaner)
-            .await;
+        t.finish_adopting(&[ok, bad], &cleaner).await;
 
         // The disk that failed cleanup is no longer managed (and will be
         // retried).
