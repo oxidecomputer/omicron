@@ -2129,7 +2129,9 @@ impl DataStore {
         let conn = self.pool_connection_authorized(opctx).await?;
 
         let provisions = self
-            .transaction_retry_wrapper(
+            // Use the non-retry wrapper, as both parts of this transaction bail
+            // on errors.
+            .transaction_non_retry_wrapper(
                 "delete_disk_and_update_provisioning_collection",
             )
             .transaction(&conn, |conn| {
