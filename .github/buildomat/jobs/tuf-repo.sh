@@ -10,6 +10,8 @@
 #: output_rules = [
 #:	"=/work/repo.zip",
 #:	"=/work/repo.zip.sha256.txt",
+#:	"=/work/repo-v1-deprecated.zip",
+#:	"=/work/repo-v1-deprecated.zip.sha256.txt",
 #:	"=/work/helios.json",
 #:	"=/work/incorporation.p5m",
 #:	"=/work/incorporation.p5p",
@@ -31,6 +33,16 @@
 #: series = "rot-all"
 #: name = "repo.zip.sha256.txt"
 #: from_output = "/work/repo.zip.sha256.txt"
+#:
+#: [[publish]]
+#: series = "rot-all"
+#: name = "repo-v1-deprecated.zip"
+#: from_output = "/work/repo-v1-deprecated.zip"
+#:
+#: [[publish]]
+#: series = "rot-all"
+#: name = "repo-v1-deprecated.zip.sha256.txt"
+#: from_output = "/work/repo.zip-v1-deprecated.sha256.txt"
 #:
 #: [[publish]]
 #: series = "rot-all"
