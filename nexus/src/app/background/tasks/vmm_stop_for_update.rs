@@ -212,15 +212,27 @@ impl VmmStopForUpdate {
                             vmm_state;
 
                         match state {
-                            // TODO-K: A VMM could have been set to stopped and
-                            // then propolis destroyed it because another nexus
-                            // told it to? Is this even possible? Does it
-                            // matter? Check my claims here
+                            // If we succeeded, one of three things happened:
+                            //
+                            //  - The VMM has not stopped yet, but propolis has
+                            //    accepted the `put_state` request and reports
+                            //    the VMM's state as `Stopping`.
+                            //  - A propolis zone does not exist yet. In this
+                            //    scenario a VMM could have been in the
+                            //    `Creating` state but had not reached the point
+                            //    where the propolis zone was created. In this
+                            //    case the request succeeded, but the VMM is
+                            //    reported as `Destroyed`.
+                            //  - A VMM should technically never be reported as
+                            //    `Stopped` since
+                            //    propolis_client::types::InstanceState::Stopped
+                            //    is always reported as `VmmState::Stopping`.
+                            //    But, if for some reason we get this state,
+                            //    it's what we want, so we consider it a
+                            //    success.
                             VmmState::Stopped
                             | VmmState::Stopping
-                            | VmmState::Destroyed
-                            | VmmState::Failed => {
-                                // TODO-K: Success!
+                            | VmmState::Destroyed => {
                                 result
                                     .vmms_stopped_by_sled
                                     .entry(*sled_id)
@@ -241,16 +253,31 @@ impl VmmStopForUpdate {
                                     "time_updated" => ?time_updated,
                                 );
                             }
+                            // Propolis is alive but does not find a VMM. This
+                            // implies that it restarted and lost the previously
+                            // created VMM. The VMM is reported as Failed. It's
+                            // not necessary to stop it anymore, so we don't add
+                            // it to the `vmms_failed_by_sled` list.
+                            VmmState::Failed => {
+                                slog::info!(
+                                    opctx.log,
+                                    "Unable to find VMM, possibly due to a \
+                                    restart. No need to stop it";
+                                    "sled_id" => %sled_id,
+                                    "vmm_id" => %id,
+                                    "state" => ?state,
+                                    "vmm_generation" => ?generation,
+                                    "time_updated" => ?time_updated,
+                                );
+                            }
                             VmmState::Migrating
                             | VmmState::Rebooting
                             | VmmState::Starting
                             | VmmState::Running => {
-                                // TODO-K: Bollocks
-
                                 slog::error!(
                                     opctx.log,
                                     "Failed to mark VMM as Stopped, \
-                                    state did not change";
+                                    unexpected state reported";
                                     "sled_id" => %sled_id,
                                     "vmm_id" => %id,
                                     "state" => ?state,
