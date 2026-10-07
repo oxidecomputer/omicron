@@ -43,7 +43,10 @@ enum PidFilter {
 }
 
 impl PidFilter {
-    pub fn should_include_pid(&self, pid: libc::pid_t) -> bool {
+    // This is only actually used on illumos, since `find_oxide_pids` falls back
+    // to a stub implementation elsewhere.
+    #[cfg_attr(not(target_os = "illumos"), allow(dead_code))]
+    fn should_include_pid(&self, pid: libc::pid_t) -> bool {
         match self {
             PidFilter::All => true,
             PidFilter::Skip(skipped) => *skipped != pid,
@@ -52,7 +55,7 @@ impl PidFilter {
 
     /// Returns a [`PidFilter::SkipMe`] filter that skips the calling process's
     /// PID.
-    pub fn skip_me() -> Self {
+    fn skip_me() -> Self {
         PidFilter::Skip(std::process::id() as libc::pid_t)
     }
 }
