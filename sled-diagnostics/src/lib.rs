@@ -117,8 +117,8 @@ pub async fn pargs_oxide_processes(
     log: &Logger,
 ) -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
     // Since `pargs` opens the process readonly, it does not involve the agent
-    // LWP and is safe to use against the calling process, so include all Oxide
-    // PIDs.
+    // LWP and is safe to use against the calling process. Therefore, include
+    // all Oxide PIDs.
     let pid_filter = PidFilter::All;
     // In a diagnostics context we care about looping over every pid we find,
     // but on failure we should just return a single error in a vec that
@@ -150,11 +150,14 @@ pub async fn pargs_oxide_processes(
 pub async fn pstack_oxide_processes(
     log: &Logger,
 ) -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
-    // Don't pstack our own pid: per the WARNINGS in `man 1 proc`, `pstack`
-    // and `pfiles` will suspend what the manual page very aptly refers to
-    // as the "victim" process until they exit. So, at the very least, the
-    // timeout is not gonna work! And, depending on who we are, perhaps
-    // other worse things might happen...
+    // There's currently a bug where sled-agent running `pstack` or `pfiles`
+    // with its own PID may cause it to crash, possibly due to an interaction
+    // between the timeout we set for the command, the agent LWP, and `fork`ing.
+    // See https://github.com/oxidecomputer/stlouis/issues/1083 for more
+    // details.
+    //
+    // Therefore, as a workaround, exclude this process' PID until this no
+    // longer causes us to crash.
     let pid_filter = PidFilter::skip_me();
     // In a diagnostics context we care about looping over every pid we find,
     // but on failure we should just return a single error in a vec that
