@@ -260,6 +260,10 @@ pub enum ReincarnationReason {
     Failed,
     /// A previous instance-start saga for this instance has failed.
     SagaUnwound,
+    // TODO-K: In a follow up PR add a StoppedForUpdate reason, so the instances
+    // we stopped during sled evacuation actually get restarted
+    //
+    // Tracking issue: https://github.com/oxidecomputer/omicron/issues/11169
 }
 
 impl std::fmt::Display for ReincarnationReason {

@@ -580,17 +580,7 @@ impl DataStore {
         paginated(dsl::vmm, dsl::id, pagparams)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::stop_for_update_disposition_generation.is_not_null())
-            // TODO-K: change to DbVmmState::SHOULD_STOP_FOR_EVACUATION once
-            // that branch is merged
-            .filter(dsl::state.eq_any(&[
-                // TODO-K: Caveat that a VMM in Creating state will not be
-                // registered with a sled agent yet. Does this affect what we're
-                // doing here?
-                DbVmmState::Creating,
-                DbVmmState::Starting,
-                DbVmmState::Running,
-                DbVmmState::Rebooting,
-            ]))
+            .filter(dsl::state.eq_any(DbVmmState::SHOULD_STOP_FOR_EVACUATION))
             .select(Vmm::as_select())
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await

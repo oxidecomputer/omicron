@@ -903,25 +903,6 @@ impl BackgroundTasksInitializer {
             activator: task_abandoned_vmm_reaper,
         });
 
-        // Background task: stop VMMs that are marked to be stopped for a sled
-        // update.
-        //
-        // TODO-K: This task is meant to be activated by the
-        // `vmm_mark_stop_for_update` task whenever that task marks one or more
-        // VMMs.
-        driver.register(TaskDefinition {
-            name: "vmm_stop_for_update",
-            description: "stops VMMs that are marked to be stopped for a sled \
-                update",
-            period: config.vmm_stop_for_update.period_secs,
-            task_impl: Box::new(vmm_stop_for_update::VmmStopForUpdate::new(
-                datastore.clone(),
-            )),
-            opctx: opctx.child(BTreeMap::new()),
-            watchers: vec![],
-            activator: task_vmm_stop_for_update,
-        });
-
         // Background task: saga recovery
         {
             let task_impl = Box::new(saga_recovery::SagaRecovery::new(
@@ -1363,12 +1344,16 @@ impl BackgroundTasksInitializer {
             activator: task_populate_switch_ports,
         });
 
+        let vmm_mark_stop_for_update =
+            VmmMarkStopForUpdate::new(datastore.clone());
+        let vmm_mark_stop_for_update_watcher =
+            vmm_mark_stop_for_update.watcher();
         driver.register(TaskDefinition {
             name: "vmm_mark_stop_for_update",
             description: "marks VMMs on evacuating sleds as needing to be \
             stopped for an update",
             period: config.vmm_mark_stop_for_update.period_secs,
-            task_impl: Box::new(VmmMarkStopForUpdate::new(datastore)),
+            task_impl: Box::new(vmm_mark_stop_for_update),
             opctx: opctx.child(BTreeMap::new()),
             // We activate this task any time the blueprint_rendezvous task runs.
             // We want to err on the side of running this task more often than
@@ -1376,6 +1361,22 @@ impl BackgroundTasksInitializer {
             // this task is triggered anyway.
             watchers: vec![Box::new(bp_rendezvous_watcher)],
             activator: task_vmm_mark_stop_for_update,
+        });
+
+        driver.register(TaskDefinition {
+            name: "vmm_stop_for_update",
+            description: "stops VMMs that are marked to be stopped for a sled \
+                update",
+            period: config.vmm_stop_for_update.period_secs,
+            task_impl: Box::new(vmm_stop_for_update::VmmStopForUpdate::new(
+                datastore,
+            )),
+            opctx: opctx.child(BTreeMap::new()),
+            // Like the vmm_mark_stop_for_update task, this task will be
+            // activated each time that task runs regardless of the outcome.
+            // We do this in the spirit of futureproofing.
+            watchers: vec![Box::new(vmm_mark_stop_for_update_watcher)],
+            activator: task_vmm_stop_for_update,
         });
 
         driver

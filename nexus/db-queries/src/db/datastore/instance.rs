@@ -463,8 +463,7 @@ impl DataStore {
                         &*self.pool_connection_authorized(opctx).await?,
                     )
                     .await
-            } // TODO-K: Add a stopped for update reason, so the instances we
-              // stopped actually get restarted
+            }
         }
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
