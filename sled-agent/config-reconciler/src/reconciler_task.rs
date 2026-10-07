@@ -484,9 +484,7 @@ impl ReconcilerTask {
                 &self.log,
             )
             .await;
-        self.external_disks.update_debug_dataset_zpools(
-            self.datasets.ensured_debug_dataset_zpools(),
-        );
+        self.external_disks.update_output_watch_channels(&self.datasets);
     }
 
     async fn do_reconcilation<
@@ -595,6 +593,7 @@ impl ReconcilerTask {
         self.external_disks.stop_managing_if_needed(
             &current_raw_disks,
             &sled_config.disks,
+            &self.datasets,
             &self.log,
         );
 
@@ -608,6 +607,8 @@ impl ReconcilerTask {
                 &self.log,
             )
             .await;
+        // Removing datasets may have changed which debug datasets are ensured.
+        self.external_disks.update_output_watch_channels(&self.datasets);
 
         // ---
         // Now go through the add process: start managing disks, create
@@ -619,6 +620,7 @@ impl ReconcilerTask {
             .start_managing_if_needed(
                 &current_raw_disks,
                 &sled_config.disks,
+                &self.datasets,
                 &self.key_requester,
                 &self.log,
             )
@@ -656,9 +658,8 @@ impl ReconcilerTask {
         .await;
         if !zpools_being_adopted.is_empty() {
             self.external_disks.verify_adopted_disks(&self.datasets, &self.log);
-            let can_archive = self.external_disks.has_debug_datasets();
             self.external_disks
-                .finish_adopting_disks(can_archive, &self.log)
+                .finish_adopting_disks(&self.datasets, &self.log)
                 .await;
             self.ensure_datasets(sled_config.datasets.clone()).await;
         }

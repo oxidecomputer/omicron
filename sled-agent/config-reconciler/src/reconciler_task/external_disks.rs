@@ -346,11 +346,11 @@ pub(super) struct ExternalDisks {
     // Output channel for the managed disks whose debug dataset has been
     // ensured. This is only consumed within this crate by
     // `DebugCollectorTask` (for managing dump devices and archiving logs).
+    //
+    // Which debug datasets have been ensured is tracked by `OmicronDatasets`,
+    // not by us, so every method that updates this channel takes a reference
+    // to it.
     debug_dataset_disks_tx: watch::Sender<HashSet<Disk>>,
-
-    // Zpools whose debug datasets were most recently reported as ensured via
-    // `update_debug_dataset_zpools()`.
-    debug_dataset_zpools: BTreeSet<ZpoolName>,
 
     // Managed disks that we've adopted but not yet put into service.
     adopting: BTreeMap<PhysicalDiskUuid, AdoptionPhase>,
@@ -371,7 +371,6 @@ impl ExternalDisks {
             mount_config,
             currently_managed_zpools_tx,
             debug_dataset_disks_tx,
-            debug_dataset_zpools: BTreeSet::new(),
             adopting: BTreeMap::new(),
             archiver,
         }
@@ -382,16 +381,6 @@ impl ExternalDisks {
             DiskState::Managed(_) => false,
             DiskState::FailedToManage(err) => err.retryable(),
         })
-    }
-
-    /// Record which zpools have an ensured debug dataset, and publish the
-    /// corresponding managed disks to `DebugCollectorTask`.
-    pub(super) fn update_debug_dataset_zpools(
-        &mut self,
-        zpools: BTreeSet<ZpoolName>,
-    ) {
-        self.debug_dataset_zpools = zpools;
-        self.update_output_watch_channels();
     }
 
     /// Returns the zpools of disks we've adopted but not yet put into service.
@@ -417,12 +406,6 @@ impl ExternalDisks {
                 })
                 .collect(),
         ))
-    }
-
-    /// Returns true if `DebugCollectorTask` has any debug datasets to archive
-    /// logs into.
-    pub(super) fn has_debug_datasets(&self) -> bool {
-        !self.debug_dataset_disks_tx.borrow().is_empty()
     }
 
     fn managed_zpool(&self, disk_id: &PhysicalDiskUuid) -> Option<ZpoolName> {
@@ -486,23 +469,23 @@ impl ExternalDisks {
                 }
             }
         }
-        self.update_output_watch_channels();
+        self.update_output_watch_channels(datasets);
     }
 
     /// Archive and destroy any former zone roots on newly-adopted disks whose
     /// required datasets have been ensured, and put the ones that succeed into
     /// service.
     ///
-    /// `can_archive` reports whether there are any debug datasets to archive
-    /// logs into; if not, we won't destroy any former zone roots. Disks that
-    /// fail are un-adopted without ever having been put into service.
+    /// If there are no debug datasets to archive logs into, we won't destroy
+    /// any former zone roots. Disks that fail are un-adopted without ever
+    /// having been put into service.
     pub(super) async fn finish_adopting_disks(
         &mut self,
-        can_archive: bool,
+        datasets: &OmicronDatasets,
         log: &Logger,
     ) {
         self.finish_adopting_disks_with_cleaner(
-            can_archive,
+            datasets,
             log,
             &RealZoneRootCleaner,
         )
@@ -511,10 +494,11 @@ impl ExternalDisks {
 
     async fn finish_adopting_disks_with_cleaner<T: ZoneRootCleaner>(
         &mut self,
-        can_archive: bool,
+        datasets: &OmicronDatasets,
         log: &Logger,
         cleaner: &T,
     ) {
+        let can_archive = !self.debug_dataset_disks(datasets).is_empty();
         for (disk_id, phase) in self.adopting.clone() {
             if phase != AdoptionPhase::AwaitingZoneRootCleanup {
                 continue;
@@ -551,7 +535,7 @@ impl ExternalDisks {
                 }
             }
         }
-        self.update_output_watch_channels();
+        self.update_output_watch_channels(datasets);
     }
 
     pub(crate) fn to_inventory(
@@ -606,29 +590,52 @@ impl ExternalDisks {
         }
     }
 
-    fn update_output_watch_channels(&self) {
-        // Disks we're still adopting are not yet in service. Ones awaiting
-        // zone root cleanup are visible to `DebugCollectorTask`, so that it
-        // can archive former zone roots into their debug datasets.
-        let managed_disks =
-            self.disks.iter().filter_map(|disk| match &disk.state {
-                DiskState::Managed(d) => {
-                    Some((self.adopting.get(&disk.config.id), d))
-                }
-                DiskState::FailedToManage(_) => None,
-            });
-        let mut current_zpools = BTreeSet::new();
-        let mut debug_dataset_disks = HashSet::new();
-        for (phase, disk) in managed_disks {
-            if phase.is_none() {
-                current_zpools.insert(*disk.zpool_name());
+    /// Returns each managed disk, along with its adoption phase if we're
+    /// still adopting it.
+    fn managed_disks(
+        &self,
+    ) -> impl Iterator<Item = (Option<&AdoptionPhase>, &Disk)> {
+        self.disks.iter().filter_map(|disk| match &disk.state {
+            DiskState::Managed(d) => {
+                Some((self.adopting.get(&disk.config.id), d))
             }
-            if phase != Some(&AdoptionPhase::AwaitingRequiredDatasets)
-                && self.debug_dataset_zpools.contains(disk.zpool_name())
-            {
-                debug_dataset_disks.insert(disk.clone());
-            }
-        }
+            DiskState::FailedToManage(_) => None,
+        })
+    }
+
+    /// Returns the managed disks to make visible to `DebugCollectorTask`:
+    /// those whose debug dataset has been ensured (according to `datasets`).
+    ///
+    /// This includes disks awaiting zone root cleanup, so that
+    /// `DebugCollectorTask` can archive former zone roots into their debug
+    /// datasets.
+    fn debug_dataset_disks(&self, datasets: &OmicronDatasets) -> HashSet<Disk> {
+        let debug_dataset_zpools = datasets.ensured_debug_dataset_zpools();
+        self.managed_disks()
+            .filter(|(phase, disk)| {
+                *phase != Some(&AdoptionPhase::AwaitingRequiredDatasets)
+                    && debug_dataset_zpools.contains(disk.zpool_name())
+            })
+            .map(|(_, disk)| disk.clone())
+            .collect()
+    }
+
+    /// Publish the managed disks that are in service, and those with debug
+    /// datasets (according to `datasets`).
+    ///
+    /// Callers must call this after any change to our disks, or to which debug
+    /// datasets `datasets` reports as ensured.
+    pub(super) fn update_output_watch_channels(
+        &self,
+        datasets: &OmicronDatasets,
+    ) {
+        // Disks we're still adopting are not yet in service.
+        let current_zpools: BTreeSet<_> = self
+            .managed_disks()
+            .filter(|(phase, _)| phase.is_none())
+            .map(|(_, disk)| *disk.zpool_name())
+            .collect();
+        let debug_dataset_disks = self.debug_dataset_disks(datasets);
         self.debug_dataset_disks_tx.send_if_modified(|disks| {
             if *disks == debug_dataset_disks {
                 false
@@ -652,10 +659,14 @@ impl ExternalDisks {
     /// are also physically present (based on `raw_disks`), removing any disks
     /// we'd previously started to manage that are no longer present in either
     /// set.
+    ///
+    /// `datasets` is only used to update our output watch channels (see
+    /// [`Self::update_output_watch_channels()`]).
     pub(super) fn stop_managing_if_needed(
         &mut self,
         raw_disks: &IdOrdMap<RawDisk>,
         config: &IdOrdMap<OmicronPhysicalDiskConfig>,
+        datasets: &OmicronDatasets,
         log: &Logger,
     ) {
         let mut disk_ids_to_remove = Vec::new();
@@ -705,7 +716,7 @@ impl ExternalDisks {
         // can save a bit of work by skipping it in the common case of "no disks
         // were removed".)
         if !disk_ids_to_remove.is_empty() || marked_disk_not_found {
-            self.update_output_watch_channels();
+            self.update_output_watch_channels(datasets);
         }
     }
 
@@ -715,16 +726,21 @@ impl ExternalDisks {
     /// Newly-adopted disks are not put into service until they've been
     /// verified ([`Self::verify_adopted_disks()`]) and their former zone roots
     /// have been cleaned up ([`Self::finish_adopting_disks()`]).
+    ///
+    /// `datasets` is only used to update our output watch channels (see
+    /// [`Self::update_output_watch_channels()`]).
     pub(super) async fn start_managing_if_needed(
         &mut self,
         raw_disks: &IdOrdMap<RawDisk>,
         config: &IdOrdMap<OmicronPhysicalDiskConfig>,
+        datasets: &OmicronDatasets,
         key_requester: &StorageKeyRequester,
         log: &Logger,
     ) {
         self.start_managing_if_needed_with_disk_adopter(
             raw_disks,
             config,
+            datasets,
             log,
             &RealDiskAdopter { key_requester },
         )
@@ -735,6 +751,7 @@ impl ExternalDisks {
         &mut self,
         raw_disks: &IdOrdMap<RawDisk>,
         config: &IdOrdMap<OmicronPhysicalDiskConfig>,
+        datasets: &OmicronDatasets,
         log: &Logger,
         disk_adopter: &T,
     ) {
@@ -833,7 +850,7 @@ impl ExternalDisks {
                 .insert(disk_id, AdoptionPhase::AwaitingRequiredDatasets);
         }
 
-        self.update_output_watch_channels();
+        self.update_output_watch_channels(datasets);
     }
 
     async fn try_ensure_disk_managed<T: DiskAdopter>(
@@ -1442,6 +1459,7 @@ mod tests {
             .start_managing_if_needed_with_disk_adopter(
                 &raw_disks,
                 &config_disks,
+                &no_datasets(),
                 &logctx.log,
                 &disk_adopter,
             )
@@ -1544,6 +1562,7 @@ mod tests {
             .start_managing_if_needed_with_disk_adopter(
                 &raw_disks,
                 &config_disks,
+                &no_datasets(),
                 &logctx.log,
                 &disk_adopter,
             )
@@ -1633,6 +1652,7 @@ mod tests {
             .start_managing_if_needed_with_disk_adopter(
                 &raw_disks,
                 &config_disks,
+                &no_datasets(),
                 &logctx.log,
                 &disk_adopter,
             )
@@ -1673,6 +1693,7 @@ mod tests {
             .start_managing_if_needed_with_disk_adopter(
                 &raw_disks,
                 &config_disks,
+                &no_datasets(),
                 &logctx.log,
                 &disk_adopter,
             )
@@ -1757,6 +1778,7 @@ mod tests {
             .start_managing_if_needed_with_disk_adopter(
                 &raw_disks,
                 &config_disks,
+                &no_datasets(),
                 &logctx.log,
                 &disk_adopter,
             )
@@ -1783,6 +1805,7 @@ mod tests {
         external_disks.stop_managing_if_needed(
             &raw_disks,
             &config_disks,
+            &no_datasets(),
             &logctx.log,
         );
 
@@ -1839,6 +1862,10 @@ mod tests {
             self.cleaned.lock().unwrap().push(*zpool_name);
             Ok(())
         }
+    }
+
+    fn no_datasets() -> OmicronDatasets {
+        OmicronDatasets::with_datasets(std::iter::empty())
     }
 
     /// Returns datasets where all the per-disk datasets on each of `zpools`
@@ -1922,6 +1949,7 @@ mod tests {
                 .start_managing_if_needed_with_disk_adopter(
                     &self.raw_disks,
                     &self.config_disks,
+                    &no_datasets(),
                     &self.logctx.log,
                     &TestDiskAdopter::default(),
                 )
@@ -1960,7 +1988,8 @@ mod tests {
                 .collect::<BTreeSet<_>>(),
             both
         );
-        t.external_disks.update_debug_dataset_zpools(both.clone());
+        t.external_disks
+            .update_output_watch_channels(&required_datasets_on(&both));
         assert!(t.published_zpools().is_empty());
         assert!(t.debug_collector_zpools().is_empty());
 
@@ -1971,12 +2000,15 @@ mod tests {
             .verify_adopted_disks(&required_datasets_on(&both), &t.logctx.log);
         assert_eq!(t.debug_collector_zpools(), both);
         assert!(t.published_zpools().is_empty());
-        assert!(t.external_disks.has_debug_datasets());
 
         // Once cleaned up, they're in service.
         let cleaner = TestZoneRootCleaner::default();
         t.external_disks
-            .finish_adopting_disks_with_cleaner(true, &t.logctx.log, &cleaner)
+            .finish_adopting_disks_with_cleaner(
+                &required_datasets_on(&both),
+                &t.logctx.log,
+                &cleaner,
+            )
             .await;
         assert_eq!(*cleaner.can_archive.lock().unwrap(), [true, true]);
         assert_eq!(t.published_zpools(), both);
@@ -1999,7 +2031,8 @@ mod tests {
         let (ok, bad) = (t.zpool("ok"), t.zpool("bad"));
 
         t.adopt().await;
-        t.external_disks.update_debug_dataset_zpools(BTreeSet::from([ok, bad]));
+        t.external_disks
+            .update_output_watch_channels(&required_datasets_on(&[ok, bad]));
         // `bad` has none of its required datasets in the config.
         t.external_disks
             .verify_adopted_disks(&required_datasets_on(&[ok]), &t.logctx.log);
@@ -2017,7 +2050,11 @@ mod tests {
 
         let cleaner = TestZoneRootCleaner::default();
         t.external_disks
-            .finish_adopting_disks_with_cleaner(true, &t.logctx.log, &cleaner)
+            .finish_adopting_disks_with_cleaner(
+                &required_datasets_on(&[ok]),
+                &t.logctx.log,
+                &cleaner,
+            )
             .await;
         assert_eq!(*cleaner.cleaned.lock().unwrap(), [ok]);
         assert_eq!(t.published_zpools(), BTreeSet::from([ok]));
@@ -2041,7 +2078,6 @@ mod tests {
         let (ok, bad) = (t.zpool("ok"), t.zpool("bad"));
 
         t.adopt().await;
-        t.external_disks.update_debug_dataset_zpools(BTreeSet::from([ok, bad]));
         t.external_disks.verify_adopted_disks(
             &required_datasets_on(&[ok, bad]),
             &t.logctx.log,
@@ -2049,15 +2085,21 @@ mod tests {
 
         let cleaner = TestZoneRootCleaner::default();
         cleaner.fail_on.lock().unwrap().insert(bad);
+        // By the time we clean up, there are no debug datasets to archive
+        // into.
         t.external_disks
-            .finish_adopting_disks_with_cleaner(false, &t.logctx.log, &cleaner)
+            .finish_adopting_disks_with_cleaner(
+                &no_datasets(),
+                &t.logctx.log,
+                &cleaner,
+            )
             .await;
 
         // We passed along that archival isn't possible, and the disk that
         // failed cleanup is no longer managed (and will be retried).
         assert_eq!(*cleaner.can_archive.lock().unwrap(), [false, false]);
         assert_eq!(t.published_zpools(), BTreeSet::from([ok]));
-        assert_eq!(t.debug_collector_zpools(), BTreeSet::from([ok]));
+        assert!(t.debug_collector_zpools().is_empty());
         assert!(t.external_disks.has_retryable_error());
         assert_currently_managed_zpools_is_consistent(&t.external_disks);
 
