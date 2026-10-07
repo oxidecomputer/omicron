@@ -1743,6 +1743,8 @@ table! {
         baseboard_revision -> Int8,
         hubris_archive_id -> Text,
         power_state -> crate::enums::HwPowerStateEnum,
+
+        rack_id -> Uuid,
     }
 }
 

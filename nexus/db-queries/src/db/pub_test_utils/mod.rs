@@ -309,8 +309,7 @@ impl TestDatabase {
     }
 }
 
-pub const RACK_UUID: RackUuid =
-    RackUuid::from_u128(0xc19a698f_c6f9_4a17_ae30_20d711b8f7dc);
+pub use nexus_inventory::examples::RACK_UUID;
 
 async fn datastore_test_on_default_rack(
     log: &Logger,

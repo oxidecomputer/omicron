@@ -739,6 +739,9 @@ impl DataStore {
                                 .into_sql::<diesel::sql_types::Text>(),
                             HwPowerState::from(sp.power_state)
                                 .into_sql::<HwPowerStateEnum>(),
+                            sp.rack_id
+                                .into_untyped_uuid()
+                                .into_sql::<diesel::sql_types::Uuid>(),
                         ))
                         .filter(
                             baseboard_dsl::part_number
@@ -763,6 +766,7 @@ impl DataStore {
                         sp_dsl::baseboard_revision,
                         sp_dsl::hubris_archive_id,
                         sp_dsl::power_state,
+                        sp_dsl::rack_id,
                     ))
                     .execute_async(&conn)
                     .await?;
@@ -792,6 +796,7 @@ impl DataStore {
                         _baseboard_revision,
                         _hubris_archive_id,
                         _power_state,
+                        _rack_id,
                     ) = sp_dsl::inv_service_processor::all_columns();
                 }
             }
@@ -5772,6 +5777,7 @@ mod test {
         let Representative { mut builder, .. } = representative();
         builder.found_sp_state(
             "test suite",
+            nexus_inventory::examples::RACK_UUID,
             SpType::Switch,
             1,
             nexus_inventory::examples::sp_state("2"),
@@ -5779,6 +5785,7 @@ mod test {
         let bb = builder
             .found_sp_state(
                 "test suite",
+                nexus_inventory::examples::RACK_UUID,
                 SpType::Power,
                 1,
                 nexus_inventory::examples::sp_state("3"),

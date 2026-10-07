@@ -1230,7 +1230,13 @@ impl<'a> TestBoardCollectionBuilder<'a> {
             let sled_model = OxideSled::try_from_model(&sp_state.model);
 
             let baseboard_id = builder
-                .found_sp_state("test", sp_id.typ, sp_id.slot, sp_state.clone())
+                .found_sp_state(
+                    "test",
+                    nexus_inventory::examples::RACK_UUID,
+                    sp_id.typ,
+                    sp_id.slot,
+                    sp_state.clone(),
+                )
                 .unwrap();
             let sp_active_version = self
                 .sp_active_version_exceptions

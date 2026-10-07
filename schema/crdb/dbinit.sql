@@ -4304,6 +4304,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_service_processor (
     hubris_archive_id TEXT NOT NULL,
     power_state omicron.public.hw_power_state NOT NULL,
 
+    -- the rack ID that this SP was found in (determined based on which MGS
+    -- reported it)
+    rack_id UUID NOT NULL,
+
     PRIMARY KEY (inv_collection_id, hw_baseboard_id)
 );
 
@@ -9560,7 +9564,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '305.0.0', NULL)
+    (TRUE, NOW(), NOW(), '306.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

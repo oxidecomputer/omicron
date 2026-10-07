@@ -127,7 +127,21 @@ impl<'a> Collector<'a> {
             "mgs_url" => client.baseurl()
         );
 
-        // First, see which SPs MGS can see via Ignition.
+        // First, determine the gateway's rack ID.
+        let rack_id = client.rack_id_get().await.with_context(|| {
+            format!("MGS {:?}: determining gateway's rack ID", client.baseurl())
+        });
+        let rack_id = match rack_id {
+            Ok(id) => id.into_inner().rack_id,
+            Err(e) => {
+                in_progress.found_error(InventoryError::from(e));
+                return;
+            }
+        };
+
+        let log = log.new(o!("rack_id" => rack_id.to_string()));
+
+        // Next, see which SPs MGS can see via Ignition.
         let ignition_result = client.ignition_list().await.with_context(|| {
             format!("MGS {:?}: listing ignition targets", client.baseurl())
         });
@@ -184,6 +198,7 @@ impl<'a> Collector<'a> {
             // Record the state that we found.
             let Some(baseboard_id) = in_progress.found_sp_state(
                 client.baseurl(),
+                rack_id,
                 sp.typ,
                 sp.slot,
                 sp_state,
@@ -903,12 +918,13 @@ mod test {
         // data comes straight from MGS.  And proper handling of that data is
         // tested in the builder.
         swrite!(s, "\nSPs:\n");
-        for (bb, _) in &collection.sps {
+        for (bb, sp) in &collection.sps {
             swrite!(
                 s,
-                "    baseboard part {:?} serial {:?}\n",
+                "    baseboard part {:?} serial {:?} rack {}\n",
                 bb.part_number,
                 bb.serial_number,
+                sp.rack_id,
             );
         }
 

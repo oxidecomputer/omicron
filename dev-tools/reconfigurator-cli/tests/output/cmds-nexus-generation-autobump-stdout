@@ -461,6 +461,7 @@ Sled serial0
     power:    A2
     revision: 0
     MGS slot: Sled 0
+    rack ID:  c19a698f-c6f9-4a17-ae30-20d711b8f7dc
     found at: <REDACTED_TIMESTAMP> from fake MGS 1
     host phase 1 active slot: A
     host phase 1 hashes:
@@ -487,6 +488,7 @@ Sled serial1
     power:    A2
     revision: 0
     MGS slot: Sled 1
+    rack ID:  c19a698f-c6f9-4a17-ae30-20d711b8f7dc
     found at: <REDACTED_TIMESTAMP> from fake MGS 1
     host phase 1 active slot: A
     host phase 1 hashes:
@@ -513,6 +515,7 @@ Sled serial2
     power:    A2
     revision: 0
     MGS slot: Sled 2
+    rack ID:  c19a698f-c6f9-4a17-ae30-20d711b8f7dc
     found at: <REDACTED_TIMESTAMP> from fake MGS 1
     host phase 1 active slot: A
     host phase 1 hashes:
