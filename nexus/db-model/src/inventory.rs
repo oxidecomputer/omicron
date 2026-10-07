@@ -75,6 +75,7 @@ use omicron_uuid_kinds::OmicronSledConfigKind;
 use omicron_uuid_kinds::OmicronSledConfigUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::RackKind;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SvcEnabledNotOnlineKind;
@@ -958,6 +959,8 @@ pub struct InvSledAgent {
 
     instance_manager_update_disposition: Option<DbInvSledUpdateDisposition>,
     instance_manager_num_registered_vmms: SqlU32,
+
+    pub rack_id: DbTypedUuid<RackKind>,
 }
 
 /// Helper for breaking an [`InstanceManagerStatus`] up into its DB columns.
@@ -1438,6 +1441,7 @@ impl InvSledAgent {
                 file_source_resolver,
                 instance_manager_update_disposition,
                 instance_manager_num_registered_vmms,
+                rack_id: RackUuid::nil().into(), // TODO use actual rack ID
             })
         }
     }

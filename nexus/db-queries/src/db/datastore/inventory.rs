@@ -1918,6 +1918,8 @@ impl DataStore {
                                 .into_sql::<Nullable<InvSledUpdateDispositionEnum>>(),
                             instance_manager_num_registered_vmms
                                 .into_sql::<diesel::sql_types::Int8>(),
+                            Uuid::nil() // TODO use rack ID
+                                .into_sql::<diesel::sql_types::Uuid>(),
                         ))
                         .filter(
                             baseboard_dsl::part_number
@@ -1962,6 +1964,7 @@ impl DataStore {
                                 sa_dsl::mupdate_override_boot_disk_error,
                                 sa_dsl::instance_manager_update_disposition,
                                 sa_dsl::instance_manager_num_registered_vmms,
+                                sa_dsl::rack_id,
                             ))
                             .execute_async(&conn)
                             .await?;
@@ -2000,6 +2003,7 @@ impl DataStore {
                         _mupdate_override_boot_disk_error,
                         _instance_manager_update_disposition,
                         _instance_manager_num_registered_vmms,
+                        _rack_id,
                     ) = sa_dsl::inv_sled_agent::all_columns();
                 }
 
