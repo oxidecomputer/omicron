@@ -10,7 +10,6 @@
 use futures::future;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
-use iddqd::id_ord_map::Entry;
 use iddqd::id_upcast;
 use illumos_utils::zfs::DestroyDatasetError;
 use illumos_utils::zfs::DestroyDatasetErrorVariant;
@@ -54,6 +53,7 @@ use trust_quorum_types::types::Epoch;
 use super::datasets::DiskRekeyInfo;
 use super::datasets::OmicronDatasets;
 use super::datasets::RequiredDatasetError;
+use crate::dataset_serialization_task::DatasetTaskError;
 use crate::dataset_serialization_task::RekeyResult;
 use crate::debug_collector::FormerZoneRootArchiver;
 use crate::disks_common::MaybeUpdatedDisk;
@@ -95,6 +95,9 @@ enum DiskManagementError {
 
     #[error(transparent)]
     RequiredDataset(RequiredDatasetError),
+
+    #[error("Could not check disk's required datasets")]
+    DatasetTaskUnavailable(#[source] DatasetTaskError),
 }
 
 impl DiskManagementError {
@@ -125,7 +128,8 @@ impl DiskManagementError {
                 name: _,
                 err: DestroyDatasetErrorVariant::Other(_),
             })
-            | Self::SetValues(_) => true,
+            | Self::SetValues(_)
+            | Self::DatasetTaskUnavailable(_) => true,
 
             Self::RequiredDataset(err) => err.is_retryable(),
         }
@@ -308,7 +312,8 @@ impl CurrentlyManagedZpoolsReceiver {
     }
 }
 
-/// How far a newly-adopted disk has progressed toward being put into service.
+/// How far a newly-adopted disk has progressed toward being put into service
+/// (see [`DiskState::Adopting`]).
 ///
 /// A disk we've just adopted is not published as managed (to the rest of
 /// sled-agent) until its required datasets have been ensured and its former
@@ -326,6 +331,17 @@ enum AdoptionPhase {
     AwaitingZoneRootCleanup,
 }
 
+impl AdoptionPhase {
+    fn description(&self) -> &'static str {
+        match self {
+            Self::AwaitingRequiredDatasets => "awaiting required datasets",
+            Self::AwaitingZoneRootCleanup => {
+                "awaiting cleanup of former zone roots"
+            }
+        }
+    }
+}
+
 #[derive(Debug)]
 pub(super) struct ExternalDisks {
     disks: IdOrdMap<ExternalDiskState>,
@@ -340,9 +356,6 @@ pub(super) struct ExternalDisks {
     // (see `debug_dataset_disks()`). This is only consumed within this crate
     // by `DebugCollectorTask` (for managing dump devices and archiving logs).
     debug_dataset_disks_tx: watch::Sender<HashSet<Disk>>,
-
-    // Managed disks that we've adopted but not yet put into service.
-    adopting: BTreeMap<PhysicalDiskUuid, AdoptionPhase>,
 
     // For requesting archival of former zone root directories.
     archiver: FormerZoneRootArchiver,
@@ -360,23 +373,22 @@ impl ExternalDisks {
             mount_config,
             currently_managed_zpools_tx,
             debug_dataset_disks_tx,
-            adopting: BTreeMap::new(),
             archiver,
         }
     }
 
     pub(crate) fn has_retryable_error(&self) -> bool {
         self.disks.iter().any(|disk| match &disk.state {
-            DiskState::Managed(_) => false,
+            DiskState::Managed(_) | DiskState::Adopting(..) => false,
             DiskState::FailedToManage(err) => err.retryable(),
         })
     }
 
     /// Returns the zpools of disks we've adopted but not yet put into service.
     pub(super) fn zpools_being_adopted(&self) -> BTreeSet<ZpoolName> {
-        self.adopting
-            .keys()
-            .filter_map(|disk_id| self.managed_zpool(disk_id))
+        self.managed_disks()
+            .filter(|(phase, _)| phase.is_some())
+            .map(|(_, disk)| *disk.zpool_name())
             .collect()
     }
 
@@ -387,21 +399,24 @@ impl ExternalDisks {
     /// else should use [`Self::currently_managed_zpools()`].
     pub(super) fn all_managed_zpools(&self) -> Arc<CurrentlyManagedZpools> {
         Arc::new(CurrentlyManagedZpools(
-            self.disks
-                .iter()
-                .filter_map(|disk| match &disk.state {
-                    DiskState::Managed(disk) => Some(*disk.zpool_name()),
-                    DiskState::FailedToManage(_) => None,
-                })
-                .collect(),
+            self.managed_disks().map(|(_, disk)| *disk.zpool_name()).collect(),
         ))
     }
 
-    fn managed_zpool(&self, disk_id: &PhysicalDiskUuid) -> Option<ZpoolName> {
-        match &self.disks.get(disk_id)?.state {
-            DiskState::Managed(disk) => Some(*disk.zpool_name()),
-            DiskState::FailedToManage(_) => None,
-        }
+    /// Returns the IDs and zpools of disks in the given adoption `phase`.
+    fn disks_in_phase(
+        &self,
+        phase: AdoptionPhase,
+    ) -> Vec<(PhysicalDiskUuid, ZpoolName)> {
+        self.disks
+            .iter()
+            .filter_map(|disk| match &disk.state {
+                DiskState::Adopting(d, p) if *p == phase => {
+                    Some((disk.config.id, *d.zpool_name()))
+                }
+                _ => None,
+            })
+            .collect()
     }
 
     /// Un-adopt `disk_id` (which we'll retry on a later reconciliation
@@ -411,10 +426,37 @@ impl ExternalDisks {
         disk_id: PhysicalDiskUuid,
         error: DiskManagementError,
     ) {
-        self.adopting.remove(&disk_id);
         // unwrap(): Callers only pass IDs of disks we're adopting.
         let mut disk = self.disks.get_mut(&disk_id).unwrap();
         *disk = ExternalDiskState::failed(disk.config.clone(), error);
+    }
+
+    /// Un-adopt all disks we're still adopting, because we couldn't learn
+    /// whether their required datasets exist (see
+    /// [`Self::verify_adopted_disks()`]).
+    ///
+    /// They'll be adopted again on a later reconciliation attempt.
+    pub(super) fn fail_adopting_disks(
+        &mut self,
+        error: DatasetTaskError,
+        log: &Logger,
+    ) {
+        for (disk_id, zpool) in
+            self.disks_in_phase(AdoptionPhase::AwaitingRequiredDatasets)
+        {
+            warn!(
+                log,
+                "not putting disk into service: \
+                 could not check required datasets";
+                "pool" => %zpool,
+                InlineErrorChain::new(&error),
+            );
+            self.fail_adoption(
+                disk_id,
+                DiskManagementError::DatasetTaskUnavailable(error.clone()),
+            );
+        }
+        self.update_output_watch_channels();
     }
 
     /// Check that newly-adopted disks' required datasets have been ensured
@@ -428,20 +470,17 @@ impl ExternalDisks {
         datasets: &OmicronDatasets,
         log: &Logger,
     ) {
-        for (disk_id, phase) in self.adopting.clone() {
-            if phase != AdoptionPhase::AwaitingRequiredDatasets {
-                continue;
-            }
-            let Some(zpool) = self.managed_zpool(&disk_id) else {
-                self.adopting.remove(&disk_id);
-                continue;
-            };
+        for (disk_id, zpool) in
+            self.disks_in_phase(AdoptionPhase::AwaitingRequiredDatasets)
+        {
             match datasets.check_required_datasets(&zpool) {
                 Ok(()) => {
-                    self.adopting.insert(
-                        disk_id,
-                        AdoptionPhase::AwaitingZoneRootCleanup,
-                    );
+                    // unwrap(): `disks_in_phase()` only returns IDs of disks
+                    // we have.
+                    let mut disk = self.disks.get_mut(&disk_id).unwrap();
+                    if let DiskState::Adopting(_, phase) = &mut disk.state {
+                        *phase = AdoptionPhase::AwaitingZoneRootCleanup;
+                    }
                 }
                 Err(err) => {
                     warn!(
@@ -476,14 +515,9 @@ impl ExternalDisks {
         log: &Logger,
         cleaner: &T,
     ) {
-        for (disk_id, phase) in self.adopting.clone() {
-            if phase != AdoptionPhase::AwaitingZoneRootCleanup {
-                continue;
-            }
-            let Some(zpool_name) = self.managed_zpool(&disk_id) else {
-                self.adopting.remove(&disk_id);
-                continue;
-            };
+        for (disk_id, zpool_name) in
+            self.disks_in_phase(AdoptionPhase::AwaitingZoneRootCleanup)
+        {
             match cleaner
                 .archive_and_destroy_former_zone_roots(
                     &zpool_name,
@@ -495,7 +529,14 @@ impl ExternalDisks {
             {
                 Ok(()) => {
                     // This disk is now in service.
-                    self.adopting.remove(&disk_id);
+                    //
+                    // unwrap(): `disks_in_phase()` only returns IDs of disks
+                    // we have.
+                    let mut disk = self.disks.get_mut(&disk_id).unwrap();
+                    if let DiskState::Adopting(d, _) = &disk.state {
+                        let d = d.clone();
+                        disk.state = DiskState::Managed(d);
+                    }
                 }
                 Err(error) => {
                     // Un-adopt this disk. It was never put into service, and
@@ -522,6 +563,17 @@ impl ExternalDisks {
                 DiskState::Managed(_) => {
                     (disk.config.id, ConfigReconcilerInventoryResult::Ok)
                 }
+                // We finish (or give up on) adopting disks within a single
+                // reconciliation pass, so we shouldn't see these here.
+                DiskState::Adopting(_, phase) => (
+                    disk.config.id,
+                    ConfigReconcilerInventoryResult::Err {
+                        message: format!(
+                            "not yet in service: {}",
+                            phase.description()
+                        ),
+                    },
+                ),
                 DiskState::FailedToManage(err) => (
                     disk.config.id,
                     ConfigReconcilerInventoryResult::Err {
@@ -542,13 +594,12 @@ impl ExternalDisks {
     pub(super) fn disk_rekey_info(
         &self,
     ) -> impl Iterator<Item = DiskRekeyInfo<'_>> {
-        self.disks.iter().filter_map(|disk_state| match &disk_state.state {
-            DiskState::Managed(disk) => Some(DiskRekeyInfo {
+        self.disks.iter().filter_map(|disk_state| {
+            disk_state.state.adopted_disk().map(|disk| DiskRekeyInfo {
                 disk,
                 disk_id: disk_state.config.id,
                 cached_epoch: disk_state.epoch,
-            }),
-            DiskState::FailedToManage(_) => None,
+            })
         })
     }
 
@@ -571,9 +622,8 @@ impl ExternalDisks {
         &self,
     ) -> impl Iterator<Item = (Option<&AdoptionPhase>, &Disk)> {
         self.disks.iter().filter_map(|disk| match &disk.state {
-            DiskState::Managed(d) => {
-                Some((self.adopting.get(&disk.config.id), d))
-            }
+            DiskState::Managed(d) => Some((None, d)),
+            DiskState::Adopting(d, phase) => Some((Some(phase), d)),
             DiskState::FailedToManage(_) => None,
         })
     }
@@ -636,6 +686,13 @@ impl ExternalDisks {
         config: &IdOrdMap<OmicronPhysicalDiskConfig>,
         log: &Logger,
     ) {
+        debug_assert!(
+            self.disks
+                .iter()
+                .all(|d| !matches!(d.state, DiskState::Adopting(..))),
+            "disks are adopted within a single reconciliation pass",
+        );
+
         let mut disk_ids_to_remove = Vec::new();
         let mut marked_disk_not_found = false;
 
@@ -666,7 +723,6 @@ impl ExternalDisks {
                     disk.state = DiskState::FailedToManage(
                         DiskManagementError::NotFound,
                     );
-                    self.adopting.remove(&disk_id);
                     marked_disk_not_found = true;
                 }
             }
@@ -675,7 +731,6 @@ impl ExternalDisks {
         // Remove the disks not present in `config`.
         for disk_id in &disk_ids_to_remove {
             self.disks.remove(disk_id);
-            self.adopting.remove(disk_id);
         }
 
         // If we made any changes, update the set of disks visbile to external
@@ -766,49 +821,12 @@ impl ExternalDisks {
         // Run all the disk management futures concurrently...
         let disk_states = future::join_all(try_ensure_managed_futures).await;
 
-        // Then record the new states for each disk in `config`, keeping track
-        // of which disks are newly-adopted so that we can archive and destroy
-        // any zone root datasets that we find on those.
-        for disk_state in failed_disk_states {
+        // Then record the new states for each disk in `config`. Newly-adopted
+        // disks are in `DiskState::Adopting`: they aren't put into service
+        // until their datasets have been ensured and their former zone roots
+        // cleaned up, both of which happen later in reconciliation.
+        for disk_state in failed_disk_states.into_iter().chain(disk_states) {
             self.disks.insert_overwrite(disk_state);
-        }
-
-        let mut newly_adopted = Vec::new();
-        for disk_state in disk_states {
-            let disk_id = disk_state.key();
-            let newly_adopted_disk = match self.disks.entry(disk_id) {
-                Entry::Vacant(vacant) => {
-                    let new_state = vacant.insert(disk_state);
-                    match &new_state.state {
-                        DiskState::Managed(_) => Some(disk_id),
-                        DiskState::FailedToManage(..) => None,
-                    }
-                }
-                Entry::Occupied(mut occupied) => {
-                    let old_state = &occupied.insert(disk_state).state;
-                    let new_state = &occupied.get().state;
-                    match (old_state, new_state) {
-                        (DiskState::Managed(_), _) => None,
-                        (_, DiskState::FailedToManage(_)) => None,
-                        (
-                            DiskState::FailedToManage(_),
-                            DiskState::Managed(_),
-                        ) => Some(disk_id),
-                    }
-                }
-            };
-
-            if let Some(disk_id) = newly_adopted_disk {
-                newly_adopted.push(disk_id);
-            }
-        }
-
-        // Newly-adopted disks aren't put into service until their datasets
-        // have been ensured and their former zone roots cleaned up, both of
-        // which happen later in reconciliation.
-        for disk_id in newly_adopted {
-            self.adopting
-                .insert(disk_id, AdoptionPhase::AwaitingRequiredDatasets);
         }
 
         self.update_output_watch_channels();
@@ -829,9 +847,27 @@ impl ExternalDisks {
                 state: DiskState::Managed(disk),
                 epoch,
                 ..
-            }) => {
-                self.update_disk_properties(disk, config, raw_disk, *epoch, log)
-            }
+            }) => match self
+                .update_disk_properties(disk, &config, raw_disk, log)
+            {
+                Ok(disk) => ExternalDiskState::managed(config, disk, *epoch),
+                Err(err) => ExternalDiskState::failed(config, err),
+            },
+            // We finish (or give up on) adopting disks within a single
+            // reconciliation pass, so we shouldn't see this. If we do, update
+            // its properties, but leave it where it was in adoption.
+            Some(ExternalDiskState {
+                state: DiskState::Adopting(disk, phase),
+                epoch,
+                ..
+            }) => match self
+                .update_disk_properties(disk, &config, raw_disk, log)
+            {
+                Ok(disk) => {
+                    ExternalDiskState::adopting(config, disk, *phase, *epoch)
+                }
+                Err(err) => ExternalDiskState::failed(config, err),
+            },
             // If we previously failed to manage this disk, try again.
             Some(ExternalDiskState {
                 state: DiskState::FailedToManage(prev_err),
@@ -870,11 +906,10 @@ impl ExternalDisks {
     fn update_disk_properties(
         &self,
         disk: &Disk,
-        config: OmicronPhysicalDiskConfig,
+        config: &OmicronPhysicalDiskConfig,
         raw_disk: &RawDisk,
-        current_epoch: Option<Epoch>,
         log: &Logger,
-    ) -> ExternalDiskState {
+    ) -> Result<Disk, DiskManagementError> {
         // Make sure the incoming config's zpool ID matches our
         // previously-managed disk's.
         if disk.zpool_name().id() != config.pool_id {
@@ -888,7 +923,7 @@ impl ExternalDisks {
                 "disk_identity" => ?config.identity,
                 InlineErrorChain::new(&err),
             );
-            return ExternalDiskState::failed(config, err);
+            return Err(err);
         }
 
         // Update any properties that have changed from `disk` based on the
@@ -899,7 +934,7 @@ impl ExternalDisks {
             MaybeUpdatedDisk::Unchanged => disk.clone(),
         };
 
-        ExternalDiskState::managed(config, disk, current_epoch)
+        Ok(disk)
     }
 
     async fn start_managing_disk<T: DiskAdopter>(
@@ -919,7 +954,12 @@ impl ExternalDisks {
                     "disk_identity" => ?config.identity,
                     "epoch" => ?epoch,
                 );
-                ExternalDiskState::managed(config, disk, epoch)
+                ExternalDiskState::adopting(
+                    config,
+                    disk,
+                    AdoptionPhase::AwaitingRequiredDatasets,
+                    epoch,
+                )
             }
             Err(err) => {
                 warn!(
@@ -951,6 +991,15 @@ impl ExternalDiskState {
         Self { config, state: DiskState::Managed(disk), epoch }
     }
 
+    fn adopting(
+        config: OmicronPhysicalDiskConfig,
+        disk: Disk,
+        phase: AdoptionPhase,
+        epoch: Option<Epoch>,
+    ) -> Self {
+        Self { config, state: DiskState::Adopting(disk, phase), epoch }
+    }
+
     fn failed(
         config: OmicronPhysicalDiskConfig,
         err: DiskManagementError,
@@ -971,8 +1020,25 @@ impl IdOrdItem for ExternalDiskState {
 
 #[derive(Debug)]
 enum DiskState {
+    /// We're managing this disk, and it's in service.
     Managed(Disk),
+    /// We've adopted this disk, but haven't put it into service yet.
+    ///
+    /// Disks are only in this state partway through a reconciliation pass: by
+    /// the end of it, we've either put them into service or given up on them
+    /// (in which case we'll try to adopt them again on a later pass).
+    Adopting(Disk, AdoptionPhase),
     FailedToManage(DiskManagementError),
+}
+
+impl DiskState {
+    /// Returns the disk if we've adopted it, whether or not it's in service.
+    fn adopted_disk(&self) -> Option<&Disk> {
+        match self {
+            Self::Managed(disk) | Self::Adopting(disk, _) => Some(disk),
+            Self::FailedToManage(_) => None,
+        }
+    }
 }
 
 /// Result of successfully adopting a disk.
@@ -1339,6 +1405,35 @@ mod tests {
         runtime.block_on(fut)
     }
 
+    /// Start managing disks, and put any we adopt into service (as though
+    /// their required datasets exist, and cleaning up their former zone roots
+    /// succeeds).
+    async fn start_managing_and_put_into_service(
+        external_disks: &mut ExternalDisks,
+        raw_disks: &IdOrdMap<RawDisk>,
+        config_disks: &IdOrdMap<OmicronPhysicalDiskConfig>,
+        disk_adopter: &TestDiskAdopter,
+        log: &Logger,
+    ) {
+        external_disks
+            .start_managing_if_needed_with_disk_adopter(
+                raw_disks,
+                config_disks,
+                log,
+                disk_adopter,
+            )
+            .await;
+        let datasets =
+            required_datasets_on(&external_disks.zpools_being_adopted());
+        external_disks.verify_adopted_disks(&datasets, log);
+        external_disks
+            .finish_adopting_disks_with_cleaner(
+                log,
+                &TestZoneRootCleaner::default(),
+            )
+            .await;
+    }
+
     // Check that the contents of `currently_managed_zpools_tx` are consistent
     // with the contents of `disks`.
     #[track_caller]
@@ -1348,10 +1443,9 @@ mod tests {
         let expected_current_pools = external_disks
             .disks
             .iter()
-            .filter(|d| !external_disks.adopting.contains_key(&d.config.id))
             .filter_map(|d| match &d.state {
                 DiskState::Managed(disk) => Some(*disk.zpool_name()),
-                DiskState::FailedToManage(_) => None,
+                DiskState::Adopting(..) | DiskState::FailedToManage(_) => None,
             })
             .collect::<BTreeSet<_>>();
         assert_eq!(
@@ -1406,14 +1500,14 @@ mod tests {
         // This should partially succeed: we should adopt the U.2s and report
         // errors on the M.2s.
         let disk_adopter = TestDiskAdopter::default();
-        external_disks
-            .start_managing_if_needed_with_disk_adopter(
-                &raw_disks,
-                &config_disks,
-                &logctx.log,
-                &disk_adopter,
-            )
-            .await;
+        start_managing_and_put_into_service(
+            &mut external_disks,
+            &raw_disks,
+            &config_disks,
+            &disk_adopter,
+            &logctx.log,
+        )
+        .await;
 
         // We should only have attempted disk adoptions for external disks.
         let num_external =
@@ -1508,14 +1602,14 @@ mod tests {
 
         // Attempt to adopt all the config disks.
         let disk_adopter = TestDiskAdopter::default();
-        external_disks
-            .start_managing_if_needed_with_disk_adopter(
-                &raw_disks,
-                &config_disks,
-                &logctx.log,
-                &disk_adopter,
-            )
-            .await;
+        start_managing_and_put_into_service(
+            &mut external_disks,
+            &raw_disks,
+            &config_disks,
+            &disk_adopter,
+            &logctx.log,
+        )
+        .await;
 
         // Ensure each disk is in the state we expect: either adopted (if the
         // corresponding disk was present) or reported as an error (if not).
@@ -1597,14 +1691,14 @@ mod tests {
 
         // Attempt to adopt all the config disks.
         let disk_adopter = TestDiskAdopter::default();
-        external_disks
-            .start_managing_if_needed_with_disk_adopter(
-                &raw_disks,
-                &config_disks,
-                &logctx.log,
-                &disk_adopter,
-            )
-            .await;
+        start_managing_and_put_into_service(
+            &mut external_disks,
+            &raw_disks,
+            &config_disks,
+            &disk_adopter,
+            &logctx.log,
+        )
+        .await;
 
         // All of them should have succeeded.
         for disk in &config_disks {
@@ -1637,14 +1731,14 @@ mod tests {
 
         // Attempt to adopt all the config disks again; we should pick up the
         // new firmware.
-        external_disks
-            .start_managing_if_needed_with_disk_adopter(
-                &raw_disks,
-                &config_disks,
-                &logctx.log,
-                &disk_adopter,
-            )
-            .await;
+        start_managing_and_put_into_service(
+            &mut external_disks,
+            &raw_disks,
+            &config_disks,
+            &disk_adopter,
+            &logctx.log,
+        )
+        .await;
 
         // All of them should have succeeded and have matching firmware to their
         // corresponding raw disk.
@@ -1721,14 +1815,14 @@ mod tests {
 
         // Attempt to adopt all the config disks.
         let disk_adopter = TestDiskAdopter::default();
-        external_disks
-            .start_managing_if_needed_with_disk_adopter(
-                &raw_disks,
-                &config_disks,
-                &logctx.log,
-                &disk_adopter,
-            )
-            .await;
+        start_managing_and_put_into_service(
+            &mut external_disks,
+            &raw_disks,
+            &config_disks,
+            &disk_adopter,
+            &logctx.log,
+        )
+        .await;
 
         // All of them should have succeeded.
         for disk in &config_disks {
@@ -1999,6 +2093,41 @@ mod tests {
             t.external_disks.zpools_being_adopted(),
             BTreeSet::from([bad])
         );
+
+        t.logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn disks_are_unadopted_if_dataset_task_is_unavailable() {
+        let mut t = AdoptionTest::new(
+            "disks_are_unadopted_if_dataset_task_is_unavailable",
+            &["a", "b"],
+        );
+        let both = BTreeSet::from([t.zpool("a"), t.zpool("b")]);
+
+        t.adopt().await;
+        t.external_disks
+            .fail_adopting_disks(DatasetTaskError::Busy, &t.logctx.log);
+
+        // The disks are no longer managed, were never published, and will be
+        // retried.
+        for serial in ["a", "b"] {
+            assert_matches!(
+                &t.external_disks.disks.get(&t.disk_id(serial)).unwrap().state,
+                DiskState::FailedToManage(
+                    DiskManagementError::DatasetTaskUnavailable(
+                        DatasetTaskError::Busy
+                    )
+                )
+            );
+        }
+        assert!(t.published_zpools().is_empty());
+        assert!(t.debug_collector_zpools().is_empty());
+        assert!(t.external_disks.has_retryable_error());
+
+        // We'll adopt them again on the next attempt.
+        t.adopt().await;
+        assert_eq!(t.external_disks.zpools_being_adopted(), both);
 
         t.logctx.cleanup_successful();
     }

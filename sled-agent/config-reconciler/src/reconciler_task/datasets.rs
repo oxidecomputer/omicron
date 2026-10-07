@@ -287,7 +287,7 @@ impl OmicronDatasets {
         datasets: IdOrdMap<DatasetConfig>,
         currently_managed_zpools: Arc<CurrentlyManagedZpools>,
         log: &Logger,
-    ) {
+    ) -> Result<(), DatasetTaskError> {
         let results = match self
             .dataset_task
             .datasets_ensure(datasets, currently_managed_zpools)
@@ -303,7 +303,7 @@ impl OmicronDatasets {
                     log, "failed to contact dataset task";
                     InlineErrorChain::new(&err),
                 );
-                return;
+                return Err(err);
             }
         };
 
@@ -314,6 +314,7 @@ impl OmicronDatasets {
             };
             self.datasets.insert_overwrite(OmicronDataset { config, state });
         }
+        Ok(())
     }
 
     /// Confirm that the per-disk datasets that contain other datasets (see

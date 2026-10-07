@@ -58,7 +58,7 @@ use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::oneshot;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum DatasetTaskError {
     #[error("dataset task busy; cannot service new requests")]
     Busy,

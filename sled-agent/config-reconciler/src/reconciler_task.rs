@@ -50,6 +50,7 @@ use crate::InternalDisksReceiver;
 use crate::SledAgentArtifactStore;
 use crate::TimeSyncConfig;
 use crate::dataset_serialization_task::DatasetRekeyInfo;
+use crate::dataset_serialization_task::DatasetTaskError;
 use crate::dataset_serialization_task::DatasetTaskHandle;
 use crate::dataset_serialization_task::RekeyRequest;
 use crate::debug_collector::FormerZoneRootArchiver;
@@ -476,14 +477,51 @@ impl ReconcilerTask {
     ///
     /// Datasets are ensured on all managed disks, including those we've
     /// adopted but not yet put into service.
-    async fn ensure_datasets(&mut self, datasets: IdOrdMap<DatasetConfig>) {
+    async fn ensure_datasets(
+        &mut self,
+        datasets: IdOrdMap<DatasetConfig>,
+    ) -> Result<(), DatasetTaskError> {
         self.datasets
             .ensure_datasets_if_needed(
                 datasets,
                 self.external_disks.all_managed_zpools(),
                 &self.log,
             )
-            .await;
+            .await
+    }
+
+    /// Ensure `datasets`, and put any newly-adopted disks into service once
+    /// their required datasets exist (see the comment in
+    /// `do_reconcilation()`).
+    async fn ensure_datasets_and_finish_adopting_disks(
+        &mut self,
+        datasets: &IdOrdMap<DatasetConfig>,
+    ) {
+        let zpools_being_adopted = self.external_disks.zpools_being_adopted();
+        if let Err(err) = self
+            .ensure_datasets(skip_transient_zones_on_adopting_zpools(
+                datasets,
+                &zpools_being_adopted,
+            ))
+            .await
+        {
+            // We can't tell whether newly-adopted disks' required datasets
+            // exist, so give up on them for now; we'll adopt them again on a
+            // later reconciliation attempt.
+            self.external_disks.fail_adopting_disks(err, &self.log);
+            return;
+        }
+        if zpools_being_adopted.is_empty() {
+            return;
+        }
+        self.external_disks.verify_adopted_disks(&self.datasets, &self.log);
+        self.external_disks.finish_adopting_disks(&self.log).await;
+        // Now that former zone roots are cleaned up, ensure all datasets,
+        // including the transient zone datasets we skipped above. If this
+        // fails, those transient zone datasets won't exist yet, and zones that
+        // need them will fail to start (and be retried), as with any other
+        // failure to ensure datasets.
+        let _ = self.ensure_datasets(datasets.clone()).await;
     }
 
     async fn do_reconcilation<
@@ -645,19 +683,8 @@ impl ReconcilerTask {
         // then ensure datasets again. That last step creates the remaining
         // datasets on disks now in service, and marks datasets on disks we
         // gave up on as unavailable.
-        let zpools_being_adopted = self.external_disks.zpools_being_adopted();
-        self.ensure_datasets(skip_transient_zones_on_adopting_zpools(
-            &sled_config.datasets,
-            &zpools_being_adopted,
-        ))
-        .await;
-        if !zpools_being_adopted.is_empty() {
-            self.external_disks.verify_adopted_disks(&self.datasets, &self.log);
-            self.external_disks.finish_adopting_disks(&self.log).await;
-            // Now that former zone roots are cleaned up, ensure all datasets,
-            // including the transient zone datasets we skipped above.
-            self.ensure_datasets(sled_config.datasets.clone()).await;
-        }
+        self.ensure_datasets_and_finish_adopting_disks(&sled_config.datasets)
+            .await;
 
         // Collect the current timesync status (needed to start any new zones,
         // and also we want to report it as part of each reconciler result).
