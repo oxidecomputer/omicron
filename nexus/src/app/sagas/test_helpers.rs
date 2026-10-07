@@ -94,7 +94,13 @@ pub(crate) async fn instance_stop(
     let instance_lookup =
         nexus.instance_lookup(&opctx, instance_selector).unwrap();
     nexus
-        .instance_stop(&opctx, &instance_lookup)
+        .instance_stop(
+            &opctx,
+            &instance_lookup,
+            // XXX: vast majority of tests were written before new instances had
+            // the default config of an ACPI shutdown with 10 minute timeout
+            true,
+        )
         .await
         .expect("Failed to stop instance");
 }
@@ -115,7 +121,13 @@ pub(crate) async fn instance_stop_by_name(
     let instance_lookup =
         nexus.instance_lookup(&opctx, instance_selector).unwrap();
     nexus
-        .instance_stop(&opctx, &instance_lookup)
+        .instance_stop(
+            &opctx,
+            &instance_lookup,
+            // XXX: vast majority of tests were written before new instances had
+            // the default config of an ACPI shutdown with 10 minute timeout
+            true,
+        )
         .await
         .expect("Failed to stop instance");
 }

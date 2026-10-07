@@ -1099,6 +1099,18 @@ impl DataStore {
                         .execute_async(&conn)
                         .await?;
 
+                    // Set the instance shutdown policy.
+                    diesel::update(instance_dsl::instance)
+                        .filter(instance_dsl::id.eq(authz_instance.id()))
+                        .set((
+                            instance_dsl::shutdown_policy_action
+                                .eq(shutdown_policy_action),
+                            instance_dsl::shutdown_policy_timeout
+                                .eq(shutdown_policy_timeout),
+                        ))
+                        .execute_async(&conn)
+                        .await?;
+
                     // Set vCPUs and memory size.
                     self.instance_set_cpu_and_mem_on_conn(
                         &conn,

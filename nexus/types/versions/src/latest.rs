@@ -196,6 +196,7 @@ pub mod instance {
     pub use crate::v2026_09_04_00::instance::Instance;
     pub use crate::v2026_09_04_00::instance::InstanceCreate;
     pub use crate::v2026_09_04_00::instance::InstanceShutdownPolicy;
+    pub use crate::v2026_09_04_00::instance::InstanceStopOrRebootParams;
     pub use crate::v2026_09_04_00::instance::InstanceUpdate;
 }
 

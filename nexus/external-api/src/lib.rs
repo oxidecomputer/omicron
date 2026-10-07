@@ -4353,7 +4353,7 @@ pub trait NexusExternalApi {
     }]
     async fn instance_reboot(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<latest::project::OptionalProjectSelector>,
+        query_params: Query<latest::instance::InstanceStopOrRebootParams>,
         path_params: Path<latest::path_params::InstancePath>,
     ) -> Result<HttpResponseAccepted<latest::instance::Instance>, HttpError>;
 
@@ -4372,8 +4372,16 @@ pub trait NexusExternalApi {
         HttpResponseAccepted<v2026_06_08_00::instance::Instance>,
         HttpError,
     > {
-        let resp =
-            Self::instance_reboot(rqctx, query_params, path_params).await?;
+        let resp = Self::instance_reboot(
+            rqctx,
+            latest::instance::InstanceStopOrRebootParams {
+                project: query_params.into_inner().project,
+                skip_os_shutdown: None,
+            }
+            .into(),
+            path_params,
+        )
+        .await?;
         Ok(HttpResponseAccepted(resp.0.try_into()?))
     }
 
@@ -4515,7 +4523,7 @@ pub trait NexusExternalApi {
     }]
     async fn instance_stop(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<latest::project::OptionalProjectSelector>,
+        query_params: Query<latest::instance::InstanceStopOrRebootParams>,
         path_params: Path<latest::path_params::InstancePath>,
     ) -> Result<HttpResponseAccepted<latest::instance::Instance>, HttpError>;
 
@@ -4534,8 +4542,16 @@ pub trait NexusExternalApi {
         HttpResponseAccepted<v2026_06_08_00::instance::Instance>,
         HttpError,
     > {
-        let resp =
-            Self::instance_stop(rqctx, query_params, path_params).await?;
+        let resp = Self::instance_stop(
+            rqctx,
+            latest::instance::InstanceStopOrRebootParams {
+                project: query_params.into_inner().project,
+                skip_os_shutdown: None,
+            }
+            .into(),
+            path_params,
+        )
+        .await?;
         Ok(HttpResponseAccepted(resp.0.try_into()?))
     }
 
