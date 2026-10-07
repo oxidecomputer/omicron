@@ -182,6 +182,7 @@ members = [
     "trust-quorum/types/versions",
     "typed-rng",
     "uuid-kinds",
+    "wicket-cli-types",
     "wicket-common",
     "wicket-dbg",
     "wicket",
@@ -380,6 +381,7 @@ default-members = [
     "test-utils",
     "typed-rng",
     "uuid-kinds",
+    "wicket-cli-types",
     "wicket-common",
     "wicket-dbg",
     "wicket",
@@ -707,6 +709,7 @@ oxide-tokio-rt = "0.1.4"
 oxide-update-engine = "0.1.2"
 oxide-update-engine-types = { version = "0.1.2", features = ["schemars08"] }
 oxide-update-engine-display = "0.1.2"
+oxide-versioned-envelope = { version = "0.1.1", features = ["schemars08"] }
 oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "fd2d6ad625cef6fb903660e57dcd4729ff66a6fe", features = [ "api", "std" ] }
 oxlog = { path = "dev-tools/oxlog" }
 oxnet = "0.1.7"
@@ -907,6 +910,7 @@ vergen-gitcl = { version = "1.0.8" }
 walkdir = "2.5"
 whoami = "1.5"
 wicket = { path = "wicket" }
+wicket-cli-types = { path = "wicket-cli-types" }
 wicket-common = { path = "wicket-common" }
 wicketd-api = { path = "wicketd-api" }
 wicketd-client = { path = "clients/wicketd-client" }
