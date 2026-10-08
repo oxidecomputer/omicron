@@ -117,6 +117,7 @@ impl BackgroundTask for InventoryCollector {
     }
 }
 
+#[allow(clippy::too_many_arguments)] // rack_id will be removed for multirack
 async fn inventory_activate(
     opctx: &OpContext,
     datastore: &DataStore,
