@@ -629,9 +629,6 @@ mod tests {
         // For each state in `REAL_VMM_STATES`, two instances are created per
         // anti-affinity group. This ensures that both sleds have the same
         // amount of instances in each state.
-        //
-        // TODO-K: Add some instances in stoppable states that are not marked
-        // for stopping
         let conn = datastore.pool_connection_for_tests().await.unwrap();
         let mut instance_ids = Vec::new();
         let mut vmm_ids = Vec::new();
@@ -674,10 +671,15 @@ mod tests {
         // rows directly in the DB. The task should skip them entirely, so they
         // don't need to be registered with sled agent.
         //
-        // One caveat is that we are including the VMMs in `Creating` state. As
-        // mentioned earlier, these cannot be realiably tested to stop, but we
-        // can conveniently use them to simulate VMMs that failed to stop. We
-        // insert them and mark them as needing to be stopped.
+        // Even though this shouldn't happen in practice, we insert marked
+        // non-stoppable VMMs. This ensures that even if the task to mark VMMs
+        // marks a VMM that is in a state that it shouldn't be stopped in, this
+        // task skips it entirely.
+        //
+        // Also, we are including the VMMs in `Creating` state. As mentioned
+        // earlier, these cannot be realiably tested to stop, but we can
+        // conveniently use them to simulate VMMs that failed to stop. We insert
+        // them and mark them as needing to be stopped.
         for sled_id in [sled_a, sled_b] {
             for &state in DbVmmState::ALL_STATES {
                 let unmarked = insert_vmm_in_state(
@@ -686,7 +688,6 @@ mod tests {
                 .await;
                 vmm_ids.push(unmarked.id);
 
-                // TODO-K: Why are adding all states instead of just creating?
                 if !REAL_VMM_STATES.iter().any(|(_, real)| *real == state) {
                     let marked = insert_vmm_in_state(
                         &datastore,
@@ -702,21 +703,14 @@ mod tests {
         }
 
         let vmms = fetch_vmms(&conn, &vmm_ids).await;
-        // TODO-K: Verify this number after we make changes
-        //
-        // There should be 40 VMM rows:
-        //  - 6 real VMMs (one in each of the 3 `REAL_VMM_STATES` on each of
-        //    the 2 sleds)
-        //  - 20 unmarked VMMs (one in each of the remaining states on each
-        //   sled)
-        //  - 14 marked VMMs (one in each of the 7 states without a real VMM
-        //    on each sled).
-        assert_eq!(vmms.len(), 40);
 
-        // TODO-K: Fix comment Step 3: split the rows into the ones the task
-        // should stop and the ones it should leave unchanged. A marked
-        // `Creating` VMM is stoppable, but no sled agent knows about it, so
-        // the stop request fails (404) and the row stays unchanged.
+        // There should be 40 VMM rows:
+        //  - 6 VMMs registered with sled agent (one in each of the 3
+        //    `REAL_VMM_STATES` on each of the 2 sleds)
+        //  - 20 unmarked VMMs (one in every state on each sled)
+        //  - 14 marked VMMs (one in each of the states *not* in
+        //    `REAL_VMM_STATES` on each sled)
+        assert_eq!(vmms.len(), 40);
 
         // Collect which VMMs we expect the task will stop and which it won't.
         let should_be_stopped = |vmm: &Vmm| {
@@ -802,7 +796,7 @@ mod tests {
         );
 
         // Poke each simulated instance so each sled agent reports back to Nexus
-        // and wait until each one reports `NoVmm`.
+        // and wait until each one reports `NoVmm`
         for id in &instance_ids {
             instance_simulate(&cptestctx, id).await;
             instance_wait_for_state(&cptestctx, *id, InstanceState::NoVmm)
