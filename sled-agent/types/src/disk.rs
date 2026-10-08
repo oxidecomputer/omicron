@@ -15,8 +15,7 @@ use omicron_common::disk::DatasetKind;
 /// These datasets are owned by the sled config: RSS includes them in the
 /// initial blueprint, the Reconfigurator planner maintains them afterwards,
 /// and the sled-agent config reconciler creates them and applies their
-/// properties. Sled-agent does not create or modify them on its own when it
-/// adopts a disk.
+/// properties.
 ///
 /// Use [`strum::IntoEnumIterator::iter`] to visit every kind.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, strum::EnumIter)]
