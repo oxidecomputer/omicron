@@ -375,12 +375,13 @@ curl -sSfL -o debian-11-genericcloud-amd64.raw \
 OMICRON_NO_UNINSTALL=1 \
     ptime -m pfexec ./target/release/omicron-package -t test install
 
-# Wait for switch zone to come up
+# Wait for switch zone to come up. This normally takes 24-36 seconds (see
+# #11453), so leave plenty of headroom.
 retry=0
 until curl --max-time 1 --head --silent --show-error -o /dev/null "http://[fd00:1122:3344:101::2]:12224/"
 do
-	if [[ $retry -gt 30 ]]; then
-		echo "Failed to reach switch zone after 30 attempts"
+	if [[ $retry -gt 300 ]]; then
+		echo "Failed to reach switch zone after 300 attempts"
 		exit 1
 	fi
 	sleep 1
