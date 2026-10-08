@@ -45,7 +45,6 @@ impl From<PropolisInstanceState> for VmmState {
             // perspective.
             State::Creating | State::Starting => VmmState::Starting,
             State::Running => VmmState::Running,
-            // TODO-K: Here are some notes about how the VMM lifecycle works
             State::Stopping => VmmState::Stopping,
             // A Propolis that is stopped but not yet destroyed should still
             // appear to be Stopping from an external API perspective, since

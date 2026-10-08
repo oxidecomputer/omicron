@@ -1350,9 +1350,10 @@ mod tests {
             dev::test_setup_log("test_vmm_list_marked_stop_for_update");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
 
-        // TODO-K: Fix comment The states from which a VMM can still be stopped
-        // for an update. Only marked VMMs in these states should be listed by
+        // The states from which a VMM can still be stopped for an update. Only
+        // marked VMMs in these states should be listed by
         // `vmm_list_marked_stop_for_update`.
         let is_stoppable = |state: DbVmmState| {
             matches!(
@@ -1408,9 +1409,7 @@ mod tests {
             // Add a filter to ensure there is no full table scan
             .filter(dsl::id.ne(Uuid::nil()))
             .count()
-            .get_result_async(
-                &*datastore.pool_connection_for_tests().await.unwrap(),
-            )
+            .get_result_async(&*conn)
             .await
             .expect("VMMs should be counted");
         assert_eq!(row_count, 40);

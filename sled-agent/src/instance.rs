@@ -613,7 +613,6 @@ impl InstanceRunner {
 
         let mut state_owner = VmmStateOwner::Runner;
 
-        // TODO-K: Part of the VMM stop lifecycle
         // Timeout for stopping the instance gracefully.
         //
         // When we send Propolis a put-state request to transition to
@@ -2249,7 +2248,6 @@ impl InstanceRunner {
                 (Some(PropolisRequest::Run), None)
             }
             VmmStateRequested::Stopped => {
-                // TODO-K: More context about VMM lifecycle
                 // If there's no running Propolis yet, unregister this instance
                 // straightaway. Since nothing will ever send a state update in
                 // this case, force the VMM into a terminal Destroyed state,
