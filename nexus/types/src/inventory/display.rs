@@ -17,7 +17,8 @@ use iddqd::IdOrdMap;
 use indent_write::fmt::IndentWriter;
 use itertools::Itertools;
 use omicron_uuid_kinds::{
-    DatasetUuid, OmicronZoneUuid, PhysicalDiskUuid, ZpoolUuid,
+    DatasetUuid, GenericUuid, OmicronZoneUuid, PhysicalDiskUuid, RackUuid,
+    ZpoolUuid,
 };
 use sled_agent_types::inventory::{
     InstanceManagerStatus, SvcEnabledNotOnlineState, SvcsEnabledNotOnline,
@@ -49,6 +50,7 @@ use crate::inventory::{
 pub struct CollectionDisplay<'a> {
     collection: &'a Collection,
     include_sps: CollectionDisplayIncludeSps,
+    include_racks: CollectionDisplayIncludeRacks,
     include_sleds: bool,
     include_orphaned_datasets: bool,
     include_clickhouse_keeper_membership: bool,
@@ -64,6 +66,7 @@ impl<'a> CollectionDisplay<'a> {
             collection,
             // Display all items by default.
             include_sps: CollectionDisplayIncludeSps::All,
+            include_racks: CollectionDisplayIncludeRacks::All,
             include_sleds: true,
             include_orphaned_datasets: true,
             include_clickhouse_keeper_membership: true,
@@ -81,6 +84,16 @@ impl<'a> CollectionDisplay<'a> {
         include_sps: CollectionDisplayIncludeSps,
     ) -> &mut Self {
         self.include_sps = include_sps;
+        self
+    }
+
+    /// Control which racks are displayed (defaults to
+    /// [`CollectionDisplayIncludeRacks::All`]).
+    pub fn include_racks(
+        &mut self,
+        include_racks: CollectionDisplayIncludeRacks,
+    ) -> &mut Self {
+        self.include_racks = include_racks;
         self
     }
 
@@ -150,6 +163,7 @@ impl<'a> CollectionDisplay<'a> {
     ) -> &mut Self {
         self.include_sps(filter.to_include_sps())
             .include_sleds(filter.include_sleds())
+            .include_racks(filter.to_include_racks())
             .include_orphaned_datasets(filter.include_orphaned_datasets())
             .include_clickhouse_keeper_membership(
                 filter.include_keeper_membership(),
@@ -167,11 +181,12 @@ impl fmt::Display for CollectionDisplay<'_> {
         display_devices(
             &self.collection,
             &self.include_sps,
+            &self.include_racks,
             &self.long_string_formatter,
             f,
         )?;
         if self.include_sleds {
-            display_sleds(&self.collection, f)?;
+            display_sleds(&self.collection, &self.include_racks, f)?;
         } else if self.include_orphaned_datasets {
             // display_sleds already includes orphaned datasets, hence "else if
             // self.include_orphaned_datasets" rather than just "if".
@@ -217,6 +232,11 @@ pub enum CollectionDisplayCliFilter {
         /// show only information about one SP
         serial: Option<String>,
     },
+    /// show all information collected from the rack(s) with the given UUID(s)
+    Racks {
+        #[arg(required = true, num_args = 1..)]
+        rack_ids: Vec<Uuid>,
+    },
     /// show orphaned datasets
     OrphanedDatasets,
 }
@@ -224,7 +244,7 @@ pub enum CollectionDisplayCliFilter {
 impl CollectionDisplayCliFilter {
     fn to_include_sps(&self) -> CollectionDisplayIncludeSps {
         match self {
-            Self::All | Self::Sp { serial: None } => {
+            Self::All | Self::Sp { serial: None } | Self::Racks { .. } => {
                 CollectionDisplayIncludeSps::All
             }
             Self::Sp { serial: Some(serial) } => {
@@ -234,10 +254,26 @@ impl CollectionDisplayCliFilter {
         }
     }
 
+    fn to_include_racks(&self) -> CollectionDisplayIncludeRacks {
+        match self {
+            Self::Racks { rack_ids } => CollectionDisplayIncludeRacks::OnlyIds(
+                rack_ids
+                    .iter()
+                    .copied()
+                    .map(RackUuid::from_untyped_uuid)
+                    .collect(),
+            ),
+            Self::All | Self::Sp { .. } | Self::OrphanedDatasets => {
+                CollectionDisplayIncludeRacks::All
+            }
+        }
+    }
+
     fn include_sleds(&self) -> bool {
         match self {
             Self::All => true,
             Self::Sp { .. } => false,
+            Self::Racks { .. } => true,
             Self::OrphanedDatasets => false,
         }
     }
@@ -246,6 +282,7 @@ impl CollectionDisplayCliFilter {
         match self {
             Self::All => true,
             Self::Sp { .. } => false,
+            Self::Racks { .. } => true,
             Self::OrphanedDatasets => true,
         }
     }
@@ -254,6 +291,7 @@ impl CollectionDisplayCliFilter {
         match self {
             Self::All => true,
             Self::Sp { .. } => false,
+            Self::Racks { .. } => true,
             Self::OrphanedDatasets => false,
         }
     }
@@ -262,6 +300,7 @@ impl CollectionDisplayCliFilter {
         match self {
             Self::All => true,
             Self::Sp { .. } => false,
+            Self::Racks { .. } => true,
             Self::OrphanedDatasets => false,
         }
     }
@@ -270,6 +309,7 @@ impl CollectionDisplayCliFilter {
         match self {
             Self::All => true,
             Self::Sp { .. } => false,
+            Self::Racks { .. } => true,
             Self::OrphanedDatasets => false,
         }
     }
@@ -278,6 +318,7 @@ impl CollectionDisplayCliFilter {
         match self {
             Self::All => true,
             Self::Sp { .. } => false,
+            Self::Racks { .. } => true,
             Self::OrphanedDatasets => false,
         }
     }
@@ -312,6 +353,33 @@ impl CollectionDisplayIncludeSps {
             CollectionDisplayIncludeSps::All => true,
             CollectionDisplayIncludeSps::Serial(s) => s == serial,
             CollectionDisplayIncludeSps::None => false,
+        }
+    }
+}
+
+/// Which racks within a collection to display.
+pub enum CollectionDisplayIncludeRacks {
+    /// Display baseboards in all racks.
+    All,
+
+    /// Display only baseboards in racks with the given IDs.
+    OnlyIds(BTreeSet<RackUuid>),
+}
+
+impl CollectionDisplayIncludeRacks {
+    fn include_rack(&self, rack_id: RackUuid) -> bool {
+        match self {
+            CollectionDisplayIncludeRacks::All => true,
+            CollectionDisplayIncludeRacks::OnlyIds(ids) => {
+                ids.contains(&rack_id)
+            }
+        }
+    }
+
+    fn include_unknown_racks(&self) -> bool {
+        match self {
+            CollectionDisplayIncludeRacks::All => false,
+            CollectionDisplayIncludeRacks::OnlyIds(_) => true,
         }
     }
 }
@@ -364,6 +432,7 @@ fn display_errors(
 fn display_devices(
     collection: &Collection,
     include_sps: &CollectionDisplayIncludeSps,
+    include_racks: &CollectionDisplayIncludeRacks,
     long_string_formatter: &LongStringFormatter,
     f: &mut dyn fmt::Write,
 ) -> fmt::Result {
@@ -386,6 +455,10 @@ fn display_devices(
         // This unwrap should not fail because the collection we're iterating
         // over came from the one we're looking into now.
         let sp = collection.sps.get(baseboard_id).unwrap();
+        if !include_racks.include_rack(sp.rack_id) {
+            continue;
+        }
+
         let baseboard = collection.baseboards.get(baseboard_id);
         let rot = collection.rots.get(baseboard_id);
 
@@ -608,6 +681,7 @@ fn display_devices(
 
 fn display_sleds(
     collection: &Collection,
+    include_racks: &CollectionDisplayIncludeRacks,
     f: &mut dyn fmt::Write,
 ) -> fmt::Result {
     let mut f = f;
@@ -637,6 +711,21 @@ fn display_sleds(
             fmd,
         } = sled;
 
+        let rack_id = baseboard_id
+            .as_ref()
+            .and_then(|id| collection.sps.get(id))
+            .map(|sp| sp.rack_id);
+
+        // Should we display this sled? If we were asked to filter by rack ID,
+        // display the sled if and only if its baseboard ID corresponds to a
+        // service processor that was found in one of the requested racks.
+        if !rack_id
+            .map(|rack| include_racks.include_rack(rack))
+            .unwrap_or(include_racks.include_unknown_racks())
+        {
+            continue;
+        }
+
         writeln!(
             f,
             "\nsled {} (role = {:?}, serial {})",
@@ -649,6 +738,10 @@ fn display_sleds(
         )?;
 
         let mut indented = IndentWriter::new("    ", f);
+        match rack_id.as_ref() {
+            Some(rack_id) => writeln!(indented, "rack ID:     {rack_id}",)?,
+            None => writeln!(indented, "rack ID:     unknown",)?,
+        };
 
         writeln!(
             indented,
