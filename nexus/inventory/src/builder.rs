@@ -745,8 +745,12 @@ impl CollectionBuilder {
     /// Returns `true` if we have already found *all PSUs* for the PSC with the
     /// provided baseboard identity.
     pub fn found_all_psus_already(&self, psc: &BaseboardId) -> bool {
+        let Some(sp) = self.sps.get(psc) else {
+            // haven't even found the PSC yet!
+            return false;
+        };
         self.power_shelves
-            .get(psc)
+            .get(&(&psc.rack_id, psc.sp_slot))
             .map(|shelf| {
                 PsuSlot::ALL.iter().all(|slot| found_psu_already(shelf, *slot))
             })
@@ -759,8 +763,12 @@ impl CollectionBuilder {
     /// This is used to avoid requesting it multiple times (from multiple MGS
     /// instances).
     pub fn found_psu_already(&self, psc: &BaseboardId, psu: PsuSlot) -> bool {
+        let Some(sp) = self.sps.get(psc) else {
+            // haven't even found the PSC yet!
+            return false;
+        };
         self.power_shelves
-            .get(psc)
+            .get(&(&psc.rack_id, psc.sp_slot))
             .map(|shelf| found_psu_already(shelf, psu))
             .unwrap_or(false)
     }
@@ -790,20 +798,23 @@ impl CollectionBuilder {
                 sp.sp_type
             )));
         }
+
+        let rack_id = &sp.rack_id;
         if sp.sp_slot != sp_slot {
             return Err(CollectorBug(anyhow::anyhow!(
                 "reporting a PSU for baseboard {psc:?}, which claims to be \
-                 power shelf {sp_slot} from power shelf {sp_slot} SP, but the \
-                 recorded SP for that baseboard claims to be in slot {}",
+                 power shelf {sp_slot} but the recorded SP for that baseboard \
+                 claims to be in slot {} in rack {rack_id}",
                 sp.sp_slot
             )));
         }
 
         let psus_for_psc = &mut self
             .power_shelves
-            .entry(psc.as_ref())
+            .entry((rack_id, sp_slot))
             .or_insert_with(|| PowerShelf {
                 psc_baseboard_id: psc.clone(),
+                rack_id: *rack_id,
                 slot: sp_slot,
                 psus: IdOrdMap::with_capacity(6),
             })
@@ -841,9 +852,9 @@ impl CollectionBuilder {
             // again!
             id_ord_map::Entry::Occupied(_) => {
                 Err(CollectorBug(anyhow::anyhow!(
-                    "PSC {sp_slot} ({psc:?}) attempted to report PSU \
-                    {psu_slot} multiple times, but the first collection from \
-                    that PSU succeeded"
+                    "PSC {sp_slot} in rack {rack_id} ({psc:?}) attempted to \
+                     report PSU {psu_slot} multiple times, but the first \
+                     collection from that PSU succeeded"
                 )))
             }
         }

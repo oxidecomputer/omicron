@@ -151,8 +151,7 @@ pub struct Collection {
     pub rot_pages_found:
         BTreeMap<RotPageWhich, BTreeMap<Arc<BaseboardId>, RotPageFound>>,
 
-    /// all power shelf PSUs found, keyed by the PSC's baseboard id, and then by
-    /// PSU slot in that power shelf.
+    /// all power shelf PSUs found, keyed by rack ID and PSC slot.
     ///
     /// In practice, these will be inserted into the `inv_power_shelf_psu` table.
     pub power_shelves: IdOrdMap<PowerShelf>,
@@ -435,12 +434,18 @@ pub struct PowerShelf {
     /// The baseboard identity of the power shelf controller.
     pub psc_baseboard_id: Arc<BaseboardId>,
 
+    /// The ID of the rack containing this power shelf.
+    ///
+    /// This, along with the slot number, is determined based on the PSC record
+    /// with the provided `psc_baseboard_id`. they are duplicated here since
+    /// they are used as the key to look up the power shelf.
+    pub rack_id: RackUuid,
+
     /// Which power shelf (0 or 1) this is.
     ///
-    /// This duplicates the [`ServiceProcessor::sp_slot`] in the
-    /// `ServiceProcessor` entry for the PSC's baseboard ID, but I figured it
-    /// would be useful to have it here, too, so you don't have to go look it up
-    /// if all you need is to know which power shelf it is.
+    /// This, along with the rack ID, is determined based on the PSC record
+    /// with the provided `psc_baseboard_id`. they are duplicated here since
+    /// they are used as the key to look up the power shelf.
     pub slot: u16,
 
     /// PSU slots reported by the power shelf controller.
@@ -448,10 +453,10 @@ pub struct PowerShelf {
 }
 
 impl IdOrdItem for PowerShelf {
-    type Key<'a> = &'a BaseboardId;
+    type Key<'a> = (&'a RackUuid, u16);
 
     fn key(&self) -> Self::Key<'_> {
-        &self.psc_baseboard_id
+        (&self.rack_id, self.slot)
     }
 
     id_upcast!();

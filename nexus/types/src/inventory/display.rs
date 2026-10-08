@@ -1679,6 +1679,8 @@ mod tests {
     use chrono::DateTime;
     use chrono::Utc;
     use iddqd::IdOrdMap;
+    use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::RackUuid;
     use sled_hardware_types::BaseboardId;
     use std::sync::Arc;
 
@@ -1728,6 +1730,9 @@ mod tests {
                 part_number: String::from("test-psc"),
                 serial_number: String::from("test-psc-serial"),
             }),
+            rack_id: RackUuid::from_u128(
+                0xc19a698f_c6f9_4a17_ae30_20d711b8f7dc,
+            ),
             slot: 0,
             psus,
         };
