@@ -14654,6 +14654,7 @@ dependencies = [
  "tokio",
  "zfs-test-harness",
  "zip 4.6.1",
+ "zstd",
 ]
 
 [[package]]
@@ -15405,6 +15406,7 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "chrono",
+ "criterion",
  "dropshot",
  "futures",
  "gateway-client",
@@ -15422,6 +15424,7 @@ dependencies = [
  "omicron-workspace-hack",
  "parallel-task-set",
  "pq-sys",
+ "rand 0.9.2",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -15432,6 +15435,7 @@ dependencies = [
  "tokio-util",
  "uuid",
  "zip 4.6.1",
+ "zstd",
 ]
 
 [[package]]
@@ -18824,7 +18828,6 @@ dependencies = [
  "jiff",
  "memchr",
  "zopfli",
- "zstd",
 ]
 
 [[package]]
