@@ -1385,7 +1385,7 @@ impl InstanceRunner {
         // But there aren't any other great choices, so retrying forever seems
         // slightly better.
         warn!(self.log, "Halting and removing zone: {}", zname);
-        omicron_common::backoff::retry(
+        omicron_common::backoff::retry_notify_ext(
             omicron_common::backoff::retry_policy_local(),
             || async {
                 self.zone_builder_factory
@@ -1394,17 +1394,36 @@ impl InstanceRunner {
                     .await
                     .map_err(BackoffError::transient)
             },
+            |_, count, duration| {
+                error!(
+                    self.log,
+                    "failed to halt and remove Propolis zone";
+                    "zone_name" => &zname,
+                    "attempts" => count,
+                    "duration" => ?duration,
+                );
+            }
         )
         .await
         .expect("infinite retry loop stopping propolis zone");
-        info!(self.log, "Stopped Propolis zone"; "zone_name" => zname);
+        info!(self.log, "Stopped Propolis zone"; "zone_name" => &zname);
 
         // See if there are any runtime objects to clean up.
         //
         // We already removed the zone above, but directly through the `Zones`
         // interface. That doesn't actually update the in-memory representation
-        // of the zone here, so do that now.
-        running_state.running_zone.stop().await.unwrap();
+        // of the zone here, so do that now. If we failed here, it's because of
+        // something very strange, like not being able to list zones. The zone
+        // is definitely gone, or the above retry wouldn't have exited.
+        if let Err(e) = running_state.running_zone.stop().await {
+            error!(
+                self.log,
+                "RunningZone::stop() failed after the Propolis zone \
+                no longer exists";
+                "zone_name" => &zname,
+                "error" => e,
+            );
+        }
 
         // Remove any OPTE ports from the port manager.
         running_state.running_zone.release_opte_ports();
@@ -2217,7 +2236,7 @@ impl InstanceRunner {
         }
 
         // Set up the state monitor for the running instance.
-        self.monitor_handle = Some(self.spawn_instance_state_monitor(&state));
+        self.monitor_handle = Some(self.spawn_instance_state_monitor(state));
         Ok(())
     }
 
