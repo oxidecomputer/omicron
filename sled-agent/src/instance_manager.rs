@@ -4,8 +4,10 @@
 
 //! API for controlling multiple instances on a sled.
 
+use crate::instance::Error as InstanceError;
 use crate::instance::Instance;
 use crate::instance::VmmStateOwner;
+use crate::instance_manager::jobs::InstanceJob;
 use crate::metrics::MetricsRequestQueue;
 use crate::nexus::NexusClient;
 use crate::vmm_reservoir::VmmReservoirManagerHandle;
@@ -18,6 +20,9 @@ use illumos_utils::opte::PortManager;
 use illumos_utils::running_zone::ZoneBuilderFactory;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::internal::shared::SledIdentifiers;
+use omicron_common::backoff::BackoffError;
+use omicron_common::backoff::retry;
+use omicron_common::backoff::retry_policy_local;
 use omicron_uuid_kinds::PropolisUuid;
 use oxnet::IpNet;
 use sled_agent_config_reconciler::AvailableDatasetsReceiver;
@@ -769,7 +774,7 @@ impl InstanceManagerRunner {
     }
 
     fn get_propolis(&self, propolis_id: PropolisUuid) -> Option<&Instance> {
-        self.jobs.get(&propolis_id)
+        self.jobs.get(&propolis_id).map(|job| &job.instance)
     }
 
     /// Ensures that the instance manager contains a registered instance with
@@ -818,13 +823,13 @@ impl InstanceManagerRunner {
             "metadata" => ?metadata,
         );
 
-        let instance = match self.jobs.can_ensure_vmm(propolis_id) {
-            CanEnsureVmm::Exists(existing_instance) => {
-                if instance_id != existing_instance.id() {
+        let instance_job = match self.jobs.can_ensure_vmm(propolis_id) {
+            CanEnsureVmm::Exists(existing_job) => {
+                if instance_id != existing_job.instance.id() {
                     info!(&self.log,
                           "Propolis ID already used by another instance";
                           "propolis_id" => %propolis_id,
-                          "existing_instanceId" => %existing_instance.id());
+                          "existing_instanceId" => %existing_job.instance.id());
 
                     return Err(Error::Instance(
                         crate::instance::Error::PropolisAlreadyRegistered(
@@ -836,7 +841,7 @@ impl InstanceManagerRunner {
                         &self.log,
                         "instance already registered with requested Propolis ID"
                     );
-                    existing_instance
+                    existing_job
                 }
             }
             CanEnsureVmm::CanRegister(registration_slot) => {
@@ -882,7 +887,8 @@ impl InstanceManagerRunner {
                     sled_identifiers,
                     metadata,
                 )?;
-                registration_slot.insert(instance)
+                registration_slot
+                    .insert(InstanceJob { instance, zpool_task: None })
             }
             CanEnsureVmm::CannotRegister(reason) => {
                 // The VMM doesn't already exist, but we must disallow new
@@ -906,7 +912,7 @@ impl InstanceManagerRunner {
             }
         };
         let (tx, rx) = oneshot::channel();
-        instance.current_state(tx)?;
+        instance_job.instance.current_state(tx)?;
         rx.await?
     }
 
@@ -955,10 +961,11 @@ impl InstanceManagerRunner {
         disk_id: Uuid,
         snapshot_id: Uuid,
     ) -> Result<(), Error> {
-        let instance =
+        let instance_job =
             self.jobs.get(&propolis_id).ok_or(Error::NoSuchVmm(propolis_id))?;
 
-        instance
+        instance_job
+            .instance
             .issue_snapshot_request(tx, disk_id, snapshot_id)
             .map_err(Error::from)
     }
@@ -995,9 +1002,9 @@ impl InstanceManagerRunner {
         tx: oneshot::Sender<Result<(), Error>>,
     ) -> Result<(), Error> {
         let mut channels = vec![];
-        for (_, instance) in self.jobs.iter() {
+        for (_, instance_job) in self.jobs.iter() {
             let (tx, rx_new) = oneshot::channel();
-            instance.refresh_external_ips(tx)?;
+            instance_job.instance.refresh_external_ips(tx)?;
             channels.push(rx_new);
         }
 
@@ -1071,48 +1078,164 @@ impl InstanceManagerRunner {
         Ok(())
     }
 
-    async fn use_only_currently_managed_zpools(&mut self) {
-        let current_zpools =
-            self.currently_managed_zpools_rx.current_and_update();
-        for (id, instance) in self.jobs.iter() {
-            // If we can read the filesystem pool, consider it. Otherwise, move
-            // on, to prevent blocking the cleanup of other instances.
-            // TODO(eliza): clone each instance and spawn a task to handle it,
-            // so that a single misbehaving instance cannot block the instance
-            // manager's run loop...
-            let (tx, rx) = oneshot::channel();
-            // This will fail if the tx has been dropped, which we just...don't do.
-            let _ = instance.get_filesystem_zpool(tx);
-            let Ok(Ok(Some(filesystem_pool))) = rx.await else {
-                info!(self.log, "use_only_these_disks: Cannot read filesystem pool"; "instance_id" => ?id);
-                continue;
-            };
-            if !current_zpools.contains(&filesystem_pool) {
-                info!(
-                    self.log,
-                    "use_only_these_disks: Terminating instance";
-                    "instance_id" => ?id,
-                );
-                let (tx, rx) = oneshot::channel();
-                if let Err(e) = instance.terminate(tx, VmmStateOwner::Runner) {
-                    warn!(
-                        self.log,
-                        "use_only_these_disks: \
-                         Failed to request instance termination";
-                        InlineErrorChain::new(&e),
-                    );
-                    continue;
-                }
+    // Retry indefinitely to ensure an instance is not running on missing
+    // zpools.
+    async fn ensure_instance_uses_only_currently_managed_zpools(
+        current_zpools_rx: CurrentlyManagedZpoolsReceiver,
+        log: Logger,
+        propolis_id: PropolisUuid,
+        instance: Instance,
+    ) {
+        let log = log.new(o!(
+            "propolis_id" => propolis_id.to_string(),
+            "instance_id" => instance.id().to_string(),
+        ));
 
-                if let Err(e) = rx.await {
+        // First attempt to fetch this instance's filesystem pool. Since this
+        // can take a while, we want to do this _before_ looking at the
+        // currently managed zpools. That way we don't risk the set of pools
+        // changing before we get an answer from the instance.
+        let fetch_pool = || async {
+            let (tx, rx) = oneshot::channel();
+            let _ = instance.get_filesystem_zpool(tx);
+            match rx.await {
+                Ok(Ok(maybe_pool)) => Ok(maybe_pool),
+                Ok(Err(Error::Instance(
+                    InstanceError::FailedSendChannelFull,
+                ))) => {
                     warn!(
-                        self.log,
-                        "use_only_these_disks: \
-                         Failed while terminating instance";
-                        InlineErrorChain::new(&e),
+                        log,
+                        "instance runner request queue is full, will retry"
+                    );
+                    Err(BackoffError::transient(()))
+                }
+                Ok(Err(Error::Instance(
+                    InstanceError::FailedSendChannelClosed,
+                )))
+                | Err(_) => {
+                    debug!(
+                        log,
+                        "instance is gone (channel closed or send failed)"
+                    );
+                    Ok(None)
+                }
+                Ok(Err(e)) => {
+                    // This is really unexpected, and means that we sent
+                    // the message to the instance runner to fetch the
+                    // pools, but it gave us some error that the code
+                    // doesn't appear to actually generate. Normally,
+                    // we'd panic, but at this point, we'd rather leak
+                    // the instance.
+                    error!(
+                        log,
+                        "unexpected error fetching filesystem pools from \
+                        the instance, bailing out";
+                        "error" => InlineErrorChain::new(&e),
+                    );
+                    Ok(None)
+                }
+            }
+        };
+        let Some(pool) = retry(retry_policy_local(), fetch_pool)
+            .await
+            .expect("infinite retry fetching instance filesystem pool")
+        else {
+            debug!(log, "instance has no filesystem pool, nothing to do");
+            return;
+        };
+
+        // Now that we've got a pool, look for it in the current set and decide
+        // how to act.
+        if current_zpools_rx.current().contains(&pool) {
+            debug!(
+                log,
+                "instance uses a managed zpool, nothing to do";
+                "zpool" => %pool,
+            );
+            return;
+        };
+
+        let terminate = || async {
+            // The direct call to `terminate()` can only return an error if
+            // the receive side of the channel is closed. Since we're
+            // holding it, it is never closed, and we can ignore this.
+            let (tx, rx) = oneshot::channel();
+            instance
+                .terminate(tx, VmmStateOwner::Runner)
+                .expect("can only fail if the rx is dropped, which we hold");
+
+            // The receiver itself can only get an error if sending fails. The
+            // actual implementation of `terminate()` never sends an error.
+            // The failures are only if the channel is closed, which means the
+            // instance is gone and our job is done, or if the channel is full,
+            // which we retry.
+            match rx.await {
+                Ok(Ok(_)) => info!(log, "terminated instance"),
+                Ok(Err(Error::Instance(
+                    InstanceError::FailedSendChannelFull,
+                ))) => {
+                    warn!(log, "instance runner request full, will retry");
+                    return Err(BackoffError::transient(()));
+                }
+                Ok(Err(Error::Instance(
+                    InstanceError::FailedSendChannelClosed,
+                )))
+                | Err(_) => {
+                    debug!(
+                        log,
+                        "instance already gone (channel closed or send failed)"
+                    );
+                }
+                Ok(Err(e)) => {
+                    // Again, this is an error the code in
+                    // `InstanceRunner::terminate()` appears incapable of
+                    // actually generating. Still, it's better to leave the
+                    // instance around than panic the sled-agent.
+                    // (Probably.)
+                    error!(
+                        log,
+                        "unexpected error terminating the instance, exiting";
+                        "error" => InlineErrorChain::new(&e),
                     );
                 }
             }
+            Ok(())
+        };
+        retry(retry_policy_local(), terminate).await.expect(
+            "infinite retry loop ensuring instance only uses managed zpools",
+        );
+    }
+
+    async fn use_only_currently_managed_zpools(&mut self) {
+        for (propolis_id, instance_job) in self.jobs.iter_mut() {
+            if instance_job
+                .zpool_task
+                .as_ref()
+                .is_some_and(|t| !t.is_finished())
+            {
+                debug!(
+                    self.log,
+                    "ensure_instance_uses_only_currently_managed_zpools is \
+                    already running for this instance, not spawning again";
+                    "propolis_id" => %propolis_id,
+                    "instance_id" => %instance_job.instance.id(),
+                );
+                continue;
+            }
+
+            // Force the instance to use only the new zpools.
+            //
+            // We have to spawn a task because instance termination can run
+            // indefinitely, such as if we fail to stop the Propolis zone. We
+            // can't allow that to block the manager's run-loop.
+            instance_job.zpool_task = Some(tokio::spawn(
+                Self::ensure_instance_uses_only_currently_managed_zpools(
+                    self.currently_managed_zpools_rx.clone(),
+                    self.log.clone(),
+                    *propolis_id,
+                    instance_job.instance.clone(),
+                ),
+            ));
         }
     }
 
