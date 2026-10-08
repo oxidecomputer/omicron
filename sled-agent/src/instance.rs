@@ -516,16 +516,16 @@ struct InstanceMonitorMessage {
 }
 
 struct Killswitch(watch::Receiver<Option<VmmStateOwner>>);
+
 impl Killswitch {
-    async fn engaged(&mut self) -> VmmStateOwner {
+    async fn engaged(
+        &mut self,
+    ) -> Result<VmmStateOwner, watch::error::RecvError> {
         loop {
             if let Some(new_owner) = *(self.0.borrow_and_update()) {
-                return new_owner;
+                return Ok(new_owner);
             }
-            if self.0.changed().await.is_err() {
-                // assume nexus if the channel was dropped
-                return VmmStateOwner::Nexus;
-            }
+            self.0.changed().await?;
         }
     }
 }
@@ -678,12 +678,43 @@ impl InstanceRunner {
 
                 // Requests to terminate the instance take priority over any
                 // other request to the instance.
-                new_owner = killswitch.engaged() => {
-                    info!(
-                        self.log,
-                        "Received request to terminate instance";
-                    );
-                    state_owner = new_owner;
+                result = killswitch.engaged() => {
+                    state_owner = match result {
+                        Ok(new_owner) => {
+                            info!(
+                                self.log,
+                                "Received request to terminate instance";
+                            );
+                            new_owner
+                        },
+                        Err(_) => {
+                            // This path shouldn't be reachable (as of this
+                            // writing): it requires the sender side of the
+                            // runner's `terminate_rx` to be dropped; this is
+                            // owned by the runner's corresponding Instance; the
+                            // instance is only removed from its InstanceManager
+                            // in response to the instance ticket being dropped;
+                            // and the instance ticket isn't dropped until the
+                            // runner exits, which by definition hasn't happened
+                            // if the runner is still selecting on its
+                            // termination receiver.
+                            //
+                            // This logic relies on an assumption about
+                            // non-local code (specifically that the instance
+                            // manager has no way to drop an Instance without
+                            // its ticket being dropped), so defensively drive
+                            // the instance into a terminal state here anyway.
+                            // (If the instance manager shutdown sequence wants
+                            // different behavior it can send an explicit
+                            // termination request.)
+                            warn!(
+                                self.log,
+                                "Instance termination request channel closed; \
+                                 shutting down";
+                            );
+                            VmmStateOwner::Runner
+                        }
+                    };
                     self.fail_vmm_and_terminate().await;
                     break;
                 }
@@ -806,14 +837,49 @@ impl InstanceRunner {
                     tokio::select! {
                         biased;
 
-                        new_owner = killswitch.engaged() => {
-                            info!(
-                                self.log,
-                                "Received request to terminate instance while \
-                                waiting  on an ongoing request";
-                                "request" => %request_variant,
-                            );
-                            state_owner = new_owner;
+                        result = killswitch.engaged() => {
+                            state_owner = match result {
+                                Ok(new_owner) => {
+                                    info!(
+                                        self.log,
+                                        "Received request to terminate \
+                                         instance while waiting on an ongoing \
+                                         request";
+                                        "request" => %request_variant,
+                                    );
+                                    new_owner
+                                },
+                                Err(_) => {
+                                    // This path shouldn't be reachable (as of
+                                    // this writing): it requires the sender
+                                    // side of the runner's `terminate_rx` to be
+                                    // dropped; this is owned by the runner's
+                                    // corresponding Instance; the instance is
+                                    // only removed from its InstanceManager in
+                                    // response to the instance ticket being
+                                    // dropped; and the instance ticket isn't
+                                    // dropped until the runner exits, which by
+                                    // definition hasn't happened if the runner
+                                    // is still selecting on its termination
+                                    // receiver.
+                                    //
+                                    // This logic relies on an assumption about
+                                    // non-local code (specifically that the
+                                    // instance manager has no way to drop an
+                                    // Instance without its ticket being
+                                    // dropped), so defensively drive the
+                                    // instance into a terminal state here
+                                    // anyway. (If the instance manager shutdown
+                                    // sequence wants different behavior it can
+                                    // send an explicit termination request.)
+                                    warn!(
+                                        self.log,
+                                        "Instance termination request channel \
+                                         closed; shutting down";
+                                    );
+                                    VmmStateOwner::Runner
+                                }
+                            };
                             self.fail_vmm_and_terminate().await;
                             break;
                         }
@@ -2034,9 +2100,11 @@ impl Instance {
                     }
                 }
                 if rx.changed().await.is_err() {
-                    let _ = tx.send(Err(
-                        ManagerError::FailedSendInstanceManagerClosed,
-                    ));
+                    // InstanceRunner is *way* gone, what the hell???
+                    // This really shouldn't happen.
+                    let _ = tx.send(Err(ManagerError::Instance(
+                        Error::FailedSendClientClosed,
+                    )));
                     break;
                 }
             }
@@ -2514,7 +2582,7 @@ impl InstanceRunner {
         self.should_terminate = true;
         // Make sure everyone who was waiting on us to go die knows we have
         // obliged!
-        let _ = self.terminate_done_tx.send(Some(VmmUnregisterResponse {
+        self.terminate_done_tx.send_replace(Some(VmmUnregisterResponse {
             updated_runtime: Some(self.current_state()),
         }));
     }
