@@ -927,7 +927,7 @@ impl InstanceManagerRunner {
 
         // Otherwise, we pipeline the request, and send it to the instance,
         // where it can receive an appropriate response.
-        instance.terminate(tx, VmmStateOwner::Nexus)?;
+        instance.terminate(tx, VmmStateOwner::Nexus);
         Ok(())
     }
 
@@ -1094,15 +1094,7 @@ impl InstanceManagerRunner {
                     "instance_id" => ?id,
                 );
                 let (tx, rx) = oneshot::channel();
-                if let Err(e) = instance.terminate(tx, VmmStateOwner::Runner) {
-                    warn!(
-                        self.log,
-                        "use_only_these_disks: \
-                         Failed to request instance termination";
-                        InlineErrorChain::new(&e),
-                    );
-                    continue;
-                }
+                instance.terminate(tx, VmmStateOwner::Runner);
 
                 if let Err(e) = rx.await {
                     warn!(

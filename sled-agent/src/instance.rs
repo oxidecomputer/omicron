@@ -2079,7 +2079,7 @@ impl Instance {
         &self,
         tx: oneshot::Sender<Result<VmmUnregisterResponse, ManagerError>>,
         new_state_owner: VmmStateOwner,
-    ) -> Result<(), Error> {
+    ) {
         self.terminate_tx.send_if_modified(|current| {
             if current.is_some() {
                 return false;
@@ -2109,7 +2109,6 @@ impl Instance {
                 }
             }
         });
-        Ok(())
     }
 
     pub fn issue_snapshot_request(
