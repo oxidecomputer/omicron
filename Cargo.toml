@@ -435,6 +435,9 @@ declare_interior_mutable_const = "warn"
 # We'd like to warn on lossy casts in the future, but lossless casts are the
 # easiest ones to convert over.
 cast_lossless = "warn"
+# This lint catches format-style placeholders in string literals outside format
+# macros, e.g. `.context("failed to read {path}")`.
+literal_string_with_formatting_args = "warn"
 
 [workspace.dependencies]
 anyhow = "1.0"
@@ -520,7 +523,7 @@ digest = "0.10.7"
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
-dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "247502812015b409d33240b836d5bf242817453d" }
+dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "a133c73e3e7116260c6f1b1ab7907184b0e0aad8" }
 dropshot = { version = "0.17.1", features = [ "usdt-probes" ] }
 dropshot-api-manager = "0.8.0"
 dropshot-api-manager-types = "0.8.0"
@@ -919,6 +922,7 @@ zeroize = { version = "1.8.1", features = ["zeroize_derive", "serde", "std"] }
 zfs-test-harness = { path = "sled-storage/zfs-test-harness" }
 zip = { version = "4.2.0", default-features = false, features = ["deflate","bzip2"] }
 zone = { version = "0.3.1", default-features = false, features = ["async"] }
+zstd = { version = "0.13.3", default-features = false }
 
 # newtype-uuid is set to default-features = false because we don't want to
 # depend on std in omicron-uuid-kinds (in case a no-std library wants to access
@@ -938,8 +942,8 @@ oxide-generation = { version = "0.1.3", default-features = false }
 oxide-generation-macros = "0.2.0"
 omicron-generation-kinds = { path = "generation-kinds", features = ["serde", "schemars08", "slog2"] }
 
-scim2-rs = { git = "https://github.com/oxidecomputer/scim2-rs", rev = "163606c052ee30b16dfab282fca721dd81e0868a" }
-scim2-test-client = { git = "https://github.com/oxidecomputer/scim2-rs", rev = "163606c052ee30b16dfab282fca721dd81e0868a" }
+scim2-rs = { git = "https://github.com/oxidecomputer/scim2-rs", rev = "9730595245fc7969c4ffeee5a32345ab7b3167b7" }
+scim2-test-client = { git = "https://github.com/oxidecomputer/scim2-rs", rev = "9730595245fc7969c4ffeee5a32345ab7b3167b7" }
 
 # NOTE: The test profile inherits from the dev profile, so settings under
 # profile.dev get inherited. AVOID setting anything under profile.test: that

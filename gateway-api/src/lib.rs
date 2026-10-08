@@ -24,6 +24,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (5, RACK_ID),
     (4, COMPONENT_VPD),
     (3, NEWTYPE_UUID_BUMP),
     (2, COSMO),
@@ -613,6 +614,23 @@ pub trait GatewayApi {
     async fn sp_all_ids(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<latest::component::SpIdentifier>>, HttpError>;
+
+    /// Returns the rack UUID of the rack this management gateway service is
+    /// located in.
+    ///
+    /// All service processors accessed via this gateway can be assumed to be
+    /// located in the rack with this ID.
+    ///
+    /// If the rack UUID has not yet been set (i.e. because RSS has not yet
+    /// run), this endpoint returns a 503 Service Unavailable error.
+    #[endpoint {
+            method = GET,
+            path = "/local/rack-id",
+            versions = VERSION_RACK_ID..
+        }]
+    async fn rack_id_get(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<latest::local::RackId>, HttpError>;
 
     /// Request ereports from the target service processor.
     ///

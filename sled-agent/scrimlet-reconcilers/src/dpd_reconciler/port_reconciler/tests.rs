@@ -610,11 +610,8 @@ enum SwitchPortSettingsTestInput {
     },
 }
 
-// We cap the arbitrary port generation here to at most `qsfp30`, because the
-// `dpd` stub binary has a bug that makes `qsfp31` unusable:
-// <https://github.com/oxidecomputer/dendrite/issues/271>.
 #[derive(Debug, Clone, Arbitrary, PartialEq, Eq, PartialOrd, Ord)]
-struct PortId(#[strategy((0..31).prop_map(|n| format!("qsfp{n}")))] String);
+struct PortId(#[strategy((0..=31).prop_map(|n| format!("qsfp{n}")))] String);
 
 impl PortId {
     fn to_dpd(&self) -> DpdQsfp {

@@ -8,10 +8,12 @@ use crate::cache::Cache;
 use crate::collection::BundleCollection;
 use crate::step::CollectionStep;
 use crate::step::CollectionStepOutput;
+use crate::zip::MERGE_ZIP_SUFFIX;
 
 use anyhow::Context;
 use anyhow::bail;
 use camino::Utf8Path;
+use camino::Utf8PathBuf;
 use futures::FutureExt;
 use futures::StreamExt;
 use futures::future::Future;
@@ -19,6 +21,7 @@ use nexus_db_model::Sled;
 use nexus_networking;
 use nexus_types::identity::Asset;
 use nexus_types::support_bundle::BundleTimeRange;
+use slog::Logger;
 use slog::error;
 use slog::info;
 use slog_error_chain::InlineErrorChain;
@@ -271,7 +274,11 @@ async fn collect_data_from_sled(
         // We log any errors saving the zip file to disk and
         // continue on.
         if let Err(e) = log_collection_result {
-            error!(log, "failed to write logs output: {e}");
+            error!(
+                log,
+                "failed to write logs output";
+                "error" => InlineErrorChain::new(e.as_ref()),
+            );
         }
     }
     Ok(CollectionStepOutput::None)
@@ -328,15 +335,15 @@ where
     Ok(())
 }
 
-// Download and extract zone logs from a sled-agent.
+// Download zone logs from a sled-agent into the bundle.
 //
 // # Cancel safety
 //
-// Cancel-**unsafe**: writes to the filesystem and uses `spawn_blocking`.
+// Cancel-**unsafe**: writes to the filesystem.
 // The initial HTTP download is cancel-safe and uses `select!` internally.
 // All filesystem operations after the download must not be dropped.
 async fn save_zone_log_zip_or_error(
-    logger: &slog::Logger,
+    log: &Logger,
     client: &sled_agent_client::Client,
     zone: &str,
     path: &Utf8Path,
@@ -361,69 +368,99 @@ async fn save_zone_log_zip_or_error(
 
     match download_result {
         Ok(res) => {
-            let bytestream = res.into_inner();
             let output_dir = path.join(format!("logs/{zone}"));
-            let zipfile_path = output_dir.join("logs.zip");
-
-            // Ensure the logs output directory exists.
-            tokio::fs::create_dir_all(&output_dir).await.with_context(
-                || format!("failed to create output directory: {output_dir}"),
-            )?;
-
-            // Stream the log zip file to disk.
-            let mut file =
-                tokio::fs::File::create(&zipfile_path).await.with_context(
-                    || format!("failed to create log zip file: {zipfile_path}"),
-                )?;
-
-            let stream = bytestream
-                .into_inner()
-                .map(|chunk| chunk.map_err(|e| std::io::Error::other(e)));
-            let mut reader = tokio_util::io::StreamReader::new(stream);
-            let _nbytes = tokio::io::copy(&mut reader, &mut file).await?;
-            file.flush().await?;
-
-            // Unzip the log file into the same directory.
-            let zip_path = zipfile_path.clone();
-            tokio::task::spawn_blocking(move || {
-                extract_zip_file(&output_dir, &zip_path)
-            })
-            .await
-            .map_err(|join_error| {
-                anyhow::anyhow!(join_error)
-                    .context("unzipping support bundle logs zip panicked")
-            })??;
-
-            // Clean up the zip file that was written to disk.
-            if let Err(e) = tokio::fs::remove_file(&zipfile_path).await {
-                error!(
-                    logger,
-                    "failed to cleanup temporary logs zip file";
-                    InlineErrorChain::new(&e),
-                    "file" => %zipfile_path,
-
-                );
+            if let Err(err) =
+                save_zone_log_zip(res.into_inner(), &output_dir).await
+            {
+                // Leave an error in the bundle in place of the logs, rather
+                // than a zip that could not be saved.
+                let err_string =
+                    InlineErrorChain::new(err.as_ref()).to_string();
+                save_zone_log_error(log, zone, path, err_string).await;
+                return Err(err);
             }
         }
         Err(err) => {
             let err_string = InlineErrorChain::new(&err).to_string();
-            tokio::fs::write(path.join(format!("{zone}.logs.err")), err_string)
-                .await?;
+            save_zone_log_error(log, zone, path, err_string).await;
         }
     };
 
     Ok(())
 }
 
-fn extract_zip_file(
+// Record, in the bundle, an error that kept a zone's logs out of it.
+//
+// If the error cannot be written to the bundle, it is logged instead, so that
+// the failure to write it does not hide the error itself.
+async fn save_zone_log_error(
+    log: &Logger,
+    zone: &str,
+    path: &Utf8Path,
+    err_string: String,
+) {
+    let err_path = path.join(format!("{zone}.logs.err"));
+    if let Err(write_err) = tokio::fs::write(&err_path, &err_string).await {
+        error!(
+            log,
+            "failed to save zone log error to bundle";
+            "zone" => zone,
+            "path" => %err_path,
+            "error" => %err_string,
+            "write_error" => InlineErrorChain::new(&write_err),
+        );
+    }
+}
+
+// The path of a zone's log zip within its logs directory.
+//
+// The name marks the zip for merging, so that the bundle includes its entries,
+// as-is, rather than the zip itself.
+fn zone_log_zip_path(output_dir: &Utf8Path) -> Utf8PathBuf {
+    output_dir.join(format!("logs{MERGE_ZIP_SUFFIX}"))
+}
+
+// Stream a zone's log zip to `output_dir`.
+//
+// On failure, removes what it wrote, so that neither a partial zip nor an
+// empty directory for it ends up in the bundle.
+async fn save_zone_log_zip(
+    bytestream: sled_agent_client::ByteStream,
     output_dir: &Utf8Path,
-    zip_file: &Utf8Path,
-) -> Result<(), anyhow::Error> {
-    let mut zip = std::fs::File::open(&zip_file)
-        .with_context(|| format!("failed to open zip file: {zip_file}"))?;
-    let mut archive = zip::ZipArchive::new(&mut zip)?;
-    archive.extract(&output_dir).with_context(|| {
-        format!("failed to extract log zip file to: {output_dir}")
-    })?;
-    Ok(())
+) -> anyhow::Result<()> {
+    let zipfile_path = zone_log_zip_path(output_dir);
+
+    let result = async {
+        // Ensure the logs output directory exists.
+        tokio::fs::create_dir_all(&output_dir).await.with_context(|| {
+            format!("failed to create output directory: {output_dir}")
+        })?;
+
+        // Stream the log zip file to disk.
+        let mut file =
+            tokio::fs::File::create(&zipfile_path).await.with_context(
+                || format!("failed to create log zip file: {zipfile_path}"),
+            )?;
+
+        let stream = bytestream
+            .into_inner()
+            .map(|chunk| chunk.map_err(|e| std::io::Error::other(e)));
+        let mut reader = tokio_util::io::StreamReader::new(stream);
+        let _nbytes =
+            tokio::io::copy(&mut reader, &mut file).await.with_context(
+                || format!("failed to download log zip: {zipfile_path}"),
+            )?;
+        file.flush().await?;
+        Ok::<_, anyhow::Error>(())
+    }
+    .await;
+
+    if result.is_err() {
+        // This is best-effort: if removal fails, the bundle skips whatever it
+        // cannot read of the partial zip, and records what it skipped.
+        let _ = tokio::fs::remove_file(&zipfile_path).await;
+        // Fails, leaving the directory alone, unless it is empty.
+        let _ = tokio::fs::remove_dir(output_dir).await;
+    }
+    result
 }

@@ -41,6 +41,9 @@ const SLED_DIAGNOSTICS_ZFS_PROPERTY_NAME: &'static str =
     "oxide:for-sled-diagnostics";
 const SLED_DIAGNOSTICS_ZFS_PROPERTY_VALUE: &'static str = "true";
 
+// The zstd compression level for logs collected into a zip.
+const LOG_ZSTD_LEVEL: i32 = 3;
+
 const fn diagnostics_zfs_properties() -> &'static [(&'static str, &'static str)]
 {
     &[(SLED_DIAGNOSTICS_ZFS_PROPERTY_NAME, SLED_DIAGNOSTICS_ZFS_PROPERTY_VALUE)]
@@ -799,13 +802,15 @@ fn write_log_to_zip<W: Write + Seek>(
         })
         .unwrap_or_else(zip::DateTime::default);
 
-    let zip_path = format!("{service}/{logtype}/{log_name}");
+    // Each log is stored in the zip as a standalone zstd file, rather than as
+    // a zstd-compressed zip entry: any unzip tool can extract it, and the
+    // result can be read with standard zstd tools.
+    let zip_path = format!("{service}/{logtype}/{log_name}.zst");
     zip.start_file_from_path(
         zip_path,
         FullFileOptions::default()
             .last_modified_time(zip_mtime)
-            .compression_method(zip::CompressionMethod::Zstd)
-            .compression_level(Some(3))
+            .compression_method(zip::CompressionMethod::Stored)
             // NB: From the docs
             // If set to false and the file exceeds the
             // limit, an I/O error is thrown and the file is aborted. If set to
@@ -813,7 +818,7 @@ fn write_log_to_zip<W: Write + Seek>(
             // exceed the limit, 20 B are wasted.
             .large_file(true),
     )?;
-    if let Err(e) = std::io::copy(&mut src, zip) {
+    if let Err(e) = write_zstd(&mut src, zip) {
         // If we fail here the `ZipWriter` is an unknown state and we are forced
         // to bubble up an error.
         zip.abort_file()?;
@@ -829,6 +834,21 @@ fn write_log_to_zip<W: Write + Seek>(
         );
     };
 
+    Ok(())
+}
+
+/// Compresses `src` into `dst` as a zstd file.
+///
+/// The frame records the size of `src`, so tools such as `zstd -l` can report
+/// it, and a checksum, as the `zstd` CLI does by default.
+fn write_zstd(src: &mut File, dst: &mut impl Write) -> std::io::Result<()> {
+    let mut encoder = zstd::Encoder::new(dst, LOG_ZSTD_LEVEL)?;
+    encoder.include_checksum(true)?;
+    // Logs are read from a snapshot, so their size cannot change while they
+    // are compressed.
+    encoder.set_pledged_src_size(Some(src.metadata()?.len()))?;
+    std::io::copy(src, &mut encoder)?;
+    encoder.finish()?;
     Ok(())
 }
 
@@ -1170,6 +1190,24 @@ mod illumos_tests {
     use zip::ZipArchive;
     use zip::ZipWriter;
 
+    /// Reads a log from the zip, checking that it is stored as a zstd file.
+    fn read_zstd_entry<R: std::io::Read>(
+        entry: zip::read::ZipFile<'_, R>,
+    ) -> String {
+        assert_eq!(
+            entry.compression(),
+            zip::CompressionMethod::Stored,
+            "{} is stored without zip compression",
+            entry.name(),
+        );
+        let mut contents = String::new();
+        zstd::Decoder::new(entry)
+            .unwrap()
+            .read_to_string(&mut contents)
+            .unwrap();
+        contents
+    }
+
     struct SingleU2StorageHarness {
         storage_test_harness: ZfsTestHarness,
         zpool_id: ExternalZpoolUuid,
@@ -1413,22 +1451,21 @@ mod illumos_tests {
             let mut archive =
                 ZipArchive::new(File::open(zipfile_path).unwrap()).unwrap();
             for (name, data) in logfile_to_data {
-                let mut file_in_zip =
-                    archive.by_name(&format!("mg-ddm/current/{name}")).unwrap();
+                let file_in_zip = archive
+                    .by_name(&format!("mg-ddm/current/{name}.zst"))
+                    .unwrap();
 
                 let mtime = file_in_zip.last_modified().unwrap();
                 assert_eq!(mtime, expected_zip_mtime, "file mtime matches");
 
-                let mut contents = String::new();
-                file_in_zip.read_to_string(&mut contents).unwrap();
-
+                let contents = read_zstd_entry(file_in_zip);
                 assert_eq!(contents.as_str(), data, "log file data matches");
             }
 
             // Confirm the zip did not pick up the unwanted files
             for (name, _) in logfile_to_data_unwanted {
                 let file_in_zip =
-                    archive.by_name(&format!("mg-ddm/current/{name}"));
+                    archive.by_name(&format!("mg-ddm/current/{name}.zst"));
                 assert!(file_in_zip.is_err(), "file should not be in zip");
             }
             log_snapshots.destroy().await;
@@ -1538,14 +1575,16 @@ mod illumos_tests {
             for (name, data) in
                 [(live, "live data"), (rotated0, "rotated data")]
             {
-                let mut file_in_zip =
-                    archive.by_name(&format!("mg-ddm/current/{name}")).unwrap();
-                let mut contents = String::new();
-                file_in_zip.read_to_string(&mut contents).unwrap();
+                let file_in_zip = archive
+                    .by_name(&format!("mg-ddm/current/{name}.zst"))
+                    .unwrap();
+                let contents = read_zstd_entry(file_in_zip);
                 assert_eq!(contents.as_str(), data, "{name} matches snapshot");
             }
             assert!(
-                archive.by_name(&format!("mg-ddm/current/{rotated1}")).is_err(),
+                archive
+                    .by_name(&format!("mg-ddm/current/{rotated1}.zst"))
+                    .is_err(),
                 "file rotated after the snapshot should not be in zip"
             );
             log_snapshots.destroy().await;
