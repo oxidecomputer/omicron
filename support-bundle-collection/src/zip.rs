@@ -22,8 +22,8 @@
 //! within it becomes an entry of the same relative path, with one exception.
 //! A file whose name ends in [`MERGE_ZIP_SUFFIX`] is expanded in place: the
 //! file itself is not added, and its entries are copied as-is, without being
-//! decompressed, under the directory that contains it. The collected directory therefore
-//! does not match the bundle's layout exactly.
+//! decompressed, under the directory that contains it. The collected directory
+//! therefore does not match the bundle's layout exactly.
 //!
 //! Merged entries may collide with each other or with files on disk. The
 //! first entry of a given name is kept, and later ones are skipped.
@@ -51,9 +51,9 @@ use std::io::Write;
 ///
 /// The file itself is not added to the bundle. Instead, each of its entries is
 /// copied into the bundle as-is, without being decompressed, under the
-/// directory that contains the file. For example, an entry named `svc/current/svc.log` within
-/// `logs/zone/logs.merge.zip` becomes `logs/zone/svc/current/svc.log` in the
-/// bundle.
+/// directory that contains the file. For example, an entry named
+/// `svc/current/svc.log` within `logs/zone/logs.merge.zip` becomes
+/// `logs/zone/svc/current/svc.log` in the bundle.
 pub const MERGE_ZIP_SUFFIX: &str = ".merge.zip";
 
 /// Write a bundle zip of `dir` into a seekable destination. Produces a
@@ -265,7 +265,8 @@ fn recursively_add_directory_to_zipfile<W: Write + std::io::Seek>(
 /// The zip is skipped if it cannot be read, and so is each entry that cannot be
 /// read or whose name would place it outside of `dst_dir`. Each is checked
 /// before anything of it is written to the bundle, and what was skipped is
-/// recorded in the bundle; see the [module documentation](self#bundle-contents).
+/// recorded in the bundle; see the
+/// [module documentation](self#bundle-contents).
 /// An error is returned only if writing to the bundle fails.
 fn merge_zip_entries<W: Write + std::io::Seek>(
     bundle: &mut BundleZip<W>,

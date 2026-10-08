@@ -21,6 +21,7 @@ use nexus_db_model::Sled;
 use nexus_networking;
 use nexus_types::identity::Asset;
 use nexus_types::support_bundle::BundleTimeRange;
+use slog::Logger;
 use slog::error;
 use slog::info;
 use slog_error_chain::InlineErrorChain;
@@ -258,6 +259,7 @@ async fn collect_data_from_sled(
     let mut log_futs = futures::stream::iter(zones)
         .map(|zone| async move {
             save_zone_log_zip_or_error(
+                log,
                 sled_client,
                 &zone,
                 sled_path,
@@ -272,7 +274,11 @@ async fn collect_data_from_sled(
         // We log any errors saving the zip file to disk and
         // continue on.
         if let Err(e) = log_collection_result {
-            error!(log, "failed to write logs output: {e}");
+            error!(
+                log,
+                "failed to write logs output";
+                "error" => InlineErrorChain::new(e.as_ref()),
+            );
         }
     }
     Ok(CollectionStepOutput::None)
@@ -337,6 +343,7 @@ where
 // The initial HTTP download is cancel-safe and uses `select!` internally.
 // All filesystem operations after the download must not be dropped.
 async fn save_zone_log_zip_or_error(
+    log: &Logger,
     client: &sled_agent_client::Client,
     zone: &str,
     path: &Utf8Path,
@@ -369,22 +376,40 @@ async fn save_zone_log_zip_or_error(
                 // than a zip that could not be saved.
                 let err_string =
                     InlineErrorChain::new(err.as_ref()).to_string();
-                tokio::fs::write(
-                    path.join(format!("{zone}.logs.err")),
-                    err_string,
-                )
-                .await?;
+                save_zone_log_error(log, zone, path, err_string).await;
                 return Err(err);
             }
         }
         Err(err) => {
             let err_string = InlineErrorChain::new(&err).to_string();
-            tokio::fs::write(path.join(format!("{zone}.logs.err")), err_string)
-                .await?;
+            save_zone_log_error(log, zone, path, err_string).await;
         }
     };
 
     Ok(())
+}
+
+// Record, in the bundle, an error that kept a zone's logs out of it.
+//
+// If the error cannot be written to the bundle, it is logged instead, so that
+// the failure to write it does not hide the error itself.
+async fn save_zone_log_error(
+    log: &Logger,
+    zone: &str,
+    path: &Utf8Path,
+    err_string: String,
+) {
+    let err_path = path.join(format!("{zone}.logs.err"));
+    if let Err(write_err) = tokio::fs::write(&err_path, &err_string).await {
+        error!(
+            log,
+            "failed to save zone log error to bundle";
+            "zone" => zone,
+            "path" => %err_path,
+            "error" => %err_string,
+            "write_error" => InlineErrorChain::new(&write_err),
+        );
+    }
 }
 
 // The path of a zone's log zip within its logs directory.
