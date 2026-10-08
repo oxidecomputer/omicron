@@ -6757,7 +6757,7 @@ checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 [[package]]
 name = "loopback-ip-mgr"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/falcon?rev=aa44de0ab2edd702322ef60dd9fec1d1e70348ad#aa44de0ab2edd702322ef60dd9fec1d1e70348ad"
+source = "git+https://github.com/oxidecomputer/falcon?rev=5b63d311d14a540d79a8318b972b5bc316436ea8#5b63d311d14a540d79a8318b972b5bc316436ea8"
 dependencies = [
  "libc",
  "libnet",
