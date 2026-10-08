@@ -1202,6 +1202,15 @@ mod tests {
                     ]),
                 }),
             },
+            ddmd_reconciler: ReconcilerStatus {
+                current_status: ReconcilerCurrentStatus::Idle,
+                last_completion: completed(DdmdReconcilerStatus::Reconciled {
+                    external_peers_address_objects: BTreeSet::from([
+                        "tfportqsfp0_0/ll".to_string(),
+                        "tfportqsfp1_0/ll".to_string(),
+                    ]),
+                }),
+            },
         }
     }
 
@@ -1259,6 +1268,12 @@ mod tests {
                 current_status: ReconcilerCurrentStatus::Idle,
                 last_completion: completed(LldpdReconcilerStatus::Reconciled {
                     ports: BTreeMap::new(),
+                }),
+            },
+            ddmd_reconciler: ReconcilerStatus {
+                current_status: ReconcilerCurrentStatus::Idle,
+                last_completion: completed(DdmdReconcilerStatus::Reconciled {
+                    external_peers_address_objects: BTreeSet::new(),
                 }),
             },
         }
