@@ -1687,58 +1687,6 @@
           "last"
         ]
       },
-      "L1PortConfig": {
-        "description": "Configuration for the physical layer of a port",
-        "type": "object",
-        "properties": {
-          "autoneg": {
-            "description": "Whether autonegotiation is enabled.",
-            "type": "boolean"
-          },
-          "fec": {
-            "nullable": true,
-            "description": "The forward error correction mode, if any.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/LinkFec"
-              }
-            ]
-          },
-          "lldp": {
-            "nullable": true,
-            "description": "LLDP configuration for this port.",
-            "default": null,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/LldpPortConfig"
-              }
-            ]
-          },
-          "speed": {
-            "description": "The port speed.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/LinkSpeed"
-              }
-            ]
-          },
-          "tx_eq": {
-            "nullable": true,
-            "description": "Transmit equalization overrides for this port.",
-            "default": null,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TxEqConfig"
-              }
-            ]
-          }
-        },
-        "required": [
-          "autoneg",
-          "speed"
-        ],
-        "additionalProperties": false
-      },
       "LaneMonitors": {
         "description": "The optical power monitors of one lane of a transceiver module.",
         "type": "object",
@@ -4582,82 +4530,6 @@
           "address"
         ]
       },
-      "UplinkPortConfig": {
-        "description": "User-specified per-port configuration.\n\nThis contains all of the fields of a port configuration other than the port name, which is used as the map key.",
-        "type": "object",
-        "properties": {
-          "addresses": {
-            "description": "Addresses configured on this port.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/UserSpecifiedUplinkAddressConfig"
-            }
-          },
-          "autoneg": {
-            "description": "Whether autonegotiation is enabled.",
-            "type": "boolean"
-          },
-          "bgp_peers": {
-            "description": "BGP peers reachable on this port.",
-            "default": [],
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/UserSpecifiedBgpPeerConfig"
-            }
-          },
-          "lldp": {
-            "nullable": true,
-            "description": "LLDP configuration for this port.",
-            "default": null,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/LldpPortConfig"
-              }
-            ]
-          },
-          "routes": {
-            "description": "Static routes for this port.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/RouteConfig"
-            }
-          },
-          "tx_eq": {
-            "nullable": true,
-            "description": "Transmit equalization overrides for this port.",
-            "default": null,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TxEqConfig"
-              }
-            ]
-          },
-          "uplink_port_fec": {
-            "nullable": true,
-            "description": "The forward error correction mode, if any.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/LinkFec"
-              }
-            ]
-          },
-          "uplink_port_speed": {
-            "description": "The port speed.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/LinkSpeed"
-              }
-            ]
-          }
-        },
-        "required": [
-          "addresses",
-          "autoneg",
-          "routes",
-          "uplink_port_speed"
-        ],
-        "additionalProperties": false
-      },
       "UplinkPorts": {
         "type": "array",
         "items": {
@@ -4843,38 +4715,140 @@
             "description": "A front port intended for use as an uplink",
             "type": "object",
             "properties": {
-              "tag": {
+              "addresses": {
+                "description": "Addresses configured on this port.",
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/UserSpecifiedUplinkAddressConfig"
+                }
+              },
+              "autoneg": {
+                "description": "Whether autonegotiation is enabled.",
+                "type": "boolean"
+              },
+              "bgp_peers": {
+                "description": "BGP peers reachable on this port.",
+                "default": [],
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/UserSpecifiedBgpPeerConfig"
+                }
+              },
+              "kind": {
                 "type": "string",
                 "enum": [
                   "uplink"
                 ]
               },
-              "val": {
-                "$ref": "#/components/schemas/UplinkPortConfig"
+              "lldp": {
+                "nullable": true,
+                "description": "LLDP configuration for this port.",
+                "default": null,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/LldpPortConfig"
+                  }
+                ]
+              },
+              "routes": {
+                "description": "Static routes for this port.",
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/RouteConfig"
+                }
+              },
+              "tx_eq": {
+                "nullable": true,
+                "description": "Transmit equalization overrides for this port.",
+                "default": null,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/TxEqConfig"
+                  }
+                ]
+              },
+              "uplink_port_fec": {
+                "nullable": true,
+                "description": "The forward error correction mode, if any.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/LinkFec"
+                  }
+                ]
+              },
+              "uplink_port_speed": {
+                "description": "The port speed.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/LinkSpeed"
+                  }
+                ]
               }
             },
             "required": [
-              "tag",
-              "val"
+              "addresses",
+              "autoneg",
+              "kind",
+              "routes",
+              "uplink_port_speed"
             ]
           },
           {
             "description": "A front port running DDM for multirack",
             "type": "object",
             "properties": {
-              "tag": {
+              "autoneg": {
+                "description": "Whether autonegotiation is enabled.",
+                "type": "boolean"
+              },
+              "fec": {
+                "nullable": true,
+                "description": "The forward error correction mode, if any.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/LinkFec"
+                  }
+                ]
+              },
+              "kind": {
                 "type": "string",
                 "enum": [
                   "ddm"
                 ]
               },
-              "val": {
-                "$ref": "#/components/schemas/L1PortConfig"
+              "lldp": {
+                "nullable": true,
+                "description": "LLDP configuration for this port.",
+                "default": null,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/LldpPortConfig"
+                  }
+                ]
+              },
+              "speed": {
+                "description": "The port speed.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/LinkSpeed"
+                  }
+                ]
+              },
+              "tx_eq": {
+                "nullable": true,
+                "description": "Transmit equalization overrides for this port.",
+                "default": null,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/TxEqConfig"
+                  }
+                ]
               }
             },
             "required": [
-              "tag",
-              "val"
+              "autoneg",
+              "kind",
+              "speed"
             ]
           }
         ]

@@ -13,7 +13,7 @@
 //! [`UserSpecifiedRackNetworkConfig`] and [`PutRssUserConfigInsensitive`] are
 //! redefined because they transitively contain it.
 
-use anyhow::{Context, anyhow, bail};
+use anyhow::{Context, anyhow};
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{IpAddr, Ipv6Addr};
 
@@ -260,9 +260,8 @@ pub struct L1PortConfig {
 /// A user-specified port configuration.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(
-    try_from = "UnvalidatedPortConfig",
-    tag = "tag",
-    content = "val",
+    from = "UnvalidatedPortConfig",
+    tag = "kind",
     rename_all = "snake_case"
 )]
 #[allow(clippy::large_enum_variant)]
@@ -292,18 +291,6 @@ impl TryFrom<v3::rack_setup::UserSpecifiedPortConfig>
     }
 }
 
-/// A representation of a serialized tag for `UserSpecifiedPortConfig`
-///
-/// This is used to allow deserializing `UserSpecifiedPortConfig` or untagged
-/// `UplinkPortConfig` into `UnvalidatedPortConfig`, which we can then convert
-/// via `TryFrom` into `UserSpecifiedPortConfig`.
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "snake_case")]
-enum PortConfigTag {
-    Uplink,
-    Ddm,
-}
-
 // Allow serde to deserialize `UserSpecifiedPortConfig` into an untagged or
 // tagged form so that it can automatically convert legacy untagged uplinks into
 // a form that can be converted to a `UserSpecifiedPortConfig`.
@@ -314,44 +301,27 @@ enum UnvalidatedPortConfig {
     LegacyUplink(UplinkPortConfig),
 }
 
-// An alternate representation of a tagged `UserSpecifiedPortConfig`. This can be used
-// to deserialize the tagged form with an explicit tag, so we can tell if the
-// tag exists. If not, we deserialize into the untagged `UplinkPortConfig`.
+// An alternate representation of a tagged `UserSpecifiedPortConfig`. This
+// can be used to deserialize the tagged form with an explicit tag, so we
+// can tell if the tag exists. If not, we deserialize into the untagged
+// `UplinkPortConfig`.
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct TaggedPortConfig {
-    tag: PortConfigTag,
-    val: TaggedPortConfigVal,
-}
-
-// An untagged representation of `UserSpecifiedPortConfig` used as in
-// intermediate value for deserialization.
-#[derive(Deserialize, Debug)]
-#[serde(untagged)]
-enum TaggedPortConfigVal {
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum TaggedPortConfig {
     Uplink(UplinkPortConfig),
     Ddm(L1PortConfig),
 }
 
-impl TryFrom<UnvalidatedPortConfig> for UserSpecifiedPortConfig {
-    type Error = anyhow::Error;
-
-    fn try_from(value: UnvalidatedPortConfig) -> Result<Self, Self::Error> {
-        let TaggedPortConfig { tag, val } = match value {
-            UnvalidatedPortConfig::LegacyUplink(uplink) => {
-                return Ok(UserSpecifiedPortConfig::Uplink(uplink));
+impl From<UnvalidatedPortConfig> for UserSpecifiedPortConfig {
+    fn from(value: UnvalidatedPortConfig) -> Self {
+        match value {
+            UnvalidatedPortConfig::Tagged(TaggedPortConfig::Uplink(uplink))
+            | UnvalidatedPortConfig::LegacyUplink(uplink) => {
+                UserSpecifiedPortConfig::Uplink(uplink)
             }
-            UnvalidatedPortConfig::Tagged(tagged) => tagged,
-        };
-
-        match (tag, val) {
-            (PortConfigTag::Uplink, TaggedPortConfigVal::Uplink(uplink)) => {
-                Ok(UserSpecifiedPortConfig::Uplink(uplink))
+            UnvalidatedPortConfig::Tagged(TaggedPortConfig::Ddm(ddm)) => {
+                UserSpecifiedPortConfig::Ddm(ddm)
             }
-            (PortConfigTag::Ddm, TaggedPortConfigVal::Ddm(ddm)) => {
-                Ok(UserSpecifiedPortConfig::Ddm(ddm))
-            }
-            (tag, val) => bail!("Tag {tag:?} does not match value {val:?}"),
         }
     }
 }
@@ -474,12 +444,10 @@ mod tests {
     #[test]
     fn tagged_ddm_deserializes_to_ddm_variant() {
         let json = serde_json::json!({
-            "tag": "ddm",
-            "val": {
-                "speed": "speed100_g",
-                "fec": "rs",
-                "autoneg": true,
-            },
+            "kind": "ddm",
+            "speed": "speed100_g",
+            "fec": "rs",
+            "autoneg": true,
         });
         assert_eq!(
             serde_json::from_value::<UserSpecifiedPortConfig>(json).unwrap(),
@@ -489,15 +457,13 @@ mod tests {
 
     #[test]
     fn tag_payload_mismatch_is_rejected() {
-        let json = serde_json::json!({
-            "tag": "ddm",
-            "val": serde_json::to_value(uplink_port_config()).unwrap(),
-        });
+        let mut json = serde_json::to_value(uplink_port_config()).unwrap();
+        json.as_object_mut().unwrap().insert("kind".to_string(), "ddm".into());
 
         let err = serde_json::from_value::<UserSpecifiedPortConfig>(json)
             .expect_err("a ddm tag over uplink data should fail");
         assert!(
-            err.to_string().contains("does not match"),
+            err.to_string().contains("did not match any variant"),
             "unexpected error: {err}"
         );
     }

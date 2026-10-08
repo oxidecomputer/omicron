@@ -22,7 +22,7 @@ use crate::{
     rack_setup::{BootstrapSledDescription, CurrentRssUserConfigInsensitive},
 };
 use wicketd_commission_types::rack_setup::{
-    AllowedSourceIps, BgpAuthKeyId, IpRange, Ipv4Range,
+    AllowedSourceIps, BgpAuthKeyId, IpRange, Ipv4Range, L1PortConfig,
     PutRssUserConfigInsensitive, ServiceIpPoolConfig, UplinkAddress,
     UplinkPortConfig, UserSpecifiedBgpPeerConfig,
     UserSpecifiedImportExportPolicy, UserSpecifiedPortConfig,
@@ -311,6 +311,14 @@ impl ExampleRackSetupData {
                     tx_eq,
                     autoneg: true,
                 }),
+                // Use a DDM port to validate round trip serialization
+                "port1".to_owned() => UserSpecifiedPortConfig::Ddm(L1PortConfig {
+                    fec: None,
+                    speed: LinkSpeed::Speed100G,
+                    lldp: None,
+                    tx_eq,
+                    autoneg: true,
+                }),
             },
             bgp: vec![BgpConfig {
                 asn: 47,
@@ -394,7 +402,7 @@ fn apply_tweak(
             for (_, _, port) in rnc.iter_uplinks_mut() {
                 // Remove all but the first BGP peer.
                 let UserSpecifiedPortConfig::Uplink(port) = port else {
-                    unimplemented!("DDM ports currently unsupported")
+                    continue;
                 };
                 port.bgp_peers.drain(1..);
             }
