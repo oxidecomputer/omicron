@@ -84,6 +84,11 @@ pub(super) fn is_required_per_disk_dataset(kind: &DatasetKind) -> bool {
 pub(super) enum RequiredDatasetError {
     #[error("{kind:?} dataset on zpool {zpool} is not in the sled config")]
     NotInConfig { zpool: ZpoolName, kind: PerDiskDatasetKind },
+    #[error(
+        "no result for {kind:?} dataset on zpool {zpool}: \
+         could not reach dataset task"
+    )]
+    NoResult { zpool: ZpoolName, kind: PerDiskDatasetKind },
     #[error("{kind:?} dataset on zpool {zpool} was not ensured")]
     NotEnsured {
         zpool: ZpoolName,
@@ -98,6 +103,7 @@ impl RequiredDatasetError {
         match self {
             // Retrying won't help until the config changes.
             RequiredDatasetError::NotInConfig { .. } => false,
+            RequiredDatasetError::NoResult { .. } => true,
             RequiredDatasetError::NotEnsured { err, .. } => err.is_retryable(),
         }
     }
@@ -345,9 +351,13 @@ impl OmicronDatasets {
             let Some(dataset) =
                 self.datasets.iter().find(|d| d.config.name == name)
             else {
-                return Err(RequiredDatasetError::NotInConfig {
-                    zpool: *zpool,
-                    kind,
+                // The dataset task returns a result for every dataset we ask
+                // it to ensure, so a missing entry means the dataset isn't in
+                // the config, unless we couldn't reach the task at all.
+                return Err(if self.dataset_task_unavailable {
+                    RequiredDatasetError::NoResult { zpool: *zpool, kind }
+                } else {
+                    RequiredDatasetError::NotInConfig { zpool: *zpool, kind }
                 });
             };
             match &dataset.state {
@@ -489,6 +499,7 @@ mod tests {
         let logctx =
             dev::test_setup_log("failing_to_reach_dataset_task_is_retryable");
         let zpool = ZpoolName::new_external(ZpoolUuid::new_v4());
+        let new_zpool = ZpoolName::new_external(ZpoolUuid::new_v4());
 
         // `with_datasets()` uses a dataset task that we can't reach. Start
         // with the required datasets ensured, as though from an earlier
@@ -503,9 +514,12 @@ mod tests {
 
         datasets
             .ensure_datasets_if_needed(
-                [dataset_config(zpool, DatasetKind::Debug)]
-                    .into_iter()
-                    .collect(),
+                [
+                    dataset_config(zpool, DatasetKind::Debug),
+                    dataset_config(new_zpool, DatasetKind::Debug),
+                ]
+                .into_iter()
+                .collect(),
                 Arc::default(),
                 &logctx.log,
             )
@@ -514,6 +528,14 @@ mod tests {
         // We still use the earlier results, but we know to retry.
         datasets.check_required_datasets(&zpool).expect("datasets ensured");
         assert!(datasets.has_retryable_error());
+
+        // We have no results for `new_zpool`, which is retryable (rather than
+        // looking like the datasets are missing from the config).
+        let err = datasets
+            .check_required_datasets(&new_zpool)
+            .expect_err("no results for new zpool");
+        assert_matches!(err, RequiredDatasetError::NoResult { .. });
+        assert!(err.is_retryable());
 
         logctx.cleanup_successful();
     }
