@@ -18607,6 +18607,7 @@ name = "xtask-downloader"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "byte-wrapper",
  "camino",
  "camino-tempfile",
  "clap",
