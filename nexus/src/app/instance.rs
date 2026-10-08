@@ -620,13 +620,14 @@ impl super::Nexus {
 
         let (shutdown_policy_action, shutdown_policy_timeout) =
             match shutdown_policy {
-                Some(instance::InstanceShutdownPolicy::HardOff) | None => {
-                    (nexus_db_model::InstanceShutdownAction::HardOff, None)
-                }
+                Some(instance::InstanceShutdownPolicy::HardOff) => (
+                    Some(nexus_db_model::InstanceShutdownAction::HardOff),
+                    None,
+                ),
                 Some(instance::InstanceShutdownPolicy::PowerButton {
                     timeout_secs,
                 }) => (
-                    nexus_db_model::InstanceShutdownAction::PowerButton,
+                    Some(nexus_db_model::InstanceShutdownAction::PowerButton),
                     Some(chrono::TimeDelta::seconds(
                         (*timeout_secs).try_into().map_err(|e| {
                             Error::invalid_value(
@@ -638,6 +639,8 @@ impl super::Nexus {
                         })?,
                     )),
                 ),
+                // if policy action omitted from the update request, leave as-is
+                None => (None, None),
             };
 
         let update = InstanceUpdate {
@@ -1464,7 +1467,7 @@ impl super::Nexus {
                             prev_instance_state
                                 .shutdown_policy_timeout
                                 .and_then(
-                                    // TODO: double-tap? we're verifying non-negative at the DB level
+                                    // non-negative enforced by crdb constraint
                                     |delta| delta.num_seconds().try_into().ok(),
                                 )
                         }
@@ -3078,8 +3081,9 @@ mod tests {
     use futures::{SinkExt, StreamExt};
     use instance::InstanceNetworkInterfaceAttachment;
     use nexus_db_model::{
-        Instance as DbInstance, InstanceState as DbInstanceState,
-        VmmCpuPlatform, VmmState as DbVmmState,
+        Instance as DbInstance, InstanceShutdownAction,
+        InstanceState as DbInstanceState, VmmCpuPlatform,
+        VmmState as DbVmmState,
     };
     use nexus_types::external_api::instance;
     use omicron_common::api::external::{
@@ -3394,5 +3398,54 @@ mod tests {
             primary_nic_mtu_for_jumbo_frames(true, true),
             Some(omicron_common::address::EXTERNAL_JUMBO_FRAMES_MTU),
         );
+    }
+
+    #[test]
+    fn test_instance_shutdown_policy() {
+        let mut params = instance::InstanceCreate {
+            identity: IdentityMetadataCreateParams {
+                name: Name::try_from("acpi".to_owned()).unwrap(),
+                description: "instance under acpi shutdown policy test"
+                    .to_owned(),
+            },
+            ncpus: instance::InstanceCpuCount(1),
+            memory: ByteCount::from_gibibytes_u32(1),
+            hostname: Hostname::try_from("jumbo").unwrap(),
+            user_data: vec![],
+            network_interfaces: InstanceNetworkInterfaceAttachment::None,
+            external_ips: vec![],
+            disks: vec![],
+            boot_disk: None,
+            cpu_platform: None,
+            ssh_public_keys: None,
+            start: false,
+            auto_restart_policy: Default::default(),
+            anti_affinity_groups: Vec::new(),
+            multicast_groups: Vec::new(),
+            enable_jumbo_frames: false,
+            shutdown_policy: None,
+        };
+        let instance_id = InstanceUuid::from_untyped_uuid(Uuid::new_v4());
+        let project_id = Uuid::new_v4();
+
+        // when shutdown policy omitted at creation, default to 600 seconds
+        let db_instance = DbInstance::new(instance_id, project_id, &params);
+        assert_eq!(
+            db_instance.shutdown_policy_action,
+            InstanceShutdownAction::PowerButton
+        );
+        assert_eq!(
+            db_instance.shutdown_policy_timeout.unwrap().num_seconds(),
+            600
+        );
+
+        params.shutdown_policy =
+            Some(instance::InstanceShutdownPolicy::HardOff);
+        let db_instance = DbInstance::new(instance_id, project_id, &params);
+        assert_eq!(
+            db_instance.shutdown_policy_action,
+            InstanceShutdownAction::HardOff
+        );
+        assert_eq!(db_instance.shutdown_policy_timeout, None);
     }
 }

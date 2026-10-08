@@ -191,6 +191,9 @@ impl Instance {
                 Some(InstanceShutdownPolicy::HardOff) => {
                     (InstanceShutdownAction::HardOff, None)
                 }
+                // RFD 622: "A user-configurable timeout for the instance to
+                // finish stopping itself should be present, bounded between
+                // 1 and 3600 seconds, inclusive"
                 Some(InstanceShutdownPolicy::PowerButton { timeout_secs })
                     if (1..=3600).contains(&timeout_secs) =>
                 {
@@ -199,7 +202,10 @@ impl Instance {
                         Some(TimeDelta::seconds(timeout_secs as i64)),
                     )
                 }
-                // absent or invalid timeout, default to 600 seconds
+                // RFD 622: "To generally match the behavior of other cloud
+                // providers, the default action for an instance that does not
+                // have an explicit policy should be graceful-stop with a
+                // timeout of 600 seconds."
                 _ => (
                     InstanceShutdownAction::PowerButton,
                     Some(TimeDelta::minutes(10)),
@@ -661,6 +667,9 @@ pub struct InstanceUpdate {
 
     pub enable_jumbo_frames: bool,
 
-    pub shutdown_policy_action: InstanceShutdownAction,
+    /// If this is `None`, the instance's shutdown policy will be unchanged by
+    /// this update request.
+    #[diesel(treat_none_as_null = false)]
+    pub shutdown_policy_action: Option<InstanceShutdownAction>,
     pub shutdown_policy_timeout: Option<TimeDelta>,
 }
