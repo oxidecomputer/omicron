@@ -245,7 +245,7 @@ pub enum VmmStateRequested {
 }
 
 /// The response sent from a request to unregister an instance.
-#[derive(Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Serialize, Deserialize, JsonSchema)]
 pub struct VmmUnregisterResponse {
     /// The current state of the instance after handling the request to
     /// unregister it. If the instance's state did not change, this field is
