@@ -64,6 +64,7 @@ mod zones;
 
 use self::datasets::OmicronDatasets;
 use self::external_disks::ExternalDisks;
+use self::external_disks::NewlyAdoptedDisks;
 use self::zones::OmicronZones;
 
 pub use self::external_disks::CurrentlyManagedZpools;
@@ -469,17 +470,6 @@ impl ReconcilerTask {
         }
     }
 
-    /// Ensure `datasets` on all adopted disks.
-    async fn ensure_datasets(&mut self, datasets: IdOrdMap<DatasetConfig>) {
-        self.datasets
-            .ensure_datasets_if_needed(
-                datasets,
-                self.external_disks.adopted_zpools(),
-                &self.log,
-            )
-            .await
-    }
-
     /// Ensure `datasets`, and put newly-adopted disks into service.
     ///
     /// Newly-adopted disks need their required datasets before their former
@@ -489,20 +479,30 @@ impl ReconcilerTask {
     async fn ensure_datasets_and_finish_adopting_disks(
         &mut self,
         datasets: &IdOrdMap<DatasetConfig>,
+        newly_adopted: NewlyAdoptedDisks,
     ) {
-        let zpools_being_adopted = self.external_disks.zpools_being_adopted();
-        self.ensure_datasets(limit_adopting_zpools_to_required_datasets(
-            datasets,
-            &zpools_being_adopted,
-        ))
-        .await;
-        if zpools_being_adopted.is_empty() {
-            return;
+        if !newly_adopted.is_empty() {
+            self.datasets
+                .ensure_datasets_if_needed(
+                    limit_adopting_zpools_to_required_datasets(
+                        datasets,
+                        &newly_adopted.zpools(),
+                    ),
+                    self.external_disks.zpools_including(&newly_adopted),
+                    &self.log,
+                )
+                .await;
+            self.external_disks
+                .finish_adopting_disks(newly_adopted, &self.datasets, &self.log)
+                .await;
         }
-        self.external_disks
-            .finish_adopting_disks(&self.datasets, &self.log)
+        self.datasets
+            .ensure_datasets_if_needed(
+                datasets.clone(),
+                self.external_disks.currently_managed_zpools(),
+                &self.log,
+            )
             .await;
-        self.ensure_datasets(datasets.clone()).await;
     }
 
     async fn do_reconcilation<
@@ -631,7 +631,8 @@ impl ReconcilerTask {
         // ---
 
         // Start managing disks.
-        self.external_disks
+        let newly_adopted = self
+            .external_disks
             .start_managing_if_needed(
                 &current_raw_disks,
                 &sled_config.disks,
@@ -640,19 +641,23 @@ impl ReconcilerTask {
             )
             .await;
 
+        // Ensure all the datasets we want exist.
+        self.ensure_datasets_and_finish_adopting_disks(
+            &sled_config.datasets,
+            newly_adopted,
+        )
+        .await;
+
         // Check if any disks need rekeying to the current committed epoch.
-        // We use borrow_and_update() to mark the epoch as seen, so we don't
-        // trigger another reconciliation for the same epoch change.
+        // This is after adoption finishes, so newly-adopted disks are
+        // included. We use borrow_and_update() to mark the epoch as seen, so
+        // we don't trigger another reconciliation for the same epoch change.
         let current_epoch = *self.committed_epoch_rx.borrow_and_update();
         let rekey_result = if let Some(epoch) = current_epoch {
             self.rekey_for_epoch(epoch).await
         } else {
             ReconciliationResult::NoRetryNeeded
         };
-
-        // Ensure all the datasets we want exist.
-        self.ensure_datasets_and_finish_adopting_disks(&sled_config.datasets)
-            .await;
 
         // Collect the current timesync status (needed to start any new zones,
         // and also we want to report it as part of each reconciler result).
