@@ -31,9 +31,11 @@ mod topo;
 
 mod gpt;
 mod partitions;
+mod softnpu;
 mod sysconf;
 
 pub use partitions::{NvmeFormattingError, ensure_partition_layout};
+pub use softnpu::find_softnpu_device;
 
 const TOFINO_MONITOR: &'static str = "/opt/oxide/sled-agent/tofino-monitor";
 

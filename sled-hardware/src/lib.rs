@@ -24,7 +24,45 @@ pub mod cleanup;
 pub mod disk;
 pub use disk::*;
 pub mod nvme_instance;
+pub mod softnpu;
 pub mod underlay;
+
+/// Failure while probing for switch hardware at startup.
+#[derive(Debug, thiserror::Error)]
+pub enum SwitchDetectError {
+    #[error("failed to walk device tree")]
+    DevInfo(#[source] anyhow::Error),
+
+    #[error("{path} still busy after {attempts} open attempts")]
+    Busy { path: String, attempts: usize },
+
+    #[error("opening {path}")]
+    Open {
+        path: String,
+        #[source]
+        err: std::io::Error,
+    },
+
+    #[error("writing Tversion to {path}")]
+    Write {
+        path: String,
+        #[source]
+        err: std::io::Error,
+    },
+
+    #[error("reading Rversion from {path}")]
+    Read {
+        path: String,
+        #[source]
+        err: std::io::Error,
+    },
+
+    #[error("{path} did not answer Tversion within {after:?}")]
+    Timeout { path: String, after: std::time::Duration },
+
+    #[error("malformed Rversion from {path}: {reason}")]
+    Protocol { path: String, reason: String },
+}
 
 // The type of networking 'ASIC' the Dendrite service is expected to manage
 #[derive(
@@ -82,9 +120,10 @@ pub enum ExternalDisks {
 }
 
 /// Configuration for forcing a sled to run as a Scrimlet or compute Sled
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum SledMode {
-    /// Automatically detect whether to run as a compute sled or Scrimlet (w/ real Tofino ASIC)
+    /// Run as a compute sled unless a Tofino ASIC is present, in which case
+    /// run as a Scrimlet
     Auto,
     /// Force sled to run as a Gimlet
     Sled,

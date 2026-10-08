@@ -19,6 +19,7 @@ use crate::support_bundle::storage::SupportBundleQueryType;
 use anyhow::Context;
 use anyhow::bail;
 use bootstore::schemes::v0 as bootstore;
+use bootstrap_agent_lockstep_types::scrimlet_reconcilers::ScrimletReconcilersStatus;
 use bytes::Bytes;
 use chrono::Utc;
 use dropshot::Body;
@@ -26,7 +27,6 @@ use dropshot::HttpError;
 use futures::Stream;
 use iddqd::IdOrdMap;
 use omicron_common::api::external::{ByteCount, Error, ResourceType};
-use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::shared::{
     ResolvedVpcRoute, ResolvedVpcRouteSet, ResolvedVpcRouteState, RouterId,
     RouterKind, RouterVersion, VirtualNetworkInterfaceHost,
@@ -51,7 +51,6 @@ use sled_agent_scrimlet_reconcilers::{
 use sled_agent_types::attached_subnet::{AttachedSubnet, AttachedSubnets};
 use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
 use sled_agent_types::disk::DiskIdentity;
-use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::disk::DiskVariant;
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::early_networking::PortConfig;
@@ -123,12 +122,26 @@ pub struct SledAgent {
     pub repo_depot: dropshot::HttpServer<ArtifactStore<SimArtifactStorage>>,
     pub log: Logger,
     health_monitor: HealthMonitorHandle,
+    /// synthetic zone log files served by the support-logs endpoints,
+    /// keyed by zone name
+    pub(super) support_logs: Mutex<HashMap<String, Vec<SimLogEntry>>>,
     /// Watch channel that sends the deserialized [`SystemNetworkingConfig`]
     /// whenever Nexus writes a new bootstore config. Present on all sim sleds;
     /// only scrimlet sleds subscribe to it via [`Self::start_scrimlet_reconcilers`].
     network_config_tx: watch::Sender<SystemNetworkingConfig>,
     /// Keeps the scrimlet reconcilers alive.
     scrimlet_reconcilers: ScrimletReconcilers,
+}
+
+/// A synthetic log file injected into the simulated sled-agent by tests,
+/// served back by the support-logs download endpoint.
+#[derive(Clone, Debug)]
+pub struct SimLogEntry {
+    /// The file's path within the zone's log zip.
+    pub filename: String,
+    pub contents: Vec<u8>,
+    /// The simulated file mtime that time-window filtering applies to.
+    pub mtime: chrono::DateTime<Utc>,
 }
 
 impl SledAgent {
@@ -225,9 +238,26 @@ impl SledAgent {
             log,
             bootstore_network_config,
             health_monitor,
+            support_logs: Mutex::new(HashMap::new()),
             network_config_tx,
             scrimlet_reconcilers,
         })
+    }
+
+    /// Injects a synthetic zone log file to be served by the support-logs
+    /// endpoints.
+    pub fn insert_support_log(&self, zone: &str, entry: SimLogEntry) {
+        self.support_logs
+            .lock()
+            .unwrap()
+            .entry(zone.to_string())
+            .or_default()
+            .push(entry);
+    }
+
+    /// Returns the names of zones with injected support logs.
+    pub(super) fn support_log_zones(&self) -> Vec<String> {
+        self.support_logs.lock().unwrap().keys().cloned().collect()
     }
 
     pub fn current_bootstore_network_config(&self) -> bootstore::NetworkConfig {
@@ -256,10 +286,7 @@ impl SledAgent {
     }
 
     /// Returns the current status of the scrimlet reconcilers.
-    pub fn scrimlet_reconcilers_status(
-        &self,
-    ) -> bootstrap_agent_lockstep_types::scrimlet_reconcilers::ScrimletReconcilersStatus
-    {
+    pub fn scrimlet_reconcilers_status(&self) -> ScrimletReconcilersStatus {
         self.scrimlet_reconcilers.status()
     }
 
@@ -604,7 +631,7 @@ impl SledAgent {
     }
 
     pub(super) fn check_local_storage_error(&self) -> Result<(), HttpError> {
-        let prev = self.local_storage_error_count.fetch_update(
+        let prev = self.local_storage_error_count.try_update(
             Ordering::Relaxed,
             Ordering::Relaxed,
             |n| {
@@ -626,15 +653,6 @@ impl SledAgent {
             ));
         }
         Ok(())
-    }
-
-    pub async fn disk_ensure(
-        self: &Arc<Self>,
-        _disk_id: Uuid,
-        _initial_state: DiskRuntimeState,
-        _target: DiskStateRequested,
-    ) -> Result<DiskRuntimeState, Error> {
-        unimplemented!("Disk attachment not yet implemented");
     }
 
     pub fn artifact_store(&self) -> &ArtifactStore<SimArtifactStorage> {

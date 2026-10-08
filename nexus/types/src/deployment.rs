@@ -176,6 +176,7 @@ pub use reconfigurator_config::ReconfiguratorConfigParam;
 pub use reconfigurator_config::ReconfiguratorConfigView;
 pub use reconfigurator_config::ReconfiguratorConfigViewDisplay;
 pub use reconfigurator_config::ReconfiguratorDisruptionPolicy;
+pub use reconfigurator_config::SledUpdateRebootPolicy;
 use sled_hardware_types::BaseboardId;
 pub use zone_type::BlueprintZoneType;
 pub use zone_type::DurableDataset;
@@ -1745,6 +1746,7 @@ impl From<BlueprintSledUpdateDisposition> for OmicronSledUpdateDisposition {
     JsonSchema,
 )]
 #[serde(tag = "availability", rename_all = "snake_case")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum BlueprintSledUpdateDispositionKind {
     /// The sled is available for use for all provisions.
     Available,
@@ -1939,16 +1941,7 @@ fn zone_sort_key<T: ZoneSortKey>(z: &T) -> impl Ord + use<T> {
 ///
 /// Part of [`BlueprintSledConfig`].
 #[derive(
-    Debug,
-    Clone,
-    Eq,
-    PartialEq,
-    Ord,
-    PartialOrd,
-    JsonSchema,
-    Deserialize,
-    Serialize,
-    Diffable,
+    Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
 )]
 pub struct BlueprintZoneConfig {
     /// The disposition (desired state) of this zone recorded in the blueprint.
@@ -2023,8 +2016,6 @@ impl From<BlueprintZoneConfig> for OmicronZoneConfig {
     PartialEq,
     Eq,
     Hash,
-    PartialOrd,
-    Ord,
     JsonSchema,
     Deserialize,
     Serialize,
@@ -2129,8 +2120,6 @@ impl fmt::Display for BlueprintZoneDisposition {
     PartialEq,
     Eq,
     Hash,
-    PartialOrd,
-    Ord,
     JsonSchema,
     Deserialize,
     Serialize,
@@ -2613,6 +2602,23 @@ impl Display for MgsUpdateComponent {
             MgsUpdateComponent::Sp => "SP",
         };
         write!(f, "{s}")
+    }
+}
+
+impl MgsUpdateComponent {
+    /// Whether updating this component requires a reboot of the sled.
+    pub fn update_requires_sled_reboot(&self) -> bool {
+        match self {
+            // Updating the SP or host OS always requires a sled reboot.
+            MgsUpdateComponent::Sp | MgsUpdateComponent::HostOs => true,
+
+            // Currently, updating the RoT or RoT bootloader can be done while
+            // the sled is running. This may change in the future with
+            // additional attestation work.
+            MgsUpdateComponent::Rot | MgsUpdateComponent::RotBootloader => {
+                false
+            }
+        }
     }
 }
 
@@ -3183,8 +3189,6 @@ impl ExpectedActiveRotSlot {
     PartialEq,
     Eq,
     Hash,
-    PartialOrd,
-    Ord,
     JsonSchema,
     Deserialize,
     Serialize,
@@ -3325,8 +3329,6 @@ impl IdOrdItem for BlueprintDatasetConfig {
     PartialEq,
     Eq,
     Hash,
-    PartialOrd,
-    Ord,
     JsonSchema,
     Deserialize,
     Serialize,
@@ -3382,16 +3384,7 @@ impl fmt::Display for BlueprintDatasetDisposition {
 
 /// Information about a dataset as recorded in a blueprint
 #[derive(
-    Debug,
-    Clone,
-    Eq,
-    PartialEq,
-    Ord,
-    PartialOrd,
-    JsonSchema,
-    Deserialize,
-    Serialize,
-    Diffable,
+    Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
 )]
 pub struct BlueprintDatasetConfig {
     pub disposition: BlueprintDatasetDisposition,

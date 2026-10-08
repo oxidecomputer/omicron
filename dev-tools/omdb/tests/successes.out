@@ -37,7 +37,7 @@ termination: Exited(0)
 stdout:
 GROUP    ZONE                         ver UPDATED              REASON                         
 internal control-plane.oxide.internal 1   <REDACTED_TIMESTAMP> rack setup                     
-external oxide-dev.test               2   <REDACTED_TIMESTAMP> create silo: "test-suite-silo" 
+external oxide-dev.test               3   <REDACTED_TIMESTAMP> test removed-names fetch limit 
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
@@ -56,6 +56,59 @@ changes:                    names added: 3, names removed: 0
 +  @                                                  NS   ns1.oxide-dev.test
 +  ns1                                                AAAA ::1
 +  test-suite-silo.sys                                A    127.0.0.1
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
+=============================================
+EXECUTING COMMAND: omdb ["db", "dns", "diff", "external", "2", "--fetch-limit", "2"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+DNS zone:                   oxide-dev.test (External)
+requested version:          2 (created at <REDACTED_TIMESTAMP>)
+version created by Nexus:   ..........<REDACTED_UUID>...........
+version created because:    create silo: "test-suite-silo"
+changes:                    names added: 2, names removed: 0
+
++  @                                                  NS   ns1.oxide-dev.test
++  ns1                                                AAAA ::1
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
+WARN: loading added names: found 2 items (the limit).  There may be more items that were ignored.  Consider overriding with --fetch-limit.
+=============================================
+EXECUTING COMMAND: omdb ["db", "dns", "diff", "external", "3", "--fetch-limit", "2"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+DNS zone:                   oxide-dev.test (External)
+requested version:          3 (created at <REDACTED_TIMESTAMP>)
+version created by Nexus:   test_omdb_success_cases
+version created because:    test removed-names fetch limit
+changes:                    names added: 0, names removed: 2
+
+-  @                                                  NS   ns1.oxide-dev.test
+-  ns1                                                AAAA ::1
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
+WARN: loading removed names: found 2 items (the limit).  There may be more items that were ignored.  Consider overriding with --fetch-limit.
+=============================================
+EXECUTING COMMAND: omdb ["db", "dns", "diff", "external", "3", "--fetch-limit", "3"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+DNS zone:                   oxide-dev.test (External)
+requested version:          3 (created at <REDACTED_TIMESTAMP>)
+version created by Nexus:   test_omdb_success_cases
+version created because:    test removed-names fetch limit
+changes:                    names added: 0, names removed: 2
+
+-  @                                                  NS   ns1.oxide-dev.test
+-  ns1                                                AAAA ::1
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
@@ -119,6 +172,7 @@ ALL CONFIGURED SPs
     TYPE   SLOT 
     Sled   0    
     Sled   1    
+    Power  0    
     Switch 0    
     Switch 1    
 
@@ -127,6 +181,7 @@ SPs FOUND THROUGH IGNITION
     TYPE   SLOT SYSTEM_TYPE SP 
     Sled   0    Gimlet      on 
     Sled   1    Gimlet      on 
+    Power  0    PSC         on 
     Switch 0    Sidecar     on 
     Switch 1    Sidecar     on 
 
@@ -135,6 +190,7 @@ SERVICE PROCESSOR STATES
     TYPE   SLOT MODEL            SERIAL      REV HUBRIS           PWR ROT_ACTIVE 
     Sled   0    i86pc            SimGimlet00 0   0000000000000000 A0  slot A     
     Sled   1    i86pc            SimGimlet01 0   0000000000000000 A0  slot A     
+    Power  0    FAKE_SIM_PSC     SimPsc0     0   0000000000000000 A2  slot A     
     Switch 0    FAKE_SIM_SIDECAR SimSidecar0 0   0000000000000000 A2  slot A     
     Switch 1    FAKE_SIM_SIDECAR SimSidecar1 0   0000000000000000 A2  slot A     
 
@@ -206,6 +262,36 @@ SP DETAILS: type "Sled" slot 1
         dev-46       CPU temperature sensor                   sbtsi        Present  None   
         dev-53       FAKE Fan controller                      max31790     Present  None   
         ibc          FAKE intermediate bus converter          bmr491       Present  None   
+
+    CABOOSES: none found
+
+SP DETAILS: type "Power" slot 0
+
+    ROOT OF TRUST
+
+        NAME                               VALUE                                                            
+        active slot                        slot A                                                           
+        persistent boot preference         slot A                                                           
+        pending persistent boot preference -                                                                
+        transient boot preference          -                                                                
+        slot A FWID                        aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 
+        slot B FWID                        bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb 
+        Stage0 FWID                        cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc 
+        Stage0Next FWID                    dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd 
+        Slot A status                      VALID                                                            
+        Slot B status                      VALID                                                            
+        Stage0 status                      VALID                                                            
+        stage0next status                  VALID                                                            
+
+    COMPONENTS
+
+        NAME DESCRIPTION DEVICE  PRESENCE SERIAL 
+        PSU0 PSU 0 MCU   mwocp68 Present  None   
+        PSU1 PSU 1 MCU   mwocp68 Present  None   
+        PSU2 PSU 2 MCU   mwocp68 Present  None   
+        PSU3 PSU 3 MCU   mwocp68 Present  None   
+        PSU4 PSU 4 MCU   mwocp68 Present  None   
+        PSU5 PSU 5 MCU   mwocp68 Present  None   
 
     CABOOSES: none found
 
@@ -511,6 +597,10 @@ task: "v2p_manager"
     manages opte v2p mappings for vpc networking
 
 
+task: "vmm_mark_stop_for_update"
+    marks VMMs on evacuating sleds as needing to be stopped for an update
+
+
 task: "vpc_route_manager"
     propagates updated VPC routes to all OPTE ports
 
@@ -788,29 +878,31 @@ task: "fm_sitrep_gc"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    batch size:                                                               1000
-    orphaned sitreps deleted:                                                    <ORPHANED_SITREPS_DELETED_REDACTED>
-      batches:                                                                   1
-    orphaned fm_alert_request rows deleted:                                      0
-      batches:                                                                   1
-    orphaned fm_case rows deleted:                                               0
-      batches:                                                                   1
-    orphaned fm_ereport_in_case rows deleted:                                    0
-      batches:                                                                   1
-    orphaned fm_fact_physical_disk rows deleted:                                 0
-      batches:                                                                   1
-    orphaned fm_fact_saga rows deleted:                                          0
-      batches:                                                                   1
-    orphaned fm_sitrep_analysis_report rows deleted:                             <ORPHANED_FMSITREPANALYSISREPORT_ROWS_DELETED_REDACTED>
-      batches:                                                                   1
-    orphaned fm_support_bundle_request rows deleted:                             0
-      batches:                                                                   1
-    orphaned fm_support_bundle_request_data_selection_ereports rows deleted:     0
-      batches:                                                                   1
-    orphaned fm_support_bundle_request_data_selection_flags rows deleted:        0
-      batches:                                                                   1
-    orphaned fm_support_bundle_request_data_selection_host_info rows deleted:    0
-      batches:                                                                   1
+    batch size:                                                                1000
+    orphaned sitreps deleted:                                                     <ORPHANED_SITREPS_DELETED_REDACTED>
+      batches:                                                                    1
+    orphaned fm_alert_request rows deleted:                                       0
+      batches:                                                                    1
+    orphaned fm_case rows deleted:                                                0
+      batches:                                                                    1
+    orphaned fm_ereport_in_case rows deleted:                                     0
+      batches:                                                                    1
+    orphaned fm_fact_physical_disk rows deleted:                                  0
+      batches:                                                                    1
+    orphaned fm_fact_saga rows deleted:                                           0
+      batches:                                                                    1
+    orphaned fm_sitrep_analysis_report rows deleted:                              <ORPHANED_FMSITREPANALYSISREPORT_ROWS_DELETED_REDACTED>
+      batches:                                                                    1
+    orphaned fm_support_bundle_request rows deleted:                              0
+      batches:                                                                    1
+    orphaned fm_support_bundle_request_data_selection_ereports rows deleted:      0
+      batches:                                                                    1
+    orphaned fm_support_bundle_request_data_selection_flags rows deleted:         0
+      batches:                                                                    1
+    orphaned fm_support_bundle_request_data_selection_host_info rows deleted:     0
+      batches:                                                                    1
+    orphaned fm_support_bundle_request_data_selection_time_range rows deleted:    0
+      batches:                                                                    1
 
 task: "fm_sitrep_history_pruner"
   configured period: every <REDACTED_DURATION>m
@@ -1109,6 +1201,13 @@ task: "v2p_manager"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "v2p_manager" (don't know how to interpret details: Object {})
+
+task: "vmm_mark_stop_for_update"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    batch size:                              1000
+    VMMs marked to be stopped for an update: 0
 
 task: "vpc_route_manager"
   configured period: every <REDACTED_DURATION>s
@@ -1516,29 +1615,31 @@ task: "fm_sitrep_gc"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    batch size:                                                               1000
-    orphaned sitreps deleted:                                                    <ORPHANED_SITREPS_DELETED_REDACTED>
-      batches:                                                                   1
-    orphaned fm_alert_request rows deleted:                                      0
-      batches:                                                                   1
-    orphaned fm_case rows deleted:                                               0
-      batches:                                                                   1
-    orphaned fm_ereport_in_case rows deleted:                                    0
-      batches:                                                                   1
-    orphaned fm_fact_physical_disk rows deleted:                                 0
-      batches:                                                                   1
-    orphaned fm_fact_saga rows deleted:                                          0
-      batches:                                                                   1
-    orphaned fm_sitrep_analysis_report rows deleted:                             <ORPHANED_FMSITREPANALYSISREPORT_ROWS_DELETED_REDACTED>
-      batches:                                                                   1
-    orphaned fm_support_bundle_request rows deleted:                             0
-      batches:                                                                   1
-    orphaned fm_support_bundle_request_data_selection_ereports rows deleted:     0
-      batches:                                                                   1
-    orphaned fm_support_bundle_request_data_selection_flags rows deleted:        0
-      batches:                                                                   1
-    orphaned fm_support_bundle_request_data_selection_host_info rows deleted:    0
-      batches:                                                                   1
+    batch size:                                                                1000
+    orphaned sitreps deleted:                                                     <ORPHANED_SITREPS_DELETED_REDACTED>
+      batches:                                                                    1
+    orphaned fm_alert_request rows deleted:                                       0
+      batches:                                                                    1
+    orphaned fm_case rows deleted:                                                0
+      batches:                                                                    1
+    orphaned fm_ereport_in_case rows deleted:                                     0
+      batches:                                                                    1
+    orphaned fm_fact_physical_disk rows deleted:                                  0
+      batches:                                                                    1
+    orphaned fm_fact_saga rows deleted:                                           0
+      batches:                                                                    1
+    orphaned fm_sitrep_analysis_report rows deleted:                              <ORPHANED_FMSITREPANALYSISREPORT_ROWS_DELETED_REDACTED>
+      batches:                                                                    1
+    orphaned fm_support_bundle_request rows deleted:                              0
+      batches:                                                                    1
+    orphaned fm_support_bundle_request_data_selection_ereports rows deleted:      0
+      batches:                                                                    1
+    orphaned fm_support_bundle_request_data_selection_flags rows deleted:         0
+      batches:                                                                    1
+    orphaned fm_support_bundle_request_data_selection_host_info rows deleted:     0
+      batches:                                                                    1
+    orphaned fm_support_bundle_request_data_selection_time_range rows deleted:    0
+      batches:                                                                    1
 
 task: "fm_sitrep_history_pruner"
   configured period: every <REDACTED_DURATION>m
@@ -1837,6 +1938,13 @@ task: "v2p_manager"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "v2p_manager" (don't know how to interpret details: Object {})
+
+task: "vmm_mark_stop_for_update"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    batch size:                              1000
+    VMMs marked to be stopped for an update: 0
 
 task: "vpc_route_manager"
   configured period: every <REDACTED_DURATION>s
@@ -2258,11 +2366,21 @@ Reconfigurator config:
     blueprint pruner nkeep: 1000
     planner enabled: false
     planner config:
-        disruption policy: terminate
+        disruption policy : terminate
+        sled update reboot policy: immediate (no evacuation)
 
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "reconfigurator-config", "show", "4294967295"]
+termination: Exited(1)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+Error: no reconfigurator config with version 4294967295
 =============================================
 EXECUTING COMMAND: omdb ["nexus", "update-status"]
 termination: Exited(0)
@@ -2272,9 +2390,9 @@ Count of each component type by system version:
 
                   |install-dataset |unknown 
 ------------------+----------------+--------
-RoT bootloader    |0               |4       
-RoT               |0               |4       
-SP                |0               |4       
+RoT bootloader    |0               |5       
+RoT               |0               |5       
+SP                |0               |5       
 Host OS (phase 1) |0               |2       
 Host OS (phase 2) |0               |2       
 Zone              |7               |0       
@@ -2290,6 +2408,7 @@ termination: Exited(0)
 stdout:
 Installed RoT Bootloader Software
 BASEBOARD_ID                 STAGE0_VERSION STAGE0_NEXT_VERSION 
+FAKE_SIM_PSC:SimPsc0         unknown        unknown             
 FAKE_SIM_SIDECAR:SimSidecar0 unknown        unknown             
 FAKE_SIM_SIDECAR:SimSidecar1 unknown        unknown             
 i86pc:SimGimlet00            unknown        unknown             
@@ -2297,6 +2416,7 @@ i86pc:SimGimlet01            unknown        unknown
 
 Installed RoT Software
 BASEBOARD_ID                 SLOT_A_VERSION   SLOT_B_VERSION 
+FAKE_SIM_PSC:SimPsc0         unknown (active) unknown        
 FAKE_SIM_SIDECAR:SimSidecar0 unknown (active) unknown        
 FAKE_SIM_SIDECAR:SimSidecar1 unknown (active) unknown        
 i86pc:SimGimlet00            unknown (active) unknown        
@@ -2304,6 +2424,7 @@ i86pc:SimGimlet01            unknown (active) unknown
 
 Installed SP Software
 BASEBOARD_ID                 SLOT0_VERSION SLOT1_VERSION 
+FAKE_SIM_PSC:SimPsc0         unknown       unknown       
 FAKE_SIM_SIDECAR:SimSidecar0 unknown       unknown       
 FAKE_SIM_SIDECAR:SimSidecar1 unknown       unknown       
 i86pc:SimGimlet00            unknown       unknown       
@@ -2337,11 +2458,12 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 reconfigurator config updated to version 2:
-    tuf repo pruner enabled::   true (unchanged)
-*   planner enabled::::::::::   false -> true
-    disruption policy::::::::   terminate (unchanged)
-    blueprint pruner enabled:   true (unchanged)
-    blueprint pruner nkeep:::   1000 (unchanged)
+    tuf repo pruner enabled:::   true (unchanged)
+*   planner enabled:::::::::::   false -> true
+    blueprint pruner enabled::   true (unchanged)
+    blueprint pruner nkeep::::   1000 (unchanged)
+    disruption policy:::::::::   terminate (unchanged)
+    sled update reboot policy:   immediate (no evacuation) (unchanged)
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
@@ -2351,11 +2473,27 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 reconfigurator config updated to version 3:
-    tuf repo pruner enabled::   true (unchanged)
-    planner enabled::::::::::   true (unchanged)
-*   disruption policy::::::::   terminate -> live-migrate or terminate
-    blueprint pruner enabled:   true (unchanged)
-    blueprint pruner nkeep:::   1000 (unchanged)
+    tuf repo pruner enabled:::   true (unchanged)
+    planner enabled:::::::::::   true (unchanged)
+    blueprint pruner enabled::   true (unchanged)
+    blueprint pruner nkeep::::   1000 (unchanged)
+*   disruption policy:::::::::   terminate -> live-migrate or terminate
+    sled update reboot policy:   immediate (no evacuation) (unchanged)
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["-w", "nexus", "reconfigurator-config", "set", "--sled-update-reboot-policy", "evacuate"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+reconfigurator config updated to version 4:
+    tuf repo pruner enabled:::   true (unchanged)
+    planner enabled:::::::::::   true (unchanged)
+    blueprint pruner enabled::   true (unchanged)
+    blueprint pruner nkeep::::   1000 (unchanged)
+    disruption policy:::::::::   live-migrate or terminate (unchanged)
+*   sled update reboot policy:   immediate (no evacuation) -> evacuate
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
@@ -2365,14 +2503,15 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 Reconfigurator config:
-    version: 3
+    version: 4
     modified time: <REDACTED_TIMESTAMP>
     tuf repo pruner enabled: true
     blueprint pruner enabled: true
     blueprint pruner nkeep: 1000
     planner enabled: true
     planner config:
-        disruption policy: live-migrate or terminate
+        disruption policy : live-migrate or terminate
+        sled update reboot policy: evacuate
 
 ---------------------------------------------
 stderr:

@@ -4,7 +4,9 @@
 
 //! Tests for wicketd updates.
 
-use std::{collections::BTreeSet, sync::Arc, time::Duration};
+use std::{
+    collections::BTreeSet, process::ExitCode, sync::Arc, time::Duration,
+};
 
 use super::setup::{
     WicketdTestContext, assert_client_error_message, wait_for_sled0_progress,
@@ -139,7 +141,9 @@ async fn test_updates() {
     {
         // Before starting, all artifacts should be present, no components should be present,
         // and the state should be NotStarted.
-        let mut status = get_rack_update_status(&wicketd_testctx, &[]).await;
+        let mut status = get_rack_update_status(&wicketd_testctx, &[])
+            .await
+            .expect_exit_code(EXIT_CODE_NOT_STARTED);
         status.artifacts.sort_unstable();
         assert_eq!(
             expected_artifact_ids, status.artifacts,
@@ -168,17 +172,28 @@ async fn test_updates() {
         .await
         .expect("update started successfully");
 
+    const POLL_INTERVAL: Duration = Duration::from_millis(100);
+
     let terminal_event = 'outer: loop {
-        // This loop tests the failure path, so expect either InProgress or Failed.
-        let status = get_rack_update_status(&wicketd_testctx, &[]).await;
-        assert!(
-            matches!(
-                status.state,
-                UpdateState::InProgress | UpdateState::Failed
-            ),
-            "unexpected state during update: {:?}",
-            status.state,
-        );
+        let output = get_rack_update_status(&wicketd_testctx, &[]).await;
+        let state = output.status.state;
+        let expected_exit_code = match state {
+            // wicketd puts an empty event buffer in place before
+            // post_start_update returns, so an early poll can legitimately
+            // report `NotStarted`. This is a transient state.
+            UpdateState::NotStarted => EXIT_CODE_NOT_STARTED,
+            UpdateState::InProgress => EXIT_CODE_IN_PROGRESS,
+            UpdateState::Failed => EXIT_CODE_FAILED,
+            UpdateState::Completed | UpdateState::Aborted => {
+                panic!("unexpected state during update: {state:?}")
+            }
+        };
+        output.expect_exit_code(expected_exit_code);
+
+        if state == UpdateState::NotStarted {
+            tokio::time::sleep(POLL_INTERVAL).await;
+            continue;
+        }
 
         let event_report = wicketd_testctx
             .wicketd_client
@@ -195,7 +210,7 @@ async fn test_updates() {
             }
         }
 
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(POLL_INTERVAL).await;
     };
 
     match terminal_event.kind {
@@ -211,7 +226,9 @@ async fn test_updates() {
 
     {
         // After the failure, status should reflect Failed for sled 0.
-        let status = get_rack_update_status(&wicketd_testctx, &[]).await;
+        let status = get_rack_update_status(&wicketd_testctx, &[])
+            .await
+            .expect_exit_code(EXIT_CODE_FAILED);
         assert_eq!(status.state, UpdateState::Failed);
         let sled0 = status
             .components
@@ -219,21 +236,35 @@ async fn test_updates() {
             .find(|c| c.id == target_sp)
             .expect("sled 0 should appear in components");
         assert_eq!(sled0.state, UpdateState::Failed);
-        assert!(
-            matches!(&sled0.exit_message, Some(ExitMessage { message, .. }) if !message.is_empty()),
-            "failed component should have a non-empty exit message",
+        let ExitMessage { message, causes } = sled0
+            .exit_message
+            .as_ref()
+            .expect("a failed component carries an exit message");
+        // TODO: The message should also carry the step name here.
+        assert_eq!(
+            message, "Unknown host type i86pc",
+            "the failed component carries the operator-facing message",
+        );
+        assert_eq!(
+            causes,
+            &Vec::<String>::new(),
+            "this failure has no causes below the message",
         );
 
         // If we filter to sled 0 only, still show Failed.
         let filtered =
-            get_rack_update_status(&wicketd_testctx, &["--sled", "0"]).await;
+            get_rack_update_status(&wicketd_testctx, &["--sled", "0"])
+                .await
+                .expect_exit_code(EXIT_CODE_FAILED);
         assert_eq!(filtered.state, UpdateState::Failed);
         assert_eq!(filtered.components.len(), 1);
         assert_eq!(filtered.components[0].state, UpdateState::Failed);
 
         // If we filter to sled 1 (not part of the update), show NotStarted and no components.
         let filtered =
-            get_rack_update_status(&wicketd_testctx, &["--sled", "1"]).await;
+            get_rack_update_status(&wicketd_testctx, &["--sled", "1"])
+                .await
+                .expect_exit_code(EXIT_CODE_NOT_STARTED);
         assert_eq!(filtered.state, UpdateState::NotStarted);
         assert!(filtered.components.is_empty());
     }
@@ -326,7 +357,9 @@ async fn test_updates() {
     {
         // After clearing, status should show NotStarted and no components.
         // Uploaded artifacts should be unaffected by the clear.
-        let mut status = get_rack_update_status(&wicketd_testctx, &[]).await;
+        let mut status = get_rack_update_status(&wicketd_testctx, &[])
+            .await
+            .expect_exit_code(EXIT_CODE_NOT_STARTED);
         assert_eq!(
             status.state,
             UpdateState::NotStarted,
@@ -359,10 +392,33 @@ async fn test_updates() {
     wicketd_testctx.teardown().await;
 }
 
+// Expected exit codes for `rack-update status`.
+const EXIT_CODE_COMPLETED: u8 = 0;
+const EXIT_CODE_NOT_STARTED: u8 = 4;
+const EXIT_CODE_IN_PROGRESS: u8 = 5;
+const EXIT_CODE_FAILED: u8 = 6;
+
+struct RackUpdateStatusOutput {
+    exit_code: ExitCode,
+    status: RackUpdateStatus,
+}
+
+impl RackUpdateStatusOutput {
+    #[track_caller]
+    fn expect_exit_code(self, expected: u8) -> RackUpdateStatus {
+        assert_eq!(
+            self.exit_code,
+            ExitCode::from(expected),
+            "rack-update status should exit with code {expected}"
+        );
+        self.status
+    }
+}
+
 async fn get_rack_update_status(
     wicketd_testctx: &WicketdTestContext,
     extra_args: &[&str],
-) -> RackUpdateStatus {
+) -> RackUpdateStatusOutput {
     let args: Vec<&str> = ["rack-update", "status", "--json"]
         .into_iter()
         .chain(extra_args.iter().copied())
@@ -374,11 +430,13 @@ async fn get_rack_update_status(
         stdout: &mut stdout,
         stderr: &mut stderr,
     };
-    wicket::exec_with_args(wicketd_testctx.wicketd_addrs, args, output)
-        .await
-        .expect("wicket rack-update status failed to run");
-    serde_json::from_slice(&stdout)
-        .expect("rack-update status --json output is valid JSON")
+    let exit_code =
+        wicket::exec_with_args(wicketd_testctx.wicketd_addrs, args, output)
+            .await
+            .expect("wicket rack-update status ran");
+    let status = serde_json::from_slice(&stdout)
+        .expect("rack-update status --json output is valid JSON");
+    RackUpdateStatusOutput { exit_code, status }
 }
 
 #[tokio::test]
@@ -882,6 +940,19 @@ async fn test_update_races() {
         }],
         "the fake update completes with its single clean step",
     );
+
+    // The update has already run to completion above, so this returns the
+    // completed state without any further waiting.
+    {
+        let status = get_rack_update_status(&wicketd_testctx, &[])
+            .await
+            .expect_exit_code(EXIT_CODE_COMPLETED);
+        assert_eq!(
+            status.state,
+            UpdateState::Completed,
+            "the completed fake update rolls up to completed",
+        );
+    }
 
     // sled 0's update completed, so it reports as cleared and no_update_data is
     // empty.

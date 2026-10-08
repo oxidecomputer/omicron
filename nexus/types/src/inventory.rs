@@ -26,6 +26,7 @@ pub use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
@@ -415,6 +416,10 @@ pub struct ServiceProcessor {
     pub baseboard_revision: u32,
     pub hubris_archive: String,
     pub power_state: PowerState,
+
+    /// The rack in which this service processor was found, as determined by
+    /// the rack ID of the MGS instance that reported it.
+    pub rack_id: RackUuid,
 }
 
 /// Describes the root of trust state found (from a service processor) during

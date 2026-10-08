@@ -1074,15 +1074,22 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                     update_disposition: OmicronSledUpdateDisposition::Available,
                 })
                 .await
-                .expect("Failed to configure sled agent {sled_id} with zones");
+                .unwrap_or_else(|err| {
+                    panic!(
+                        "Failed to configure sled agent {sled_id} \
+                         with zones: {err:?}"
+                    )
+                });
 
             client
                 .write_network_bootstore_config(&early_network_config)
                 .await
-                .expect(
-                    "Failed to write early networking config \
-                     to bootstore on sled {sled_id}",
-                );
+                .unwrap_or_else(|err| {
+                    panic!(
+                        "Failed to write early networking config \
+                         to bootstore on sled {sled_id}: {err:?}"
+                    )
+                });
         }
     }
 
@@ -1856,10 +1863,17 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
                         .unwrap_or_else(|| panic!("start_mgd() must be called for {slot:?} before starting a scrimlet sled"))
                         .address()
                         .into();
+                    let ddmd_addr: SocketAddr = builder
+                        .ddm
+                        .get(&slot)
+                        .unwrap_or_else(|| panic!("start_ddm() must be called for {slot:?} before starting a scrimlet sled"))
+                        .address()
+                        .into();
                     let mode = ScrimletReconcilersMode::Test {
                         mgs_addr,
                         dpd_addr,
                         mgd_addr,
+                        ddmd_addr,
                         bgp_socket_config: BgpSocketConfig::for_test(mgd_addr),
                     };
                     builder
@@ -1902,10 +1916,17 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
                             .unwrap_or_else(|| panic!("start_mgd() must be called for {slot:?} before starting a scrimlet sled"))
                             .address()
                             .into();
+                        let ddmd_addr: SocketAddr = builder
+                            .ddm
+                            .get(&slot)
+                            .unwrap_or_else(|| panic!("start_ddm() must be called for {slot:?} before starting a scrimlet sled"))
+                            .address()
+                            .into();
                         let mode = ScrimletReconcilersMode::Test {
                             mgs_addr,
                             dpd_addr,
                             mgd_addr,
+                            ddmd_addr,
                             bgp_socket_config: BgpSocketConfig::for_test(mgd_addr),
                         };
                         builder
@@ -2089,11 +2110,25 @@ pub async fn start_oximeter(
     native_port: u16,
     id: Uuid,
 ) -> Result<Oximeter, String> {
+    // In production, clickhouse-admin is responsible for constructing the
+    // database and tables for us. These tests start ClickHouse directly, so we
+    // have to do it ourselves. Use an admin client for that, then drop to a
+    // less-capable client after.
+    let native_address =
+        SocketAddr::new(Ipv6Addr::LOCALHOST.into(), native_port);
+    oximeter_db::Client::new(oximeter_db::User::Admin, native_address, &log)
+        .initialize_db_with_version(false, oximeter_db::OXIMETER_VERSION)
+        .await
+        .map_err(|e| {
+            format!(
+                "failed to init test ClickHouse: {}",
+                slog_error_chain::InlineErrorChain::new(&e),
+            )
+        })?;
     let db = oximeter_collector::DbConfig {
-        address: Some(SocketAddr::new(Ipv6Addr::LOCALHOST.into(), native_port)),
+        address: Some(native_address),
         batch_size: 10,
         batch_interval: 1,
-        replicated: false,
     };
     let config = oximeter_collector::Config {
         nexus_address: Some(nexus_address),

@@ -1665,10 +1665,16 @@ table! {
 table! {
     support_bundle_data_selection_ereports (bundle_id) {
         bundle_id -> Uuid,
-        start_time -> Nullable<Timestamptz>,
-        end_time -> Nullable<Timestamptz>,
         only_serials -> Array<Text>,
         only_classes -> Array<Text>,
+    }
+}
+
+table! {
+    support_bundle_data_selection_time_range (bundle_id) {
+        bundle_id -> Uuid,
+        start_time -> Timestamptz,
+        end_time -> Nullable<Timestamptz>,
     }
 }
 
@@ -1676,6 +1682,7 @@ allow_tables_to_appear_in_same_query!(
     support_bundle_data_selection_flags,
     support_bundle_data_selection_host_info,
     support_bundle_data_selection_ereports,
+    support_bundle_data_selection_time_range,
 );
 
 /* hardware inventory */
@@ -1736,6 +1743,8 @@ table! {
         baseboard_revision -> Int8,
         hubris_archive_id -> Text,
         power_state -> crate::enums::HwPowerStateEnum,
+
+        rack_id -> Uuid,
     }
 }
 
@@ -2253,6 +2262,7 @@ table! {
         disruption_policy -> crate::enums::ReconfiguratorDisruptionPolicyEnum,
         blueprint_pruner_enabled -> Bool,
         blueprint_pruner_nkeep -> Int8,
+        sled_update_reboot_policy -> crate::enums::SledUpdateRebootPolicyEnum,
     }
 }
 
@@ -2771,6 +2781,7 @@ table! {
 
 allow_tables_to_appear_in_same_query!(instance, migration);
 allow_tables_to_appear_in_same_query!(migration, vmm);
+allow_tables_to_appear_in_same_query!(vmm, rendezvous_sled_bp_availability);
 joinable!(instance -> migration (migration_id));
 
 allow_tables_to_appear_in_same_query!(subnet_pool, subnet_pool_silo_link, silo);
@@ -3492,10 +3503,17 @@ table! {
     fm_support_bundle_request_data_selection_ereports (sitrep_id, request_id) {
         sitrep_id -> Uuid,
         request_id -> Uuid,
-        start_time -> Nullable<Timestamptz>,
-        end_time -> Nullable<Timestamptz>,
         only_serials -> Array<Text>,
         only_classes -> Array<Text>,
+    }
+}
+
+table! {
+    fm_support_bundle_request_data_selection_time_range (sitrep_id, request_id) {
+        sitrep_id -> Uuid,
+        request_id -> Uuid,
+        start_time -> Nullable<Timestamptz>,
+        end_time -> Nullable<Timestamptz>,
     }
 }
 
@@ -3503,6 +3521,7 @@ allow_tables_to_appear_in_same_query!(
     fm_support_bundle_request_data_selection_flags,
     fm_support_bundle_request_data_selection_host_info,
     fm_support_bundle_request_data_selection_ereports,
+    fm_support_bundle_request_data_selection_time_range,
 );
 
 table! {

@@ -12,12 +12,10 @@ use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use omicron_common::{
     address::{Ip, NUM_SOURCE_NAT_PORTS},
-    api::external::ByteCount,
     zpool_name::ZpoolName,
 };
 use omicron_generation_kinds::Generation;
 use omicron_ledger::Ledgerable;
-use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::{DatasetUuid, OmicronZoneUuid};
 use omicron_uuid_kinds::{MupdateOverrideUuid, PhysicalDiskUuid};
 use schemars::JsonSchema;
@@ -26,36 +24,13 @@ use serde::{Deserialize, Serialize};
 use crate::impls::inventory::SourceNatConfigError;
 use crate::v1::disk::DatasetConfig;
 use crate::v1::disk::OmicronPhysicalDiskConfig;
-use crate::v1::inventory::Baseboard;
 use crate::v1::inventory::{
     BootPartitionContents, ConfigReconcilerInventoryResult,
-    HostPhase2DesiredSlots, InventoryDataset, InventoryDisk, InventoryZpool,
-    OmicronZoneDataset, OmicronZoneImageSource, OrphanedDataset,
-    RemoveMupdateOverrideInventory, SledRole, ZoneImageResolverInventory,
+    HostPhase2DesiredSlots, OmicronZoneDataset, OmicronZoneImageSource,
+    OrphanedDataset, RemoveMupdateOverrideInventory,
 };
 use crate::v10;
 use crate::v10::inventory::NetworkInterface;
-use sled_hardware_types::SledCpuFamily;
-
-/// Identity and basic status information about this sled agent
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
-pub struct Inventory {
-    pub sled_id: SledUuid,
-    pub sled_agent_address: SocketAddrV6,
-    pub sled_role: SledRole,
-    pub baseboard: Baseboard,
-    pub usable_hardware_threads: u32,
-    pub usable_physical_ram: ByteCount,
-    pub cpu_family: SledCpuFamily,
-    pub reservoir_size: ByteCount,
-    pub disks: Vec<InventoryDisk>,
-    pub zpools: Vec<InventoryZpool>,
-    pub datasets: Vec<InventoryDataset>,
-    pub ledgered_sled_config: Option<OmicronSledConfig>,
-    pub reconciler_status: ConfigReconcilerInventoryStatus,
-    pub last_reconciliation: Option<ConfigReconcilerInventory>,
-    pub zone_image_resolver: ZoneImageResolverInventory,
-}
 
 /// Describes the last attempt made by the sled-agent-config-reconciler to
 /// reconcile the current sled config against the actual state of the sled.
@@ -291,36 +266,6 @@ fn default_nexus_lockstep_port() -> u16 {
 
 use omicron_common::api::external;
 
-impl TryFrom<v10::inventory::Inventory> for Inventory {
-    type Error = external::Error;
-
-    fn try_from(v10: v10::inventory::Inventory) -> Result<Self, Self::Error> {
-        Ok(Self {
-            sled_id: v10.sled_id,
-            sled_agent_address: v10.sled_agent_address,
-            sled_role: v10.sled_role,
-            baseboard: v10.baseboard,
-            usable_hardware_threads: v10.usable_hardware_threads,
-            usable_physical_ram: v10.usable_physical_ram,
-            cpu_family: v10.cpu_family,
-            reservoir_size: v10.reservoir_size,
-            disks: v10.disks,
-            zpools: v10.zpools,
-            datasets: v10.datasets,
-            ledgered_sled_config: v10
-                .ledgered_sled_config
-                .map(TryInto::try_into)
-                .transpose()?,
-            reconciler_status: v10.reconciler_status.try_into()?,
-            last_reconciliation: v10
-                .last_reconciliation
-                .map(TryInto::try_into)
-                .transpose()?,
-            zone_image_resolver: v10.zone_image_resolver,
-        })
-    }
-}
-
 impl TryFrom<v10::inventory::OmicronSledConfig> for OmicronSledConfig {
     type Error = external::Error;
 
@@ -523,37 +468,6 @@ impl TryFrom<v10::inventory::OmicronZonesConfig> for OmicronZonesConfig {
                 .into_iter()
                 .map(TryInto::try_into)
                 .collect::<Result<_, _>>()?,
-        })
-    }
-}
-
-// Conversions from v11 to v10 for response types
-impl TryFrom<Inventory> for v10::inventory::Inventory {
-    type Error = external::Error;
-
-    fn try_from(v11: Inventory) -> Result<Self, Self::Error> {
-        Ok(Self {
-            sled_id: v11.sled_id,
-            sled_agent_address: v11.sled_agent_address,
-            sled_role: v11.sled_role,
-            baseboard: v11.baseboard,
-            usable_hardware_threads: v11.usable_hardware_threads,
-            usable_physical_ram: v11.usable_physical_ram,
-            cpu_family: v11.cpu_family,
-            reservoir_size: v11.reservoir_size,
-            disks: v11.disks,
-            zpools: v11.zpools,
-            datasets: v11.datasets,
-            ledgered_sled_config: v11
-                .ledgered_sled_config
-                .map(TryInto::try_into)
-                .transpose()?,
-            reconciler_status: v11.reconciler_status.try_into()?,
-            last_reconciliation: v11
-                .last_reconciliation
-                .map(TryInto::try_into)
-                .transpose()?,
-            zone_image_resolver: v11.zone_image_resolver,
         })
     }
 }

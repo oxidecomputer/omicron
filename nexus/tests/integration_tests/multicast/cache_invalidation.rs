@@ -182,6 +182,7 @@ async fn test_sled_move_updates_multicast_port_mapping(
     let mut builder = nexus_inventory::CollectionBuilder::new("sled-move-test");
     builder.found_sp_state(
         "test-sp",
+        nexus_test_utils::RACK_UUID,
         SpType::Sled,
         new_slot,
         SpState {
@@ -449,6 +450,7 @@ async fn test_cache_ttl_behavior() {
         nexus_inventory::CollectionBuilder::new("ttl-refresh-test");
     builder.found_sp_state(
         "test-sp",
+        nexus_test_utils::RACK_UUID,
         SpType::Sled,
         new_slot,
         SpState {

@@ -418,7 +418,7 @@ impl Client {
         let Some(schema) = self.schema_for_timeseries(name).await? else {
             return Err(Error::TimeseriesNotFound(name.to_string()));
         };
-        debug!(
+        trace!(
             query_log,
             "running flat OxQL query";
             "query" => ?query,
@@ -430,14 +430,14 @@ impl Client {
         // that apply to this timeseries in particular. We also need to merge
         // them in with the predicates passed in from a possible outer query.
         let preds = query.coalesced_predicates(outer_predicates.clone());
-        debug!(
+        trace!(
             query_log,
             "coalesced predicates from flat query";
             "outer_predicates" => ?&outer_predicates,
             "coalesced" => ?&preds,
         );
         let limit = query.coalesced_limits(outer_limit);
-        debug!(
+        trace!(
             query_log,
             "coalesced limit operations from flat query";
             "outer_limit" => ?&outer_limit,
@@ -478,7 +478,7 @@ impl Client {
         // groups for the measurement queries.
         let disjoint_predicates = if let Some(preds) = preds.as_ref() {
             let simplified = preds.simplify_to_dnf()?;
-            debug!(
+            trace!(
                 query_log,
                 "simplified filtering predicates to disjunctive normal form";
                 "original" => %preds,
@@ -502,7 +502,7 @@ impl Client {
         let mut query_summaries =
             Vec::with_capacity(1 + disjoint_predicates.len());
         for predicates in disjoint_predicates.into_iter() {
-            debug!(
+            trace!(
                 query_log,
                 "running disjoint query predicate";
                 "predicate" => predicates.as_ref().map(|s| s.to_string()).unwrap_or("none".into()),
@@ -512,7 +512,7 @@ impl Client {
             let (summary, consistent_keys) = self
                 .select_matching_timeseries_info(&all_fields_query, &schema)
                 .await?;
-            debug!(
+            trace!(
                 query_log,
                 "fetched information for matching timeseries keys";
                 "n_keys" => consistent_keys.len(),
@@ -570,7 +570,7 @@ impl Client {
         )?];
 
         let transformations = query.transformations();
-        debug!(
+        trace!(
             query_log,
             "constructed OxQL table, starting transformation pipeline";
             "name" => tables[0].name(),
@@ -673,7 +673,7 @@ impl Client {
                 n_measurements += 1;
             }
         }
-        debug!(
+        trace!(
             query_log,
             "fetched measurements for OxQL query";
             "n_keys" => measurements_by_key.len(),
@@ -730,7 +730,7 @@ impl Client {
                 oxql_types::point::Points::gauge_from_gauge(&measurements)?
             };
             timeseries.points = points;
-            debug!(
+            trace!(
                 query_log,
                 "inserted new OxQL timeseries";
                 "key" => key,
@@ -1192,7 +1192,7 @@ mod tests {
         QueryAuthzScope, chunk_consistent_key_groups_impl,
     };
     use crate::oxql::ast::grammar::query_parser;
-    use crate::{Client, DATABASE_TIMESTAMP_FORMAT, DbWrite};
+    use crate::{Client, DATABASE_TIMESTAMP_FORMAT, DbWrite, User};
     use crate::{Metric, Target};
     use chrono::{DateTime, NaiveDate, Utc};
     use dropshot::test_util::LogContext;
@@ -1326,8 +1326,9 @@ mod tests {
         let db = ClickHouseDeployment::new_single_node(&logctx)
             .await
             .expect("Failed to start ClickHouse");
-        let client = Client::new(db.native_address().into(), &logctx.log);
-        client
+        let admin_client =
+            Client::new(User::Admin, db.native_address().into(), &logctx.log);
+        admin_client
             .init_single_node_db()
             .await
             .expect("Failed to init single-node oximeter database");
@@ -1338,10 +1339,12 @@ mod tests {
             .flatten()
             .cloned()
             .collect();
-        client
+        admin_client
             .insert_samples(&samples)
             .await
             .expect("Failed to insert test data");
+        let client =
+            Client::new(User::Writer, db.native_address().into(), &logctx.log);
         TestContext { logctx, clickhouse: db, client, test_data }
     }
 
@@ -1461,6 +1464,140 @@ mod tests {
 
         assert_eq!(series[0].fields.get("foo").unwrap(), &FieldValue::I32(3));
         assert_eq!(series[0].fields.get("baz").unwrap(), &FieldValue::I32(4));
+
+        ctx.cleanup_successful().await;
+    }
+
+    #[tokio::test]
+    async fn test_string_literals_are_escaped() {
+        let ctx = setup_oxql_test("test_string_literals_are_escaped").await;
+
+        // Unescaped \n and \x41 become a newline and 'A' in ClickHouse.
+        // A trailing backslash would escape the closing quote.
+        let weird_name = String::from(
+            "it's a \\n \\x41 weird\tname\n\0 with ünïcödé 日本\\",
+        );
+        let target = SomeTarget { name: weird_name.clone(), index: 1 };
+        let metric = SomeMetric { foo: 0, datum: Cumulative::new(1) };
+        let sample = Sample::new(&target, &metric).unwrap();
+        ctx.client
+            .insert_samples(&[sample])
+            .await
+            .expect("failed to insert samples");
+
+        // Backslashes and control characters need OxQL escapes too.
+        let query = concat!(
+            "get some_target:some_metric | filter name == ",
+            r#""it's a \\n \\x41 weird\tname\n\0 with ünïcödé 日本\\""#,
+        );
+        let result = ctx
+            .client
+            .oxql_query(query, QueryAuthzScope::Fleet)
+            .await
+            .expect("failed to run OxQL query");
+        assert_eq!(result.tables.len(), 1);
+        let table = result.tables.get(0).unwrap();
+        assert_eq!(table.n_timeseries(), 1);
+        let series = table.timeseries().next().unwrap();
+        assert_eq!(
+            series.fields.get("name").unwrap(),
+            &FieldValue::String(weird_name.into()),
+        );
+
+        ctx.cleanup_successful().await;
+    }
+
+    #[tokio::test]
+    async fn test_string_literal_cannot_inject_sql() {
+        let ctx =
+            setup_oxql_test("test_string_literal_cannot_inject_sql").await;
+
+        // The filter renders to SQL as `equals(name, '<value>')`. This value
+        // closes that literal and call, adds a predicate that is always true,
+        // and reopens a literal to consume the closing quote and paren that
+        // follow. Without escaping, it is valid SQL and matches every key for
+        // this timeseries. Rust filtering can hide extra SQL results, so check
+        // the keys returned by ClickHouse before running the full OxQL query.
+        let filter =
+            r#"filter name == "first-target') OR 1 = 1 OR equals(name, '""#;
+        let predicate = query_parser::filter(filter).unwrap();
+        let schema = ctx
+            .client
+            .schema_for_timeseries(
+                &TimeseriesName::try_from("some_target:some_metric").unwrap(),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        let field_query =
+            ctx.client.all_fields_query(&schema, Some(&predicate)).unwrap();
+        let (_, matching_keys) = ctx
+            .client
+            .select_matching_timeseries_info(&field_query, &schema)
+            .await
+            .expect("failed to query matching keys");
+        assert!(
+            matching_keys.is_empty(),
+            "unexpected matching keys: {matching_keys:?}",
+        );
+
+        let query = format!("get some_target:some_metric | {filter}");
+        let result = ctx
+            .client
+            .oxql_query(&query, QueryAuthzScope::Fleet)
+            .await
+            .expect("failed to run OxQL query");
+        assert_eq!(result.tables.len(), 1);
+        assert_eq!(result.tables.get(0).unwrap().n_timeseries(), 0);
+
+        ctx.cleanup_successful().await;
+    }
+
+    // ClickHouse decodes the C-style escapes it recognizes inside a string
+    // literal, so an unescaped `\b` reaches the regex engine as a backspace
+    // rather than a word boundary. Escapes it does not recognize, like `\d`,
+    // keep their backslash. Of the four names below, only a word-boundary `\b`
+    // matches exactly one.
+    #[tokio::test]
+    async fn test_regex_string_literals_are_escaped() {
+        let ctx =
+            setup_oxql_test("test_regex_string_literals_are_escaped").await;
+        let metric = SomeMetric { foo: 0, datum: Cumulative::new(1) };
+        let samples: Vec<_> =
+            ["it's foo", "it's foobar", "it's afoo", "it is foo"]
+                .into_iter()
+                .map(|name| {
+                    Sample::new(
+                        &SomeTarget { name: name.to_string(), index: 1 },
+                        &metric,
+                    )
+                    .unwrap()
+                })
+                .collect();
+        ctx.client.insert_samples(&samples).await.unwrap();
+
+        let filter = r#"filter name ~= "it's \\bfoo\\b""#;
+        let predicate = query_parser::filter(filter).unwrap();
+        let schema = TimeseriesSchema::from(&samples[0]);
+        let field_query =
+            ctx.client.all_fields_query(&schema, Some(&predicate)).unwrap();
+        let (_, matching_keys) = ctx
+            .client
+            .select_matching_timeseries_info(&field_query, &schema)
+            .await
+            .unwrap();
+        assert_eq!(matching_keys.len(), 1);
+        let (target, _) = matching_keys.values().next().unwrap();
+        let name = target.fields.iter().find(|f| f.name == "name").unwrap();
+        assert_eq!(name.value, FieldValue::from("it's foo"));
+
+        let query = format!("get some_target:some_metric | {filter}");
+        let result =
+            ctx.client.oxql_query(query, QueryAuthzScope::Fleet).await.unwrap();
+        assert_eq!(result.tables.len(), 1);
+        assert_eq!(result.tables[0].n_timeseries(), 1);
+        let series = result.tables[0].timeseries().next().unwrap();
+        assert_eq!(series.fields["name"], FieldValue::from("it's foo"));
 
         ctx.cleanup_successful().await;
     }
@@ -1927,6 +2064,7 @@ mod tests {
             ..Default::default()
         };
         let client = Client::new_with_pool_policy(
+            User::Reader,
             Box::new(FixedResolver::new([ctx
                 .clickhouse
                 .native_address()

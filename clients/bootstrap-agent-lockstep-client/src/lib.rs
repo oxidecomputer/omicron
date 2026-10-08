@@ -35,6 +35,7 @@ progenitor::generate_api!(
         LinkSpeed = sled_agent_types::early_networking::LinkSpeed,
         LldpAdminStatus = sled_agent_types::early_networking::LldpAdminStatus,
         LldpPortConfig = sled_agent_types::early_networking::LldpPortConfig,
+        MultirackJoinRequest = bootstrap_agent_lockstep_types::MultirackJoinRequest,
         PortConfig = sled_agent_types::early_networking::PortConfig,
         RackOperationStatus = bootstrap_agent_lockstep_types::RackOperationStatus,
         RouteConfig = sled_agent_types::early_networking::RouteConfig,

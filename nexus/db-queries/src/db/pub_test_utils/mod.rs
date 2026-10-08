@@ -39,7 +39,11 @@ enum Interface {
 
 fn new_pool(log: &Logger, db: &CockroachInstance) -> Arc<db::Pool> {
     let cfg = db::Config { url: db.pg_config().clone() };
-    Arc::new(db::Pool::new_single_host(log, &cfg))
+    Arc::new(db::Pool::new_single_host(
+        log,
+        &cfg,
+        db::ClaimBacktraceSetting::Capture,
+    ))
 }
 
 struct TestDatabaseBuilder {
@@ -305,8 +309,7 @@ impl TestDatabase {
     }
 }
 
-pub const RACK_UUID: RackUuid =
-    RackUuid::from_u128(0xc19a698f_c6f9_4a17_ae30_20d711b8f7dc);
+pub use nexus_inventory::examples::RACK_UUID;
 
 async fn datastore_test_on_default_rack(
     log: &Logger,
@@ -326,7 +329,11 @@ async fn datastore_test(
     use crate::authn;
 
     let cfg = db::Config { url: db.pg_config().clone() };
-    let pool = Arc::new(db::Pool::new_single_host(&log, &cfg));
+    let pool = Arc::new(db::Pool::new_single_host(
+        &log,
+        &cfg,
+        db::ClaimBacktraceSetting::Capture,
+    ));
     let datastore = Arc::new(
         DataStore::new(&log, pool, None, IdentityCheckPolicy::DontCare)
             .await

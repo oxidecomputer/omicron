@@ -368,14 +368,17 @@ fn display_devices(
     f: &mut dyn fmt::Write,
 ) -> fmt::Result {
     // Assemble a list of baseboard ids, sorted first by device type (sled,
-    // switch, power), then by slot number.  This is the order in which we will
-    // print everything out.
+    // switch, power), then by rack ID and slot number.  This is the order in
+    // which we will print everything out.
     let mut sorted_baseboard_ids: Vec<_> =
         collection.sps.keys().cloned().collect();
     sorted_baseboard_ids.sort_by(|s1, s2| {
         let sp1 = collection.sps.get(s1).unwrap();
         let sp2 = collection.sps.get(s2).unwrap();
-        sp1.sp_type.cmp(&sp2.sp_type).then(sp1.sp_slot.cmp(&sp2.sp_slot))
+        sp1.sp_type
+            .cmp(&sp2.sp_type)
+            .then(sp1.rack_id.cmp(&sp2.rack_id))
+            .then(sp1.sp_slot.cmp(&sp2.sp_slot))
     });
 
     // Now print them.
@@ -418,6 +421,7 @@ fn display_devices(
 
         writeln!(f, "    power:    {:?}", sp.power_state)?;
         writeln!(f, "    revision: {}", sp.baseboard_revision)?;
+        writeln!(f, "    rack ID:  {}", sp.rack_id)?;
         write!(f, "    MGS slot: {:?} {}", sp.sp_type, sp.sp_slot)?;
         writeln!(f, "")?;
         writeln!(
