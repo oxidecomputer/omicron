@@ -18,6 +18,8 @@ use futures::future::BoxFuture;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_networking::GatewayClient;
+use nexus_networking::GatewaysByRack;
+use nexus_networking::RackGateways;
 use nexus_types::fm::ereport::EreportData;
 use nexus_types::internal_api::background::EreporterStatus;
 use nexus_types::internal_api::background::SpEreportIngesterStatus;
@@ -28,7 +30,6 @@ use omicron_uuid_kinds::RackUuid;
 use parallel_task_set::ParallelTaskSet;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
-use std::collections::HashMap;
 use std::sync::Arc;
 
 pub struct SpEreportIngester {
@@ -86,63 +87,38 @@ impl SpEreportIngester {
             );
             return status;
         }
-        // Find MGS clients, and partition the resolved clients by rack ID.
-        let mgs_clients = {
-            // This is where we might, elsewhere, reach for a BTreeMap to ensure
-            // deterministic iteration ordering. Here, we *intentionally* do the
-            // opposite, so that each Nexus collecting ereports starts with a
-            // different rack each time this task is activated, helping to
-            // distribute collection throughout the cluster.
-            let mut by_rack = HashMap::<RackUuid, Vec<GatewayClient>>::new();
-            let all_clients = match GatewayClient::resolve_all_gateways(
-                &opctx.log,
-                &self.resolver,
-            )
-            .await
-            {
-                Err(error) => {
-                    const MSG: &str = "no MGS DNS records resolved";
-                    let error = InlineErrorChain::new(&*error);
-                    error!(opctx.log, "{MSG}"; "error" => &error);
-                    status.errors.push(format!("{MSG}: {error}"));
-                    return status;
-                }
-                Ok(clients) => clients,
-            };
-
-            for gateway in all_clients {
-                let rack_id = match gateway.client.rack_id_get().await {
-                    Ok(rsp) => rsp.into_inner().rack_id,
-                    Err(e) => {
-                        const MSG: &str = "failed to determine rack ID for MGS";
-
-                        let error = InlineErrorChain::new(&e);
-                        error!(
-                            opctx.log,
-                            "{MSG}";
-                            "mgs_addr" => %gateway.addr,
-                            "error" => &error,
-                        );
-                        status
-                            .errors
-                            .push(format!("{MSG} {}: {error}", gateway.addr));
-                        continue;
-                    }
-                };
-                by_rack.entry(rack_id).or_default().push(gateway);
+        // Find MGS clients partitioned by rack ID.
+        let mgs_clients = match GatewaysByRack::resolve_all_gateways(
+            &opctx.log,
+            &self.resolver,
+        )
+        .await
+        {
+            Err(error) => {
+                const MSG: &str = "no MGS DNS records resolved";
+                let error = InlineErrorChain::new(&*error);
+                error!(opctx.log, "{MSG}"; "error" => &error);
+                status.errors.push(format!("{MSG}: {error}"));
+                return status;
             }
-            by_rack
+            Ok(clients) => clients,
         };
-
+        for (GatewayClient { addr, .. }, error) in mgs_clients.unknown() {
+            status.errors.push(format!(
+                "failed to discover rack ID for MGS {addr}: {}",
+                InlineErrorChain::new(&error)
+            ));
+        }
         // TODO(eliza): what seems like an appropriate parallelism? should we
         // just do 16?
         let mut tasks = ParallelTaskSet::new();
         let mut totals = Totals { ereports: 0, new_ereports: 0, racks: 0 };
 
-        for (rack_id, mgs_clients) in mgs_clients {
+        for RackGateways { rack_id, gateways } in mgs_clients.into_discovered()
+        {
             self.ingest_one_rack(
                 opctx,
-                mgs_clients,
+                gateways,
                 rack_id,
                 &mut status,
                 &mut totals,
