@@ -609,6 +609,7 @@ mod tests {
     use omicron_uuid_kinds::InstanceUuid;
     use omicron_uuid_kinds::SledUuid;
     use sled_agent_types::instance::MigrationState;
+    use std::collections::BTreeSet;
     use std::collections::HashMap;
 
     #[tokio::test]
@@ -1338,6 +1339,108 @@ mod tests {
         assert_eq!(marked.batches, 0);
         assert_eq!(marked.batch_size, SQL_BATCH_SIZE);
 
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_vmm_list_marked_stop_for_update() {
+        // Setup
+        let logctx =
+            dev::test_setup_log("test_vmm_list_marked_stop_for_update");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // TODO-K: Fix comment The states from which a VMM can still be stopped
+        // for an update. Only marked VMMs in these states should be listed by
+        // `vmm_list_marked_stop_for_update`.
+        let is_stoppable = |state: DbVmmState| {
+            matches!(
+                state,
+                DbVmmState::Creating
+                    | DbVmmState::Starting
+                    | DbVmmState::Running
+                    | DbVmmState::Rebooting
+            )
+        };
+
+        // Insert 2 VMMs (one marked to stop, one not) in each state per sled
+        // (2 sleds only).
+        let generation = UpdateDispositionGeneration::from(1);
+        let sled_a = SledUuid::new_v4();
+        let sled_b = SledUuid::new_v4();
+        let mut vmms = Vec::new();
+        for sled_id in [sled_a, sled_b] {
+            for &state in DbVmmState::ALL_STATES {
+                for marker in [Some(generation), None] {
+                    let failure_reason = (state == DbVmmState::Failed)
+                        .then_some(db::model::VmmFailureReason::FromSledAgent);
+                    let vmm = datastore
+                        .vmm_insert(
+                            &opctx,
+                            Vmm {
+                                id: Uuid::new_v4(),
+                                time_created: Utc::now(),
+                                time_deleted: None,
+                                instance_id: Uuid::new_v4(),
+                                sled_id: sled_id.into(),
+                                propolis_ip: "10.1.9.32".parse().unwrap(),
+                                propolis_port: 420.into(),
+                                cpu_platform: VmmCpuPlatform::SledDefault,
+                                time_state_updated: Utc::now(),
+                                generation: Generation::new(),
+                                state,
+                                failure_reason,
+                                stop_for_update_disposition_generation: marker
+                                    .map(Into::into),
+                            },
+                        )
+                        .await
+                        .expect("VMM should be inserted successfully");
+                    vmms.push(vmm);
+                }
+            }
+        }
+
+        // There should be 40 VMM rows. 2 VMMs (one marked, one not) per state
+        // per sled
+        let row_count: i64 = dsl::vmm
+            // Add a filter to ensure there is no full table scan
+            .filter(dsl::id.ne(Uuid::nil()))
+            .count()
+            .get_result_async(
+                &*datastore.pool_connection_for_tests().await.unwrap(),
+            )
+            .await
+            .expect("VMMs should be counted");
+        assert_eq!(row_count, 40);
+
+        // Check there are 8 stoppable VMMs (4 per sled)
+        let expected_ids: BTreeSet<Uuid> = vmms
+            .iter()
+            .filter(|vmm| {
+                vmm.stop_for_update_disposition_generation.is_some()
+                    && is_stoppable(vmm.state)
+            })
+            .map(|vmm| vmm.id)
+            .collect();
+        assert_eq!(expected_ids.len(), 8);
+
+        // Check the retrieved ids for stoppable VMMs are the same as the
+        // expected ones
+        let listed = datastore
+            .vmm_list_marked_stop_for_update(
+                &opctx,
+                &DataPageParams::max_page(),
+            )
+            .await
+            .expect("marked VMMs should be listed");
+        assert_eq!(listed.len(), expected_ids.len());
+        let listed_ids: BTreeSet<Uuid> =
+            listed.iter().map(|vmm| vmm.id).collect();
+        assert_eq!(listed_ids, expected_ids);
+
+        // Clean up.
         db.terminate().await;
         logctx.cleanup_successful();
     }

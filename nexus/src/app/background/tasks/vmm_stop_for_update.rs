@@ -134,9 +134,9 @@ impl VmmStopForUpdate {
                 "vmms" => ?vmm_ids,
             );
 
-            // Since we're using IdOrdMap, each sled id will only appear once.
-            // Because of this it's not a big deal to start a new sled agent
-            // client per sled id.
+            // Since we're using IdOrdMap, each sled id will only appear once
+            // per batch of VMMs. Because of this, it's ok to start a new sled
+            // agent client per sled id.
             let sled_client = match nexus_networking::sled_client(
                 &self.datastore,
                 &opctx,
@@ -840,6 +840,30 @@ mod tests {
                 expected.state,
             );
         }
+
+        // Run the task again.
+        let status_second_run = task.actually_activate(&opctx).await;
+
+        // No new VMMs were marked to be stopped so nothing is stopped
+        assert!(status_second_run.vmms_stopped_by_sled.is_empty());
+
+        // The VMMs in `Creating` state still fail because no sled agent is
+        // aware of them
+        let failed_count_second_run: usize = status_second_run
+            .vmms_failed_by_sled
+            .iter()
+            .map(|sled| sled.vmm_ids.len())
+            .sum();
+        assert_eq!(failed_count_second_run, expected_failed_ids.len());
+        assert_eq!(
+            vmm_ids_in_all_sleds(&status_second_run.vmms_failed_by_sled),
+            expected_failed_ids
+        );
+        assert_eq!(status_second_run.error_messages, status.error_messages);
+
+        // The second run makes no changes to the VMMs
+        let vmms_after_second_run = fetch_vmms(&conn, &vmm_ids).await;
+        assert_eq!(vmms_after_second_run, vmms_after);
 
         cptestctx.teardown().await;
     }
