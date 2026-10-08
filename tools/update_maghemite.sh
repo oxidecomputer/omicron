@@ -58,11 +58,17 @@ function update_mgd {
     SHA_LINUX=$(get_sha "$REPO" "$TARGET_COMMIT" "mgd" "linux")
     OUTPUT_LINUX=$(printf "MGD_LINUX_SHA256=\"%s\"\n" "$SHA_LINUX")
 
+    SHA_MACOS_AARCH64=$(get_sha "$REPO" "$TARGET_COMMIT" "mgd" "macos-aarch64")
+    OUTPUT_MACOS_AARCH64=$(printf "MGD_MACOS_AARCH64_SHA256=\"%s\"\n" "$SHA_MACOS_AARCH64")
+
     SHA_MG_DDM=$(get_sha "$REPO" "$TARGET_COMMIT" "mg-ddm" "image")
     OUTPUT_MG_DDM=$(printf "MG_DDM_SHA256=\"%s\"\n" "$SHA_MG_DDM")
 
     SHA_DDMD_LINUX=$(get_sha "$REPO" "$TARGET_COMMIT" "ddmd" "linux")
     OUTPUT_DDMD_LINUX=$(printf "DDMD_LINUX_SHA256=\"%s\"\n" "$SHA_DDMD_LINUX")
+
+    SHA_DDMD_MACOS_AARCH64=$(get_sha "$REPO" "$TARGET_COMMIT" "ddmd" "macos-aarch64")
+    OUTPUT_DDMD_MACOS_AARCH64=$(printf "DDMD_MACOS_AARCH64_SHA256=\"%s\"\n" "$SHA_DDMD_MACOS_AARCH64")
 
     if [ -n "$DRY_RUN" ]; then
         MGD_PATH="/dev/null"
@@ -71,7 +77,7 @@ function update_mgd {
     fi
     echo "Updating Maghemite mgd from: $TARGET_COMMIT"
     set -x
-    printf "$OUTPUT\n$OUTPUT_LINUX\n$OUTPUT_MG_DDM\n$OUTPUT_DDMD_LINUX" > $MGD_PATH
+    printf "$OUTPUT\n$OUTPUT_LINUX\n$OUTPUT_MACOS_AARCH64\n$OUTPUT_MG_DDM\n$OUTPUT_DDMD_LINUX\n$OUTPUT_DDMD_MACOS_AARCH64" > $MGD_PATH
     set +x
 }
 

@@ -33,6 +33,7 @@ const BUILDOMAT_URL: &'static str =
     "https://buildomat.eng.oxide.computer/public/file";
 const CARGO_HACK_URL: &'static str =
     "https://github.com/taiki-e/cargo-hack/releases/download";
+const MACOS_AARCH64_SERIES: &'static str = "macos-aarch64";
 
 const RETRY_ATTEMPTS: usize = 3;
 
@@ -243,8 +244,7 @@ impl OxideBuildomatFile {
     }
 }
 
-/// A binary that needs to either be downloaded or built on a non-illumos
-/// platform.
+/// A binary that needs to be downloaded on a non-illumos platform.
 ///
 /// On illumos, the image tarball (i.e., with series `image`) already provides
 /// all binaries.
@@ -252,8 +252,9 @@ struct HostNativeBinary {
     name: &'static str,
     /// If downloading the binary for Linux, the SHA2-256 checksum of the file.
     x86_64_linux_sha2: Sha256Digest,
-    /// If building the binary from source, the arguments to pass to cargo.
-    source_build_args: &'static [&'static str],
+    /// If downloading the binary for aarch64 macOS, the SHA2-256 checksum of
+    /// the file.
+    aarch64_macos_sha2: Sha256Digest,
 }
 
 struct Downloader<'a> {
@@ -273,121 +274,6 @@ impl<'a> Downloader<'a> {
         versions_dir: &'a Utf8Path,
     ) -> Self {
         Self { log, output_dir, versions_dir }
-    }
-
-    /// Build a binary from a git repository at a specific commit.
-    ///
-    /// This function:
-    /// 1. Checks for cached binaries at `out/.build-cache/{repo_name}/{commit}/`
-    /// 2. If not cached, shallow clones the repo to a temp directory
-    /// 3. Builds the specified binaries with cargo
-    /// 4. Caches the built binaries
-    /// 5. Returns paths to the cached binaries
-    async fn build_from_git(
-        &self,
-        repo_name: &str,
-        commit: GitCommitHash,
-        binaries: &[(&str, &[&str])], // (binary_name, cargo_args)
-    ) -> Result<Vec<Utf8PathBuf>> {
-        let cache_dir = self
-            .output_dir
-            .join(".build-cache")
-            .join(repo_name)
-            .join(commit.to_string());
-
-        // Check if all binaries are already cached
-        let mut cached_paths = Vec::new();
-        let mut all_cached = true;
-        for (binary_name, _) in binaries {
-            let cached_path = cache_dir.join(binary_name);
-            if !cached_path.exists() {
-                all_cached = false;
-                break;
-            }
-            cached_paths.push(cached_path);
-        }
-
-        if all_cached {
-            info!(self.log, "Found cached binaries for {repo_name} at {commit}"; "cache_dir" => %cache_dir);
-            return Ok(cached_paths);
-        }
-
-        // Need to build - create temp directory
-        info!(self.log, "Building {repo_name} from source at commit {commit}");
-        let temp_dir = camino_tempfile::tempdir()?;
-        let temp_path = temp_dir.path().to_owned();
-
-        // Clone and checkout the specific commit
-        let repo_url =
-            format!("https://github.com/oxidecomputer/{}", repo_name);
-        info!(self.log, "Cloning {repo_url}");
-        let mut clone_cmd = Command::new("git");
-        clone_cmd
-            .arg("clone")
-            .arg("--filter=blob:none")
-            .arg(&repo_url)
-            .arg(&temp_path);
-
-        let clone_output = clone_cmd.output().await?;
-        if !clone_output.status.success() {
-            let stderr = String::from_utf8_lossy(&clone_output.stderr);
-            bail!("Failed to clone {repo_url}: {stderr}");
-        }
-
-        // Checkout the specific commit
-        info!(self.log, "Checking out commit {commit}");
-        let mut checkout_cmd = Command::new("git");
-        checkout_cmd
-            .arg("checkout")
-            .arg(commit.to_string())
-            .current_dir(&temp_path);
-
-        let checkout_output = checkout_cmd.output().await?;
-        if !checkout_output.status.success() {
-            let stderr = String::from_utf8_lossy(&checkout_output.stderr);
-            bail!("Failed to checkout {commit}: {stderr}");
-        }
-
-        // Build each binary
-        tokio::fs::create_dir_all(&cache_dir).await?;
-        let mut result_paths = Vec::new();
-
-        for (binary_name, cargo_args) in binaries {
-            info!(self.log, "Building {binary_name}"; "args" => ?cargo_args);
-
-            let mut build_cmd = Command::new("cargo");
-            build_cmd
-                .arg("build")
-                .arg("--release")
-                .arg("--bin")
-                .arg(binary_name)
-                .args(*cargo_args)
-                .current_dir(&temp_path);
-
-            let build_output = build_cmd.output().await?;
-            if !build_output.status.success() {
-                let stderr = String::from_utf8_lossy(&build_output.stderr);
-                bail!("Failed to build {binary_name}: {stderr}");
-            }
-
-            // Always build in release mode
-            let source_path =
-                temp_path.join("target").join("release").join(binary_name);
-
-            if !source_path.exists() {
-                bail!("Expected binary not found at {source_path}");
-            }
-
-            // Copy to cache
-            let cached_path = cache_dir.join(binary_name);
-            tokio::fs::copy(&source_path, &cached_path).await?;
-            set_permissions(&cached_path, 0o755).await?;
-
-            result_paths.push(cached_path);
-        }
-
-        info!(self.log, "Successfully built and cached {repo_name} binaries");
-        Ok(result_paths)
     }
 }
 
@@ -732,7 +618,7 @@ impl Downloader<'_> {
 
     /// Installs binaries for the host into `binary_dir`.
     ///
-    /// Uses prebuilt binaries where available, otherwise builds from source.
+    /// Uses prebuilt binaries where available, otherwise fails.
     ///
     /// This doesn't do anything on illumos, since the image tarball already
     /// provides the binaries.
@@ -744,38 +630,41 @@ impl Downloader<'_> {
         binary_dir: &Utf8Path,
     ) -> Result<()> {
         match os_name()? {
-            Os::Linux => {
-                for binary in binaries {
-                    let file = OxideBuildomatFile {
-                        repo,
-                        series: linux_series,
-                        filename: binary.name,
-                        sha2: binary.x86_64_linux_sha2,
-                    };
-                    self.download_oxide_buildomat_binary(&file, binary_dir)
-                        .await?;
+            Os::Linux => match arch()? {
+                Arch::X86_64 => {
+                    for binary in binaries {
+                        let file = OxideBuildomatFile {
+                            repo,
+                            series: linux_series,
+                            filename: binary.name,
+                            sha2: binary.x86_64_linux_sha2,
+                        };
+                        self.download_oxide_buildomat_binary(&file, binary_dir)
+                            .await?;
+                    }
                 }
-            }
-            Os::Mac => {
-                info!(self.log, "Building {} from source for macOS", repo.name,);
-
-                // Perform a single `build_from_git` call for all provided
-                // binaries, so they share a checkout and target directory.
-                let to_build: Vec<_> = binaries
-                    .iter()
-                    .map(|binary| (binary.name, binary.source_build_args))
-                    .collect();
-                let built_binaries = self
-                    .build_from_git(repo.name, repo.revision, &to_build)
-                    .await?;
-
-                for (built_path, binary) in built_binaries.iter().zip(binaries)
-                {
-                    let dest = binary_dir.join(binary.name);
-                    tokio::fs::copy(built_path, &dest).await?;
-                    set_permissions(&dest, 0o755).await?;
+                Arch::Aarch64 => {
+                    // We can start publishing these binaries if anyone needs them.
+                    bail!("aarch64 Linux is not supported");
                 }
-            }
+            },
+            Os::Mac => match arch()? {
+                Arch::Aarch64 => {
+                    for binary in binaries {
+                        let file = OxideBuildomatFile {
+                            repo,
+                            series: MACOS_AARCH64_SERIES,
+                            filename: binary.name,
+                            sha2: binary.aarch64_macos_sha2,
+                        };
+                        self.download_oxide_buildomat_binary(&file, binary_dir)
+                            .await?;
+                    }
+                }
+                Arch::X86_64 => {
+                    bail!("x86_64 macOS is not supported");
+                }
+            },
             Os::Illumos => {
                 // The image tarball already provides all binaries.
             }
@@ -978,6 +867,10 @@ impl Downloader<'_> {
             stub_checksums.get_sha256_value("CIDL_SHA256_LINUX_DPD")?;
         let swadm_linux_sha2 =
             stub_checksums.get_sha256_value("CIDL_SHA256_LINUX_SWADM")?;
+        let dpd_macos_aarch64_sha2 =
+            stub_checksums.get_sha256_value("CIDL_SHA256_MACOS_AARCH64_DPD")?;
+        let swadm_macos_aarch64_sha2 = stub_checksums
+            .get_sha256_value("CIDL_SHA256_MACOS_AARCH64_SWADM")?;
         let version =
             KvFile::read(self.versions_dir.join("dendrite_version")).await?;
         let commit = version.get_git_commit_hash_value("COMMIT")?;
@@ -1019,12 +912,12 @@ impl Downloader<'_> {
             HostNativeBinary {
                 name: "dpd",
                 x86_64_linux_sha2: dpd_linux_sha2,
-                source_build_args: &["--features=tofino_stub"],
+                aarch64_macos_sha2: dpd_macos_aarch64_sha2,
             },
             HostNativeBinary {
                 name: "swadm",
                 x86_64_linux_sha2: swadm_linux_sha2,
-                source_build_args: &[],
+                aarch64_macos_sha2: swadm_macos_aarch64_sha2,
             },
         ];
         self.install_host_native_binaries(
@@ -1045,6 +938,8 @@ impl Downloader<'_> {
                 .await?;
         let mgd_sha2 = checksums.get_sha256_value("CIDL_SHA256")?;
         let mgd_linux_sha2 = checksums.get_sha256_value("MGD_LINUX_SHA256")?;
+        let mgd_macos_aarch64_sha2 =
+            checksums.get_sha256_value("MGD_MACOS_AARCH64_SHA256")?;
         let version = KvFile::read(
             self.versions_dir.join("maghemite_mg_openapi_version"),
         )
@@ -1075,7 +970,7 @@ impl Downloader<'_> {
         let binaries = [HostNativeBinary {
             name: "mgd",
             x86_64_linux_sha2: mgd_linux_sha2,
-            source_build_args: &["--no-default-features"],
+            aarch64_macos_sha2: mgd_macos_aarch64_sha2,
         }];
         self.install_host_native_binaries(repo, "linux", &binaries, &binary_dir)
             .await
@@ -1091,6 +986,8 @@ impl Downloader<'_> {
         let mg_ddm_sha2 = checksums.get_sha256_value("MG_DDM_SHA256")?;
         let ddmd_linux_sha2 =
             checksums.get_sha256_value("DDMD_LINUX_SHA256")?;
+        let ddmd_macos_aarch64_sha2 =
+            checksums.get_sha256_value("DDMD_MACOS_AARCH64_SHA256")?;
         let version = KvFile::read(
             self.versions_dir.join("maghemite_ddm_openapi_version"),
         )
@@ -1121,7 +1018,7 @@ impl Downloader<'_> {
         let binaries = [HostNativeBinary {
             name: "ddmd",
             x86_64_linux_sha2: ddmd_linux_sha2,
-            source_build_args: &["--no-default-features"],
+            aarch64_macos_sha2: ddmd_macos_aarch64_sha2,
         }];
         self.install_host_native_binaries(repo, "linux", &binaries, &binary_dir)
             .await
