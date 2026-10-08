@@ -914,6 +914,7 @@ mod test {
     use omicron_common::api::external::ByteCount;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::PropolisUuid;
+    use omicron_uuid_kinds::RackUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use sled_agent_types::disk::M2Slot;
@@ -1067,7 +1068,7 @@ mod test {
         let collection =
             fake_collection_with_ids(sled_id(), zpools, smf_services);
         datastore
-            .inventory_insert_collection(opctx, &collection)
+            .inventory_insert_collection(opctx, &collection, RackUuid::nil())
             .await
             .expect("inserted inventory collection");
     }

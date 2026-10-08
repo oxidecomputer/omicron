@@ -499,7 +499,7 @@ mod test {
     };
     use omicron_debug_dropbox::DebugDropbox;
     use omicron_test_utils::dev;
-    use omicron_uuid_kinds::OmicronZoneUuid;
+    use omicron_uuid_kinds::{OmicronZoneUuid, RackUuid};
     use std::collections::BTreeMap;
 
     type ControlPlaneTestContext =
@@ -542,6 +542,7 @@ mod test {
             "test_planner",
             1,
             false,
+            RackUuid::nil(),
         );
         collector.activate(&opctx).await;
 

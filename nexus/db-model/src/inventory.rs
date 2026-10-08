@@ -75,7 +75,6 @@ use omicron_uuid_kinds::OmicronSledConfigKind;
 use omicron_uuid_kinds::OmicronSledConfigUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::RackKind;
-use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SvcEnabledNotOnlineKind;
@@ -1393,6 +1392,7 @@ impl InvSledAgent {
         ledgered_sled_config: Option<OmicronSledConfigUuid>,
         reconciler_status: InvConfigReconcilerStatus,
         file_source_resolver: InvOmicronFileSourceResolver,
+        rack_id: DbTypedUuid<RackKind>,
     ) -> Result<InvSledAgent, anyhow::Error> {
         // It's irritating to have to check this case at runtime.  The challenge
         // is that if this sled agent does have a baseboard id, we don't know
@@ -1441,7 +1441,7 @@ impl InvSledAgent {
                 file_source_resolver,
                 instance_manager_update_disposition,
                 instance_manager_num_registered_vmms,
-                rack_id: RackUuid::nil().into(), // TODO use actual rack ID
+                rack_id,
             })
         }
     }
