@@ -381,12 +381,17 @@ impl BackgroundTask for VmmStopForUpdate {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::sagas::test_helpers;
+    use crate::app::sagas::test_helpers::instance_fetch;
+    use crate::app::sagas::test_helpers::instance_simulate;
+    use crate::app::sagas::test_helpers::instance_wait_for_state;
+    use crate::app::sagas::test_helpers::test_opctx;
+    use crate::app::sagas::test_helpers::wait_for_running_sagas;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use chrono::Utc;
     use diesel::ExpressionMethods;
     use diesel::QueryDsl;
     use diesel::SelectableHelper;
+    use nexus_db_lookup::AsyncConnection;
     use nexus_db_model::Generation;
     use nexus_db_model::InstanceState;
     use nexus_db_model::Vmm;
@@ -399,8 +404,10 @@ mod tests {
     use nexus_test_utils::resource_helpers::create_default_ip_pools;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils::resource_helpers::object_create;
-    use nexus_types::external_api::instance;
-    use nexus_types_versions::latest;
+    use nexus_types::external_api::instance::InstanceCreate;
+    use nexus_types_versions::latest::instance::Instance;
+    use nexus_types_versions::latest::instance::InstanceNetworkInterfaceAttachment;
+    use nexus_types_versions::latest::instance::InstanceSelector;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::api::external::NameOrId;
@@ -417,27 +424,28 @@ mod tests {
 
     const PROJECT_NAME: &str = "vmm-stop-for-update";
 
-    // TODO-K: Fix comment The states of the real (simulated) VMMs that the
-    // task should stop. The label is used to name instances and groups.
+    // In order to stop a VMM, it needs to be registered with the simulated
+    // sled agent. We keep a record of the states of the real VMMs we will be
+    // stopping. Even though `Created` is a "stoppable" state, we do not include
+    // it in this list as a VMM is only in this state for a short period. This
+    // means we cannot reliably test a VMM in the `Creating` state.
     //
-    // TODO-K: Explain why we can't have a `Creating` VMM
+    // The label is used to name instances and groups.
     const REAL_VMM_STATES: [(&str, DbVmmState); 3] = [
         ("starting", DbVmmState::Starting),
         ("running", DbVmmState::Running),
         ("rebooting", DbVmmState::Rebooting),
     ];
 
-    // TODO-K: Fix comment Creates and starts an instance that belongs to
-    // `anti_affinity_group`, and returns its ID.
     async fn create_started_instance(
         cptestctx: &ControlPlaneTestContext,
         name: &str,
         anti_affinity_group: &str,
     ) -> InstanceUuid {
-        let created = object_create::<_, latest::instance::Instance>(
+        let created = object_create::<_, Instance>(
             &cptestctx.external_client,
             &format!("/v1/instances?project={PROJECT_NAME}"),
-            &instance::InstanceCreate {
+            &InstanceCreate {
                 identity: IdentityMetadataCreateParams {
                     name: name.parse().unwrap(),
                     description: format!("instance {name}"),
@@ -446,8 +454,7 @@ mod tests {
                 memory: ByteCount::from_gibibytes_u32(1),
                 hostname: "myhostname".try_into().unwrap(),
                 user_data: Vec::new(),
-                network_interfaces:
-                    instance::InstanceNetworkInterfaceAttachment::None,
+                network_interfaces: InstanceNetworkInterfaceAttachment::None,
                 external_ips: Vec::new(),
                 disks: Vec::new(),
                 boot_disk: None,
@@ -466,18 +473,16 @@ mod tests {
         InstanceUuid::from_untyped_uuid(created.identity.id)
     }
 
-    // TODO-K: Fix comment Asks Nexus to reboot a running instance. The
-    // simulated sled agent leaves the VMM in `Rebooting` until it is poked.
     async fn reboot_instance(
         cptestctx: &ControlPlaneTestContext,
         instance_id: InstanceUuid,
     ) {
         let nexus = &cptestctx.server.server_context().nexus;
-        let opctx = test_helpers::test_opctx(cptestctx);
+        let opctx = test_opctx(cptestctx);
         let lookup = nexus
             .instance_lookup(
                 &opctx,
-                instance::InstanceSelector {
+                InstanceSelector {
                     project: None,
                     instance: NameOrId::from(instance_id.into_untyped_uuid()),
                 },
@@ -493,16 +498,15 @@ mod tests {
         cptestctx: &ControlPlaneTestContext,
         instance_id: InstanceUuid,
     ) -> Vmm {
-        test_helpers::instance_fetch(cptestctx, instance_id)
+        instance_fetch(cptestctx, instance_id)
             .await
             .vmm()
             .clone()
             .expect("instance should have an active VMM")
     }
 
-    // TODO-K: Fix comment Marks a single VMM to be stopped for an update.
-    async fn mark_vmm(
-        conn: &nexus_db_lookup::AsyncConnection,
+    async fn mark_vmm_stopped_for_update(
+        conn: &AsyncConnection,
         vmm_id: Uuid,
         generation: UpdateDispositionGeneration,
     ) {
@@ -520,16 +524,15 @@ mod tests {
         assert_eq!(updated, 1, "exactly one VMM should be marked");
     }
 
-    // TODO-K: Fix comment Inserts a VMM row that no sled agent knows about.
-    async fn insert_vmm(
+    // Inserts a VMM row without sled agent knowing about it. This is used for
+    // VMM in states that we don't expect to stop.
+    async fn insert_vmm_in_state(
         datastore: &DataStore,
         opctx: &OpContext,
         sled_id: SledUuid,
         state: DbVmmState,
         marker: Option<UpdateDispositionGeneration>,
     ) -> Vmm {
-        // TODO-K: Fix comment The `failure_reason_iff_failed` constraint
-        // requires a failure reason for `Failed` VMMs, and only for them.
         let failure_reason = (state == DbVmmState::Failed)
             .then_some(VmmFailureReason::FromSledAgent);
         datastore
@@ -556,10 +559,10 @@ mod tests {
             .expect("VMM should be inserted")
     }
 
-    // TODO-K: Fix comment Fetches the given VMM rows, including deleted rows
-    // (unlike `vmm_fetch`, which skips them).
+    // `vmm_fetch` does not retrieve rows with a non-null `time_deleted`, so we
+    // need a little helper that does.
     async fn fetch_vmms(
-        conn: &nexus_db_lookup::AsyncConnection,
+        conn: &AsyncConnection,
         ids: &[Uuid],
     ) -> BTreeMap<Uuid, Vmm> {
         use nexus_db_schema::schema::vmm::dsl;
@@ -575,8 +578,10 @@ mod tests {
             .collect()
     }
 
-    fn vmm_ids_in(sleds: &IdOrdMap<VmmsBySled>) -> BTreeSet<Uuid> {
-        sleds
+    fn vmm_ids_in_all_sleds(
+        vmms_by_sled: &IdOrdMap<VmmsBySled>,
+    ) -> BTreeSet<Uuid> {
+        vmms_by_sled
             .iter()
             .flat_map(|sled| {
                 sled.vmm_ids.iter().map(|id| id.into_untyped_uuid())
@@ -586,10 +591,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_vmm_stop_for_update_activation() {
-        // TODO-K: Fix comment Use two simulated sleds. Lengthen the periods
-        // of the background tasks that could change the VMM rows while this
-        // test runs. Each of them still runs once when Nexus starts, before
-        // any of the rows below exist.
+        // Set up the test environment.
+        //
+        // We want two sleds to test that the task stops VMMs across multiple
+        // sleds. Additionally, to avoid flakiness, we increase the intervals
+        // for background tasks that could potentially modify VMM rows while
+        // this test is running.
         let cptestctx =
             ControlPlaneBuilder::new("test_vmm_stop_for_update_activation")
                 .with_extra_sled_agents(1)
@@ -603,10 +610,11 @@ mod tests {
                 })
                 .start::<crate::Server>()
                 .await;
+
         let client = &cptestctx.external_client;
         let datastore =
             cptestctx.server.server_context().nexus.datastore().clone();
-        let opctx = test_helpers::test_opctx(&cptestctx);
+        let opctx = test_opctx(&cptestctx);
         let sled_a = cptestctx.first_sled_id();
         let sled_b = cptestctx.second_sled_id();
         let generation = UpdateDispositionGeneration::from(1);
@@ -614,13 +622,16 @@ mod tests {
         create_default_ip_pools(client).await;
         create_project(client, PROJECT_NAME).await;
 
-        // TODO-K: Fix comment Step 1: create the VMM rows.
+        // The simulated agent can only stopp VMMs that are registered with it.
+        // So, for each VMM that we intend to stop, we create a real instance
+        // via the external API.
         //
-        // The simulated sled agents only know about VMMs that an instance
-        // start registered with them, so the marked VMMs that the task should
-        // stop are real VMMs. For each state in `REAL_VMM_STATES`, start two
-        // instances in one anti-affinity group, so that one VMM lands on each
-        // sled, put the VMMs in that state, and mark them.
+        // For each state in `REAL_VMM_STATES`, two instances are created per
+        // anti-affinity group. This ensures that both sleds have the same
+        // amount of instances in each state.
+        //
+        // TODO-K: Add some instances in stoppable states that are not marked
+        // for stopping
         let conn = datastore.pool_connection_for_tests().await.unwrap();
         let mut instance_ids = Vec::new();
         let mut vmm_ids = Vec::new();
@@ -636,36 +647,48 @@ mod tests {
                 .await;
                 match state {
                     // A new VMM in a simulatated environemnt stays in
-                    // `Starting` until the `poke` API is called.
+                    // `Starting` until the "poke" API is called, so we can
+                    // confidently test a VMM in this state.
                     DbVmmState::Starting => {}
                     DbVmmState::Running => {
-                        test_helpers::instance_simulate(&cptestctx, &id).await;
+                        instance_simulate(&cptestctx, &id).await;
                     }
                     DbVmmState::Rebooting => {
-                        test_helpers::instance_simulate(&cptestctx, &id).await;
+                        instance_simulate(&cptestctx, &id).await;
+                        // Like above, we can keep a VMM in `Rebooting` if we
+                        // don't call the "poke" API
                         reboot_instance(&cptestctx, id).await;
                     }
                     _ => unreachable!("{state:?} is not in REAL_VMM_STATES"),
                 }
                 let vmm = active_vmm(&cptestctx, id).await;
                 assert_eq!(vmm.state, state, "VMM {} is not {state:?}", vmm.id);
-                mark_vmm(&conn, vmm.id, generation).await;
+                // Mark them to be stopped by the task
+                mark_vmm_stopped_for_update(&conn, vmm.id, generation).await;
                 instance_ids.push(id);
                 vmm_ids.push(vmm.id);
             }
         }
 
-        // TODO-K: Fix comment The task never contacts a sled agent about the
-        // other rows, so they are inserted directly: one unmarked VMM in every
-        // state, and one marked VMM in every state that no real VMM covers.
-        // That includes a marked `Creating` VMM, which no sled agent knows.
+        // For all other states that shouldn't be stopped by the task, we insert
+        // rows directly in the DB. The task should skip them entirely, so they
+        // don't need to be registered with sled agent.
+        //
+        // One caveat is that we are including the VMMs in `Creating` state. As
+        // mentioned earlier, these cannot be realiably tested to stop, but we
+        // can conveniently use them to simulate VMMs that failed to stop. We
+        // insert them and mark them as needing to be stopped.
         for sled_id in [sled_a, sled_b] {
             for &state in DbVmmState::ALL_STATES {
-                let unmarked =
-                    insert_vmm(&datastore, &opctx, sled_id, state, None).await;
+                let unmarked = insert_vmm_in_state(
+                    &datastore, &opctx, sled_id, state, None,
+                )
+                .await;
                 vmm_ids.push(unmarked.id);
+
+                // TODO-K: Why are adding all states instead of just creating?
                 if !REAL_VMM_STATES.iter().any(|(_, real)| *real == state) {
-                    let marked = insert_vmm(
+                    let marked = insert_vmm_in_state(
                         &datastore,
                         &opctx,
                         sled_id,
@@ -678,27 +701,38 @@ mod tests {
             }
         }
 
-        // TODO-K: Fix comment Step 2: retrieve every VMM row created above.
         let vmms = fetch_vmms(&conn, &vmm_ids).await;
-        // TODO-K: Fix comment There should be 40 rows: 6 real VMMs (one in
-        // each of the 3 `REAL_VMM_STATES` on each of the 2 sleds), 20 unmarked
-        // VMMs (one in each of the 10 states on each sled), and 14 marked VMMs
-        // (one in each of the 7 states without a real VMM on each sled).
+        // TODO-K: Verify this number after we make changes
+        //
+        // There should be 40 VMM rows:
+        //  - 6 real VMMs (one in each of the 3 `REAL_VMM_STATES` on each of
+        //    the 2 sleds)
+        //  - 20 unmarked VMMs (one in each of the remaining states on each
+        //   sled)
+        //  - 14 marked VMMs (one in each of the 7 states without a real VMM
+        //    on each sled).
         assert_eq!(vmms.len(), 40);
 
         // TODO-K: Fix comment Step 3: split the rows into the ones the task
         // should stop and the ones it should leave unchanged. A marked
         // `Creating` VMM is stoppable, but no sled agent knows about it, so
         // the stop request fails (404) and the row stays unchanged.
+
+        // Collect which VMMs we expect the task will stop and which it won't.
         let should_be_stopped = |vmm: &Vmm| {
             vmm.stop_for_update_disposition_generation.is_some()
                 && DbVmmState::SHOULD_STOP_FOR_EVACUATION.contains(&vmm.state)
+                // As mentioned above, we don't expect VMMs in `Creating` state
+                // to stop for the purposes of this test
                 && vmm.state != DbVmmState::Creating
         };
         let (expected_rows_to_be_stopped, expected_rows_to_be_unchanged): (
             Vec<Vmm>,
             Vec<Vmm>,
         ) = vmms.values().cloned().partition(should_be_stopped);
+
+        // Collect the ids of the VMMs in `Creating` state, which are the ones
+        // we expect to turn up as failed.
         let expected_failed_ids: BTreeSet<Uuid> = expected_rows_to_be_unchanged
             .iter()
             .filter(|vmm| {
@@ -707,8 +741,12 @@ mod tests {
             })
             .map(|vmm| vmm.id)
             .collect();
+
         assert_eq!(expected_rows_to_be_stopped.len(), 6);
         assert_eq!(expected_failed_ids.len(), 2);
+
+        // Confirm there is one of each stoppable state per sled in
+        // `expected_rows_to_be_stopped`
         for sled_id in [sled_a, sled_b] {
             for (_, state) in REAL_VMM_STATES {
                 let count = expected_rows_to_be_stopped
@@ -724,23 +762,26 @@ mod tests {
             }
         }
 
-        // TODO-K: Fix comment Step 4: run the task.
+        // Run the task.
         let mut task = VmmStopForUpdate::new(datastore.clone());
         let status = task.actually_activate(&opctx).await;
 
-        // TODO-K: Fix comment Step 5: check the task's status.
+        // We stopped the VMMs we expected to stop
         let stopped_count: usize = status
             .vmms_stopped_by_sled
             .iter()
             .map(|sled| sled.vmm_ids.len())
             .sum();
         assert_eq!(stopped_count, expected_rows_to_be_stopped.len());
+
         let expected_stopped_ids: BTreeSet<Uuid> =
             expected_rows_to_be_stopped.iter().map(|vmm| vmm.id).collect();
         assert_eq!(
-            vmm_ids_in(&status.vmms_stopped_by_sled),
+            vmm_ids_in_all_sleds(&status.vmms_stopped_by_sled),
             expected_stopped_ids
         );
+
+        // The VMMs we expected to fail to stop, failed.
         let failed_count: usize = status
             .vmms_failed_by_sled
             .iter()
@@ -748,32 +789,32 @@ mod tests {
             .sum();
         assert_eq!(failed_count, expected_failed_ids.len());
         assert_eq!(
-            vmm_ids_in(&status.vmms_failed_by_sled),
+            vmm_ids_in_all_sleds(&status.vmms_failed_by_sled),
             expected_failed_ids
         );
         assert_eq!(status.error_messages.len(), expected_failed_ids.len());
+        assert_eq!(
+            status.error_messages,
+            vec![
+                "Invalid Request: Not Found".to_string(),
+                "Invalid Request: Not Found".to_string()
+            ]
+        );
 
-        // TODO-K: Fix comment Step 6: the task does not write VMM states to
-        // the database. The simulated sled agents report the rest of each
-        // stop to Nexus only when they are poked. Poke each stopped VMM, wait
-        // for its instance to reach `NoVmm`, wait for the instance-update
-        // sagas to finish, and then retrieve every row again.
+        // Poke each simulated instance so each sled agent reports back to Nexus
+        // and wait until each one reports `NoVmm`.
         for id in &instance_ids {
-            test_helpers::instance_simulate(&cptestctx, id).await;
-            test_helpers::instance_wait_for_state(
-                &cptestctx,
-                *id,
-                InstanceState::NoVmm,
-            )
-            .await;
+            instance_simulate(&cptestctx, id).await;
+            instance_wait_for_state(&cptestctx, *id, InstanceState::NoVmm)
+                .await;
         }
-        test_helpers::wait_for_running_sagas(&cptestctx).await;
+        // Before fetching the VMMs again, make sure all instance update sagas
+        // are finished
+        wait_for_running_sagas(&cptestctx).await;
         let vmms_after = fetch_vmms(&conn, &vmm_ids).await;
         assert_eq!(vmms_after.len(), 40);
 
-        // TODO-K: Fix comment Step 7: every VMM the task stopped is now
-        // `Destroyed`, the instance-update saga marked it deleted, and it is
-        // still marked to be stopped for an update.
+        // Every VMM we expected to stop should be destroyed at this point
         for expected in &expected_rows_to_be_stopped {
             let actual = &vmms_after[&expected.id];
             assert_eq!(
@@ -794,7 +835,7 @@ mod tests {
             );
         }
 
-        // TODO-K: Fix comment Step 8: every other row is exactly as it was.
+        // Make sure all other rows are unchanged
         for expected in &expected_rows_to_be_unchanged {
             assert_eq!(
                 &vmms_after[&expected.id],
