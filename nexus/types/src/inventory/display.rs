@@ -42,7 +42,7 @@ use uuid::Uuid;
 
 use crate::inventory::{
     CabooseWhich, Collection, Dataset, InternalDnsGenerationStatus,
-    PhysicalDisk, RotPageWhich, SledAgent, TimeSync, Zpool,
+    PhysicalDisk, PowerShelf, RotPageWhich, SledAgent, TimeSync, Zpool,
 };
 
 /// Code to display inventory collections.
@@ -217,6 +217,7 @@ pub enum CollectionDisplayCliFilter {
         /// show only information about one SP
         serial: Option<String>,
     },
+
     /// show orphaned datasets
     OrphanedDatasets,
 }
@@ -432,6 +433,13 @@ fn display_devices(
             sp.source
         )?;
 
+        if sp.sp_type == SpType::Power {
+            display_power_shelf(
+                collection.power_shelves.get(baseboard_id.as_ref()),
+                f,
+            )?;
+        }
+
         if sp.sp_type == SpType::Sled {
             #[derive(Tabled)]
             #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -600,6 +608,71 @@ fn display_devices(
             hw_baseboard_id {:?} -- this is a bug",
             rot_missing_sp
         )?;
+    }
+
+    Ok(())
+}
+
+fn display_power_shelf(
+    shelf: Option<&PowerShelf>,
+    f: &mut dyn fmt::Write,
+) -> fmt::Result {
+    use super::PsuIdentityResult;
+    use super::PsuSlot;
+
+    let Some(shelf) = shelf else {
+        return writeln!(f, "    PSUs: no information found");
+    };
+
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct PsuRow<'a> {
+        slot: PsuSlot,
+        presence: String,
+        device: &'a str,
+        mfr_model: &'a str,
+        mfr_serial: &'a str,
+        firmware_rev: &'a str,
+        mfr_id: &'a str,
+        mfr_location: &'a str,
+        mfr_date: &'a str,
+    }
+
+    writeln!(f, "    PSUs:")?;
+    let rows = shelf.psus.iter().map(|psu| {
+        let vpd = psu.identity().ok();
+        PsuRow {
+            slot: psu.slot,
+            presence: format!("{:?}", psu.presence()),
+            device: psu.hubris_device_type.as_str(),
+            mfr_id: vpd.map(|vpd| vpd.mfr_id.as_str()).unwrap_or("-"),
+            mfr_model: vpd.map(|vpd| vpd.mfr_model.as_str()).unwrap_or("-"),
+            firmware_rev: vpd
+                .map(|vpd| vpd.firmware_rev.as_str())
+                .unwrap_or("-"),
+            mfr_location: vpd
+                .map(|vpd| vpd.mfr_location.as_str())
+                .unwrap_or("-"),
+            mfr_date: vpd.map(|vpd| vpd.mfr_date.as_str()).unwrap_or("-"),
+            mfr_serial: vpd.map(|vpd| vpd.mfr_serial.as_str()).unwrap_or("-"),
+        }
+    });
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+    writeln!(f, "{}", textwrap::indent(&table, "        "))?;
+
+    let mut wrote_errors_header = false;
+    for psu in &shelf.psus {
+        let PsuIdentityResult::ReadError(error) = psu.identity() else {
+            continue;
+        };
+        if !wrote_errors_header {
+            writeln!(f, "    PSU VPD errors:")?;
+            wrote_errors_header = true;
+        }
+        writeln!(f, "      - {}: {error}", psu.slot)?;
     }
 
     Ok(())
@@ -1498,5 +1571,80 @@ fn option_impl_display<T: fmt::Display>(t: &Option<T>) -> String {
     match t {
         Some(v) => format!("{v}"),
         None => String::from("n/a"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::display_power_shelf;
+    use crate::inventory::PowerShelf;
+    use crate::inventory::Psu;
+    use crate::inventory::PsuIdentity;
+    use crate::inventory::PsuSlot;
+    use crate::inventory::PsuState;
+    use crate::inventory::PsuStatus;
+    use chrono::DateTime;
+    use chrono::Utc;
+    use iddqd::IdOrdMap;
+    use sled_hardware_types::BaseboardId;
+    use std::sync::Arc;
+
+    #[test]
+    fn test_power_shelf_inventory_display() {
+        fn identity(serial: &str, date: &str) -> PsuIdentity {
+            PsuIdentity {
+                mfr_id: String::from("Murata-PS"),
+                mfr_model: String::from("MWOCP68-3600-D-RM"),
+                firmware_rev: String::from("0762-0701-0000"),
+                mfr_location: String::from("China"),
+                mfr_date: date.to_owned(),
+                mfr_serial: serial.to_owned(),
+            }
+        }
+
+        fn present(identity: Result<PsuIdentity, String>) -> Option<PsuState> {
+            Some(PsuState { status: PsuStatus::Present, identity })
+        }
+
+        let mut psus = IdOrdMap::with_capacity(6);
+        let values = [
+            (PsuSlot::Psu0, present(Ok(identity("LL2111Q9002T", "2111")))),
+            (PsuSlot::Psu1, present(Ok(identity("LL2111Q9003T", "2111")))),
+            (
+                PsuSlot::Psu2,
+                present(Err(String::from(
+                    "test suite injected VPD read failure",
+                ))),
+            ),
+            (PsuSlot::Psu3, None),
+            (PsuSlot::Psu4, present(Ok(identity("LL2115Q1001T", "2115")))),
+            (PsuSlot::Psu5, None),
+        ];
+        for (slot, state) in values {
+            psus.insert_unique(Psu {
+                time_collected: DateTime::<Utc>::MIN_UTC,
+                source: String::from("test MGS"),
+                slot,
+                hubris_device_type: String::from("mwocp68"),
+                state,
+            })
+            .expect("test PSU slots are unique");
+        }
+        let shelf = PowerShelf {
+            psc_baseboard_id: Arc::new(BaseboardId {
+                part_number: String::from("test-psc"),
+                serial_number: String::from("test-psc-serial"),
+            }),
+            slot: 0,
+            psus,
+        };
+        let mut output = String::new();
+        display_power_shelf(Some(&shelf), &mut output)
+            .expect("formatting test power shelf succeeds");
+
+        expectorate::assert_contents(
+            "output/inventory_power_shelf.txt",
+            &output,
+        );
     }
 }

@@ -7708,6 +7708,7 @@ dependencies = [
  "omicron-generation-kinds",
  "omicron-rpaths",
  "omicron-sled-agent",
+ "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "parallel-task-set",
