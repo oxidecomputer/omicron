@@ -14,6 +14,7 @@ use bootstrap_agent_lockstep_types::scrimlet_reconcilers::ReconcilerRunningStatu
 use bootstrap_agent_lockstep_types::scrimlet_reconcilers::ReconcilerStatus;
 use bootstrap_agent_lockstep_types::scrimlet_reconcilers::ReconciliationCompletedStatus;
 use bootstrap_agent_lockstep_types::scrimlet_reconcilers::ScrimletReconcilersStatus;
+use bootstrap_agent_lockstep_types::scrimlet_reconcilers::ddmd::DdmdReconcilerStatus;
 use bootstrap_agent_lockstep_types::scrimlet_reconcilers::dpd::DpdNatReconcilerStatus;
 use bootstrap_agent_lockstep_types::scrimlet_reconcilers::dpd::DpdNatReconcilerStatusNatEntry;
 use bootstrap_agent_lockstep_types::scrimlet_reconcilers::dpd::DpdNatReconcilerStatusNatEntryFailure;
@@ -160,6 +161,7 @@ impl fmt::Display for ScrimletReconcilersStatusDisplay<'_> {
                 lldpd_reconciler,
                 mgd_reconciler,
                 uplinkd_reconciler,
+                ddmd_reconciler,
             } => {
                 let reconcilers = [
                     (
@@ -170,6 +172,7 @@ impl fmt::Display for ScrimletReconcilersStatusDisplay<'_> {
                     ("mgd", &ReconcilerStatusDisplay(&mgd_reconciler)),
                     ("lldpd", &ReconcilerStatusDisplay(&lldpd_reconciler)),
                     ("uplinkd", &ReconcilerStatusDisplay(&uplinkd_reconciler)),
+                    ("ddmd", &ReconcilerStatusDisplay(&ddmd_reconciler)),
                 ];
                 write_lines(f, reconcilers, |f, (name, displayable)| {
                     writeln!(f, "{name} reconciler:")?;
@@ -390,6 +393,54 @@ impl fmt::Display for UplinkdReconcilerStatusDisplay<'_> {
                         |f, (port, values)| {
                             write!(f, "* {port}: {}", values.join(", "))
                         },
+                    )?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+impl DisplayableStatus for DdmdReconcilerStatus {
+    type DisplayAdapter<'a>
+        = DdmdReconcilerStatusDisplay<'a>
+    where
+        Self: 'a;
+
+    /// Get a `fmt::Display`-able version of this status (e.g., for `omdb`).
+    fn display(&self) -> DdmdReconcilerStatusDisplay<'_> {
+        DdmdReconcilerStatusDisplay(self)
+    }
+}
+
+struct DdmdReconcilerStatusDisplay<'a>(&'a DdmdReconcilerStatus);
+
+impl fmt::Display for DdmdReconcilerStatusDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.0 {
+            DdmdReconcilerStatus::Failed(reason) => {
+                write!(f, "reconciliation failed: {reason}")
+            }
+            DdmdReconcilerStatus::Reconciled {
+                external_peers_address_objects,
+            } => {
+                let plural = if external_peers_address_objects.len() == 1 {
+                    ""
+                } else {
+                    "s"
+                };
+                write!(
+                    f,
+                    "successfully reconciled {} external peer address object{plural}",
+                    external_peers_address_objects.len()
+                )?;
+
+                if !external_peers_address_objects.is_empty() {
+                    writeln!(f, ":")?;
+                    write_lines(
+                        &mut IndentWriter::new(INDENT, f),
+                        external_peers_address_objects,
+                        |f, addrobj| write!(f, "* {addrobj}"),
                     )?;
                 }
                 Ok(())
@@ -1151,6 +1202,15 @@ mod tests {
                     ]),
                 }),
             },
+            ddmd_reconciler: ReconcilerStatus {
+                current_status: ReconcilerCurrentStatus::Idle,
+                last_completion: completed(DdmdReconcilerStatus::Reconciled {
+                    external_peers_address_objects: BTreeSet::from([
+                        "tfportqsfp0_0/ll".to_string(),
+                        "tfportqsfp1_0/ll".to_string(),
+                    ]),
+                }),
+            },
         }
     }
 
@@ -1208,6 +1268,12 @@ mod tests {
                 current_status: ReconcilerCurrentStatus::Idle,
                 last_completion: completed(LldpdReconcilerStatus::Reconciled {
                     ports: BTreeMap::new(),
+                }),
+            },
+            ddmd_reconciler: ReconcilerStatus {
+                current_status: ReconcilerCurrentStatus::Idle,
+                last_completion: completed(DdmdReconcilerStatus::Reconciled {
+                    external_peers_address_objects: BTreeSet::new(),
                 }),
             },
         }

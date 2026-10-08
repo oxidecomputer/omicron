@@ -1602,7 +1602,7 @@ dependencies = [
 [[package]]
 name = "client-common"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=fc9563cea463926d1a7f57b9c920044246cc8b63#fc9563cea463926d1a7f57b9c920044246cc8b63"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=a070c58caa5f272510c7094eb60501a2c7cbd789#a070c58caa5f272510c7094eb60501a2c7cbd789"
 
 [[package]]
 name = "clipboard-win"
@@ -2638,7 +2638,7 @@ dependencies = [
 [[package]]
 name = "ddm-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=fc9563cea463926d1a7f57b9c920044246cc8b63#fc9563cea463926d1a7f57b9c920044246cc8b63"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=a070c58caa5f272510c7094eb60501a2c7cbd789#a070c58caa5f272510c7094eb60501a2c7cbd789"
 dependencies = [
  "ddm-api-types-versions",
  "oxnet",
@@ -2650,9 +2650,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "ddm-api-types"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=a070c58caa5f272510c7094eb60501a2c7cbd789#a070c58caa5f272510c7094eb60501a2c7cbd789"
+dependencies = [
+ "ddm-api-types-versions",
+]
+
+[[package]]
 name = "ddm-api-types-versions"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=fc9563cea463926d1a7f57b9c920044246cc8b63#fc9563cea463926d1a7f57b9c920044246cc8b63"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=a070c58caa5f272510c7094eb60501a2c7cbd789#a070c58caa5f272510c7094eb60501a2c7cbd789"
 dependencies = [
  "ddm-protocol",
  "oxnet",
@@ -2665,7 +2673,7 @@ dependencies = [
 [[package]]
 name = "ddm-protocol"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=fc9563cea463926d1a7f57b9c920044246cc8b63#fc9563cea463926d1a7f57b9c920044246cc8b63"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=a070c58caa5f272510c7094eb60501a2c7cbd789#a070c58caa5f272510c7094eb60501a2c7cbd789"
 dependencies = [
  "oxnet",
  "schemars 0.8.22",
@@ -6925,7 +6933,7 @@ dependencies = [
 [[package]]
 name = "mg-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=fc9563cea463926d1a7f57b9c920044246cc8b63#fc9563cea463926d1a7f57b9c920044246cc8b63"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=a070c58caa5f272510c7094eb60501a2c7cbd789#a070c58caa5f272510c7094eb60501a2c7cbd789"
 dependencies = [
  "chrono",
  "client-common",
@@ -6945,7 +6953,7 @@ dependencies = [
 [[package]]
 name = "mg-api-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=fc9563cea463926d1a7f57b9c920044246cc8b63#fc9563cea463926d1a7f57b9c920044246cc8b63"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=a070c58caa5f272510c7094eb60501a2c7cbd789#a070c58caa5f272510c7094eb60501a2c7cbd789"
 dependencies = [
  "mg-api-types-versions",
 ]
@@ -6953,7 +6961,7 @@ dependencies = [
 [[package]]
 name = "mg-api-types-versions"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=fc9563cea463926d1a7f57b9c920044246cc8b63#fc9563cea463926d1a7f57b9c920044246cc8b63"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=a070c58caa5f272510c7094eb60501a2c7cbd789#a070c58caa5f272510c7094eb60501a2c7cbd789"
 dependencies = [
  "chrono",
  "nom 8.0.0",
@@ -14514,6 +14522,8 @@ dependencies = [
  "bootstrap-agent-lockstep-types",
  "chrono",
  "daft",
+ "ddm-admin-client",
+ "ddm-api-types",
  "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=a133c73e3e7116260c6f1b1ab7907184b0e0aad8)",
  "dropshot",
  "either",
@@ -17937,11 +17947,13 @@ dependencies = [
 name = "wicketd-commission-api"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "dropshot",
  "dropshot-api-manager-types",
  "iddqd",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "wicketd-commission-types-versions",
 ]
 
@@ -17974,6 +17986,7 @@ dependencies = [
 name = "wicketd-commission-types-versions"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "gateway-types-versions",
  "iddqd",
  "omicron-common",

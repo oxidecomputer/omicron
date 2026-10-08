@@ -115,6 +115,19 @@ uplinkd reconciler:
                 * qsfp0: 192.0.2.10/24, 2001:db8::10/64
                 * qsfp1: 192.0.2.11/24
 
+ddmd reconciler:
+    current status:
+        idle
+    last completion:
+        activation reason: first execution on start
+        activation count: 1
+        completed at: 1970-01-01T00:00:00.000Z
+        ran for: 1.5s
+        detailed status:
+            successfully reconciled 2 external peer address objects:
+                * tfportqsfp0_0/ll
+                * tfportqsfp1_0/ll
+
 ---------------------------------------------
 stderr:
 =============================================
@@ -187,6 +200,17 @@ uplinkd reconciler:
     current status:
         idle
     last completion: none
+
+ddmd reconciler:
+    current status:
+        idle
+    last completion:
+        activation reason: first execution on start
+        activation count: 1
+        completed at: 1970-01-01T00:00:00.000Z
+        ran for: 1.5s
+        detailed status:
+            successfully reconciled 0 external peer address objects
 
 ---------------------------------------------
 stderr:
