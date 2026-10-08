@@ -412,6 +412,8 @@ enum DbCommands {
     Sleds(SledsArgs),
     /// Show instances grouped by the sled they are running on
     SledInstances(SledInstancesArgs),
+    /// Show how much CPU, memory, and storage is left on each sled.
+    SledCapacity(SledCapacityArgs),
     /// Print the current target release and the update date
     TargetRelease(target_release::TargetReleaseArgs),
     /// Print information about customer instances.
@@ -745,6 +747,23 @@ struct SledsArgs {
     /// Show sleds that match the given filter
     #[clap(short = 'F', long, value_enum)]
     filter: Option<SledFilter>,
+}
+
+#[derive(Debug, Args, Clone)]
+struct SledCapacityArgs {
+    /// Show sleds that match the given filter
+    #[clap(short = 'F', long, value_enum, default_value_t = SledFilter::InService)]
+    filter: SledFilter,
+
+    /// Show the amount free and percentage free, rather than the amount used
+    /// and percentage used
+    #[clap(long)]
+    free: bool,
+
+    /// List the VMMs on each sled along with the hardware threads and
+    /// reservoir RAM assigned to each
+    #[clap(short, long)]
+    verbose: bool,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -1457,6 +1476,9 @@ impl DbArgs {
                     }
                     DbCommands::Sleds(args) => {
                         cmd_db_sleds(&opctx, &datastore, &fetch_opts, args).await
+                    }
+                    DbCommands::SledCapacity(args) => {
+                        cmd_db_sled_capacity(&opctx, &datastore, &fetch_opts, args).await
                     }
                     DbCommands::SledInstances(args) => {
                         cmd_db_sled_instances(
@@ -4735,6 +4757,393 @@ async fn cmd_db_sleds(
         .to_string();
 
     println!("{}", table);
+
+    Ok(())
+}
+
+/// Run `omdb db sled-capacity`.
+async fn cmd_db_sled_capacity(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+    args: &SledCapacityArgs,
+) -> Result<(), anyhow::Error> {
+    let conn = datastore.pool_connection_for_tests().await?;
+
+    let limit = fetch_opts.fetch_limit;
+    let sleds = datastore
+        .sled_list(&opctx, &first_page(limit), args.filter)
+        .await
+        .context("listing sleds")?;
+    check_limit(&sleds, limit, || String::from("listing sleds"));
+
+    // Sum VMM resource reservations by sled.
+    struct VmmAssignment {
+        instance_id: Option<InstanceUuid>,
+        hardware_threads: i64,
+        reservoir_ram: i64,
+    }
+
+    #[derive(Default)]
+    struct VmmUsage {
+        hardware_threads: i64,
+        reservoir_ram: i64,
+        vmms: Vec<VmmAssignment>,
+    }
+
+    // Gather all of the VMM resource reservations per sled.
+    let mut vmm_usage: HashMap<SledUuid, VmmUsage> = HashMap::new();
+    let mut paginator =
+        Paginator::new(SQL_BATCH_SIZE, dropshot::PaginationOrder::Ascending);
+    while let Some(p) = paginator.next() {
+        use nexus_db_schema::schema::sled_resource_vmm::dsl;
+        let batch =
+            paginated(dsl::sled_resource_vmm, dsl::id, &p.current_pagparams())
+                .select(db::model::SledResourceVmm::as_select())
+                .load_async(&*conn)
+                .await
+                .context("fetching sled resource reservations")?;
+        paginator =
+            p.found_batch(&batch, &|vmm: &db::model::SledResourceVmm| {
+                PropolisUuid::from(vmm.id).into_untyped_uuid()
+            });
+        for vmm in batch {
+            let hardware_threads =
+                i64::from(u32::from(vmm.resources.hardware_threads));
+            let reservoir_ram = vmm.resources.reservoir_ram.to_bytes() as i64;
+            let usage = vmm_usage.entry(vmm.sled_id.into()).or_default();
+            usage.hardware_threads += hardware_threads;
+            usage.reservoir_ram += reservoir_ram;
+            usage.vmms.push(VmmAssignment {
+                instance_id: vmm.instance_id.map(InstanceUuid::from),
+                hardware_threads,
+                reservoir_ram,
+            });
+        }
+    }
+
+    // We are intentionally calling potentially slow db methods here as we
+    // otherwise would just be performing the pagination ourselves. If this cmd
+    // becomes too slow we can start looking at filtering.
+    let mut pool_used: HashMap<ZpoolUuid, i64> = HashMap::new();
+    for d in datastore.crucible_dataset_list_all_batched(opctx).await? {
+        if d.time_deleted().is_none() {
+            *pool_used.entry(d.pool_id()).or_default() += d.size_used;
+        }
+    }
+    for d in datastore.local_storage_dataset_list_all_batched(opctx).await? {
+        if !d.is_tombstoned() {
+            *pool_used.entry(d.pool_id()).or_default() += d.size_used;
+        }
+    }
+    for d in datastore
+        .local_storage_unencrypted_dataset_list_all_batched(opctx)
+        .await?
+    {
+        if !d.is_tombstoned() {
+            *pool_used.entry(d.pool_id()).or_default() += d.size_used;
+        }
+    }
+
+    // Similar to above, if this becomes too slow or cause an impact on the db
+    // we can add filtering.
+    let zpools: Vec<_> = datastore
+        .zpool_list_all_external_batched(opctx)
+        .await?
+        .into_iter()
+        .filter(|(_, disk)| {
+            matches!(disk.disk_policy, db::model::PhysicalDiskPolicy::InService)
+                && matches!(
+                    disk.disk_state,
+                    db::model::PhysicalDiskState::Active
+                )
+        })
+        .map(|(zpool, _)| zpool)
+        .collect();
+
+    // We are trying to emulate disk allocation logic here by using the most
+    // recently reported size of each zpool from any inventory collection.
+    // Filtering on the known pool IDs lets this use the
+    // `inv_zpool_by_id_and_time` index instead of a full table scan.
+    let pool_ids: Vec<Uuid> =
+        zpools.iter().map(|z| z.id().into_untyped_uuid()).collect();
+    let pool_total_size: HashMap<ZpoolUuid, i64> = {
+        use nexus_db_schema::schema::inv_zpool::dsl;
+        dsl::inv_zpool
+            .filter(dsl::id.eq_any(pool_ids))
+            .distinct_on(dsl::id)
+            .order_by((dsl::id, dsl::time_collected.desc()))
+            .select((dsl::id, dsl::total_size))
+            .load_async::<(Uuid, i64)>(&*conn)
+            .await
+            .context("fetching zpool sizes")?
+            .into_iter()
+            .map(|(id, size)| (ZpoolUuid::from_untyped_uuid(id), size))
+            .collect()
+    };
+
+    // Sum storage by sled.
+    #[derive(Default)]
+    struct StorageUsage {
+        total: i64,
+        free: i64,
+        largest_pool_free: i64,
+        pools_missing_inventory: usize,
+    }
+    let mut storage: HashMap<SledUuid, StorageUsage> = HashMap::new();
+    for zpool in zpools {
+        let usage = storage.entry(zpool.sled_id()).or_default();
+        match pool_total_size.get(&zpool.id()) {
+            Some(total) => {
+                let buffer: i64 = zpool.control_plane_storage_buffer().into();
+                let used = pool_used.get(&zpool.id()).copied().unwrap_or(0);
+                let free = (total - buffer - used).max(0);
+                usage.total += total;
+                usage.free += free;
+                usage.largest_pool_free = usage.largest_pool_free.max(free);
+            }
+            None => usage.pools_missing_inventory += 1,
+        }
+    }
+
+    #[derive(Clone, Copy, Default)]
+    struct Ratio {
+        used: i64,
+        total: i64,
+    }
+
+    impl std::ops::AddAssign for Ratio {
+        fn add_assign(&mut self, other: Self) {
+            self.used += other.used;
+            self.total += other.total;
+        }
+    }
+
+    fn gib(bytes: i64) -> String {
+        format!("{:.1}", bytes as f64 / (1u64 << 30) as f64)
+    }
+
+    fn count(n: i64) -> String {
+        n.to_string()
+    }
+
+    // Formats a column of ratios as an amount over a total followed by a
+    // percentage. The amount and percentage show either the used or the free
+    // portion depending on `show_free`.
+    //
+    // Each part is padded to the widest value in the column so that the values
+    // line up vertically. The amount is padded to at least `min_amount_width`
+    // so that VMM rows can be aligned underneath it. The final amount width is
+    // returned for that purpose.
+    fn format_ratio_column(
+        ratios: &[Ratio],
+        fmt: fn(i64) -> String,
+        show_free: bool,
+        min_amount_width: usize,
+    ) -> (Vec<String>, usize) {
+        let amounts: Vec<i64> = ratios
+            .iter()
+            .map(|r| if show_free { r.total - r.used } else { r.used })
+            .collect();
+        let amount: Vec<String> = amounts.iter().map(|a| fmt(*a)).collect();
+        let total: Vec<String> = ratios.iter().map(|r| fmt(r.total)).collect();
+        let amount_width = amount
+            .iter()
+            .map(|s| s.len())
+            .max()
+            .unwrap_or(0)
+            .max(min_amount_width);
+        let total_width = total.iter().map(|s| s.len()).max().unwrap_or(0);
+        let formatted = ratios
+            .iter()
+            .zip(amounts)
+            .zip(amount.iter().zip(total.iter()))
+            .map(|((r, a), (amount, total))| {
+                let pct = if r.total > 0 {
+                    format!("{:>5.1}%", a as f64 / r.total as f64 * 100.0)
+                } else {
+                    format!("{:>6}", "-")
+                };
+                format!(
+                    "{amount:>amount_width$} / {total:>total_width$} ({pct})"
+                )
+            })
+            .collect();
+        (formatted, amount_width)
+    }
+
+    // Gather the raw numbers for each sled. A totals row is appended at the
+    // end once every sled has been processed.
+    struct SledCapacity {
+        serial: String,
+        id: String,
+        threads: Ratio,
+        reservoir: Ratio,
+        storage: Ratio,
+        largest_pool_free: Option<i64>,
+        missing_inventory: bool,
+        vmms: Vec<VmmAssignment>,
+    }
+
+    let mut capacities: Vec<SledCapacity> = sleds
+        .iter()
+        .map(|sled| {
+            let mut vmm = vmm_usage.remove(&sled.id()).unwrap_or_default();
+            // The largest VMMs are listed first. Ties are broken by instance
+            // ID so that the output is stable.
+            vmm.vmms.sort_by(|a, b| {
+                b.hardware_threads
+                    .cmp(&a.hardware_threads)
+                    .then(b.reservoir_ram.cmp(&a.reservoir_ram))
+                    .then(a.instance_id.cmp(&b.instance_id))
+            });
+            let st = storage.remove(&sled.id()).unwrap_or_default();
+            let threads_total =
+                i64::from(u32::from(sled.usable_hardware_threads));
+            let reservoir_total = sled.reservoir_size.to_bytes() as i64;
+            SledCapacity {
+                serial: sled.serial_number().to_string(),
+                id: sled.id().to_string(),
+                threads: Ratio {
+                    used: vmm.hardware_threads,
+                    total: threads_total,
+                },
+                reservoir: Ratio {
+                    used: vmm.reservoir_ram,
+                    total: reservoir_total,
+                },
+                // Storage that is unavailable for allocation (including the
+                // control plane storage buffer) counts as used.
+                storage: Ratio { used: st.total - st.free, total: st.total },
+                largest_pool_free: Some(st.largest_pool_free),
+                missing_inventory: st.pools_missing_inventory > 0,
+                vmms: vmm.vmms,
+            }
+        })
+        .collect();
+
+    let mut totals = SledCapacity {
+        serial: String::from("TOTAL"),
+        id: String::new(),
+        threads: Ratio::default(),
+        reservoir: Ratio::default(),
+        storage: Ratio::default(),
+        largest_pool_free: None,
+        missing_inventory: false,
+        vmms: Vec::new(),
+    };
+    for c in &capacities {
+        totals.threads += c.threads;
+        totals.reservoir += c.reservoir;
+        totals.storage += c.storage;
+    }
+    capacities.push(totals);
+
+    // VMM rows are only shown in verbose mode. When they are shown their
+    // values must fit within the amount portion of their column.
+    let vmm_width = |get: fn(&VmmAssignment) -> String| {
+        capacities
+            .iter()
+            .filter(|_| args.verbose)
+            .flat_map(|c| c.vmms.iter())
+            .map(|v| get(v).len())
+            .max()
+            .unwrap_or(0)
+    };
+    let vmm_threads_width = vmm_width(|v| count(v.hardware_threads));
+    let vmm_reservoir_width = vmm_width(|v| gib(v.reservoir_ram));
+
+    // Format each column as a whole so that values line up.
+    let column = |get: fn(&SledCapacity) -> Ratio,
+                  fmt: fn(i64) -> String,
+                  min_amount_width: usize| {
+        let ratios: Vec<Ratio> = capacities.iter().map(get).collect();
+        format_ratio_column(&ratios, fmt, args.free, min_amount_width)
+    };
+    let (threads, threads_width) =
+        column(|c| c.threads, count, vmm_threads_width);
+    let (reservoir, reservoir_width) =
+        column(|c| c.reservoir, gib, vmm_reservoir_width);
+    let (storage, _) = column(|c| c.storage, gib, 0);
+    let largest_pool: Vec<String> = capacities
+        .iter()
+        .map(|c| c.largest_pool_free.map(gib).unwrap_or_default())
+        .collect();
+    let largest_pool_width =
+        largest_pool.iter().map(|s| s.len()).max().unwrap_or(0);
+
+    let any_missing_inventory = capacities.iter().any(|c| c.missing_inventory);
+
+    // The table is built by hand rather than by deriving `Tabled` because the
+    // column headers depend on whether we are showing used or free.
+    let kind = if args.free { "free" } else { "used" };
+    let suffix = kind.to_uppercase();
+    let mut builder = tabled::builder::Builder::new();
+    builder.push_record([
+        String::from("SERIAL"),
+        if args.verbose {
+            String::from("SLED_ID / INSTANCE_ID")
+        } else {
+            String::from("ID")
+        },
+        format!("THREADS_{suffix}"),
+        format!("RESERVOIR_{suffix}"),
+        format!("STORAGE_{suffix}"),
+        String::from("LARGEST_POOL_FREE"),
+    ]);
+    for ((((c, threads), reservoir), mut storage), largest_pool) in capacities
+        .into_iter()
+        .zip(threads)
+        .zip(reservoir)
+        .zip(storage)
+        .zip(largest_pool)
+    {
+        if c.missing_inventory {
+            storage.push_str(" *");
+        }
+        builder.push_record([
+            c.serial,
+            c.id,
+            threads,
+            reservoir,
+            storage,
+            format!("{largest_pool:>largest_pool_width$}"),
+        ]);
+
+        if args.verbose {
+            for vmm in c.vmms {
+                let instance_id = vmm
+                    .instance_id
+                    .map(|id| id.to_string())
+                    .unwrap_or_else(|| String::from("-"));
+                builder.push_record([
+                    String::new(),
+                    instance_id,
+                    format!("{:>threads_width$}", count(vmm.hardware_threads)),
+                    format!("{:>reservoir_width$}", gib(vmm.reservoir_ram)),
+                    String::new(),
+                    String::new(),
+                ]);
+            }
+        }
+    }
+
+    let table = builder
+        .build()
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(1, 1, 0, 0))
+        .to_string();
+    println!("{}", table);
+    println!(
+        "(memory and storage values are in GiB, shown as \
+         {kind} / total (% {kind}))"
+    );
+    if any_missing_inventory {
+        println!(
+            "* some zpools on this sled have never been reported in an \
+             inventory collection and are not counted"
+        );
+    }
 
     Ok(())
 }
