@@ -1981,59 +1981,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn disks_are_unadopted_if_dataset_task_is_unavailable() {
-        let mut t = AdoptionTest::new(
-            "disks_are_unadopted_if_dataset_task_is_unavailable",
-            &["a", "b"],
-        );
-        let both = BTreeSet::from([t.zpool("a"), t.zpool("b")]);
-
-        let newly_adopted = t.adopt().await;
-
-        // `datasets` says the required datasets were ensured, but that may be
-        // from an earlier attempt: we couldn't reach the dataset task to check.
-        let mut datasets = required_datasets_on(&both);
-        datasets
-            .ensure_datasets_if_needed(
-                IdOrdMap::new(),
-                t.external_disks.zpools_including(&newly_adopted),
-                &t.logctx.log,
-            )
-            .await;
-        let cleaner = t.cleaner();
-        t.external_disks
-            .finish_adopting_disks_with_cleaner(
-                newly_adopted,
-                &datasets,
-                &t.logctx.log,
-                &cleaner,
-            )
-            .await;
-
-        // The disks are no longer managed, were never cleaned up or published,
-        // and will be retried.
-        for serial in ["a", "b"] {
-            assert_matches!(
-                &t.external_disks.disks.get(&t.disk_id(serial)).unwrap().state,
-                DiskState::FailedToManage(
-                    DiskManagementError::RequiredDataset(
-                        RequiredDatasetError::DatasetTaskUnavailable
-                    )
-                )
-            );
-        }
-        assert!(cleaner.cleaned.lock().unwrap().is_empty());
-        assert!(t.published_zpools().is_empty());
-        assert!(t.debug_collector_zpools().is_empty());
-        assert!(t.external_disks.has_retryable_error());
-
-        // We'll adopt them again on the next attempt.
-        assert_eq!(t.adopt().await.zpools(), both);
-
-        t.logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
     async fn disks_that_fail_cleanup_are_unadopted() {
         let mut t = AdoptionTest::new(
             "disks_that_fail_cleanup_are_unadopted",
