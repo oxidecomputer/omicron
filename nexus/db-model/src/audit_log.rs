@@ -20,9 +20,21 @@ use uuid::Uuid;
 /// Actor information for audit log initialization. Inspired by `authn::Actor`
 #[derive(Clone, Debug)]
 pub enum AuditLogActor {
-    UserBuiltin { user_builtin_id: BuiltInUserUuid },
-    SiloUser { silo_user_id: SiloUserUuid, silo_id: Uuid },
-    Scim { silo_id: Uuid },
+    UserBuiltin {
+        user_builtin_id: BuiltInUserUuid,
+    },
+    SiloUser {
+        silo_user_id: SiloUserUuid,
+        silo_id: Uuid,
+    },
+    Scim {
+        silo_id: Uuid,
+    },
+    ServiceAccount {
+        service_account_id: Uuid,
+        silo_id: Uuid,
+        federation: Option<audit::FederationIdentity>,
+    },
     Unauthenticated,
 }
 
@@ -63,6 +75,7 @@ impl_enum_type!(
     SiloUser => b"silo_user"
     Unauthenticated => b"unauthenticated"
     Scim => b"scim"
+    ServiceAccount => b"service_account"
 );
 
 impl_enum_type!(
@@ -107,6 +120,7 @@ impl_enum_type!(
     SessionCookie => b"session_cookie"
     AccessToken => b"access_token"
     ScimToken => b"scim_token"
+    ServiceAccountToken => b"service_account_token"
     Spoof => b"spoof"
 );
 
@@ -118,6 +132,9 @@ impl From<AuditLogAuthMethod> for audit::AuthMethod {
             }
             AuditLogAuthMethod::AccessToken => audit::AuthMethod::AccessToken,
             AuditLogAuthMethod::ScimToken => audit::AuthMethod::ScimToken,
+            AuditLogAuthMethod::ServiceAccountToken => {
+                audit::AuthMethod::ServiceAccountToken
+            }
             AuditLogAuthMethod::Spoof => audit::AuthMethod::Spoof,
         }
     }
@@ -130,6 +147,9 @@ impl From<&nexus_types::authn::SchemeName> for AuditLogAuthMethod {
             SchemeName::SessionCookie => AuditLogAuthMethod::SessionCookie,
             SchemeName::AccessToken => AuditLogAuthMethod::AccessToken,
             SchemeName::ScimToken => AuditLogAuthMethod::ScimToken,
+            SchemeName::ServiceAccountToken => {
+                AuditLogAuthMethod::ServiceAccountToken
+            }
             SchemeName::Spoof => AuditLogAuthMethod::Spoof,
         }
     }
@@ -169,6 +189,9 @@ pub struct AuditLogEntryInit {
     /// ID of the credential used to authenticate (session ID, access token ID,
     /// or SCIM token ID). Not set for unauthenticated requests or spoof auth.
     pub credential_id: Option<Uuid>,
+    pub federation_idp_id: Option<Uuid>,
+    pub federation_iss: Option<String>,
+    pub federation_sub: Option<String>,
 }
 
 impl From<AuditLogEntryInitParams> for AuditLogEntryInit {
@@ -184,7 +207,27 @@ impl From<AuditLogEntryInitParams> for AuditLogEntryInit {
             credential_id,
         } = params;
 
+        let (federation_idp_id, federation_iss, federation_sub) = match &actor {
+            AuditLogActor::ServiceAccount {
+                federation: Some(identity),
+                ..
+            } => (
+                Some(identity.idp_id),
+                Some(identity.iss.clone()),
+                Some(identity.sub.clone()),
+            ),
+            _ => (None, None, None),
+        };
         let (actor_id, actor_silo_id, actor_kind) = match actor {
+            AuditLogActor::ServiceAccount {
+                service_account_id,
+                silo_id,
+                ..
+            } => (
+                Some(service_account_id),
+                Some(silo_id),
+                AuditLogActorKind::ServiceAccount,
+            ),
             AuditLogActor::UserBuiltin { user_builtin_id } => (
                 Some(user_builtin_id.into_untyped_uuid()),
                 None,
@@ -216,6 +259,9 @@ impl From<AuditLogEntryInitParams> for AuditLogEntryInit {
             user_agent,
             auth_method,
             credential_id,
+            federation_idp_id,
+            federation_iss,
+            federation_sub,
         }
     }
 }
@@ -255,6 +301,9 @@ pub struct AuditLogEntry {
     /// ID of the credential used to authenticate (session ID, access token ID,
     /// or SCIM token ID). Not set for unauthenticated requests or spoof auth.
     pub credential_id: Option<Uuid>,
+    pub federation_idp_id: Option<Uuid>,
+    pub federation_iss: Option<String>,
+    pub federation_sub: Option<String>,
 }
 
 /// Struct that we can use as a kind of constructor arg for our actual audit
@@ -339,6 +388,41 @@ impl TryFrom<AuditLogEntry> for audit::AuditLogEntry {
             source_ip: entry.source_ip.ip(),
             user_agent: entry.user_agent,
             actor: match entry.actor_kind {
+                AuditLogActorKind::ServiceAccount => {
+                    audit::AuditLogEntryActor::ServiceAccount {
+                        service_account_id: entry.actor_id.ok_or_else(
+                            || {
+                                Error::internal_error(
+                                    "Service account actor missing actor_id",
+                                )
+                            },
+                        )?,
+                        silo_id: entry.actor_silo_id.ok_or_else(|| {
+                            Error::internal_error(
+                                "Service account actor missing actor_silo_id",
+                            )
+                        })?,
+                        federation: match (
+                            entry.federation_idp_id,
+                            entry.federation_iss,
+                            entry.federation_sub,
+                        ) {
+                            (None, None, None) => None,
+                            (Some(idp_id), Some(iss), Some(sub)) => {
+                                Some(audit::FederationIdentity {
+                                    idp_id,
+                                    iss,
+                                    sub,
+                                })
+                            }
+                            _ => {
+                                return Err(Error::internal_error(
+                                    "incomplete federation audit identity",
+                                ));
+                            }
+                        },
+                    }
+                }
                 AuditLogActorKind::UserBuiltin => {
                     let user_builtin_id = entry.actor_id.ok_or_else(|| {
                         Error::internal_error(

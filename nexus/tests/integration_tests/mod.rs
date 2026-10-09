@@ -53,6 +53,7 @@ mod saml;
 mod schema;
 mod scim;
 mod service_account;
+mod service_account_authentication;
 mod service_account_federation;
 mod silo_users;
 mod silos;

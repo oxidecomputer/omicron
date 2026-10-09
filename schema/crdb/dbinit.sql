@@ -7288,7 +7288,8 @@ CREATE TYPE IF NOT EXISTS omicron.public.audit_log_actor_kind AS ENUM (
     'user_builtin',
     'silo_user',
     'unauthenticated',
-    'scim'
+    'scim',
+    'service_account'
 );
 
 CREATE TYPE IF NOT EXISTS omicron.public.audit_log_result_kind AS ENUM (
@@ -7304,7 +7305,8 @@ CREATE TYPE IF NOT EXISTS omicron.public.audit_log_auth_method AS ENUM (
     'session_cookie',
     'access_token',
     'scim_token',
-    'spoof'
+    'spoof',
+    'service_account_token'
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.audit_log (
@@ -7343,6 +7345,16 @@ CREATE TABLE IF NOT EXISTS omicron.public.audit_log (
     -- ID of the credential used to authenticate. Session ID, access token ID,
     -- or SCIM token ID.
     credential_id UUID,
+    federation_idp_id UUID,
+    federation_iss STRING,
+    federation_sub STRING,
+
+    CONSTRAINT federation_identity_consistent CHECK (
+        (federation_idp_id IS NULL AND federation_iss IS NULL AND federation_sub IS NULL)
+        OR (federation_idp_id IS NOT NULL AND federation_iss IS NOT NULL AND federation_sub IS NOT NULL
+            AND actor_kind = 'service_account' AND auth_method IS NOT NULL
+            AND auth_method = 'service_account_token' AND credential_id IS NOT NULL)
+    ),
 
     -- make sure time_completed and result_kind are either both null or both not
     CONSTRAINT time_completed_and_result_kind CHECK (
@@ -7379,6 +7391,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.audit_log (
         OR
         -- For a scim actor: must have a actor_silo_id
         (actor_kind = 'scim' AND actor_id IS NULL AND actor_silo_id IS NOT NULL)
+        OR (actor_kind = 'service_account' AND actor_id IS NOT NULL AND actor_silo_id IS NOT NULL)
         OR
         -- For unauthenticated: must not have actor_id or actor_silo_id
         (actor_kind = 'unauthenticated' AND actor_id IS NULL AND actor_silo_id IS NULL)
@@ -7396,7 +7409,7 @@ ALTER TABLE omicron.public.audit_log
 ADD CONSTRAINT IF NOT EXISTS auth_method_and_credential_id_consistent CHECK (
     (auth_method IS NULL AND credential_id IS NULL)
     OR (auth_method = 'spoof' AND credential_id IS NULL)
-    OR (auth_method IN ('session_cookie', 'access_token', 'scim_token')
+    OR (auth_method IN ('session_cookie', 'access_token', 'scim_token', 'service_account_token')
         AND credential_id IS NOT NULL)
 ) NOT VALID;
 
@@ -7440,7 +7453,10 @@ SELECT
     error_message,
     result_kind,
     auth_method,
-    credential_id
+    credential_id,
+    federation_idp_id,
+    federation_iss,
+    federation_sub
 FROM omicron.public.audit_log
 WHERE
     time_completed IS NOT NULL
@@ -9661,7 +9677,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '309.0.0', NULL)
+    (TRUE, NOW(), NOW(), '310.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

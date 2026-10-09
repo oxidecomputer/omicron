@@ -133,6 +133,15 @@ impl OpContext {
             metadata.insert(String::from("actor"), format!("{:?}", actor));
 
             match &actor {
+                authn::Actor::ServiceAccountSession {
+                    service_account_id,
+                    silo_id,
+                } => log.new(o!(
+                    "authenticated" => true,
+                    "type" => "service_account",
+                    "service_account_id" => service_account_id.to_string(),
+                    "silo_id" => silo_id.to_string(),
+                )),
                 authn::Actor::SiloUser { silo_user_id, silo_id } => {
                     log.new(o!(
                         "authenticated" => true,

@@ -74,6 +74,26 @@ pub struct Context {
 }
 
 impl Context {
+    pub fn federation_identity(
+        &self,
+    ) -> Option<&nexus_types::external_api::audit::FederationIdentity> {
+        match &self.kind {
+            Kind::Authenticated(details, ..) => {
+                details.federation_identity.as_ref()
+            }
+            Kind::Unauthenticated => None,
+        }
+    }
+
+    pub fn service_account_roles(&self) -> Option<&authz::RoleSet> {
+        match &self.kind {
+            Kind::Authenticated(details, ..) => {
+                details.service_account_roles.as_ref()
+            }
+            Kind::Unauthenticated => None,
+        }
+    }
+
     /// Returns the authenticated actor, if any
     pub fn actor(&self) -> Option<&Actor> {
         self.actor_required().ok()
@@ -94,17 +114,16 @@ impl Context {
         }
     }
 
-    /// Returns the expiration time if authenticated via a device token.
+    /// Returns the expiration time of the authenticating token, if any.
     ///
     /// This is used to prevent token lifetime extension during token creation:
     /// a new token created using an existing token should not outlive the
     /// token used to authenticate.
     pub fn token_expiration(&self) -> Option<DateTime<Utc>> {
         match &self.kind {
-            Kind::Authenticated(
-                Details { device_token_expiration, .. },
-                ..,
-            ) => *device_token_expiration,
+            Kind::Authenticated(Details { token_expiration, .. }, ..) => {
+                *token_expiration
+            }
             Kind::Unauthenticated => None,
         }
     }
@@ -168,11 +187,14 @@ impl Context {
                 LookupType::ById(*silo_id),
             )),
             Actor::UserBuiltin { .. } => None,
-            Actor::Scim { silo_id } => Some(authz::Silo::new(
-                authz::FLEET,
-                *silo_id,
-                LookupType::ById(*silo_id),
-            )),
+            Actor::Scim { silo_id }
+            | Actor::ServiceAccountSession { silo_id, .. } => {
+                Some(authz::Silo::new(
+                    authz::FLEET,
+                    *silo_id,
+                    LookupType::ById(*silo_id),
+                ))
+            }
         })
     }
 
@@ -253,8 +275,10 @@ impl Context {
             kind: Kind::Authenticated(
                 Details {
                     actor: Actor::UserBuiltin { user_builtin_id },
-                    device_token_expiration: None,
+                    token_expiration: None,
                     credential_id: None,
+                    service_account_roles: None,
+                    federation_identity: None,
                 },
                 None,
             ),
@@ -273,8 +297,10 @@ impl Context {
                         silo_user_id: USER_TEST_PRIVILEGED.id(),
                         silo_id: USER_TEST_PRIVILEGED.silo_id,
                     },
-                    device_token_expiration: None,
+                    token_expiration: None,
                     credential_id: None,
+                    service_account_roles: None,
+                    federation_identity: None,
                 },
                 Some(SiloAuthnPolicy::try_from(&*DEFAULT_SILO).unwrap()),
             ),
@@ -304,8 +330,10 @@ impl Context {
             kind: Kind::Authenticated(
                 Details {
                     actor: Actor::SiloUser { silo_user_id, silo_id },
-                    device_token_expiration: None,
+                    token_expiration: None,
                     credential_id: None,
+                    service_account_roles: None,
+                    federation_identity: None,
                 },
                 Some(silo_authn_policy),
             ),
@@ -320,8 +348,10 @@ impl Context {
             kind: Kind::Authenticated(
                 Details {
                     actor: Actor::Scim { silo_id },
-                    device_token_expiration: None,
+                    token_expiration: None,
                     credential_id: None,
+                    service_account_roles: None,
+                    federation_identity: None,
                 },
                 // This should never be non-empty, we don't want the SCIM user
                 // to ever have associated roles.
@@ -445,14 +475,17 @@ enum Kind {
 pub struct Details {
     /// the actor performing the request
     pub actor: Actor,
-    /// When the device token expires. Present only when authenticating via
-    /// a device token. This is a slightly awkward fit but is included here
-    /// because we need to use this to clamp the expiration time when device
-    /// tokens are confirmed using an existing device token.
-    pub device_token_expiration: Option<DateTime<Utc>>,
+    /// When the authenticating token expires.
+    #[serde(alias = "device_token_expiration")]
+    pub token_expiration: Option<DateTime<Utc>>,
     /// ID of the credential used to authenticate (session ID, access token ID,
     /// or SCIM token ID). Not set for spoof auth or built-in users.
     pub credential_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service_account_roles: Option<authz::RoleSet>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub federation_identity:
+        Option<nexus_types::external_api::audit::FederationIdentity>,
 }
 
 /// Who is performing an operation
@@ -461,6 +494,7 @@ pub enum Actor {
     UserBuiltin { user_builtin_id: BuiltInUserUuid },
     SiloUser { silo_user_id: SiloUserUuid, silo_id: Uuid },
     Scim { silo_id: Uuid },
+    ServiceAccountSession { service_account_id: Uuid, silo_id: Uuid },
 }
 
 impl Actor {
@@ -468,7 +502,8 @@ impl Actor {
         match self {
             Actor::UserBuiltin { .. } => None,
             Actor::SiloUser { silo_id, .. } => Some(*silo_id),
-            Actor::Scim { silo_id } => Some(*silo_id),
+            Actor::Scim { silo_id }
+            | Actor::ServiceAccountSession { silo_id, .. } => Some(*silo_id),
         }
     }
 
@@ -476,7 +511,7 @@ impl Actor {
         match self {
             Actor::UserBuiltin { .. } => None,
             Actor::SiloUser { silo_user_id, .. } => Some(*silo_user_id),
-            Actor::Scim { .. } => None,
+            Actor::Scim { .. } | Actor::ServiceAccountSession { .. } => None,
         }
     }
 
@@ -484,7 +519,7 @@ impl Actor {
         match self {
             Actor::UserBuiltin { user_builtin_id } => Some(*user_builtin_id),
             Actor::SiloUser { .. } => None,
-            Actor::Scim { .. } => None,
+            Actor::Scim { .. } | Actor::ServiceAccountSession { .. } => None,
         }
     }
 
@@ -503,6 +538,7 @@ impl Actor {
                 silo_user_id.into_untyped_uuid(),
                 nexus_db_model::IdentityType::SiloUser,
             )),
+            Actor::ServiceAccountSession { .. } => None,
             // a role assignment for this Actor is invalid, they have a fixed
             // policy.
             Actor::Scim { .. } => None,
@@ -520,6 +556,11 @@ impl std::fmt::Debug for Actor {
         // Do NOT include sensitive fields (e.g., private key or a bearer
         // token) in this output!
         match self {
+            Actor::ServiceAccountSession { service_account_id, silo_id } => f
+                .debug_struct("Actor::ServiceAccountSession")
+                .field("service_account_id", service_account_id)
+                .field("silo_id", silo_id)
+                .finish_non_exhaustive(),
             Actor::UserBuiltin { user_builtin_id } => f
                 .debug_struct("Actor::UserBuiltin")
                 .field("user_builtin_id", &user_builtin_id)

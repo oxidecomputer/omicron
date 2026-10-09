@@ -10,9 +10,14 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::{DateTime, Duration, Utc};
 use diesel::prelude::*;
 use nexus_db_errors::{ErrorHandler, OptionalError, public_error_from_diesel};
-use nexus_db_model::ServiceAccountToken;
+use nexus_db_model::{
+    ServiceAccount, ServiceAccountGrant, ServiceAccountToken,
+};
 use nexus_db_schema::schema::service_account;
 use nexus_db_schema::schema::service_account_token::dsl;
+use nexus_db_schema::schema::{
+    federation_identity_provider, project, service_account_grant, silo,
+};
 use nexus_types::external_api::{
     service_account as account, service_account_token as api,
 };
@@ -50,6 +55,83 @@ fn token_expiration(
 }
 
 impl DataStore {
+    pub async fn service_account_token_fetch_for_authn(
+        &self,
+        opctx: &OpContext,
+        token: String,
+    ) -> Result<
+        Option<(ServiceAccountToken, Uuid, Vec<ServiceAccountGrant>)>,
+        Error,
+    > {
+        opctx
+            .authorize(
+                authz::Action::CreateChild,
+                &authz::SERVICE_ACCOUNT_TOKEN_LIST,
+            )
+            .await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        self.transaction_retry_wrapper("service_account_token_fetch_for_authn")
+            .transaction(&conn, |conn| {
+                let token = token.clone();
+                async move {
+                    let now = Utc::now();
+                    let found = dsl::service_account_token
+                        .inner_join(service_account::table.on(service_account::id.eq(dsl::service_account_id)))
+                        .filter(dsl::token.eq(token))
+                        .filter(dsl::time_deleted.is_null())
+                        .filter(dsl::time_expires.is_null().or(dsl::time_expires.gt(now)))
+                        .filter(service_account::time_deleted.is_null())
+                        .select((ServiceAccountToken::as_select(), ServiceAccount::as_select()))
+                        .first_async::<(ServiceAccountToken, ServiceAccount)>(&conn)
+                        .await.optional()?;
+                    let Some((mut token, account)) = found else { return Ok(None); };
+                    let silo_id = match account.scope.as_str() {
+                        "silo" => account.resource_id,
+                        "project" => {
+                            let parent = project::table
+                                .filter(project::id.eq(account.resource_id))
+                                .filter(project::time_deleted.is_null())
+                                .select(project::silo_id)
+                                .first_async::<Uuid>(&conn).await.optional()?;
+                            let Some(silo_id) = parent else { return Ok(None); };
+                            silo_id
+                        }
+                        _ => return Ok(None),
+                    };
+                    let live_silo = diesel::select(diesel::dsl::exists(
+                        silo::table.filter(silo::id.eq(silo_id)).filter(silo::time_deleted.is_null())
+                    )).get_result_async::<bool>(&conn).await?;
+                    if !live_silo { return Ok(None); }
+                    match (token.idp_id, token.federation_generation, token.federation_jwt_claims.as_ref()) {
+                        (None, None, None) => {}
+                        (Some(idp_id), Some(generation), Some(_)) => {
+                            if account.identity_provider_id != Some(idp_id)
+                                || account.trust_policy.is_none()
+                                || generation != i64::from(&account.federation_generation.0)
+                                || token.time_expires.is_none()
+                            { return Ok(None); }
+                            let live_provider = diesel::select(diesel::dsl::exists(
+                                federation_identity_provider::table
+                                    .filter(federation_identity_provider::id.eq(idp_id))
+                                    .filter(federation_identity_provider::silo_id.eq(silo_id))
+                                    .filter(federation_identity_provider::time_deleted.is_null())
+                            )).get_result_async::<bool>(&conn).await?;
+                            if !live_provider { return Ok(None); }
+                        }
+                        _ => return Ok(None),
+                    }
+                    let grants = service_account_grant::table
+                        .filter(service_account_grant::service_account_id.eq(account.id()))
+                        .select(ServiceAccountGrant::as_select())
+                        .load_async(&conn).await?;
+                    diesel::update(dsl::service_account_token.filter(dsl::id.eq(token.id)))
+                        .set(dsl::time_last_used.eq(now)).execute_async(&conn).await?;
+                    token.time_last_used = now;
+                    Ok(Some((token, silo_id, grants)))
+                }
+            }).await.map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
     pub async fn service_account_token_create(
         &self,
         opctx: &OpContext,

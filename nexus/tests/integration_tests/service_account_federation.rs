@@ -44,7 +44,7 @@ type ControlPlaneTestContext =
 struct TestClaims(serde_json::Map<String, Value>);
 impl AdditionalClaims for TestClaims {}
 
-fn signing_key() -> (CoreRsaPrivateSigningKey, Value) {
+pub(super) fn signing_key() -> (CoreRsaPrivateSigningKey, Value) {
     let pair = openssl::rsa::Rsa::generate(2048).unwrap();
     let pem = String::from_utf8(pair.private_key_to_pem().unwrap()).unwrap();
     let key = CoreRsaPrivateSigningKey::from_pem(
@@ -56,7 +56,7 @@ fn signing_key() -> (CoreRsaPrivateSigningKey, Value) {
     (key, serde_json::to_value(keys).unwrap())
 }
 
-fn signed(key: &CoreRsaPrivateSigningKey, claims: &Value) -> String {
+pub(super) fn signed(key: &CoreRsaPrivateSigningKey, claims: &Value) -> String {
     IdToken::<
         TestClaims,
         CoreGenderClaim,
@@ -73,18 +73,18 @@ fn signed(key: &CoreRsaPrivateSigningKey, claims: &Value) -> String {
     .to_string()
 }
 
-fn claims() -> Value {
+pub(super) fn claims() -> Value {
     let now = Utc::now().timestamp();
     json!({"iss": "https://issuer.example", "aud": ["oxide"], "sub": "builder",
         "iat": now, "exp": now + 600,
         "my_idp": {"custom_claims": {"project_id": "build-project"}}})
 }
 
-fn federation(ttl: u32) -> Value {
+pub(super) fn federation(ttl: u32) -> Value {
     json!({"identity_provider": "gcp", "policy": POLICY, "max_ttl_seconds": ttl})
 }
 
-async fn provider(
+pub(super) async fn provider(
     client: &ClientTestContext,
     owner: &AuthnMode,
     keys: Value,
@@ -96,7 +96,7 @@ async fn provider(
     created["id"].as_str().unwrap().parse().unwrap()
 }
 
-async fn exchange(
+pub(super) async fn exchange(
     client: &ClientTestContext,
     host: &str,
     url: &str,

@@ -16,6 +16,7 @@ use std::borrow::Borrow;
 use uuid::Uuid;
 
 pub mod scim;
+pub mod service_account;
 pub mod session_cookie;
 pub mod spoof;
 pub mod token;
@@ -235,8 +236,10 @@ mod test {
             match self.next.load(Ordering::SeqCst) {
                 SKIP => SchemeResult::NotRequested,
                 OK => SchemeResult::Authenticated(authn::Details {
+                    service_account_roles: None,
+                    federation_identity: None,
                     actor: self.actor,
-                    device_token_expiration: None,
+                    token_expiration: None,
                     credential_id: None,
                 }),
                 FAIL => SchemeResult::Failed(Reason::BadCredentials {

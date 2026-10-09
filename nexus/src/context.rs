@@ -152,6 +152,9 @@ impl ServerContext {
                     }
                     SchemeName::AccessToken => Box::new(HttpAuthnToken),
                     SchemeName::ScimToken => Box::new(HttpAuthnScimToken),
+                    SchemeName::ServiceAccountToken => Box::new(
+                        authn::external::service_account::HttpAuthnServiceAccountToken,
+                    ),
                 },
             )
             .collect();
@@ -521,6 +524,23 @@ impl authn::external::token::TokenContext for ServerContext {
     > {
         let opctx = self.nexus.opctx_external_authn();
         self.nexus.authenticate_token(opctx, token).await
+    }
+}
+
+#[async_trait]
+impl authn::external::service_account::ServiceAccountTokenContext
+    for ServerContext
+{
+    async fn authenticate_service_account_token(
+        &self,
+        token: String,
+    ) -> Result<authn::Details, authn::Reason> {
+        self.nexus
+            .authenticate_service_account_token(
+                self.nexus.opctx_external_authn(),
+                token,
+            )
+            .await
     }
 }
 

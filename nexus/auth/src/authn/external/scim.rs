@@ -69,8 +69,10 @@ where
                 Err(error) => SchemeResult::Failed(error),
                 Ok((actor, token_id)) => SchemeResult::Authenticated(Details {
                     actor,
-                    device_token_expiration: None,
+                    token_expiration: None,
                     credential_id: Some(token_id),
+                    service_account_roles: None,
+                    federation_identity: None,
                 }),
             },
         }

@@ -67,6 +67,14 @@ impl super::Nexus {
             Some(nexus_auth::authn::Actor::Scim { silo_id }) => {
                 AuditLogActor::Scim { silo_id: *silo_id }
             }
+            Some(nexus_auth::authn::Actor::ServiceAccountSession {
+                service_account_id,
+                silo_id,
+            }) => AuditLogActor::ServiceAccount {
+                service_account_id: *service_account_id,
+                silo_id: *silo_id,
+                federation: opctx.authn.federation_identity().cloned(),
+            },
             None => AuditLogActor::Unauthenticated,
         };
 
@@ -125,6 +133,7 @@ impl super::Nexus {
             // cause this method to be called with a built-in user
             AuditLogActor::UserBuiltin { .. }
             | AuditLogActor::SiloUser { .. }
+            | AuditLogActor::ServiceAccount { .. }
             | AuditLogActor::Scim { .. } => {
                 opctx.authn.scheme_used().map(Into::into)
             }

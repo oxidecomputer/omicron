@@ -182,8 +182,10 @@ where
         }
 
         SchemeResult::Authenticated(Details {
+            service_account_roles: None,
+            federation_identity: None,
             actor,
-            device_token_expiration: None,
+            token_expiration: None,
             credential_id: Some(session.id().into_untyped_uuid()),
         })
     }

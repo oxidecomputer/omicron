@@ -67,11 +67,13 @@ where
             Ok(None) => SchemeResult::NotRequested,
             Ok(Some(token)) => match ctx.authenticate_token(token).await {
                 Err(error) => SchemeResult::Failed(error),
-                Ok((actor, device_token_expiration, token_id)) => {
+                Ok((actor, token_expiration, token_id)) => {
                     SchemeResult::Authenticated(Details {
                         actor,
-                        device_token_expiration,
+                        token_expiration,
                         credential_id: Some(token_id),
+                        service_account_roles: None,
+                        federation_identity: None,
                     })
                 }
             },

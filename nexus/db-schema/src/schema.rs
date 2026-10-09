@@ -970,6 +970,8 @@ table! {
     }
 }
 
+allow_tables_to_appear_in_same_query!(service_account, service_account_token);
+
 table! {
     service_account_grant (id) {
         id -> Uuid,
@@ -3243,6 +3245,9 @@ table! {
         result_kind -> Nullable<crate::enums::AuditLogResultKindEnum>,
         auth_method -> Nullable<crate::enums::AuditLogAuthMethodEnum>,
         credential_id -> Nullable<Uuid>,
+        federation_idp_id -> Nullable<Uuid>,
+        federation_iss -> Nullable<Text>,
+        federation_sub -> Nullable<Text>,
     }
 }
 
@@ -3265,6 +3270,9 @@ table! {
         result_kind -> crate::enums::AuditLogResultKindEnum,
         auth_method -> Nullable<crate::enums::AuditLogAuthMethodEnum>,
         credential_id -> Nullable<Uuid>,
+        federation_idp_id -> Nullable<Uuid>,
+        federation_iss -> Nullable<Text>,
+        federation_sub -> Nullable<Text>,
     }
 }
 
