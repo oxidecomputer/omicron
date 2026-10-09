@@ -4,6 +4,7 @@
 
 //! API for controlling multiple instances on a sled.
 
+use crate::instance;
 use crate::instance::Instance;
 use crate::instance::VmmStateOwner;
 use crate::metrics::MetricsRequestQueue;
@@ -29,7 +30,6 @@ use sled_agent_types::instance::*;
 use sled_agent_types::inventory::InstanceManagerStatus;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
-use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
@@ -267,8 +267,13 @@ impl InstanceManager {
             })
             .await
             .map_err(|_| Error::FailedSendInstanceManagerClosed)?;
-        let terminated = rx.await?;
-        Ok(terminated.await)
+        match rx.await? {
+            // No VMM with the requested `propolis_id` was found, so send an
+            // empty state back.
+            None => Ok(VmmUnregisterResponse { updated_runtime: None }),
+            // We got the instance terminator, wait for it to complete.
+            Some(terminator) => Ok(terminator.terminated().await),
+        }
     }
 
     pub async fn ensure_state(
@@ -524,7 +529,11 @@ enum InstanceManagerRequest {
     },
     EnsureUnregistered {
         propolis_id: PropolisUuid,
-        tx: oneshot::Sender<UnregisterFuture>,
+        // The response to the `EnsureUnregistered` request is either the
+        // instance's `Terminator`, which can be used to await the completion of
+        // the termination request, or `None`, if no VMM with the targeted
+        // `propolis_id` exists.
+        tx: oneshot::Sender<Option<Arc<instance::Terminator>>>,
     },
     EnsureState {
         propolis_id: PropolisUuid,
@@ -585,10 +594,6 @@ enum InstanceManagerRequest {
         tx: oneshot::Sender<Result<(), Error>>,
     },
 }
-
-type UnregisterFuture = Pin<
-    Box<dyn Future<Output = VmmUnregisterResponse> + Send + Sync + 'static>,
->;
 
 // Requests that the instance manager stop processing information about a
 // particular instance.
@@ -921,23 +926,21 @@ impl InstanceManagerRunner {
     /// zone is rudely terminated.
     fn ensure_unregistered(
         &mut self,
-        tx: oneshot::Sender<UnregisterFuture>,
+        tx: oneshot::Sender<Option<Arc<instance::Terminator>>>,
         propolis_id: PropolisUuid,
     ) -> Result<(), Error> {
-        // If the instance does not exist, we response immediately.
+        // If the instance does not exist, we respond immediately.
         let Some(instance) = self.get_propolis(propolis_id) else {
-            tx.send(Box::pin(async {
-                VmmUnregisterResponse { updated_runtime: None }
-            }))
-            .map_err(|_| Error::FailedSendClientClosed)?;
+            tx.send(None).map_err(|_| Error::FailedSendClientClosed)?;
             return Ok(());
         };
 
-        // Otherwise, request that the instance terminate, and send back a future that awaits the completion of the termination request.
+        // Otherwise, request that the instance terminate, and send back the
+        // terminator so that the caller can wait for the instance to finish
+        // terminating.
         let terminator =
             instance.terminate(&self.log, VmmStateOwner::Nexus).clone();
-        tx.send(Box::pin(terminator.terminated()))
-            .map_err(|_| Error::FailedSendClientClosed)?;
+        tx.send(Some(terminator)).map_err(|_| Error::FailedSendClientClosed)?;
         Ok(())
     }
 
