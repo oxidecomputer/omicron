@@ -29,6 +29,7 @@ use sled_agent_types::instance::*;
 use sled_agent_types::inventory::InstanceManagerStatus;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
+use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
@@ -266,7 +267,8 @@ impl InstanceManager {
             })
             .await
             .map_err(|_| Error::FailedSendInstanceManagerClosed)?;
-        rx.await?
+        let terminated = rx.await?;
+        Ok(terminated.await)
     }
 
     pub async fn ensure_state(
@@ -522,7 +524,7 @@ enum InstanceManagerRequest {
     },
     EnsureUnregistered {
         propolis_id: PropolisUuid,
-        tx: oneshot::Sender<Result<VmmUnregisterResponse, Error>>,
+        tx: oneshot::Sender<UnregisterFuture>,
     },
     EnsureState {
         propolis_id: PropolisUuid,
@@ -583,6 +585,10 @@ enum InstanceManagerRequest {
         tx: oneshot::Sender<Result<(), Error>>,
     },
 }
+
+type UnregisterFuture = Pin<
+    Box<dyn Future<Output = VmmUnregisterResponse> + Send + Sync + 'static>,
+>;
 
 // Requests that the instance manager stop processing information about a
 // particular instance.
@@ -915,19 +921,23 @@ impl InstanceManagerRunner {
     /// zone is rudely terminated.
     fn ensure_unregistered(
         &mut self,
-        tx: oneshot::Sender<Result<VmmUnregisterResponse, Error>>,
+        tx: oneshot::Sender<UnregisterFuture>,
         propolis_id: PropolisUuid,
     ) -> Result<(), Error> {
         // If the instance does not exist, we response immediately.
         let Some(instance) = self.get_propolis(propolis_id) else {
-            tx.send(Ok(VmmUnregisterResponse { updated_runtime: None }))
-                .map_err(|_| Error::FailedSendClientClosed)?;
+            tx.send(Box::pin(async {
+                VmmUnregisterResponse { updated_runtime: None }
+            }))
+            .map_err(|_| Error::FailedSendClientClosed)?;
             return Ok(());
         };
 
-        // Otherwise, we pipeline the request, and send it to the instance,
-        // where it can receive an appropriate response.
-        instance.terminate(tx, VmmStateOwner::Nexus);
+        // Otherwise, request that the instance terminate, and send back a future that awaits the completion of the termination request.
+        let terminator =
+            instance.terminate(&self.log, VmmStateOwner::Nexus).clone();
+        tx.send(Box::pin(terminator.terminated()))
+            .map_err(|_| Error::FailedSendClientClosed)?;
         Ok(())
     }
 
@@ -1093,17 +1103,12 @@ impl InstanceManagerRunner {
                     "use_only_these_disks: Terminating instance";
                     "instance_id" => ?id,
                 );
-                let (tx, rx) = oneshot::channel();
-                instance.terminate(tx, VmmStateOwner::Runner);
-
-                if let Err(e) = rx.await {
-                    warn!(
-                        self.log,
-                        "use_only_these_disks: \
-                         Failed while terminating instance";
-                        InlineErrorChain::new(&e),
-                    );
-                }
+                // Note that we do *not* need to await the completion of the
+                // termination request here. It has been successfully signalled,
+                // so the VMM will terminate eventually. We can now go on with
+                // our lives and terminate any other instances without awaiting
+                // the completion of the termination request.
+                instance.terminate(&self.log, VmmStateOwner::Runner);
             }
         }
     }

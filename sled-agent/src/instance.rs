@@ -54,7 +54,7 @@ use std::ops::ControlFlow;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{mpsc, oneshot, watch};
+use tokio::sync::{SetOnce, mpsc, oneshot};
 use uuid::Uuid;
 
 // The depth of the request queue for the instance.
@@ -515,18 +515,30 @@ struct InstanceMonitorMessage {
     tx: oneshot::Sender<ControlFlow<()>>,
 }
 
-struct Killswitch(watch::Receiver<Option<VmmStateOwner>>);
+pub(crate) struct Terminator {
+    /// Set when termination of the VMM is requested.
+    signalled: SetOnce<VmmStateOwner>,
+    /// Set with the final state of the VMM once termination has completed.
+    completed: SetOnce<VmmUnregisterResponse>,
+}
 
-impl Killswitch {
-    async fn engaged(
-        &mut self,
-    ) -> Result<VmmStateOwner, watch::error::RecvError> {
-        loop {
-            if let Some(new_owner) = *(self.0.borrow_and_update()) {
-                return Ok(new_owner);
-            }
-            self.0.changed().await?;
-        }
+impl Terminator {
+    fn new() -> Arc<Self> {
+        Arc::new(Terminator {
+            signalled: SetOnce::new(),
+            completed: SetOnce::new(),
+        })
+    }
+
+    /// Wait for a request to terminate the instance, returning the new
+    /// [`VmmStateOwner`].
+    async fn should_terminate(&self) -> VmmStateOwner {
+        *(self.signalled.wait().await)
+    }
+
+    /// Await the completion of a request to terminate the instance.
+    pub(crate) async fn terminated(self: Arc<Self>) -> VmmUnregisterResponse {
+        self.completed.wait().await.clone()
     }
 }
 
@@ -602,7 +614,8 @@ struct InstanceRunner {
     // Subnets attached to this instance.
     attached_subnets: IdOrdMap<AttachedSubnet>,
 
-    terminate_done_tx: watch::Sender<Option<VmmUnregisterResponse>>,
+    // Requests that the VMM terminate and publishes the result.
+    terminator: Arc<Terminator>,
 }
 
 impl InstanceRunner {
@@ -610,13 +623,13 @@ impl InstanceRunner {
     /// terminating the zone.
     const STOP_GRACE_PERIOD: Duration = Duration::from_secs(60 * 10);
 
-    async fn run(
-        mut self,
-        mut killswitch: Killswitch,
-        mut ticket: InstanceTicket,
-    ) {
+    async fn run(mut self, mut ticket: InstanceTicket) {
         use InstanceRequest::*;
 
+        // Clone the arc around the terminator so that we can await the
+        // termination signal even while running an async function that mutably
+        // borrows `self`, below.
+        let terminator = self.terminator.clone();
         let mut state_owner = VmmStateOwner::Runner;
 
         // Timeout for stopping the instance gracefully.
@@ -678,43 +691,13 @@ impl InstanceRunner {
 
                 // Requests to terminate the instance take priority over any
                 // other request to the instance.
-                result = killswitch.engaged() => {
-                    state_owner = match result {
-                        Ok(new_owner) => {
-                            info!(
-                                self.log,
-                                "Received request to terminate instance";
-                            );
-                            new_owner
-                        },
-                        Err(_) => {
-                            // This path shouldn't be reachable (as of this
-                            // writing): it requires the sender side of the
-                            // runner's `terminate_rx` to be dropped; this is
-                            // owned by the runner's corresponding Instance; the
-                            // instance is only removed from its InstanceManager
-                            // in response to the instance ticket being dropped;
-                            // and the instance ticket isn't dropped until the
-                            // runner exits, which by definition hasn't happened
-                            // if the runner is still selecting on its
-                            // termination receiver.
-                            //
-                            // This logic relies on an assumption about
-                            // non-local code (specifically that the instance
-                            // manager has no way to drop an Instance without
-                            // its ticket being dropped), so defensively drive
-                            // the instance into a terminal state here anyway.
-                            // (If the instance manager shutdown sequence wants
-                            // different behavior it can send an explicit
-                            // termination request.)
-                            warn!(
-                                self.log,
-                                "Instance termination request channel closed; \
-                                 shutting down";
-                            );
-                            VmmStateOwner::Runner
-                        }
-                    };
+                new_owner = terminator.should_terminate() => {
+                    state_owner = new_owner;
+                    info!(
+                        self.log,
+                        "Received request to terminate instance";
+                        "new_state_owner" => ?new_owner,
+                    );
                     self.fail_vmm_and_terminate().await;
                     break;
                 }
@@ -837,49 +820,15 @@ impl InstanceRunner {
                     tokio::select! {
                         biased;
 
-                        result = killswitch.engaged() => {
-                            state_owner = match result {
-                                Ok(new_owner) => {
-                                    info!(
-                                        self.log,
-                                        "Received request to terminate \
-                                         instance while waiting on an ongoing \
-                                         request";
-                                        "request" => %request_variant,
-                                    );
-                                    new_owner
-                                },
-                                Err(_) => {
-                                    // This path shouldn't be reachable (as of
-                                    // this writing): it requires the sender
-                                    // side of the runner's `terminate_rx` to be
-                                    // dropped; this is owned by the runner's
-                                    // corresponding Instance; the instance is
-                                    // only removed from its InstanceManager in
-                                    // response to the instance ticket being
-                                    // dropped; and the instance ticket isn't
-                                    // dropped until the runner exits, which by
-                                    // definition hasn't happened if the runner
-                                    // is still selecting on its termination
-                                    // receiver.
-                                    //
-                                    // This logic relies on an assumption about
-                                    // non-local code (specifically that the
-                                    // instance manager has no way to drop an
-                                    // Instance without its ticket being
-                                    // dropped), so defensively drive the
-                                    // instance into a terminal state here
-                                    // anyway. (If the instance manager shutdown
-                                    // sequence wants different behavior it can
-                                    // send an explicit termination request.)
-                                    warn!(
-                                        self.log,
-                                        "Instance termination request channel \
-                                         closed; shutting down";
-                                    );
-                                    VmmStateOwner::Runner
-                                }
-                            };
+                        new_owner = terminator.should_terminate() => {
+                            state_owner = new_owner;
+                            info!(
+                                self.log,
+                                "Received request to terminate instance while \
+                                 waiting on an ongoing request";
+                                "request" => %request_variant,
+                                "new_state_owner" => ?new_owner,
+                            );
                             self.fail_vmm_and_terminate().await;
                             break;
                         }
@@ -1849,15 +1798,8 @@ pub struct Instance {
     /// loop.
     tx: mpsc::Sender<InstanceRequest>,
 
-    /// Sender for requests to terminate the instance.
-    ///
-    /// These are sent over a separate channel so that they can be prioritized
-    /// over all other requests to the instance.
-    ///
-    /// While the value inside this `watch` channel is `None`, the VMM process
-    /// should not terminate.
-    terminate_tx: watch::Sender<Option<VmmStateOwner>>,
-    terminate_done_rx: watch::Receiver<Option<VmmUnregisterResponse>>,
+    /// Requests that the instance terminates and awaits termination.
+    terminator: Arc<Terminator>,
 
     /// This is reference-counted so that the `Instance` struct may be cloned.
     #[allow(dead_code)]
@@ -1958,19 +1900,8 @@ impl Instance {
         let (tx, rx) = mpsc::channel(QUEUE_SIZE);
         let (tx_monitor, rx_monitor) = mpsc::channel(1);
 
-        // Request channel for terminating the instance.
-        //
-        // This is a separate channel from the main request channel (`self.rx`)
-        // because we would like to be able to prioritize requests to terminate, and
-        // handle them even when the instance's main request channel may have filled
-        // up.
-        //
-        // Note also that this is *not* part of the `InstanceRunner` struct,
-        // because it's necessary to split mutable borrows in order to allow
-        // selecting between the actual instance operation (which must mutate
-        // the `InstanceRunner`) and awaiting a termination request.
-        let (terminate_tx, terminate_rx) = watch::channel(None);
-        let (terminate_done_tx, terminate_done_rx) = watch::channel(None);
+        // Construct the termination signal and response channel.
+        let terminator = Terminator::new();
 
         let metadata = propolis_client::instance_spec::InstanceMetadata {
             project_id: metadata.project_id,
@@ -2014,19 +1945,16 @@ impl Instance {
             metrics_queue,
             delegated_zvols: local_config.delegated_zvols,
             attached_subnets: IdOrdMap::new(),
-            terminate_done_tx,
+            terminator: terminator.clone(),
         };
 
-        let runner_handle = tokio::task::spawn(async move {
-            runner.run(Killswitch(terminate_rx), ticket).await
-        });
+        let runner_handle = tokio::task::spawn(runner.run(ticket));
 
         Ok(Instance {
             id,
             tx,
             runner_handle: Arc::new(runner_handle),
-            terminate_tx,
-            terminate_done_rx,
+            terminator,
         })
     }
 
@@ -2074,41 +2002,23 @@ impl Instance {
     }
 
     /// Rudely terminates this instance's Propolis (if it has one) and
-    /// immediately transitions the instance to the Destroyed state.
+    /// immediately transitions the instance to the Destroyed state. This
+    /// returns the [`Terminator`], which may be used to await the termination
+    /// of the VMM..
     pub fn terminate(
         &self,
-        tx: oneshot::Sender<Result<VmmUnregisterResponse, ManagerError>>,
+        log: &Logger,
         new_state_owner: VmmStateOwner,
-    ) {
-        self.terminate_tx.send_if_modified(|current| {
-            if current.is_some() {
-                return false;
-            }
-            *current = Some(new_state_owner);
-            true
-        });
-        let mut rx = self.terminate_done_rx.clone();
-        tokio::spawn(async move {
-            // wait for it to finish shutting down...
-            loop {
-                // ensure the borrow is dropped before awaiting.
-                {
-                    let current = rx.borrow_and_update();
-                    if let Some(ref rsp) = *current {
-                        let _ = tx.send(Ok(rsp.clone())); // XXX eliza probly should log
-                        break;
-                    }
-                }
-                if rx.changed().await.is_err() {
-                    // InstanceRunner is *way* gone, what the hell???
-                    // This really shouldn't happen.
-                    let _ = tx.send(Err(ManagerError::Instance(
-                        Error::FailedSendClientClosed,
-                    )));
-                    break;
-                }
-            }
-        });
+    ) -> &Arc<Terminator> {
+        if self.terminator.signalled.set(new_state_owner).is_err() {
+            debug!(
+                log,
+                "Requested instance termination, but the instance is already \
+                 terminating...";
+                "instance_id" => %self.id,
+            );
+        }
+        &self.terminator
     }
 
     pub fn issue_snapshot_request(
@@ -2581,9 +2491,20 @@ impl InstanceRunner {
         self.should_terminate = true;
         // Make sure everyone who was waiting on us to go die knows we have
         // obliged!
-        self.terminate_done_tx.send_replace(Some(VmmUnregisterResponse {
-            updated_runtime: Some(self.current_state()),
-        }));
+        if self
+            .terminator
+            .completed
+            .set(VmmUnregisterResponse {
+                updated_runtime: Some(self.current_state()),
+            })
+            .is_err()
+        {
+            warn!(
+                self.log,
+                "Tried to publish VMM state after terminating the instance, \
+                 but it seems to have already terminated?"
+            );
+        }
     }
 
     async fn issue_snapshot_request(
