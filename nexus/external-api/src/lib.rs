@@ -88,6 +88,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_10_09_00, SERVICE_ACCOUNT_TOKENS),
     (2026_10_08_00, SERVICE_ACCOUNTS),
     (2026_09_22_00, FEDERATION_IDENTITY_PROVIDERS),
     (2026_09_15_00, REMOVE_SILO_DISCOVERABLE),
@@ -911,6 +912,57 @@ pub trait NexusExternalApi {
     async fn service_account_delete(
         rqctx: RequestContext<Self::Context>,
         path: Path<latest::service_account::ServiceAccountPath>,
+        query: Query<latest::service_account::ServiceAccountParentSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// List service account tokens
+    #[endpoint {
+        method = GET,
+        path = "/v1/service-accounts/{scope}/{service_account}/tokens",
+        tags = ["service-accounts"],
+        versions = VERSION_SERVICE_ACCOUNT_TOKENS..,
+    }]
+    async fn service_account_token_list(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::service_account::ServiceAccountPath>,
+        query: Query<
+            PaginatedById<
+                latest::service_account::ServiceAccountParentSelector,
+            >,
+        >,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<latest::service_account_token::ServiceAccountToken>,
+        >,
+        HttpError,
+    >;
+
+    /// Fetch service account token metadata
+    #[endpoint {
+        method = GET,
+        path = "/v1/service-accounts/{scope}/{service_account}/tokens/{token_id}",
+        tags = ["service-accounts"],
+        versions = VERSION_SERVICE_ACCOUNT_TOKENS..,
+    }]
+    async fn service_account_token_view(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::service_account_token::ServiceAccountTokenPath>,
+        query: Query<latest::service_account::ServiceAccountParentSelector>,
+    ) -> Result<
+        HttpResponseOk<latest::service_account_token::ServiceAccountToken>,
+        HttpError,
+    >;
+
+    /// Revoke service account token
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/service-accounts/{scope}/{service_account}/tokens/{token_id}",
+        tags = ["service-accounts"],
+        versions = VERSION_SERVICE_ACCOUNT_TOKENS..,
+    }]
+    async fn service_account_token_delete(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::service_account_token::ServiceAccountTokenPath>,
         query: Query<latest::service_account::ServiceAccountParentSelector>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 

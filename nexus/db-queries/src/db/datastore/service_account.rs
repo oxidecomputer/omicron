@@ -359,6 +359,28 @@ async fn account_parent(
 }
 
 impl DataStore {
+    pub(super) async fn service_account_lookup_for(
+        &self,
+        opctx: &OpContext,
+        path: api::ServiceAccountPath,
+        selector: api::ServiceAccountParentSelector,
+        action: authz::Action,
+    ) -> Result<ServiceAccount, Error> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let parent = account_parent(
+            &conn,
+            opctx,
+            path.scope,
+            &selector,
+            &path.service_account,
+        )
+        .await?;
+        parent.authorize(opctx, action).await?;
+        fetch_account(&conn, &parent, &path.service_account).await.map_err(
+            |e| public_error_from_diesel(e, not_found(&path.service_account)),
+        )
+    }
+
     pub async fn service_account_create(
         &self,
         opctx: &OpContext,

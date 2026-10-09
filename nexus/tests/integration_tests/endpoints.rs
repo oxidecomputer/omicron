@@ -1848,6 +1848,21 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 ],
             },
             VerifyEndpoint {
+                url: "/v1/service-accounts/silo/00000000-0000-0000-0000-000000000000/tokens",
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::GetNonexistent],
+            },
+            VerifyEndpoint {
+                url: "/v1/service-accounts/silo/00000000-0000-0000-0000-000000000000/tokens/00000000-0000-0000-0000-000000000000",
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::GetNonexistent,
+                    AllowedMethod::Delete,
+                ],
+            },
+            VerifyEndpoint {
                 url: "/v1/federation/inbound/identity-providers",
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,

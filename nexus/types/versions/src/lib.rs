@@ -115,3 +115,5 @@ pub mod v2026_09_22_00;
 
 #[path = "service_accounts/mod.rs"]
 pub mod v2026_10_08_00;
+#[path = "service_account_tokens/mod.rs"]
+pub mod v2026_10_09_00;

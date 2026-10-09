@@ -956,6 +956,21 @@ table! {
 }
 
 table! {
+    service_account_token (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_last_used -> Timestamptz,
+        service_account_id -> Uuid,
+        token -> Text,
+        idp_id -> Nullable<Uuid>,
+        federation_jwt_claims -> Nullable<Jsonb>,
+        federation_generation -> Nullable<Int8>,
+        time_expires -> Nullable<Timestamptz>,
+        time_deleted -> Nullable<Timestamptz>,
+    }
+}
+
+table! {
     service_account_grant (id) {
         id -> Uuid,
         service_account_id -> Uuid,

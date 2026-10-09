@@ -852,6 +852,7 @@ pub enum ResourceType {
     ExternalSubnet,
     FederationIdentityProvider,
     ServiceAccount,
+    ServiceAccountToken,
     Fleet,
     FloatingIp,
     IdentityProvider,

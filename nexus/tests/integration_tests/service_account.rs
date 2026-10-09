@@ -682,3 +682,322 @@ async fn test_service_account_authorization(
     request(client, &authn, Method::DELETE, &url, None, StatusCode::FORBIDDEN)
         .await;
 }
+
+#[nexus_test]
+async fn test_service_account_token_management(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    use async_bb8_diesel::AsyncRunQueryDsl;
+    use chrono::{Duration, Utc};
+    use diesel::prelude::*;
+    use nexus_db_model::ServiceAccountToken;
+    use nexus_db_schema::schema::service_account_token::dsl;
+    use nexus_types::external_api::policy::ProjectRole;
+    use nexus_types::external_api::silo::Silo;
+
+    let client = &cptestctx.external_client;
+    let (silo_id, owner) = admin(client, "owner").await;
+    let (_, outsider) = admin(client, "other").await;
+    let project_id = project(client, &owner, "one").await;
+    let silo: Silo = request(
+        client,
+        &AuthnMode::PrivilegedUser,
+        Method::GET,
+        &format!("/v1/system/silos/{silo_id}"),
+        None,
+        StatusCode::OK,
+    )
+    .await
+    .parsed_body()
+    .unwrap();
+    let conn = cptestctx
+        .server
+        .server_context()
+        .nexus
+        .datastore()
+        .pool_connection_for_tests()
+        .await
+        .unwrap();
+
+    for (scope, parent) in [("silo", silo_id), ("project", project_id)] {
+        let mut actors = Vec::new();
+        for is_admin in [false, true] {
+            let name = format!(
+                "{scope}-{}",
+                if is_admin { "admin" } else { "viewer" }
+            );
+            let user = create_local_user(
+                client,
+                &silo,
+                &name.parse().unwrap(),
+                test_params::UserPassword::LoginDisallowed,
+            )
+            .await;
+            if scope == "silo" {
+                grant_iam(
+                    client,
+                    &format!("/v1/system/silos/{parent}"),
+                    if is_admin { SiloRole::Admin } else { SiloRole::Viewer },
+                    user.id,
+                    AuthnMode::PrivilegedUser,
+                )
+                .await;
+            } else {
+                grant_iam(
+                    client,
+                    &format!("/v1/projects/{parent}"),
+                    if is_admin {
+                        ProjectRole::Admin
+                    } else {
+                        ProjectRole::Viewer
+                    },
+                    user.id,
+                    owner.clone(),
+                )
+                .await;
+            }
+            actors.push(AuthnMode::SiloUser(user.id));
+        }
+        let viewer = &actors[0];
+        let manager = &actors[1];
+        let mut accounts = Vec::new();
+        for name in ["reader", "other"] {
+            let mut body = params(scope, parent);
+            body["name"] = json!(name);
+            let account: Value = request(
+                client,
+                &owner,
+                Method::POST,
+                &format!("{URL}/{scope}?{scope}={parent}"),
+                Some(&body),
+                StatusCode::CREATED,
+            )
+            .await
+            .parsed_body()
+            .unwrap();
+            accounts
+                .push(account["id"].as_str().unwrap().parse::<Uuid>().unwrap());
+        }
+        let account_id = accounts[0];
+        let other_id = accounts[1];
+        let now = Utc::now();
+        let mut tokens = Vec::new();
+        for (index, account) in [account_id, account_id, account_id, other_id]
+            .into_iter()
+            .enumerate()
+        {
+            let token_id = Uuid::new_v4();
+            tokens.push(ServiceAccountToken {
+                id: token_id,
+                time_created: now,
+                time_last_used: now,
+                service_account_id: account,
+                token: token_id.simple().to_string(),
+                idp_id: Some(Uuid::new_v4()),
+                federation_jwt_claims: Some(
+                    json!({"sub": "external-subject", "custom": true}),
+                ),
+                federation_generation: Some(1),
+                time_expires: Some(if index == 1 {
+                    now - Duration::hours(1)
+                } else {
+                    now + Duration::hours(1)
+                }),
+                time_deleted: (index == 2).then_some(now),
+            });
+        }
+        diesel::insert_into(dsl::service_account_token)
+            .values(tokens.clone())
+            .execute_async(&*conn)
+            .await
+            .unwrap();
+        let collection = format!("{URL}/{scope}/{account_id}/tokens");
+        let named = format!("{URL}/{scope}/reader/tokens?{scope}={parent}");
+        for actor in [viewer, manager] {
+            for url in [&collection, &named] {
+                let page: Value = request(
+                    client,
+                    actor,
+                    Method::GET,
+                    url,
+                    None,
+                    StatusCode::OK,
+                )
+                .await
+                .parsed_body()
+                .unwrap();
+                let items = page["items"].as_array().unwrap();
+                assert_eq!(items.len(), 2);
+                for token in &tokens[..2] {
+                    let item = items
+                        .iter()
+                        .find(|item| item["id"] == token.id.to_string())
+                        .unwrap();
+                    assert_eq!(item.as_object().unwrap().len(), 4);
+                    let fetched: Value = request(
+                        client,
+                        actor,
+                        Method::GET,
+                        &format!("{collection}/{}", token.id),
+                        None,
+                        StatusCode::OK,
+                    )
+                    .await
+                    .parsed_body()
+                    .unwrap();
+                    assert_eq!(*item, fetched);
+                }
+            }
+        }
+        let first: Value = request(
+            client,
+            viewer,
+            Method::GET,
+            &format!("{named}&limit=1"),
+            None,
+            StatusCode::OK,
+        )
+        .await
+        .parsed_body()
+        .unwrap();
+        assert_eq!(first["items"].as_array().unwrap().len(), 1);
+        let cursor = first["next_page"].as_str().unwrap();
+        let second: Value = request(
+            client,
+            viewer,
+            Method::GET,
+            &format!("{URL}/{scope}/reader/tokens?page_token={cursor}"),
+            None,
+            StatusCode::OK,
+        )
+        .await
+        .parsed_body()
+        .unwrap();
+        assert_eq!(second["items"].as_array().unwrap().len(), 1);
+        assert_ne!(first["items"][0]["id"], second["items"][0]["id"]);
+        let token_url = format!("{collection}/{}", tokens[0].id);
+        request(
+            client,
+            viewer,
+            Method::DELETE,
+            &token_url,
+            None,
+            StatusCode::FORBIDDEN,
+        )
+        .await;
+        request(
+            client,
+            &outsider,
+            Method::GET,
+            &collection,
+            None,
+            StatusCode::NOT_FOUND,
+        )
+        .await;
+        for method in [Method::GET, Method::DELETE] {
+            request(
+                client,
+                &outsider,
+                method.clone(),
+                &token_url,
+                None,
+                StatusCode::NOT_FOUND,
+            )
+            .await;
+            for token in &tokens[2..] {
+                request(
+                    client,
+                    manager,
+                    method.clone(),
+                    &format!("{collection}/{}", token.id),
+                    None,
+                    StatusCode::NOT_FOUND,
+                )
+                .await;
+            }
+            let wrong_scope = if scope == "silo" { "project" } else { "silo" };
+            request(
+                client,
+                manager,
+                method,
+                &format!(
+                    "{URL}/{wrong_scope}/{account_id}/tokens/{}",
+                    tokens[0].id
+                ),
+                None,
+                StatusCode::NOT_FOUND,
+            )
+            .await;
+        }
+        request(
+            client,
+            manager,
+            Method::DELETE,
+            &token_url,
+            None,
+            StatusCode::NO_CONTENT,
+        )
+        .await;
+        for method in [Method::GET, Method::DELETE] {
+            request(
+                client,
+                manager,
+                method,
+                &token_url,
+                None,
+                StatusCode::NOT_FOUND,
+            )
+            .await;
+        }
+        let row = dsl::service_account_token
+            .filter(dsl::id.eq(tokens[0].id))
+            .select(ServiceAccountToken::as_select())
+            .first_async(&*conn)
+            .await
+            .unwrap();
+        assert!(row.time_deleted.is_some());
+        assert_eq!(row.federation_jwt_claims, tokens[0].federation_jwt_claims);
+        let page: Value = request(
+            client,
+            viewer,
+            Method::GET,
+            &collection,
+            None,
+            StatusCode::OK,
+        )
+        .await
+        .parsed_body()
+        .unwrap();
+        assert_eq!(page["items"].as_array().unwrap().len(), 1);
+        assert_eq!(page["items"][0]["id"], tokens[1].id.to_string());
+        request(
+            client,
+            manager,
+            Method::DELETE,
+            &format!("{URL}/{scope}/{account_id}"),
+            None,
+            StatusCode::NO_CONTENT,
+        )
+        .await;
+        request(
+            client,
+            manager,
+            Method::GET,
+            &collection,
+            None,
+            StatusCode::NOT_FOUND,
+        )
+        .await;
+        for method in [Method::GET, Method::DELETE] {
+            request(
+                client,
+                manager,
+                method,
+                &format!("{collection}/{}", tokens[1].id),
+                None,
+                StatusCode::NOT_FOUND,
+            )
+            .await;
+        }
+    }
+}

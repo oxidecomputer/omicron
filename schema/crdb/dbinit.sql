@@ -9626,6 +9626,32 @@ CREATE INDEX IF NOT EXISTS federation_identity_provider_silo_id
 ON omicron.public.federation_identity_provider (silo_id, id)
 WHERE time_deleted IS NULL;
 
+CREATE TABLE IF NOT EXISTS omicron.public.service_account_token (
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_last_used TIMESTAMPTZ NOT NULL,
+    service_account_id UUID NOT NULL,
+    token STRING(40) NOT NULL,
+    idp_id UUID,
+    federation_jwt_claims JSONB,
+    federation_generation INT8,
+    time_expires TIMESTAMPTZ,
+    time_deleted TIMESTAMPTZ,
+    CONSTRAINT service_account_token_federation CHECK (
+        (idp_id IS NULL AND federation_jwt_claims IS NULL
+            AND federation_generation IS NULL)
+        OR (idp_id IS NOT NULL AND federation_jwt_claims IS NOT NULL
+            AND federation_generation IS NOT NULL AND time_expires IS NOT NULL)
+    )
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS service_account_token_unique
+ON omicron.public.service_account_token (token);
+
+CREATE INDEX IF NOT EXISTS service_account_token_by_account
+ON omicron.public.service_account_token (service_account_id, id)
+WHERE time_deleted IS NULL;
+
 -- Keep this at the end of file so that the database does not contain a version
 -- until it is fully populated.
 INSERT INTO omicron.public.db_metadata (
@@ -9635,7 +9661,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '308.0.0', NULL)
+    (TRUE, NOW(), NOW(), '309.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

@@ -45,8 +45,9 @@ use nexus_types::external_api::{
     external_subnet, federation, floating_ip, hardware, identity_provider,
     image, instance, internet_gateway, ip_pool, metrics, multicast, networking,
     oxql, path_params, policy, probe, project, rack, scim, service_account,
-    silo, sled, snapshot, ssh_key, subnet_pool, support_bundle, switch, system,
-    system_networking, timeseries, update, user, vpc,
+    service_account_token, silo, sled, snapshot, ssh_key, subnet_pool,
+    support_bundle, switch, system, system_networking, timeseries, update,
+    user, vpc,
 };
 // Type imports for API implementations (per RFD 619)
 use nexus_types::external_api::bfd::BfdStatus;
@@ -4044,6 +4045,95 @@ impl NexusExternalApi for NexusExternalApiImpl {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             nexus
                 .service_account_delete(
+                    &opctx,
+                    path.into_inner(),
+                    query.into_inner(),
+                )
+                .await?;
+            Ok(HttpResponseDeleted())
+        })
+        .await
+    }
+
+    async fn service_account_token_list(
+        rqctx: RequestContext<ApiContext>,
+        path: Path<service_account::ServiceAccountPath>,
+        query: Query<
+            PaginatedById<service_account::ServiceAccountParentSelector>,
+        >,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<service_account_token::ServiceAccountToken>>,
+        HttpError,
+    > {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let query = query.into_inner();
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let scan_params = ScanById::from_query(&query)?;
+            let tokens = apictx
+                .context
+                .nexus
+                .service_account_token_list(
+                    &opctx,
+                    path.into_inner(),
+                    scan_params.selector.clone(),
+                    &pag_params,
+                )
+                .await?;
+            Ok(HttpResponseOk(ScanById::results_page(
+                &query,
+                tokens,
+                &marker_for_id,
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn service_account_token_view(
+        rqctx: RequestContext<ApiContext>,
+        path: Path<service_account_token::ServiceAccountTokenPath>,
+        query: Query<service_account::ServiceAccountParentSelector>,
+    ) -> Result<
+        HttpResponseOk<service_account_token::ServiceAccountToken>,
+        HttpError,
+    > {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            Ok(HttpResponseOk(
+                apictx
+                    .context
+                    .nexus
+                    .service_account_token_view(
+                        &opctx,
+                        path.into_inner(),
+                        query.into_inner(),
+                    )
+                    .await?,
+            ))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn service_account_token_delete(
+        rqctx: RequestContext<ApiContext>,
+        path: Path<service_account_token::ServiceAccountTokenPath>,
+        query: Query<service_account::ServiceAccountParentSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            nexus
+                .service_account_token_delete(
                     &opctx,
                     path.into_inner(),
                     query.into_inner(),

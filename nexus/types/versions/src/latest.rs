@@ -600,6 +600,10 @@ pub mod service_account {
     pub use crate::v2026_10_08_00::service_account::*;
 }
 
+pub mod service_account_token {
+    pub use crate::v2026_10_09_00::service_account_token::*;
+}
+
 pub mod path_params {
     pub use crate::v2025_11_20_00::path_params::AddressLotPath;
     pub use crate::v2025_11_20_00::path_params::AffinityGroupPath;

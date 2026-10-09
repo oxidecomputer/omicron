@@ -131,6 +131,7 @@ mod saga;
 mod scim;
 mod scim_provider_store;
 mod service_account;
+mod service_account_token;
 mod silo;
 mod silo_auth_settings;
 mod silo_group;
