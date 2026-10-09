@@ -91,7 +91,7 @@ oxnet.workspace = true
 oxql-types.workspace = true
 parallel-task-set.workspace = true
 parse-display.workspace = true
-paste.workspace = true
+pastey.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
 progenitor-client.workspace = true
