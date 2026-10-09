@@ -600,10 +600,6 @@ impl Terminator {
 struct InstanceRunner {
     log: Logger,
 
-    // A signal the InstanceRunner should shut down.
-    // This is currently only activated by the runner itself.
-    should_terminate: bool,
-
     // Request channel on which most instance requests are made.
     rx: mpsc::Receiver<InstanceRequest>,
 
@@ -705,7 +701,7 @@ impl InstanceRunner {
             }
         }
 
-        while !self.should_terminate {
+        while !self.is_terminating() {
             tokio::select! {
                 biased;
 
@@ -1991,7 +1987,6 @@ impl Instance {
 
         let runner = InstanceRunner {
             log: log.new(o!("instance_id" => id.to_string())),
-            should_terminate: false,
             rx,
             tx_monitor,
             rx_monitor,
@@ -2574,12 +2569,11 @@ impl InstanceRunner {
         self.terminate().await;
     }
 
-    /// Ensures that no Propolis zone exists for this instance runner, sets its
-    /// `should_terminate` flag so that the runner will shut down, and signals
-    /// anyone awaiting the termination with the VMM's final state.
+    /// Ensures that no Propolis zone exists for this instance runner, and
+    /// publishes the VMM's final state to anyone awaiting its termination.
+    /// Calling this will indicate that the runner's main loop should exit.
     async fn terminate(&mut self) {
         self.remove_propolis_zone().await;
-        self.should_terminate = true;
         // Make sure everyone who was waiting on us to go die knows we have
         // obliged!
         if self.terminator.completed.set(self.current_state()).is_err() {
@@ -2589,6 +2583,12 @@ impl InstanceRunner {
                  but it seems to have already terminated?"
             );
         }
+    }
+
+    /// Returns `true` if this `InstanceRunner` has destroyed its Propolis zone
+    /// and its run loop should exit.
+    fn is_terminating(&self) -> bool {
+        self.terminator.completed.initialized()
     }
 
     async fn issue_snapshot_request(
@@ -4020,7 +4020,6 @@ mod tests {
 
             Self {
                 log: log.new(o!("component" => "TestInstanceRunner")),
-                should_terminate: false,
                 rx: cmd_rx,
                 tx_monitor: monitor_tx,
                 rx_monitor: monitor_rx,
