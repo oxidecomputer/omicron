@@ -81,7 +81,7 @@ use super::LOCAL_STORAGE_WORKERS;
 use crate::db::datastore::Disk;
 use nexus_db_queries::db;
 use omicron_common::api::external::Error;
-use sled_agent_client::types::VirtioSocket;
+//use sled_agent_client::types::VirtioSocket;
 use sled_agent_client::types::{
     BlobStorageBackend, Board, BootOrderEntry, BootSettings, Chipset,
     Component, Cpuid, CpuidVendor, CrucibleStorageBackend, FileStorageBackend,
@@ -92,8 +92,8 @@ use sled_agent_client::types::{
 use sled_agent_types::inventory::NetworkInterface;
 use uuid::Uuid;
 
-/// Default `guest_cid` for a propolis guest.
-const VSOCK_GUEST_CID: u64 = 16;
+// /// Default `guest_cid` for a propolis guest.
+//const VSOCK_GUEST_CID: u64 = 16;
 
 /// Constants and functions used to assign names to assorted VM components.
 mod component_names {
@@ -105,7 +105,7 @@ mod component_names {
     pub(super) const BOOT_SETTINGS: &'static str = "boot-settings";
     pub(super) const CLOUD_INIT_DEVICE: &'static str = "cloud-init-dev";
     pub(super) const CLOUD_INIT_BACKEND: &'static str = "cloud-init-backend";
-    pub(super) const VSOCK: &'static str = "vsock";
+    //pub(super) const VSOCK: &'static str = "vsock";
 
     /// Given an object ID, derives a name for the "device" half of the
     /// device/backend component pair that describes that object.
@@ -118,7 +118,7 @@ enum PciDeviceKind {
     Disk,
     Nic,
     CloudInitDisk,
-    Vsock,
+    //Vsock,
 }
 
 impl std::fmt::Display for PciDeviceKind {
@@ -130,7 +130,7 @@ impl std::fmt::Display for PciDeviceKind {
                 Self::Disk => "disk",
                 Self::Nic => "network interface",
                 Self::CloudInitDisk => "cloud-init data disk",
-                Self::Vsock => "vsock",
+                //Self::Vsock => "vsock",
             }
         )
     }
@@ -170,7 +170,7 @@ fn slot_to_pci_bdf(
         }
         // NB: This will eventually become our first multi function device, but
         // for now it will be the only device at this device num
-        PciDeviceKind::Vsock if logical_slot == 0 => 0x19,
+        //PciDeviceKind::Vsock if logical_slot == 0 => 0x19,
         _ => {
             return Err(Error::invalid_value(
                 format!("{kind} with slot {logical_slot}"),
@@ -392,6 +392,7 @@ impl Default for Components {
                 component_names::PVPANIC,
                 Component::QemuPvpanic(QemuPvpanic { enable_isa: true }),
             ),
+            /*
             (
                 component_names::VSOCK,
                 Component::VirtioSocket(VirtioSocket {
@@ -400,6 +401,7 @@ impl Default for Components {
                         .expect("vsock bdf (0, 25, 0)"),
                 }),
             ),
+            */
         ]
         .into_iter()
         .map(|(k, v)| (k.to_owned(), v))
