@@ -471,12 +471,12 @@ struct DatasetTask {
     // Zpools whose former zone roots have been archived and destroyed since
     // this sled-agent process started.
     //
-    // A zpool stays in this set while it's physically absent: the reconciler
-    // doesn't shut down zones when their disk disappears, so if the disk comes
-    // back, cleaning up its zone root again would destroy datasets of zones
-    // that are still running as far as the reconciler is concerned. A zpool is
-    // only removed once our config has no datasets on it at all (e.g., its
-    // disk was expunged); see `prune_zone_roots_cleaned_up()`.
+    // A zpool stays in this set even if it's physically absent: the
+    // reconciler doesn't shut down zones when their disk disappears, so if the
+    // disk comes back, cleaning up its zone root again would destroy datasets
+    // of zones that are still running as far as the reconciler is concerned.
+    // A zpool is only removed once our config has no datasets on it at all
+    // (e.g., its disk was expunged); see `prune_zone_roots_cleaned_up()`.
     zone_roots_cleaned_up: BTreeSet<ZpoolName>,
     log: Logger,
 }
