@@ -1735,6 +1735,35 @@ impl InstanceRunner {
     }
 }
 
+impl Drop for InstanceRunner {
+    fn drop(&mut self) {
+        // An `InstanceRunner` should really never be dropped without publishing
+        // the instance's final state to any callers waiting for it to
+        // terminate. The only ways this could happen are if the runner task is
+        // forcefully aborted (which we don't do), or if the task panics. The
+        // latter will also never happen in production, since we build with
+        // `panic = "abort"`, so the whole process would just exit if we
+        // panicked. However, if this *did* ever happen, anyone awaiting the
+        // termination-completed signal would hang forever, so defensively, we
+        // shall ensure that the final state is published here if we have not
+        // already published termination completion.
+        if self
+            .terminator
+            .completed
+            .set(VmmUnregisterResponse {
+                updated_runtime: Some(self.current_state()),
+            })
+            .is_ok()
+        {
+            error!(
+                self.log,
+                "InstanceRunner dropped without publishing that the instance \
+                 has terminated!"
+            );
+        }
+    }
+}
+
 fn propolis_error_code(
     log: &slog::Logger,
     error: &PropolisClientError,
@@ -2484,8 +2513,9 @@ impl InstanceRunner {
         self.terminate().await;
     }
 
-    /// Ensures that no Propolis zone exists for this instance runner and sets
-    /// its `should_terminate` flag so that the runner will shut down.
+    /// Ensures that no Propolis zone exists for this instance runner, sets its
+    /// `should_terminate` flag so that the runner will shut down, and signals
+    /// anyone awaiting the termination with the VMM's final state.
     async fn terminate(&mut self) {
         self.remove_propolis_zone().await;
         self.should_terminate = true;
