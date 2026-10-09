@@ -1127,6 +1127,11 @@ impl PortManager {
             }
         }
     }
+
+    #[cfg(test)]
+    pub fn contains_key(&self, key: &(Uuid, NetworkInterfaceKind)) -> bool {
+        self.inner.ports.lock().unwrap().contains_key(key)
+    }
 }
 
 pub struct PortTicket {

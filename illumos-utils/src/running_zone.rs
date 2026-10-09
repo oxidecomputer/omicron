@@ -560,6 +560,21 @@ impl Drop for RunningZone {
             let log = self.inner.log.clone();
             let name = self.name().to_string();
             let zones_api = self.inner.zones_api.clone();
+
+            // Take the OPTE ports and move them into the scope of the spawned
+            // task below, where we'll drop them _after_ the zone is removed.
+            // The order matters, because deleting the ports while the zone owns
+            // them will return `EBUSY`. See
+            // https://github.com/oxidecomputer/omicron/issues/7726#issuecomment-2702320286
+            // and the surrounding thread for context.
+            //
+            // Drop the tickets right away, which removes the ports from the
+            // manager, so the only live reference is the one in the spawned
+            // task.
+            let ports_and_tickets = std::mem::take(&mut self.inner.opte_ports);
+            let (opte_ports, tickets): (Vec<_>, Vec<_>) =
+                ports_and_tickets.into_iter().unzip();
+            drop(tickets);
             tokio::task::spawn(async move {
                 match zones_api.halt_and_remove_logged(&log, &name).await {
                     Ok(()) => {
@@ -569,6 +584,7 @@ impl Drop for RunningZone {
                         warn!(log, "Failed to stop zone: {}", e)
                     }
                 }
+                drop(opte_ports);
             });
         }
     }
@@ -1055,6 +1071,34 @@ pub fn is_oxide_smf_service(fmri: impl AsRef<str>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::is_oxide_smf_service;
+    use crate::dladm::Etherstub;
+    use crate::fakes::zone::Zones;
+    use crate::link::VnicAllocator;
+    use crate::opte::Handle;
+    use crate::opte::PortCreateParams;
+    use crate::opte::PortManager;
+    use crate::running_zone::RunningZone;
+    use crate::running_zone::ZoneBuilderFactory;
+    use crate::zpool::PathInPool;
+    use crate::zpool::ZpoolOrRamdisk;
+    use camino_tempfile::Utf8TempDir;
+    use omicron_common::api::external::MacAddr;
+    use omicron_common::api::external::Vni;
+    use omicron_common::api::internal::shared::PrivateIpConfig;
+    use omicron_common::api::internal::shared::PrivateIpv4Config;
+    use omicron_test_utils::dev::poll::CondCheckError;
+    use omicron_test_utils::dev::poll::wait_for_condition;
+    use omicron_uuid_kinds::OmicronZoneUuid;
+    use oxide_vpc::api::DhcpCfg;
+    use oxnet::Ipv4Net;
+    use sled_agent_types::instance::ExternalIpConfig;
+    use sled_agent_types::inventory::NetworkInterface;
+    use sled_agent_types::inventory::NetworkInterfaceKind;
+    use std::net::Ipv4Addr;
+    use std::net::Ipv6Addr;
+    use std::time::Duration;
+    use tokio::time::timeout;
+    use uuid::Uuid;
 
     #[test]
     fn test_is_oxide_smf_service() {
@@ -1062,5 +1106,139 @@ mod tests {
         assert!(is_oxide_smf_service("svc:/system/illumos/blah:default"));
         assert!(!is_oxide_smf_service("svc:/system/blah:default"));
         assert!(!is_oxide_smf_service("svc:/not/oxide/blah:default"));
+    }
+
+    #[tokio::test]
+    async fn running_zone_drop_also_drops_opte_ports() {
+        let logctx = omicron_test_utils::dev::test_setup_log(
+            "running_zone_drop_also_drops_opte_ports",
+        );
+        let xde_handle = Handle::new().unwrap();
+        xde_handle.set_xde_underlay("net0", "net1").unwrap();
+        let vnic_source = Etherstub("teststub".to_string());
+        let vnic_alloc = VnicAllocator::new(
+            "testvnic",
+            vnic_source,
+            crate::fakes::dladm::Dladm::new(),
+        );
+        let tempdir = Utf8TempDir::with_prefix("running-zone-drops-opte-ports")
+            .expect("created a temporary dir");
+
+        let manager = PortManager::new(logctx.log.clone(), Ipv6Addr::LOCALHOST);
+        let key = (
+            Uuid::new_v4(),
+            NetworkInterfaceKind::Instance { id: Uuid::new_v4() },
+        );
+        let (port, ticket) = manager
+            .create_port(PortCreateParams {
+                nic: &NetworkInterface {
+                    id: key.0,
+                    kind: key.1,
+                    name: "net0".parse().unwrap(),
+                    ip_config: PrivateIpConfig::V4(
+                        PrivateIpv4Config::new(
+                            Ipv4Addr::new(10, 0, 0, 10),
+                            Ipv4Net::new(Ipv4Addr::new(10, 0, 0, 0), 24)
+                                .unwrap(),
+                        )
+                        .unwrap(),
+                    ),
+                    mac: MacAddr("a8:40:25:01:01:77".parse().unwrap()),
+                    vni: Vni::try_from(777).unwrap(),
+                    primary: true,
+                    slot: 0,
+                },
+                external_ips: &ExternalIpConfig { v4: None, v6: None },
+                firewall_rules: &[],
+                dhcp_config: DhcpCfg {
+                    hostname: None,
+                    host_domain: None,
+                    domain_search_list: vec![],
+                    dns4_servers: vec![],
+                    dns6_servers: vec![],
+                },
+                attached_subnets: vec![],
+                mtu: None,
+            })
+            .expect("Failed to create port");
+        let port_name = port.name().to_string();
+
+        // Build a zone with these OPTE ports.
+        let (zones, mut halt_ctl) = Zones::new_with_halt_control();
+        let factory =
+            ZoneBuilderFactory::fake(Some(tempdir.path().as_str()), zones);
+        let zone_type = "tester";
+        let zone_uuid = OmicronZoneUuid::new_v4();
+        let expected_zone_name = format!("oxz_{zone_type}_{zone_uuid}");
+        let installed_zone = factory
+            .builder()
+            .with_zone_type(zone_type)
+            .with_unique_name(zone_uuid)
+            .with_zone_root_path(PathInPool {
+                pool: ZpoolOrRamdisk::Ramdisk,
+                path: "/test-root".into(),
+            })
+            .with_underlay_vnic_allocator(&vnic_alloc)
+            .with_log(logctx.log.clone())
+            .with_opte_ports(vec![(port, ticket)])
+            .with_links(vec![])
+            .install()
+            .await
+            .expect("Should have installed zone");
+        let zone = RunningZone::boot(installed_zone).await.unwrap();
+
+        // Drop the zone, which will eventually call its instrumented halt
+        // method.
+        drop(zone);
+
+        // Check that it's this zone which started halting.
+        let zname = timeout(Duration::from_secs(30), halt_ctl.halt_started())
+            .await
+            .expect("timed out waiting for zone to halt")
+            .expect("should have gotten a zone name");
+        assert_eq!(zname, expected_zone_name);
+
+        // At this point, the tickets should be gone, which means the ports
+        // should have been removed from the manager's map.
+        assert!(
+            !manager.contains_key(&key),
+            "Dropping the zone should have synchronously dropped the port \
+            ticket, which removes the port from the manager's map."
+        );
+
+        // But it should still appear in the full list at the "driver", as we
+        // haven't completed the zone halt and thus deleted the actual XDE
+        // devices.
+        assert!(
+            xde_handle.state().lock().unwrap().ports.contains_key(&port_name),
+            "OPTE kernel driver should still have the actual OPTE ports, \
+            as we haven't halted the zone yet",
+        );
+
+        // Release the zone to finish halting.
+        halt_ctl.release();
+
+        // Now it should really be gone from the handle.
+        wait_for_condition(
+            || async {
+                let exists = xde_handle
+                    .state()
+                    .lock()
+                    .unwrap()
+                    .ports
+                    .contains_key(&port_name);
+                if exists {
+                    Err(CondCheckError::<()>::NotYet { status: None })
+                } else {
+                    Ok(())
+                }
+            },
+            &Duration::from_millis(100),
+            &Duration::from_secs(10),
+        )
+        .await
+        .expect("should have removed the port from the driver");
+
+        logctx.cleanup_successful();
     }
 }
