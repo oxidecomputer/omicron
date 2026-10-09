@@ -527,6 +527,7 @@ pub enum MultirackJoinServiceState {
     TrustQuorumCommitting(CommitState),
     ConfigureNetworking,
     StartSledAgents(StartSledAgentsStatus),
+    WaitForCompletion,
     Completed,
     Failed { message: String },
     InvalidMembershipSize { message: String },

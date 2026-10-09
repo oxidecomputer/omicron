@@ -47,6 +47,8 @@ pub enum RssAccessError {
     MultirackJoinCompleted,
     #[error("Membership cannot be changed anymore")]
     MembershipChangeNoLongerAllowed,
+    #[error("Multirack join has not yet started")]
+    MultirackJoinNotYetStarted,
 }
 
 impl RssAccessError {
@@ -69,6 +71,9 @@ impl RssAccessError {
             RssAccessError::MembershipChangeNoLongerAllowed => {
                 "MembershipChangeNoLongerAllowed"
             }
+            RssAccessError::MultirackJoinNotYetStarted => {
+                "MultirackJoinNotYetStarted"
+            }
         }
     }
 }
@@ -85,6 +90,7 @@ impl From<RssAccessError> for HttpError {
         //   be idempotent here -- to do so we'd have to ensure the actual RSS
         //   config is the same, which is tricky. Instead, clients should look
         //   at the error code to determine what to do.)
+        // * `MultirackJoinNotYetStarted` means it can't complete when signalled.
         // * The other states are terminal states that need operator intervention.
         //
         // We map all of these states to 409 Conflict errors, and (since this is
@@ -244,6 +250,67 @@ impl RssAccess {
         }
     }
 
+    /// This should only occur once this sled is successfully on the underlay
+    /// network and discoverable by Nexus.
+    ///
+    /// If the join has already completed succcessfully we treat this as idempotent.
+    pub(crate) fn complete_multirack_join(&self) -> Result<(), RssAccessError> {
+        let mut status = self.status.lock().unwrap();
+        match &mut *status {
+            RssStatus::Uninitialized => {
+                Err(RssAccessError::MultirackJoinNotYetStarted)
+            }
+            RssStatus::Initializing { .. } => {
+                Err(RssAccessError::StillInitializing)
+            }
+            RssStatus::Initialized { .. } => {
+                Err(RssAccessError::AlreadyInitialized)
+            }
+            RssStatus::InitializationFailed { err, .. } => {
+                Err(RssAccessError::InitializationFailed {
+                    message: InlineErrorChain::new(err).to_string(),
+                })
+            }
+            RssStatus::InitializationPanicked { .. } => {
+                Err(RssAccessError::InitializationPanicked)
+            }
+            RssStatus::MultirackJoinInProgress {
+                membership_change_still_possible,
+                rack_join_successful_tx,
+                ..
+            } => {
+                // We can't successfully complete the join if we haven't
+                // finished setting up trust quorum.
+                if membership_change_still_possible.load(Ordering::Relaxed) {
+                    return Err(RssAccessError::MultirackJoinInProgress);
+                }
+
+                // We haven't sent the completion signal yet.
+                if let Some(tx) = rack_join_successful_tx.take() {
+                    tx.send(()).expect("join task should not have completed.");
+                }
+
+                // We've either sent the completion signal this time, or we did
+                // previously. This can happen due to a lost reply to Nexus and
+                // a retry. We treat both as success, even though it's highly
+                // unlikely given the timespan differences between task receipt
+                // and HTTP retry and resend.
+                Ok(())
+            }
+            RssStatus::MultirackJoinCompleted { .. } => {
+                Err(RssAccessError::MultirackJoinCompleted)
+            }
+            RssStatus::MultirackJoinFailed { err, .. } => {
+                Err(RssAccessError::MultirackJoinFailed {
+                    message: InlineErrorChain::new(err).to_string(),
+                })
+            }
+            RssStatus::MultirackJoinPanicked { .. } => {
+                Err(RssAccessError::MultirackJoinPanicked)
+            }
+        }
+    }
+
     pub(crate) fn start_multirack_join(
         &self,
         ctx: RssContext,
@@ -259,12 +326,14 @@ impl RssAccess {
                     input_tx,
                     output_rx,
                     membership_change_still_possible,
+                    rack_join_successful_tx,
                 } = MultirackJoinServiceHandle::spawn(ctx, request);
                 *status = RssStatus::MultirackJoinInProgress {
                     id,
                     input_tx,
                     output_rx,
                     membership_change_still_possible,
+                    rack_join_successful_tx: Some(rack_join_successful_tx),
                 };
                 mem::drop(status);
                 let status = Arc::clone(&self.status);
@@ -422,6 +491,7 @@ enum RssStatus {
         input_tx: watch::Sender<MultirackJoinRequest>,
         output_rx: watch::Receiver<MultirackJoinServiceState>,
         membership_change_still_possible: Arc<AtomicBool>,
+        rack_join_successful_tx: Option<oneshot::Sender<()>>,
     },
 
     MultirackJoinCompleted {
