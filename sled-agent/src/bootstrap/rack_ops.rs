@@ -297,9 +297,7 @@ impl RssAccess {
                 // and HTTP retry and resend.
                 Ok(())
             }
-            RssStatus::MultirackJoinCompleted { .. } => {
-                Err(RssAccessError::MultirackJoinCompleted)
-            }
+            RssStatus::MultirackJoinCompleted { .. } => Ok(()),
             RssStatus::MultirackJoinFailed { err, .. } => {
                 Err(RssAccessError::MultirackJoinFailed {
                     message: InlineErrorChain::new(err).to_string(),
