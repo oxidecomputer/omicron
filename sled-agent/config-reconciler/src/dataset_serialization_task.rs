@@ -471,12 +471,9 @@ struct DatasetTask {
     // Zpools whose former zone roots have been archived and destroyed since
     // this sled-agent process started.
     //
-    // A zpool stays in this set even if it's physically absent: the
-    // reconciler doesn't shut down zones when their disk disappears, so if the
-    // disk comes back, cleaning up its zone root again would destroy datasets
-    // of zones that are still running as far as the reconciler is concerned.
-    // A zpool is only removed once our config has no datasets on it at all
-    // (e.g., its disk was expunged); see `prune_zone_roots_cleaned_up()`.
+    // A zpool stays in this set even if it's physically absent. It's only
+    // removed once our config has no datasets on it at all (e.g., its disk was
+    // expunged); see `prune_zone_roots_cleaned_up()`.
     zone_roots_cleaned_up: BTreeSet<ZpoolName>,
     log: Logger,
 }
@@ -1031,13 +1028,7 @@ impl DatasetTask {
     //
     // This must consider every dataset in `config`, including those on zpools
     // we aren't currently managing: a zpool whose disk was pulled is still in
-    // our config, and must stay in `zone_roots_cleaned_up` (see the comment on
-    // that field).
-    //
-    // We also don't forget a zpool just because its `TransientZoneRoot` was
-    // removed from our config: zones on that zpool might still be running (if
-    // their configs are unchanged). The control plane only removes all of a
-    // zpool's datasets when expunging its disk, which also expunges its zones.
+    // our config, and stays in `zone_roots_cleaned_up`.
     fn prune_zone_roots_cleaned_up(
         &mut self,
         config: &IdOrdMap<DatasetConfig>,
@@ -2684,7 +2675,7 @@ mod tests {
             .await;
 
             // When the disk comes back, we don't clean up its zone root
-            // again: its zones may still be running.
+            // again.
             let stray_name =
                 format!("{}/oxz_stray", setup.zone_root.name.full_name());
             setup.zfs.insert_existing_dataset(stray_name.clone(), None);
@@ -2733,8 +2724,8 @@ mod tests {
             setup.zfs.insert_existing_dataset(stray_name.clone(), None);
 
             // Removing just the zone root from our config doesn't make us
-            // forget that we cleaned it up: the zpool still has other
-            // datasets, and zones on it may still be running.
+            // forget that we cleaned it up, since the zpool still has other
+            // datasets.
             let without_zone_root = [setup.debug.clone(), setup.zone.clone()]
                 .into_iter()
                 .collect::<IdOrdMap<_>>();
