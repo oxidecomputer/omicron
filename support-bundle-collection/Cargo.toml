@@ -43,3 +43,12 @@ uuid.workspace = true
 zip.workspace = true
 
 omicron-workspace-hack.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+rand.workspace = true
+zstd.workspace = true
+
+[[bench]]
+name = "zone_logs"
+harness = false

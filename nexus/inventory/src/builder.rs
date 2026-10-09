@@ -37,6 +37,7 @@ use nexus_types::inventory::Zpool;
 use omicron_cockroach_metrics::CockroachMetric;
 use omicron_cockroach_metrics::PrometheusMetrics;
 use omicron_uuid_kinds::CollectionKind;
+use omicron_uuid_kinds::RackUuid;
 use sled_agent_types::disk::M2Slot;
 use sled_agent_types::inventory::Inventory;
 use sled_hardware_types::BaseboardId;
@@ -209,9 +210,13 @@ impl CollectionBuilder {
     ///
     /// `source` is an arbitrary string for debugging that describes the MGS
     /// that reported this data (generally a URL string).
+    ///
+    /// `rack_id` is the rack in which the MGS that reported this data is
+    /// located (and therefore the rack in which this SP is located).
     pub fn found_sp_state(
         &mut self,
         source: &str,
+        rack_id: RackUuid,
         sp_type: SpType,
         sp_slot: u16,
         sp_state: SpState,
@@ -240,6 +245,7 @@ impl CollectionBuilder {
                 baseboard_revision: sp_state.revision,
                 hubris_archive: sp_state.hubris_archive_id,
                 power_state: sp_state.power_state,
+                rack_id,
             }
         });
 
@@ -773,6 +779,7 @@ pub use omicron_common::now_db_precision;
 mod test {
     use super::CollectionBuilder;
     use super::now_db_precision;
+    use crate::examples::RACK_UUID;
     use crate::examples::Representative;
     use crate::examples::representative;
     use base64::Engine;
@@ -1206,6 +1213,7 @@ mod test {
         let sled1_bb = builder
             .found_sp_state(
                 "fake MGS 1",
+                RACK_UUID,
                 SpType::Sled,
                 3,
                 SpState {
@@ -1231,6 +1239,7 @@ mod test {
         let sled1_bb_dup = builder
             .found_sp_state(
                 "fake MGS 1",
+                RACK_UUID,
                 SpType::Sled,
                 3,
                 SpState {
@@ -1257,6 +1266,7 @@ mod test {
         let sled1_bb_dup = builder
             .found_sp_state(
                 "fake MGS 1",
+                RACK_UUID,
                 SpType::Sled,
                 3,
                 SpState {

@@ -5,8 +5,6 @@
 //! sled-agent's handle to the Rack Setup Service it spawns
 
 use bootstrap_agent_lockstep_types::RssStep;
-use futures::StreamExt;
-use futures::stream::FuturesUnordered;
 use omicron_common::backoff::BackoffError;
 use omicron_common::backoff::retry_notify;
 use omicron_common::backoff::retry_policy_local;
@@ -27,6 +25,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::sync::watch;
+use tokio::task::JoinSet;
 
 /// Executes the rack setup service until it has completed
 pub(super) async fn run_rss(
@@ -152,8 +151,9 @@ impl BootstrapAgentHandleReceiver {
 
         match kind {
             RequestKind::Init(requests) => {
-                // Convert the vec of requests into a `FuturesUnordered` containing all
-                // of the initialization requests, allowing them to run concurrently.
+                // Convert the vec of requests into a `JoinSet` containing all
+                // of the initialization requests, allowing them to run
+                // concurrently.
 
                 let s = self.sprockets.clone();
                 let m = self.measurements.clone();
@@ -162,15 +162,20 @@ impl BootstrapAgentHandleReceiver {
                     .map(|(bootstrap_addr, request)| {
                         let value = s.clone();
                         let measurements_value = m.clone();
+                        let log = log.new(
+                            // Since we must clone the logger in order to spawn
+                            // the task anyway, may as well include the target
+                            // sled on every log line from the task!
+                            o!("target_sled" => bootstrap_addr.to_string()),
+                        );
                         async move {
                             info!(
                                 log, "Received initialization request from RSS";
                                 "request" => ?request,
-                                "target_sled" => %bootstrap_addr,
                             );
 
                             initialize_sled_agent(
-                                log,
+                                &log,
                                 bootstrap_addr,
                                 value,
                                 measurements_value,
@@ -184,15 +189,12 @@ impl BootstrapAgentHandleReceiver {
                                 )
                             })?;
 
-                            info!(
-                                log, "Initialized sled agent";
-                                "target_sled" => %bootstrap_addr,
-                            );
+                            info!(log, "Initialized sled agent");
 
                             Ok(())
                         }
                     })
-                    .collect::<FuturesUnordered<_>>();
+                    .collect::<JoinSet<_>>();
 
                 // Wait for all initialization requests to complete, but stop on the
                 // first error.
@@ -205,9 +207,21 @@ impl BootstrapAgentHandleReceiver {
                 // https://github.com/oxidecomputer/omicron/issues/820, we'll have to
                 // replace these channels with IPC, which will also eliminiate these
                 // unwraps.
-                while let Some(result) = futs.next().await {
+                while let Some(join_result) = futs.join_next().await {
+                    let result = join_result
+                        .map_err(|e| {
+                            // Since we don't ever abort the spawned tasks, and
+                            // we compile with panic="abort", we *should* never
+                            // see a `JoinError` here, and could alternatively
+                            // just `expect()` the outer result, but...this
+                            // seems nicer than doing that.
+                            format!("spawned task failed unexpectedly: {e}")
+                        })
+                        .flatten();
                     if result.is_err() {
                         tx.send(result).unwrap();
+                        // N.B. that `return`ing here will drop the `JoinSet`,
+                        // and abort all the spawned tasks.
                         return;
                     }
                 }

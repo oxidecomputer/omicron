@@ -25,7 +25,8 @@ cockroachdb settings:
     version::::::::::::   (none)
     preserve downgrade:   (not set)
 planner config:
-    disruption policy: terminate
+    disruption policy : terminate
+    sled update reboot policy: immediate (no evacuation)
 
 
 
@@ -1531,7 +1532,9 @@ Sled serial0
     part number: 913-0000019
     power:    A2
     revision: 0
+    rack ID:  c19a698f-c6f9-4a17-ae30-20d711b8f7dc
     MGS slot: Sled 0
+    rack ID:  c19a698f-c6f9-4a17-ae30-20d711b8f7dc
     found at: <REDACTED_TIMESTAMP> from fake MGS 1
     host phase 1 active slot: A
     host phase 1 hashes:
@@ -1556,7 +1559,9 @@ Sled serial1
     part number: 913-0000019
     power:    A2
     revision: 0
+    rack ID:  c19a698f-c6f9-4a17-ae30-20d711b8f7dc
     MGS slot: Sled 1
+    rack ID:  c19a698f-c6f9-4a17-ae30-20d711b8f7dc
     found at: <REDACTED_TIMESTAMP> from fake MGS 1
     host phase 1 active slot: A
     host phase 1 hashes:
@@ -1581,7 +1586,9 @@ Sled serial2
     part number: 913-0000019
     power:    A2
     revision: 0
+    rack ID:  c19a698f-c6f9-4a17-ae30-20d711b8f7dc
     MGS slot: Sled 2
+    rack ID:  c19a698f-c6f9-4a17-ae30-20d711b8f7dc
     found at: <REDACTED_TIMESTAMP> from fake MGS 1
     host phase 1 active slot: A
     host phase 1 hashes:
@@ -1605,6 +1612,7 @@ Sled serial2
 SLED AGENTS
 
 sled 2eb69596-f081-4e2d-9425-9994926e0832 (role = Gimlet, serial serial1)
+    rack ID:     c19a698f-c6f9-4a17-ae30-20d711b8f7dc
     found at:    <REDACTED_TIMESTAMP> from fake sled agent
     address:     [fd00:1122:3344:102::1]:12345
     usable hw threads:   10
@@ -1760,6 +1768,7 @@ SMF SERVICES STATUS
     no data on SMF services has been collected
 
 sled 32d8d836-4d8a-4e54-8fa9-f31d79c42646 (role = Gimlet, serial serial2)
+    rack ID:     c19a698f-c6f9-4a17-ae30-20d711b8f7dc
     found at:    <REDACTED_TIMESTAMP> from fake sled agent
     address:     [fd00:1122:3344:103::1]:12345
     usable hw threads:   10
@@ -1915,6 +1924,7 @@ SMF SERVICES STATUS
     no data on SMF services has been collected
 
 sled 89d02b1b-478c-401a-8e28-7a26f74fa41b (role = Gimlet, serial serial0)
+    rack ID:     c19a698f-c6f9-4a17-ae30-20d711b8f7dc
     found at:    <REDACTED_TIMESTAMP> from fake sled agent
     address:     [fd00:1122:3344:101::1]:12345
     usable hw threads:   10

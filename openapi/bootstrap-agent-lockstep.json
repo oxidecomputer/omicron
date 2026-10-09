@@ -675,6 +675,59 @@
           "share_digest"
         ]
       },
+      "DdmdReconcilerStatus": {
+        "description": "Status of the `ddmd` scrimlet reconciler.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "failed"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "reconciled"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "external_peers_address_objects": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "uniqueItems": true
+                  }
+                },
+                "required": [
+                  "external_peers_address_objects"
+                ]
+              }
+            },
+            "required": [
+              "status",
+              "value"
+            ]
+          }
+        ]
+      },
       "DetermineSwitchSlotStatus": {
         "description": "Status of attempting to determine this sled's switch slot via MGS within this sled's switch zone.",
         "oneOf": [
@@ -2072,10 +2125,11 @@
         ]
       },
       "MultirackJoinRequest": {
+        "description": "A request to join this rack into an existing multirack cluster.",
         "type": "object",
         "properties": {
           "rack_network_config": {
-            "description": "The rack network configuration for this joining rack",
+            "description": "The network configuration for this joining rack.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/RackNetworkConfig"
@@ -2083,7 +2137,7 @@
             ]
           },
           "trust_quorum_peers": {
-            "description": "The set of peers required to initialize trust quorum\n\nUnlike RSS, this is not optional for multirack setups. Bootstrap addresses are discovered by the bootstrap agent and mapped to the `BaseboardId`s.",
+            "description": "The peers required to initialize this rack's trust quorum.\n\nUnlike RSS, this is not optional: the bootstrap agent discovers bootstrap addresses and maps them to these `BaseboardId`s.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/BaseboardId"
@@ -2284,6 +2338,20 @@
               "state",
               "threshold",
               "transient_errors"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "configure_networking"
+                ]
+              }
+            },
+            "required": [
+              "state"
             ]
           },
           {
@@ -3016,6 +3084,32 @@
           "started_at_time"
         ]
       },
+      "ReconcilerStatusDdmdReconcilerStatus": {
+        "description": "Status of a single scrimlet reconciler.",
+        "type": "object",
+        "properties": {
+          "current_status": {
+            "description": "Status of the task at this moment.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ReconcilerCurrentStatus"
+              }
+            ]
+          },
+          "last_completion": {
+            "nullable": true,
+            "description": "Final status of the most recent activation of this task.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ReconciliationCompletedStatusDdmdReconcilerStatus"
+              }
+            ]
+          }
+        },
+        "required": [
+          "current_status"
+        ]
+      },
       "ReconcilerStatusDpdReconcilerStatus": {
         "description": "Status of a single scrimlet reconciler.",
         "type": "object",
@@ -3118,6 +3212,54 @@
         },
         "required": [
           "current_status"
+        ]
+      },
+      "ReconciliationCompletedStatusDdmdReconcilerStatus": {
+        "description": "Status of a completed-in-the-past reconciliation attempt.",
+        "type": "object",
+        "properties": {
+          "activation_count": {
+            "description": "0-based counter of the number of times this reconciler has activated since the last time sled-agent started.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "activation_reason": {
+            "description": "Why the reconciliation attempt fired.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ReconcilerActivationReason"
+              }
+            ]
+          },
+          "completed_at_time": {
+            "description": "When the attempt completed.",
+            "type": "string",
+            "format": "date-time"
+          },
+          "ran_for": {
+            "description": "How long the attempt ran.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          },
+          "status": {
+            "description": "Reconciler-specific status.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DdmdReconcilerStatus"
+              }
+            ]
+          }
+        },
+        "required": [
+          "activation_count",
+          "activation_reason",
+          "completed_at_time",
+          "ran_for",
+          "status"
         ]
       },
       "ReconciliationCompletedStatusDpdReconcilerStatus": {
@@ -3743,6 +3885,9 @@
               "value": {
                 "type": "object",
                 "properties": {
+                  "ddmd_reconciler": {
+                    "$ref": "#/components/schemas/ReconcilerStatusDdmdReconcilerStatus"
+                  },
                   "dpd_reconciler": {
                     "$ref": "#/components/schemas/ReconcilerStatusDpdReconcilerStatus"
                   },
@@ -3757,6 +3902,7 @@
                   }
                 },
                 "required": [
+                  "ddmd_reconciler",
                   "dpd_reconciler",
                   "lldpd_reconciler",
                   "mgd_reconciler",

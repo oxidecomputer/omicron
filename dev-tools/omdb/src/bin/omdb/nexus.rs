@@ -47,6 +47,7 @@ use nexus_lockstep_client::types::PhysicalDiskPath;
 use nexus_lockstep_client::types::SagaState;
 use nexus_lockstep_client::types::SledSelector;
 use nexus_saga_recovery::LastPass;
+use nexus_saga_recovery::LastPassSuccess;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::ClickhouseMode;
 use nexus_types::deployment::ClickhousePolicy;
@@ -98,6 +99,8 @@ use nexus_types::internal_api::background::TufArtifactReplicationCounters;
 use nexus_types::internal_api::background::TufArtifactReplicationRequest;
 use nexus_types::internal_api::background::TufArtifactReplicationStatus;
 use nexus_types::internal_api::background::TufRepoPrunerStatus;
+use nexus_types::internal_api::background::VmmMarkStopForUpdateStatus;
+use nexus_types::internal_api::background::WebhookRxDeliveryStatus;
 use nexus_types::internal_api::background::fm_rendezvous;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
@@ -129,6 +132,7 @@ use sled_hardware_types::BaseboardId;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::fmt;
 use std::fs::OpenOptions;
 use std::num::ParseIntError;
 use std::os::unix::fs::PermissionsExt;
@@ -1432,6 +1436,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         }
         "switch_port_config_manager" => {
             print_task_switch_port_settings_manager(details);
+        }
+        "vmm_mark_stop_for_update" => {
+            print_task_vmm_mark_stop_for_update(details);
         }
         _ => {
             println!(
@@ -2754,6 +2761,24 @@ fn print_task_region_snapshot_replacement_step(details: &serde_json::Value) {
     }
 }
 
+struct LastPassSuccessDisplay<'a>(&'a LastPassSuccess);
+
+impl std::fmt::Display for LastPassSuccessDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let LastPassSuccess { nfound, nrecovered, nfailed, nskipped, nremoved } =
+            self.0;
+        writeln!(
+            f,
+            "        found sagas: {nfound:3} \
+             (in-progress, assigned to this Nexus)"
+        )?;
+        writeln!(f, "        recovered:   {nrecovered:3} (successfully)")?;
+        writeln!(f, "        failed:      {nfailed:3}")?;
+        writeln!(f, "        skipped:     {nskipped:3} (already running)")?;
+        writeln!(f, "        removed:     {nremoved:3} (newly finished)")
+    }
+}
+
 fn print_task_saga_recovery(details: &serde_json::Value) {
     match serde_json::from_value::<nexus_saga_recovery::Report>(details.clone())
     {
@@ -2797,24 +2822,7 @@ fn print_task_saga_recovery(details: &serde_json::Value) {
                 }
                 LastPass::Success(success) => {
                     println!("    last pass:");
-                    println!(
-                        "        found sagas: {:3} \
-                        (in-progress, assigned to this Nexus)",
-                        success.nfound
-                    );
-                    println!(
-                        "        recovered:   {:3} (successfully)",
-                        success.nrecovered
-                    );
-                    println!("        failed:      {:3}", success.nfailed);
-                    println!(
-                        "        skipped:     {:3} (already running)",
-                        success.nskipped
-                    );
-                    println!(
-                        "        removed:     {:3} (newly finished)",
-                        success.nskipped
-                    );
+                    print!("{}", LastPassSuccessDisplay(&success));
                 }
             };
 
@@ -2905,6 +2913,40 @@ fn print_task_audit_log_cleanup(details: &serde_json::Value) {
                 status.max_deleted_per_activation
             );
             if let Some(error) = &status.error {
+                println!("    {ERROR:<WIDTH$}{error}");
+            }
+        }
+    };
+}
+
+fn print_task_vmm_mark_stop_for_update(details: &serde_json::Value) {
+    match serde_json::from_value::<VmmMarkStopForUpdateStatus>(details.clone())
+    {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(status) => {
+            let VmmMarkStopForUpdateStatus {
+                vmms_marked,
+                batches,
+                batch_size,
+                error,
+            } = status;
+
+            const MARKED: &str = "VMMs marked to be stopped for an update:";
+            const BATCHES: &str = "  batches:";
+            const BATCH_SIZE: &str = "batch size:";
+            const ERROR: &str = "error:";
+            const WIDTH: usize =
+                const_max_len(&[MARKED, BATCHES, BATCH_SIZE, ERROR]) + 1;
+
+            println!("    {BATCH_SIZE:<WIDTH$}{batch_size}");
+            println!("    {MARKED:<WIDTH$}{}", vmms_marked);
+            if batches > 0 {
+                println!("    {BATCHES:<WIDTH$}{batches}");
+            }
+            if let Some(error) = &error {
                 println!("    {ERROR:<WIDTH$}{error}");
             }
         }
@@ -3220,7 +3262,7 @@ fn print_task_alert_dispatcher(details: &serde_json::Value) {
     const GLOBS_REPROCESSED: &str = "glob subscriptions reprocessed:";
     const ALREADY_REPROCESSED: &str =
         "globs already reprocessed by another Nexus:";
-    const GLOB_ERRORS: &str = "globs that failed to be reprocessed";
+    const GLOB_ERRORS: &str = "globs that failed to be reprocessed:";
     const WIDTH: usize = const_max_len(&[
         DISPATCHED,
         NO_RECEIVERS,
@@ -3313,11 +3355,49 @@ fn print_task_alert_dispatcher(details: &serde_json::Value) {
         );
     }
 }
+
+#[derive(Debug, Default, Eq, PartialEq)]
+struct WebhookDeliveryTotals {
+    ok: usize,
+    already_delivered: usize,
+    in_progress: usize,
+    failed: usize,
+    errors: usize,
+}
+
+impl WebhookDeliveryTotals {
+    fn from_status<'a>(
+        by_rx: impl IntoIterator<Item = &'a WebhookRxDeliveryStatus>,
+    ) -> Self {
+        let mut totals = Self::default();
+        for status in by_rx {
+            let WebhookRxDeliveryStatus {
+                ready: _,
+                delivered_ok,
+                already_delivered,
+                in_progress,
+                failed_deliveries,
+                delivery_errors: _,
+                error: _,
+            } = status;
+            totals.ok += delivered_ok;
+            totals.already_delivered += already_delivered;
+            totals.in_progress += in_progress;
+            totals.failed += failed_deliveries.len();
+            totals.errors += rx_internal_errors(status);
+        }
+        totals
+    }
+}
+
+fn rx_internal_errors(status: &WebhookRxDeliveryStatus) -> usize {
+    status.delivery_errors.len() + if status.error.is_some() { 1 } else { 0 }
+}
+
 fn print_task_webhook_deliverator(details: &serde_json::Value) {
     use nexus_types::external_api::alert::WebhookDeliveryAttemptResult;
     use nexus_types::internal_api::background::WebhookDeliveratorStatus;
     use nexus_types::internal_api::background::WebhookDeliveryFailure;
-    use nexus_types::internal_api::background::WebhookRxDeliveryStatus;
 
     let WebhookDeliveratorStatus { by_rx, error } = match serde_json::from_value::<
         WebhookDeliveratorStatus,
@@ -3352,13 +3432,17 @@ fn print_task_webhook_deliverator(details: &serde_json::Value) {
     ]) + 1;
     const NUM_WIDTH: usize = 3;
 
-    let mut total_ok = 0;
-    let mut total_already_delivered = 0;
-    let mut total_in_progress = 0;
-    let mut total_failed = 0;
-    let mut total_errors = 0;
+    let WebhookDeliveryTotals {
+        ok: total_ok,
+        already_delivered: total_already_delivered,
+        in_progress: total_in_progress,
+        failed: total_failed,
+        errors: total_errors,
+    } = WebhookDeliveryTotals::from_status(by_rx.values());
     println!("    {RECEIVERS:<WIDTH$}{:>NUM_WIDTH$}", by_rx.len());
     for (rx_id, status) in by_rx {
+        let n_internal_errors = rx_internal_errors(&status);
+        let n_failed = status.failed_deliveries.len();
         let WebhookRxDeliveryStatus {
             ready,
             delivered_ok,
@@ -3390,11 +3474,6 @@ fn print_task_webhook_deliverator(details: &serde_json::Value) {
             already_delivered,
         );
         println!("      {IN_PROGRESS:<WIDTH$}{in_progress:>NUM_WIDTH$}");
-        total_ok += delivered_ok;
-        total_already_delivered += total_already_delivered;
-        total_in_progress += in_progress;
-        let n_failed = failed_deliveries.len();
-        total_failed += n_failed;
         println!("      {FAILED:<WIDTH$}{n_failed:>NUM_WIDTH$}");
         if n_failed > 0 {
             #[derive(Tabled)]
@@ -3435,10 +3514,7 @@ fn print_task_webhook_deliverator(details: &serde_json::Value) {
                 .to_string();
             println!("{}", textwrap::indent(&table.to_string(), "      "));
         }
-        let n_internal_errors =
-            delivery_errors.len() + if error.is_some() { 1 } else { 0 };
         if n_internal_errors > 0 {
-            total_errors += n_internal_errors;
             println!(
                 "{ERRICON}   {ERRORS:<WIDTH$}{:>NUM_WIDTH$}",
                 n_internal_errors,
@@ -3505,7 +3581,10 @@ fn print_task_sp_ereport_ingester(details: &serde_json::Value) {
                 "(i) {SPS_NOT_PRESENT:<WIDTH$}{sps_not_present:>NUM_WIDTH$}"
             );
         }
-        print_ereporter_status_totals(sps.iter().map(|sp| &sp.status));
+        print!(
+            "{}",
+            EreporterStatusTotalsDisplay::new(sps.iter().map(|sp| &sp.status))
+        );
     }
 
     if !sps.is_empty() {
@@ -3519,8 +3598,9 @@ fn print_task_sp_ereport_ingester(details: &serde_json::Value) {
         println!("\n    service processors:");
         for SpEreporterStatus { sp_type, slot, status, ignition_type } in &sps {
             println!(
-                "    - {sp_type:<6} {slot:02}: {:>NUM_WIDTH$} ereports",
-                status.ereports_received
+                "    - rack {}, {sp_type:<6} {slot:02}: {:>NUM_WIDTH$} \
+                 ereports",
+                status.rack_id, status.ereports_received
             );
             println!("      ignition type: {ignition_type:?}",);
             println!(
@@ -3545,70 +3625,129 @@ fn print_task_sp_ereport_ingester(details: &serde_json::Value) {
     }
 }
 
-fn print_ereporter_status_totals<'status>(
-    statuses: impl Iterator<Item = &'status EreporterStatus>,
-) {
-    let mut total_received = 0;
-    let mut total_new = 0;
-    let mut total_reqs = 0;
-    let mut total_errors = 0;
-    let mut reporters_with_ereports = 0;
-    let mut reporters_without_ereports = 0;
-    let mut reporters_with_errors = 0;
-    let mut reporters_without_errors = 0;
+struct EreporterStatusTotalsDisplay {
+    total_received: usize,
+    total_new: usize,
+    total_reqs: usize,
+    total_errors: usize,
+    total_racks: usize,
+    total_reporters: usize,
+    reporters_with_ereports: usize,
+    reporters_without_ereports: usize,
+    reporters_with_errors: usize,
+    reporters_without_errors: usize,
+}
 
-    for &EreporterStatus {
-        ereports_received,
-        new_ereports,
-        requests,
-        ref errors,
-    } in statuses
-    {
-        total_received += ereports_received;
-        total_new += new_ereports;
-        total_reqs += requests;
-        total_errors += errors.len();
-        if ereports_received > 0 {
-            reporters_with_ereports += 1;
-        } else {
-            reporters_without_ereports += 1;
+impl EreporterStatusTotalsDisplay {
+    fn new<'a>(
+        statuses: impl IntoIterator<Item = &'a EreporterStatus>,
+    ) -> Self {
+        let mut racks = std::collections::HashSet::new();
+        let mut total_received = 0;
+        let mut total_new = 0;
+        let mut total_reqs = 0;
+        let mut total_errors = 0;
+        let mut reporters_with_ereports = 0;
+        let mut reporters_without_ereports = 0;
+        let mut reporters_with_errors = 0;
+        let mut reporters_without_errors = 0;
+
+        for &EreporterStatus {
+            rack_id,
+            ereports_received,
+            new_ereports,
+            requests,
+            ref errors,
+        } in statuses
+        {
+            racks.insert(rack_id);
+            total_received += ereports_received;
+            total_new += new_ereports;
+            total_reqs += requests;
+            total_errors += errors.len();
+            if ereports_received > 0 {
+                reporters_with_ereports += 1;
+            } else {
+                reporters_without_ereports += 1;
+            }
+            if !errors.is_empty() {
+                reporters_with_errors += 1;
+            } else {
+                reporters_without_errors += 1;
+            }
         }
-        if !errors.is_empty() {
-            reporters_with_errors += 1;
-        } else {
-            reporters_without_errors += 1;
+        let total_reporters =
+            reporters_with_ereports + reporters_without_ereports;
+        let total_racks = racks.len();
+        Self {
+            total_received,
+            total_new,
+            total_reqs,
+            total_errors,
+            total_racks,
+            total_reporters,
+            reporters_with_ereports,
+            reporters_without_ereports,
+            reporters_with_errors,
+            reporters_without_errors,
         }
     }
-    let total_reporters = reporters_with_ereports + reporters_without_ereports;
+}
 
-    use ereporter_status_fields::*;
-    println!("    {EREPORTS_RECEIVED:<WIDTH$}{total_received:>NUM_WIDTH$}");
-    println!("    {NEW_EREPORTS:<WIDTH$}{total_new:>NUM_WIDTH$}");
-    println!("    {HTTP_REQUESTS:<WIDTH$}{total_reqs:>NUM_WIDTH$}");
-    println!("    {ERRORS:<WIDTH$}{total_errors:>NUM_WIDTH$}");
-    println!("    {TOTAL_REPORTERS:<WIDTH$}{total_reporters:>NUM_WIDTH$}",);
-    println!(
-        "    {REPORTERS_CONTACTED_SUCCESSFULLY:<WIDTH$}\
-        {reporters_without_errors:>NUM_WIDTH$}",
-    );
-    println!(
-        "    {REPORTERS_WITH_EREPORTS:<WIDTH$}\
-         {reporters_with_ereports:>NUM_WIDTH$}"
-    );
-    println!(
-        "    {REPORTERS_WITHOUT_EREPORTS:<WIDTH$}\
-         {reporters_without_ereports:>NUM_WIDTH$}"
-    );
-    println!(
-        "    {REPORTERS_WITH_ERRORS:<WIDTH$}\
-         {reporters_with_errors:>NUM_WIDTH$}"
-    );
+impl fmt::Display for EreporterStatusTotalsDisplay {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self {
+            total_received,
+            total_new,
+            total_reqs,
+            total_errors,
+            total_racks,
+            total_reporters,
+            reporters_with_ereports,
+            reporters_without_ereports,
+            reporters_with_errors,
+            reporters_without_errors,
+        } = self;
+        use ereporter_status_fields::*;
+
+        writeln!(f, "    {TOTAL_RACKS:<WIDTH$}{total_racks:>NUM_WIDTH$}")?;
+        writeln!(
+            f,
+            "    {EREPORTS_RECEIVED:<WIDTH$}{total_received:>NUM_WIDTH$}"
+        )?;
+        writeln!(f, "    {NEW_EREPORTS:<WIDTH$}{total_new:>NUM_WIDTH$}")?;
+        writeln!(f, "    {HTTP_REQUESTS:<WIDTH$}{total_reqs:>NUM_WIDTH$}")?;
+        writeln!(f, "    {ERRORS:<WIDTH$}{total_errors:>NUM_WIDTH$}")?;
+        writeln!(
+            f,
+            "    {TOTAL_REPORTERS:<WIDTH$}{total_reporters:>NUM_WIDTH$}",
+        )?;
+        writeln!(
+            f,
+            "    {REPORTERS_CONTACTED_SUCCESSFULLY:<WIDTH$}\
+            {reporters_without_errors:>NUM_WIDTH$}",
+        )?;
+        writeln!(
+            f,
+            "    {REPORTERS_WITH_EREPORTS:<WIDTH$}\
+             {reporters_with_ereports:>NUM_WIDTH$}"
+        )?;
+        writeln!(
+            f,
+            "    {REPORTERS_WITHOUT_EREPORTS:<WIDTH$}\
+             {reporters_without_ereports:>NUM_WIDTH$}"
+        )?;
+        writeln!(
+            f,
+            "    {REPORTERS_WITH_ERRORS:<WIDTH$}\
+             {reporters_with_errors:>NUM_WIDTH$}"
+        )?;
+        Ok(())
+    }
 }
 
 mod ereporter_status_fields {
-    pub const TOTAL_NEW_EREPORTS: &str = "new ereports ingested:";
-    pub const TOTAL_HTTP_REQUESTS: &str = "HTTP requests sent:";
-
+    pub const TOTAL_RACKS: &str = "total racks:";
     pub const EREPORTS_RECEIVED: &str = "total ereports received:";
     pub const NEW_EREPORTS: &str = "  new ereports ingested:";
     pub const HTTP_REQUESTS: &str = "total HTTP requests sent:";
@@ -3622,12 +3761,12 @@ mod ereporter_status_fields {
     pub const SPS_FOUND: &str = "SPs found via ignition:";
     pub const SPS_NOT_PRESENT: &str = "SPs not present:";
     pub const WIDTH: usize = super::const_max_len(&[
-        TOTAL_NEW_EREPORTS,
-        TOTAL_HTTP_REQUESTS,
+        TOTAL_RACKS,
         EREPORTS_RECEIVED,
         NEW_EREPORTS,
         HTTP_REQUESTS,
         ERRORS,
+        TOTAL_REPORTERS,
         REPORTERS_CONTACTED_SUCCESSFULLY,
         REPORTERS_WITH_EREPORTS,
         REPORTERS_WITHOUT_EREPORTS,
@@ -4917,11 +5056,11 @@ async fn cmd_nexus_clickhouse_policy_get(
                     Defaulting to single-node deployment"
                 );
             } else {
-                eprintln!("error: {:#}", err);
+                return Err(err).context("retrieving clickhouse policy");
             }
         }
         Ok(policy) => {
-            println!("Clickhouse Policy: ");
+            println!("Clickhouse Policy:");
             println!("    version: {}", policy.version);
             println!("    creation time: {}", policy.time_created);
             match policy.mode {
@@ -5027,7 +5166,6 @@ async fn cmd_nexus_clickhouse_policy_set(
                     time_created: now_db_precision(),
                 }
             } else {
-                eprintln!("error: {:#}", err);
                 return Err(err).context("retrieving clickhouse policy");
             }
         }
@@ -5063,11 +5201,11 @@ async fn cmd_nexus_oximeter_read_policy_get(
                     Defaulting to reading from a single-node"
                 );
             } else {
-                eprintln!("error: {:#}", err);
+                return Err(err).context("retrieving oximeter read policy");
             }
         }
         Ok(policy) => {
-            println!("Oximeter Read Policy: ");
+            println!("Oximeter Read Policy:");
             println!("    version: {}", policy.version);
             println!("    creation time: {}", policy.time_created);
             match policy.mode {
@@ -5104,7 +5242,6 @@ async fn cmd_nexus_oximeter_read_policy_set(
                     time_created: now_db_precision(),
                 }
             } else {
-                eprintln!("error: {:#}", err);
                 return Err(err).context("retrieving oximeter read policy");
             }
         }
@@ -5926,4 +6063,130 @@ async fn cmd_nexus_support_bundles_inspect(
     };
 
     support_bundle_viewer::run_dashboard(accessor).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nexus_types::external_api::alert::WebhookDeliveryAttemptResult;
+    use nexus_types::internal_api::background::WebhookDeliveryFailure;
+    use omicron_uuid_kinds::AlertUuid;
+    use omicron_uuid_kinds::RackUuid;
+    use omicron_uuid_kinds::WebhookDeliveryUuid;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn test_ereporter_status_totals_display() {
+        // Include reporters with and without ereports, and errors both with
+        // and without received ereports.
+        //
+        // Also have one of the reporters contain multiple errors to distinguish
+        // the error count from the count of affected reporters. And throw in
+        // two rack IDs to see how that part looks.
+        let rack1 = RackUuid::from_u128(0x6174c6ce_9bb1_4ce8_afc3_97fc1e6aa450);
+        let rack2 = RackUuid::from_u128(0xaaf68b01_1fa2_4665_ad2d_cf43f7c3f378);
+        let statuses = [
+            EreporterStatus {
+                rack_id: rack1,
+                ereports_received: 12,
+                new_ereports: 7,
+                requests: 4,
+                errors: vec![],
+            },
+            EreporterStatus {
+                rack_id: rack1,
+                ereports_received: 3,
+                new_ereports: 2,
+                requests: 5,
+                errors: vec!["error one".into(), "error two".into()],
+            },
+            EreporterStatus {
+                rack_id: rack2,
+                requests: 2,
+                ereports_received: 0,
+                new_ereports: 0,
+                errors: Vec::new(),
+            },
+            EreporterStatus {
+                rack_id: rack2,
+                requests: 1,
+                ereports_received: 0,
+                new_ereports: 0,
+                errors: vec!["error three".into()],
+            },
+            EreporterStatus {
+                rack_id: rack1,
+                ereports_received: 0,
+                new_ereports: 0,
+                requests: 0,
+                errors: Vec::new(),
+            },
+        ];
+        expectorate::assert_contents(
+            "tests/output/ereporter-status-totals.txt",
+            &EreporterStatusTotalsDisplay::new(&statuses).to_string(),
+        );
+        expectorate::assert_contents(
+            "tests/output/ereporter-status-totals-empty.txt",
+            &EreporterStatusTotalsDisplay::new([]).to_string(),
+        );
+    }
+
+    #[test]
+    fn test_webhook_delivery_totals_distinct_counts() {
+        let failure = WebhookDeliveryFailure {
+            delivery_id: WebhookDeliveryUuid::nil(),
+            alert_id: AlertUuid::nil(),
+            attempt: 1,
+            result: WebhookDeliveryAttemptResult::FailedTimeout,
+            response_status: None,
+            response_duration: None,
+        };
+        let first = WebhookRxDeliveryStatus {
+            ready: 100,
+            delivered_ok: 1,
+            already_delivered: 2,
+            in_progress: 3,
+            failed_deliveries: vec![failure.clone()],
+            delivery_errors: BTreeMap::from([(
+                WebhookDeliveryUuid::nil(),
+                "error one".to_string(),
+            )]),
+            error: None,
+        };
+        let second = WebhookRxDeliveryStatus {
+            ready: 200,
+            delivered_ok: 10,
+            already_delivered: 20,
+            in_progress: 30,
+            failed_deliveries: vec![failure.clone(), failure],
+            delivery_errors: BTreeMap::new(),
+            error: Some("task error".to_string()),
+        };
+        assert_eq!(
+            WebhookDeliveryTotals::from_status([&first, &second]),
+            WebhookDeliveryTotals {
+                ok: 11,
+                already_delivered: 22,
+                in_progress: 33,
+                failed: 3,
+                errors: 2,
+            },
+        );
+    }
+
+    #[test]
+    fn test_last_pass_success_display_distinct_counts() {
+        let success = LastPassSuccess {
+            nfound: 5,
+            nrecovered: 4,
+            nfailed: 3,
+            nskipped: 2,
+            nremoved: 1,
+        };
+        expectorate::assert_contents(
+            "tests/output/saga-recovery-last-pass.txt",
+            &LastPassSuccessDisplay(&success).to_string(),
+        );
+    }
 }

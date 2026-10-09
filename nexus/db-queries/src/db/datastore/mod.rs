@@ -216,6 +216,7 @@ pub use switch_port::SwitchConfigData;
 pub use switch_port::SwitchPortSettingsCombinedResult;
 pub use user_data_export::*;
 pub use virtual_provisioning_collection::StorageType;
+pub use vmm::VmmBulkMarkStopForUpdateResult;
 pub use vmm::VmmStateUpdateResult;
 pub use volume::*;
 pub use webhook_delivery::WebhookDeliveryFilters;

@@ -12,6 +12,7 @@ use camino::Utf8Path;
 use nexus_reconfigurator_preparation::reconfigurator_state_load;
 use slog::info;
 use slog::warn;
+use std::io::Write;
 
 pub async fn collect(
     collection: &BundleCollection,
@@ -55,9 +56,12 @@ pub async fn collect(
             .truncate(true)
             .open(&file_path)
             .with_context(|| format!("failed to open {}", file_path))?;
-        serde_json::to_writer_pretty(&file, &state).with_context(|| {
+        // Serializing to an unbuffered file adds a huge amount of overhead.
+        let mut w = std::io::BufWriter::new(file);
+        serde_json::to_writer_pretty(&mut w, &state).with_context(|| {
             format!("failed to serialize reconfigurator state to {}", file_path)
-        })
+        })?;
+        w.flush().with_context(|| format!("flush {file_path}"))
     })
     .await??;
     info!(

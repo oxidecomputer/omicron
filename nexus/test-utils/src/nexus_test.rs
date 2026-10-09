@@ -357,6 +357,21 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         sled_agent
     }
 
+    /// Returns the number of simulated service processors in this test.
+    pub fn num_sps(&self) -> usize {
+        self.gateway
+            .values()
+            // because all gateways in a given `ControlPlaneTestContext` share
+            // the same sp-sim config, just pick the first one.
+            //
+            // N.B. that if this changes in the future (such as if we add
+            // support for simulating management network partitions?) this may
+            // become wrong!
+            .next()
+            .map(|gwctx| gwctx.simrack.num_sps())
+            .unwrap_or(0)
+    }
+
     /// Run an inventory collection and load it, ensuring that the loaded
     /// collection contains the sled ID.
     async fn collect_inventory_with_sled(&self, sled_id: SledUuid) {
