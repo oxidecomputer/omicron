@@ -3852,7 +3852,6 @@ mod tests {
             cmd_rx: mpsc::Receiver<InstanceRequest>,
             monitor_tx: mpsc::Sender<InstanceMonitorMessage>,
             monitor_rx: mpsc::Receiver<InstanceMonitorMessage>,
-            terminator: Arc<Terminator>,
         ) -> Self {
             let metadata = InstanceMetadata {
                 silo_id: Uuid::new_v4(),
@@ -3929,7 +3928,7 @@ mod tests {
                 metrics_queue,
                 delegated_zvols: local_config.delegated_zvols,
                 attached_subnets: IdOrdMap::new(),
-                terminator,
+                terminator: Terminator::new(),
             }
         }
     }
@@ -3978,7 +3977,6 @@ mod tests {
 
             let initial_state = fake_instance_initial_state(propolis_addr);
 
-            let terminator = Terminator::new();
             let (monitor_tx, monitor_rx) = mpsc::channel(1);
             let (cmd_tx, cmd_rx) = mpsc::channel(QUEUE_SIZE);
             let (remove_tx, remove_rx) = mpsc::unbounded_channel();
@@ -3992,8 +3990,8 @@ mod tests {
                 cmd_rx,
                 monitor_tx.clone(),
                 monitor_rx,
-                terminator.clone(),
             );
+            let terminator = runner.terminator.clone();
 
             let runner_task = tokio::spawn(runner.run(ticket));
 
