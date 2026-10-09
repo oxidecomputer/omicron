@@ -939,6 +939,33 @@ table! {
 }
 
 table! {
+    service_account (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        scope -> Text,
+        resource_id -> Uuid,
+        federation_generation -> Int8,
+        federation_token_max_ttl_seconds -> Int8,
+        identity_provider_id -> Nullable<Uuid>,
+        trust_policy -> Nullable<Text>,
+    }
+}
+
+table! {
+    service_account_grant (id) {
+        id -> Uuid,
+        service_account_id -> Uuid,
+        resource_kind -> Text,
+        resource_id -> Uuid,
+        role_name -> Text,
+    }
+}
+
+table! {
     identity_provider (silo_id, id) {
         id -> Uuid,
         name -> Text,

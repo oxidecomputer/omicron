@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026092200.0.0"
+    "version": "2026100800.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -7237,6 +7237,340 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProjectRolePolicy"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/service-accounts/{scope}": {
+      "get": {
+        "tags": [
+          "service-accounts"
+        ],
+        "summary": "List service accounts",
+        "operationId": "service_account_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scope",
+            "description": "Scope of the service accounts.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ServiceAccountScope"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Owning project's name or UUID, for project-scoped service accounts.",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "silo",
+            "description": "Owning silo's name or UUID, for silo-scoped service accounts.",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceAccountResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      },
+      "post": {
+        "tags": [
+          "service-accounts"
+        ],
+        "summary": "Create service account",
+        "operationId": "service_account_create",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scope",
+            "description": "Scope of the service accounts.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ServiceAccountScope"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Owning project's name or UUID, for project-scoped service accounts.",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "silo",
+            "description": "Owning silo's name or UUID, for silo-scoped service accounts.",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceAccountCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceAccount"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/service-accounts/{scope}/{service_account}": {
+      "get": {
+        "tags": [
+          "service-accounts"
+        ],
+        "summary": "Fetch service account",
+        "operationId": "service_account_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scope",
+            "description": "Scope of the service account.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ServiceAccountScope"
+            }
+          },
+          {
+            "in": "path",
+            "name": "service_account",
+            "description": "Name or UUID of the service account.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Owning project's name or UUID, for project-scoped service accounts.",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "silo",
+            "description": "Owning silo's name or UUID, for silo-scoped service accounts.",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceAccount"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "service-accounts"
+        ],
+        "summary": "Delete service account",
+        "operationId": "service_account_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scope",
+            "description": "Scope of the service account.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ServiceAccountScope"
+            }
+          },
+          {
+            "in": "path",
+            "name": "service_account",
+            "description": "Name or UUID of the service account.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Owning project's name or UUID, for project-scoped service accounts.",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "silo",
+            "description": "Owning silo's name or UUID, for silo-scoped service accounts.",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "service-accounts"
+        ],
+        "summary": "Update service account",
+        "operationId": "service_account_update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scope",
+            "description": "Scope of the service account.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ServiceAccountScope"
+            }
+          },
+          {
+            "in": "path",
+            "name": "service_account",
+            "description": "Name or UUID of the service account.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Owning project's name or UUID, for project-scoped service accounts.",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "silo",
+            "description": "Owning silo's name or UUID, for silo-scoped service accounts.",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceAccountUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceAccount"
                 }
               }
             }
@@ -27948,6 +28282,306 @@
           "time_created"
         ]
       },
+      "ServiceAccount": {
+        "description": "Identity-related metadata that's included in nearly all public API objects",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "Human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "federation": {
+            "nullable": true,
+            "description": "Federation configuration, if enabled.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ServiceAccountFederationView"
+              }
+            ]
+          },
+          "federation_generation": {
+            "description": "Generation of the federation identity provider and policy.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "grants": {
+            "description": "Roles granted to this service account.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ServiceAccountGrant"
+            }
+          },
+          "id": {
+            "description": "Unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "description": "Unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "resource_id": {
+            "description": "UUID of the owning silo or project.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "scope": {
+            "description": "Scope of the service account.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ServiceAccountScope"
+              }
+            ]
+          },
+          "time_created": {
+            "description": "Timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "Timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "description",
+          "federation_generation",
+          "grants",
+          "id",
+          "name",
+          "resource_id",
+          "scope",
+          "time_created",
+          "time_modified"
+        ]
+      },
+      "ServiceAccountCreate": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "Human-readable description, limited to 512 characters.",
+            "type": "string"
+          },
+          "federation": {
+            "nullable": true,
+            "description": "Optional configuration for assuming this account through federation.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ServiceAccountFederation"
+              }
+            ]
+          },
+          "grants": {
+            "description": "Built-in roles granted to the service account.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ServiceAccountGrant"
+            }
+          },
+          "name": {
+            "description": "Name within the owning silo or project.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          }
+        },
+        "required": [
+          "description",
+          "grants",
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "ServiceAccountFederation": {
+        "type": "object",
+        "properties": {
+          "identity_provider": {
+            "description": "Name or UUID of an identity provider in the current silo.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NameOrId"
+              }
+            ]
+          },
+          "max_ttl_seconds": {
+            "description": "Maximum federation token lifetime in seconds. Defaults to one hour.",
+            "default": 3600,
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 1
+          },
+          "policy": {
+            "description": "Polar policy defining `assume` with one parameter for verified JWT claims.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "identity_provider",
+          "policy"
+        ],
+        "additionalProperties": false
+      },
+      "ServiceAccountFederationView": {
+        "type": "object",
+        "properties": {
+          "identity_provider": {
+            "description": "UUID of the configured identity provider.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "max_ttl_seconds": {
+            "description": "Maximum federation token lifetime in seconds.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 1
+          },
+          "policy": {
+            "description": "Polar policy evaluated against verified JWT claims.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "identity_provider",
+          "max_ttl_seconds",
+          "policy"
+        ]
+      },
+      "ServiceAccountGrant": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "resource_id": {
+                "description": "UUID of the owning silo.",
+                "type": "string",
+                "format": "uuid"
+              },
+              "resource_kind": {
+                "type": "string",
+                "enum": [
+                  "silo"
+                ]
+              },
+              "role_name": {
+                "description": "Built-in silo role to grant.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/SiloRole"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "resource_id",
+              "resource_kind",
+              "role_name"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "resource_id": {
+                "description": "UUID of a project within the service account's scope.",
+                "type": "string",
+                "format": "uuid"
+              },
+              "resource_kind": {
+                "type": "string",
+                "enum": [
+                  "project"
+                ]
+              },
+              "role_name": {
+                "description": "Built-in project role to grant.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/ProjectRole"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "resource_id",
+              "resource_kind",
+              "role_name"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "ServiceAccountResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ServiceAccount"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "ServiceAccountScope": {
+        "type": "string",
+        "enum": [
+          "silo",
+          "project"
+        ]
+      },
+      "ServiceAccountUpdate": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "nullable": true,
+            "description": "Replacement description, limited to 512 characters.",
+            "type": "string"
+          },
+          "federation": {
+            "nullable": true,
+            "description": "Omit to retain federation, set to null to remove it, or provide a replacement.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ServiceAccountFederation"
+              }
+            ]
+          },
+          "grants": {
+            "nullable": true,
+            "description": "Replacement grants; an empty list removes all grants.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ServiceAccountGrant"
+            }
+          },
+          "name": {
+            "nullable": true,
+            "description": "Replacement name within the same owner.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
       "ServiceIcmpConfig": {
         "description": "Configuration of inbound ICMP allowed by API services.",
         "type": "object",
@@ -32816,6 +33450,10 @@
       "externalDocs": {
         "url": "http://docs.oxide.computer/api/projects"
       }
+    },
+    {
+      "name": "service-accounts",
+      "description": "Service accounts"
     },
     {
       "name": "silos",

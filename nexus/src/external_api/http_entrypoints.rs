@@ -44,8 +44,8 @@ use nexus_types::external_api::{
     affinity, alert, audit, certificate, console, device, disk, external_ip,
     external_subnet, federation, floating_ip, hardware, identity_provider,
     image, instance, internet_gateway, ip_pool, metrics, multicast, networking,
-    oxql, path_params, policy, probe, project, rack, scim, silo, sled,
-    snapshot, ssh_key, subnet_pool, support_bundle, switch, system,
+    oxql, path_params, policy, probe, project, rack, scim, service_account,
+    silo, sled, snapshot, ssh_key, subnet_pool, support_bundle, switch, system,
     system_networking, timeseries, update, user, vpc,
 };
 // Type imports for API implementations (per RFD 619)
@@ -3916,6 +3916,139 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let group_lookup =
                 nexus.anti_affinity_group_lookup(&opctx, group_selector)?;
             nexus.anti_affinity_group_delete(&opctx, &group_lookup).await?;
+            Ok(HttpResponseDeleted())
+        })
+        .await
+    }
+
+    async fn service_account_create(
+        rqctx: RequestContext<ApiContext>,
+        path: Path<service_account::ServiceAccountScopePath>,
+        query: Query<service_account::ServiceAccountParentSelector>,
+        body: TypedBody<service_account::ServiceAccountCreate>,
+    ) -> Result<HttpResponseCreated<service_account::ServiceAccount>, HttpError>
+    {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            Ok(HttpResponseCreated(
+                nexus
+                    .service_account_create(
+                        &opctx,
+                        path.into_inner().scope,
+                        query.into_inner(),
+                        body.into_inner(),
+                    )
+                    .await?,
+            ))
+        })
+        .await
+    }
+
+    async fn service_account_list(
+        rqctx: RequestContext<ApiContext>,
+        path: Path<service_account::ServiceAccountScopePath>,
+        query: Query<
+            PaginatedByNameOrId<service_account::ServiceAccountParentSelector>,
+        >,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<service_account::ServiceAccount>>,
+        HttpError,
+    > {
+        let apictx = rqctx.context();
+        let handler = async {
+            let query = query.into_inner();
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let scan_params = ScanByNameOrId::from_query(&query)?;
+            let parent = scan_params.selector.clone();
+            let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let accounts = apictx
+                .context
+                .nexus
+                .service_account_list(
+                    &opctx,
+                    path.into_inner().scope,
+                    parent,
+                    &paginated_by,
+                )
+                .await?;
+            Ok(HttpResponseOk(ScanByNameOrId::results_page(
+                &query,
+                accounts,
+                &marker_for_name_or_id,
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn service_account_view(
+        rqctx: RequestContext<ApiContext>,
+        path: Path<service_account::ServiceAccountPath>,
+        query: Query<service_account::ServiceAccountParentSelector>,
+    ) -> Result<HttpResponseOk<service_account::ServiceAccount>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            Ok(HttpResponseOk(
+                apictx
+                    .context
+                    .nexus
+                    .service_account_view(
+                        &opctx,
+                        path.into_inner(),
+                        query.into_inner(),
+                    )
+                    .await?,
+            ))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn service_account_update(
+        rqctx: RequestContext<ApiContext>,
+        path: Path<service_account::ServiceAccountPath>,
+        query: Query<service_account::ServiceAccountParentSelector>,
+        body: TypedBody<service_account::ServiceAccountUpdate>,
+    ) -> Result<HttpResponseOk<service_account::ServiceAccount>, HttpError>
+    {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            Ok(HttpResponseOk(
+                nexus
+                    .service_account_update(
+                        &opctx,
+                        path.into_inner(),
+                        query.into_inner(),
+                        body.into_inner(),
+                    )
+                    .await?,
+            ))
+        })
+        .await
+    }
+
+    async fn service_account_delete(
+        rqctx: RequestContext<ApiContext>,
+        path: Path<service_account::ServiceAccountPath>,
+        query: Query<service_account::ServiceAccountParentSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            nexus
+                .service_account_delete(
+                    &opctx,
+                    path.into_inner(),
+                    query.into_inner(),
+                )
+                .await?;
             Ok(HttpResponseDeleted())
         })
         .await

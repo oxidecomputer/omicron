@@ -308,6 +308,7 @@ async fn make_silo(
     ));
 
     builder.new_resource(authz::SiloImageList::new(silo.clone()));
+    builder.new_resource(authz::SiloServiceAccountList::new(silo.clone()));
 
     builder.new_resource(authz::SiloFederationIdentityProviderList::new(
         silo.clone(),
@@ -407,6 +408,9 @@ async fn make_project(
     } else {
         builder.new_resource(project.clone());
     }
+
+    builder
+        .new_resource(authz::ProjectServiceAccountList::new(project.clone()));
 
     let vpc1_name = format!("{}-vpc1", project_name);
     let vpc1 = authz::Vpc::new(

@@ -88,6 +88,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_10_08_00, SERVICE_ACCOUNTS),
     (2026_09_22_00, FEDERATION_IDENTITY_PROVIDERS),
     (2026_09_15_00, REMOVE_SILO_DISCOVERABLE),
     (2026_09_11_00, ALERT_PAYLOAD),
@@ -300,6 +301,7 @@ const PUT_UPDATE_REPOSITORY_MAX_BYTES: usize = 4 * GIB;
                     url = "http://docs.oxide.computer/api/policy"
                 }
             },
+            "service-accounts" = { description = "Service accounts" },
             "projects" = {
                 description = "Projects are a grouping of associated resources such as instances and disks within a silo for purposes of billing and access control.",
                 external_docs = {
@@ -828,6 +830,89 @@ pub trait NexusExternalApi {
             .await
             .map(|HttpResponseOk(u)| HttpResponseOk(u.into()))
     }
+
+    /// List service accounts
+    #[endpoint {
+        method = GET,
+        path = "/v1/service-accounts/{scope}",
+        tags = ["service-accounts"],
+        versions = VERSION_SERVICE_ACCOUNTS..,
+    }]
+    async fn service_account_list(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::service_account::ServiceAccountScopePath>,
+        query: Query<
+            PaginatedByNameOrId<
+                latest::service_account::ServiceAccountParentSelector,
+            >,
+        >,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::service_account::ServiceAccount>>,
+        HttpError,
+    >;
+
+    /// Create service account
+    #[endpoint {
+        method = POST,
+        path = "/v1/service-accounts/{scope}",
+        tags = ["service-accounts"],
+        versions = VERSION_SERVICE_ACCOUNTS..,
+    }]
+    async fn service_account_create(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::service_account::ServiceAccountScopePath>,
+        query: Query<latest::service_account::ServiceAccountParentSelector>,
+        body: TypedBody<latest::service_account::ServiceAccountCreate>,
+    ) -> Result<
+        HttpResponseCreated<latest::service_account::ServiceAccount>,
+        HttpError,
+    >;
+
+    /// Fetch service account
+    #[endpoint {
+        method = GET,
+        path = "/v1/service-accounts/{scope}/{service_account}",
+        tags = ["service-accounts"],
+        versions = VERSION_SERVICE_ACCOUNTS..,
+    }]
+    async fn service_account_view(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::service_account::ServiceAccountPath>,
+        query: Query<latest::service_account::ServiceAccountParentSelector>,
+    ) -> Result<
+        HttpResponseOk<latest::service_account::ServiceAccount>,
+        HttpError,
+    >;
+
+    /// Update service account
+    #[endpoint {
+        method = PATCH,
+        path = "/v1/service-accounts/{scope}/{service_account}",
+        tags = ["service-accounts"],
+        versions = VERSION_SERVICE_ACCOUNTS..,
+    }]
+    async fn service_account_update(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::service_account::ServiceAccountPath>,
+        query: Query<latest::service_account::ServiceAccountParentSelector>,
+        body: TypedBody<latest::service_account::ServiceAccountUpdate>,
+    ) -> Result<
+        HttpResponseOk<latest::service_account::ServiceAccount>,
+        HttpError,
+    >;
+
+    /// Delete service account
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/service-accounts/{scope}/{service_account}",
+        tags = ["service-accounts"],
+        versions = VERSION_SERVICE_ACCOUNTS..,
+    }]
+    async fn service_account_delete(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::service_account::ServiceAccountPath>,
+        query: Query<latest::service_account::ServiceAccountParentSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
 
     /// List inbound federation identity providers
     #[endpoint {

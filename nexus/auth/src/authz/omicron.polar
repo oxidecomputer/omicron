@@ -944,3 +944,25 @@ resource SiloFederationIdentityProviderList {
 }
 has_relation(silo: Silo, "parent_silo", collection: SiloFederationIdentityProviderList)
     if collection.silo = silo;
+
+resource SiloServiceAccountList {
+    permissions = [ "read", "list_children", "create_child", "modify" ];
+    relations = { parent_silo: Silo };
+    "read" if "viewer" on "parent_silo";
+    "list_children" if "viewer" on "parent_silo";
+    "create_child" if "admin" on "parent_silo";
+    "modify" if "admin" on "parent_silo";
+}
+has_relation(silo: Silo, "parent_silo", collection: SiloServiceAccountList)
+    if collection.silo = silo;
+
+resource ProjectServiceAccountList {
+    permissions = [ "read", "list_children", "create_child", "modify" ];
+    relations = { parent_project: Project };
+    "read" if "viewer" on "parent_project";
+    "list_children" if "viewer" on "parent_project";
+    "create_child" if "admin" on "parent_project";
+    "modify" if "admin" on "parent_project";
+}
+has_relation(project: Project, "parent_project", collection: ProjectServiceAccountList)
+    if collection.project = project;

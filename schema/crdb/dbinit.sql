@@ -9555,6 +9555,49 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_config (
 );
 
 
+CREATE TABLE IF NOT EXISTS omicron.public.service_account (
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    scope STRING NOT NULL,
+    resource_id UUID NOT NULL,
+    federation_generation INT8 NOT NULL DEFAULT 1,
+    federation_token_max_ttl_seconds INT8 NOT NULL,
+    identity_provider_id UUID,
+    trust_policy STRING,
+    CONSTRAINT service_account_scope CHECK (scope IN ('silo', 'project')),
+    CONSTRAINT service_account_federation CHECK (
+        (identity_provider_id IS NULL AND trust_policy IS NULL)
+        OR (identity_provider_id IS NOT NULL AND trust_policy IS NOT NULL)
+    )
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS service_account_name
+ON omicron.public.service_account (scope, resource_id, name)
+WHERE time_deleted IS NULL;
+
+CREATE INDEX IF NOT EXISTS service_account_parent
+ON omicron.public.service_account (scope, resource_id, id)
+WHERE time_deleted IS NULL;
+
+CREATE TABLE IF NOT EXISTS omicron.public.service_account_grant (
+    id UUID PRIMARY KEY,
+    service_account_id UUID NOT NULL,
+    resource_kind STRING NOT NULL,
+    resource_id UUID NOT NULL,
+    role_name STRING NOT NULL,
+    CONSTRAINT service_account_grant_kind CHECK (
+        resource_kind IN ('silo', 'project')
+    )
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS service_account_grant_unique
+ON omicron.public.service_account_grant
+    (service_account_id, resource_kind, resource_id, role_name);
+
 CREATE TABLE IF NOT EXISTS omicron.public.federation_identity_provider (
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
@@ -9592,7 +9635,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '307.0.0', NULL)
+    (TRUE, NOW(), NOW(), '308.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

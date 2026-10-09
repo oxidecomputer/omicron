@@ -39,6 +39,7 @@ pub mod project;
 pub mod rack;
 pub mod saml;
 pub mod scim;
+pub mod service_account;
 pub mod silo;
 pub mod sled;
 pub mod snapshot;

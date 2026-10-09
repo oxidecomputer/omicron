@@ -258,6 +258,17 @@ impl DataStore {
                 let err = err.clone();
                 async move {
                     let now = Utc::now();
+                    if super::service_account::has_service_accounts(
+                        &conn,
+                        "project",
+                        authz_project.id(),
+                    )
+                    .await?
+                    {
+                        return Err(err.bail(Error::invalid_request(
+                            "project to be deleted contains a service account",
+                        )));
+                    }
                     let updated_rows = diesel::update(dsl::project)
                         .filter(dsl::time_deleted.is_null())
                         .filter(dsl::id.eq(authz_project.id()))

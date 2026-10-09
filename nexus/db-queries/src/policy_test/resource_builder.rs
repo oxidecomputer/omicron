@@ -374,6 +374,40 @@ impl DynAuthorizedResource for authz::SiloFederationIdentityProviderList {
     }
 }
 
+impl DynAuthorizedResource for authz::SiloServiceAccountList {
+    fn do_authorize<'a, 'b>(
+        &'a self,
+        opctx: &'b OpContext,
+        action: authz::Action,
+    ) -> BoxFuture<'a, Result<(), Error>>
+    where
+        'b: 'a,
+    {
+        opctx.authorize(action, self).boxed()
+    }
+
+    fn resource_name(&self) -> String {
+        format!("{}: service account list", self.silo().resource_name())
+    }
+}
+
+impl DynAuthorizedResource for authz::ProjectServiceAccountList {
+    fn do_authorize<'a, 'b>(
+        &'a self,
+        opctx: &'b OpContext,
+        action: authz::Action,
+    ) -> BoxFuture<'a, Result<(), Error>>
+    where
+        'b: 'a,
+    {
+        opctx.authorize(action, self).boxed()
+    }
+
+    fn resource_name(&self) -> String {
+        format!("{}: service account list", self.project().resource_name())
+    }
+}
+
 impl DynAuthorizedResource for authz::SiloIdentityProviderList {
     fn do_authorize<'a, 'b>(
         &'a self,

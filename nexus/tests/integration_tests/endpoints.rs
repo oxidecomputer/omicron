@@ -1816,9 +1816,37 @@ pub static URL_USERS_DB_INIT: LazyLock<String> = LazyLock::new(|| {
 });
 
 /// List of endpoints to be verified
+pub static SERVICE_ACCOUNT_COLLECTION_URL: LazyLock<String> =
+    LazyLock::new(|| {
+        format!("/v1/service-accounts/silo?silo={}", DEFAULT_SILO.id())
+    });
+
 pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
     || {
         vec![
+            VerifyEndpoint {
+                url: &SERVICE_ACCOUNT_COLLECTION_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Post(
+                        serde_json::json!({"name": "test-account", "description": "", "grants": []}),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: "/v1/service-accounts/silo/00000000-0000-0000-0000-000000000000",
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::GetNonexistent,
+                    AllowedMethod::Patch(
+                        serde_json::json!({"description": "updated"}),
+                    ),
+                    AllowedMethod::Delete,
+                ],
+            },
             VerifyEndpoint {
                 url: "/v1/federation/inbound/identity-providers",
                 visibility: Visibility::Public,

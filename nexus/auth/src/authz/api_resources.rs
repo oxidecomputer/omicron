@@ -890,6 +890,101 @@ impl AuthorizedResource for SiloFederationIdentityProviderList {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SiloServiceAccountList(Silo);
+
+impl SiloServiceAccountList {
+    pub fn new(silo: Silo) -> SiloServiceAccountList {
+        SiloServiceAccountList(silo)
+    }
+
+    pub fn silo(&self) -> &Silo {
+        &self.0
+    }
+}
+
+impl oso::PolarClass for SiloServiceAccountList {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        oso::Class::builder()
+            .with_equality_check()
+            .add_attribute_getter("silo", |list: &SiloServiceAccountList| {
+                list.0.clone()
+            })
+    }
+}
+
+impl AuthorizedResource for SiloServiceAccountList {
+    fn load_roles<'fut>(
+        &'fut self,
+        opctx: &'fut OpContext,
+        authn: &'fut authn::Context,
+        roleset: &'fut mut RoleSet,
+    ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
+        self.silo().load_roles(opctx, authn, roleset)
+    }
+
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        error
+    }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProjectServiceAccountList(Project);
+
+impl ProjectServiceAccountList {
+    pub fn new(project: Project) -> ProjectServiceAccountList {
+        ProjectServiceAccountList(project)
+    }
+
+    pub fn project(&self) -> &Project {
+        &self.0
+    }
+}
+
+impl oso::PolarClass for ProjectServiceAccountList {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        oso::Class::builder().with_equality_check().add_attribute_getter(
+            "project",
+            |list: &ProjectServiceAccountList| list.0.clone(),
+        )
+    }
+}
+
+impl AuthorizedResource for ProjectServiceAccountList {
+    fn load_roles<'fut>(
+        &'fut self,
+        opctx: &'fut OpContext,
+        authn: &'fut authn::Context,
+        roleset: &'fut mut RoleSet,
+    ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
+        self.project().load_roles(opctx, authn, roleset)
+    }
+
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        error
+    }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
+    }
+}
+
 /// Synthetic resource describing the list of Identity Providers associated with
 /// a Silo
 #[derive(Clone, Debug, Eq, PartialEq)]

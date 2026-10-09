@@ -52,6 +52,7 @@ mod router_routes;
 mod saml;
 mod schema;
 mod scim;
+mod service_account;
 mod silo_users;
 mod silos;
 mod sled_bp_availability;

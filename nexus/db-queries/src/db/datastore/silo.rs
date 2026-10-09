@@ -483,6 +483,15 @@ impl DataStore {
         // with retryable transactions.
         self.transaction_non_retry_wrapper("silo_delete")
             .transaction(&conn, |conn| async move {
+                if super::service_account::has_service_accounts(
+                    &conn, "silo", id,
+                )
+                .await?
+                {
+                    return Err(TxnError::CustomError(Error::invalid_request(
+                        "silo to be deleted contains a service account",
+                    )));
+                }
                 let updated_rows = diesel::update(silo::dsl::silo)
                     .filter(silo::dsl::time_deleted.is_null())
                     .filter(silo::dsl::id.eq(id))
