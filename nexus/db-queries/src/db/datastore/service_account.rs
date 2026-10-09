@@ -31,7 +31,7 @@ type Conn = async_bb8_diesel::Connection<DbConnection>;
 type DieselResult<T> = Result<T, diesel::result::Error>;
 
 #[derive(Clone)]
-enum Parent {
+pub(super) enum Parent {
     Silo(authz::Silo),
     Project(authz::Project),
 }
@@ -93,14 +93,10 @@ fn not_found(selector: &NameOrId) -> ErrorHandler<'static> {
 
 async fn resolve_parent(
     conn: &Conn,
-    opctx: &OpContext,
+    authz_silo: &authz::Silo,
     scope: api::ServiceAccountScope,
     selector: &NameOrId,
 ) -> Result<Parent, Error> {
-    let authz_silo = opctx
-        .authn
-        .silo_required()
-        .internal_context("managing service accounts")?;
     match scope {
         api::ServiceAccountScope::Silo => {
             use silo::dsl;
@@ -125,7 +121,7 @@ async fn resolve_parent(
                     )
                 },
             )?;
-            Ok(Parent::Silo(authz_silo))
+            Ok(Parent::Silo(authz_silo.clone()))
         }
         api::ServiceAccountScope::Project => {
             use project::dsl;
@@ -152,7 +148,7 @@ async fn resolve_parent(
                     },
                 )?;
             Ok(Parent::Project(authz::Project::new(
-                authz_silo,
+                authz_silo.clone(),
                 id,
                 lookup(selector),
             )))
@@ -261,7 +257,10 @@ async fn insert_grants(
         .await
 }
 
-async fn parent_exists(conn: &Conn, parent: &Parent) -> DieselResult<bool> {
+pub(super) async fn parent_exists(
+    conn: &Conn,
+    parent: &Parent,
+) -> DieselResult<bool> {
     match parent {
         Parent::Silo(_) => {
             diesel::select(diesel::dsl::exists(
@@ -299,7 +298,7 @@ pub(super) async fn has_service_accounts(
     .await
 }
 
-async fn fetch_account(
+pub(super) async fn fetch_account(
     conn: &Conn,
     parent: &Parent,
     selector: &NameOrId,
@@ -317,9 +316,9 @@ async fn fetch_account(
     query.select(ServiceAccount::as_select()).first_async(conn).await
 }
 
-async fn account_parent(
+pub(super) async fn account_parent(
     conn: &Conn,
-    opctx: &OpContext,
+    authz_silo: &authz::Silo,
     scope: api::ServiceAccountScope,
     selector: &api::ServiceAccountParentSelector,
     account: &NameOrId,
@@ -340,11 +339,11 @@ async fn account_parent(
             .await
             .map_err(|e| public_error_from_diesel(e, not_found(account)))?;
         let parent =
-            resolve_parent(conn, opctx, scope, &NameOrId::Id(resource_id))
+            resolve_parent(conn, authz_silo, scope, &NameOrId::Id(resource_id))
                 .await?;
         if let Some(explicit) = explicit {
             let requested =
-                resolve_parent(conn, opctx, scope, explicit).await?;
+                resolve_parent(conn, authz_silo, scope, explicit).await?;
             if requested.id() != parent.id() {
                 return Err(Error::invalid_request(
                     "service account does not belong to the selected parent",
@@ -353,8 +352,13 @@ async fn account_parent(
         }
         Ok(parent)
     } else {
-        resolve_parent(conn, opctx, scope, selector.required_for_scope(scope)?)
-            .await
+        resolve_parent(
+            conn,
+            authz_silo,
+            scope,
+            selector.required_for_scope(scope)?,
+        )
+        .await
     }
 }
 
@@ -369,7 +373,10 @@ impl DataStore {
         let conn = self.pool_connection_authorized(opctx).await?;
         let parent = account_parent(
             &conn,
-            opctx,
+            &opctx
+                .authn
+                .silo_required()
+                .internal_context("managing service accounts")?,
             path.scope,
             &selector,
             &path.service_account,
@@ -391,7 +398,10 @@ impl DataStore {
         let conn = self.pool_connection_authorized(opctx).await?;
         let parent = resolve_parent(
             &conn,
-            opctx,
+            &opctx
+                .authn
+                .silo_required()
+                .internal_context("managing service accounts")?,
             scope,
             selector.required_for_scope(scope)?,
         )
@@ -477,7 +487,10 @@ impl DataStore {
         let conn = self.pool_connection_authorized(opctx).await?;
         let parent = resolve_parent(
             &conn,
-            opctx,
+            &opctx
+                .authn
+                .silo_required()
+                .internal_context("managing service accounts")?,
             scope,
             selector.required_for_scope(scope)?,
         )
@@ -547,7 +560,10 @@ impl DataStore {
         let conn = self.pool_connection_authorized(opctx).await?;
         let parent = account_parent(
             &conn,
-            opctx,
+            &opctx
+                .authn
+                .silo_required()
+                .internal_context("managing service accounts")?,
             path.scope,
             &selector,
             &path.service_account,
@@ -593,7 +609,10 @@ impl DataStore {
         let conn = self.pool_connection_authorized(opctx).await?;
         let parent = account_parent(
             &conn,
-            opctx,
+            &opctx
+                .authn
+                .silo_required()
+                .internal_context("managing service accounts")?,
             path.scope,
             &selector,
             &path.service_account,
@@ -749,7 +768,10 @@ impl DataStore {
         let conn = self.pool_connection_authorized(opctx).await?;
         let parent = account_parent(
             &conn,
-            opctx,
+            &opctx
+                .authn
+                .silo_required()
+                .internal_context("managing service accounts")?,
             path.scope,
             &selector,
             &path.service_account,

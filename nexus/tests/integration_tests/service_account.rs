@@ -20,7 +20,7 @@ type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 const URL: &str = "/v1/service-accounts";
 
-async fn request(
+pub(super) async fn request(
     client: &ClientTestContext,
     authn: &AuthnMode,
     method: Method,
@@ -39,7 +39,10 @@ async fn request(
     .unwrap()
 }
 
-async fn admin(client: &ClientTestContext, name: &str) -> (Uuid, AuthnMode) {
+pub(super) async fn admin(
+    client: &ClientTestContext,
+    name: &str,
+) -> (Uuid, AuthnMode) {
     let silo = create_silo(client, name, SiloIdentityMode::LocalOnly).await;
     let user = create_local_user(
         client,
@@ -59,7 +62,7 @@ async fn admin(client: &ClientTestContext, name: &str) -> (Uuid, AuthnMode) {
     (silo.identity.id, AuthnMode::SiloUser(user.id))
 }
 
-async fn project(
+pub(super) async fn project(
     client: &ClientTestContext,
     admin: &AuthnMode,
     name: &str,

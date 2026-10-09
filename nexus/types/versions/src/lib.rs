@@ -119,3 +119,5 @@ pub mod v2026_10_08_00;
 pub mod v2026_10_09_00;
 #[path = "service_account_token_issuance/mod.rs"]
 pub mod v2026_10_09_01;
+#[path = "service_account_federation/mod.rs"]
+pub mod v2026_10_09_02;

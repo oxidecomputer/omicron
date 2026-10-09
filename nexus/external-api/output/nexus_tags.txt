@@ -153,6 +153,7 @@ API operations found with tag "service-accounts"
 OPERATION ID                             METHOD   URL PATH
 service_account_create                   POST     /v1/service-accounts/{scope}
 service_account_delete                   DELETE   /v1/service-accounts/{scope}/{service_account}
+service_account_federation_token_create  POST     /v1/service-accounts/{scope}/{service_account}/federation-token
 service_account_list                     GET      /v1/service-accounts/{scope}
 service_account_token_create             POST     /v1/service-accounts/{scope}/{service_account}/token
 service_account_token_delete             DELETE   /v1/service-accounts/{scope}/{service_account}/tokens/{token_id}

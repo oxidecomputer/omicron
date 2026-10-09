@@ -83,6 +83,8 @@ omicron-cockroach-metrics.workspace = true
 omicron-debug-dropbox.workspace = true
 omicron-generation-kinds.workspace = true
 openssl.workspace = true
+openidconnect.workspace = true
+oso.workspace = true
 oximeter-client.workspace = true
 oximeter-db = { workspace = true, default-features = false, features = [
     "oxql",

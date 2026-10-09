@@ -966,3 +966,11 @@ resource ProjectServiceAccountList {
 }
 has_relation(project: Project, "parent_project", collection: ProjectServiceAccountList)
     if collection.project = project;
+
+resource ServiceAccountTokenList {
+    permissions = [ "create_child" ];
+    relations = { parent_fleet: Fleet };
+    "create_child" if "external-authenticator" on "parent_fleet";
+}
+has_relation(fleet: Fleet, "parent_fleet", collection: ServiceAccountTokenList)
+    if collection.fleet = fleet;

@@ -621,6 +621,18 @@ async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
             }
         };
 
+    check_manual(
+        "POST",
+        super::service_account_federation::TOKEN_ENDPOINT,
+        RequestBuilder::new(
+            client,
+            Method::POST,
+            super::service_account_federation::TOKEN_ENDPOINT,
+        )
+        .body(Some(&serde_json::json!({"jwt": "invalid"}))),
+    )
+    .await;
+
     // login_local: unauthenticated, JSON body
     check_manual(
         "POST",

@@ -4055,6 +4055,61 @@ impl NexusExternalApi for NexusExternalApiImpl {
         .await
     }
 
+    async fn service_account_federation_token_create(
+        rqctx: RequestContext<ApiContext>,
+        path: Path<service_account::ServiceAccountPath>,
+        query: Query<service_account::ServiceAccountParentSelector>,
+        body: TypedBody<
+            service_account_token::ServiceAccountFederationTokenCreate,
+        >,
+    ) -> Result<
+        HttpResponseHeaders<
+            HttpResponseCreated<
+                service_account_token::ServiceAccountTokenGrant,
+            >,
+        >,
+        HttpError,
+    > {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx = nexus.opctx_external_authn();
+            let audit =
+                nexus.audit_log_entry_init_unauthed(opctx, &rqctx).await?;
+            let result = async {
+                let silo_id = nexus.endpoint_for_request(&rqctx)?.silo().id();
+                let token = nexus
+                    .service_account_federation_token_create(
+                        opctx,
+                        silo_id,
+                        path.into_inner(),
+                        query.into_inner(),
+                        body.into_inner(),
+                    )
+                    .await?;
+                let mut response = HttpResponseHeaders::new_unnamed(
+                    HttpResponseCreated(token),
+                );
+                response
+                    .headers_mut()
+                    .insert(header::CACHE_CONTROL, "no-store".parse().unwrap());
+                response
+                    .headers_mut()
+                    .insert(header::PRAGMA, "no-cache".parse().unwrap());
+                Ok(response)
+            }
+            .await;
+            let _ =
+                nexus.audit_log_entry_complete(opctx, &audit, &result).await;
+            result
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     async fn service_account_token_create(
         rqctx: RequestContext<ApiContext>,
         path: Path<service_account::ServiceAccountPath>,
