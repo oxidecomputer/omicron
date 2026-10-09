@@ -34,6 +34,7 @@ mod v1_client {
         },
         interface = Positional,
         inner_type = slog::Logger,
+        hooks = Expected,
         derives = [schemars::JsonSchema, Clone, Eq, PartialEq],
         replace = {
             DnsConfig = v1::config::DnsConfig,

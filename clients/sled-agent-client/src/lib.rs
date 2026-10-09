@@ -17,6 +17,7 @@ progenitor::generate_api!(
     spec = "../../openapi/sled-agent/sled-agent-latest.json",
     interface = Positional,
     inner_type = slog::Logger,
+    hooks = Expected,
     derives = [schemars::JsonSchema, PartialEq],
     patch = {
         OmicronPhysicalDiskConfig = { derives = [Eq, Hash, PartialOrd, Ord] },

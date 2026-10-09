@@ -8,6 +8,7 @@ progenitor::generate_api!(
     spec = "../../openapi/cockroach-admin/cockroach-admin-latest.json",
     interface = Positional,
     inner_type = slog::Logger,
+    hooks = Expected,
     crates = {
         "omicron-uuid-kinds" = "*",
     },

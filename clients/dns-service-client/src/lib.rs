@@ -6,6 +6,7 @@ progenitor::generate_api!(
     spec = "../../openapi/dns-server/dns-server-latest.json",
     interface = Positional,
     inner_type = slog::Logger,
+    hooks = Expected,
     derives = [schemars::JsonSchema, Clone, Eq, PartialEq],
     replace = {
         DnsConfig = internal_dns_types_versions::latest::config::DnsConfig,

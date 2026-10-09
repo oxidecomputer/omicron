@@ -15,6 +15,7 @@ progenitor::generate_api!(
     interface = Positional,
     derives = [schemars::JsonSchema, PartialEq],
     inner_type = slog::Logger,
+    hooks = Expected,
     crates = {
         "iddqd" = "*",
         "omicron-generation-kinds" = "*",

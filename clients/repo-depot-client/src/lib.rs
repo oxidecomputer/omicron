@@ -8,6 +8,7 @@ progenitor::generate_api!(
     spec = "../../openapi/repo-depot/repo-depot-1.0.0-65083f.json",
     interface = Positional,
     inner_type = slog::Logger,
+    hooks = Expected,
     derives = [schemars::JsonSchema],
 );
 

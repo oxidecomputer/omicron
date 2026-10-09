@@ -9,6 +9,7 @@ progenitor::generate_api!(
     spec = "../../openapi/clickhouse-admin-server/clickhouse-admin-server-latest.json",
     interface = Positional,
     inner_type = slog::Logger,
+    hooks = Expected,
     crates = {
         "omicron-uuid-kinds" = "*",
     },

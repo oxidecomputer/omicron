@@ -8,6 +8,7 @@ progenitor::generate_api!(
     spec = "../../openapi/bootstrap-agent-lockstep.json",
     interface = Positional,
     inner_type = slog::Logger,
+    hooks = Expected,
     derives = [schemars::JsonSchema],
     crates = {
         "iddqd" = "*",

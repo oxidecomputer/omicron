@@ -834,6 +834,7 @@ mod test {
         spec = "tests/output/test-server.json",
         interface = Positional,
         inner_type = slog::Logger,
+        hooks = Expected,
     );
 
     impl progenitor::progenitor_client::ClientHooks<slog::Logger> for Client {

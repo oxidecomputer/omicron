@@ -618,6 +618,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
+name = "base64"
+version = "0.23.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
+
+[[package]]
 name = "base64ct"
 version = "1.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -920,9 +926,9 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
- "progenitor 0.14.0",
+ "progenitor 0.15.1",
  "regress 0.10.5",
- "reqwest 0.13.2",
+ "reqwest 0.13.5",
  "schemars 0.8.22",
  "serde",
  "serde_json",
@@ -1479,8 +1485,8 @@ dependencies = [
  "clickhouse-admin-types",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "progenitor 0.14.0",
- "reqwest 0.13.2",
+ "progenitor 0.15.1",
+ "reqwest 0.13.5",
  "schemars 0.8.22",
  "serde",
  "slog",
@@ -1494,8 +1500,8 @@ dependencies = [
  "clickhouse-admin-types",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "progenitor 0.14.0",
- "reqwest 0.13.2",
+ "progenitor 0.15.1",
+ "reqwest 0.13.5",
  "schemars 0.8.22",
  "serde",
  "slog",
@@ -1509,8 +1515,8 @@ dependencies = [
  "clickhouse-admin-types",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "progenitor 0.14.0",
- "reqwest 0.13.2",
+ "progenitor 0.15.1",
+ "reqwest 0.13.5",
  "schemars 0.8.22",
  "serde",
  "slog",
@@ -1649,8 +1655,8 @@ dependencies = [
  "chrono",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "progenitor 0.14.0",
- "reqwest 0.13.2",
+ "progenitor 0.15.1",
+ "reqwest 0.13.5",
  "schemars 0.8.22",
  "serde",
  "slog",
@@ -2163,7 +2169,7 @@ dependencies = [
  "crucible-workspace-hack",
  "percent-encoding",
  "progenitor 0.14.0",
- "reqwest 0.13.2",
+ "reqwest 0.13.5",
  "schemars 0.8.22",
  "serde",
  "serde_json",
@@ -2222,7 +2228,7 @@ dependencies = [
  "crucible-workspace-hack",
  "percent-encoding",
  "progenitor 0.14.0",
- "reqwest 0.13.2",
+ "reqwest 0.13.5",
  "schemars 0.8.22",
  "serde",
  "serde_json",
@@ -2636,7 +2642,7 @@ dependencies = [
  "ddm-api-types-versions",
  "oxnet",
  "progenitor 0.14.0",
- "reqwest 0.13.2",
+ "reqwest 0.13.5",
  "serde",
  "slog",
  "uuid",
@@ -3154,8 +3160,8 @@ dependencies = [
  "omicron-workspace-hack",
  "oxide-tokio-rt",
  "pretty-hex",
- "progenitor 0.14.0",
- "reqwest 0.13.2",
+ "progenitor 0.15.1",
+ "reqwest 0.13.5",
  "schemars 0.8.22",
  "serde",
  "serde_json",
@@ -3191,8 +3197,8 @@ dependencies = [
  "http",
  "internal-dns-types-versions",
  "omicron-workspace-hack",
- "progenitor 0.14.0",
- "reqwest 0.13.2",
+ "progenitor 0.15.1",
+ "reqwest 0.13.5",
  "schemars 0.8.22",
  "serde",
  "slog",
@@ -3279,7 +3285,7 @@ dependencies = [
  "oxnet",
  "progenitor 0.13.0",
  "regress 0.10.5",
- "reqwest 0.13.2",
+ "reqwest 0.13.5",
  "schemars 0.8.22",
  "serde",
  "serde_json",
@@ -3303,7 +3309,7 @@ dependencies = [
  "oxnet",
  "progenitor 0.14.0",
  "regress 0.11.1",
- "reqwest 0.13.2",
+ "reqwest 0.13.5",
  "schemars 0.8.22",
  "serde",
  "serde_json",
@@ -3712,7 +3718,7 @@ dependencies = [
  "oxide-tokio-rt",
  "rand 0.10.1",
  "rand 0.9.2",
- "reqwest 0.13.2",
+ "reqwest 0.13.5",
  "russh",
  "serde",
  "serde_json",
@@ -4280,7 +4286,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxide-tokio-rt",
- "reqwest 0.13.2",
+ "reqwest 0.13.5",
  "serde",
  "serde_json",
  "slog",
@@ -4306,9 +4312,9 @@ dependencies = [
  "gateway-types",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "progenitor 0.14.0",
+ "progenitor 0.15.1",
  "rand 0.9.2",
- "reqwest 0.13.2",
+ "reqwest 0.13.5",
  "schemars 0.8.22",
  "serde",
  "serde_json",
@@ -5835,7 +5841,7 @@ dependencies = [
  "oxide-update-engine-types",
  "partial-io",
  "proptest",
- "reqwest 0.13.2",
+ "reqwest 0.13.5",
  "serde_json",
  "sha2 0.10.9",
  "sled-agent-types",
@@ -5882,9 +5888,9 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxide-update-engine-types",
- "progenitor 0.14.0",
+ "progenitor 0.15.1",
  "regress 0.10.5",
- "reqwest 0.13.2",
+ "reqwest 0.13.5",
  "schemars 0.8.22",
  "serde",
  "serde_json",
@@ -5970,9 +5976,9 @@ dependencies = [
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "progenitor 0.14.0",
+ "progenitor 0.15.1",
  "qorb",
- "reqwest 0.13.2",
+ "reqwest 0.13.5",
  "semver 1.0.28",
  "serde",
  "serde_json",
@@ -6702,7 +6708,7 @@ dependencies = [
  "lldpd-types-versions",
  "progenitor 0.13.0",
  "protocol",
- "reqwest 0.13.2",
+ "reqwest 0.13.5",
  "schemars 0.8.22",
  "serde",
  "serde_json",
@@ -6953,7 +6959,7 @@ dependencies = [
  "mg-api-types-versions",
  "oxnet",
  "progenitor 0.14.0",
- "reqwest 0.13.2",
+ "reqwest 0.13.5",
  "schemars 0.8.22",
  "serde",
  "serde_json",
@@ -7323,9 +7329,9 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
- "progenitor 0.14.0",
+ "progenitor 0.15.1",
  "regress 0.10.5",
- "reqwest 0.13.2",
+ "reqwest 0.13.5",
  "schemars 0.8.22",
  "serde",
  "serde_json",
@@ -7741,7 +7747,7 @@ dependencies = [
  "omicron-workspace-hack",
  "parallel-task-set",
  "regex",
- "reqwest 0.13.2",
+ "reqwest 0.13.5",
  "serde_json",
  "sled-agent-client",
  "sled-agent-resolvable-files-examples",
@@ -7792,9 +7798,9 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
- "progenitor 0.14.0",
+ "progenitor 0.15.1",
  "regress 0.10.5",
- "reqwest 0.13.2",
+ "reqwest 0.13.5",
  "schemars 0.8.22",
  "serde",
  "serde_json",
@@ -7874,7 +7880,7 @@ dependencies = [
  "rand 0.9.2",
  "repo-depot-api",
  "repo-depot-client",
- "reqwest 0.13.2",
+ "reqwest 0.13.5",
  "sha2 0.10.9",
  "sled-agent-api",
  "sled-agent-client",
@@ -7912,7 +7918,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oxnet",
  "pq-sys",
- "reqwest 0.13.2",
+ "reqwest 0.13.5",
  "sled-agent-client",
  "sled-agent-types",
  "sled-hardware-types",
@@ -8016,7 +8022,7 @@ dependencies = [
  "oxide-update-engine-types",
  "oxnet",
  "pq-sys",
- "reqwest 0.13.2",
+ "reqwest 0.13.5",
  "serde_json",
  "sled-agent-client",
  "sled-agent-types",
@@ -8556,8 +8562,8 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "omicron-workspace-hack",
- "progenitor 0.14.0",
- "reqwest 0.13.2",
+ "progenitor 0.15.1",
+ "reqwest 0.13.5",
  "schemars 0.8.22",
  "serde",
  "slog",
@@ -8911,7 +8917,7 @@ dependencies = [
  "oxide-tokio-rt",
  "pq-sys",
  "proptest",
- "reqwest 0.13.2",
+ "reqwest 0.13.5",
  "schemars 0.8.22",
  "serde",
  "serde_json",
@@ -8940,7 +8946,7 @@ dependencies = [
  "omicron-workspace-hack",
  "parallel-task-set",
  "proptest",
- "reqwest 0.13.2",
+ "reqwest 0.13.5",
  "serde",
  "serde_json",
  "slog",
@@ -8983,7 +8989,7 @@ dependencies = [
  "proptest",
  "rand 0.9.2",
  "regress 0.10.5",
- "reqwest 0.13.2",
+ "reqwest 0.13.5",
  "schemars 0.8.22",
  "semver 1.0.28",
  "serde",
@@ -9011,7 +9017,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oxnet",
  "progenitor-client 0.14.0",
- "reqwest 0.13.2",
+ "reqwest 0.13.5",
  "serde",
  "sled-hardware-types",
  "slog",
@@ -9235,7 +9241,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "pq-sys",
- "reqwest 0.13.2",
+ "reqwest 0.13.5",
  "serde",
  "sled-agent-types",
  "slog",
@@ -9412,7 +9418,7 @@ dependencies = [
  "reconfigurator-cli",
  "ref-cast",
  "regex",
- "reqwest 0.13.2",
+ "reqwest 0.13.5",
  "rustix 1.1.4",
  "rustls",
  "rustls-pemfile",
@@ -9484,7 +9490,7 @@ dependencies = [
  "oxide-tokio-rt",
  "pq-sys",
  "proptest",
- "reqwest 0.13.2",
+ "reqwest 0.13.5",
  "schemars 0.8.22",
  "serde",
  "serde_json",
@@ -9581,7 +9587,7 @@ dependencies = [
  "pq-sys",
  "ratatui",
  "reedline",
- "reqwest 0.13.2",
+ "reqwest 0.13.5",
  "serde",
  "serde_json",
  "sigpipe",
@@ -9626,7 +9632,7 @@ dependencies = [
  "oxide-tokio-rt",
  "petgraph 0.8.3",
  "rayon",
- "reqwest 0.13.2",
+ "reqwest 0.13.5",
  "semver 1.0.28",
  "serde",
  "sha2 0.10.9",
@@ -9728,7 +9734,7 @@ dependencies = [
  "omicron-workspace-hack",
  "omicron-zone-package",
  "rats-corim 0.1.0 (git+https://github.com/oxidecomputer/rats-corim.git?rev=f0d5d5168d3d31487a56df32c676b0c6240bcc6b)",
- "reqwest 0.13.2",
+ "reqwest 0.13.5",
  "semver 1.0.28",
  "serde",
  "serde_json",
@@ -9862,7 +9868,7 @@ dependencies = [
  "oximeter-producer",
  "oxnet",
  "pretty_assertions",
- "progenitor 0.14.0",
+ "progenitor 0.15.1",
  "propolis-client",
  "propolis-mock-server",
  "propolis_api_types",
@@ -9872,7 +9878,7 @@ dependencies = [
  "regress 0.10.5",
  "repo-depot-api",
  "repo-depot-client",
- "reqwest 0.13.2",
+ "reqwest 0.13.5",
  "schemars 0.8.22",
  "secrecy 0.10.3",
  "serde",
@@ -9957,7 +9963,7 @@ dependencies = [
  "port-file",
  "rcgen",
  "regex",
- "reqwest 0.13.2",
+ "reqwest 0.13.5",
  "rustls",
  "serde",
  "serde_json",
@@ -10108,7 +10114,7 @@ dependencies = [
  "regex-automata",
  "regex-syntax 0.8.10",
  "reqwest 0.12.28",
- "reqwest 0.13.2",
+ "reqwest 0.13.5",
  "rsa 0.9.10",
  "rustix 0.38.44",
  "rustix 1.1.4",
@@ -10186,7 +10192,7 @@ dependencies = [
  "futures",
  "futures-util",
  "hex",
- "reqwest 0.13.2",
+ "reqwest 0.13.5",
  "semver 1.0.28",
  "serde",
  "serde_derive",
@@ -10397,11 +10403,11 @@ dependencies = [
  "hyper",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "progenitor 0.14.0",
+ "progenitor 0.15.1",
  "progenitor-client 0.14.0",
  "rand 0.9.2",
  "regress 0.10.5",
- "reqwest 0.13.2",
+ "reqwest 0.13.5",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -10553,8 +10559,8 @@ dependencies = [
  "futures",
  "omicron-common",
  "omicron-workspace-hack",
- "progenitor 0.14.0",
- "reqwest 0.13.2",
+ "progenitor 0.15.1",
+ "reqwest 0.13.5",
  "serde",
  "slog",
  "uuid",
@@ -10592,7 +10598,7 @@ dependencies = [
  "proptest",
  "qorb",
  "rand 0.9.2",
- "reqwest 0.13.2",
+ "reqwest 0.13.5",
  "schemars 0.8.22",
  "semver 1.0.28",
  "serde",
@@ -10660,7 +10666,7 @@ dependencies = [
  "rand 0.9.2",
  "reedline",
  "regex",
- "reqwest 0.13.2",
+ "reqwest 0.13.5",
  "rustyline",
  "schemars 0.8.22",
  "serde",
@@ -11957,6 +11963,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "progenitor"
+version = "0.15.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "15bd395aa613c6491be9233fae4a870a35cd611655c0ef1cbaae7aa9e1c4c0e6"
+dependencies = [
+ "progenitor-client 0.15.1",
+ "progenitor-impl 0.15.1",
+ "progenitor-macro 0.15.1",
+]
+
+[[package]]
 name = "progenitor-client"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11965,7 +11982,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "percent-encoding",
- "reqwest 0.13.2",
+ "reqwest 0.13.5",
  "serde",
  "serde_json",
  "serde_urlencoded",
@@ -11980,7 +11997,22 @@ dependencies = [
  "bytes",
  "futures-core",
  "percent-encoding",
- "reqwest 0.13.2",
+ "reqwest 0.13.5",
+ "serde",
+ "serde_json",
+ "serde_urlencoded",
+]
+
+[[package]]
+name = "progenitor-client"
+version = "0.15.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6aa13eb6d9499a851512ec8fa3280f586be059682da4f05d953924be45d736f0"
+dependencies = [
+ "bytes",
+ "futures-core",
+ "percent-encoding",
+ "reqwest 0.13.5",
  "serde",
  "serde_json",
  "serde_urlencoded",
@@ -12016,7 +12048,7 @@ dependencies = [
  "serde_json",
  "syn 2.0.117",
  "thiserror 2.0.18",
- "typify",
+ "typify 0.6.2",
  "unicode-ident",
 ]
 
@@ -12038,7 +12070,29 @@ dependencies = [
  "serde_json",
  "syn 2.0.117",
  "thiserror 2.0.18",
- "typify",
+ "typify 0.6.2",
+ "unicode-ident",
+]
+
+[[package]]
+name = "progenitor-impl"
+version = "0.15.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3d9fbe5a1aa114c6c7c507a30ebeb0b12de383edab951ea27300210a3841917c"
+dependencies = [
+ "heck 0.5.0",
+ "http",
+ "indexmap 2.14.0",
+ "openapiv3",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "syn 3.0.3",
+ "thiserror 2.0.18",
+ "typify 0.8.0",
  "unicode-ident",
 ]
 
@@ -12079,6 +12133,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "progenitor-macro"
+version = "0.15.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dccde5096e96f6a57e16af4a4ac575755d5973f0c1bd4e6b7b86808932a33408"
+dependencies = [
+ "openapiv3",
+ "proc-macro2",
+ "progenitor-impl 0.15.1",
+ "quote",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "serde_tokenstream 0.3.0",
+ "serde_yaml",
+ "syn 3.0.3",
+]
+
+[[package]]
 name = "propolis-api-types-versions"
 version = "0.0.0"
 source = "git+https://github.com/oxidecomputer/propolis?rev=93e04e189a76f73b3764c6417928274b0f4df453#93e04e189a76f73b3764c6417928274b0f4df453"
@@ -12104,7 +12176,7 @@ dependencies = [
  "progenitor-client 0.14.0",
  "propolis-api-types-versions",
  "rand 0.9.2",
- "reqwest 0.13.2",
+ "reqwest 0.13.5",
  "schemars 0.8.22",
  "serde",
  "serde_json",
@@ -12131,7 +12203,7 @@ dependencies = [
  "propolis_api_types",
  "propolis_types",
  "rand 0.9.2",
- "reqwest 0.13.2",
+ "reqwest 0.13.5",
  "schemars 0.8.22",
  "semver 1.0.28",
  "serde",
@@ -12846,6 +12918,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "regress"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32eef8b209c3c1c15dbad02c1f30f9539f00dc7253e0cbcdaae442a50a09d7c1"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
 name = "relative-path"
 version = "1.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -12868,8 +12949,8 @@ name = "repo-depot-client"
 version = "0.1.0"
 dependencies = [
  "omicron-workspace-hack",
- "progenitor 0.14.0",
- "reqwest 0.13.2",
+ "progenitor 0.15.1",
+ "reqwest 0.13.5",
  "schemars 0.8.22",
  "serde",
  "slog",
@@ -12921,11 +13002,11 @@ dependencies = [
 
 [[package]]
 name = "reqwest"
-version = "0.13.2"
+version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab3f43e3283ab1488b624b44b0e988d0acea0b3214e694730a055cb6b2efa801"
+checksum = "16a1cfa75cc186dd73d5818e510e042e40927bccc9c236b061cea97e1eb08029"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "bytes",
  "cookie",
  "cookie_store",
@@ -14330,10 +14411,10 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
- "progenitor 0.14.0",
+ "progenitor 0.15.1",
  "propolis-client",
  "regress 0.10.5",
- "reqwest 0.13.2",
+ "reqwest 0.13.5",
  "schemars 0.8.22",
  "serde",
  "serde_json",
@@ -14521,7 +14602,7 @@ dependencies = [
  "oxnet",
  "rand 0.9.2",
  "rcgen",
- "reqwest 0.13.2",
+ "reqwest 0.13.5",
  "schemars 0.8.22",
  "serde",
  "sled-agent-bootstrap-common",
@@ -14617,7 +14698,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oxnet",
  "proptest",
- "reqwest 0.13.2",
+ "reqwest 0.13.5",
  "scuffle",
  "serde_json",
  "sled-agent-types",
@@ -17095,8 +17176,18 @@ version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bc0b89f47309feaeb23c4509c15c9a04234f7deccef6f96c3bfe95319819a304"
 dependencies = [
- "typify-impl",
- "typify-macro",
+ "typify-impl 0.6.2",
+ "typify-macro 0.6.2",
+]
+
+[[package]]
+name = "typify"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "71187d2e983363e9a6ca884f7b061620bc6da4316902058e74bbc9d61c347696"
+dependencies = [
+ "typify-impl 0.8.0",
+ "typify-macro 0.8.0",
 ]
 
 [[package]]
@@ -17120,6 +17211,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "typify-impl"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1cbc3132686085f84a068ad86fc281cb3d566dd940c8911fd3562013851e9ae8"
+dependencies = [
+ "heck 0.5.0",
+ "log",
+ "proc-macro2",
+ "quote",
+ "regress 0.12.0",
+ "schemars 0.8.22",
+ "semver 1.0.28",
+ "serde",
+ "serde_json",
+ "syn 3.0.3",
+ "thiserror 2.0.18",
+ "unicode-ident",
+]
+
+[[package]]
 name = "typify-macro"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -17133,7 +17244,24 @@ dependencies = [
  "serde_json",
  "serde_tokenstream 0.2.3",
  "syn 2.0.117",
- "typify-impl",
+ "typify-impl 0.6.2",
+]
+
+[[package]]
+name = "typify-macro"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b3a7f8d08ec85254fb8b383a6c66fe43b81f7f6b288fa71eb365f0867fc8f3a6"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "schemars 0.8.22",
+ "semver 1.0.28",
+ "serde",
+ "serde_json",
+ "serde_tokenstream 0.3.0",
+ "syn 3.0.3",
+ "typify-impl 0.8.0",
 ]
 
 [[package]]
@@ -17803,7 +17931,7 @@ dependencies = [
  "oxide-update-engine-types",
  "proptest",
  "ratatui",
- "reqwest 0.13.2",
+ "reqwest 0.13.5",
  "rpassword",
  "semver 1.0.28",
  "serde",
@@ -17949,7 +18077,7 @@ dependencies = [
  "oxide-update-engine-types",
  "oxnet",
  "rand 0.9.2",
- "reqwest 0.13.2",
+ "reqwest 0.13.5",
  "schemars 0.8.22",
  "semver 1.0.28",
  "serde",
@@ -18019,9 +18147,9 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxide-update-engine-types",
- "progenitor 0.14.0",
+ "progenitor 0.15.1",
  "regress 0.10.5",
- "reqwest 0.13.2",
+ "reqwest 0.13.5",
  "schemars 0.8.22",
  "semver 1.0.28",
  "serde",
@@ -18054,9 +18182,9 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
- "progenitor 0.14.0",
+ "progenitor 0.15.1",
  "regress 0.10.5",
- "reqwest 0.13.2",
+ "reqwest 0.13.5",
  "schemars 0.8.22",
  "serde",
  "slog",
@@ -18698,7 +18826,7 @@ dependencies = [
  "flate2",
  "futures",
  "omicron-workspace-hack",
- "reqwest 0.13.2",
+ "reqwest 0.13.5",
  "sha2 0.10.9",
  "slog",
  "slog-async",

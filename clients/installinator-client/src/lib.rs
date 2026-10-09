@@ -8,6 +8,7 @@ progenitor::generate_api!(
     spec = "../../openapi/installinator/installinator-1.0.0-c0ed87.json",
     interface = Positional,
     inner_type = slog::Logger,
+    hooks = Expected,
     derives = [schemars::JsonSchema],
     crates = {
         "omicron-uuid-kinds" = "*",

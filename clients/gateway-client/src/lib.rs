@@ -49,6 +49,7 @@ progenitor::generate_api!(
     spec = "../../openapi/gateway/gateway-latest.json",
     interface = Positional,
     inner_type = slog::Logger,
+    hooks = Expected,
     derives = [schemars::JsonSchema],
     patch = {
         ComponentFirmwareHashStatus = { derives = [PartialEq, Eq, PartialOrd, Ord] },

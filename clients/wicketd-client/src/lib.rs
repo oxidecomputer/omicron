@@ -8,6 +8,7 @@ progenitor::generate_api!(
     spec = "../../openapi/wicketd.json",
     interface = Positional,
     inner_type = slog::Logger,
+    hooks = Expected,
     derives = [schemars::JsonSchema],
     patch = {
         CurrentRssUserConfig = { derives = [PartialEq] },
