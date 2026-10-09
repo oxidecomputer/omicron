@@ -68,7 +68,7 @@ const TOKEN_LENGTH: usize = 20;
 /// Generate a random token/device code.
 // TODO: this should be merged with session::generate_session_token,
 // and probably also the key generation in the disk creation saga.
-fn generate_token() -> String {
+pub(crate) fn generate_token() -> String {
     let mut bytes: [u8; TOKEN_LENGTH] = [0; TOKEN_LENGTH];
     let mut rng = StdRng::from_os_rng();
     rng.fill_bytes(&mut bytes);

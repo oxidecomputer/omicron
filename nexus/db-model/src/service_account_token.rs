@@ -23,6 +23,37 @@ pub struct ServiceAccountToken {
     pub time_deleted: Option<DateTime<Utc>>,
 }
 
+impl ServiceAccountToken {
+    pub fn new(
+        service_account_id: Uuid,
+        time_expires: Option<DateTime<Utc>>,
+    ) -> Self {
+        let now = Utc::now();
+        Self {
+            id: Uuid::new_v4(),
+            time_created: now,
+            time_last_used: now,
+            service_account_id,
+            token: crate::device_auth::generate_token(),
+            idp_id: None,
+            federation_jwt_claims: None,
+            federation_generation: None,
+            time_expires,
+            time_deleted: None,
+        }
+    }
+}
+
+impl From<ServiceAccountToken> for api::ServiceAccountTokenGrant {
+    fn from(token: ServiceAccountToken) -> Self {
+        Self {
+            id: token.id,
+            token: format!("oxide-service-account-{}", token.token),
+            time_expires: token.time_expires,
+        }
+    }
+}
+
 impl From<ServiceAccountToken> for api::ServiceAccountToken {
     fn from(token: ServiceAccountToken) -> Self {
         Self {

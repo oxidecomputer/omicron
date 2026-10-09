@@ -1001,3 +1001,248 @@ async fn test_service_account_token_management(
         }
     }
 }
+
+#[nexus_test]
+async fn test_service_account_token_issuance(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    use async_bb8_diesel::AsyncRunQueryDsl;
+    use chrono::{DateTime, Duration, SubsecRound, Utc};
+    use diesel::prelude::*;
+    use nexus_db_model::{DeviceAccessToken, ServiceAccountToken};
+    use nexus_db_schema::schema::{device_access_token, service_account_token};
+    use nexus_types::external_api::policy::ProjectRole;
+    use nexus_types::external_api::silo::Silo;
+
+    let client = &cptestctx.external_client;
+    let (silo_id, owner) = admin(client, "owner").await;
+    let (_, outsider) = admin(client, "other").await;
+    let project_id = project(client, &owner, "one").await;
+    let silo: Silo = request(
+        client,
+        &AuthnMode::PrivilegedUser,
+        Method::GET,
+        &format!("/v1/system/silos/{silo_id}"),
+        None,
+        StatusCode::OK,
+    )
+    .await
+    .parsed_body()
+    .unwrap();
+    let conn = cptestctx
+        .server
+        .server_context()
+        .nexus
+        .datastore()
+        .pool_connection_for_tests()
+        .await
+        .unwrap();
+
+    for (scope, parent) in [("silo", silo_id), ("project", project_id)] {
+        let created: Value = request(
+            client,
+            &owner,
+            Method::POST,
+            &format!("{URL}/{scope}?{scope}={parent}"),
+            Some(&params(scope, parent)),
+            StatusCode::CREATED,
+        )
+        .await
+        .parsed_body()
+        .unwrap();
+        let account_id = created["id"].as_str().unwrap();
+        let url = format!("{URL}/{scope}/{account_id}/token");
+        let mut admin_id = None;
+        for (name, allowed) in
+            [("viewer", false), ("collaborator", false), ("admin", true)]
+        {
+            let user = create_local_user(
+                client,
+                &silo,
+                &format!("{scope}-{name}").parse().unwrap(),
+                test_params::UserPassword::LoginDisallowed,
+            )
+            .await;
+            if scope == "silo" {
+                let role = match name {
+                    "admin" => SiloRole::Admin,
+                    "collaborator" => SiloRole::Collaborator,
+                    _ => SiloRole::Viewer,
+                };
+                grant_iam(
+                    client,
+                    &format!("/v1/system/silos/{parent}"),
+                    role,
+                    user.id,
+                    AuthnMode::PrivilegedUser,
+                )
+                .await;
+            } else {
+                let role = match name {
+                    "admin" => ProjectRole::Admin,
+                    "collaborator" => ProjectRole::Collaborator,
+                    _ => ProjectRole::Viewer,
+                };
+                grant_iam(
+                    client,
+                    &format!("/v1/projects/{parent}"),
+                    role,
+                    user.id,
+                    owner.clone(),
+                )
+                .await;
+            }
+            let response = request(
+                client,
+                &AuthnMode::SiloUser(user.id),
+                Method::POST,
+                &url,
+                Some(&json!({})),
+                if allowed {
+                    StatusCode::CREATED
+                } else {
+                    StatusCode::FORBIDDEN
+                },
+            )
+            .await;
+            if allowed {
+                admin_id = Some(user.id);
+                let grant: Value = response.parsed_body().unwrap();
+                assert!(grant["time_expires"].is_null());
+                let id: Uuid = grant["id"].as_str().unwrap().parse().unwrap();
+                let token = service_account_token::table
+                    .filter(service_account_token::id.eq(id))
+                    .select(ServiceAccountToken::as_select())
+                    .first_async(&*conn)
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    grant["token"],
+                    format!("oxide-service-account-{}", token.token)
+                );
+                assert_eq!(token.token.len(), 40);
+                assert_eq!(token.service_account_id.to_string(), account_id);
+                assert!(token.idp_id.is_none());
+                assert!(token.federation_jwt_claims.is_none());
+                assert!(token.federation_generation.is_none());
+                assert!(token.time_deleted.is_none());
+                let metadata: Value = request(
+                    client,
+                    &owner,
+                    Method::GET,
+                    &format!("{URL}/{scope}/{account_id}/tokens/{id}"),
+                    None,
+                    StatusCode::OK,
+                )
+                .await
+                .parsed_body()
+                .unwrap();
+                assert!(metadata.get("token").is_none());
+            }
+        }
+        for ttl in [0, -1, 4294967296i64] {
+            request(
+                client,
+                &owner,
+                Method::POST,
+                &url,
+                Some(&json!({"ttl_seconds": ttl})),
+                StatusCode::BAD_REQUEST,
+            )
+            .await;
+        }
+        request(
+            client,
+            &outsider,
+            Method::POST,
+            &url,
+            Some(&json!({})),
+            StatusCode::NOT_FOUND,
+        )
+        .await;
+        let before = Utc::now();
+        let grant: Value = request(
+            client,
+            &owner,
+            Method::POST,
+            &format!("{URL}/{scope}/reader/token?{scope}={parent}"),
+            Some(&json!({"ttl_seconds": 30})),
+            StatusCode::CREATED,
+        )
+        .await
+        .parsed_body()
+        .unwrap();
+        let expiry: DateTime<Utc> =
+            serde_json::from_value(grant["time_expires"].clone()).unwrap();
+        assert!(expiry >= before + Duration::seconds(30));
+        assert!(expiry <= Utc::now() + Duration::seconds(30));
+        let device = DeviceAccessToken::new(
+            Uuid::new_v4(),
+            Uuid::new_v4().to_string(),
+            Utc::now(),
+            admin_id.unwrap(),
+            Some(Utc::now() + Duration::minutes(5)),
+        );
+        let expected_expiry = device.time_expires;
+        let authn =
+            AuthnMode::DeviceToken(format!("oxide-token-{}", device.token));
+        diesel::insert_into(device_access_token::table)
+            .values(device)
+            .execute_async(&*conn)
+            .await
+            .unwrap();
+        let inherited: Value = request(
+            client,
+            &authn,
+            Method::POST,
+            &url,
+            Some(&json!({})),
+            StatusCode::CREATED,
+        )
+        .await
+        .parsed_body()
+        .unwrap();
+        let inherited_expiry: Option<DateTime<Utc>> =
+            serde_json::from_value(inherited["time_expires"].clone()).unwrap();
+        assert_eq!(
+            inherited_expiry,
+            expected_expiry.map(|t| t.trunc_subsecs(6))
+        );
+        request(
+            client,
+            &authn,
+            Method::POST,
+            &url,
+            Some(&json!({"ttl_seconds": 600})),
+            StatusCode::BAD_REQUEST,
+        )
+        .await;
+        request(
+            client,
+            &authn,
+            Method::POST,
+            &url,
+            Some(&json!({"ttl_seconds": 30})),
+            StatusCode::CREATED,
+        )
+        .await;
+        request(
+            client,
+            &owner,
+            Method::DELETE,
+            &format!("{URL}/{scope}/{account_id}"),
+            None,
+            StatusCode::NO_CONTENT,
+        )
+        .await;
+        request(
+            client,
+            &owner,
+            Method::POST,
+            &url,
+            Some(&json!({})),
+            StatusCode::NOT_FOUND,
+        )
+        .await;
+    }
+}

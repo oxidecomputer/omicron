@@ -155,7 +155,7 @@ impl super::Nexus {
                 Utc::now() + Duration::seconds(requested_ttl.0.into());
 
             // If currently authenticated via token, error if requested exceeds it
-            if let Some(auth_exp) = opctx.authn.device_token_expiration()
+            if let Some(auth_exp) = opctx.authn.token_expiration()
                 && requested_exp > auth_exp
             {
                 return Err(Error::invalid_request(
@@ -176,7 +176,7 @@ impl super::Nexus {
             let silo_max_exp = silo_max_ttl
                 .map(|ttl| Utc::now() + Duration::seconds(ttl.0.into()));
             // a.min(b) doesn't do it because None is always less than Some(_)
-            match (silo_max_exp, opctx.authn.device_token_expiration()) {
+            match (silo_max_exp, opctx.authn.token_expiration()) {
                 (Some(silo_exp), Some(token_exp)) => {
                     Some(silo_exp.min(token_exp))
                 }

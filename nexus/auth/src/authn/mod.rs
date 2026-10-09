@@ -99,7 +99,7 @@ impl Context {
     /// This is used to prevent token lifetime extension during token creation:
     /// a new token created using an existing token should not outlive the
     /// token used to authenticate.
-    pub fn device_token_expiration(&self) -> Option<DateTime<Utc>> {
+    pub fn token_expiration(&self) -> Option<DateTime<Utc>> {
         match &self.kind {
             Kind::Authenticated(
                 Details { device_token_expiration, .. },

@@ -4055,6 +4055,30 @@ impl NexusExternalApi for NexusExternalApiImpl {
         .await
     }
 
+    async fn service_account_token_create(
+        rqctx: RequestContext<ApiContext>,
+        path: Path<service_account::ServiceAccountPath>,
+        query: Query<service_account::ServiceAccountParentSelector>,
+        body: TypedBody<service_account_token::ServiceAccountTokenCreate>,
+    ) -> Result<
+        HttpResponseCreated<service_account_token::ServiceAccountTokenGrant>,
+        HttpError,
+    > {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            Ok(HttpResponseCreated(
+                nexus
+                    .service_account_token_create(
+                        &opctx,
+                        path.into_inner(),
+                        query.into_inner(),
+                        body.into_inner(),
+                    )
+                    .await?,
+            ))
+        })
+        .await
+    }
+
     async fn service_account_token_list(
         rqctx: RequestContext<ApiContext>,
         path: Path<service_account::ServiceAccountPath>,

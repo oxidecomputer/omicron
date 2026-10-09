@@ -88,6 +88,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_10_09_01, SERVICE_ACCOUNT_TOKEN_ISSUANCE),
     (2026_10_09_00, SERVICE_ACCOUNT_TOKENS),
     (2026_10_08_00, SERVICE_ACCOUNTS),
     (2026_09_22_00, FEDERATION_IDENTITY_PROVIDERS),
@@ -914,6 +915,27 @@ pub trait NexusExternalApi {
         path: Path<latest::service_account::ServiceAccountPath>,
         query: Query<latest::service_account::ServiceAccountParentSelector>,
     ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// Issue service account token
+    #[endpoint {
+        method = POST,
+        path = "/v1/service-accounts/{scope}/{service_account}/token",
+        tags = ["service-accounts"],
+        versions = VERSION_SERVICE_ACCOUNT_TOKEN_ISSUANCE..,
+    }]
+    async fn service_account_token_create(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::service_account::ServiceAccountPath>,
+        query: Query<latest::service_account::ServiceAccountParentSelector>,
+        body: TypedBody<
+            latest::service_account_token::ServiceAccountTokenCreate,
+        >,
+    ) -> Result<
+        HttpResponseCreated<
+            latest::service_account_token::ServiceAccountTokenGrant,
+        >,
+        HttpError,
+    >;
 
     /// List service account tokens
     #[endpoint {

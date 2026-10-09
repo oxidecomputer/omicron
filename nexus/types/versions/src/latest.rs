@@ -602,6 +602,7 @@ pub mod service_account {
 
 pub mod service_account_token {
     pub use crate::v2026_10_09_00::service_account_token::*;
+    pub use crate::v2026_10_09_01::service_account_token::*;
 }
 
 pub mod path_params {

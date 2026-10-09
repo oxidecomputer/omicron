@@ -10,6 +10,19 @@ use omicron_common::api::external::{DataPageParams, Error};
 use uuid::Uuid;
 
 impl super::Nexus {
+    pub(crate) async fn service_account_token_create(
+        &self,
+        opctx: &OpContext,
+        path: account::ServiceAccountPath,
+        parent: account::ServiceAccountParentSelector,
+        params: api::ServiceAccountTokenCreate,
+    ) -> Result<api::ServiceAccountTokenGrant, Error> {
+        self.db_datastore
+            .service_account_token_create(opctx, path, parent, params)
+            .await
+            .map(Into::into)
+    }
+
     pub(crate) async fn service_account_token_list(
         &self,
         opctx: &OpContext,
