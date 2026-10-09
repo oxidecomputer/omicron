@@ -532,11 +532,11 @@ impl Terminator {
 
     /// Wait for a request to terminate the instance, returning the new
     /// [`VmmStateOwner`].
-    async fn should_terminate(&self) -> VmmStateOwner {
+    async fn termination_requested(&self) -> VmmStateOwner {
         *(self.signalled.wait().await)
     }
 
-    /// Await the completion of a request to terminate the instance.
+    /// Wait for the completion of a request to terminate the instance.
     pub(crate) async fn terminated(self: Arc<Self>) -> VmmUnregisterResponse {
         self.completed.wait().await.clone()
     }
@@ -691,7 +691,7 @@ impl InstanceRunner {
 
                 // Requests to terminate the instance take priority over any
                 // other request to the instance.
-                new_owner = terminator.should_terminate() => {
+                new_owner = terminator.termination_requested() => {
                     state_owner = new_owner;
                     info!(
                         self.log,
@@ -820,7 +820,7 @@ impl InstanceRunner {
                     tokio::select! {
                         biased;
 
-                        new_owner = terminator.should_terminate() => {
+                        new_owner = terminator.termination_requested() => {
                             state_owner = new_owner;
                             info!(
                                 self.log,
