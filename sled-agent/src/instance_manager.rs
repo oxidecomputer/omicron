@@ -4,6 +4,7 @@
 
 //! API for controlling multiple instances on a sled.
 
+use crate::instance;
 use crate::instance::Instance;
 use crate::instance::VmmStateOwner;
 use crate::metrics::MetricsRequestQueue;
@@ -266,7 +267,14 @@ impl InstanceManager {
             })
             .await
             .map_err(|_| Error::FailedSendInstanceManagerClosed)?;
-        rx.await?
+        let updated_runtime = match rx.await? {
+            // No VMM with the requested `propolis_id` was found, so send an
+            // empty state back.
+            None => None,
+            // We got the instance terminator, wait for it to complete.
+            Some(terminator) => Some(terminator.terminated().await),
+        };
+        Ok(VmmUnregisterResponse { updated_runtime })
     }
 
     pub async fn ensure_state(
@@ -522,7 +530,11 @@ enum InstanceManagerRequest {
     },
     EnsureUnregistered {
         propolis_id: PropolisUuid,
-        tx: oneshot::Sender<Result<VmmUnregisterResponse, Error>>,
+        // The response to the `EnsureUnregistered` request is either the
+        // instance's `Terminator`, which can be used to await the completion of
+        // the termination request, or `None`, if no VMM with the targeted
+        // `propolis_id` exists.
+        tx: oneshot::Sender<Option<Arc<instance::Terminator>>>,
     },
     EnsureState {
         propolis_id: PropolisUuid,
@@ -915,19 +927,22 @@ impl InstanceManagerRunner {
     /// zone is rudely terminated.
     fn ensure_unregistered(
         &mut self,
-        tx: oneshot::Sender<Result<VmmUnregisterResponse, Error>>,
+        tx: oneshot::Sender<Option<Arc<instance::Terminator>>>,
         propolis_id: PropolisUuid,
     ) -> Result<(), Error> {
-        // If the instance does not exist, we response immediately.
+        // If the instance does not exist, we respond immediately.
         let Some(instance) = self.get_propolis(propolis_id) else {
-            tx.send(Ok(VmmUnregisterResponse { updated_runtime: None }))
-                .map_err(|_| Error::FailedSendClientClosed)?;
+            tx.send(None).map_err(|_| Error::FailedSendClientClosed)?;
             return Ok(());
         };
 
-        // Otherwise, we pipeline the request, and send it to the instance,
-        // where it can receive an appropriate response.
-        instance.terminate(tx, VmmStateOwner::Nexus)?;
+        // Otherwise, request that the instance terminate, and send back the
+        // terminator so that the caller can wait for the instance to finish
+        // terminating.
+        let terminator = instance
+            .request_termination(&self.log, VmmStateOwner::Nexus)
+            .clone();
+        tx.send(Some(terminator)).map_err(|_| Error::FailedSendClientClosed)?;
         Ok(())
     }
 
@@ -1093,25 +1108,12 @@ impl InstanceManagerRunner {
                     "use_only_these_disks: Terminating instance";
                     "instance_id" => ?id,
                 );
-                let (tx, rx) = oneshot::channel();
-                if let Err(e) = instance.terminate(tx, VmmStateOwner::Runner) {
-                    warn!(
-                        self.log,
-                        "use_only_these_disks: \
-                         Failed to request instance termination";
-                        InlineErrorChain::new(&e),
-                    );
-                    continue;
-                }
-
-                if let Err(e) = rx.await {
-                    warn!(
-                        self.log,
-                        "use_only_these_disks: \
-                         Failed while terminating instance";
-                        InlineErrorChain::new(&e),
-                    );
-                }
+                // Note that we do *not* need to await the completion of the
+                // termination request here. It has been successfully signalled,
+                // so the VMM will terminate eventually. We can now go on with
+                // our lives and terminate any other instances without awaiting
+                // the completion of the termination request.
+                instance.request_termination(&self.log, VmmStateOwner::Runner);
             }
         }
     }
