@@ -470,6 +470,13 @@ struct DatasetTask {
     debug_dataset_zpools_tx: watch::Sender<BTreeSet<ZpoolName>>,
     // Zpools whose former zone roots have been archived and destroyed since
     // this sled-agent process started.
+    //
+    // A zpool stays in this set while it's physically absent: the reconciler
+    // doesn't shut down zones when their disk disappears, so if the disk comes
+    // back, cleaning up its zone root again would destroy datasets of zones
+    // that are still running as far as the reconciler is concerned. A zpool is
+    // only removed once our config has no datasets on it at all (e.g., its
+    // disk was expunged); see `prune_zone_roots_cleaned_up()`.
     zone_roots_cleaned_up: BTreeSet<ZpoolName>,
     log: Logger,
 }
@@ -750,6 +757,8 @@ impl DatasetTask {
         // properties to avoid doing unnecessary work.
         let mut dataset_names = Vec::new();
 
+        self.prune_zone_roots_cleaned_up(&config);
+
         for dataset in config {
             let zpool = dataset.name.pool();
 
@@ -1014,6 +1023,41 @@ impl DatasetTask {
             .collect();
 
         ensure_results
+    }
+
+    // Forget about having cleaned up zone roots on zpools that our config no
+    // longer has any datasets on, so if such a zpool ever comes back, we clean
+    // up its zone root again.
+    //
+    // This must consider every dataset in `config`, including those on zpools
+    // we aren't currently managing: a zpool whose disk was pulled is still in
+    // our config, and must stay in `zone_roots_cleaned_up` (see the comment on
+    // that field).
+    //
+    // We also don't forget a zpool just because its `TransientZoneRoot` was
+    // removed from our config: zones on that zpool might still be running (if
+    // their configs are unchanged). The control plane only removes all of a
+    // zpool's datasets when expunging its disk, which also expunges its zones.
+    fn prune_zone_roots_cleaned_up(
+        &mut self,
+        config: &IdOrdMap<DatasetConfig>,
+    ) {
+        let configured_zpools = config
+            .iter()
+            .map(|dataset| *dataset.name.pool())
+            .collect::<BTreeSet<_>>();
+        self.zone_roots_cleaned_up.retain(|zpool| {
+            let keep = configured_zpools.contains(zpool);
+            if !keep {
+                info!(
+                    self.log,
+                    "zpool no longer in config; will clean up its zone root \
+                     again if it returns";
+                    "zpool" => %zpool,
+                );
+            }
+            keep
+        });
     }
 
     // Fetch the properties of whichever of `dataset_names` exist, keyed by
@@ -2567,6 +2611,171 @@ mod tests {
             assert_eq!(archived.lock().unwrap().len(), 2);
             assert!(zfs.dataset_exists(&stray_name));
             assert_eq!(zfs.ensure_call_count(&setup.zone.name.full_name()), 1);
+
+            logctx.cleanup_successful();
+        })
+    }
+
+    // Ensure `configs` on `setup`'s zpool (which is managed iff `managed`), and
+    // assert that every dataset on a managed zpool was ensured.
+    async fn ensure_former_zone_roots_setup(
+        task_handle: &DatasetTaskHandle,
+        setup: &FormerZoneRootsSetup,
+        configs: IdOrdMap<DatasetConfig>,
+        managed: bool,
+    ) {
+        let zpools = if managed { vec![setup.zpool] } else { vec![] };
+        let currently_managed_zpools =
+            CurrentlyManagedZpoolsReceiver::fake_static(zpools.into_iter())
+                .current();
+        let result = task_handle
+            .datasets_ensure(configs, currently_managed_zpools)
+            .await
+            .expect("no task error");
+        for single_result in &result {
+            if managed {
+                assert_matches!(
+                    single_result.result,
+                    Ok(()),
+                    "bad state for {:?}",
+                    single_result.config
+                );
+            } else {
+                assert!(single_result.result.is_err());
+            }
+        }
+    }
+
+    #[test]
+    fn former_zone_roots_not_cleaned_up_again_after_zpool_returns() {
+        with_test_runtime(async move {
+            let logctx = dev::test_setup_log(
+                "former_zone_roots_not_cleaned_up_again_after_zpool_returns",
+            );
+            let setup = FormerZoneRootsSetup::new();
+            let (archiver, archived) =
+                FormerZoneRootArchiver::recording(&logctx.log);
+            let task_handle = DatasetTaskHandle::spawn_with_zfs_impl(
+                nonexistent_mount_config(),
+                archiver,
+                watch::channel(BTreeSet::new()).0,
+                &logctx.log,
+                setup.zfs.clone(),
+            );
+
+            // Clean up the zone root.
+            ensure_former_zone_roots_setup(
+                &task_handle,
+                &setup,
+                setup.configs(),
+                true,
+            )
+            .await;
+            assert_eq!(archived.lock().unwrap().len(), 2);
+
+            // The disk is pulled: its zpool is no longer managed, but our
+            // config is unchanged.
+            ensure_former_zone_roots_setup(
+                &task_handle,
+                &setup,
+                setup.configs(),
+                false,
+            )
+            .await;
+
+            // When the disk comes back, we don't clean up its zone root
+            // again: its zones may still be running.
+            let stray_name =
+                format!("{}/oxz_stray", setup.zone_root.name.full_name());
+            setup.zfs.insert_existing_dataset(stray_name.clone(), None);
+            ensure_former_zone_roots_setup(
+                &task_handle,
+                &setup,
+                setup.configs(),
+                true,
+            )
+            .await;
+            assert_eq!(archived.lock().unwrap().len(), 2);
+            assert!(setup.zfs.dataset_exists(&stray_name));
+
+            logctx.cleanup_successful();
+        })
+    }
+
+    #[test]
+    fn former_zone_roots_cleaned_up_again_after_zpool_leaves_config() {
+        with_test_runtime(async move {
+            let logctx = dev::test_setup_log(
+                "former_zone_roots_cleaned_up_again_after_zpool_leaves_config",
+            );
+            let setup = FormerZoneRootsSetup::new();
+            let (archiver, archived) =
+                FormerZoneRootArchiver::recording(&logctx.log);
+            let task_handle = DatasetTaskHandle::spawn_with_zfs_impl(
+                nonexistent_mount_config(),
+                archiver,
+                watch::channel(BTreeSet::new()).0,
+                &logctx.log,
+                setup.zfs.clone(),
+            );
+
+            // Clean up the zone root.
+            ensure_former_zone_roots_setup(
+                &task_handle,
+                &setup,
+                setup.configs(),
+                true,
+            )
+            .await;
+            assert_eq!(archived.lock().unwrap().len(), 2);
+            let stray_name =
+                format!("{}/oxz_stray", setup.zone_root.name.full_name());
+            setup.zfs.insert_existing_dataset(stray_name.clone(), None);
+
+            // Removing just the zone root from our config doesn't make us
+            // forget that we cleaned it up: the zpool still has other
+            // datasets, and zones on it may still be running.
+            let without_zone_root = [setup.debug.clone(), setup.zone.clone()]
+                .into_iter()
+                .collect::<IdOrdMap<_>>();
+            let currently_managed_zpools =
+                CurrentlyManagedZpoolsReceiver::fake_static(
+                    [setup.zpool].into_iter(),
+                )
+                .current();
+            task_handle
+                .datasets_ensure(without_zone_root, currently_managed_zpools)
+                .await
+                .expect("no task error");
+            ensure_former_zone_roots_setup(
+                &task_handle,
+                &setup,
+                setup.configs(),
+                true,
+            )
+            .await;
+            assert_eq!(archived.lock().unwrap().len(), 2);
+            assert!(setup.zfs.dataset_exists(&stray_name));
+
+            // Once our config has no datasets on the zpool (e.g., its disk
+            // was expunged), we forget it, and clean up its zone root again
+            // if it comes back.
+            ensure_former_zone_roots_setup(
+                &task_handle,
+                &setup,
+                IdOrdMap::new(),
+                true,
+            )
+            .await;
+            ensure_former_zone_roots_setup(
+                &task_handle,
+                &setup,
+                setup.configs(),
+                true,
+            )
+            .await;
+            assert!(!setup.zfs.dataset_exists(&stray_name));
+            assert_eq!(archived.lock().unwrap().len(), 4);
 
             logctx.cleanup_successful();
         })
