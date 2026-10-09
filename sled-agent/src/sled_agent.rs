@@ -5,6 +5,7 @@
 //! Sled agent implementation
 
 use crate::artifact_store::{ArtifactStore, SledAgentArtifactStoreWrapper};
+use crate::bootstrap::MultirackJoinCompleter;
 use crate::config::Config;
 use crate::hardware_monitor::HardwareMonitorHandle;
 use crate::instance_manager::InstanceManager;
@@ -199,6 +200,9 @@ pub enum Error {
 
     #[error(transparent)]
     Rot(#[from] crate::rot::RotError),
+
+    #[error("Failed to complete multirack join request")]
+    MultirackJoin(#[from] crate::bootstrap::RssAccessError),
 }
 
 impl From<Error> for omicron_common::api::external::Error {
@@ -399,6 +403,11 @@ impl From<Error> for dropshot::HttpError {
                 let err = omicron_common::api::external::Error::from(err);
                 err.into()
             }
+            Error::MultirackJoin(err) => HttpError::for_client_error(
+                Some("Conflict".to_string()),
+                ClientErrorStatusCode::CONFLICT,
+                InlineErrorChain::new(&err).to_string(),
+            ),
             err @ (Error::BootDiskNotFound
             | Error::Config(_)
             | Error::BackingFs(_)
@@ -521,6 +530,9 @@ struct SledAgentInner {
 
     // Handle to access reference measurements for Sprockets/TrustQuorum
     measurements: Arc<MeasurementsHandle>,
+
+    // A mechanism to complete a multirack join
+    multirack_join_completer: MultirackJoinCompleter,
 }
 
 impl SledAgentInner {
@@ -544,6 +556,7 @@ pub struct SledAgent {
 
 impl SledAgent {
     /// Initializes a new [`SledAgent`] object.
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         config: &Config,
         log: Logger,
@@ -552,6 +565,7 @@ impl SledAgent {
         services: ServiceManager,
         long_running_task_handles: LongRunningTaskHandles,
         config_reconciler_spawn_token: ConfigReconcilerSpawnToken,
+        multirack_join_completer: MultirackJoinCompleter,
     ) -> Result<SledAgent, Error> {
         // Pass the "parent_log" to all subcomponents that want to set their own
         // "component" value.
@@ -881,6 +895,7 @@ impl SledAgent {
                 metrics_manager,
                 repo_depot,
                 measurements: long_running_task_handles.measurements.clone(),
+                multirack_join_completer,
             }),
             log: log.clone(),
             sprockets: config.sprockets.clone(),
@@ -1705,6 +1720,12 @@ impl SledAgent {
             .detach_subnet(propolis_id, subnet)
             .await
             .map_err(|e| Error::Instance(e))
+    }
+
+    /// Complete a multirack join operation
+    pub(crate) fn complete_multirack_join(&self) -> Result<(), Error> {
+        self.inner.multirack_join_completer.complete_multirack_join()?;
+        Ok(())
     }
 }
 

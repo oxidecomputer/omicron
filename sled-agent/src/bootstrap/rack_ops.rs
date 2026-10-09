@@ -47,6 +47,8 @@ pub enum RssAccessError {
     MultirackJoinCompleted,
     #[error("Membership cannot be changed anymore")]
     MembershipChangeNoLongerAllowed,
+    #[error("Multirack join has not yet started")]
+    MultirackJoinNotYetStarted,
 }
 
 impl RssAccessError {
@@ -69,6 +71,9 @@ impl RssAccessError {
             RssAccessError::MembershipChangeNoLongerAllowed => {
                 "MembershipChangeNoLongerAllowed"
             }
+            RssAccessError::MultirackJoinNotYetStarted => {
+                "MultirackJoinNotYetStarted"
+            }
         }
     }
 }
@@ -85,6 +90,7 @@ impl From<RssAccessError> for HttpError {
         //   be idempotent here -- to do so we'd have to ensure the actual RSS
         //   config is the same, which is tricky. Instead, clients should look
         //   at the error code to determine what to do.)
+        // * `MultirackJoinNotYetStarted` means it can't complete when signalled.
         // * The other states are terminal states that need operator intervention.
         //
         // We map all of these states to 409 Conflict errors, and (since this is
@@ -94,6 +100,47 @@ impl From<RssAccessError> for HttpError {
             dropshot::ClientErrorStatusCode::CONFLICT,
             err.to_string(),
         )
+    }
+}
+
+/// A mechanism for sled-agent to complete a multirack join request.
+///
+/// When a sled-agent that performed a multirack join becomes visible on the
+/// underlay network to an existing Nexus via inventory, it will receive a
+/// request telling it to complete the multirack join. We provide a newtype
+/// wrapper that allows triggering that completion without providing full access
+/// to `RssAccess`, which could be used to start initialization or multirack
+/// join requests outside of the official path.
+#[derive(Clone)]
+pub(crate) struct MultirackJoinCompleter(RssAccess);
+
+impl MultirackJoinCompleter {
+    pub fn new(rss_access: RssAccess) -> MultirackJoinCompleter {
+        Self(rss_access)
+    }
+
+    /// Complete the multirack join.
+    ///
+    /// This is triggered on a request from Nexus to sled-agent.
+    pub fn complete_multirack_join(&self) -> Result<(), RssAccessError> {
+        self.0.complete_multirack_join()
+    }
+
+    /// Used to provide inventory with information about the particular
+    /// sled-agent that is performing the multirack join. This prevents Nexus
+    /// from having to guess or try all sled-agents.
+    //
+    // TODO: Remove this `unused` annotation when we add this functionality
+    // to inventory.
+    #[expect(unused)]
+    pub fn is_multirack_join_in_progress(&self) -> bool {
+        if let RssStatus::MultirackJoinInProgress { .. } =
+            &*self.0.status.lock().unwrap()
+        {
+            true
+        } else {
+            false
+        }
     }
 }
 
@@ -244,6 +291,86 @@ impl RssAccess {
         }
     }
 
+    /// This should only occur once this sled is successfully on the underlay
+    /// network and discoverable by Nexus.
+    ///
+    /// If the join has already completed succcessfully we treat this as idempotent.
+    pub(crate) fn complete_multirack_join(&self) -> Result<(), RssAccessError> {
+        let mut status = self.status.lock().unwrap();
+        match &mut *status {
+            RssStatus::Uninitialized => {
+                Err(RssAccessError::MultirackJoinNotYetStarted)
+            }
+            RssStatus::Initializing { .. } => {
+                Err(RssAccessError::StillInitializing)
+            }
+            RssStatus::Initialized { .. } => {
+                // After cold boot Nexus may still be trying to get a
+                // response for whether multirack join has completed. If the
+                // `StartSledAgentRequest` was recorded to the ledger, the sled
+                // agent itself will start with this status.
+                //
+                // Since Nexus should only be sending the completion signals
+                // to sled-agents it knows were joining, we figure it's correct
+                // to idempotently return `Ok(())` here rather than an error.
+                // This ensures Nexus gets a valid response.
+                //
+                // The whole point of sending this signal from Nexus is to
+                // ensure that the sled-agent is on the underlay network before
+                // we conclude the join. Therefore if we are already up and
+                // running and receive messages from Nexus we know we are on the
+                // underlay network, and may as well reply in the affirmative
+                // to Nexus.
+                //
+                // We'll also return `OK(())` in the case that Nexus initialized
+                // a rack via RSS, but that seems harmless, and would only occur
+                // if Nexus sent the completion request to an RSS'd sled-agent,
+                // which it really should not do.
+                Ok(())
+            }
+            RssStatus::InitializationFailed { err, .. } => {
+                Err(RssAccessError::InitializationFailed {
+                    message: InlineErrorChain::new(err).to_string(),
+                })
+            }
+            RssStatus::InitializationPanicked { .. } => {
+                Err(RssAccessError::InitializationPanicked)
+            }
+            RssStatus::MultirackJoinInProgress {
+                membership_change_still_possible,
+                rack_join_successful_tx,
+                ..
+            } => {
+                // We can't successfully complete the join if we haven't
+                // finished setting up trust quorum.
+                if membership_change_still_possible.load(Ordering::Relaxed) {
+                    return Err(RssAccessError::MultirackJoinInProgress);
+                }
+
+                // We haven't sent the completion signal yet.
+                if let Some(tx) = rack_join_successful_tx.take() {
+                    tx.send(()).expect("join task should not have completed.");
+                }
+
+                // We've either sent the completion signal this time, or we did
+                // previously. This can happen due to a lost reply to Nexus and
+                // a retry. We treat both as success, even though it's highly
+                // unlikely given the timespan differences between task receipt
+                // and HTTP retry and resend.
+                Ok(())
+            }
+            RssStatus::MultirackJoinCompleted { .. } => Ok(()),
+            RssStatus::MultirackJoinFailed { err, .. } => {
+                Err(RssAccessError::MultirackJoinFailed {
+                    message: InlineErrorChain::new(err).to_string(),
+                })
+            }
+            RssStatus::MultirackJoinPanicked { .. } => {
+                Err(RssAccessError::MultirackJoinPanicked)
+            }
+        }
+    }
+
     pub(crate) fn start_multirack_join(
         &self,
         ctx: RssContext,
@@ -259,12 +386,14 @@ impl RssAccess {
                     input_tx,
                     output_rx,
                     membership_change_still_possible,
+                    rack_join_successful_tx,
                 } = MultirackJoinServiceHandle::spawn(ctx, request);
                 *status = RssStatus::MultirackJoinInProgress {
                     id,
                     input_tx,
                     output_rx,
                     membership_change_still_possible,
+                    rack_join_successful_tx: Some(rack_join_successful_tx),
                 };
                 mem::drop(status);
                 let status = Arc::clone(&self.status);
@@ -422,6 +551,7 @@ enum RssStatus {
         input_tx: watch::Sender<MultirackJoinRequest>,
         output_rx: watch::Receiver<MultirackJoinServiceState>,
         membership_change_still_possible: Arc<AtomicBool>,
+        rack_join_successful_tx: Option<oneshot::Sender<()>>,
     },
 
     MultirackJoinCompleted {

@@ -35,6 +35,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (55, ADD_MULTIRACK_JOIN_COMPLETE),
     (54, ADD_LOG_TIME_RANGE),
     (53, ADD_INSTANCE_MANAGER_STATUS_TO_INVENTORY),
     (52, TYPED_ARTIFACT_CONFIG_GENERATION),
@@ -1617,4 +1618,16 @@ pub trait SledAgentApi {
         path_params: Path<latest::rot::RotPathParams>,
         body: TypedBody<latest::rot::Nonce>,
     ) -> Result<HttpResponseOk<latest::rot::Attestation>, HttpError>;
+
+    /// Report that this sled's multirack join is complete.
+    ///
+    /// Sent by Nexus once it has observed this sled on the underlay network.
+    #[endpoint {
+        method = PUT,
+        path = "/multirack-join-complete",
+        versions = VERSION_ADD_MULTIRACK_JOIN_COMPLETE..,
+    }]
+    async fn multirack_join_complete(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 }

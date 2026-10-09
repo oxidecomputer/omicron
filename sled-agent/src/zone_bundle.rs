@@ -377,6 +377,9 @@ impl ZoneBundler {
     ///
     /// This is critical for disk expungement, which wants to ensure that the
     /// Sled Agent is no longer using devices after they have been expunged.
+    //
+    // TODO: Why is this unused?
+    #[expect(unused)]
     pub async fn await_completion_of_prior_bundles(&self) {
         let _ = self.inner.lock().await;
     }
