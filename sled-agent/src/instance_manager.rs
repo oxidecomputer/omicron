@@ -939,8 +939,9 @@ impl InstanceManagerRunner {
         // Otherwise, request that the instance terminate, and send back the
         // terminator so that the caller can wait for the instance to finish
         // terminating.
-        let terminator =
-            instance.terminate(&self.log, VmmStateOwner::Nexus).clone();
+        let terminator = instance
+            .request_termination(&self.log, VmmStateOwner::Nexus)
+            .clone();
         tx.send(Some(terminator)).map_err(|_| Error::FailedSendClientClosed)?;
         Ok(())
     }
@@ -1112,7 +1113,7 @@ impl InstanceManagerRunner {
                 // so the VMM will terminate eventually. We can now go on with
                 // our lives and terminate any other instances without awaiting
                 // the completion of the termination request.
-                instance.terminate(&self.log, VmmStateOwner::Runner);
+                instance.request_termination(&self.log, VmmStateOwner::Runner);
             }
         }
     }

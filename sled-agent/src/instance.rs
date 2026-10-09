@@ -2078,11 +2078,24 @@ impl Instance {
             .or_else(InstanceRequest::fail_try_send)
     }
 
-    /// Rudely terminates this instance's Propolis (if it has one) and
-    /// immediately transitions the instance to the Destroyed state. This
-    /// returns the [`Terminator`], which may be used to await the termination
-    /// of the VMM..
-    pub fn terminate(
+    /// Request that this instance's Propolis be rudely terminated (if it has
+    /// one). This signals to the [`InstanceRunner`] task that the instance
+    /// should transition to the `Failed` state and the Propolis zone should be
+    /// destroyed.
+    ///
+    /// Once this method returns, the termination signal has been sent
+    /// successfully, and the `InstanceRunner` will begin the process of
+    /// terminating the VMM. This method returns the [`Terminator`], which the
+    /// caller *may* clone and await [`Terminator::terminated()`] to wait for
+    /// the termination sequence to complete. However, awaiting this future is
+    /// *not* necessary to signal termination and the VMM will be terminated
+    /// regardless of whether or not [`Terminator::terminated()`] is awaited.
+    ///
+    /// The provided [`VmmStateOwner`] determines whether or not the VMM's final
+    /// state is published to Nexus, based on whether termination was requested
+    /// *by* Nexus or triggered internally. The first call to this function
+    /// determines the state owner for the termination request.
+    pub fn request_termination(
         &self,
         log: &Logger,
         new_state_owner: VmmStateOwner,
