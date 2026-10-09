@@ -660,10 +660,10 @@ service_name = "crucible_utils"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "ef27fcf7481b79a519ca5ee32ad3c53f1889d6114db0b32875c2856787414ef3"
+source.commit = "bd62980710dd3d6d3524aa7f6617127942b75002"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible-utils.sha256.txt
-source.sha256 = "b2d933a87870d01632d974ff8ea0d46f53f439999adeacb1173dbca983b3d9fe"
+source.sha256 = "ef27fcf7481b79a519ca5ee32ad3c53f1889d6114db0b32875c2856787414ef3"
 output.type = "tarball"
 
 # Refer to
