@@ -3829,6 +3829,76 @@ mod tests {
         logctx.cleanup_successful();
     }
 
+    /// Concurrent unregistrations of the same VMM must all complete
+    /// successfully, and must not hang forever.
+    #[tokio::test]
+    async fn test_instance_manager_concurrent_unregister() {
+        let logctx = omicron_test_utils::dev::test_setup_log(
+            "test_instance_manager_concurrent_unregister",
+        );
+        let log = logctx.log.new(o!(FileKv));
+
+        let test_objects = InstanceTestObjects::new(&log).await;
+
+        let propolis_id = PropolisUuid::new_v4();
+        try_ensure_registered(
+            &test_objects,
+            propolis_id,
+            InstanceUuid::new_v4(),
+        )
+        .await
+        .expect("registration should succeed");
+        wait_for_status(&test_objects.instance_manager, |status| {
+            status.num_registered_vmms == 1
+        })
+        .await;
+
+        let manager = &test_objects.instance_manager;
+        let (rsp1, rsp2) = tokio::time::timeout(TIMEOUT_DURATION, async {
+            tokio::join!(
+                manager.ensure_unregistered(propolis_id),
+                manager.ensure_unregistered(propolis_id),
+            )
+        })
+        .await
+        .expect("concurrent ensure_unregistered requests must all complete");
+
+        let states = [rsp1, rsp2].map(|rsp| {
+            rsp.expect("both ensure_unregistered requests should succeed")
+                .updated_runtime
+                .map(|state| state.vmm_state.state)
+        });
+
+        // Whether or not a final state was received will depend on whether the
+        // `InstanceManager` has received the request to unregister the VMM's
+        // `InstanceTicket` or not. It's fine if *one* of the requests only
+        // arrived after that occurred, but the one that won the race and
+        // actually resulted in the VMM's termination should get to see its
+        // terminal state.
+        assert!(
+            states.iter().any(Option::is_some),
+            "at least one ensure_unregistered request must receive the VMM's \
+             terminal state: {states:?}"
+        );
+        for state in states.iter().flatten() {
+            assert_eq!(*state, VmmState::Failed, "states: {states:?}");
+        }
+
+        wait_for_status(&test_objects.instance_manager, |status| {
+            status.num_registered_vmms == 0
+        })
+        .await;
+
+        // Once the VMM is gone, unregistering it again is a no-op.
+        let rsp = manager
+            .ensure_unregistered(propolis_id)
+            .await
+            .expect("unregistering an absent VMM should succeed");
+        assert!(rsp.updated_runtime.is_none());
+
+        logctx.cleanup_successful();
+    }
+
     impl InstanceRunner {
         fn new_for_test(
             log: &slog::Logger,
@@ -4103,6 +4173,155 @@ mod tests {
         };
 
         assert_eq!(state.vmm_state.state, VmmState::Failed);
+        logctx.cleanup_successful();
+    }
+
+    /// Test forceful termination with Nexus as the state owner.
+    #[tokio::test]
+    async fn test_terminate_nexus_owned() {
+        let logctx = omicron_test_utils::dev::test_setup_log(
+            "test_terminate_nexus_owned",
+        );
+        let log = logctx.log.new(o!(FileKv));
+
+        let published =
+            terminatate_with_state_owner(&log, VmmStateOwner::Nexus).await;
+        assert!(
+            matches!(published, ReceivedInstanceState::None),
+            "if Nexus is the VMM state owner, then no terminal state should be \
+             published, but we received: {published:?}"
+        );
+
+        logctx.cleanup_successful();
+    }
+
+    /// Test forceful termination with the InstanceRunner as the state owner.
+    #[tokio::test]
+    async fn test_terminate_runner_owned() {
+        let logctx = omicron_test_utils::dev::test_setup_log(
+            "test_terminate_runner_owned",
+        );
+        let log = logctx.log.new(o!(FileKv));
+
+        let published =
+            terminatate_with_state_owner(&log, VmmStateOwner::Runner).await;
+        let ReceivedInstanceState::InstancePut(published) = published else {
+            panic!(
+                "if InstanceRunner is the VMM state owner, the terminal state \
+                 should be published to Nexus",
+            );
+        };
+        assert_eq!(published.vmm_state.state, VmmState::Failed);
+
+        logctx.cleanup_successful();
+    }
+
+    /// Helper for tests that request instance termination with a
+    /// `VmmStateOwner`, returning the instance state that was published to
+    /// nexus.
+    async fn terminatate_with_state_owner(
+        log: &Logger,
+        owner: VmmStateOwner,
+    ) -> ReceivedInstanceState {
+        let TestInstanceRunner {
+            runner_task,
+            state_rx,
+            terminator,
+            monitor_tx: _mt,
+            cmd_tx,
+            mut remove_rx,
+            _nexus_server,
+            _dns_server,
+        } = TestInstanceRunner::new(log).await;
+
+        terminator
+            .signalled
+            .set(owner)
+            .expect("nothing else has signalled this runner to terminate");
+        let state =
+            tokio::time::timeout(TIMEOUT_DURATION, terminator.terminated())
+                .await
+                .expect("runner should complete termination");
+
+        assert_eq!(state.vmm_state.state, VmmState::Failed);
+
+        assert!(
+            remove_rx.recv().await.is_some(),
+            "terminated instance should request removal"
+        );
+        drop(cmd_tx);
+        tokio::time::timeout(TIMEOUT_DURATION, runner_task)
+            .await
+            .expect("runner should exit after its command channel closes")
+            .expect("runner task should not panic");
+
+        state_rx.borrow().clone()
+    }
+
+    /// A request to terminate a VMM that has already stopped should complete
+    /// with the VMM's final state.
+    #[tokio::test]
+    async fn test_terminate_already_destroyed_vmm() {
+        let logctx = omicron_test_utils::dev::test_setup_log(
+            "test_terminate_already_destroyed_vmm",
+        );
+        let log = logctx.log.new(o!(FileKv));
+
+        let TestInstanceRunner {
+            runner_task,
+            state_rx: _sr,
+            terminator,
+            monitor_tx,
+            cmd_tx,
+            mut remove_rx,
+            _nexus_server,
+            _dns_server,
+        } = TestInstanceRunner::new(&log).await;
+
+        // Let's say that the Propolis process has exited, advancing the VMM's
+        // state to `Destroyed`.
+        let (resp_tx, resp_rx) = oneshot::channel();
+        monitor_tx
+            .send(InstanceMonitorMessage {
+                update: InstanceMonitorUpdate::State(
+                    InstanceStateMonitorResponse {
+                        gen_: 5,
+                        migration: InstanceMigrateStatusResponse {
+                            migration_in: None,
+                            migration_out: None,
+                        },
+                        state: propolis_client::types::InstanceState::Destroyed,
+                    },
+                ),
+                tx: resp_tx,
+            })
+            .await
+            .unwrap();
+        assert!(resp_rx.await.unwrap().is_break());
+        assert!(remove_rx.recv().await.is_some());
+
+        // Let the runner exit completely before anyone asks it to terminate.
+        drop(cmd_tx);
+        tokio::time::timeout(TIMEOUT_DURATION, runner_task)
+            .await
+            .expect("runner should exit after its command channel closes")
+            .expect("runner task should not panic");
+
+        // A late termination request (say, one where the HTTP request was
+        // received before Propolis exited, but not sent to the `InstanceRunner`
+        // until after the monitor reported Propolis was gone) should succeed
+        // and receive the final state.
+        terminator
+            .signalled
+            .set(VmmStateOwner::Nexus)
+            .expect("nothing else has signalled this runner to terminate");
+        let state =
+            // This is the part where we don't want to hang forever!
+            tokio::time::timeout(TIMEOUT_DURATION, terminator.terminated())
+                .await
+                .expect("termination of an exited runner should complete");
+        assert_eq!(state.vmm_state.state, VmmState::Destroyed);
+
         logctx.cleanup_successful();
     }
 
