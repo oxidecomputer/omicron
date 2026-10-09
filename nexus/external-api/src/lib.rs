@@ -9269,11 +9269,12 @@ pub trait NexusExternalApi {
 
     #[endpoint {
         method = GET,
-        path = "/images",
+        path = "/images/{path:.*}",
         unpublished = true,
     }]
     async fn console_silo_images(
         rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::console::RestPathParam>,
     ) -> Result<Response<Body>, HttpError>;
 
     #[endpoint {
