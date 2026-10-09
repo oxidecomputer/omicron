@@ -817,21 +817,9 @@ impl DatasetTask {
         // exist.
         //
         // This pre-fetching lets us avoid individually querying them later.
-        let mut old_datasets = zfs
-            .get_dataset_properties(&dataset_names, WhichDatasets::SelfOnly)
-            .await
-            .inspect_err(|err| {
-                warn!(
-                    self.log,
-                    "failed to fetch ZFS dataset properties; \
-                     will attempt to ensure all datasets";
-                    InlineErrorChain::new(err.as_ref()),
-                );
-            })
-            .unwrap_or_default()
-            .into_iter()
-            .map(|props| (props.name.clone(), props))
-            .collect::<BTreeMap<_, _>>();
+        let mut old_datasets =
+            Self::fetch_dataset_properties(&dataset_names, &self.log, zfs)
+                .await;
 
         // Capture references to appease borrow checking on the closures and
         // async blocks below.
@@ -916,21 +904,23 @@ impl DatasetTask {
             .collect::<Vec<_>>()
             .await
         };
+        let mut attempted_cleanup = false;
         for (config, needs_cleanup, result) in transient_zone_root_results {
             if needs_cleanup {
-                let zpool = *config.name.pool();
+                attempted_cleanup = true;
                 if result.is_ok() {
-                    self.zone_roots_cleaned_up.insert(zpool);
+                    self.zone_roots_cleaned_up.insert(*config.name.pool());
                 }
-
-                // Cleanup may have destroyed datasets whose properties we
-                // fetched above; forget them, so we don't skip re-creating
-                // them below.
-                let prefix = format!("{}/", config.name.full_name());
-                old_datasets.retain(|name, _| !name.starts_with(&prefix));
             }
             ensure_results
                 .insert_overwrite(DatasetEnsureResult { config, result });
+        }
+
+        // Cleanup may have destroyed datasets whose properties we fetched
+        // above; fetch them again, so we don't skip re-creating them below.
+        if attempted_cleanup {
+            old_datasets =
+                Self::fetch_dataset_properties(&dataset_names, log, zfs).await;
         }
 
         // For each transient zone dataset: either ensure it or mark down why we
@@ -1024,6 +1014,30 @@ impl DatasetTask {
             .collect();
 
         ensure_results
+    }
+
+    // Fetch the properties of whichever of `dataset_names` exist, keyed by
+    // name. On failure, returns an empty map (so callers will attempt to
+    // ensure all the datasets).
+    async fn fetch_dataset_properties<T: ZfsImpl>(
+        dataset_names: &[String],
+        log: &Logger,
+        zfs: &T,
+    ) -> BTreeMap<String, DatasetProperties> {
+        zfs.get_dataset_properties(dataset_names, WhichDatasets::SelfOnly)
+            .await
+            .inspect_err(|err| {
+                warn!(
+                    log,
+                    "failed to fetch ZFS dataset properties; \
+                     will attempt to ensure all datasets";
+                    InlineErrorChain::new(err.as_ref()),
+                );
+            })
+            .unwrap_or_default()
+            .into_iter()
+            .map(|props| (props.name.clone(), props))
+            .collect()
     }
 
     /// Compare `dataset`'s properties against `old_dataset` (an set of
@@ -1225,15 +1239,6 @@ impl DatasetTask {
         // we archive and destroy all the zone root filesystems within it.
         // Until that succeeds, we report the zone root dataset as failed, so
         // no zones are started within it.
-        //
-        // ---
-        //
-        // It is also worth noting that it's conceivable that we find a zoneroot
-        // here for a zone that is still running.  This could happen if we're
-        // doing the first ensure of zone root datasets after sled agent
-        // restarts.  In that case, we will wind up archiving (and deleting)
-        // its log files out from under it.  We deem this okay because in this
-        // case, we're about to restart that zone anyway.
         let zpool = *dataset.name.pool();
         info!(
             log,
@@ -1249,6 +1254,14 @@ impl DatasetTask {
             zfs,
         )
         .await
+        .inspect_err(|err| {
+            warn!(
+                log,
+                "failed to archive and destroy former zone roots";
+                "zpool" => %zpool,
+                InlineErrorChain::new(err),
+            );
+        })
         .map_err(|err| DatasetEnsureError::FormerZoneRootCleanup { zpool, err })
     }
 
