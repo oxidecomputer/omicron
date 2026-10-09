@@ -3822,7 +3822,7 @@ mod tests {
             cmd_rx: mpsc::Receiver<InstanceRequest>,
             monitor_tx: mpsc::Sender<InstanceMonitorMessage>,
             monitor_rx: mpsc::Receiver<InstanceMonitorMessage>,
-            terminate_done_tx: watch::Sender<Option<VmmUnregisterResponse>>,
+            terminator: Arc<Terminator>,
         ) -> Self {
             let metadata = InstanceMetadata {
                 silo_id: Uuid::new_v4(),
@@ -3899,7 +3899,7 @@ mod tests {
                 metrics_queue,
                 delegated_zvols: local_config.delegated_zvols,
                 attached_subnets: IdOrdMap::new(),
-                terminate_done_tx,
+                terminator,
             }
         }
     }
@@ -3907,8 +3907,7 @@ mod tests {
     struct TestInstanceRunner {
         runner_task: tokio::task::JoinHandle<()>,
         state_rx: tokio::sync::watch::Receiver<ReceivedInstanceState>,
-        terminate_tx: watch::Sender<Option<VmmStateOwner>>,
-        terminate_done_rx: watch::Receiver<Option<VmmUnregisterResponse>>,
+        terminator: Arc<Terminator>,
         monitor_tx: mpsc::Sender<InstanceMonitorMessage>,
         cmd_tx: mpsc::Sender<InstanceRequest>,
         remove_rx: mpsc::UnboundedReceiver<
@@ -3949,8 +3948,7 @@ mod tests {
 
             let initial_state = fake_instance_initial_state(propolis_addr);
 
-            let (terminate_tx, terminate_rx) = watch::channel(None);
-            let (terminate_done_tx, terminate_done_rx) = watch::channel(None);
+            let terminator = Terminator::new();
             let (monitor_tx, monitor_rx) = mpsc::channel(1);
             let (cmd_tx, cmd_rx) = mpsc::channel(QUEUE_SIZE);
             let (remove_tx, remove_rx) = mpsc::unbounded_channel();
@@ -3964,18 +3962,15 @@ mod tests {
                 cmd_rx,
                 monitor_tx.clone(),
                 monitor_rx,
-                terminate_done_tx,
+                terminator.clone(),
             );
 
-            let runner_task = tokio::spawn(async move {
-                runner.run(Killswitch(terminate_rx), ticket).await;
-            });
+            let runner_task = tokio::spawn(runner.run(ticket));
 
             Self {
                 runner_task,
                 state_rx,
-                terminate_tx,
-                terminate_done_rx,
+                terminator,
                 monitor_tx,
                 cmd_tx,
                 remove_rx,
@@ -3995,8 +3990,7 @@ mod tests {
         let TestInstanceRunner {
             runner_task,
             state_rx,
-            terminate_tx,
-            terminate_done_rx: _tdr,
+            terminator: _terminator,
             monitor_tx,
             cmd_tx,
             mut remove_rx,
@@ -4049,7 +4043,7 @@ mod tests {
         assert_eq!(state.vmm_state.state, VmmState::Destroyed);
 
         // Make sure the runner actually runs to completion once its command
-        // channels are dropped. (This simulates what happens when the "real"
+        // channel is dropped. (This simulates what happens when the "real"
         // instance manager is asked to remove a record from its VMM table.)
         drop(cmd_tx);
         drop(terminate_tx);
@@ -4068,8 +4062,7 @@ mod tests {
         let TestInstanceRunner {
             runner_task: _rt,
             state_rx,
-            terminate_tx: _tt,
-            terminate_done_rx: _tdr,
+            terminator: _terminator,
             monitor_tx,
             cmd_tx: _ct,
             mut remove_rx,
