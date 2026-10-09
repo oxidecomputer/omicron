@@ -515,6 +515,38 @@ struct InstanceMonitorMessage {
     tx: oneshot::Sender<ControlFlow<()>>,
 }
 
+/// Released in 1984 and starring Arnold Schwarzenegger and Linda Hamilton, _The
+/// Terminator_ is an American science fiction film used to request the forceful
+/// termination of a Propolis zone. This is used by the `ensure_unregistered`
+/// API request and by `InstanceManager::use_only_currently_managed_zpools` to
+/// signal that the [`InstanceRunner`] must immediately destroy the Propolis
+/// zone and shut itself down, *without* first sending a request to gracefully
+/// stop the VMM.
+///
+/// The termination signal is separate from the [`InstanceRunner`]'s normal
+/// request channel, because termination must take priority over currently in
+/// progress requests. This ensures the zone can always be torn down even if
+/// Propolis (and in turn, the `InstanceRunner`) have gotten stuck while
+/// handling a currently-in-flight request. This struct consists of two
+/// [`tokio::sync::SetOnce`] channels, one of which communicates the termination
+/// request to the [`InstanceRunner`], and the other of which signals whether
+/// termination has completed. Using [`SetOnce`] ensures that once termination
+/// has been requested, it remains requested forever, and (unlike a `mpsc`
+/// channel!) there is no queue which can fill up and exert backpressure on
+/// callers who all, fundamentally, are really just trying to communicate the
+/// same bit of information: "it's time for you to stop".
+///
+/// Termination is requested by the [`Instance::terminate`] method, which takes
+/// a [`VmmStateOwner`] that determines whether the termination request came
+/// from Nexus or is internal to the sled-agent. The [`VmmStateOwner`] from the
+/// *first* request to terminate will determine whether a subsequent state
+/// update will be published to Nexus when the VMM finishes shutting down.
+/// Callers of [`Instance::terminate`] receive an `&Arc<Terminator>` which they
+/// may `clone` and await [`Terminator::terminated`] to await the *completion*
+/// of the termination sequence and receive the final [`SledVmmState`]. Callers
+/// which do not need to await the completion of the termination sequence can
+/// simply choose not to do this. The VMM will terminate regardless of whether
+/// or not this future is awaited.
 pub(crate) struct Terminator {
     /// Set when termination of the VMM is requested.
     signalled: SetOnce<VmmStateOwner>,
@@ -530,13 +562,36 @@ impl Terminator {
         })
     }
 
-    /// Wait for a request to terminate the instance, returning the new
+    /// Wait for a request to terminate the VMM, returning the new
     /// [`VmmStateOwner`].
+    ///
+    /// ## Cancellation Safety
+    ///
+    /// This method is cancel-safe: once termination has been requested, it will
+    /// always return a `VmmStateOwner`, even if a previous
+    /// `termination_requested()` future was dropped. This allows us to
+    /// `select!` over calls to this function in the [`InstanceRunner::run`]
+    /// loop without missing a termination signal.
     async fn termination_requested(&self) -> VmmStateOwner {
         *(self.signalled.wait().await)
     }
 
-    /// Wait for the completion of a request to terminate the instance.
+    /// Wait for the completion of a request to terminate the VMM, returning the
+    /// final [`SledVmmState`] published.
+    ///
+    /// If the VMM has not yet finished terminating, this function will wait
+    /// until it has. Once the VMM has terminated, any time this function is
+    /// called will return the final [`SledVmmState`].
+    ///
+    /// Awaiting this function is **not** necessary to ensure that the VMM will
+    /// terminate. This function only waits for a signal that fires when the
+    /// Propolis zone has been destroyed, and does *not* actually perform the
+    /// work of shutting down the instance.
+    ///
+    /// ## Cancellation Safety
+    ///
+    /// This method is cancel-safe: once the VMM has completed termination, it
+    /// will always return the final [`SledVmmState`].
     pub(crate) async fn terminated(self: Arc<Self>) -> SledVmmState {
         self.completed.wait().await.clone()
     }
