@@ -536,17 +536,18 @@ struct InstanceMonitorMessage {
 /// callers who all, fundamentally, are really just trying to communicate the
 /// same bit of information: "it's time for you to stop".
 ///
-/// Termination is requested by the [`Instance::terminate`] method, which takes
-/// a [`VmmStateOwner`] that determines whether the termination request came
-/// from Nexus or is internal to the sled-agent. The [`VmmStateOwner`] from the
-/// *first* request to terminate will determine whether a subsequent state
-/// update will be published to Nexus when the VMM finishes shutting down.
-/// Callers of [`Instance::terminate`] receive an `&Arc<Terminator>` which they
-/// may `clone` and await [`Terminator::terminated`] to await the *completion*
-/// of the termination sequence and receive the final [`SledVmmState`]. Callers
-/// which do not need to await the completion of the termination sequence can
-/// simply choose not to do this. The VMM will terminate regardless of whether
-/// or not this future is awaited.
+/// Termination is requested by the [`Instance::request_termination`] method,
+/// which takes a [`VmmStateOwner`] that determines whether the termination
+/// request came from Nexus or is internal to the sled-agent. The
+/// [`VmmStateOwner`] from the *first* request to terminate will determine
+/// whether a subsequent state update will be published to Nexus when the VMM
+/// finishes shutting down. Callers of [`Instance::request_termination`] receive
+/// an `&Arc<Terminator>` which they may `clone` and await
+/// [`Terminator::terminated`] to await the *completion* of the termination
+/// sequence and receive the final [`SledVmmState`]. Callers which do not need
+/// to await the completion of the termination sequence can simply choose not to
+/// do this. The VMM will terminate regardless of whether or not this future is
+/// awaited.
 pub(crate) struct Terminator {
     /// Set when termination of the VMM is requested.
     signalled: SetOnce<VmmStateOwner>,
