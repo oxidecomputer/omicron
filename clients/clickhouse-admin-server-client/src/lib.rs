@@ -19,26 +19,4 @@ progenitor::generate_api!(
     }
 );
 
-impl progenitor::progenitor_client::ClientHooks<slog::Logger> for Client {
-    async fn pre<E>(
-        &self,
-        request: &mut reqwest::Request,
-        _info: &progenitor::progenitor_client::OperationInfo,
-    ) -> Result<(), progenitor::progenitor_client::Error<E>> {
-        slog::debug!(self.inner(), "client request";
-            "method" => %request.method(),
-            "uri" => %request.url(),
-            "body" => ?&request.body(),
-        );
-        Ok(())
-    }
-
-    async fn post<E>(
-        &self,
-        result: &reqwest::Result<reqwest::Response>,
-        _info: &progenitor::progenitor_client::OperationInfo,
-    ) -> Result<(), progenitor::progenitor_client::Error<E>> {
-        slog::debug!(self.inner(), "client response"; "result" => ?result);
-        Ok(())
-    }
-}
+progenitor_extras::slog_hooks::impl_slog_client_hooks!(Client);
