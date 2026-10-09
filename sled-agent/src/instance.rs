@@ -4046,7 +4046,6 @@ mod tests {
         // channel is dropped. (This simulates what happens when the "real"
         // instance manager is asked to remove a record from its VMM table.)
         drop(cmd_tx);
-        drop(terminate_tx);
         let _ = runner_task.await;
 
         logctx.cleanup_successful();
