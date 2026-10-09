@@ -519,7 +519,7 @@ pub(crate) struct Terminator {
     /// Set when termination of the VMM is requested.
     signalled: SetOnce<VmmStateOwner>,
     /// Set with the final state of the VMM once termination has completed.
-    completed: SetOnce<VmmUnregisterResponse>,
+    completed: SetOnce<SledVmmState>,
 }
 
 impl Terminator {
@@ -537,7 +537,7 @@ impl Terminator {
     }
 
     /// Wait for the completion of a request to terminate the instance.
-    pub(crate) async fn terminated(self: Arc<Self>) -> VmmUnregisterResponse {
+    pub(crate) async fn terminated(self: Arc<Self>) -> SledVmmState {
         self.completed.wait().await.clone()
     }
 }
@@ -1747,14 +1747,7 @@ impl Drop for InstanceRunner {
         // termination-completed signal would hang forever, so defensively, we
         // shall ensure that the final state is published here if we have not
         // already published termination completion.
-        if self
-            .terminator
-            .completed
-            .set(VmmUnregisterResponse {
-                updated_runtime: Some(self.current_state()),
-            })
-            .is_ok()
-        {
+        if self.terminator.completed.set(self.current_state()).is_ok() {
             error!(
                 self.log,
                 "InstanceRunner dropped without publishing that the instance \
@@ -2521,14 +2514,7 @@ impl InstanceRunner {
         self.should_terminate = true;
         // Make sure everyone who was waiting on us to go die knows we have
         // obliged!
-        if self
-            .terminator
-            .completed
-            .set(VmmUnregisterResponse {
-                updated_runtime: Some(self.current_state()),
-            })
-            .is_err()
-        {
+        if self.terminator.completed.set(self.current_state()).is_err() {
             warn!(
                 self.log,
                 "Tried to publish VMM state after terminating the instance, \

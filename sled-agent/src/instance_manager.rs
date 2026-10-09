@@ -267,13 +267,14 @@ impl InstanceManager {
             })
             .await
             .map_err(|_| Error::FailedSendInstanceManagerClosed)?;
-        match rx.await? {
+        let updated_runtime = match rx.await? {
             // No VMM with the requested `propolis_id` was found, so send an
             // empty state back.
-            None => Ok(VmmUnregisterResponse { updated_runtime: None }),
+            None => None,
             // We got the instance terminator, wait for it to complete.
-            Some(terminator) => Ok(terminator.terminated().await),
-        }
+            Some(terminator) => Some(terminator.terminated().await),
+        };
+        Ok(VmmUnregisterResponse { updated_runtime })
     }
 
     pub async fn ensure_state(
