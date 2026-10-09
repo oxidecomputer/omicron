@@ -850,7 +850,8 @@ fn write_zstd(src: &mut File, dst: &mut impl Write) -> anyhow::Result<()> {
     encoder
         .set_pledged_src_size(Some(src_size))
         .context("failed to set zstd pledged source size")?;
-    std::io::copy(src, &mut encoder).context("failed to compress log")?;
+    std::io::copy(src, &mut encoder)
+        .context("failed to copy log contents into zstd encoder")?;
     encoder.finish().context("failed to finish zstd frame")?;
     Ok(())
 }
