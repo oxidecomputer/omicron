@@ -14,6 +14,7 @@ use std::collections::BTreeMap;
 use std::collections::btree_map;
 use std::sync::Arc;
 use std::sync::RwLock;
+use tokio::task::JoinHandle;
 
 #[derive(Debug)]
 pub struct InstanceManagerJobsStatusReceiver {
@@ -33,11 +34,22 @@ pub(super) enum CanEnsureVmm<'a, T> {
     CanRegister(RegisterNewVmm<'a, T>),
 }
 
+/// Small wrapper around an instance, plus an optional task terminating it if
+/// the zpool the instance is running on goes away.
+pub(super) struct InstanceJob {
+    /// The instance itself.
+    pub instance: Instance,
+    /// The task trying to terminate the instance if its zpool is gone.
+    pub zpool_task: Option<JoinHandle<()>>,
+}
+
 /// [`Jobs`] stores a set of VMM registrations (i.e., [`Instance`]s keyed by
-/// their propolis ID).
+/// their propolis ID). The instances are stored with an extra join handle,
+/// which is a task responsible for shutting down the instance if its zpool goes
+/// away.
 ///
-/// Callers should treat this as a fancy `BTreeMap<PropolisUuid, Instance>` with
-/// some special sauce:
+/// Callers should treat this as a fancy `BTreeMap<PropolisUuid, InstanceJob>`
+/// with some special sauce:
 ///
 /// 1. `Jobs` is able to act on the sled's update disposition, and knows that
 ///    new VMM registrations may be disallowed depending on the disposition.
@@ -55,7 +67,7 @@ pub(super) enum CanEnsureVmm<'a, T> {
 //
 // This type is generic only to support easy testing without having to construct
 // `Instance`s; prod code always uses the default type.
-pub(super) struct Jobs<T = Instance> {
+pub(super) struct Jobs<T = InstanceJob> {
     // Invariant: `jobs.len()` is always equal to
     // `status.num_registered_vmms`. This is enforced by `Jobs::remove()` and
     // `RegisterNewVmm::insert()` below, which always update `status` when
@@ -100,6 +112,12 @@ impl<T> Jobs<T> {
 
     pub(super) fn iter(&self) -> btree_map::Iter<'_, PropolisUuid, T> {
         self.jobs.iter()
+    }
+
+    pub(super) fn iter_mut(
+        &mut self,
+    ) -> btree_map::IterMut<'_, PropolisUuid, T> {
+        self.jobs.iter_mut()
     }
 
     pub(super) fn can_ensure_vmm(
