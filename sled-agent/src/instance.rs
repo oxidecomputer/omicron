@@ -3901,6 +3901,7 @@ mod tests {
             cmd_rx: mpsc::Receiver<InstanceRequest>,
             monitor_tx: mpsc::Sender<InstanceMonitorMessage>,
             monitor_rx: mpsc::Receiver<InstanceMonitorMessage>,
+            terminate_done_tx: watch::Sender<Option<VmmUnregisterResponse>>,
         ) -> Self {
             let metadata = InstanceMetadata {
                 silo_id: Uuid::new_v4(),
@@ -3977,6 +3978,7 @@ mod tests {
                 metrics_queue,
                 delegated_zvols: local_config.delegated_zvols,
                 attached_subnets: IdOrdMap::new(),
+                terminate_done_tx,
             }
         }
     }
@@ -3984,7 +3986,8 @@ mod tests {
     struct TestInstanceRunner {
         runner_task: tokio::task::JoinHandle<()>,
         state_rx: tokio::sync::watch::Receiver<ReceivedInstanceState>,
-        terminate_tx: mpsc::Sender<TerminateRequest>,
+        terminate_tx: watch::Sender<Option<VmmStateOwner>>,
+        terminate_done_rx: watch::Receiver<Option<VmmUnregisterResponse>>,
         monitor_tx: mpsc::Sender<InstanceMonitorMessage>,
         cmd_tx: mpsc::Sender<InstanceRequest>,
         remove_rx: mpsc::UnboundedReceiver<
@@ -4025,7 +4028,8 @@ mod tests {
 
             let initial_state = fake_instance_initial_state(propolis_addr);
 
-            let (terminate_tx, terminate_rx) = mpsc::channel(1);
+            let (terminate_tx, terminate_rx) = watch::channel(None);
+            let (terminate_done_tx, terminate_done_rx) = watch::channel(None);
             let (monitor_tx, monitor_rx) = mpsc::channel(1);
             let (cmd_tx, cmd_rx) = mpsc::channel(QUEUE_SIZE);
             let (remove_tx, remove_rx) = mpsc::unbounded_channel();
@@ -4039,16 +4043,18 @@ mod tests {
                 cmd_rx,
                 monitor_tx.clone(),
                 monitor_rx,
+                terminate_done_tx,
             );
 
             let runner_task = tokio::spawn(async move {
-                runner.run(terminate_rx, ticket).await;
+                runner.run(Killswitch(terminate_rx), ticket).await;
             });
 
             Self {
                 runner_task,
                 state_rx,
                 terminate_tx,
+                terminate_done_rx,
                 monitor_tx,
                 cmd_tx,
                 remove_rx,
@@ -4069,6 +4075,7 @@ mod tests {
             runner_task,
             state_rx,
             terminate_tx,
+            terminate_done_rx: _tdr,
             monitor_tx,
             cmd_tx,
             mut remove_rx,
@@ -4141,6 +4148,7 @@ mod tests {
             runner_task: _rt,
             state_rx,
             terminate_tx: _tt,
+            terminate_done_rx: _tdr,
             monitor_tx,
             cmd_tx: _ct,
             mut remove_rx,
