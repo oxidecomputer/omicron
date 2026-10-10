@@ -9295,6 +9295,26 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<Response<Body>, HttpError>;
 
+    #[endpoint {
+        method = GET,
+        path = "/users/{path:.*}",
+        unpublished = true,
+    }]
+    async fn console_silo_users(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::console::RestPathParam>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/groups/{path:.*}",
+        unpublished = true,
+    }]
+    async fn console_silo_groups(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::console::RestPathParam>,
+    ) -> Result<Response<Body>, HttpError>;
+
     /// Serve a static asset
     #[endpoint {
         method = GET,
