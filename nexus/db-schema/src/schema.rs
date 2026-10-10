@@ -1921,6 +1921,8 @@ table! {
 
         instance_manager_update_disposition -> Nullable<crate::enums::InvSledUpdateDispositionEnum>,
         instance_manager_num_registered_vmms -> Int8,
+
+        rack_id -> Uuid,
     }
 }
 

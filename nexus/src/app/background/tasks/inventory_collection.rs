@@ -18,6 +18,7 @@ use nexus_types::deployment::SledFilter;
 use nexus_types::inventory::Collection;
 use omicron_cockroach_metrics::CockroachClusterAdminClient;
 use omicron_uuid_kinds::CollectionUuid;
+use omicron_uuid_kinds::RackUuid;
 use serde_json::json;
 use slog::{debug, o, warn};
 use std::net::SocketAddr;
@@ -34,6 +35,7 @@ pub struct InventoryCollector {
     disable: bool,
     tx: watch::Sender<Option<CollectionUuid>>,
     cockroach_admin_client: CockroachClusterAdminClient,
+    rack_id: RackUuid,
 }
 
 impl InventoryCollector {
@@ -44,6 +46,7 @@ impl InventoryCollector {
         creator: &str,
         nkeep: u32,
         disable: bool,
+        rack_id: RackUuid,
     ) -> InventoryCollector {
         let (tx, _) = watch::channel(None);
         let timeout = Duration::from_secs(15);
@@ -61,6 +64,7 @@ impl InventoryCollector {
             disable,
             tx,
             cockroach_admin_client,
+            rack_id,
         }
     }
 
@@ -83,6 +87,7 @@ impl BackgroundTask for InventoryCollector {
                 self.nkeep,
                 self.disable,
                 &self.cockroach_admin_client,
+                self.rack_id,
             )
             .await
             .context("failed to collect inventory")
@@ -112,6 +117,7 @@ impl BackgroundTask for InventoryCollector {
     }
 }
 
+#[allow(clippy::too_many_arguments)] // rack_id will be removed for multirack
 async fn inventory_activate(
     opctx: &OpContext,
     datastore: &DataStore,
@@ -120,6 +126,7 @@ async fn inventory_activate(
     nkeep: u32,
     disabled: bool,
     cockroach_admin_client: &CockroachClusterAdminClient,
+    rack_id: RackUuid,
 ) -> Result<Collection, anyhow::Error> {
     // If we're disabled, don't do anything.  (This switch is only intended for
     // unforeseen production emergencies.)
@@ -216,7 +223,7 @@ async fn inventory_activate(
 
     // Write it to the database.
     datastore
-        .inventory_insert_collection(opctx, &collection)
+        .inventory_insert_collection(opctx, &collection, rack_id)
         .await
         .context("saving inventory to database")?;
 
@@ -313,6 +320,7 @@ mod test {
             "me",
             nkeep,
             false,
+            RackUuid::nil(),
         );
         let nkeep = usize::try_from(nkeep).unwrap();
         let mut all_our_collection_ids = Vec::new();
@@ -385,6 +393,7 @@ mod test {
             "disabled",
             3,
             true,
+            RackUuid::nil(),
         );
         let _ = task.activate(&opctx).await;
 
