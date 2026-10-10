@@ -1508,7 +1508,7 @@ mod test {
     // - ... and Selects them as the requested model type.
     macro_rules! fn_to_get_all {
         ($table:ident, $model:ident) => {
-            paste::paste! {
+            pastey::paste! {
                 async fn [<get_all_ $table s>](db: &DataStore) -> Vec<$model> {
                     use nexus_db_schema::schema::$table::dsl;
                     use nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL;

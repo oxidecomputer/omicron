@@ -34,7 +34,7 @@ macaddr.workspace = true
 nonempty.workspace = true
 omicron-generation-kinds.workspace = true
 oxnet.workspace = true
-paste.workspace = true
+pastey.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
 qorb.workspace = true
