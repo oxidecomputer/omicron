@@ -72,6 +72,7 @@ use nexus_types::internal_api::background::IncompleteBootstoreConfigReport;
 use nexus_types::internal_api::background::InstanceReincarnationStatus;
 use nexus_types::internal_api::background::InstanceUpdaterStatus;
 use nexus_types::internal_api::background::InventoryLoadStatus;
+use nexus_types::internal_api::background::LocalStorageDeleteStatus;
 use nexus_types::internal_api::background::LookupRegionPortStatus;
 use nexus_types::internal_api::background::PhysicalDiskAdoptionStatus;
 use nexus_types::internal_api::background::ProbeDistributorStatus;
@@ -1439,6 +1440,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         }
         "vmm_mark_stop_for_update" => {
             print_task_vmm_mark_stop_for_update(details);
+        }
+        "local_storage_delete" => {
+            print_task_local_storage_delete(details);
         }
         _ => {
             println!(
@@ -4522,6 +4526,38 @@ fn print_task_physical_disk_adoption(details: &serde_json::Value) {
     println!("physical disks added: {}", status.disks_added);
     for error in status.errors {
         println!("{ERRICON} {error}");
+    }
+}
+
+fn print_task_local_storage_delete(details: &serde_json::Value) {
+    match serde_json::from_value::<LocalStorageDeleteStatus>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+
+        Ok(status) => {
+            let LocalStorageDeleteStatus {
+                delete_results,
+                deallocate_results,
+                errors,
+            } = &status;
+
+            println!("    results of deleting local storage:");
+            for result in delete_results {
+                println!("    > {result}");
+            }
+
+            println!("    results of deallocating local storage:");
+            for result in deallocate_results {
+                println!("    > {result}");
+            }
+
+            println!("    errors: {}", errors.len());
+            for error in errors {
+                println!("    > {error}");
+            }
+        }
     }
 }
 

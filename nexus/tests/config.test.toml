@@ -250,6 +250,7 @@ populate_switch_ports.period_secs = 30
 # In this configuration the blueprint rendezvous task is set to 600, so we set
 # this task to 600 as well.
 vmm_mark_stop_for_update.period_secs = 600
+local_storage_delete.period_secs = 10000
 
 [multicast]
 # Enable multicast functionality for tests (disabled by default in production)
