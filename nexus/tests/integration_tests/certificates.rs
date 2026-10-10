@@ -6,19 +6,28 @@
 
 use display_error_chain::ErrorChainExt;
 use dropshot::HttpErrorResponseBody;
+use dropshot::ResultsPage;
 use dropshot::test_util::ClientTestContext;
 use futures::TryStreamExt;
 use http::StatusCode;
 use http::method::Method;
 use internal_dns_types::names::DNS_ZONE_EXTERNAL_TESTING;
+use nexus_db_lookup::LookupPath;
+use nexus_db_queries::context::OpContext;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::resource_helpers::create_certificate;
+use nexus_test_utils::resource_helpers::create_local_user;
+use nexus_test_utils::resource_helpers::create_silo;
 use nexus_test_utils::resource_helpers::delete_certificate;
+use nexus_test_utils::resource_helpers::grant_iam;
+use nexus_test_utils::resource_helpers::test_params;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::certificate::{
     Certificate, CertificateCreate, ServiceUsingCertificate,
 };
+use nexus_types::external_api::policy::{FleetRole, SiloRole};
+use nexus_types::external_api::silo::SiloIdentityMode;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::internal::nexus::Certificate as InternalCertificate;
 use omicron_test_utils::certificates::CertificateChain;
@@ -299,6 +308,388 @@ async fn test_cannot_create_certificate_with_incorrect_subject_alt_name(
             "{error:?} does not contain {expected:?}"
         );
     }
+}
+
+#[nexus_test]
+async fn test_system_certificates_crud(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+
+    // The privileged user lives in the default test Silo. Create another Silo
+    // to manage certificates in.
+    let other_silo =
+        create_silo(client, "other-silo", SiloIdentityMode::LocalOnly).await;
+    let other_silo_name = other_silo.identity.name.as_str();
+    let other_silo_id = other_silo.identity.id;
+    let system_certs_url =
+        format!("/v1/system/certificates?silo={other_silo_name}");
+    let system_certs_list = async |silo: &str| -> Vec<Certificate> {
+        NexusRequest::iter_collection_authn(
+            client,
+            "/v1/system/certificates",
+            &format!("silo={silo}"),
+            None,
+        )
+        .await
+        .expect("failed to list certificates")
+        .all_items
+    };
+
+    assert!(system_certs_list(other_silo_name).await.is_empty());
+
+    // A certificate that's not valid for the target Silo is rejected.
+    let bad_chain = CertificateChain::new(format!(
+        "{}.sys.{}",
+        cptestctx.silo_name, cptestctx.external_dns_zone_name
+    ));
+    let bad_params = CertificateCreate {
+        identity: IdentityMetadataCreateParams {
+            name: CERT_NAME.parse().unwrap(),
+            description: String::new(),
+        },
+        cert: bad_chain.cert_chain_as_pem(),
+        key: bad_chain.end_cert_private_key_as_pem(),
+        service: ServiceUsingCertificate::ExternalApi,
+    };
+    let error = NexusRequest::expect_failure_with_body(
+        client,
+        StatusCode::BAD_REQUEST,
+        Method::POST,
+        &system_certs_url,
+        &bad_params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<HttpErrorResponseBody>()
+    .unwrap();
+    assert!(
+        error.message.contains("Certificate not valid for"),
+        "unexpected error: {}",
+        error.message
+    );
+
+    // Create a certificate in the other Silo.
+    let chain = CertificateChain::new(cptestctx.wildcard_silo_dns_name());
+    let params = CertificateCreate {
+        cert: chain.cert_chain_as_pem(),
+        key: chain.end_cert_private_key_as_pem(),
+        ..bad_params
+    };
+    let created: Certificate =
+        NexusRequest::objects_post(client, &system_certs_url, &params)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute_and_parse_unwrap()
+            .await;
+    assert_eq!(created.identity.name, CERT_NAME);
+
+    // It shows up in the other Silo, not the caller's Silo.
+    let list = system_certs_list(other_silo_name).await;
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].identity.id, created.identity.id);
+    assert!(certs_list(client).await.is_empty());
+    assert!(system_certs_list(cptestctx.silo_name.as_str()).await.is_empty());
+    let datastore = cptestctx.server.server_context().nexus.datastore();
+    let opctx = OpContext::for_tests(
+        cptestctx.logctx.log.new(slog::o!()),
+        datastore.clone(),
+    );
+    let (.., db_cert) = LookupPath::new(&opctx, datastore)
+        .certificate_id(created.identity.id)
+        .fetch()
+        .await
+        .unwrap();
+    assert_eq!(db_cert.silo_id, other_silo_id);
+
+    // Names are unique per Silo.
+    let error = NexusRequest::expect_failure_with_body(
+        client,
+        StatusCode::BAD_REQUEST,
+        Method::POST,
+        &system_certs_url,
+        &params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<HttpErrorResponseBody>()
+    .unwrap();
+    assert_eq!(
+        error.message,
+        format!("already exists: certificate \"{CERT_NAME}\"")
+    );
+
+    // Fetch by name (with Silo) and by ID (without Silo).
+    let by_name_url =
+        format!("/v1/system/certificates/{CERT_NAME}?silo={other_silo_name}");
+    let by_id_url = format!("/v1/system/certificates/{}", created.identity.id);
+    for url in [&by_name_url, &by_id_url] {
+        let fetched: Certificate = NexusRequest::object_get(client, url)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute_and_parse_unwrap()
+            .await;
+        assert_eq!(fetched.identity.id, created.identity.id);
+    }
+
+    // The Silo must be given with a name and must not be given with an ID.
+    for (url, expected) in [
+        (
+            format!("/v1/system/certificates/{CERT_NAME}"),
+            "certificate should either be a UUID or silo should be specified",
+        ),
+        (
+            format!(
+                "/v1/system/certificates/{}?silo={other_silo_name}",
+                created.identity.id
+            ),
+            "when providing certificate as an ID, silo should not be \
+             specified",
+        ),
+    ] {
+        for method in [Method::GET, Method::DELETE] {
+            let error = NexusRequest::expect_failure(
+                client,
+                StatusCode::BAD_REQUEST,
+                method,
+                &url,
+            )
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body::<HttpErrorResponseBody>()
+            .unwrap();
+            assert_eq!(error.message, expected);
+        }
+    }
+
+    // A name in the wrong Silo is not found.
+    NexusRequest::expect_failure(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::GET,
+        &format!(
+            "/v1/system/certificates/{CERT_NAME}?silo={}",
+            cptestctx.silo_name
+        ),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Delete by name, recreate, and delete by ID.
+    NexusRequest::object_delete(client, &by_name_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+    assert!(system_certs_list(other_silo_name).await.is_empty());
+    let created: Certificate =
+        NexusRequest::objects_post(client, &system_certs_url, &params)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute_and_parse_unwrap()
+            .await;
+    NexusRequest::object_delete(
+        client,
+        &format!("/v1/system/certificates/{}", created.identity.id),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+    assert!(system_certs_list(other_silo_name).await.is_empty());
+}
+
+#[nexus_test]
+async fn test_system_certificates_authz(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+
+    // Create a Silo with a Silo administrator.
+    let silo =
+        create_silo(client, "admin-silo", SiloIdentityMode::LocalOnly).await;
+    let silo_name = silo.identity.name.as_str();
+    let admin_id = create_local_user(
+        client,
+        &silo,
+        &"admin".parse().unwrap(),
+        test_params::UserPassword::LoginDisallowed,
+    )
+    .await
+    .id;
+    grant_iam(
+        client,
+        &format!("/v1/system/silos/{silo_name}"),
+        SiloRole::Admin,
+        admin_id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    // Create a fleet viewer. Fleet viewers can read every Silo but can't
+    // manage any Silo's certificates.
+    let viewer_id = create_local_user(
+        client,
+        &silo,
+        &"fleet-viewer".parse().unwrap(),
+        test_params::UserPassword::LoginDisallowed,
+    )
+    .await
+    .id;
+    grant_iam(
+        client,
+        "/v1/system",
+        FleetRole::Viewer,
+        viewer_id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    let chain = CertificateChain::new(cptestctx.wildcard_silo_dns_name());
+    let params = CertificateCreate {
+        identity: IdentityMetadataCreateParams {
+            name: CERT_NAME.parse().unwrap(),
+            description: String::new(),
+        },
+        cert: chain.cert_chain_as_pem(),
+        key: chain.end_cert_private_key_as_pem(),
+        service: ServiceUsingCertificate::ExternalApi,
+    };
+
+    // Create a certificate in the default test Silo as a fleet administrator.
+    let other_silo_name = cptestctx.silo_name.as_str();
+    let other_url = format!("/v1/system/certificates?silo={other_silo_name}");
+    let other_cert: Certificate =
+        NexusRequest::objects_post(client, &other_url, &params)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute_and_parse_unwrap()
+            .await;
+
+    // The Silo administrator can manage certificates in their own Silo.
+    let url = format!("/v1/system/certificates?silo={silo_name}");
+    let created: Certificate =
+        NexusRequest::objects_post(client, &url, &params)
+            .authn_as(AuthnMode::SiloUser(admin_id))
+            .execute_and_parse_unwrap()
+            .await;
+    let list: ResultsPage<Certificate> = NexusRequest::object_get(client, &url)
+        .authn_as(AuthnMode::SiloUser(admin_id))
+        .execute_and_parse_unwrap()
+        .await;
+    assert_eq!(list.items.len(), 1);
+    assert_eq!(list.items[0].identity.id, created.identity.id);
+    let by_name_url =
+        format!("/v1/system/certificates/{CERT_NAME}?silo={silo_name}");
+    let by_id_url = format!("/v1/system/certificates/{}", created.identity.id);
+    for url in [&by_name_url, &by_id_url] {
+        let fetched: Certificate = NexusRequest::object_get(client, url)
+            .authn_as(AuthnMode::SiloUser(admin_id))
+            .execute_and_parse_unwrap()
+            .await;
+        assert_eq!(fetched.identity.id, created.identity.id);
+    }
+
+    // But not in another Silo, whether by Silo, by name, or by ID.
+    NexusRequest::expect_failure_with_body(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::POST,
+        &other_url,
+        &params,
+    )
+    .authn_as(AuthnMode::SiloUser(admin_id))
+    .execute()
+    .await
+    .unwrap();
+    let other_by_name_url =
+        format!("/v1/system/certificates/{CERT_NAME}?silo={other_silo_name}");
+    let other_by_id_url =
+        format!("/v1/system/certificates/{}", other_cert.identity.id);
+    for (method, url) in [
+        (Method::GET, &other_url),
+        (Method::GET, &other_by_name_url),
+        (Method::DELETE, &other_by_name_url),
+        (Method::GET, &other_by_id_url),
+        (Method::DELETE, &other_by_id_url),
+    ] {
+        NexusRequest::expect_failure(
+            client,
+            StatusCode::NOT_FOUND,
+            method,
+            url,
+        )
+        .authn_as(AuthnMode::SiloUser(admin_id))
+        .execute()
+        .await
+        .unwrap();
+    }
+
+    // A fleet viewer can't create certificates. This must fail on
+    // authorization before the certificate is validated against the Silo's
+    // DNS names, so an invalid certificate also produces a 403.
+    let bad_chain = CertificateChain::new("bogus.example.com");
+    let bad_params = CertificateCreate {
+        cert: bad_chain.cert_chain_as_pem(),
+        key: bad_chain.end_cert_private_key_as_pem(),
+        ..params.clone()
+    };
+    for params in [&params, &bad_params] {
+        NexusRequest::expect_failure_with_body(
+            client,
+            StatusCode::FORBIDDEN,
+            Method::POST,
+            &other_url,
+            params,
+        )
+        .authn_as(AuthnMode::SiloUser(viewer_id))
+        .execute()
+        .await
+        .unwrap();
+    }
+
+    // A fleet viewer can't list, view, or delete certificates either.
+    NexusRequest::expect_failure(
+        client,
+        StatusCode::FORBIDDEN,
+        Method::GET,
+        &other_url,
+    )
+    .authn_as(AuthnMode::SiloUser(viewer_id))
+    .execute()
+    .await
+    .unwrap();
+    for method in [Method::GET, Method::DELETE] {
+        NexusRequest::expect_failure(
+            client,
+            StatusCode::NOT_FOUND,
+            method,
+            &other_by_id_url,
+        )
+        .authn_as(AuthnMode::SiloUser(viewer_id))
+        .execute()
+        .await
+        .unwrap();
+    }
+
+    // Certificates in the Silo can't be accessed by other Silos' users.
+    for method in [Method::GET, Method::DELETE] {
+        NexusRequest::expect_failure(
+            client,
+            StatusCode::NOT_FOUND,
+            method,
+            &by_id_url,
+        )
+        .authn_as(AuthnMode::UnprivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+    }
+    NexusRequest::object_delete(client, &by_id_url)
+        .authn_as(AuthnMode::SiloUser(admin_id))
+        .execute()
+        .await
+        .unwrap();
 }
 
 #[tokio::test]

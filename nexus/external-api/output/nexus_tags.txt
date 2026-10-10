@@ -314,6 +314,10 @@ silo_user_view                           GET      /v1/system/users/{user_id}
 silo_utilization_list                    GET      /v1/system/utilization/silos
 silo_utilization_view                    GET      /v1/system/utilization/silos/{silo}
 silo_view                                GET      /v1/system/silos/{silo}
+system_certificate_create                POST     /v1/system/certificates
+system_certificate_delete                DELETE   /v1/system/certificates/{certificate}
+system_certificate_list                  GET      /v1/system/certificates
+system_certificate_view                  GET      /v1/system/certificates/{certificate}
 system_quotas_list                       GET      /v1/system/silo-quotas
 user_builtin_list                        GET      /v1/system/users-builtin
 user_builtin_view                        GET      /v1/system/users-builtin/{user}

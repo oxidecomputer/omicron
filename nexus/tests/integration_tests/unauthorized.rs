@@ -535,6 +535,12 @@ static SETUP_REQUESTS: LazyLock<Vec<SetupReq>> = LazyLock::new(|| {
             body: serde_json::to_value(&*DEMO_CERTIFICATE_CREATE).unwrap(),
             id_routes: vec![],
         },
+        // Create a Certificate in a non-default Silo
+        SetupReq::Post {
+            url: &DEMO_SYSTEM_CERTIFICATES_URL,
+            body: serde_json::to_value(&*DEMO_CERTIFICATE_CREATE).unwrap(),
+            id_routes: vec![],
+        },
         // Create a Support Bundle
         SetupReq::Post {
             url: &SUPPORT_BUNDLES_URL,
