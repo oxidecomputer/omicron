@@ -3467,6 +3467,7 @@ mod tests {
             600
         );
 
+        // explicitly set hard-off
         params.shutdown_policy =
             Some(instance::InstanceShutdownPolicy::HardOff);
         let db_instance = DbInstance::new(instance_id, project_id, &params);
@@ -3475,5 +3476,21 @@ mod tests {
             InstanceShutdownAction::HardOff
         );
         assert_eq!(db_instance.shutdown_policy_timeout, None);
+
+        params.shutdown_policy =
+            Some(instance::InstanceShutdownPolicy::PowerButton {
+                timeout_secs: 42,
+            });
+
+        // explicitly set power button with timeout
+        let db_instance = DbInstance::new(instance_id, project_id, &params);
+        assert_eq!(
+            db_instance.shutdown_policy_action,
+            InstanceShutdownAction::PowerButton
+        );
+        assert_eq!(
+            db_instance.shutdown_policy_timeout.unwrap().num_seconds(),
+            42
+        );
     }
 }
