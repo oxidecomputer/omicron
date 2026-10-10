@@ -8,15 +8,8 @@ progenitor::generate_api!(
     spec = "../../openapi/ntp-admin/ntp-admin-latest.json",
     interface = Positional,
     inner_type = slog::Logger,
-    pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
-        slog::debug!(log, "client request";
-            "method" => %request.method(),
-            "uri" => %request.url(),
-            "body" => ?&request.body(),
-        );
-    }),
-    post_hook = (|log: &slog::Logger, result: &Result<_, _>| {
-        slog::debug!(log, "client response"; "result" => ?result);
-    }),
+    hooks = Expected,
     derives = [schemars::JsonSchema],
 );
+
+progenitor_extras::slog_hooks::impl_slog_client_hooks!(Client);

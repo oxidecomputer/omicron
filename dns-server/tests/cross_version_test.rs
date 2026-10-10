@@ -34,17 +34,8 @@ mod v1_client {
         },
         interface = Positional,
         inner_type = slog::Logger,
+        hooks = Expected,
         derives = [schemars::JsonSchema, Clone, Eq, PartialEq],
-        pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
-            slog::debug!(log, "client request";
-                "method" => %request.method(),
-                "uri" => %request.url(),
-                "body" => ?&request.body(),
-            );
-        }),
-        post_hook = (|log: &slog::Logger, result: &Result<_, _>| {
-            slog::debug!(log, "client response"; "result" => ?result);
-        }),
         replace = {
             DnsConfig = v1::config::DnsConfig,
             DnsConfigParams = v1::config::DnsConfigParams,
@@ -53,6 +44,8 @@ mod v1_client {
             Srv = v1::config::Srv,
         }
     );
+
+    progenitor_extras::slog_hooks::impl_slog_client_hooks!(Client);
 
     pub async fn dns_records_create(
         client: &Client,

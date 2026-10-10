@@ -16,6 +16,7 @@ gateway-messages.workspace = true
 gateway-types.workspace = true
 omicron-uuid-kinds.workspace = true
 progenitor.workspace = true
+progenitor-extras = { workspace = true, features = ["slog"] }
 rand.workspace = true
 reqwest = { workspace = true, features = ["rustls", "stream"] }
 serde.workspace = true

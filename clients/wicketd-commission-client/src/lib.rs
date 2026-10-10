@@ -8,16 +8,7 @@ progenitor::generate_api!(
     spec = "../../openapi/wicketd-commission/wicketd-commission-latest.json",
     interface = Positional,
     inner_type = slog::Logger,
-    pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
-        slog::debug!(log, "client request";
-            "method" => %request.method(),
-            "uri" => %request.url(),
-            "body" => ?&request.body(),
-        );
-    }),
-    post_hook = (|log: &slog::Logger, result: &Result<_, _>| {
-        slog::debug!(log, "client response"; "result" => ?result);
-    }),
+    hooks = Expected,
     derives = [schemars::JsonSchema],
     crates = {
         "iddqd" = "*",
@@ -121,5 +112,7 @@ progenitor::generate_api!(
         UserSpecifiedUplinkAddressConfig = wicketd_commission_types_versions::latest::rack_setup::UserSpecifiedUplinkAddressConfig,
     },
 );
+
+progenitor_extras::slog_hooks::impl_slog_client_hooks!(Client);
 
 pub type ClientError = crate::Error<crate::types::Error>;
