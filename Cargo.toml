@@ -498,11 +498,11 @@ crossterm = { version = "0.29.0", features = ["event-stream"] }
 # NOTE: if you change the pinned revision of the `crucible` dependencies, you
 # must also update the references in package-manifest.toml to match the new
 # revision.
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "c145fdec7219556ad95bbe7415ae92e492545537" }
-crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "c145fdec7219556ad95bbe7415ae92e492545537" }
-crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "c145fdec7219556ad95bbe7415ae92e492545537" }
-crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "c145fdec7219556ad95bbe7415ae92e492545537" }
-crucible-client-types = { git = "https://github.com/oxidecomputer/crucible", rev = "c145fdec7219556ad95bbe7415ae92e492545537" }
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "babc6fadac30651bf38941e77f36ae3a93b29ec1" }
+crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "babc6fadac30651bf38941e77f36ae3a93b29ec1" }
+crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "babc6fadac30651bf38941e77f36ae3a93b29ec1" }
+crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "babc6fadac30651bf38941e77f36ae3a93b29ec1" }
+crucible-client-types = { git = "https://github.com/oxidecomputer/crucible", rev = "babc6fadac30651bf38941e77f36ae3a93b29ec1" }
 # NOTE: See above!
 csv = "1.3.1"
 curve25519-dalek = "4"

@@ -2168,7 +2168,7 @@ dependencies = [
 [[package]]
 name = "crucible-agent-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=c145fdec7219556ad95bbe7415ae92e492545537#c145fdec7219556ad95bbe7415ae92e492545537"
+source = "git+https://github.com/oxidecomputer/crucible?rev=babc6fadac30651bf38941e77f36ae3a93b29ec1#babc6fadac30651bf38941e77f36ae3a93b29ec1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2197,9 +2197,9 @@ dependencies = [
 [[package]]
 name = "crucible-client-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=c145fdec7219556ad95bbe7415ae92e492545537#c145fdec7219556ad95bbe7415ae92e492545537"
+source = "git+https://github.com/oxidecomputer/crucible?rev=babc6fadac30651bf38941e77f36ae3a93b29ec1#babc6fadac30651bf38941e77f36ae3a93b29ec1"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "crucible-workspace-hack",
  "schemars 0.8.22",
  "serde",
@@ -2210,7 +2210,7 @@ dependencies = [
 [[package]]
 name = "crucible-common"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=c145fdec7219556ad95bbe7415ae92e492545537#c145fdec7219556ad95bbe7415ae92e492545537"
+source = "git+https://github.com/oxidecomputer/crucible?rev=babc6fadac30651bf38941e77f36ae3a93b29ec1#babc6fadac30651bf38941e77f36ae3a93b29ec1"
 dependencies = [
  "anyhow",
  "atty",
@@ -2240,7 +2240,7 @@ dependencies = [
 [[package]]
 name = "crucible-pantry-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=c145fdec7219556ad95bbe7415ae92e492545537#c145fdec7219556ad95bbe7415ae92e492545537"
+source = "git+https://github.com/oxidecomputer/crucible?rev=babc6fadac30651bf38941e77f36ae3a93b29ec1#babc6fadac30651bf38941e77f36ae3a93b29ec1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2257,7 +2257,7 @@ dependencies = [
 [[package]]
 name = "crucible-smf"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=c145fdec7219556ad95bbe7415ae92e492545537#c145fdec7219556ad95bbe7415ae92e492545537"
+source = "git+https://github.com/oxidecomputer/crucible?rev=babc6fadac30651bf38941e77f36ae3a93b29ec1#babc6fadac30651bf38941e77f36ae3a93b29ec1"
 dependencies = [
  "crucible-workspace-hack",
  "libc",
@@ -9814,7 +9814,7 @@ dependencies = [
  "clap",
  "clickhouse-admin-types",
  "crucible-agent-client",
- "crucible-client-types 0.1.0 (git+https://github.com/oxidecomputer/crucible?rev=c145fdec7219556ad95bbe7415ae92e492545537)",
+ "crucible-client-types 0.1.0 (git+https://github.com/oxidecomputer/crucible?rev=babc6fadac30651bf38941e77f36ae3a93b29ec1)",
  "derive_more 0.99.20",
  "dice-verifier 0.3.0-pre0 (git+https://github.com/oxidecomputer/dice-util?rev=ff9f27aa0d6ef6fb64c349890b6e3c242ea3d8fc)",
  "display-error-chain",
