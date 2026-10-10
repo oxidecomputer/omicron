@@ -23,12 +23,14 @@ use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use illumos_utils::zone::OmicronZoneConfigExt;
 use illumos_utils::zpool::PathInPool;
+use illumos_utils::zpool::ZpoolName;
 use illumos_utils::zpool::ZpoolOrRamdisk;
 use omicron_common::disk::DatasetKind;
 use omicron_common::disk::DatasetName;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use sled_agent_types::disk::DatasetConfig;
+use sled_agent_types::disk::PerDiskDatasetKind;
 use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
 use sled_agent_types::inventory::OmicronZoneConfig;
 use sled_agent_types::inventory::OrphanedDataset;
@@ -66,11 +68,55 @@ pub(super) enum ZoneDatasetDependencyError {
     DurableDatasetNotAvailable(DatasetName),
 }
 
+/// Per-disk datasets needed to adopt a disk: debug (to archive former zone
+/// roots into) and transient zone root (which holds those zone roots).
+const REQUIRED_PER_DISK_DATASETS: [PerDiskDatasetKind; 2] =
+    [PerDiskDatasetKind::Debug, PerDiskDatasetKind::TransientZoneRoot];
+
+/// Returns true if `kind` is one of the [`REQUIRED_PER_DISK_DATASETS`].
+pub(super) fn is_required_per_disk_dataset(kind: &DatasetKind) -> bool {
+    REQUIRED_PER_DISK_DATASETS
+        .iter()
+        .any(|required| DatasetKind::from(*required) == *kind)
+}
+
+#[derive(Debug, thiserror::Error)]
+pub(super) enum RequiredDatasetError {
+    #[error("{kind:?} dataset on zpool {zpool} is not in the sled config")]
+    NotInConfig { zpool: ZpoolName, kind: PerDiskDatasetKind },
+    #[error(
+        "no result for {kind:?} dataset on zpool {zpool}: \
+         could not reach dataset task"
+    )]
+    NoResult { zpool: ZpoolName, kind: PerDiskDatasetKind },
+    #[error("{kind:?} dataset on zpool {zpool} was not ensured")]
+    NotEnsured {
+        zpool: ZpoolName,
+        kind: PerDiskDatasetKind,
+        #[source]
+        err: Arc<DatasetEnsureError>,
+    },
+}
+
+impl RequiredDatasetError {
+    pub(super) fn is_retryable(&self) -> bool {
+        match self {
+            // Retrying won't help until the config changes.
+            RequiredDatasetError::NotInConfig { .. } => false,
+            RequiredDatasetError::NoResult { .. } => true,
+            RequiredDatasetError::NotEnsured { err, .. } => err.is_retryable(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub(super) struct OmicronDatasets {
     datasets: IdOrdMap<OmicronDataset>,
     orphaned_datasets: IdOrdMap<OrphanedDataset>,
     dataset_task: DatasetTaskHandle,
+    // Set if we couldn't reach the dataset task on our last attempt, in which
+    // case `datasets` may be missing or out-of-date entries.
+    dataset_task_unavailable: bool,
 }
 
 impl OmicronDatasets {
@@ -89,7 +135,12 @@ impl OmicronDatasets {
                 },
             })
             .collect();
-        Self { datasets, orphaned_datasets: IdOrdMap::new(), dataset_task }
+        Self {
+            datasets,
+            orphaned_datasets: IdOrdMap::new(),
+            dataset_task,
+            dataset_task_unavailable: false,
+        }
     }
 
     pub(super) fn new(dataset_task: DatasetTaskHandle) -> Self {
@@ -97,6 +148,7 @@ impl OmicronDatasets {
             datasets: IdOrdMap::default(),
             orphaned_datasets: IdOrdMap::new(),
             dataset_task,
+            dataset_task_unavailable: false,
         }
     }
 
@@ -273,9 +325,11 @@ impl OmicronDatasets {
                     log, "failed to contact dataset task";
                     InlineErrorChain::new(&err),
                 );
+                self.dataset_task_unavailable = true;
                 return;
             }
         };
+        self.dataset_task_unavailable = false;
 
         for DatasetEnsureResult { config, result } in results {
             let state = match result {
@@ -286,11 +340,46 @@ impl OmicronDatasets {
         }
     }
 
+    /// Confirm that [`REQUIRED_PER_DISK_DATASETS`] have been ensured on
+    /// `zpool`.
+    pub(super) fn check_required_datasets(
+        &self,
+        zpool: &ZpoolName,
+    ) -> Result<(), RequiredDatasetError> {
+        for kind in REQUIRED_PER_DISK_DATASETS {
+            let name = DatasetName::new(*zpool, kind.into());
+            let Some(dataset) =
+                self.datasets.iter().find(|d| d.config.name == name)
+            else {
+                // The dataset task returns a result for every dataset we ask
+                // it to ensure, so a missing entry means the dataset isn't in
+                // the config, unless we couldn't reach the task at all.
+                return Err(if self.dataset_task_unavailable {
+                    RequiredDatasetError::NoResult { zpool: *zpool, kind }
+                } else {
+                    RequiredDatasetError::NotInConfig { zpool: *zpool, kind }
+                });
+            };
+            match &dataset.state {
+                DatasetState::Ensured => (),
+                DatasetState::FailedToEnsure(err) => {
+                    return Err(RequiredDatasetError::NotEnsured {
+                        zpool: *zpool,
+                        kind,
+                        err: Arc::clone(err),
+                    });
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn has_retryable_error(&self) -> bool {
-        self.datasets.iter().any(|d| match &d.state {
-            DatasetState::Ensured => false,
-            DatasetState::FailedToEnsure(err) => err.is_retryable(),
-        })
+        self.dataset_task_unavailable
+            || self.datasets.iter().any(|d| match &d.state {
+                DatasetState::Ensured => false,
+                DatasetState::FailedToEnsure(err) => err.is_retryable(),
+            })
     }
 
     pub(crate) fn to_inventory(
@@ -353,7 +442,103 @@ enum DatasetState {
 mod tests {
     use super::*;
     use crate::dataset_serialization_task::RekeyResult;
+    use assert_matches::assert_matches;
+    use omicron_test_utils::dev;
+    use omicron_uuid_kinds::ZpoolUuid;
+    use sled_agent_types::disk::SharedDatasetConfig;
     use std::collections::BTreeSet;
+
+    fn dataset_config(zpool: ZpoolName, kind: DatasetKind) -> DatasetConfig {
+        DatasetConfig {
+            id: DatasetUuid::new_v4(),
+            name: DatasetName::new(zpool, kind),
+            inner: SharedDatasetConfig::default(),
+        }
+    }
+
+    #[test]
+    fn check_required_datasets() {
+        let ok = ZpoolName::new_external(ZpoolUuid::new_v4());
+        let failed = ZpoolName::new_external(ZpoolUuid::new_v4());
+        let missing = ZpoolName::new_external(ZpoolUuid::new_v4());
+
+        let datasets = OmicronDatasets::with_datasets(
+            [
+                (dataset_config(ok, DatasetKind::Debug), Ok(())),
+                (dataset_config(ok, DatasetKind::TransientZoneRoot), Ok(())),
+                (dataset_config(failed, DatasetKind::Debug), Ok(())),
+                (
+                    dataset_config(failed, DatasetKind::TransientZoneRoot),
+                    Err(DatasetEnsureError::TestError("failed")),
+                ),
+                // `missing` has no transient zone root in its config.
+                (dataset_config(missing, DatasetKind::Debug), Ok(())),
+            ]
+            .into_iter(),
+        );
+
+        datasets.check_required_datasets(&ok).expect("datasets ensured");
+        assert_matches!(
+            datasets.check_required_datasets(&failed),
+            Err(RequiredDatasetError::NotEnsured {
+                kind: PerDiskDatasetKind::TransientZoneRoot,
+                ..
+            })
+        );
+        assert_matches!(
+            datasets.check_required_datasets(&missing),
+            Err(RequiredDatasetError::NotInConfig {
+                kind: PerDiskDatasetKind::TransientZoneRoot,
+                ..
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn failing_to_reach_dataset_task_is_retryable() {
+        let logctx =
+            dev::test_setup_log("failing_to_reach_dataset_task_is_retryable");
+        let zpool = ZpoolName::new_external(ZpoolUuid::new_v4());
+        let new_zpool = ZpoolName::new_external(ZpoolUuid::new_v4());
+
+        // `with_datasets()` uses a dataset task that we can't reach. Start
+        // with the required datasets ensured, as though from an earlier
+        // attempt.
+        let mut datasets = OmicronDatasets::with_datasets(
+            REQUIRED_PER_DISK_DATASETS
+                .into_iter()
+                .map(|kind| (dataset_config(zpool, kind.into()), Ok(()))),
+        );
+        datasets.check_required_datasets(&zpool).expect("datasets ensured");
+        assert!(!datasets.has_retryable_error());
+
+        datasets
+            .ensure_datasets_if_needed(
+                [
+                    dataset_config(zpool, DatasetKind::Debug),
+                    dataset_config(new_zpool, DatasetKind::Debug),
+                ]
+                .into_iter()
+                .collect(),
+                Arc::default(),
+                &logctx.log,
+            )
+            .await;
+
+        // We still use the earlier results, but we know to retry.
+        datasets.check_required_datasets(&zpool).expect("datasets ensured");
+        assert!(datasets.has_retryable_error());
+
+        // We have no results for `new_zpool`, which is retryable (rather than
+        // looking like the datasets are missing from the config).
+        let err = datasets
+            .check_required_datasets(&new_zpool)
+            .expect_err("no results for new zpool");
+        assert_matches!(err, RequiredDatasetError::NoResult { .. });
+        assert!(err.is_retryable());
+
+        logctx.cleanup_successful();
+    }
 
     #[test]
     fn test_rekey_result_has_failures() {

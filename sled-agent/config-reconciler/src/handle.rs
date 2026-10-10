@@ -90,7 +90,7 @@ struct SpawnTokenCommon {
     time_sync_config: TimeSyncConfig,
     reconciler_result_tx: watch::Sender<ReconcilerResult>,
     currently_managed_zpools_tx: watch::Sender<Arc<CurrentlyManagedZpools>>,
-    external_disks_tx: watch::Sender<HashSet<Disk>>,
+    debug_dataset_disks_tx: watch::Sender<HashSet<Disk>>,
     former_zone_root_archiver: FormerZoneRootArchiver,
     raw_disks_rx: RawDisksReceiver,
     reconciler_task_log: Logger,
@@ -281,11 +281,11 @@ impl ConfigReconcilerHandle {
             );
 
         // Spawn the task that manages dump devices.
-        let (external_disks_tx, external_disks_rx) =
+        let (debug_dataset_disks_tx, debug_dataset_disks_rx) =
             watch::channel(HashSet::new());
         let former_zone_root_archiver = debug_collector::spawn(
             internal_disks_rx.clone(),
-            external_disks_rx,
+            debug_dataset_disks_rx,
             Arc::clone(&mount_config),
             base_log,
         );
@@ -321,7 +321,7 @@ impl ConfigReconcilerHandle {
                     time_sync_config,
                     reconciler_result_tx,
                     currently_managed_zpools_tx,
-                    external_disks_tx,
+                    debug_dataset_disks_tx,
                     former_zone_root_archiver,
                     raw_disks_rx,
                     reconciler_task_log: base_log
@@ -404,7 +404,7 @@ impl ConfigReconcilerHandle {
                     time_sync_config,
                     reconciler_result_tx,
                     currently_managed_zpools_tx,
-                    external_disks_tx,
+                    debug_dataset_disks_tx,
                     former_zone_root_archiver,
                     raw_disks_rx,
                     reconciler_task_log,
@@ -421,7 +421,7 @@ impl ConfigReconcilerHandle {
             reconciler_result_tx,
             currently_managed_zpools_tx,
             self.internal_disks_rx.clone(),
-            external_disks_tx,
+            debug_dataset_disks_tx,
             former_zone_root_archiver,
             raw_disks_rx,
             committed_epoch_rx,
