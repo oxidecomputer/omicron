@@ -142,6 +142,8 @@ opte-ioctl.workspace = true
 
 [dev-dependencies]
 assert_matches.workspace = true
+attest-mock.workspace = true
+dice-verifier.workspace = true
 expectorate.workspace = true
 guppy.workspace = true
 hex-literal.workspace = true
@@ -156,6 +158,7 @@ reqwest = { workspace = true, features = ["blocking"] }
 subprocess.workspace = true
 slog-async.workspace = true
 slog-term.workspace = true
+sprockets-tls-test-utils.workspace = true
 test-strategy.workspace = true
 tokio-stream.workspace = true
 tokio-util.workspace = true
