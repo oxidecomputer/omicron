@@ -36,8 +36,8 @@ pub(crate) async fn build_tuf_repo(
     extra_manifest: Option<Utf8PathBuf>,
     threads: usize,
 ) -> Result<()> {
-    let repo_path = output_dir.join("repo.zip");
-    let sha256_path = output_dir.join("repo.zip.sha256.txt");
+    let repo_path = output_dir.join("repo-v1-deprecated.zip");
+    let sha256_path = output_dir.join("repo-v1-deprecated.zip.sha256.txt");
 
     // We currently go about this somewhat strangely; the old release
     // engineering process produced a Tufaceous manifest, and (the now very many
@@ -124,13 +124,6 @@ pub(crate) async fn build_tuf_repo(
             source: DeserializedArtifactSource::CompositeControlPlane { zones },
         }],
     );
-
-    // Serialize the manifest out.
-    fs::write(
-        output_dir.join("manifest.toml"),
-        toml::to_string_pretty(&manifest)?.into_bytes(),
-    )
-    .await?;
 
     // Convert the manifest.
     let manifest = ArtifactManifest::from_deserialized(&output_dir, manifest)?;
