@@ -15019,6 +15019,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "ciborium",
+ "ciborium-ll",
  "clap",
  "dropshot",
  "futures",
@@ -15034,7 +15036,6 @@ dependencies = [
  "omicron-workspace-hack",
  "oxide-tokio-rt",
  "serde",
- "serde_cbor",
  "sha2 0.10.9",
  "sha3 0.10.8",
  "sled-agent-types",
