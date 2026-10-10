@@ -69,7 +69,7 @@ fn into_external_error(
             ))
         }
 
-        IndefiniteRetryOperationWhileErrorKind::OperationError(e) => match e {
+        IndefiniteRetryOperationWhileErrorKind::OperationError(e) => match *e {
             crucible_agent_client::Error::ErrorResponse(rv) => {
                 if rv.status().is_client_error() {
                     Error::invalid_request(&rv.message)
