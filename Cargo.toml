@@ -796,7 +796,6 @@ rpassword = "7.5.0"
 rstest = "0.25.0"
 rustfmt-wrapper = "0.2"
 rustls = "0.23.40"
-rustls-pemfile = "2.2.0"
 rustyline = "14.0.0"
 rustix = "1.1.2"
 samael = { version = "0.0.22", features = ["xmlsec"] }

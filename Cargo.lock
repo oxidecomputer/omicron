@@ -9392,7 +9392,6 @@ dependencies = [
  "reqwest",
  "rustix 1.1.4",
  "rustls",
- "rustls-pemfile",
  "samael",
  "schemars 0.8.22",
  "scim2-rs",
