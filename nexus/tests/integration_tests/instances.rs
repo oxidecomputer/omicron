@@ -10101,3 +10101,105 @@ async fn can_create_instance_with_multiple_nics_and_ephemeral_ip(
     )
     .await;
 }
+
+#[nexus_test]
+async fn test_instances_shutdown_policy_updates(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let apictx = &cptestctx.server.server_context();
+    let nexus = &apictx.nexus;
+    let datastore = nexus.datastore();
+    let instance_name = "resonance-cascade";
+    let instance_url = get_instance_url(instance_name);
+
+    let propolis_addr = cptestctx
+        .first_sled_agent()
+        .start_local_mock_propolis_server(&cptestctx.logctx.log)
+        .await
+        .unwrap();
+
+    create_project_and_pool(&client).await;
+
+    // Create an instance with no specified shutdown policy.
+    let instance_default =
+        create_instance(client, PROJECT_NAME, instance_name).await;
+
+    assert_eq!(instance_default.identity.name, instance_name);
+    assert_eq!(instance_default.shutdown_policy, None);
+
+    // Poke it to ensure it's running
+    let instance_id =
+        InstanceUuid::from_untyped_uuid(instance_default.identity.id);
+    let instance_next = poll::wait_for_condition(
+        || async {
+            instance_simulate(nexus, &instance_id).await;
+            let instance_next = instance_get(&client, &instance_url).await;
+            if instance_next.runtime.run_state == InstanceState::Running {
+                Ok(instance_next)
+            } else {
+                Err(CondCheckError::<()>::NotYet { status: None })
+            }
+        },
+        &Duration::from_secs(5),
+        &Duration::from_secs(60),
+    )
+    .await
+    .unwrap();
+    identity_eq(&instance_default.identity, &instance_next.identity);
+    assert!(
+        instance_next.runtime.time_run_state_updated
+            > instance_default.runtime.time_run_state_updated
+    );
+
+    // Starting a simulated instance with a mock Propolis server starts the
+    // mock, but it serves on localhost instead of the address that was chosen
+    // by the instance start process. Forcibly update the VMM record to point to
+    // the correct IP.
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+    let (.., db_instance) = LookupPath::new(&opctx, datastore)
+        .instance_id(instance_default.identity.id)
+        .fetch()
+        .await
+        .unwrap();
+    let propolis_id = PropolisUuid::from_untyped_uuid(
+        db_instance
+            .runtime()
+            .propolis_id
+            .expect("running instance should have vmm"),
+    );
+    let updated_vmm = datastore
+        .vmm_overwrite_addr_for_test(&opctx, &propolis_id, propolis_addr)
+        .await
+        .unwrap();
+    assert_eq!(updated_vmm.propolis_ip.ip(), propolis_addr.ip());
+    assert_eq!(updated_vmm.propolis_port.0, propolis_addr.port());
+
+    expect_instance_stop_ok(client, instance_name).await;
+    // TODO give propolis-mock an escape hatch api ep to check what timeout arg was passed.
+    // TODO start instance again, stop with skip_os_shutdown=true param.
+
+    // changes to shutdown policy
+    let base_update = instance::InstanceUpdate {
+        auto_restart_policy: Nullable(None),
+        boot_disk: Nullable(None),
+        cpu_platform: Nullable(None),
+        ncpus: instance_default.ncpus,
+        memory: instance_default.memory,
+        multicast_groups: None,
+        enable_jumbo_frames: instance_default.enable_jumbo_frames,
+        shutdown_policy: None,
+    };
+    let instance_hard = expect_instance_reconfigure_ok(
+        client,
+        &instance_default.identity.id,
+        instance::InstanceUpdate {
+            shutdown_policy: Some(instance::InstanceShutdownPolicy::HardOff),
+            ..base_update.clone()
+        },
+    )
+    .await;
+
+    // TODO start instance, stop again.
+}

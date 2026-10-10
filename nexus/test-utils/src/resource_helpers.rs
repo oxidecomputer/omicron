@@ -900,7 +900,7 @@ pub async fn create_instance(
         // Multicast groups=
         Vec::<multicast::MulticastGroupJoinSpec>::new(),
         // Shutdown policy=
-        None,
+        Some(instance::InstanceShutdownPolicy::HardOff),
     )
     .await
 }
