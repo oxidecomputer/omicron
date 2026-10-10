@@ -2283,7 +2283,7 @@
         ]
       },
       "PowerState": {
-        "description": "See RFD 81.\n\nThis enum only lists power states the SP is able to control; higher power states are controlled by ignition.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"See RFD 81.\\n\\nThis enum only lists power states the SP is able to control; higher power states are controlled by ignition.\", \"type\": \"string\", \"enum\": [ \"A0\", \"A1\", \"A2\" ] } ``` </details>",
+        "description": "See RFD 81.\n\nThis enum only lists power states the SP is able to control; higher power states are controlled by ignition.",
         "type": "string",
         "enum": [
           "A0",
@@ -3968,7 +3968,7 @@
         ]
       },
       "SpComponentCaboose": {
-        "description": "`SpComponentCaboose`\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"board\", \"git_commit\", \"name\", \"version\" ], \"properties\": { \"board\": { \"type\": \"string\" }, \"epoch\": { \"type\": [ \"string\", \"null\" ] }, \"git_commit\": { \"type\": \"string\" }, \"name\": { \"type\": \"string\" }, \"sign\": { \"type\": [ \"string\", \"null\" ] }, \"version\": { \"type\": \"string\" } } } ``` </details>",
+        "description": "`SpComponentCaboose`",
         "type": "object",
         "properties": {
           "board": {
@@ -4000,7 +4000,7 @@
         ]
       },
       "SpComponentInfo": {
-        "description": "Overview of a single SP component.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Overview of a single SP component.\", \"type\": \"object\", \"required\": [ \"capabilities\", \"component\", \"description\", \"device\", \"presence\" ], \"properties\": { \"capabilities\": { \"description\": \"`capabilities` is a bitmask; interpret it via [`gateway_messages::DeviceCapabilities`].\", \"type\": \"integer\", \"format\": \"uint32\", \"minimum\": 0.0 }, \"component\": { \"description\": \"The unique identifier for this component.\", \"type\": \"string\" }, \"description\": { \"description\": \"A human-readable description of the component.\", \"type\": \"string\" }, \"device\": { \"description\": \"The name of the physical device.\", \"type\": \"string\" }, \"presence\": { \"description\": \"Whether or not the component is present, to the best of the SP's ability to judge.\", \"allOf\": [ { \"$ref\": \"#/components/schemas/SpComponentPresence\" } ] }, \"serial_number\": { \"description\": \"The component's serial number, if it has one.\", \"type\": [ \"string\", \"null\" ] } } } ``` </details>",
+        "description": "Overview of a single SP component.",
         "type": "object",
         "properties": {
           "capabilities": {
@@ -4044,7 +4044,7 @@
         ]
       },
       "SpComponentPresence": {
-        "description": "Description of the presence or absence of a component.\n\nThe presence of some components may vary based on the power state of the sled (e.g., components that time out or appear unavailable if the sled is in A2 may become present when the sled moves to A0).\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Description of the presence or absence of a component.\\n\\nThe presence of some components may vary based on the power state of the sled (e.g., components that time out or appear unavailable if the sled is in A2 may become present when the sled moves to A0).\", \"oneOf\": [ { \"description\": \"The component is present.\", \"type\": \"string\", \"enum\": [ \"present\" ] }, { \"description\": \"The component is not present.\", \"type\": \"string\", \"enum\": [ \"not_present\" ] }, { \"description\": \"The component is present but in a failed or faulty state.\", \"type\": \"string\", \"enum\": [ \"failed\" ] }, { \"description\": \"The SP is unable to determine the presence of the component.\", \"type\": \"string\", \"enum\": [ \"unavailable\" ] }, { \"description\": \"The SP's attempt to determine the presence of the component timed out.\", \"type\": \"string\", \"enum\": [ \"timeout\" ] }, { \"description\": \"The SP's attempt to determine the presence of the component failed.\", \"type\": \"string\", \"enum\": [ \"error\" ] } ] } ``` </details>",
+        "description": "Description of the presence or absence of a component.\n\nThe presence of some components may vary based on the power state of the sled (e.g., components that time out or appear unavailable if the sled is in A2 may become present when the sled moves to A0).",
         "oneOf": [
           {
             "description": "The component is present.",
@@ -7776,7 +7776,7 @@
         ]
       },
       "IgnitionCommand": {
-        "description": "Ignition command.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Ignition command.\", \"type\": \"string\", \"enum\": [ \"power_on\", \"power_off\", \"power_reset\" ] } ``` </details>",
+        "description": "Ignition command.",
         "type": "string",
         "enum": [
           "power_on",
