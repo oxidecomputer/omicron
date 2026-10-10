@@ -124,7 +124,7 @@ to:   blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
     oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_internal_dns_99e2f30b-3174-40bf-a78a-90da8abba8ca      b46de15d-33e7-4cd0-aa7c-e7be2a61e71b   in service    none      none          off        
     oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_nexus_466a9f29-62bf-4e63-924a-b9efdb86afec             3b66453b-7148-4c1b-84a9-499e43290ab4   in service    none      none          off        
     oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_ntp_62620961-fc4a-481e-968b-f5acbac0dc63               318fae85-abcb-4259-b1b6-ac96d193f7b7   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/debug                                                           93957ca0-9ed1-4e7b-8c34-2ce07a69541c   in service    100 GiB   none          gzip-9     
+    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/debug                                                           93957ca0-9ed1-4e7b-8c34-2ce07a69541c   in service    100 GiB   none          lz4        
     oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/local_storage                                                   2db6b7c1-0f46-4ced-a3ad-48872793360e   in service    none      none          off        
     oxp_72c59873-31ff-4e36-8d76-ff834009349a/local_storage_unencrypted                                             775f9207-c42d-4af2-9186-27ffef67735e   in service    none      none          off        
 
@@ -190,7 +190,7 @@ to:   blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
     oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/zone/oxz_internal_dns_427ec88f-f467-42fa-9bbb-66a91a36103c      3ac089c9-9dec-465b-863a-188e80d71fb4   in service    none      none          off        
     oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/zone/oxz_nexus_0c71b3b2-6ceb-4e8f-b020-b08675e83038             4f60b534-eaa3-40a1-b60f-bfdf147af478   in service    none      none          off        
     oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/zone/oxz_ntp_6444f8a5-6465-4f0b-a549-1993c113569c               686c19cf-a0d7-45f6-866f-c564612b2664   in service    none      none          off        
-    oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/debug                                                           248c6c10-1ac6-45de-bb55-ede36ca56bbd   in service    100 GiB   none          gzip-9     
+    oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/debug                                                           248c6c10-1ac6-45de-bb55-ede36ca56bbd   in service    100 GiB   none          lz4        
     oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/local_storage                                                   cdf3684f-a6cf-4449-b9ec-e696b2c663e2   in service    none      none          off        
     oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/local_storage_unencrypted                                             793ac181-1b01-403c-850d-7f5c54bda6c9   in service    none      none          off        
 
@@ -254,7 +254,7 @@ to:   blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
     oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/crypt/zone/oxz_internal_dns_ea5b4030-b52f-44b2-8d70-45f15f987d01      c65a9c1c-36dc-4ddb-8aac-ec3be8dbb209   in service    none      none          off        
     oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/crypt/zone/oxz_nexus_3eeb8d49-eb1a-43f8-bb64-c2338421c2c6             252ac39f-b9e2-4697-8c07-3a833115d704   in service    none      none          off        
     oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/crypt/zone/oxz_ntp_f10a4fb9-759f-4a65-b25e-5794ad2d07d8               21fd4f3a-ec31-469b-87b1-087c343a2422   in service    none      none          off        
-    oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/crypt/debug                                                           7a6a2058-ea78-49de-9730-cce5e28b4cfb   in service    100 GiB   none          gzip-9     
+    oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/crypt/debug                                                           7a6a2058-ea78-49de-9730-cce5e28b4cfb   in service    100 GiB   none          lz4        
     oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/crypt/local_storage                                                   41071985-1dfd-4ce5-8bc2-897161a8bce4   in service    none      none          off        
     oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/local_storage_unencrypted                                             e009d8b8-4695-4322-b53f-f03f2744aef7   in service    none      none          off        
 
@@ -440,7 +440,7 @@ parent:    58d5e830-0884-47d8-a7cd-b2b3751adeb4
     oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_internal_dns_99e2f30b-3174-40bf-a78a-90da8abba8ca      b46de15d-33e7-4cd0-aa7c-e7be2a61e71b   in service    none      none          off        
     oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_nexus_466a9f29-62bf-4e63-924a-b9efdb86afec             3b66453b-7148-4c1b-84a9-499e43290ab4   in service    none      none          off        
     oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_ntp_62620961-fc4a-481e-968b-f5acbac0dc63               318fae85-abcb-4259-b1b6-ac96d193f7b7   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/debug                                                           93957ca0-9ed1-4e7b-8c34-2ce07a69541c   in service    100 GiB   none          gzip-9     
+    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/debug                                                           93957ca0-9ed1-4e7b-8c34-2ce07a69541c   in service    100 GiB   none          lz4        
     oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/local_storage                                                   2db6b7c1-0f46-4ced-a3ad-48872793360e   in service    none      none          off        
     oxp_72c59873-31ff-4e36-8d76-ff834009349a/local_storage_unencrypted                                             775f9207-c42d-4af2-9186-27ffef67735e   in service    none      none          off        
 
@@ -503,7 +503,7 @@ parent:    58d5e830-0884-47d8-a7cd-b2b3751adeb4
     oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/zone/oxz_internal_dns_427ec88f-f467-42fa-9bbb-66a91a36103c      3ac089c9-9dec-465b-863a-188e80d71fb4   in service    none      none          off        
     oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/zone/oxz_nexus_0c71b3b2-6ceb-4e8f-b020-b08675e83038             4f60b534-eaa3-40a1-b60f-bfdf147af478   in service    none      none          off        
     oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/zone/oxz_ntp_6444f8a5-6465-4f0b-a549-1993c113569c               686c19cf-a0d7-45f6-866f-c564612b2664   in service    none      none          off        
-    oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/debug                                                           248c6c10-1ac6-45de-bb55-ede36ca56bbd   in service    100 GiB   none          gzip-9     
+    oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/debug                                                           248c6c10-1ac6-45de-bb55-ede36ca56bbd   in service    100 GiB   none          lz4        
     oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/local_storage                                                   cdf3684f-a6cf-4449-b9ec-e696b2c663e2   in service    none      none          off        
     oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/local_storage_unencrypted                                             793ac181-1b01-403c-850d-7f5c54bda6c9   in service    none      none          off        
 
@@ -565,7 +565,7 @@ parent:    58d5e830-0884-47d8-a7cd-b2b3751adeb4
     oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/crypt/zone/oxz_internal_dns_ea5b4030-b52f-44b2-8d70-45f15f987d01      c65a9c1c-36dc-4ddb-8aac-ec3be8dbb209   in service    none      none          off        
     oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/crypt/zone/oxz_nexus_3eeb8d49-eb1a-43f8-bb64-c2338421c2c6             252ac39f-b9e2-4697-8c07-3a833115d704   in service    none      none          off        
     oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/crypt/zone/oxz_ntp_f10a4fb9-759f-4a65-b25e-5794ad2d07d8               21fd4f3a-ec31-469b-87b1-087c343a2422   in service    none      none          off        
-    oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/crypt/debug                                                           7a6a2058-ea78-49de-9730-cce5e28b4cfb   in service    100 GiB   none          gzip-9     
+    oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/crypt/debug                                                           7a6a2058-ea78-49de-9730-cce5e28b4cfb   in service    100 GiB   none          lz4        
     oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/crypt/local_storage                                                   41071985-1dfd-4ce5-8bc2-897161a8bce4   in service    none      none          off        
     oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/local_storage_unencrypted                                             e009d8b8-4695-4322-b53f-f03f2744aef7   in service    none      none          off        
 
