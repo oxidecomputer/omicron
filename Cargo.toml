@@ -453,7 +453,9 @@ attest-mock = { git = "https://github.com/oxidecomputer/dice-util", rev = "4a39e
 atomicwrites = "0.4.4"
 authz-macros = { path = "nexus/authz-macros" }
 backoff = { version = "0.4.0", features = [ "tokio" ] }
-backon = { version = "1.6", default-features = false }
+# Without "std", backon would seed jitter with a fixed constant, so concurrent
+# retries across machines could continue to result in thundering herd problems.
+backon = { version = "1.6", default-features = false, features = ["std"] }
 base64 = "0.22.1"
 bcs = "0.1.6"
 bincode = "1.3.3"
@@ -1184,4 +1186,3 @@ path = "workspace-hack"
 omicron-common = { path = "common" }
 omicron-generation-kinds = { path = "generation-kinds" }
 omicron-uuid-kinds = { path = "uuid-kinds" }
-

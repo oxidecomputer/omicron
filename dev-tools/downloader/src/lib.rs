@@ -8,6 +8,7 @@
 //! parts of `cargo xtask` do not.
 
 use anyhow::{Context, Result, bail};
+use backon::{BackoffBuilder, ExponentialBuilder};
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::Parser;
 use clap::ValueEnum;
@@ -32,7 +33,10 @@ const BUILDOMAT_URL: &'static str =
 const CARGO_HACK_URL: &'static str =
     "https://github.com/taiki-e/cargo-hack/releases/download";
 
-const RETRY_ATTEMPTS: usize = 3;
+// The budget here is somewhere between 61s and 122s of total backoff.
+const DOWNLOAD_RETRIES: usize = 6;
+const DOWNLOAD_RETRY_MIN_DELAY: Duration = Duration::from_secs(1);
+const DOWNLOAD_RETRY_MAX_DELAY: Duration = Duration::from_secs(30);
 
 /// What is being downloaded?
 #[derive(
@@ -371,26 +375,160 @@ async fn get_values_from_file<const N: usize>(
     Ok(values)
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Retryability {
+    Transient,
+    Permanent,
+}
+
+#[derive(Debug, thiserror::Error)]
+enum DownloadError {
+    #[error(transparent)]
+    Http(reqwest::Error),
+    #[error("server responded with HTTP {status} for url ({url})")]
+    Status { status: reqwest::StatusCode, url: String },
+    #[error("failed to write downloaded data to {path}")]
+    Io {
+        path: Utf8PathBuf,
+        #[source]
+        error: std::io::Error,
+    },
+}
+
+impl DownloadError {
+    fn retryability(&self) -> Retryability {
+        match self {
+            DownloadError::Http(error) => {
+                if error.is_builder() || error.is_redirect() {
+                    // A malformed URL or a redirect loop will not fix itself.
+                    Retryability::Permanent
+                } else {
+                    Retryability::Transient
+                }
+            }
+            DownloadError::Status { status, url: _ } => {
+                status_retryability(*status)
+            }
+            DownloadError::Io { path: _, error: _ } => Retryability::Permanent,
+        }
+    }
+}
+
+/// Determines whether to retry a request based on the HTTP status code.
+///
+/// Note that unlike progenitor-client's is_retryable (which only retries 429,
+/// 502, 503, and 504), here, all 5xx are retried. This is all right because:
+///
+/// * Downloads are idempotent.
+/// * Buildomat reports its transient failures as 500.
+fn status_retryability(status: reqwest::StatusCode) -> Retryability {
+    if status.is_server_error()
+        || status == reqwest::StatusCode::REQUEST_TIMEOUT
+        || status == reqwest::StatusCode::TOO_MANY_REQUESTS
+    {
+        Retryability::Transient
+    } else {
+        Retryability::Permanent
+    }
+}
+
+fn download_retry_policy() -> ExponentialBuilder {
+    ExponentialBuilder::new()
+        .with_factor(2.0)
+        .with_min_delay(DOWNLOAD_RETRY_MIN_DELAY)
+        .with_max_delay(DOWNLOAD_RETRY_MAX_DELAY)
+        .with_max_times(DOWNLOAD_RETRIES)
+        .with_jitter()
+}
+
+/// Download a file to a path with retries.
+///
+/// Modeled after `progenitor_extras::retry::retry_operation`.
+async fn download_with_retries<F, Fut>(
+    log: &Logger,
+    path: &Utf8Path,
+    mut download: F,
+) -> Result<()>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<(), DownloadError>>,
+{
+    let mut delays = download_retry_policy().build();
+    let mut attempt: usize = 1;
+
+    loop {
+        info!(log, "Downloading {path} (attempt {attempt})");
+        let error = match download().await {
+            Ok(()) => return Ok(()),
+            Err(error) => error,
+        };
+
+        let retryability = error.retryability();
+        let error = anyhow::Error::new(error);
+        let delay = match retryability {
+            Retryability::Permanent => {
+                return Err(error.context(format!(
+                    "download of {path} failed on attempt {attempt} with an \
+                     error that retrying will not fix"
+                )));
+            }
+            Retryability::Transient => match delays.next() {
+                Some(delay) => delay,
+                None => {
+                    return Err(error.context(format!(
+                        "download of {path} still failing after {attempt} \
+                         attempts"
+                    )));
+                }
+            },
+        };
+
+        warn!(
+            log,
+            "Download failed, retrying in {:.1}s: {error:#}",
+            delay.as_secs_f64(),
+        );
+        tokio::time::sleep(delay).await;
+        attempt += 1;
+    }
+}
+
 /// Send a GET request to `url`, downloading the contents to `path`.
 ///
 /// Writes the response to the file as it is received.
-async fn streaming_download(url: &str, path: &Utf8Path) -> Result<()> {
+async fn streaming_download(
+    url: &str,
+    path: &Utf8Path,
+) -> Result<(), DownloadError> {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 
     let client = CLIENT.get_or_init(|| {
         reqwest::ClientBuilder::new()
             .timeout(Duration::from_secs(3600))
+            // If a download stream is stalled, fail after 60s of no data rather
+            // than waiting for the default 3600s timeout.
+            .read_timeout(Duration::from_secs(60))
             .tcp_keepalive(Duration::from_secs(60))
             .connect_timeout(Duration::from_secs(15))
             .build()
             .unwrap()
     });
-    let mut response = client.get(url).send().await?.error_for_status()?;
-    let mut tarball = tokio::fs::File::create(&path).await?;
-    while let Some(chunk) = response.chunk().await? {
-        tarball.write_all(chunk.as_ref()).await?;
+    let io_error = |error| DownloadError::Io { path: path.to_owned(), error };
+
+    let mut response =
+        client.get(url).send().await.map_err(DownloadError::Http)?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(DownloadError::Status { status, url: url.to_owned() });
     }
-    tarball.flush().await?;
+
+    let mut tarball = tokio::fs::File::create(&path).await.map_err(io_error)?;
+    while let Some(chunk) =
+        response.chunk().await.map_err(DownloadError::Http)?
+    {
+        tarball.write_all(chunk.as_ref()).await.map_err(io_error)?;
+    }
+    tarball.flush().await.map_err(io_error)?;
     Ok(())
 }
 
@@ -532,22 +670,8 @@ async fn download_file_and_verify(
     };
 
     if do_download {
-        for attempt in 1..=RETRY_ATTEMPTS {
-            info!(
-                log,
-                "Downloading {path} (attempt {attempt}/{RETRY_ATTEMPTS})"
-            );
-            match streaming_download(&url, &path).await {
-                Ok(()) => break,
-                Err(err) => {
-                    if attempt == RETRY_ATTEMPTS {
-                        return Err(err);
-                    } else {
-                        warn!(log, "Download failed, retrying: {err}");
-                    }
-                }
-            }
-        }
+        download_with_retries(log, path, || streaming_download(url, path))
+            .await?;
     }
 
     let observed_checksum = algorithm.checksum(&path).await?;
@@ -1111,5 +1235,180 @@ impl Downloader<'_> {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reqwest::StatusCode;
+
+    const BASE_DELAYS_SECS: [u64; DOWNLOAD_RETRIES] = [1, 2, 4, 8, 16, 30];
+
+    fn test_logger() -> Logger {
+        Logger::root(slog::Discard, o!())
+    }
+
+    fn status_error(status: StatusCode) -> DownloadError {
+        DownloadError::Status {
+            status,
+            url: "https://buildomat.invalid/public/file/a.tar.gz".to_owned(),
+        }
+    }
+
+    fn assert_elapsed_within_jitter(
+        elapsed: Duration,
+        base_delays_secs: &[u64],
+    ) {
+        let base = Duration::from_secs(base_delays_secs.iter().sum());
+        // The upper bound is inclusive because tokio rounds each sleep deadline
+        // up to the next millisecond.
+        assert!(
+            elapsed >= base && elapsed <= base * 2,
+            "elapsed {elapsed:?} should be within [{base:?}, {:?}]",
+            base * 2,
+        );
+    }
+
+    #[test]
+    fn status_retryability_classification() {
+        for status in [
+            StatusCode::REQUEST_TIMEOUT,
+            StatusCode::TOO_MANY_REQUESTS,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            StatusCode::BAD_GATEWAY,
+            StatusCode::SERVICE_UNAVAILABLE,
+            StatusCode::GATEWAY_TIMEOUT,
+        ] {
+            assert_eq!(
+                status_retryability(status),
+                Retryability::Transient,
+                "{status} should be retried",
+            );
+        }
+
+        for status in [
+            StatusCode::NOT_MODIFIED,
+            StatusCode::BAD_REQUEST,
+            StatusCode::UNAUTHORIZED,
+            StatusCode::FORBIDDEN,
+            StatusCode::NOT_FOUND,
+            StatusCode::GONE,
+        ] {
+            assert_eq!(
+                status_retryability(status),
+                Retryability::Permanent,
+                "{status} should not be retried",
+            );
+        }
+    }
+
+    #[test]
+    fn local_io_error_is_permanent() {
+        let error = DownloadError::Io {
+            path: Utf8PathBuf::from("out/downloads/a.tar.gz"),
+            error: std::io::Error::from(std::io::ErrorKind::StorageFull),
+        };
+        assert_eq!(error.retryability(), Retryability::Permanent);
+    }
+
+    #[test]
+    fn malformed_url_is_permanent() {
+        let error = reqwest::Client::new()
+            .get("not a url")
+            .build()
+            .expect_err("malformed URL is rejected");
+        assert_eq!(
+            DownloadError::Http(error).retryability(),
+            Retryability::Permanent,
+        );
+    }
+
+    struct DownloadOutcome {
+        result: Result<()>,
+        calls: usize,
+        elapsed: Duration,
+    }
+
+    async fn run_download(
+        mut result_for_call: impl FnMut(usize) -> Result<(), DownloadError>,
+    ) -> DownloadOutcome {
+        let start = tokio::time::Instant::now();
+        let mut calls = 0;
+
+        let result = download_with_retries(
+            &test_logger(),
+            Utf8Path::new("a.tar.gz"),
+            || {
+                calls += 1;
+                let result = result_for_call(calls);
+                async move { result }
+            },
+        )
+        .await;
+
+        DownloadOutcome { result, calls, elapsed: start.elapsed() }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn success_on_first_attempt_does_not_wait() {
+        let outcome = run_download(|_call| Ok(())).await;
+
+        outcome.result.expect("download succeeded");
+        assert_eq!(outcome.calls, 1);
+        assert_eq!(outcome.elapsed, Duration::ZERO);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn transient_errors_are_retried_with_backoff() {
+        let outcome = run_download(|call| {
+            if call <= 2 {
+                Err(status_error(StatusCode::INTERNAL_SERVER_ERROR))
+            } else {
+                Ok(())
+            }
+        })
+        .await;
+
+        outcome.result.expect("download succeeded after retries");
+        assert_eq!(outcome.calls, 3);
+        assert_elapsed_within_jitter(outcome.elapsed, &BASE_DELAYS_SECS[..2]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn permanent_error_fails_without_retrying() {
+        let outcome =
+            run_download(|_call| Err(status_error(StatusCode::NOT_FOUND)))
+                .await;
+
+        let error = outcome.result.expect_err("404 is not retried");
+        assert_eq!(outcome.calls, 1);
+        assert_eq!(outcome.elapsed, Duration::ZERO);
+        let message = format!("{error:#}");
+        assert!(
+            message.contains("failed on attempt 1")
+                && message.contains("404 Not Found"),
+            "unexpected error message: {message}",
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn persistent_transient_error_exhausts_retries() {
+        let outcome = run_download(|_call| {
+            Err(status_error(StatusCode::SERVICE_UNAVAILABLE))
+        })
+        .await;
+
+        let attempts = DOWNLOAD_RETRIES + 1;
+        let error = outcome.result.expect_err("retries are exhausted");
+        assert_eq!(outcome.calls, attempts);
+        assert_elapsed_within_jitter(outcome.elapsed, &BASE_DELAYS_SECS);
+        let message = format!("{error:#}");
+        assert!(
+            message
+                .contains(&format!("still failing after {attempts} attempts"))
+                && message.contains("503 Service Unavailable"),
+            "unexpected error message: {message}",
+        );
     }
 }
