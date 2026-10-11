@@ -666,7 +666,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=9da09f63ba10c232bd1e3dc2327195de3a081df1#9da09f63ba10c232bd1e3dc2327195de3a081df1"
+source = "git+https://github.com/oxidecomputer/propolis?rev=65886117ca3b32994b7a77f1436d55b716a1d5f8#65886117ca3b32994b7a77f1436d55b716a1d5f8"
 dependencies = [
  "bhyve_api_sys",
  "libc",
@@ -676,7 +676,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=9da09f63ba10c232bd1e3dc2327195de3a081df1#9da09f63ba10c232bd1e3dc2327195de3a081df1"
+source = "git+https://github.com/oxidecomputer/propolis?rev=65886117ca3b32994b7a77f1436d55b716a1d5f8#65886117ca3b32994b7a77f1436d55b716a1d5f8"
 dependencies = [
  "libc",
  "strum 0.26.3",
