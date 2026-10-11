@@ -146,6 +146,7 @@ string_cache = { version = "0.8.9" }
 strum-2f80eeee3b1b6c7e = { package = "strum", version = "0.26.3", features = ["derive"] }
 strum-754bda37e0fb3874 = { package = "strum", version = "0.27.2", features = ["derive"] }
 subtle = { version = "2.6.1", features = ["const-generics"] }
+syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3.0.3", features = ["extra-traits", "full", "visit"] }
 syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.117", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
 textwrap = { version = "0.16.2", features = ["terminal_size"] }
 time = { version = "0.3.47", features = ["formatting", "local-offset", "macros", "parsing"] }
@@ -305,7 +306,7 @@ string_cache = { version = "0.8.9" }
 strum-2f80eeee3b1b6c7e = { package = "strum", version = "0.26.3", features = ["derive"] }
 strum-754bda37e0fb3874 = { package = "strum", version = "0.27.2", features = ["derive"] }
 subtle = { version = "2.6.1", features = ["const-generics"] }
-syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3.0.3", features = ["full", "visit"] }
+syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3.0.3", features = ["extra-traits", "full", "visit"] }
 syn-dff4ba8e3ae991db = { package = "syn", version = "1.0.109", features = ["extra-traits", "full"] }
 syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.117", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
 textwrap = { version = "0.16.2", features = ["terminal_size"] }
