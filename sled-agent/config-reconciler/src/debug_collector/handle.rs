@@ -11,6 +11,7 @@ use super::worker::DebugCollectorWorker;
 use super::worker::DebugZpool;
 use super::worker::DumpSlicePath;
 use camino::Utf8Path;
+use omicron_common::zpool_name::ZpoolName;
 use sled_agent_types::disk::DiskVariant;
 use sled_agent_types::inventory::ZpoolHealth;
 use sled_storage::config::MountConfig;
@@ -51,22 +52,23 @@ impl DebugCollector {
         Self { tx, mount_config, _poller, log }
     }
 
-    /// Given the set of all managed disks, updates the dump device location
-    /// for logs and dumps.
+    /// Given the set of internal disks and the U.2 zpools whose debug datasets
+    /// have been ensured, updates the dump device location for logs and dumps.
     ///
     /// This function returns only once this request has been handled, which
     /// can be used as a signal by callers that any "old disks" are no longer
     /// being used by [DebugCollector].
     pub async fn update_dumpdev_setup(
         &self,
-        disks: impl Iterator<Item = &Disk>,
+        internal_disks: impl Iterator<Item = &Disk>,
+        u2_debug_zpools: impl Iterator<Item = &ZpoolName>,
     ) {
         let log = &self.log;
         let mut m2_dump_slices = Vec::new();
         let mut u2_debug_datasets = Vec::new();
         let mut m2_core_datasets = Vec::new();
         let mount_config = self.mount_config.clone();
-        for disk in disks {
+        for disk in internal_disks {
             match disk.variant() {
                 DiskVariant::M2 => {
                     match disk.dump_device_devfs_path(false) {
@@ -101,24 +103,31 @@ impl DebugCollector {
                     }
                 }
                 DiskVariant::U2 => {
-                    let name = disk.zpool_name();
-                    if let Ok(info) =
-                        illumos_utils::zpool::Zpool::get_info(&name.to_string())
-                            .await
-                    {
-                        if info.health() == ZpoolHealth::Online {
-                            u2_debug_datasets.push(DebugZpool {
-                                mount_config: mount_config.clone(),
-                                name: *name,
-                            });
-                        } else {
-                            warn!(
-                                log,
-                                "Zpool {name:?} not online, won't attempt to \
-                                 save kernel core dumps there"
-                            );
-                        }
-                    }
+                    // External disks' debug datasets are supplied separately
+                    // via `u2_debug_zpools`.
+                    warn!(
+                        log,
+                        "Ignoring unexpected U.2 in internal disks";
+                        "zpool" => %disk.zpool_name(),
+                    );
+                }
+            }
+        }
+        for name in u2_debug_zpools {
+            if let Ok(info) =
+                illumos_utils::zpool::Zpool::get_info(&name.to_string()).await
+            {
+                if info.health() == ZpoolHealth::Online {
+                    u2_debug_datasets.push(DebugZpool {
+                        mount_config: mount_config.clone(),
+                        name: *name,
+                    });
+                } else {
+                    warn!(
+                        log,
+                        "Zpool {name:?} not online, won't attempt to \
+                         save kernel core dumps there"
+                    );
                 }
             }
         }

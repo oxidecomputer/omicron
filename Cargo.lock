@@ -14461,6 +14461,7 @@ dependencies = [
  "slog",
  "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "static_assertions",
+ "strum 0.27.2",
  "thiserror 2.0.18",
  "tokio",
  "toml 0.8.23",
@@ -14582,6 +14583,7 @@ dependencies = [
  "sled-hardware-types",
  "slog",
  "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
+ "strum 0.27.2",
  "swrite",
  "test-strategy",
  "thiserror 2.0.18",
@@ -18814,6 +18816,7 @@ dependencies = [
  "sled-storage",
  "slog",
  "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
+ "strum 0.27.2",
  "tokio",
 ]
 

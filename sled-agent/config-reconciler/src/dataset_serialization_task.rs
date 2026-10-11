@@ -12,6 +12,7 @@
 
 use crate::CurrentlyManagedZpools;
 use crate::InventoryError;
+use crate::debug_collector::FormerZoneRootArchiver;
 use camino::Utf8PathBuf;
 use debug_ignore::DebugIgnore;
 use futures::StreamExt;
@@ -46,6 +47,7 @@ use sled_storage::nested_dataset::NestedDatasetConfig;
 use sled_storage::nested_dataset::NestedDatasetListOptions;
 use sled_storage::nested_dataset::NestedDatasetLocation;
 use slog::Logger;
+use slog::debug;
 use slog::info;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
@@ -57,6 +59,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::oneshot;
+use tokio::sync::watch;
 
 #[derive(Debug, thiserror::Error)]
 pub enum DatasetTaskError {
@@ -83,6 +86,12 @@ pub enum DatasetEnsureError {
          (expected {expected}, got {got})"
     )]
     UuidMismatch { name: String, expected: DatasetUuid, got: DatasetUuid },
+    #[error("failed to clean up former zone roots on zpool {zpool}")]
+    FormerZoneRootCleanup {
+        zpool: ZpoolName,
+        #[source]
+        err: FormerZoneRootCleanupError,
+    },
     #[error("failed to ensure dataset")]
     EnsureFailed {
         name: String,
@@ -104,6 +113,7 @@ impl DatasetEnsureError {
             // that's better than failing to retry something we should have
             // retried.
             DatasetEnsureError::ZpoolNotFound(_)
+            | DatasetEnsureError::FormerZoneRootCleanup { .. }
             | DatasetEnsureError::EnsureFailed { .. } => true,
 
             // Errors that we know aren't retryable: recovering from these
@@ -120,6 +130,21 @@ impl DatasetEnsureError {
             DatasetEnsureError::TestError(_) => false,
         }
     }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum FormerZoneRootCleanupError {
+    #[error(
+        "no debug dataset has been ensured, so former zone roots \
+         cannot be archived"
+    )]
+    NoDebugDataset,
+    #[error("failed to list former zone roots")]
+    List(#[source] anyhow::Error),
+    #[error("failed to mount former zone root")]
+    Mount(#[source] NestedDatasetMountError),
+    #[error("failed to destroy former zone root")]
+    Destroy(#[source] DestroyDatasetError),
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -236,15 +261,32 @@ impl DatasetTaskHandle {
         Self(tx)
     }
 
+    /// Spawn the dataset task.
+    ///
+    /// The first time this task ensures each zpool's transient zone root, it
+    /// archives (via `archiver`) and destroys any former zone roots on that
+    /// zpool. Before doing so, it publishes the set of zpools whose debug
+    /// datasets have been ensured on `debug_dataset_zpools_tx`; that's where
+    /// the archived files go.
     pub fn spawn_dataset_task(
         mount_config: Arc<MountConfig>,
+        archiver: FormerZoneRootArchiver,
+        debug_dataset_zpools_tx: watch::Sender<BTreeSet<ZpoolName>>,
         base_log: &Logger,
     ) -> Self {
-        Self::spawn_with_zfs_impl(mount_config, base_log, RealZfs)
+        Self::spawn_with_zfs_impl(
+            mount_config,
+            archiver,
+            debug_dataset_zpools_tx,
+            base_log,
+            RealZfs,
+        )
     }
 
     fn spawn_with_zfs_impl<T: ZfsImpl>(
         mount_config: Arc<MountConfig>,
+        archiver: FormerZoneRootArchiver,
+        debug_dataset_zpools_tx: watch::Sender<BTreeSet<ZpoolName>>,
         base_log: &Logger,
         zfs: T,
     ) -> Self {
@@ -264,6 +306,9 @@ impl DatasetTaskHandle {
                 mount_config,
                 request_rx,
                 ensured_datasets: BTreeSet::new(),
+                archiver,
+                debug_dataset_zpools_tx,
+                zone_roots_cleaned_up: BTreeSet::new(),
                 log: base_log.new(slog::o!("component" => "DatasetTask")),
             }
             .run(zfs),
@@ -418,6 +463,18 @@ struct DatasetTask {
     mount_config: Arc<MountConfig>,
     request_rx: mpsc::Receiver<DatasetTaskRequest>,
     ensured_datasets: BTreeSet<DatasetName>,
+    // Used to archive former zone roots before destroying them.
+    archiver: FormerZoneRootArchiver,
+    // Zpools whose debug datasets were ensured by the most recent
+    // `datasets_ensure()`; consumed by `DebugCollectorTask`.
+    debug_dataset_zpools_tx: watch::Sender<BTreeSet<ZpoolName>>,
+    // Zpools whose former zone roots have been archived and destroyed since
+    // this sled-agent process started.
+    //
+    // A zpool stays in this set even if it's physically absent. It's only
+    // removed once our config has no datasets on it at all (e.g., its disk was
+    // expunged); see `prune_zone_roots_cleaned_up()`.
+    zone_roots_cleaned_up: BTreeSet<ZpoolName>,
     log: Logger,
 }
 
@@ -671,25 +728,33 @@ impl DatasetTask {
         //    one we manage explicitly (it's ensured and mounted implicitly when
         //    we start managing its zpool).
         //
+        // Additionally, the first time we ensure each `TransientZoneRoot`, we
+        // archive and destroy any former zone roots within it, which requires
+        // a debug dataset to archive into.
+        //
         // We make a pass over the datasets here and form a few buckets:
         //
         // 1. Collect all the `TransientZone`s configs, keyed by zpool
-        // 2. Collect all the other configs in a `Vec`, but keep a map of
+        // 2. Collect all the `TransientZoneRoot` configs, and keep a map of
         //    zpool-to-`TransientZoneRoot` IDs
+        // 3. Collect all the other configs (including `Debug`) in a `Vec`
         //
-        // We can ensure all the datasets in group 2 concurrently. After that
-        // group is done, we can ensure all the datasets in group 1 concurrently
-        // (but must filter out any whose parent `TransientZoneRoot` failed to
-        // mount).
+        // We ensure each group concurrently, in the order 3, 2, 1. A
+        // `TransientZoneRoot` is only reported as ensured once its former zone
+        // roots have been cleaned up, and we filter out any `TransientZone`s
+        // whose parent `TransientZoneRoot` failed.
         let mut transient_zone_root_by_zpool = BTreeMap::new();
         let mut transient_zone_configs_by_zpool: BTreeMap<_, Vec<_>> =
             BTreeMap::new();
-        let mut non_transient_zone_configs = Vec::new();
+        let mut transient_zone_root_configs = Vec::new();
+        let mut other_configs = Vec::new();
 
         // Also collect a list of all the dataset names we want to ensure; we'll
         // check whether they already exist, are mounted, and have the expected
         // properties to avoid doing unnecessary work.
         let mut dataset_names = Vec::new();
+
+        self.prune_zone_roots_cleaned_up(&config);
 
         for dataset in config {
             let zpool = dataset.name.pool();
@@ -737,7 +802,7 @@ impl DatasetTask {
                             "ignoring_root" => %prev,
                         );
                     }
-                    non_transient_zone_configs.push(dataset);
+                    transient_zone_root_configs.push(dataset);
                 }
                 DatasetKind::Cockroach
                 | DatasetKind::Crucible
@@ -749,7 +814,7 @@ impl DatasetTask {
                 | DatasetKind::Debug
                 | DatasetKind::LocalStorage
                 | DatasetKind::LocalStorageUnencrypted => {
-                    non_transient_zone_configs.push(dataset);
+                    other_configs.push(dataset);
                 }
             }
         }
@@ -758,55 +823,115 @@ impl DatasetTask {
         // exist.
         //
         // This pre-fetching lets us avoid individually querying them later.
-        let old_datasets = zfs
-            .get_dataset_properties(&dataset_names, WhichDatasets::SelfOnly)
-            .await
-            .inspect_err(|err| {
-                warn!(
-                    self.log,
-                    "failed to fetch ZFS dataset properties; \
-                     will attempt to ensure all datasets";
-                    InlineErrorChain::new(err.as_ref()),
-                );
-            })
-            .unwrap_or_default()
-            .into_iter()
-            .map(|props| (props.name.clone(), props))
-            .collect::<BTreeMap<_, _>>();
+        let mut old_datasets =
+            Self::fetch_dataset_properties(&dataset_names, &self.log, zfs)
+                .await;
 
         // Capture references to appease borrow checking on the closures and
         // async blocks below.
-        let old_datasets = &old_datasets;
         let mount_config = &self.mount_config;
         let log = &self.log;
 
         // Ensure all the datasets except those with kind `TransientZone { .. }`
-        // concurrently.
+        // or `TransientZoneRoot` concurrently.
         const DATASET_ENSURE_CONCURRENCY_LIMIT: usize = 16;
-        let mut non_transient_zones = futures::stream::iter(
-            non_transient_zone_configs.into_iter().map(|dataset| async move {
-                let result = Self::ensure_one_dataset(
-                    DatasetCreationDetails::Config(
+        {
+            let old_datasets = &old_datasets;
+            let mut others = futures::stream::iter(
+                other_configs.into_iter().map(|dataset| async move {
+                    let result = Self::ensure_one_dataset(
+                        DatasetCreationDetails::Config(
+                            &dataset,
+                            old_datasets.get(&dataset.name.full_name()),
+                        ),
+                        &mount_config,
+                        &log,
+                        zfs,
+                    )
+                    .await;
+                    (dataset, result.map_err(Arc::new))
+                }),
+            )
+            .buffer_unordered(DATASET_ENSURE_CONCURRENCY_LIMIT);
+
+            while let Some((config, result)) = others.next().await {
+                ensure_results
+                    .insert_overwrite(DatasetEnsureResult { config, result });
+            }
+        }
+
+        // Tell `DebugCollectorTask` which debug datasets are available. This
+        // must happen before we clean up any former zone roots below, which
+        // archives their contents into these debug datasets.
+        let debug_dataset_zpools = ensure_results
+            .iter()
+            .filter(|d| {
+                d.result.is_ok()
+                    && matches!(d.config.name.kind(), DatasetKind::Debug)
+            })
+            .map(|d| *d.config.name.pool())
+            .collect::<BTreeSet<_>>();
+        let have_debug_dataset = !debug_dataset_zpools.is_empty();
+        self.debug_dataset_zpools_tx.send_if_modified(|zpools| {
+            if *zpools == debug_dataset_zpools {
+                false
+            } else {
+                *zpools = debug_dataset_zpools;
+                true
+            }
+        });
+
+        // Ensure all the `TransientZoneRoot` datasets concurrently. The first
+        // time we ensure each one, also archive and destroy any former zone
+        // roots it contains.
+        let transient_zone_root_results = {
+            let old_datasets = &old_datasets;
+            let zone_roots_cleaned_up = &self.zone_roots_cleaned_up;
+            let archiver = &self.archiver;
+            futures::stream::iter(transient_zone_root_configs.into_iter().map(
+                |dataset| async move {
+                    let zpool = *dataset.name.pool();
+                    let needs_cleanup = !zone_roots_cleaned_up.contains(&zpool);
+                    let result = Self::ensure_transient_zone_root(
                         &dataset,
                         old_datasets.get(&dataset.name.full_name()),
-                    ),
-                    &mount_config,
-                    &log,
-                    zfs,
-                )
-                .await;
-                (dataset, result.map_err(Arc::new))
-            }),
-        )
-        .buffer_unordered(DATASET_ENSURE_CONCURRENCY_LIMIT);
-
-        while let Some((config, result)) = non_transient_zones.next().await {
+                        needs_cleanup,
+                        have_debug_dataset,
+                        &mount_config,
+                        archiver,
+                        &log,
+                        zfs,
+                    )
+                    .await;
+                    (dataset, needs_cleanup, result.map_err(Arc::new))
+                },
+            ))
+            .buffer_unordered(DATASET_ENSURE_CONCURRENCY_LIMIT)
+            .collect::<Vec<_>>()
+            .await
+        };
+        let mut attempted_cleanup = false;
+        for (config, needs_cleanup, result) in transient_zone_root_results {
+            if needs_cleanup {
+                attempted_cleanup = true;
+                if result.is_ok() {
+                    self.zone_roots_cleaned_up.insert(*config.name.pool());
+                }
+            }
             ensure_results
                 .insert_overwrite(DatasetEnsureResult { config, result });
         }
 
+        // Cleanup may have destroyed datasets whose properties we fetched
+        // above; fetch them again, so we don't skip re-creating them below.
+        if attempted_cleanup {
+            old_datasets =
+                Self::fetch_dataset_properties(&dataset_names, log, zfs).await;
+        }
+
         // For each transient zone dataset: either ensure it or mark down why we
         // don't try.
+        let old_datasets = &old_datasets;
         let mut transient_zone_futures = Vec::new();
         for (zpool_id, datasets) in transient_zone_configs_by_zpool {
             for dataset in datasets {
@@ -895,6 +1020,59 @@ impl DatasetTask {
             .collect();
 
         ensure_results
+    }
+
+    // Forget about having cleaned up zone roots on zpools that our config no
+    // longer has any datasets on, so if such a zpool ever comes back, we clean
+    // up its zone root again.
+    //
+    // This must consider every dataset in `config`, including those on zpools
+    // we aren't currently managing: a zpool whose disk was pulled is still in
+    // our config, and stays in `zone_roots_cleaned_up`.
+    fn prune_zone_roots_cleaned_up(
+        &mut self,
+        config: &IdOrdMap<DatasetConfig>,
+    ) {
+        let configured_zpools = config
+            .iter()
+            .map(|dataset| *dataset.name.pool())
+            .collect::<BTreeSet<_>>();
+        self.zone_roots_cleaned_up.retain(|zpool| {
+            let keep = configured_zpools.contains(zpool);
+            if !keep {
+                info!(
+                    self.log,
+                    "zpool no longer in config; will clean up its zone root \
+                     again if it returns";
+                    "zpool" => %zpool,
+                );
+            }
+            keep
+        });
+    }
+
+    // Fetch the properties of whichever of `dataset_names` exist, keyed by
+    // name. On failure, returns an empty map (so callers will attempt to
+    // ensure all the datasets).
+    async fn fetch_dataset_properties<T: ZfsImpl>(
+        dataset_names: &[String],
+        log: &Logger,
+        zfs: &T,
+    ) -> BTreeMap<String, DatasetProperties> {
+        zfs.get_dataset_properties(dataset_names, WhichDatasets::SelfOnly)
+            .await
+            .inspect_err(|err| {
+                warn!(
+                    log,
+                    "failed to fetch ZFS dataset properties; \
+                     will attempt to ensure all datasets";
+                    InlineErrorChain::new(err.as_ref()),
+                );
+            })
+            .unwrap_or_default()
+            .into_iter()
+            .map(|props| (props.name.clone(), props))
+            .collect()
     }
 
     /// Compare `dataset`'s properties against `old_dataset` (an set of
@@ -1033,6 +1211,160 @@ impl DatasetTask {
             additional_options: None,
         })
         .await
+    }
+
+    // Ensures a `TransientZoneRoot` dataset exists. If `needs_cleanup` is set,
+    // also archives and destroys any former zone roots within it.
+    #[allow(clippy::too_many_arguments)]
+    async fn ensure_transient_zone_root<T: ZfsImpl>(
+        dataset: &DatasetConfig,
+        old_dataset: Option<&DatasetProperties>,
+        needs_cleanup: bool,
+        have_debug_dataset: bool,
+        mount_config: &MountConfig,
+        archiver: &FormerZoneRootArchiver,
+        log: &Logger,
+        zfs: &T,
+    ) -> Result<(), DatasetEnsureError> {
+        Self::ensure_one_dataset(
+            DatasetCreationDetails::Config(dataset, old_dataset),
+            mount_config,
+            log,
+            zfs,
+        )
+        .await?;
+
+        if !needs_cleanup {
+            return Ok(());
+        }
+
+        // Archive and then wipe the contents of the zone root dataset.
+        //
+        // There's a chain of design goals and compromises here:
+        //
+        // In general, across the control plane, we want to carefully manage
+        // persistent storage in a way that will ensure the system's fault
+        // tolerance.  Important data generally needs to be stored in
+        // CockroachDB or some other replicated storage, not the local
+        // filesystem.  We want some guard rails to prevent developers from
+        // accidentally using the local filesystem to store important data that
+        // really ought to be replicated.
+        //
+        // In an ideal world, we might make the root filesystem read-only
+        // altogether or at least isolate the parts that really need to be
+        // writeable (e.g., for logging) from the rest of it.  But that's a fair
+        // bit of work we haven't done yet.
+        //
+        // Instead, we make zone root filesystems transient, which is to say
+        // that their contents are not preserved after every kind of restart.
+        // But we still need to put the data somewhere, and it should be on disk
+        // rather than in memory, so we still use these ZFS pools for them.
+        // That means we have to wipe that data at some point.  And before
+        // wiping it, we want to archive any log files for debugging.
+        //
+        // So, when should we archive and wipe zone root filesystems?  In an
+        // ideal world, we'd do it each time the zone starts (to make sure we
+        // wipe them even if the sled reboots unexpectedly) as well as when the
+        // zone halts (to make sure we archive files from zones that will never
+        // start again).  See oxidecomputer/omicron#8316.  But this too is
+        // tricky and we haven't done this work yet.
+        //
+        // So instead, we take a pretty blunt hammer: the first time we ensure
+        // each zone root dataset in the lifetime of this sled agent process,
+        // we archive and destroy all the zone root filesystems within it.
+        // Until that succeeds, we report the zone root dataset as failed, so
+        // no zones are started within it.
+        let zpool = *dataset.name.pool();
+        info!(
+            log,
+            "archiving and destroying former zone roots";
+            "zpool" => %zpool,
+        );
+        Self::cleanup_former_zone_roots(
+            dataset,
+            have_debug_dataset,
+            mount_config,
+            archiver,
+            log,
+            zfs,
+        )
+        .await
+        .inspect_err(|err| {
+            warn!(
+                log,
+                "failed to archive and destroy former zone roots";
+                "zpool" => %zpool,
+                InlineErrorChain::new(err),
+            );
+        })
+        .map_err(|err| DatasetEnsureError::FormerZoneRootCleanup { zpool, err })
+    }
+
+    // Archives and destroys all the children of the `TransientZoneRoot`
+    // dataset `zone_root`.
+    async fn cleanup_former_zone_roots<T: ZfsImpl>(
+        zone_root: &DatasetConfig,
+        have_debug_dataset: bool,
+        mount_config: &MountConfig,
+        archiver: &FormerZoneRootArchiver,
+        log: &Logger,
+        zfs: &T,
+    ) -> Result<(), FormerZoneRootCleanupError> {
+        let parent_dataset_name = zone_root.name.full_name();
+        let parent_mountpoint = zone_root.name.mountpoint(&mount_config.root);
+        let child_datasets = zfs
+            .list_child_datasets(&parent_dataset_name)
+            .await
+            .map_err(FormerZoneRootCleanupError::List)?;
+
+        // Refuse to destroy any former zone roots without archiving them
+        // first.
+        if !child_datasets.is_empty() && !have_debug_dataset {
+            return Err(FormerZoneRootCleanupError::NoDebugDataset);
+        }
+
+        for child_name in child_datasets {
+            let child_dataset_name =
+                format!("{parent_dataset_name}/{child_name}");
+            let mountpoint = parent_mountpoint.join(&child_name);
+
+            // We need this dataset to be mounted in order to archive its logs.
+            // On initial sled boot, it won't be mounted yet.  In other cases
+            // (e.g., sled-agent restart), it may already be.
+            debug!(
+                log,
+                "ensuring dataset mounted to archive former zone root";
+                "path" => %mountpoint,
+                "dataset" => &child_dataset_name,
+            );
+            zfs.ensure_nested_dataset_mounted(
+                &child_dataset_name,
+                &Mountpoint(mountpoint.clone()),
+            )
+            .await
+            .map_err(FormerZoneRootCleanupError::Mount)?;
+
+            // Attempt to archive this dataset as though it's a former zone
+            // root.  This is best-effort.
+            info!(
+                log,
+                "archiving logs from former zone root";
+                "path" => %mountpoint,
+            );
+            archiver.archive_former_zone_root(mountpoint).await;
+
+            // Finally, destroy it.
+            info!(
+                log,
+                "destroying former zone root";
+                "dataset_name" => &child_dataset_name,
+            );
+            zfs.destroy_dataset(&child_dataset_name)
+                .await
+                .map_err(FormerZoneRootCleanupError::Destroy)?;
+        }
+
+        Ok(())
     }
 
     async fn nested_dataset_mount<T: ZfsImpl>(
@@ -1424,6 +1756,12 @@ trait ZfsImpl: Send + Sync + 'static {
         which: WhichDatasets,
     ) -> impl Future<Output = anyhow::Result<Vec<DatasetProperties>>> + Send;
 
+    /// List the names of the direct children of `name`, relative to `name`.
+    fn list_child_datasets(
+        &self,
+        name: &str,
+    ) -> impl Future<Output = anyhow::Result<Vec<String>>> + Send;
+
     /// Change the encryption key and set the oxide:epoch property.
     ///
     /// This is used for ZFS key rotation when a new Trust Quorum epoch is
@@ -1481,6 +1819,13 @@ impl ZfsImpl for RealZfs {
         Zfs::get_dataset_properties(datasets, which).await
     }
 
+    async fn list_child_datasets(
+        &self,
+        name: &str,
+    ) -> anyhow::Result<Vec<String>> {
+        Ok(Zfs::list_datasets(name).await?)
+    }
+
     async fn change_key(
         &self,
         dataset: &str,
@@ -1520,6 +1865,45 @@ mod tests {
     impl InMemoryZfs {
         fn ensure_should_fail(&self, name: String, reason: &'static str) {
             self.inner.lock().unwrap().ensure_should_fail.insert(name, reason);
+        }
+
+        fn clear_ensure_should_fail(&self, name: &str) {
+            self.inner.lock().unwrap().ensure_should_fail.remove(name);
+        }
+
+        // Add a mounted dataset to our fake ZFS, as though it was left behind
+        // by a previous sled-agent process.
+        fn insert_existing_dataset(
+            &self,
+            name: String,
+            id: Option<DatasetUuid>,
+        ) {
+            let props = DatasetProperties {
+                id,
+                name: name.clone(),
+                mounted: true,
+                avail: ByteCount::from_kibibytes_u32(1024),
+                used: ByteCount::from_kibibytes_u32(0),
+                quota: None,
+                reservation: None,
+                compression: "on".to_string(),
+                epoch: None,
+            };
+            self.inner.lock().unwrap().datasets.insert(name, props);
+        }
+
+        fn dataset_exists(&self, name: &str) -> bool {
+            self.inner.lock().unwrap().datasets.contains_key(name)
+        }
+
+        fn ensure_call_count(&self, name: &str) -> usize {
+            self.inner
+                .lock()
+                .unwrap()
+                .ensure_call_counts
+                .get(name)
+                .copied()
+                .unwrap_or(0)
         }
     }
 
@@ -1681,6 +2065,24 @@ mod tests {
                 .collect())
         }
 
+        async fn list_child_datasets(
+            &self,
+            name: &str,
+        ) -> anyhow::Result<Vec<String>> {
+            let state = self.inner.lock().unwrap();
+            if !state.datasets.contains_key(name) {
+                return Err(anyhow!("dataset {name} does not exist"));
+            }
+            let prefix = format!("{name}/");
+            Ok(state
+                .datasets
+                .keys()
+                .filter_map(|k| k.strip_prefix(&prefix))
+                .filter(|child| !child.contains('/'))
+                .map(String::from)
+                .collect())
+        }
+
         async fn change_key(
             &self,
             dataset: &str,
@@ -1796,6 +2198,8 @@ mod tests {
         let zfs = InMemoryZfs::default();
         let task_handle = DatasetTaskHandle::spawn_with_zfs_impl(
             nonexistent_mount_config(),
+            FormerZoneRootArchiver::noop(&logctx.log),
+            watch::channel(BTreeSet::new()).0,
             &logctx.log,
             zfs.clone(),
         );
@@ -1926,6 +2330,8 @@ mod tests {
                 .current();
         let task_handle = DatasetTaskHandle::spawn_with_zfs_impl(
             nonexistent_mount_config(),
+            FormerZoneRootArchiver::noop(&logctx.log),
+            watch::channel(BTreeSet::new()).0,
             &logctx.log,
             zfs.clone(),
         );
@@ -2044,6 +2450,8 @@ mod tests {
         let zfs = InMemoryZfs::default();
         let task_handle = DatasetTaskHandle::spawn_with_zfs_impl(
             nonexistent_mount_config(),
+            FormerZoneRootArchiver::noop(&logctx.log),
+            watch::channel(BTreeSet::new()).0,
             &logctx.log,
             zfs.clone(),
         );
@@ -2066,6 +2474,431 @@ mod tests {
         }
 
         logctx.cleanup_successful();
+    }
+
+    // Datasets for a single zpool as they'd look after a sled-agent restart:
+    // a transient zone root containing the zone root of a zone still in the
+    // config and the zone root of a zone that's since been removed.
+    struct FormerZoneRootsSetup {
+        zpool: ZpoolName,
+        debug: DatasetConfig,
+        zone_root: DatasetConfig,
+        zone: DatasetConfig,
+        removed_zone_name: String,
+        zfs: InMemoryZfs,
+    }
+
+    impl FormerZoneRootsSetup {
+        fn new() -> Self {
+            let zpool = ZpoolName::new_external(ZpoolUuid::new_v4());
+            let debug = make_dataset_config(zpool, DatasetKind::Debug);
+            let zone_root =
+                make_dataset_config(zpool, DatasetKind::TransientZoneRoot);
+            let zone = make_dataset_config(
+                zpool,
+                DatasetKind::TransientZone { name: "oxz_current".to_string() },
+            );
+            let removed_zone_name =
+                format!("{}/oxz_removed", zone_root.name.full_name());
+
+            let zfs = InMemoryZfs::default();
+            zfs.insert_existing_dataset(
+                zone_root.name.full_name(),
+                Some(zone_root.id),
+            );
+            zfs.insert_existing_dataset(zone.name.full_name(), Some(zone.id));
+            zfs.insert_existing_dataset(removed_zone_name.clone(), None);
+
+            Self { zpool, debug, zone_root, zone, removed_zone_name, zfs }
+        }
+
+        fn configs(&self) -> IdOrdMap<DatasetConfig> {
+            [self.debug.clone(), self.zone_root.clone(), self.zone.clone()]
+                .into_iter()
+                .collect()
+        }
+
+        fn mountpoint(&self, dataset_name: &str) -> Utf8PathBuf {
+            let relative = dataset_name
+                .strip_prefix(&format!("{}/", self.zpool))
+                .expect("dataset is within zpool");
+            self.zpool
+                .dataset_mountpoint(&nonexistent_mount_config().root, relative)
+        }
+    }
+
+    #[test]
+    fn former_zone_roots_archived_and_destroyed_once() {
+        with_test_runtime(async move {
+            let logctx = dev::test_setup_log(
+                "former_zone_roots_archived_and_destroyed_once",
+            );
+            let setup = FormerZoneRootsSetup::new();
+            let zfs = &setup.zfs;
+
+            let (archiver, archived) =
+                FormerZoneRootArchiver::recording(&logctx.log);
+            let (debug_tx, debug_rx) = watch::channel(BTreeSet::new());
+            let task_handle = DatasetTaskHandle::spawn_with_zfs_impl(
+                nonexistent_mount_config(),
+                archiver,
+                debug_tx,
+                &logctx.log,
+                zfs.clone(),
+            );
+            let currently_managed_zpools =
+                CurrentlyManagedZpoolsReceiver::fake_static(
+                    [setup.zpool].into_iter(),
+                )
+                .current();
+
+            let result = task_handle
+                .datasets_ensure(
+                    setup.configs(),
+                    Arc::clone(&currently_managed_zpools),
+                )
+                .await
+                .expect("no task error");
+            for single_result in &result {
+                assert_matches!(
+                    single_result.result,
+                    Ok(()),
+                    "bad state for {:?}",
+                    single_result.config
+                );
+            }
+
+            // The debug dataset was published before archival, and both
+            // former zone roots were archived and destroyed.
+            assert_eq!(*debug_rx.borrow(), BTreeSet::from([setup.zpool]));
+            let mut expected_archived = vec![
+                setup.mountpoint(&setup.zone.name.full_name()),
+                setup.mountpoint(&setup.removed_zone_name),
+            ];
+            expected_archived.sort();
+            let mut actual_archived = archived.lock().unwrap().clone();
+            actual_archived.sort();
+            assert_eq!(actual_archived, expected_archived);
+            assert!(!zfs.dataset_exists(&setup.removed_zone_name));
+
+            // The zone dataset that's still in our config was re-created,
+            // even though it existed (with the right properties) when
+            // `datasets_ensure()` started.
+            assert!(zfs.dataset_exists(&setup.zone.name.full_name()));
+            assert_eq!(zfs.ensure_call_count(&setup.zone.name.full_name()), 1);
+
+            // If a dataset shows up within the zone root later, it's left
+            // alone: we only clean up once per sled-agent process.
+            let stray_name =
+                format!("{}/oxz_stray", setup.zone_root.name.full_name());
+            zfs.insert_existing_dataset(stray_name.clone(), None);
+            let result = task_handle
+                .datasets_ensure(setup.configs(), currently_managed_zpools)
+                .await
+                .expect("no task error");
+            for single_result in &result {
+                assert_matches!(single_result.result, Ok(()));
+            }
+            assert_eq!(archived.lock().unwrap().len(), 2);
+            assert!(zfs.dataset_exists(&stray_name));
+            assert_eq!(zfs.ensure_call_count(&setup.zone.name.full_name()), 1);
+
+            logctx.cleanup_successful();
+        })
+    }
+
+    // Ensure `configs` on `setup`'s zpool (which is managed iff `managed`), and
+    // assert that every dataset on a managed zpool was ensured.
+    async fn ensure_former_zone_roots_setup(
+        task_handle: &DatasetTaskHandle,
+        setup: &FormerZoneRootsSetup,
+        configs: IdOrdMap<DatasetConfig>,
+        managed: bool,
+    ) {
+        let zpools = if managed { vec![setup.zpool] } else { vec![] };
+        let currently_managed_zpools =
+            CurrentlyManagedZpoolsReceiver::fake_static(zpools.into_iter())
+                .current();
+        let result = task_handle
+            .datasets_ensure(configs, currently_managed_zpools)
+            .await
+            .expect("no task error");
+        for single_result in &result {
+            if managed {
+                assert_matches!(
+                    single_result.result,
+                    Ok(()),
+                    "bad state for {:?}",
+                    single_result.config
+                );
+            } else {
+                assert!(single_result.result.is_err());
+            }
+        }
+    }
+
+    #[test]
+    fn former_zone_roots_not_cleaned_up_again_after_zpool_returns() {
+        with_test_runtime(async move {
+            let logctx = dev::test_setup_log(
+                "former_zone_roots_not_cleaned_up_again_after_zpool_returns",
+            );
+            let setup = FormerZoneRootsSetup::new();
+            let (archiver, archived) =
+                FormerZoneRootArchiver::recording(&logctx.log);
+            let task_handle = DatasetTaskHandle::spawn_with_zfs_impl(
+                nonexistent_mount_config(),
+                archiver,
+                watch::channel(BTreeSet::new()).0,
+                &logctx.log,
+                setup.zfs.clone(),
+            );
+
+            // Clean up the zone root.
+            ensure_former_zone_roots_setup(
+                &task_handle,
+                &setup,
+                setup.configs(),
+                true,
+            )
+            .await;
+            assert_eq!(archived.lock().unwrap().len(), 2);
+
+            // The disk is pulled: its zpool is no longer managed, but our
+            // config is unchanged.
+            ensure_former_zone_roots_setup(
+                &task_handle,
+                &setup,
+                setup.configs(),
+                false,
+            )
+            .await;
+
+            // When the disk comes back, we don't clean up its zone root
+            // again.
+            let stray_name =
+                format!("{}/oxz_stray", setup.zone_root.name.full_name());
+            setup.zfs.insert_existing_dataset(stray_name.clone(), None);
+            ensure_former_zone_roots_setup(
+                &task_handle,
+                &setup,
+                setup.configs(),
+                true,
+            )
+            .await;
+            assert_eq!(archived.lock().unwrap().len(), 2);
+            assert!(setup.zfs.dataset_exists(&stray_name));
+
+            logctx.cleanup_successful();
+        })
+    }
+
+    #[test]
+    fn former_zone_roots_cleaned_up_again_after_zpool_leaves_config() {
+        with_test_runtime(async move {
+            let logctx = dev::test_setup_log(
+                "former_zone_roots_cleaned_up_again_after_zpool_leaves_config",
+            );
+            let setup = FormerZoneRootsSetup::new();
+            let (archiver, archived) =
+                FormerZoneRootArchiver::recording(&logctx.log);
+            let task_handle = DatasetTaskHandle::spawn_with_zfs_impl(
+                nonexistent_mount_config(),
+                archiver,
+                watch::channel(BTreeSet::new()).0,
+                &logctx.log,
+                setup.zfs.clone(),
+            );
+
+            // Clean up the zone root.
+            ensure_former_zone_roots_setup(
+                &task_handle,
+                &setup,
+                setup.configs(),
+                true,
+            )
+            .await;
+            assert_eq!(archived.lock().unwrap().len(), 2);
+            let stray_name =
+                format!("{}/oxz_stray", setup.zone_root.name.full_name());
+            setup.zfs.insert_existing_dataset(stray_name.clone(), None);
+
+            // Removing just the zone root from our config doesn't make us
+            // forget that we cleaned it up, since the zpool still has other
+            // datasets.
+            let without_zone_root = [setup.debug.clone(), setup.zone.clone()]
+                .into_iter()
+                .collect::<IdOrdMap<_>>();
+            let currently_managed_zpools =
+                CurrentlyManagedZpoolsReceiver::fake_static(
+                    [setup.zpool].into_iter(),
+                )
+                .current();
+            task_handle
+                .datasets_ensure(without_zone_root, currently_managed_zpools)
+                .await
+                .expect("no task error");
+            ensure_former_zone_roots_setup(
+                &task_handle,
+                &setup,
+                setup.configs(),
+                true,
+            )
+            .await;
+            assert_eq!(archived.lock().unwrap().len(), 2);
+            assert!(setup.zfs.dataset_exists(&stray_name));
+
+            // Once our config has no datasets on the zpool (e.g., its disk
+            // was expunged), we forget it, and clean up its zone root again
+            // if it comes back.
+            ensure_former_zone_roots_setup(
+                &task_handle,
+                &setup,
+                IdOrdMap::new(),
+                true,
+            )
+            .await;
+            ensure_former_zone_roots_setup(
+                &task_handle,
+                &setup,
+                setup.configs(),
+                true,
+            )
+            .await;
+            assert!(!setup.zfs.dataset_exists(&stray_name));
+            assert_eq!(archived.lock().unwrap().len(), 4);
+
+            logctx.cleanup_successful();
+        })
+    }
+
+    #[test]
+    fn former_zone_roots_not_destroyed_without_debug_dataset() {
+        with_test_runtime(async move {
+            let logctx = dev::test_setup_log(
+                "former_zone_roots_not_destroyed_without_debug_dataset",
+            );
+            let setup = FormerZoneRootsSetup::new();
+            let zfs = &setup.zfs;
+            zfs.ensure_should_fail(
+                setup.debug.name.full_name(),
+                "debug dataset failure",
+            );
+
+            let (archiver, archived) =
+                FormerZoneRootArchiver::recording(&logctx.log);
+            let (debug_tx, debug_rx) = watch::channel(BTreeSet::new());
+            let task_handle = DatasetTaskHandle::spawn_with_zfs_impl(
+                nonexistent_mount_config(),
+                archiver,
+                debug_tx,
+                &logctx.log,
+                zfs.clone(),
+            );
+            let currently_managed_zpools =
+                CurrentlyManagedZpoolsReceiver::fake_static(
+                    [setup.zpool].into_iter(),
+                )
+                .current();
+
+            // Without a debug dataset, the zone root fails (retryably), as do
+            // the zones within it, and nothing is archived or destroyed.
+            let result = task_handle
+                .datasets_ensure(
+                    setup.configs(),
+                    Arc::clone(&currently_managed_zpools),
+                )
+                .await
+                .expect("no task error");
+            assert!(debug_rx.borrow().is_empty());
+            let zone_root_err = result
+                .get(&setup.zone_root.id)
+                .unwrap()
+                .result
+                .as_ref()
+                .expect_err("zone root should fail");
+            assert_matches!(
+                &**zone_root_err,
+                DatasetEnsureError::FormerZoneRootCleanup {
+                    err: FormerZoneRootCleanupError::NoDebugDataset,
+                    ..
+                }
+            );
+            assert!(zone_root_err.is_retryable());
+            let zone_err = result
+                .get(&setup.zone.id)
+                .unwrap()
+                .result
+                .as_ref()
+                .expect_err("zone should fail");
+            assert_matches!(
+                &**zone_err,
+                DatasetEnsureError::TransientZoneRootFailure { .. }
+            );
+            assert!(archived.lock().unwrap().is_empty());
+            assert!(zfs.dataset_exists(&setup.removed_zone_name));
+
+            // Once the debug dataset can be ensured, we clean up.
+            zfs.clear_ensure_should_fail(&setup.debug.name.full_name());
+            let result = task_handle
+                .datasets_ensure(setup.configs(), currently_managed_zpools)
+                .await
+                .expect("no task error");
+            for single_result in &result {
+                assert_matches!(
+                    single_result.result,
+                    Ok(()),
+                    "bad state for {:?}",
+                    single_result.config
+                );
+            }
+            assert_eq!(*debug_rx.borrow(), BTreeSet::from([setup.zpool]));
+            assert_eq!(archived.lock().unwrap().len(), 2);
+            assert!(!zfs.dataset_exists(&setup.removed_zone_name));
+
+            logctx.cleanup_successful();
+        })
+    }
+
+    #[test]
+    fn empty_zone_root_does_not_require_debug_dataset() {
+        with_test_runtime(async move {
+            let logctx = dev::test_setup_log(
+                "empty_zone_root_does_not_require_debug_dataset",
+            );
+            let zpool = ZpoolName::new_external(ZpoolUuid::new_v4());
+            let zone_root =
+                make_dataset_config(zpool, DatasetKind::TransientZoneRoot);
+            let zfs = InMemoryZfs::default();
+            let (archiver, archived) =
+                FormerZoneRootArchiver::recording(&logctx.log);
+            let task_handle = DatasetTaskHandle::spawn_with_zfs_impl(
+                nonexistent_mount_config(),
+                archiver,
+                watch::channel(BTreeSet::new()).0,
+                &logctx.log,
+                zfs.clone(),
+            );
+            let currently_managed_zpools =
+                CurrentlyManagedZpoolsReceiver::fake_static(
+                    [zpool].into_iter(),
+                )
+                .current();
+
+            // A newly-created zone root has nothing to archive, so we don't
+            // need a debug dataset to put it into service.
+            let result = task_handle
+                .datasets_ensure(
+                    [zone_root.clone()].into_iter().collect(),
+                    currently_managed_zpools,
+                )
+                .await
+                .expect("no task error");
+            assert_matches!(result.get(&zone_root.id).unwrap().result, Ok(()));
+            assert!(archived.lock().unwrap().is_empty());
+
+            logctx.cleanup_successful();
+        })
     }
 
     #[proptest]
@@ -2109,6 +2942,8 @@ mod tests {
         let zfs = InMemoryZfs::default();
         let task_handle = DatasetTaskHandle::spawn_with_zfs_impl(
             nonexistent_mount_config(),
+            FormerZoneRootArchiver::noop(&logctx.log),
+            watch::channel(BTreeSet::new()).0,
             &logctx.log,
             zfs.clone(),
         );
@@ -2289,6 +3124,8 @@ mod tests {
                 .current();
         let task_handle = DatasetTaskHandle::spawn_with_zfs_impl(
             nonexistent_mount_config(),
+            FormerZoneRootArchiver::noop(&logctx.log),
+            watch::channel(BTreeSet::new()).0,
             &logctx.log,
             zfs.clone(),
         );
@@ -2436,6 +3273,8 @@ mod tests {
         let zfs = InMemoryZfs::default();
         let task_handle = DatasetTaskHandle::spawn_with_zfs_impl(
             nonexistent_mount_config(),
+            FormerZoneRootArchiver::noop(&logctx.log),
+            watch::channel(BTreeSet::new()).0,
             &logctx.log,
             zfs.clone(),
         );
@@ -2804,6 +3643,8 @@ mod illumos_tests {
         let zpool = harness.add_zpool(ZpoolKind::External).await;
         let task_handle = DatasetTaskHandle::spawn_dataset_task(
             Arc::new(harness.mount_config.clone()),
+            FormerZoneRootArchiver::noop(&logctx.log),
+            watch::channel(BTreeSet::new()).0,
             &logctx.log,
         );
 
@@ -2879,6 +3720,8 @@ mod illumos_tests {
         let zpool = harness.add_zpool(ZpoolKind::External).await;
         let task_handle = DatasetTaskHandle::spawn_dataset_task(
             Arc::new(harness.mount_config.clone()),
+            FormerZoneRootArchiver::noop(&logctx.log),
+            watch::channel(BTreeSet::new()).0,
             &logctx.log,
         );
 
@@ -2943,6 +3786,8 @@ mod illumos_tests {
         let zpool = harness.add_zpool(ZpoolKind::External).await;
         let task_handle = DatasetTaskHandle::spawn_dataset_task(
             Arc::new(harness.mount_config.clone()),
+            FormerZoneRootArchiver::noop(&logctx.log),
+            watch::channel(BTreeSet::new()).0,
             &logctx.log,
         );
 
@@ -2956,6 +3801,19 @@ mod illumos_tests {
         );
         let dataset = make_dataset_config(zpool, kind);
 
+        // Because `dataset` has kind `TransientZone { .. }`, we also need to
+        // supply its parent root. Create it first, so the marker file below
+        // isn't hidden when the root is mounted over its directory.
+        let root = make_dataset_config(zpool, DatasetKind::TransientZoneRoot);
+        let result = task_handle
+            .datasets_ensure(
+                id_ord_map! { root.clone() },
+                harness.current_zpools(),
+            )
+            .await
+            .expect("task should not fail");
+        assert_matches!(result.get(&root.id).unwrap().result, Ok(()));
+
         // Before we actually make the dataset - create the mountpoint, and
         // stick a file there.
         let mountpoint = dataset.name.mountpoint(&harness.mount_config.root);
@@ -2963,12 +3821,7 @@ mod illumos_tests {
         std::fs::write(mountpoint.join("marker.txt"), "hello").unwrap();
         assert!(mountpoint.join("marker.txt").exists());
 
-        // Because `dataset` has kind `TransientZone { .. }`, we also need to
-        // supply its parent root.
-        let dataset_configs = id_ord_map! {
-            dataset.clone(),
-            make_dataset_config(zpool, DatasetKind::TransientZoneRoot),
-        };
+        let dataset_configs = id_ord_map! { dataset.clone(), root };
 
         // Create the datasets.
         let result = task_handle
@@ -3019,6 +3872,74 @@ mod illumos_tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn former_zone_roots_destroyed_after_restart() {
+        let logctx =
+            dev::test_setup_log("former_zone_roots_destroyed_after_restart");
+        let mut harness = RealZfsTestHarness::new(logctx.log.clone());
+        let zpool = harness.add_zpool(ZpoolKind::External).await;
+
+        let debug = make_dataset_config(zpool, DatasetKind::Debug);
+        let root = make_dataset_config(zpool, DatasetKind::TransientZoneRoot);
+        let zone = make_dataset_config(
+            zpool,
+            DatasetKind::TransientZone { name: "oxz_former".to_string() },
+        );
+
+        // Create a zone root, and put a file in it.
+        let task_handle = DatasetTaskHandle::spawn_dataset_task(
+            Arc::new(harness.mount_config.clone()),
+            FormerZoneRootArchiver::noop(&logctx.log),
+            watch::channel(BTreeSet::new()).0,
+            &logctx.log,
+        );
+        let configs = id_ord_map! {
+            debug.clone(), root.clone(), zone.clone(),
+        };
+        let result = task_handle
+            .datasets_ensure(configs.clone(), harness.current_zpools())
+            .await
+            .expect("task should not fail");
+        for result in &result {
+            assert_matches!(result.result, Ok(()));
+        }
+        let marker =
+            zone.name.mountpoint(&harness.mount_config.root).join("marker.txt");
+        std::fs::write(&marker, "hello").unwrap();
+
+        // A second `datasets_ensure()` from the same task leaves the zone
+        // root alone.
+        let result = task_handle
+            .datasets_ensure(configs.clone(), harness.current_zpools())
+            .await
+            .expect("task should not fail");
+        for result in &result {
+            assert_matches!(result.result, Ok(()));
+        }
+        assert!(marker.exists());
+
+        // A new dataset task (as though sled-agent restarted) destroys and
+        // re-creates the zone root.
+        let task_handle = DatasetTaskHandle::spawn_dataset_task(
+            Arc::new(harness.mount_config.clone()),
+            FormerZoneRootArchiver::noop(&logctx.log),
+            watch::channel(BTreeSet::new()).0,
+            &logctx.log,
+        );
+        let result = task_handle
+            .datasets_ensure(configs, harness.current_zpools())
+            .await
+            .expect("task should not fail");
+        for result in &result {
+            assert_matches!(result.result, Ok(()));
+        }
+        assert!(is_mounted(&zone.name).await);
+        assert!(!marker.exists());
+
+        harness.cleanup().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn ensure_many_datasets() {
         let logctx = dev::test_setup_log("ensure_many_datasets");
         let mut harness = RealZfsTestHarness::new(logctx.log.clone());
@@ -3033,6 +3954,8 @@ mod illumos_tests {
         };
         let task_handle = DatasetTaskHandle::spawn_dataset_task(
             Arc::new(harness.mount_config.clone()),
+            FormerZoneRootArchiver::noop(&logctx.log),
+            watch::channel(BTreeSet::new()).0,
             &logctx.log,
         );
 
@@ -3090,6 +4013,8 @@ mod illumos_tests {
         let zpool = harness.add_zpool(ZpoolKind::External).await;
         let task_handle = DatasetTaskHandle::spawn_dataset_task(
             Arc::new(harness.mount_config.clone()),
+            FormerZoneRootArchiver::noop(&logctx.log),
+            watch::channel(BTreeSet::new()).0,
             &logctx.log,
         );
 
