@@ -295,6 +295,19 @@ impl<'a> RequestBuilder<'a> {
             )
     }
 
+    /// Tells the request to initiate a WebSocket upgrade handshake
+    /// without expecting it to succeed, for endpoints that refuse in
+    /// HTTP before upgrading. This also sets the request method to
+    /// GET. The caller supplies the expected failure status.
+    pub fn websocket_handshake_headers(mut self) -> Self {
+        const TEST_WEBSOCKET_REQUEST_KEY: &str = "SEFDSyBUSEUgUExBTkVUIQ==";
+        self.method = http::method::Method::GET;
+        self.header(http::header::CONNECTION, "Upgrade")
+            .header(http::header::UPGRADE, "websocket")
+            .header(http::header::SEC_WEBSOCKET_VERSION, "13")
+            .header(http::header::SEC_WEBSOCKET_KEY, TEST_WEBSOCKET_REQUEST_KEY)
+    }
+
     /// Expect a successful console asset response.
     pub fn expect_console_asset(mut self) -> Self {
         let headers = [
@@ -643,6 +656,13 @@ impl<'a> NexusRequest<'a> {
     pub fn websocket_handshake(mut self) -> Self {
         self.request_builder =
             self.request_builder.expect_websocket_handshake();
+        self
+    }
+
+    /// See [`RequestBuilder::websocket_handshake_headers()`].
+    pub fn websocket_handshake_headers(mut self) -> Self {
+        self.request_builder =
+            self.request_builder.websocket_handshake_headers();
         self
     }
 

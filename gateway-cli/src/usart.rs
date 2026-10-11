@@ -8,7 +8,6 @@ use anyhow::Result;
 use futures::SinkExt;
 use futures::StreamExt;
 use reqwest::Upgraded;
-use std::borrow::Cow;
 use std::fs::File;
 use std::io;
 use std::io::Write;
@@ -85,7 +84,7 @@ pub(crate) async fn run(
                     IngestResult::Exit => {
                         _ = ws.close(Some(CloseFrame {
                             code: CloseCode::Normal,
-                            reason: Cow::Borrowed("client closed stdin"),
+                            reason: "client closed stdin".into(),
                         })).await;
                         return Ok(());
                     }
@@ -120,7 +119,7 @@ pub(crate) async fn run(
             }
 
             _ = flush_delay.ready() => {
-                ws.send(Message::Binary(out_buf.steal_buf()))
+                ws.send(Message::Binary(out_buf.steal_buf().into()))
                     .await
                     .context("failed to send data on websocket")?;
             }
