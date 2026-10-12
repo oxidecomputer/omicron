@@ -15,12 +15,11 @@ use sled_agent_types::inventory::InventoryDisk;
 use sled_agent_types::inventory::InventoryZpool;
 use sled_agent_types::inventory::OmicronSledConfig;
 use sled_storage::config::MountConfig;
-use sled_storage::disk::Disk;
 use sled_storage::nested_dataset::NestedDatasetConfig;
 use sled_storage::nested_dataset::NestedDatasetListOptions;
 use sled_storage::nested_dataset::NestedDatasetLocation;
 use slog::Logger;
-use std::collections::HashSet;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use tokio::sync::oneshot;
@@ -90,7 +89,6 @@ struct SpawnTokenCommon {
     time_sync_config: TimeSyncConfig,
     reconciler_result_tx: watch::Sender<ReconcilerResult>,
     currently_managed_zpools_tx: watch::Sender<Arc<CurrentlyManagedZpools>>,
-    external_disks_tx: watch::Sender<HashSet<Disk>>,
     former_zone_root_archiver: FormerZoneRootArchiver,
     raw_disks_rx: RawDisksReceiver,
     reconciler_task_log: Logger,
@@ -281,11 +279,11 @@ impl ConfigReconcilerHandle {
             );
 
         // Spawn the task that manages dump devices.
-        let (external_disks_tx, external_disks_rx) =
-            watch::channel(HashSet::new());
+        let (debug_dataset_zpools_tx, debug_dataset_zpools_rx) =
+            watch::channel(BTreeSet::new());
         let former_zone_root_archiver = debug_collector::spawn(
             internal_disks_rx.clone(),
-            external_disks_rx,
+            debug_dataset_zpools_rx,
             Arc::clone(&mount_config),
             base_log,
         );
@@ -300,6 +298,8 @@ impl ConfigReconcilerHandle {
         // Spawn the task that serializes dataset operations.
         let dataset_task = DatasetTaskHandle::spawn_dataset_task(
             Arc::clone(&mount_config),
+            former_zone_root_archiver.clone(),
+            debug_dataset_zpools_tx,
             base_log,
         );
 
@@ -321,7 +321,6 @@ impl ConfigReconcilerHandle {
                     time_sync_config,
                     reconciler_result_tx,
                     currently_managed_zpools_tx,
-                    external_disks_tx,
                     former_zone_root_archiver,
                     raw_disks_rx,
                     reconciler_task_log: base_log
@@ -404,7 +403,6 @@ impl ConfigReconcilerHandle {
                     time_sync_config,
                     reconciler_result_tx,
                     currently_managed_zpools_tx,
-                    external_disks_tx,
                     former_zone_root_archiver,
                     raw_disks_rx,
                     reconciler_task_log,
@@ -421,7 +419,6 @@ impl ConfigReconcilerHandle {
             reconciler_result_tx,
             currently_managed_zpools_tx,
             self.internal_disks_rx.clone(),
-            external_disks_tx,
             former_zone_root_archiver,
             raw_disks_rx,
             committed_epoch_rx,
