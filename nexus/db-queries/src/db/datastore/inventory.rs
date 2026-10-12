@@ -821,8 +821,9 @@ impl DataStore {
             {
                 use nexus_db_schema::schema::hw_baseboard_id::dsl as baseboard_dsl;
                 use nexus_db_schema::schema::inv_power_shelf_psu::dsl as psu_dsl;
-                use nexus_types::inventory::PsuIdentityResult;
+                use nexus_types::inventory::PsuFirmwareRevisions;
                 use nexus_types::inventory::PsuIdentity;
+                use nexus_types::inventory::PsuIdentityResult;
 
                 for shelf in &collection.power_shelves {
                     let PowerShelf {
@@ -847,29 +848,54 @@ impl DataStore {
                         let (
                             mfr_id,
                             mfr_model,
-                            firmware_rev,
                             mfr_location,
+                            mfr_revision,
                             mfr_date,
                             mfr_serial,
+                            primary_fw_rev,
+                            secondary_fw_rev,
                             vpd_error,
+                            fw_rev_error,
                         ) = match psu.identity() {
                             PsuIdentityResult::Present(PsuIdentity {
                                 mfr_id,
                                 mfr_model,
-                                firmware_rev,
+                                mfr_revision,
                                 mfr_location,
                                 mfr_date,
                                 mfr_serial,
-                            }) => (
-                                Some(mfr_id.clone()),
-                                Some(mfr_model.clone()),
-                                Some(firmware_rev.clone()),
-                                Some(mfr_location.clone()),
-                                Some(mfr_date.clone()),
-                                Some(mfr_serial.clone()),
+                                firmware_revs,
+                            }) => {
+                                let (primary, secondary, fw_rev_error) =
+                                    match firmware_revs {
+                                        Ok(PsuFirmwareRevisions {
+                                            primary,
+                                            secondary,
+                                        }) => (
+                                            Some(primary.clone()),
+                                            Some(secondary.clone()),
+                                            None,
+                                        ),
+                                        Err(error) => {
+                                            (None, None, Some(error.clone()))
+                                        }
+                                    };
+                                (
+                                    Some(mfr_id.clone()),
+                                    Some(mfr_model.clone()),
+                                    Some(mfr_location.clone()),
+                                    Some(mfr_revision.clone()),
+                                    Some(mfr_date.clone()),
+                                    Some(mfr_serial.clone()),
+                                    primary,
+                                    secondary,
+                                    None,
+                                    fw_rev_error,
+                                )
+                            }
+                            PsuIdentityResult::Error(error) => (
                                 None,
-                            ),
-                            PsuIdentityResult::ReadError(error) => (
+                                None,
                                 None,
                                 None,
                                 None,
@@ -877,8 +903,12 @@ impl DataStore {
                                 None,
                                 None,
                                 Some(error.to_owned()),
+                                None,
                             ),
-                            PsuIdentityResult::NotPresent => (None, None, None, None, None, None, None),
+                            PsuIdentityResult::NotPresent => (
+                                None, None, None, None, None, None, None, None,
+                                None, None,
+                            ),
                         };
                         let selection =
                             nexus_db_schema::schema::hw_baseboard_id::table
@@ -906,10 +936,10 @@ impl DataStore {
                                     mfr_model.into_sql::<Nullable<
                                         diesel::sql_types::Text,
                                     >>(),
-                                    firmware_rev.into_sql::<Nullable<
+                                    mfr_location.into_sql::<Nullable<
                                         diesel::sql_types::Text,
                                     >>(),
-                                    mfr_location.into_sql::<Nullable<
+                                    mfr_revision.into_sql::<Nullable<
                                         diesel::sql_types::Text,
                                     >>(),
                                     mfr_date.into_sql::<Nullable<
@@ -918,7 +948,16 @@ impl DataStore {
                                     mfr_serial.into_sql::<Nullable<
                                         diesel::sql_types::Text,
                                     >>(),
+                                    primary_fw_rev.into_sql::<Nullable<
+                                        diesel::sql_types::Text,
+                                    >>(),
+                                    secondary_fw_rev.into_sql::<Nullable<
+                                        diesel::sql_types::Text,
+                                    >>(),
                                     vpd_error.into_sql::<Nullable<
+                                        diesel::sql_types::Text,
+                                    >>(),
+                                    fw_rev_error.into_sql::<Nullable<
                                         diesel::sql_types::Text,
                                     >>(),
                                 ))
@@ -947,11 +986,14 @@ impl DataStore {
                             psu_dsl::hubris_device_type,
                             psu_dsl::mfr_id,
                             psu_dsl::mfr_model,
-                            psu_dsl::firmware_rev,
                             psu_dsl::mfr_location,
+                            psu_dsl::mfr_revision,
                             psu_dsl::mfr_date,
                             psu_dsl::mfr_serial,
+                            psu_dsl::primary_fw_rev,
+                            psu_dsl::secondary_fw_rev,
                             psu_dsl::vpd_error,
+                            psu_dsl::fw_rev_error,
                         ))
                         .execute_async(&conn)
                         .await?;
@@ -966,11 +1008,14 @@ impl DataStore {
                             _hubris_device_type,
                             _mfr_id,
                             _mfr_model,
-                            _firmware_rev,
                             _mfr_location,
+                            _mfr_revision,
                             _mfr_date,
                             _mfr_serial,
+                            _primary_fw_rev,
+                            _secondary_fw_rev,
                             _vpd_error,
+                            _fw_rev_error,
                         ) = psu_dsl::inv_power_shelf_psu::all_columns();
                     }
                 }

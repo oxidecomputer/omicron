@@ -827,6 +827,7 @@ async fn collect_one_psc(
 ) -> Result<(), anyhow::Error> {
     use gateway_types::component_vpd::ComponentVpd;
     use gateway_types::component_vpd::PmbusDevice;
+    use nexus_types::inventory::PsuFirmwareRevisions;
     use nexus_types::inventory::PsuIdentity;
     use nexus_types::inventory::PsuSlot;
 
@@ -883,16 +884,20 @@ async fn collect_one_psc(
             ic_device_rev: _,
         } = vpd;
 
+        // muRata uses the PMBus `MFR_REVISION` command to represent the PSU's
+        // *firmware* revisions, rather than a hardware revision.
+        let mfr_revision = expect_string("MFR_REVISION", mfr_revision);
+        let firmware_revs = mfr_revision
+            .parse::<PsuFirmwareRevisions>()
+            .map_err(|e| format!("{e:#}"));
         PsuIdentity {
             mfr_id: expect_string("MFR_ID", mfr_id),
             mfr_model: expect_string("MFR_MODEL", mfr_model),
-            // muRata uses the PMBus `MFR_REVISION` command to represent the
-            // PSU's *firmware* revision, rather than a hardware revision. We
-            // rename it to `firmware_rev` here to make that clear.
-            firmware_rev: expect_string("MFR_REVISION", mfr_revision),
+            mfr_revision,
             mfr_location: expect_string("MFR_LOCATION", mfr_location),
             mfr_date: expect_string("MFR_DATE", mfr_date),
             mfr_serial: expect_string("MFR_SERIAL", mfr_serial),
+            firmware_revs,
         }
     }
 
@@ -1041,6 +1046,7 @@ mod test {
     use iddqd::id_ord_map;
     use nexus_types::inventory::Collection;
     use nexus_types::inventory::PowerShelf;
+    use nexus_types::inventory::PsuFirmwareRevisions;
     use nexus_types::inventory::PsuIdentity;
     use nexus_types::inventory::PsuIdentityResult;
     use omicron_cockroach_metrics::CockroachClusterAdminClient;
@@ -1300,22 +1306,38 @@ mod test {
                     PsuIdentityResult::Present(PsuIdentity {
                         mfr_id,
                         mfr_model,
-                        firmware_rev,
+                        mfr_revision,
                         mfr_location,
                         mfr_date,
                         mfr_serial,
+                        firmware_revs,
                     }) => {
                         swriteln!(
                             s,
                             "            VPD: mfr_model {mfr_model:?} \
                               mfr_serial {mfr_serial:?} \
-                              firmware_rev {firmware_rev:?} \
+                              mfr_revision {mfr_revision:?} \
                               mfr_id {mfr_id:?} \
                               mfr_location {mfr_location:?} \
                               mfr_date {mfr_date:?}"
                         );
+                        match firmware_revs {
+                            Ok(PsuFirmwareRevisions { primary, secondary }) => {
+                                swriteln!(
+                                    s,
+                                    "            firmware: primary \
+                                     {primary:?} secondary {secondary:?}"
+                                );
+                            }
+                            Err(error) => {
+                                swriteln!(
+                                    s,
+                                    "            firmware: error: {error}"
+                                );
+                            }
+                        }
                     }
-                    PsuIdentityResult::ReadError(error) => {
+                    PsuIdentityResult::Error(error) => {
                         let error = error_redactor.do_redact(error);
                         swriteln!(s, "            VPD: error: {error}");
                     }

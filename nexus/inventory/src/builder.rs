@@ -849,7 +849,7 @@ impl CollectionBuilder {
             // again. Overwrite it if the subsequent attempt was not a read
             // error, otherwise, do nothing..
             id_ord_map::Entry::Occupied(mut previous)
-                if !previous.get().identity().is_read_error() =>
+                if !previous.get().identity().is_error() =>
             {
                 // Note that we overwrite it with *any* value that does not
                 // contain an identity read error. We may have previously failed
@@ -858,7 +858,7 @@ impl CollectionBuilder {
                 // and it failed, and then subsequently it was not present, we
                 // want to overwrite the "present/error" with the new "not
                 // present".
-                if !psu.identity().is_read_error() {
+                if !psu.identity().is_error() {
                     previous.insert(psu);
                     Ok(true)
                 } else {
@@ -927,7 +927,7 @@ fn found_psu_already(shelf: &PowerShelf, psu_slot: PsuSlot) -> bool {
         // attempt to read the PSU's identity failed, let's say that we have not
         // "found it already" so that we make a second attempt, so that we try
         // again in the event of a transient I2C error on the SP or similar.
-        !psu.identity().is_read_error()
+        !psu.identity().is_error()
     })
 }
 
@@ -952,7 +952,6 @@ mod test {
     use gateway_types::rot::RotState;
     use nexus_types::inventory::Caboose;
     use nexus_types::inventory::CabooseWhich;
-    use nexus_types::inventory::Psu;
     use nexus_types::inventory::PsuSlot;
     use nexus_types::inventory::RotPage;
     use nexus_types::inventory::RotPageWhich;
@@ -1680,6 +1679,7 @@ mod test {
             CollectionBuilder::new("test_power_shelf_psc_replaced");
         let mgs_1 = "fake MGS 1";
         let mgs_2 = "fake MGS 2";
+        let psu_device = ExamplePsuKind::Mwocp68;
 
         // The first MGS finds the original PSC in shelf 0, and a PSC in shelf
         // 1, which is not replaced and should be unaffected throughout.
@@ -1696,42 +1696,29 @@ mod test {
             )
             .unwrap();
 
-        fn make_psus(
-            source: &str,
-            psus: [(PsuSlot, Option<Result<&str, &str>>); 6],
-        ) -> Vec<Psu> {
-            let psu_device = ExamplePsuKind::Mwocp68;
-            psus.into_iter()
-                .map(move |(slot, serial)| match serial {
-                    Some(serial) => {
-                        examples::psu(source, slot, psu_device, serial)
-                    }
-                    None => examples::psu_missing(source, slot, psu_device),
-                })
-                .collect()
-        }
-
         // Populate both PSCs' inventories of PSUs.
-        let old_psus = make_psus(
+        let old_psus = examples::power_shelf_psus(
             mgs_1,
+            psu_device,
             [
-                (PsuSlot::Psu0, Some(Ok("old0"))),
-                (PsuSlot::Psu1, Some(Ok("old1"))),
-                (PsuSlot::Psu2, Some(Ok("old2"))),
-                (PsuSlot::Psu3, Some(Err("fake VPD read error"))),
-                (PsuSlot::Psu4, Some(Ok("old4"))),
-                (PsuSlot::Psu5, None),
+                Some(Ok("old0")),
+                Some(Ok("old1")),
+                Some(Ok("old2")),
+                Some(Err("fake VPD read error")),
+                Some(Ok("old4")),
+                None,
             ],
         );
-        let other_psus = make_psus(
+        let other_psus = examples::power_shelf_psus(
             mgs_1,
+            psu_device,
             [
-                (PsuSlot::Psu0, None),
-                (PsuSlot::Psu1, Some(Ok("other1"))),
-                (PsuSlot::Psu2, Some(Err("fake VPD read error"))),
-                (PsuSlot::Psu3, Some(Ok("other3"))),
-                (PsuSlot::Psu4, Some(Ok("other4"))),
-                (PsuSlot::Psu5, Some(Ok("other5"))),
+                None,
+                Some(Ok("other1")),
+                Some(Err("fake VPD read error")),
+                Some(Ok("other3")),
+                Some(Ok("other4")),
+                Some(Ok("other5")),
             ],
         );
         for psu in &old_psus {
@@ -1767,15 +1754,16 @@ mod test {
         );
 
         // The new PSC reports a different set of PSUs.
-        let new_psus = make_psus(
+        let new_psus = examples::power_shelf_psus(
             mgs_2,
+            psu_device,
             [
-                (PsuSlot::Psu0, Some(Ok("new0"))),
-                (PsuSlot::Psu1, None),
-                (PsuSlot::Psu2, Some(Ok("new2"))),
-                (PsuSlot::Psu3, Some(Ok("new3"))),
-                (PsuSlot::Psu4, Some(Ok("new4"))),
-                (PsuSlot::Psu5, Some(Ok("new5"))),
+                Some(Ok("new0")),
+                None,
+                Some(Ok("new2")),
+                Some(Ok("new3")),
+                Some(Ok("new4")),
+                Some(Ok("new5")),
             ],
         );
         let (first_new_psu, rest_new_psus) = new_psus.split_first().unwrap();

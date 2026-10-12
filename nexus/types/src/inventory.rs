@@ -536,7 +536,7 @@ impl Psu {
                 PsuIdentityResult::Present(identity)
             }
             Some(PsuState { identity: Err(ref error), .. }) => {
-                PsuIdentityResult::ReadError(error)
+                PsuIdentityResult::Error(error)
             }
         }
     }
@@ -544,6 +544,11 @@ impl Psu {
     /// Returns the result of reading the PSU's firmware revisions, or
     /// [`PsuIdentityResult::NotPresent`] if the SP indicated that no PSU is
     /// present in this slot.
+    ///
+    /// This returns [`PsuIdentityResult::Error`] both if the PSU's identity
+    /// could not be read, and if it was read but its firmware revisions could
+    /// not be parsed from it. To distinguish between those cases, use
+    /// [`Psu::identity`] and [`PsuIdentity::firmware_revs`].
     pub fn firmware_revs(&self) -> PsuIdentityResult<'_, PsuFirmwareRevisions> {
         match self.state {
             None => PsuIdentityResult::NotPresent,
@@ -555,9 +560,9 @@ impl Psu {
             Some(PsuState {
                 identity: Ok(PsuIdentity { firmware_revs: Err(ref err), .. }),
                 ..
-            }) => PsuIdentityResult::ReadError(err),
+            }) => PsuIdentityResult::Error(err),
             Some(PsuState { identity: Err(ref error), .. }) => {
-                PsuIdentityResult::ReadError(error)
+                PsuIdentityResult::Error(error)
             }
         }
     }
@@ -631,23 +636,21 @@ pub struct PsuState {
     pub identity: Result<PsuIdentity, String>,
 }
 
-/// Values returned by [`Psu::identity`].
+/// Values returned by [`Psu::identity`] and [`Psu::firmware_revs`].
 #[derive(Copy, Clone, Debug, Eq, PartialOrd, PartialEq)]
 pub enum PsuIdentityResult<'psu, T = PsuIdentity> {
-    /// The VPD identity of the PSU was not read because no PSU was present in
-    /// this slot.
+    /// The value was not read because no PSU was present in this slot.
     NotPresent,
-    /// The VPD identity of the PSU was successfully read.
+    /// The value was successfully determined.
     Present(&'psu T),
     /// The PSU was not determined to be not present, but an error occurred
-    /// while reading its VPD identity.
-    ReadError(&'psu str),
+    /// while determining the value.
+    Error(&'psu str),
 }
 
 impl<'psu, T> PsuIdentityResult<'psu, T> {
-    /// Returns [`Some`]`(`[`PsuIdentity`]`)` if the PSU was present and its VPD
-    /// identity was read successfully, or [`None`] if no PSU was present or an
-    /// error occurred while reading its VPD identity.
+    /// Returns [`Some`] if the PSU was present and the value was determined
+    /// successfully, or [`None`] if no PSU was present or an error occurred.
     pub fn ok(self) -> Option<&'psu T> {
         match self {
             PsuIdentityResult::Present(identity) => Some(identity),
@@ -659,8 +662,8 @@ impl<'psu, T> PsuIdentityResult<'psu, T> {
         matches!(self, PsuIdentityResult::Present(_))
     }
 
-    pub fn is_read_error(&self) -> bool {
-        matches!(self, PsuIdentityResult::ReadError(_))
+    pub fn is_error(&self) -> bool {
+        matches!(self, PsuIdentityResult::Error(_))
     }
 
     pub fn is_not_present(&self) -> bool {
@@ -696,7 +699,7 @@ pub struct PsuIdentity {
 
 /// The firmware revisions of a muRata PSU.
 ///
-/// The combination of `mfr_model` and `mfr_serial` identifies the PSU.
+/// These are parsed from the PSU's [`PsuIdentity::mfr_revision`].
 #[derive(Clone, Debug, Eq, PartialOrd, PartialEq, Deserialize, Serialize)]
 pub struct PsuFirmwareRevisions {
     /// The firmware revision on the primary MCU (AC input side).
@@ -742,6 +745,13 @@ impl std::str::FromStr for PsuFirmwareRevisions {
         anyhow::ensure!(
             zeroes == "0000",
             "expected \"0000\" but found: {zeroes:?}"
+        );
+        let rest = parts.collect::<Vec<_>>();
+        anyhow::ensure!(
+            rest.is_empty(),
+            "expected firmware revision to end after \"0000\", but found \
+             trailing {:?}",
+            rest.join("-"),
         );
         Ok(Self {
             primary: primary.to_string(),
@@ -1107,4 +1117,41 @@ impl IdOrdItem for InternalDnsGenerationStatus {
         self.zone_id
     }
     id_upcast!();
+}
+
+#[cfg(test)]
+mod test {
+    use super::PsuFirmwareRevisions;
+
+    #[test]
+    fn test_parse_psu_firmware_revisions() {
+        // This is the `MFR_REVISION` value reported by a real MWOCP68.
+        let revs = "0762-0701-0000".parse::<PsuFirmwareRevisions>().unwrap();
+        assert_eq!(
+            revs,
+            PsuFirmwareRevisions {
+                primary: String::from("0762"),
+                secondary: String::from("0701"),
+            }
+        );
+
+        // Values that are not of the form `XXXX-YYYY-0000` must be rejected,
+        // rather than producing firmware revisions that misrepresent the PSU.
+        for invalid in [
+            "",
+            "0762",
+            "0762-0701",
+            "0762-0701-",
+            "0762-0701-0001",
+            "0762-0701-0000-0000",
+            "762-0701-0000",
+            "0762-07010-0000",
+            "07620701-0000",
+        ] {
+            assert!(
+                invalid.parse::<PsuFirmwareRevisions>().is_err(),
+                "{invalid:?} should not parse as PSU firmware revisions",
+            );
+        }
+    }
 }

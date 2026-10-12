@@ -690,6 +690,7 @@ fn display_power_shelf(
     shelf: Option<&PowerShelf>,
     f: &mut dyn fmt::Write,
 ) -> fmt::Result {
+    use super::PsuIdentity;
     use super::PsuIdentityResult;
     use super::PsuSlot;
 
@@ -705,7 +706,8 @@ fn display_power_shelf(
         device: &'a str,
         mfr_model: &'a str,
         mfr_serial: &'a str,
-        firmware_rev: &'a str,
+        primary_fw_rev: &'a str,
+        secondary_fw_rev: &'a str,
         mfr_id: &'a str,
         mfr_location: &'a str,
         mfr_date: &'a str,
@@ -714,14 +716,18 @@ fn display_power_shelf(
     writeln!(f, "    PSUs:")?;
     let rows = shelf.psus.iter().map(|psu| {
         let vpd = psu.identity().ok();
+        let fw_revs = psu.firmware_revs().ok();
         PsuRow {
             slot: psu.slot,
             presence: format!("{:?}", psu.presence()),
             device: psu.hubris_device_type.as_str(),
             mfr_id: vpd.map(|vpd| vpd.mfr_id.as_str()).unwrap_or("-"),
             mfr_model: vpd.map(|vpd| vpd.mfr_model.as_str()).unwrap_or("-"),
-            firmware_rev: vpd
-                .map(|vpd| vpd.firmware_rev.as_str())
+            primary_fw_rev: fw_revs
+                .map(|revs| revs.primary.as_str())
+                .unwrap_or("-"),
+            secondary_fw_rev: fw_revs
+                .map(|revs| revs.secondary.as_str())
                 .unwrap_or("-"),
             mfr_location: vpd
                 .map(|vpd| vpd.mfr_location.as_str())
@@ -738,8 +744,19 @@ fn display_power_shelf(
 
     let mut wrote_errors_header = false;
     for psu in &shelf.psus {
-        let PsuIdentityResult::ReadError(error) = psu.identity() else {
-            continue;
+        let error = match psu.identity() {
+            PsuIdentityResult::Error(error) => error.to_owned(),
+            PsuIdentityResult::Present(PsuIdentity {
+                mfr_revision,
+                firmware_revs: Err(error),
+                ..
+            }) => format!(
+                "failed to parse firmware revisions from MFR_REVISION \
+                 {mfr_revision:?}: {error}"
+            ),
+            PsuIdentityResult::Present(_) | PsuIdentityResult::NotPresent => {
+                continue;
+            }
         };
         if !wrote_errors_header {
             writeln!(f, "    PSU VPD errors:")?;
@@ -1672,6 +1689,7 @@ mod tests {
     use super::display_power_shelf;
     use crate::inventory::PowerShelf;
     use crate::inventory::Psu;
+    use crate::inventory::PsuFirmwareRevisions;
     use crate::inventory::PsuIdentity;
     use crate::inventory::PsuSlot;
     use crate::inventory::PsuState;
@@ -1685,14 +1703,17 @@ mod tests {
 
     #[test]
     fn test_power_shelf_inventory_display() {
-        fn identity(serial: &str, date: &str) -> PsuIdentity {
+        fn identity(serial: &str, date: &str, fw_rev: &str) -> PsuIdentity {
             PsuIdentity {
                 mfr_id: String::from("Murata-PS"),
                 mfr_model: String::from("MWOCP68-3600-D-RM"),
-                firmware_rev: String::from("0762-0701-0000"),
+                mfr_revision: fw_rev.to_owned(),
                 mfr_location: String::from("China"),
                 mfr_date: date.to_owned(),
                 mfr_serial: serial.to_owned(),
+                firmware_revs: fw_rev
+                    .parse::<PsuFirmwareRevisions>()
+                    .map_err(|e| format!("{e:#}")),
             }
         }
 
@@ -1702,8 +1723,16 @@ mod tests {
 
         let mut psus = IdOrdMap::with_capacity(6);
         let values = [
-            (PsuSlot::Psu0, present(Ok(identity("LL2111Q9002T", "2111")))),
-            (PsuSlot::Psu1, present(Ok(identity("LL2111Q9003T", "2111")))),
+            (
+                PsuSlot::Psu0,
+                present(Ok(identity("LL2111Q9002T", "2111", "0762-0701-0000"))),
+            ),
+            // VPD read successfully, but its MFR_REVISION is not in the
+            // expected format, so firmware revisions could not be parsed.
+            (
+                PsuSlot::Psu1,
+                present(Ok(identity("LL2111Q9003T", "2111", "0762-0701"))),
+            ),
             (
                 PsuSlot::Psu2,
                 present(Err(String::from(
@@ -1711,7 +1740,10 @@ mod tests {
                 ))),
             ),
             (PsuSlot::Psu3, None),
-            (PsuSlot::Psu4, present(Ok(identity("LL2115Q1001T", "2115")))),
+            (
+                PsuSlot::Psu4,
+                present(Ok(identity("LL2115Q1001T", "2115", "0762-0702-0000"))),
+            ),
             (PsuSlot::Psu5, None),
         ];
         for (slot, state) in values {

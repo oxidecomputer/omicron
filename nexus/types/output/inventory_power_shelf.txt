@@ -1,10 +1,11 @@
     PSUs:
-        SLOT PRESENCE   DEVICE  MFR_MODEL         MFR_SERIAL   FIRMWARE_REV   MFR_ID    MFR_LOCATION MFR_DATE 
-        PSU0 Present    mwocp68 MWOCP68-3600-D-RM LL2111Q9002T 0762-0701-0000 Murata-PS China        2111     
-        PSU1 Present    mwocp68 MWOCP68-3600-D-RM LL2111Q9003T 0762-0701-0000 Murata-PS China        2111     
-        PSU2 Present    mwocp68 -                 -            -              -         -            -        
-        PSU3 NotPresent mwocp68 -                 -            -              -         -            -        
-        PSU4 Present    mwocp68 MWOCP68-3600-D-RM LL2115Q1001T 0762-0701-0000 Murata-PS China        2115     
-        PSU5 NotPresent mwocp68 -                 -            -              -         -            -        
+        SLOT PRESENCE   DEVICE  MFR_MODEL         MFR_SERIAL   PRIMARY_FW_REV SECONDARY_FW_REV MFR_ID    MFR_LOCATION MFR_DATE 
+        PSU0 Present    mwocp68 MWOCP68-3600-D-RM LL2111Q9002T 0762           0701             Murata-PS China        2111     
+        PSU1 Present    mwocp68 MWOCP68-3600-D-RM LL2111Q9003T -              -                Murata-PS China        2111     
+        PSU2 Present    mwocp68 -                 -            -              -                -         -            -        
+        PSU3 NotPresent mwocp68 -                 -            -              -                -         -            -        
+        PSU4 Present    mwocp68 MWOCP68-3600-D-RM LL2115Q1001T 0762           0702             Murata-PS China        2115     
+        PSU5 NotPresent mwocp68 -                 -            -              -                -         -            -        
     PSU VPD errors:
+      - PSU1: failed to parse firmware revisions from MFR_REVISION "0762-0701": expected firmware revision to end with 0000
       - PSU2: test suite injected VPD read failure

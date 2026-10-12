@@ -19,6 +19,7 @@ use iddqd::id_ord_map;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::InternalDnsGenerationStatus;
 use nexus_types::inventory::Psu;
+use nexus_types::inventory::PsuFirmwareRevisions;
 use nexus_types::inventory::PsuIdentity;
 use nexus_types::inventory::PsuSlot;
 use nexus_types::inventory::PsuState;
@@ -234,22 +235,31 @@ pub fn representative() -> Representative {
         )
         .unwrap();
 
-    // a real PSC will always report 6 PSU slots, even if some are not present,
-    // so let's make sure to do that here for realism's sake.
-    let psus = [
-        (PsuSlot::Psu0, Some(Ok("LL2111Q9002T"))),
-        (PsuSlot::Psu1, Some(Ok("LL2111Q9003T"))),
-        (PsuSlot::Psu2, Some(Ok("LL2111Q9013T"))),
-        (PsuSlot::Psu3, Some(Err("fake VPD read error"))),
-        (PsuSlot::Psu4, Some(Ok("LL2115Q1001T"))),
-        (PsuSlot::Psu5, None),
-    ];
     let psu_device = ExamplePsuKind::Mwocp68;
-    for (slot, serial) in psus {
-        let psu = match serial {
-            Some(serial) => psu("fake MGS 1", slot, psu_device, serial),
-            None => psu_missing("fake MGS 1", slot, psu_device),
-        };
+    let mut psus = power_shelf_psus(
+        "fake MGS 1",
+        psu_device,
+        [
+            Some(Ok("LL2111Q9002T")),
+            Some(Ok("LL2111Q9003T")),
+            Some(Ok("LL2111Q9013T")),
+            Some(Err("fake VPD read error")),
+            Some(Ok("LL2115Q1001T")),
+            None,
+        ],
+    );
+    // Simulate a PSU whose VPD was read successfully, but whose `MFR_REVISION`
+    // is not in the expected format, so its firmware revisions could not be
+    // parsed.
+    psus[2].state = Some(PsuState {
+        status: PsuStatus::Present,
+        identity: Ok(psu_identity_with_revision(
+            psu_device,
+            "LL2111Q9013T",
+            "0762-0701",
+        )),
+    });
+    for psu in psus {
         builder.found_psu(&psc_bb, 1, psu).unwrap();
     }
 
@@ -878,6 +888,20 @@ pub fn psu_identity(
     kind: ExamplePsuKind,
     serial: impl ToString,
 ) -> PsuIdentity {
+    psu_identity_with_revision(kind, serial, "0762-0701-0000")
+}
+
+/// Constructs a realistic-looking PSU identity for a muRata PSU, with the given
+/// `MFR_REVISION` value.
+///
+/// The firmware revisions are parsed from `mfr_revision` in the same way as
+/// they are when collecting inventory, so passing a malformed revision
+/// simulates a PSU whose firmware revisions could not be parsed.
+pub fn psu_identity_with_revision(
+    kind: ExamplePsuKind,
+    serial: impl ToString,
+    mfr_revision: impl ToString,
+) -> PsuIdentity {
     let mfr_model = match kind {
         ExamplePsuKind::Mwocp68 => String::from("MWOCP68-3600-D-RM"),
         ExamplePsuKind::Mwocp67 => String::from("MWOCP67-5500-B-RM"),
@@ -891,13 +915,18 @@ pub fn psu_identity(
         .filter(|date| date.chars().all(|c| c.is_numeric()))
         .unwrap_or("2111")
         .to_string();
+    let mfr_revision = mfr_revision.to_string();
+    let firmware_revs = mfr_revision
+        .parse::<PsuFirmwareRevisions>()
+        .map_err(|e| format!("{e:#}"));
     PsuIdentity {
         mfr_id: String::from("Murata-PS"),
         mfr_model,
-        firmware_rev: String::from("0762-0701-0000"),
+        mfr_revision,
         mfr_location: String::from("China"),
         mfr_date,
         mfr_serial,
+        firmware_revs,
     }
 }
 
@@ -936,6 +965,31 @@ pub fn psu_missing(
         time_collected: now_db_precision(),
         state: None,
     }
+}
+
+/// Constructs the PSUs reported by a PSC in a single inventory of its power
+/// shelf.
+///
+/// The PSC always reports all six PSU slots, even if some are empty, so this
+/// takes one entry per slot, in order from `PSU0` to `PSU5`. If the entry for a
+/// given slot is `None`, the returned array contains a [`Psu`] representing a
+/// slot where no PSU is present. If the entry is `Some`, then the provided
+/// `Result` represents the result of reading the PSU's VPD identity. `Ok` with
+/// a string represents the serial number of a successful VPD read, while `Err`
+/// represents a simulated error reading the VPD from a PSU.
+pub fn power_shelf_psus(
+    source: &str,
+    kind: ExamplePsuKind,
+    psus: [Option<Result<&str, &str>>; 6],
+) -> [Psu; 6] {
+    let mut slots = PsuSlot::ALL.iter().copied();
+    psus.map(|serial| {
+        let slot = slots.next().expect("PsuSlot::ALL has 6 entries");
+        match serial {
+            Some(serial) => psu(source, slot, kind, serial),
+            None => psu_missing(source, slot, kind),
+        }
+    })
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
