@@ -745,12 +745,7 @@ impl CollectionBuilder {
     /// Returns `true` if we have already found *all PSUs* for the PSC with the
     /// provided baseboard identity.
     pub fn found_all_psus_already(&self, psc: &BaseboardId) -> bool {
-        let Some(sp) = self.sps.get(psc) else {
-            // haven't even found the PSC yet!
-            return false;
-        };
-        self.power_shelves
-            .get(&(&psc.rack_id, psc.sp_slot))
+        self.power_shelf_for_psc(psc)
             .map(|shelf| {
                 PsuSlot::ALL.iter().all(|slot| found_psu_already(shelf, *slot))
             })
@@ -763,14 +758,23 @@ impl CollectionBuilder {
     /// This is used to avoid requesting it multiple times (from multiple MGS
     /// instances).
     pub fn found_psu_already(&self, psc: &BaseboardId, psu: PsuSlot) -> bool {
-        let Some(sp) = self.sps.get(psc) else {
-            // haven't even found the PSC yet!
-            return false;
-        };
-        self.power_shelves
-            .get(&(&psc.rack_id, psc.sp_slot))
+        self.power_shelf_for_psc(psc)
             .map(|shelf| found_psu_already(shelf, psu))
             .unwrap_or(false)
+    }
+
+    /// Returns the power shelf at the location of the PSC with the provided
+    /// baseboard identity, if one has been recorded *by that PSC*.
+    ///
+    /// If the shelf at that location was recorded by a different PSC, this
+    /// returns `None`, since nothing has been found from *this* PSC yet. See
+    /// [`CollectionBuilder::found_psu`] for details on this.
+    fn power_shelf_for_psc(&self, psc: &BaseboardId) -> Option<&PowerShelf> {
+        // If we haven't found the PSC's SP yet, we don't know its location.
+        let sp = self.sps.get(psc)?;
+        self.power_shelves
+            .get(&(&sp.rack_id, sp.sp_slot))
+            .filter(|shelf| *shelf.psc_baseboard_id == *psc)
     }
 
     /// Record information about a power shelf PSU.
@@ -781,6 +785,15 @@ impl CollectionBuilder {
     /// VPD read also failed. Finally, this returns an error if the PSU was
     /// already successfully inventoried or if the baseboard ID does not refer
     /// to a power shelf controller SP.
+    ///
+    /// Power shelves are indexed by the shelf's physical location (rack ID and
+    /// shelf slot number), not by the PSC's baseboard identity. If we have
+    /// collected PSU inventory from one power shelf controller, and then that
+    /// PSC was removed and replaced with a different one before we query it
+    /// through the other MGS instance for that rack, we discard the previously
+    /// recorded shelf and re-inventory all the PSUs from the newer PSC. This
+    /// way, we ensure that the collection reflects the most recently seen PSC's
+    /// inventory.
     pub fn found_psu(
         &mut self,
         psc: &BaseboardId,
@@ -809,16 +822,26 @@ impl CollectionBuilder {
             )));
         }
 
-        let psus_for_psc = &mut self
-            .power_shelves
-            .entry((rack_id, sp_slot))
-            .or_insert_with(|| PowerShelf {
-                psc_baseboard_id: psc.clone(),
-                rack_id: *rack_id,
-                slot: sp_slot,
-                psus: IdOrdMap::with_capacity(6),
-            })
-            .psus;
+        let make_new_shelf = || PowerShelf {
+            psc_baseboard_id: psc.clone(),
+            rack_id: *rack_id,
+            slot: sp_slot,
+            psus: IdOrdMap::with_capacity(6),
+        };
+        let mut shelf = match self.power_shelves.entry((rack_id, sp_slot)) {
+            id_ord_map::Entry::Occupied(mut entry) => {
+                // If the preexisting entry has a different PSC baseboard ID,
+                // the PSC must have been removed and replaced since the
+                // previous inventory collection. In that case, discard the
+                // previous collection and start over.
+                if entry.get().psc_baseboard_id != *psc {
+                    entry.insert(make_new_shelf());
+                }
+                entry.into_mut()
+            }
+            id_ord_map::Entry::Vacant(entry) => entry.insert(make_new_shelf()),
+        };
+        let psus_for_psc = &mut shelf.psus;
 
         let psu_slot = psu.slot;
         match psus_for_psc.entry(psu_slot) {
@@ -914,9 +937,12 @@ pub use omicron_common::now_db_precision;
 mod test {
     use super::CollectionBuilder;
     use super::now_db_precision;
+    use crate::examples;
+    use crate::examples::ExamplePsuKind;
     use crate::examples::RACK_UUID;
     use crate::examples::Representative;
     use crate::examples::representative;
+    use crate::examples::sp_state;
     use base64::Engine;
     use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
     use gateway_client::types::SpComponentCaboose;
@@ -926,6 +952,8 @@ mod test {
     use gateway_types::rot::RotState;
     use nexus_types::inventory::Caboose;
     use nexus_types::inventory::CabooseWhich;
+    use nexus_types::inventory::Psu;
+    use nexus_types::inventory::PsuSlot;
     use nexus_types::inventory::RotPage;
     use nexus_types::inventory::RotPageWhich;
     use nexus_types::inventory::SpType;
@@ -1639,5 +1667,165 @@ mod test {
 
         // We should see no errors.
         assert!(collection.errors.is_empty());
+    }
+
+    // Tests that if a different PSC is found at a power shelf location from
+    // which PSUs were already reported (i.e., the PSC was removed and replaced
+    // between MGS queries), the shelf is completely re-inventoried from the
+    // newer PSC, rather than merging the PSUs reported by both PSCs or
+    // rejecting the newer PSC's PSUs.
+    #[test]
+    fn test_power_shelf_psc_replaced() {
+        let mut builder =
+            CollectionBuilder::new("test_power_shelf_psc_replaced");
+        let mgs_1 = "fake MGS 1";
+        let mgs_2 = "fake MGS 2";
+
+        // The first MGS finds the original PSC in shelf 0, and a PSC in shelf
+        // 1, which is not replaced and should be unaffected throughout.
+        let old_psc = builder
+            .found_sp_state(mgs_1, RACK_UUID, SpType::Power, 0, sp_state("old"))
+            .unwrap();
+        let other_psc = builder
+            .found_sp_state(
+                mgs_1,
+                RACK_UUID,
+                SpType::Power,
+                1,
+                sp_state("other"),
+            )
+            .unwrap();
+
+        fn make_psus(
+            source: &str,
+            psus: [(PsuSlot, Option<Result<&str, &str>>); 6],
+        ) -> Vec<Psu> {
+            let psu_device = ExamplePsuKind::Mwocp68;
+            psus.into_iter()
+                .map(move |(slot, serial)| match serial {
+                    Some(serial) => {
+                        examples::psu(source, slot, psu_device, serial)
+                    }
+                    None => examples::psu_missing(source, slot, psu_device),
+                })
+                .collect()
+        }
+
+        // Populate both PSCs' inventories of PSUs.
+        let old_psus = make_psus(
+            mgs_1,
+            [
+                (PsuSlot::Psu0, Some(Ok("old0"))),
+                (PsuSlot::Psu1, Some(Ok("old1"))),
+                (PsuSlot::Psu2, Some(Ok("old2"))),
+                (PsuSlot::Psu3, Some(Err("fake VPD read error"))),
+                (PsuSlot::Psu4, Some(Ok("old4"))),
+                (PsuSlot::Psu5, None),
+            ],
+        );
+        let other_psus = make_psus(
+            mgs_1,
+            [
+                (PsuSlot::Psu0, None),
+                (PsuSlot::Psu1, Some(Ok("other1"))),
+                (PsuSlot::Psu2, Some(Err("fake VPD read error"))),
+                (PsuSlot::Psu3, Some(Ok("other3"))),
+                (PsuSlot::Psu4, Some(Ok("other4"))),
+                (PsuSlot::Psu5, Some(Ok("other5"))),
+            ],
+        );
+        for psu in &old_psus {
+            assert!(
+                builder.found_psu(&old_psc, 0, psu.clone()).unwrap(),
+                "PSU should be inserted"
+            );
+        }
+        for psu in &other_psus {
+            assert!(
+                builder.found_psu(&other_psc, 1, psu.clone()).unwrap(),
+                "PSU should be inserted"
+            );
+        }
+        assert!(builder.found_psu_already(&old_psc, PsuSlot::Psu0));
+
+        // The second MGS finds a different PSC in shelf 0. Nothing has been
+        // found from the new PSC yet, even though the old PSC already reported
+        // PSUs from the same location.
+        let new_psc = builder
+            .found_sp_state(mgs_2, RACK_UUID, SpType::Power, 0, sp_state("new"))
+            .unwrap();
+        assert_ne!(old_psc, new_psc);
+        assert!(
+            !builder.found_psu_already(&new_psc, PsuSlot::Psu0),
+            "found_psu_already() with a different baseboard ID should return \
+             false"
+        );
+        assert!(
+            !builder.found_all_psus_already(&new_psc),
+            "found_all_psus_already() with a different baseboard ID should \
+            return false"
+        );
+
+        // The new PSC reports a different set of PSUs.
+        let new_psus = make_psus(
+            mgs_2,
+            [
+                (PsuSlot::Psu0, Some(Ok("new0"))),
+                (PsuSlot::Psu1, None),
+                (PsuSlot::Psu2, Some(Ok("new2"))),
+                (PsuSlot::Psu3, Some(Ok("new3"))),
+                (PsuSlot::Psu4, Some(Ok("new4"))),
+                (PsuSlot::Psu5, Some(Ok("new5"))),
+            ],
+        );
+        let (first_new_psu, rest_new_psus) = new_psus.split_first().unwrap();
+
+        // The new PSC reports PSU0, which the old PSC already reported
+        // successfully. This would be an error if it were the same PSC.
+        assert!(
+            builder.found_psu(&new_psc, 0, first_new_psu.clone()).unwrap(),
+            "PSU should be inserted"
+        );
+        assert!(builder.found_psu_already(&new_psc, PsuSlot::Psu0));
+        // The shelf now belongs to the new PSC, and *all* of the old PSC's
+        // reports were discarded, not just the one for the slot the new PSC
+        // reported: the old PSC's PSU1 must not be carried over.
+        assert!(!builder.found_psu_already(&new_psc, PsuSlot::Psu1));
+        assert!(!builder.found_psu_already(&old_psc, PsuSlot::Psu0));
+        assert!(!builder.found_psu_already(&old_psc, PsuSlot::Psu1));
+        // The other power shelf is unaffected.
+        assert!(builder.found_psu_already(&other_psc, PsuSlot::Psu1));
+
+        // Finish populating the new PSC's shelf.
+        for psu in rest_new_psus {
+            assert!(
+                builder.found_psu(&new_psc, 0, psu.clone()).unwrap(),
+                "PSU should be inserted"
+            );
+        }
+        assert!(builder.found_all_psus_already(&new_psc));
+
+        let collection = builder.build();
+        assert!(collection.errors.is_empty(), "{:#?}", collection.errors);
+        assert_eq!(collection.power_shelves.len(), 2);
+
+        // Shelf 0 contains the PSUs reported by the second PSC in that slot.
+        let shelf0 = collection.power_shelves.get(&(&RACK_UUID, 0)).unwrap();
+        assert_eq!(shelf0.psc_baseboard_id, new_psc);
+        assert_eq!(shelf0.rack_id, RACK_UUID);
+        assert_eq!(shelf0.slot, 0);
+        assert_eq!(shelf0.psus.iter().cloned().collect::<Vec<_>>(), new_psus);
+
+        // Shelf 1 is unchanged.
+        let shelf1 = collection.power_shelves.get(&(&RACK_UUID, 1)).unwrap();
+        assert_eq!(shelf1.psc_baseboard_id, other_psc);
+        assert_eq!(shelf1.rack_id, RACK_UUID);
+        assert_eq!(shelf1.slot, 1);
+        assert_eq!(shelf1.psus.iter().cloned().collect::<Vec<_>>(), other_psus);
+
+        // Both PSCs' SP records are still present, which is how the collection
+        // reflects that the swap occurred.
+        assert_eq!(collection.sps[&old_psc].sp_slot, 0);
+        assert_eq!(collection.sps[&new_psc].sp_slot, 0);
     }
 }

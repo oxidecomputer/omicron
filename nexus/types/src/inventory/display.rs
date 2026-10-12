@@ -508,7 +508,7 @@ fn display_devices(
 
         if sp.sp_type == SpType::Power {
             display_power_shelf(
-                collection.power_shelves.get(baseboard_id.as_ref()),
+                collection.power_shelves.get(&(&sp.rack_id, sp.sp_slot)),
                 f,
             )?;
         }
@@ -1679,7 +1679,6 @@ mod tests {
     use chrono::DateTime;
     use chrono::Utc;
     use iddqd::IdOrdMap;
-    use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::RackUuid;
     use sled_hardware_types::BaseboardId;
     use std::sync::Arc;

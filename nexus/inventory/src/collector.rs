@@ -1040,6 +1040,7 @@ mod test {
     use iddqd::IdOrdMap;
     use iddqd::id_ord_map;
     use nexus_types::inventory::Collection;
+    use nexus_types::inventory::PowerShelf;
     use nexus_types::inventory::PsuIdentity;
     use nexus_types::inventory::PsuIdentityResult;
     use omicron_cockroach_metrics::CockroachClusterAdminClient;
@@ -1277,15 +1278,17 @@ mod test {
             r.basic(true).uuids(true);
             r
         };
-        for shelf in &collection.power_shelves {
+        for PowerShelf { rack_id, slot, psc_baseboard_id, psus } in
+            &collection.power_shelves
+        {
             swriteln!(
                 s,
-                "    shelf {} PSC baseboard part {:?} serial {:?}",
-                shelf.slot,
-                shelf.psc_baseboard_id.part_number,
-                shelf.psc_baseboard_id.serial_number,
+                "    rack {rack_id} shelf {slot}, PSC baseboard part {:?} \
+                 serial {:?}",
+                psc_baseboard_id.part_number,
+                psc_baseboard_id.serial_number,
             );
-            for psu in &shelf.psus {
+            for psu in psus {
                 swriteln!(
                     s,
                     "        {}: presence {:?} hubris_device {}",

@@ -246,18 +246,9 @@ pub fn representative() -> Representative {
     ];
     let psu_device = ExamplePsuKind::Mwocp68;
     for (slot, serial) in psus {
-        let state = serial.map(|id_result| {
-            let identity = id_result
-                .map(|serial| psu_identity(psu_device, serial))
-                .map_err(ToString::to_string);
-            PsuState { status: PsuStatus::Present, identity }
-        });
-        let psu = Psu {
-            time_collected: now_db_precision(),
-            source: String::from("fake MGS 1"),
-            slot,
-            hubris_device_type: psu_device.hubris_device_type(),
-            state,
+        let psu = match serial {
+            Some(serial) => psu("fake MGS 1", slot, psu_device, serial),
+            None => psu_missing("fake MGS 1", slot, psu_device),
         };
         builder.found_psu(&psc_bb, 1, psu).unwrap();
     }
@@ -907,6 +898,43 @@ pub fn psu_identity(
         mfr_location: String::from("China"),
         mfr_date,
         mfr_serial,
+    }
+}
+
+/// Constructs an entry for a present PSU, with the given source, PSU slot, and
+/// serial number. If `serial` is `Ok`, a valid PSU VPD identity is simulated;
+/// if it is `Err`, a VPD read error with the given message is simulated,
+/// instead.
+pub fn psu(
+    source: impl ToString,
+    slot: PsuSlot,
+    kind: ExamplePsuKind,
+    serial: Result<impl ToString, impl ToString>,
+) -> Psu {
+    let identity = serial
+        .map(|serial| psu_identity(kind, serial))
+        .map_err(|e| e.to_string());
+    Psu {
+        source: source.to_string(),
+        slot,
+        hubris_device_type: kind.hubris_device_type(),
+        time_collected: now_db_precision(),
+        state: Some(PsuState { status: PsuStatus::Present, identity }),
+    }
+}
+
+/// Constructs an entry for a PSU slot that contains no PSU.
+pub fn psu_missing(
+    source: impl ToString,
+    slot: PsuSlot,
+    kind: ExamplePsuKind,
+) -> Psu {
+    Psu {
+        source: source.to_string(),
+        slot,
+        hubris_device_type: kind.hubris_device_type(),
+        time_collected: now_db_precision(),
+        state: None,
     }
 }
 

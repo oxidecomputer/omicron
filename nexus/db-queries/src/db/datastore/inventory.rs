@@ -827,6 +827,10 @@ impl DataStore {
                 for shelf in &collection.power_shelves {
                     let PowerShelf {
                         psc_baseboard_id,
+                        // The rack ID and slot are determined from the PSC's
+                        // `inv_service_processor` row when loading, so they are
+                        // not stored in the PSU table.
+                        rack_id: _,
                         slot: _,
                         psus,
                     } = shelf;
@@ -3688,28 +3692,49 @@ impl DataStore {
                 });
             }
 
+            let rack_id = sp.rack_id;
+            let slot = sp.sp_slot;
             let psu = nexus_types::inventory::Psu::try_from(row).map_err(
                 |error| Error::InternalError {
                     internal_message: format!(
-                        "invalid PSU row for PSC {psc:?}: {error:#}",
+                        "invalid PSU row for PSC {psc:?} (rack {rack_id} power \
+                         shelf {slot}): {error:#}",
                     ),
                 },
             )?;
 
-            power_shelves
-                .entry(psc.as_ref())
+            // The power shelf's location comes from the PSC's SP row.
+            let mut shelf = power_shelves
+                .entry((&rack_id, slot))
                 .or_insert_with(|| PowerShelf {
                     psc_baseboard_id: psc.clone(),
-                    slot: sp.sp_slot,
+                    rack_id,
+                    slot,
                     psus: IdOrdMap::with_capacity(6),
-                })
-                .psus
-                .insert_unique(psu)
-                .map_err(|error| Error::InternalError {
+                });
+            // The database schema doesn't prevent us from inserting PSU rows
+            // reported by two different PSC service processors that were found
+            // in the same location, but the collector should not do this. If a
+            // new PSC is inserted between collection attempts from one MGS and
+            // the other, any previously collected PSU entries should be
+            // replaced with the PSUs reported by the new PSC. Therefore, if
+            // we actually encounter this, that's a collector bug.
+            if shelf.psc_baseboard_id != *psc {
+                return Err(Error::InternalError {
+                    internal_message: format!(
+                        "PSU rows for rack {rack_id} power shelf {slot} \
+                         reference multiple PSC baseboards ({:?} and {psc:?})",
+                        shelf.psc_baseboard_id,
+                    ),
+                });
+            }
+            shelf.psus.insert_unique(psu).map_err(|error| {
+                Error::InternalError {
                     internal_message: format!(
                         "duplicate PSU row for power shelf {psc:?}: {error}",
                     ),
-                })?;
+                }
+            })?;
         }
 
         // Fetch the host phase 1 active slots found.
