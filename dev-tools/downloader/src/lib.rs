@@ -204,6 +204,58 @@ fn arch() -> Result<Arch> {
     Ok(arch)
 }
 
+/// An Oxide repository at `revision`.
+///
+/// This assumes that the repo URL is `github.com/oxidecomputer/{name}`.
+#[derive(Clone, Copy)]
+struct OxideRepoRevision {
+    name: &'static str,
+    revision: GitCommitHash,
+}
+
+/// Represents a file that needs to be retrieved from Buildomat.
+///
+/// This assumes that:
+///
+/// * The repo URL is `github.com/oxidecomputer/{name}`.
+/// * The file is hosted in Buildomat, under
+///   `{BUILDOMAT_URL}/oxidecomputer/{name}/{series}`.
+/// * The file is published for `revision`, at `{revision}/{filename}`.
+/// * The SHA2-256 checksum for the file is also published.
+struct OxideBuildomatFile {
+    repo: OxideRepoRevision,
+    series: &'static str,
+    filename: &'static str,
+    sha2: Sha256Digest,
+}
+
+impl OxideBuildomatFile {
+    fn url(&self) -> String {
+        let Self {
+            repo: OxideRepoRevision { name, revision },
+            series,
+            filename,
+            sha2: _,
+        } = self;
+        format!(
+            "{BUILDOMAT_URL}/oxidecomputer/{name}/{series}/{revision}/{filename}"
+        )
+    }
+}
+
+/// A binary that needs to either be downloaded or built on a non-illumos
+/// platform.
+///
+/// On illumos, the image tarball (i.e., with series `image`) already provides
+/// all binaries.
+struct HostNativeBinary {
+    name: &'static str,
+    /// If downloading the binary for Linux, the SHA2-256 checksum of the file.
+    x86_64_linux_sha2: Sha256Digest,
+    /// If building the binary from source, the arguments to pass to cargo.
+    source_build_args: &'static [&'static str],
+}
+
 struct Downloader<'a> {
     log: Logger,
 
@@ -226,21 +278,21 @@ impl<'a> Downloader<'a> {
     /// Build a binary from a git repository at a specific commit.
     ///
     /// This function:
-    /// 1. Checks for cached binaries at `out/.build-cache/{project}/{commit}/`
+    /// 1. Checks for cached binaries at `out/.build-cache/{repo_name}/{commit}/`
     /// 2. If not cached, shallow clones the repo to a temp directory
     /// 3. Builds the specified binaries with cargo
     /// 4. Caches the built binaries
     /// 5. Returns paths to the cached binaries
     async fn build_from_git(
         &self,
-        project: &str,
+        repo_name: &str,
         commit: GitCommitHash,
         binaries: &[(&str, &[&str])], // (binary_name, cargo_args)
     ) -> Result<Vec<Utf8PathBuf>> {
         let cache_dir = self
             .output_dir
             .join(".build-cache")
-            .join(project)
+            .join(repo_name)
             .join(commit.to_string());
 
         // Check if all binaries are already cached
@@ -256,17 +308,18 @@ impl<'a> Downloader<'a> {
         }
 
         if all_cached {
-            info!(self.log, "Found cached binaries for {project} at {commit}"; "cache_dir" => %cache_dir);
+            info!(self.log, "Found cached binaries for {repo_name} at {commit}"; "cache_dir" => %cache_dir);
             return Ok(cached_paths);
         }
 
         // Need to build - create temp directory
-        info!(self.log, "Building {project} from source at commit {commit}");
+        info!(self.log, "Building {repo_name} from source at commit {commit}");
         let temp_dir = camino_tempfile::tempdir()?;
         let temp_path = temp_dir.path().to_owned();
 
         // Clone and checkout the specific commit
-        let repo_url = format!("https://github.com/oxidecomputer/{}", project);
+        let repo_url =
+            format!("https://github.com/oxidecomputer/{}", repo_name);
         info!(self.log, "Cloning {repo_url}");
         let mut clone_cmd = Command::new("git");
         clone_cmd
@@ -333,7 +386,7 @@ impl<'a> Downloader<'a> {
             result_paths.push(cached_path);
         }
 
-        info!(self.log, "Successfully built and cached {project} binaries");
+        info!(self.log, "Successfully built and cached {repo_name} binaries");
         Ok(result_paths)
     }
 }
@@ -639,6 +692,98 @@ impl Downloader<'_> {
         Ok(version.to_string())
     }
 
+    /// Downloads a file off of Buildomat to the given path, and verifies its
+    /// checksum.
+    ///
+    /// If the path is already present and matches the checksum, it isn't
+    /// downloaded again.
+    async fn download_oxide_buildomat_file(
+        &self,
+        file: &OxideBuildomatFile,
+        path: &Utf8Path,
+    ) -> Result<()> {
+        download_file_and_verify(&self.log, path, &file.url(), file.sha2).await
+    }
+
+    /// Downloads an executable file off of Buildomat to the given path, and
+    /// verifies its checksum.
+    ///
+    /// The file is staged in `{self.output_dir}/downloads`.
+    async fn download_oxide_buildomat_binary(
+        &self,
+        binary: &OxideBuildomatFile,
+        binary_dir: &Utf8Path,
+    ) -> Result<()> {
+        let path = self.output_dir.join("downloads").join(binary.filename);
+        self.download_oxide_buildomat_file(binary, &path).await?;
+        set_permissions(&path, 0o755).await?;
+        let dest = binary_dir.join(binary.filename);
+        tokio::fs::copy(&path, &dest)
+            .await
+            .with_context(|| format!("Failed to copy {path} to {dest}"))?;
+
+        // A prebuilt binary can potentially be incompatible with this host
+        // (e.g., due to a libc version or dynamically linked libraries). Do a
+        // little smoke test to make sure the binary works.
+        info!(self.log, "Checking that {} works", binary.filename);
+        confirm_binary_works(&dest, &["--help"]).await?;
+        Ok(())
+    }
+
+    /// Installs binaries for the host into `binary_dir`.
+    ///
+    /// Uses prebuilt binaries where available, otherwise builds from source.
+    ///
+    /// This doesn't do anything on illumos, since the image tarball already
+    /// provides the binaries.
+    async fn install_host_native_binaries(
+        &self,
+        repo: OxideRepoRevision,
+        linux_series: &'static str,
+        binaries: &[HostNativeBinary],
+        binary_dir: &Utf8Path,
+    ) -> Result<()> {
+        match os_name()? {
+            Os::Linux => {
+                for binary in binaries {
+                    let file = OxideBuildomatFile {
+                        repo,
+                        series: linux_series,
+                        filename: binary.name,
+                        sha2: binary.x86_64_linux_sha2,
+                    };
+                    self.download_oxide_buildomat_binary(&file, binary_dir)
+                        .await?;
+                }
+            }
+            Os::Mac => {
+                info!(self.log, "Building {} from source for macOS", repo.name,);
+
+                // Perform a single `build_from_git` call for all provided
+                // binaries, so they share a checkout and target directory.
+                let to_build: Vec<_> = binaries
+                    .iter()
+                    .map(|binary| (binary.name, binary.source_build_args))
+                    .collect();
+                let built_binaries = self
+                    .build_from_git(repo.name, repo.revision, &to_build)
+                    .await?;
+
+                for (built_path, binary) in built_binaries.iter().zip(binaries)
+                {
+                    let dest = binary_dir.join(binary.name);
+                    tokio::fs::copy(built_path, &dest).await?;
+                    set_permissions(&dest, 0o755).await?;
+                }
+            }
+            Os::Illumos => {
+                // The image tarball already provides all binaries.
+            }
+        }
+
+        Ok(())
+    }
+
     async fn download_cargo_hack(&self) -> Result<()> {
         let os = os_name()?;
         let arch = arch()?;
@@ -753,22 +898,18 @@ impl Downloader<'_> {
             Os::Mac => "darwin-amd64",
         };
 
-        let tarball_filename = "cockroach.tgz";
-        let tarball_url = format!(
-            "{BUILDOMAT_URL}/oxidecomputer/cockroach/{build}/{commit}/{tarball_filename}"
-        );
-        let tarball_path = download_dir.join(tarball_filename);
+        let tarball = OxideBuildomatFile {
+            repo: OxideRepoRevision { name: "cockroach", revision: commit },
+            series: build,
+            filename: "cockroach.tgz",
+            sha2: checksum,
+        };
+        let tarball_path = download_dir.join(tarball.filename);
 
         tokio::fs::create_dir_all(&download_dir).await?;
         tokio::fs::create_dir_all(&destination_dir).await?;
 
-        download_file_and_verify(
-            &self.log,
-            &tarball_path,
-            &tarball_url,
-            checksum,
-        )
-        .await?;
+        self.download_oxide_buildomat_file(&tarball, &tarball_path).await?;
 
         // We unpack the tarball in the download directory to emulate the old
         // behavior. This could be a little more consistent with Clickhouse.
@@ -833,29 +974,27 @@ impl Downloader<'_> {
             KvFile::read(self.versions_dir.join("dendrite_stub_checksums"))
                 .await?;
         let sha2 = stub_checksums.get_sha256_value("CIDL_SHA256_ILLUMOS")?;
-        let dpd_sha2 =
+        let dpd_linux_sha2 =
             stub_checksums.get_sha256_value("CIDL_SHA256_LINUX_DPD")?;
-        let swadm_sha2 =
+        let swadm_linux_sha2 =
             stub_checksums.get_sha256_value("CIDL_SHA256_LINUX_SWADM")?;
         let version =
             KvFile::read(self.versions_dir.join("dendrite_version")).await?;
         let commit = version.get_git_commit_hash_value("COMMIT")?;
 
-        let tarball_file = "dendrite-stub.tar.gz";
-        let tarball_path = download_dir.join(tarball_file);
-        let repo = "oxidecomputer/dendrite";
-        let url_base = format!("{BUILDOMAT_URL}/{repo}/image/{commit}");
+        let repo = OxideRepoRevision { name: "dendrite", revision: commit };
+        let tarball = OxideBuildomatFile {
+            repo,
+            series: "image",
+            filename: "dendrite-stub.tar.gz",
+            sha2,
+        };
+        let tarball_path = download_dir.join(tarball.filename);
 
         tokio::fs::create_dir_all(&download_dir).await?;
         tokio::fs::create_dir_all(&destination_dir).await?;
 
-        download_file_and_verify(
-            &self.log,
-            &tarball_path,
-            &format!("{url_base}/{tarball_file}"),
-            sha2,
-        )
-        .await?;
+        self.download_oxide_buildomat_file(&tarball, &tarball_path).await?;
 
         // Unpack in the download directory, then copy everything into the
         // destination directory.
@@ -876,58 +1015,25 @@ impl Downloader<'_> {
         )
         .context("Failed to create a symlink to dendrite's bin directory")?;
 
-        match os_name()? {
-            Os::Linux => {
-                let base_url =
-                    format!("{BUILDOMAT_URL}/{repo}/linux-bin/{commit}");
-                let filename = "dpd";
-                let path = download_dir.join(filename);
-                download_file_and_verify(
-                    &self.log,
-                    &path,
-                    &format!("{base_url}/{filename}"),
-                    dpd_sha2,
-                )
-                .await?;
-                set_permissions(&path, 0o755).await?;
-                tokio::fs::copy(path, bin_dir.join(filename)).await?;
-
-                let filename = "swadm";
-                let path = download_dir.join(filename);
-                download_file_and_verify(
-                    &self.log,
-                    &path,
-                    &format!("{base_url}/{filename}"),
-                    swadm_sha2,
-                )
-                .await?;
-                set_permissions(&path, 0o755).await?;
-                tokio::fs::copy(path, bin_dir.join(filename)).await?;
-            }
-            Os::Illumos => {}
-            Os::Mac => {
-                info!(self.log, "Building dendrite from source for macOS");
-
-                let binaries = [
-                    ("dpd", &["--features=tofino_stub"][..]),
-                    ("swadm", &[][..]),
-                ];
-
-                let built_binaries =
-                    self.build_from_git("dendrite", commit, &binaries).await?;
-
-                // Copy built binaries to bin_dir
-                for (binary_path, (binary_name, _)) in
-                    built_binaries.iter().zip(binaries.iter())
-                {
-                    let dest = bin_dir.join(binary_name);
-                    tokio::fs::copy(binary_path, &dest).await?;
-                    set_permissions(&dest, 0o755).await?;
-                }
-            }
-        }
-
-        Ok(())
+        let binaries = [
+            HostNativeBinary {
+                name: "dpd",
+                x86_64_linux_sha2: dpd_linux_sha2,
+                source_build_args: &["--features=tofino_stub"],
+            },
+            HostNativeBinary {
+                name: "swadm",
+                x86_64_linux_sha2: swadm_linux_sha2,
+                source_build_args: &[],
+            },
+        ];
+        self.install_host_native_binaries(
+            repo,
+            "linux-bin",
+            &binaries,
+            &bin_dir,
+        )
+        .await
     }
 
     async fn download_maghemite_mgd(&self) -> Result<()> {
@@ -945,18 +1051,15 @@ impl Downloader<'_> {
         .await?;
         let commit = version.get_git_commit_hash_value("COMMIT")?;
 
-        let repo = "oxidecomputer/maghemite";
-        let base_url = format!("{BUILDOMAT_URL}/{repo}/image/{commit}");
-
-        let filename = "mgd.tar.gz";
-        let tarball_path = download_dir.join(filename);
-        download_file_and_verify(
-            &self.log,
-            &tarball_path,
-            &format!("{base_url}/{filename}"),
-            mgd_sha2,
-        )
-        .await?;
+        let repo = OxideRepoRevision { name: "maghemite", revision: commit };
+        let tarball = OxideBuildomatFile {
+            repo,
+            series: "image",
+            filename: "mgd.tar.gz",
+            sha2: mgd_sha2,
+        };
+        let tarball_path = download_dir.join(tarball.filename);
+        self.download_oxide_buildomat_file(&tarball, &tarball_path).await?;
         unpack_tarball(&self.log, &tarball_path, &download_dir).await?;
 
         let destination_dir = self.output_dir.join("mgd");
@@ -969,39 +1072,13 @@ impl Downloader<'_> {
 
         let binary_dir = destination_dir.join("root/opt/oxide/mgd/bin");
 
-        match os_name()? {
-            Os::Linux => {
-                let filename = "mgd";
-                let path = download_dir.join(filename);
-                download_file_and_verify(
-                    &self.log,
-                    &path,
-                    &format!(
-                        "{BUILDOMAT_URL}/{repo}/linux/{commit}/{filename}"
-                    ),
-                    mgd_linux_sha2,
-                )
-                .await?;
-                set_permissions(&path, 0o755).await?;
-                tokio::fs::copy(path, binary_dir.join(filename)).await?;
-            }
-            Os::Mac => {
-                info!(self.log, "Building maghemite from source for macOS");
-
-                let binaries = [("mgd", &["--no-default-features"][..])];
-
-                let built_binaries =
-                    self.build_from_git("maghemite", commit, &binaries).await?;
-
-                // Copy built binary to binary_dir
-                let dest = binary_dir.join("mgd");
-                tokio::fs::copy(&built_binaries[0], &dest).await?;
-                set_permissions(&dest, 0o755).await?;
-            }
-            Os::Illumos => (),
-        }
-
-        Ok(())
+        let binaries = [HostNativeBinary {
+            name: "mgd",
+            x86_64_linux_sha2: mgd_linux_sha2,
+            source_build_args: &["--no-default-features"],
+        }];
+        self.install_host_native_binaries(repo, "linux", &binaries, &binary_dir)
+            .await
     }
 
     async fn download_maghemite_ddmd(&self) -> Result<()> {
@@ -1020,18 +1097,15 @@ impl Downloader<'_> {
         .await?;
         let commit = version.get_git_commit_hash_value("COMMIT")?;
 
-        let repo = "oxidecomputer/maghemite";
-        let base_url = format!("{BUILDOMAT_URL}/{repo}/image/{commit}");
-
-        let filename = "mg-ddm.tar.gz";
-        let tarball_path = download_dir.join(filename);
-        download_file_and_verify(
-            &self.log,
-            &tarball_path,
-            &format!("{base_url}/{filename}"),
-            mg_ddm_sha2,
-        )
-        .await?;
+        let repo = OxideRepoRevision { name: "maghemite", revision: commit };
+        let tarball = OxideBuildomatFile {
+            repo,
+            series: "image",
+            filename: "mg-ddm.tar.gz",
+            sha2: mg_ddm_sha2,
+        };
+        let tarball_path = download_dir.join(tarball.filename);
+        self.download_oxide_buildomat_file(&tarball, &tarball_path).await?;
         unpack_tarball(&self.log, &tarball_path, &download_dir).await?;
 
         let destination_dir = self.output_dir.join("mg-ddm");
@@ -1044,41 +1118,13 @@ impl Downloader<'_> {
 
         let binary_dir = destination_dir.join("root/opt/oxide/mg-ddm/bin");
 
-        match os_name()? {
-            Os::Linux => {
-                let filename = "ddmd";
-                let path = download_dir.join(filename);
-                download_file_and_verify(
-                    &self.log,
-                    &path,
-                    &format!(
-                        "{BUILDOMAT_URL}/{repo}/linux/{commit}/{filename}"
-                    ),
-                    ddmd_linux_sha2,
-                )
-                .await?;
-                set_permissions(&path, 0o755).await?;
-                tokio::fs::copy(path, binary_dir.join(filename)).await?;
-            }
-            Os::Mac => {
-                info!(
-                    self.log,
-                    "Building maghemite ddmd from source for macOS"
-                );
-
-                let binaries = [("ddmd", &["--no-default-features"][..])];
-
-                let built_binaries =
-                    self.build_from_git("maghemite", commit, &binaries).await?;
-
-                let dest = binary_dir.join("ddmd");
-                tokio::fs::copy(&built_binaries[0], &dest).await?;
-                set_permissions(&dest, 0o755).await?;
-            }
-            Os::Illumos => (),
-        }
-
-        Ok(())
+        let binaries = [HostNativeBinary {
+            name: "ddmd",
+            x86_64_linux_sha2: ddmd_linux_sha2,
+            source_build_args: &["--no-default-features"],
+        }];
+        self.install_host_native_binaries(repo, "linux", &binaries, &binary_dir)
+            .await
     }
 
     async fn download_softnpu(&self) -> Result<()> {
@@ -1090,14 +1136,14 @@ impl Downloader<'_> {
         let commit = checksums.get_git_commit_hash_value("COMMIT")?;
         let sha2 = checksums.get_sha256_value("SHA2")?;
 
-        let repo = "oxidecomputer/softnpu";
-
-        let filename = "npuzone";
-        let base_url = format!("{BUILDOMAT_URL}/{repo}/image/{commit}");
-        let artifact_url = format!("{base_url}/{filename}");
-
-        let path = destination_dir.join(filename);
-        download_file_and_verify(&self.log, &path, &artifact_url, sha2).await?;
+        let npuzone = OxideBuildomatFile {
+            repo: OxideRepoRevision { name: "softnpu", revision: commit },
+            series: "image",
+            filename: "npuzone",
+            sha2,
+        };
+        let path = destination_dir.join(npuzone.filename);
+        self.download_oxide_buildomat_file(&npuzone, &path).await?;
         set_permissions(&path, 0o755).await?;
 
         Ok(())
@@ -1114,19 +1160,18 @@ impl Downloader<'_> {
         let commit = version.get_git_commit_hash_value("COMMIT")?;
         let sha2 = version.get_sha256_value("CIDL_SHA256_ILLUMOS")?;
 
-        let repo = "oxidecomputer/transceiver-control";
-        let base_url = format!("{BUILDOMAT_URL}/{repo}/bins/{commit}");
-
-        let filename_gz = "xcvradm.gz";
-        let filename = "xcvradm";
-        let gzip_path = download_dir.join(filename_gz);
-        download_file_and_verify(
-            &self.log,
-            &gzip_path,
-            &format!("{base_url}/{filename_gz}"),
+        let xcvradm_gz = OxideBuildomatFile {
+            repo: OxideRepoRevision {
+                name: "transceiver-control",
+                revision: commit,
+            },
+            series: "bins",
+            filename: "xcvradm.gz",
             sha2,
-        )
-        .await?;
+        };
+        let filename = "xcvradm";
+        let gzip_path = download_dir.join(xcvradm_gz.filename);
+        self.download_oxide_buildomat_file(&xcvradm_gz, &gzip_path).await?;
 
         let download_bin_dir = download_dir.join("root/opt/oxide/bin");
         tokio::fs::create_dir_all(&download_bin_dir).await?;
