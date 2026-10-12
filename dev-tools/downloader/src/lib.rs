@@ -8,6 +8,7 @@
 //! parts of `cargo xtask` do not.
 
 use anyhow::{Context, Result, bail};
+use byte_wrapper::HexArray;
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::Parser;
 use clap::ValueEnum;
@@ -15,7 +16,8 @@ use flate2::bufread::GzDecoder;
 use futures::StreamExt;
 use sha2::Digest;
 use slog::{Drain, Logger, info, o, warn};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, btree_map};
+use std::fmt;
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::sync::OnceLock;
@@ -232,11 +234,14 @@ impl<'a> Downloader<'a> {
     async fn build_from_git(
         &self,
         project: &str,
-        commit: &str,
+        commit: GitCommitHash,
         binaries: &[(&str, &[&str])], // (binary_name, cargo_args)
     ) -> Result<Vec<Utf8PathBuf>> {
-        let cache_dir =
-            self.output_dir.join(".build-cache").join(project).join(commit);
+        let cache_dir = self
+            .output_dir
+            .join(".build-cache")
+            .join(project)
+            .join(commit.to_string());
 
         // Check if all binaries are already cached
         let mut cached_paths = Vec::new();
@@ -279,7 +284,10 @@ impl<'a> Downloader<'a> {
         // Checkout the specific commit
         info!(self.log, "Checking out commit {commit}");
         let mut checkout_cmd = Command::new("git");
-        checkout_cmd.arg("checkout").arg(commit).current_dir(&temp_path);
+        checkout_cmd
+            .arg("checkout")
+            .arg(commit.to_string())
+            .current_dir(&temp_path);
 
         let checkout_output = checkout_cmd.output().await?;
         if !checkout_output.status.success() {
@@ -330,45 +338,94 @@ impl<'a> Downloader<'a> {
     }
 }
 
-/// Parses a file of the format:
+/// A file containing data in the format:
 ///
 /// ```ignore
 /// KEY1="value1"
 /// KEY2="value2"
 /// ```
 ///
-/// And returns an array of the values in the same order as keys.
-async fn get_values_from_file<const N: usize>(
-    keys: [&str; N],
-    path: &Utf8Path,
-) -> Result<[String; N]> {
-    // Map of "key" => "Position in output".
-    let mut keys: HashMap<&str, usize> =
-        keys.into_iter().enumerate().map(|(i, s)| (s, i)).collect();
+/// These files are kept under `tools/`, and are formatted so that both shell
+/// scripts and Rust can read them.
+#[derive(Debug)]
+struct KvFile {
+    path: Utf8PathBuf,
+    values: BTreeMap<String, String>,
+}
 
-    const EMPTY_STRING: String = String::new();
-    let mut values = [EMPTY_STRING; N];
+impl KvFile {
+    async fn read(path: Utf8PathBuf) -> Result<Self> {
+        let contents = tokio::fs::read_to_string(&path)
+            .await
+            .with_context(|| format!("Failed to read {path}"))?;
+        Self::parse(path, &contents)
+    }
 
-    let content = tokio::fs::read_to_string(&path)
-        .await
-        .with_context(|| format!("Failed to read {path}"))?;
-    for line in content.lines() {
-        let line = line.trim();
-        let Some((key, value)) = line.split_once('=') else {
-            continue;
-        };
-        let value = value.trim_matches('"');
-        if let Some(i) = keys.remove(key) {
-            values[i] = value.to_string();
+    fn parse(path: Utf8PathBuf, contents: &str) -> Result<Self> {
+        let mut values = BTreeMap::new();
+        for (index, line) in contents.lines().enumerate() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            let line_number = index + 1;
+            let Some((key, value)) =
+                line.split_once('=').filter(|(key, _)| !key.is_empty())
+            else {
+                // Ban non-empty lines that aren't in the correct KEY="value"
+                // format.
+                bail!(
+                    "{path}:{line_number}: expected KEY=\"value\", found {line:?}"
+                );
+            };
+            match values.entry(key.to_owned()) {
+                btree_map::Entry::Vacant(entry) => {
+                    // We permit both quoted and unquoted values.
+                    entry.insert(value.trim_matches('"').to_owned());
+                }
+                btree_map::Entry::Occupied(_) => {
+                    // Ban duplicate keys.
+                    bail!(
+                        "{path}:{line_number}: key {key:?} is already set earlier in the file"
+                    );
+                }
+            }
         }
+        Ok(Self { path, values })
     }
-    if !keys.is_empty() {
-        bail!(
-            "Could not find keys {:?} in {path}",
-            keys.keys().collect::<Vec<_>>(),
-        );
+
+    fn get_string_value(&self, key: &str) -> Result<&str> {
+        let Some(value) = self.values.get(key) else {
+            bail!(
+                "Could not find key {key:?} in {}, which sets {:?}",
+                self.path,
+                self.values.keys().collect::<Vec<_>>(),
+            );
+        };
+        Ok(value)
     }
-    Ok(values)
+
+    fn get_sha256_value(&self, key: &str) -> Result<Sha256Digest> {
+        let value = self.get_string_value(key)?;
+        let bytes = value.parse().with_context(|| {
+            format!(
+                "Invalid SHA-256 checksum {value:?} for {key} in {}",
+                self.path,
+            )
+        })?;
+        Ok(Sha256Digest(bytes))
+    }
+
+    fn get_git_commit_hash_value(&self, key: &str) -> Result<GitCommitHash> {
+        let value = self.get_string_value(key)?;
+        let bytes = value.parse().with_context(|| {
+            format!(
+                "Invalid git commit hash {value:?} for {key} in {}",
+                self.path
+            )
+        })?;
+        Ok(GitCommitHash(bytes))
+    }
 }
 
 /// Send a GET request to `url`, downloading the contents to `path`.
@@ -394,21 +451,44 @@ async fn streaming_download(url: &str, path: &Utf8Path) -> Result<()> {
     Ok(())
 }
 
-/// Returns the hex, lowercase sha2 checksum of a file at `path`.
-async fn sha2_checksum(path: &Utf8Path) -> Result<String> {
-    let mut buf = vec![0u8; 65536];
-    let mut file = tokio::fs::File::open(path).await?;
-    let mut ctx = sha2::Sha256::new();
-    loop {
-        let n = file.read(&mut buf).await?;
-        if n == 0 {
-            break;
-        }
-        ctx.write_all(&buf[0..n])?;
-    }
+/// A SHA-256 digest.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Sha256Digest(HexArray<32>);
 
-    let digest = ctx.finalize();
-    Ok(format!("{digest:x}"))
+impl Sha256Digest {
+    /// Computes and returns the SHA-256 digest of the file at `path`.
+    async fn from_path(path: &Utf8Path) -> Result<Self> {
+        let mut buf = vec![0u8; 65536];
+        let mut file = tokio::fs::File::open(path).await?;
+        let mut ctx = sha2::Sha256::new();
+        loop {
+            let n = file.read(&mut buf).await?;
+            if n == 0 {
+                break;
+            }
+            ctx.write_all(&buf[0..n])?;
+        }
+
+        Ok(Self(HexArray::new(ctx.finalize().into())))
+    }
+}
+
+impl fmt::Display for Sha256Digest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&self.0, f)
+    }
+}
+
+/// A full (non-abbreviated) Git commit hash.
+///
+/// Currently we only support SHA-1 commit hashes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct GitCommitHash(HexArray<20>);
+
+impl fmt::Display for GitCommitHash {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&self.0, f)
+    }
 }
 
 async fn unpack_tarball(
@@ -492,18 +572,6 @@ async fn set_permissions(path: &Utf8Path, mode: u32) -> Result<()> {
     Ok(())
 }
 
-enum ChecksumAlgorithm {
-    Sha2,
-}
-
-impl ChecksumAlgorithm {
-    async fn checksum(&self, path: &Utf8Path) -> Result<String> {
-        match self {
-            ChecksumAlgorithm::Sha2 => sha2_checksum(path).await,
-        }
-    }
-}
-
 /// Downloads a file and verifies the checksum.
 ///
 /// If the file already exists and the checksum matches,
@@ -512,12 +580,11 @@ async fn download_file_and_verify(
     log: &Logger,
     path: &Utf8Path,
     url: &str,
-    algorithm: ChecksumAlgorithm,
-    checksum: &str,
+    checksum: Sha256Digest,
 ) -> Result<()> {
     let do_download = if path.exists() {
         info!(log, "Already downloaded ({path})");
-        if algorithm.checksum(&path).await? == checksum {
+        if Sha256Digest::from_path(path).await? == checksum {
             info!(
                 log,
                 "Checksum matches already downloaded file - skipping download"
@@ -550,7 +617,7 @@ async fn download_file_and_verify(
         }
     }
 
-    let observed_checksum = algorithm.checksum(&path).await?;
+    let observed_checksum = Sha256Digest::from_path(path).await?;
     if observed_checksum != checksum {
         bail!(
             "Checksum mismatch (saw {observed_checksum}, expected {checksum})"
@@ -579,12 +646,10 @@ impl Downloader<'_> {
         let download_dir = self.output_dir.join("downloads");
         let destination_dir = self.output_dir.join("cargo-hack");
 
-        let checksums_path = self.versions_dir.join("cargo_hack_checksum");
-        let [checksum] = get_values_from_file(
-            [&format!("CIDL_SHA256_{}", os.env_name())],
-            &checksums_path,
-        )
-        .await?;
+        let checksums =
+            KvFile::read(self.versions_dir.join("cargo_hack_checksum")).await?;
+        let checksum = checksums
+            .get_sha256_value(&format!("CIDL_SHA256_{}", os.env_name()))?;
 
         let version = self.read_version_file("cargo_hack_version").await?;
 
@@ -611,8 +676,7 @@ impl Downloader<'_> {
             &self.log,
             &tarball_path,
             &tarball_url,
-            ChecksumAlgorithm::Sha2,
-            &checksum,
+            checksum,
         )
         .await?;
 
@@ -627,12 +691,11 @@ impl Downloader<'_> {
         let download_dir = self.output_dir.join("downloads");
         let destination_dir = self.output_dir.join("clickhouse");
 
-        let checksums_path = self.versions_dir.join("clickhouse_checksums");
-        let [checksum] = get_values_from_file(
-            [&format!("CIDL_SHA256_{}", os.env_name())],
-            &checksums_path,
-        )
-        .await?;
+        let checksums =
+            KvFile::read(self.versions_dir.join("clickhouse_checksums"))
+                .await?;
+        let checksum = checksums
+            .get_sha256_value(&format!("CIDL_SHA256_{}", os.env_name()))?;
 
         let version = self.read_version_file("clickhouse_version").await?;
 
@@ -657,8 +720,7 @@ impl Downloader<'_> {
             &self.log,
             &tarball_path,
             &tarball_url,
-            ChecksumAlgorithm::Sha2,
-            &checksum,
+            checksum,
         )
         .await?;
 
@@ -678,12 +740,12 @@ impl Downloader<'_> {
         let download_dir = self.output_dir.join("downloads");
         let destination_dir = self.output_dir.join("cockroachdb");
 
-        let checksums_path = self.versions_dir.join("cockroachdb_checksums");
-        let [commit, checksum] = get_values_from_file(
-            ["COCKROACH_COMMIT", &format!("CIDL_SHA256_{}", os.env_name())],
-            &checksums_path,
-        )
-        .await?;
+        let checksums =
+            KvFile::read(self.versions_dir.join("cockroachdb_checksums"))
+                .await?;
+        let commit = checksums.get_git_commit_hash_value("COCKROACH_COMMIT")?;
+        let checksum = checksums
+            .get_sha256_value(&format!("CIDL_SHA256_{}", os.env_name()))?;
 
         let build = match os {
             Os::Illumos => "illumos-amd64",
@@ -704,8 +766,7 @@ impl Downloader<'_> {
             &self.log,
             &tarball_path,
             &tarball_url,
-            ChecksumAlgorithm::Sha2,
-            &checksum,
+            checksum,
         )
         .await?;
 
@@ -738,9 +799,10 @@ impl Downloader<'_> {
         let download_dir = self.output_dir.join("downloads");
         let tarball_path = download_dir.join("console.tar.gz");
 
-        let checksums_path = self.versions_dir.join("console_version");
-        let [commit, checksum] =
-            get_values_from_file(["COMMIT", "SHA2"], &checksums_path).await?;
+        let checksums =
+            KvFile::read(self.versions_dir.join("console_version")).await?;
+        let commit = checksums.get_git_commit_hash_value("COMMIT")?;
+        let checksum = checksums.get_sha256_value("SHA2")?;
 
         tokio::fs::create_dir_all(&download_dir).await?;
         let tarball_url = format!(
@@ -750,8 +812,7 @@ impl Downloader<'_> {
             &self.log,
             &tarball_path,
             &tarball_url,
-            ChecksumAlgorithm::Sha2,
-            &checksum,
+            checksum,
         )
         .await?;
 
@@ -768,20 +829,17 @@ impl Downloader<'_> {
         let download_dir = self.output_dir.join("downloads");
         let destination_dir = self.output_dir.join("dendrite-stub");
 
-        let stub_checksums_path =
-            self.versions_dir.join("dendrite_stub_checksums");
-
-        let [sha2, dpd_sha2, swadm_sha2] = get_values_from_file(
-            [
-                "CIDL_SHA256_ILLUMOS",
-                "CIDL_SHA256_LINUX_DPD",
-                "CIDL_SHA256_LINUX_SWADM",
-            ],
-            &stub_checksums_path,
-        )
-        .await?;
-        let version_path = self.versions_dir.join("dendrite_version");
-        let [commit] = get_values_from_file(["COMMIT"], &version_path).await?;
+        let stub_checksums =
+            KvFile::read(self.versions_dir.join("dendrite_stub_checksums"))
+                .await?;
+        let sha2 = stub_checksums.get_sha256_value("CIDL_SHA256_ILLUMOS")?;
+        let dpd_sha2 =
+            stub_checksums.get_sha256_value("CIDL_SHA256_LINUX_DPD")?;
+        let swadm_sha2 =
+            stub_checksums.get_sha256_value("CIDL_SHA256_LINUX_SWADM")?;
+        let version =
+            KvFile::read(self.versions_dir.join("dendrite_version")).await?;
+        let commit = version.get_git_commit_hash_value("COMMIT")?;
 
         let tarball_file = "dendrite-stub.tar.gz";
         let tarball_path = download_dir.join(tarball_file);
@@ -795,8 +853,7 @@ impl Downloader<'_> {
             &self.log,
             &tarball_path,
             &format!("{url_base}/{tarball_file}"),
-            ChecksumAlgorithm::Sha2,
-            &sha2,
+            sha2,
         )
         .await?;
 
@@ -829,8 +886,7 @@ impl Downloader<'_> {
                     &self.log,
                     &path,
                     &format!("{base_url}/{filename}"),
-                    ChecksumAlgorithm::Sha2,
-                    &dpd_sha2,
+                    dpd_sha2,
                 )
                 .await?;
                 set_permissions(&path, 0o755).await?;
@@ -842,8 +898,7 @@ impl Downloader<'_> {
                     &self.log,
                     &path,
                     &format!("{base_url}/{filename}"),
-                    ChecksumAlgorithm::Sha2,
-                    &swadm_sha2,
+                    swadm_sha2,
                 )
                 .await?;
                 set_permissions(&path, 0o755).await?;
@@ -859,7 +914,7 @@ impl Downloader<'_> {
                 ];
 
                 let built_binaries =
-                    self.build_from_git("dendrite", &commit, &binaries).await?;
+                    self.build_from_git("dendrite", commit, &binaries).await?;
 
                 // Copy built binaries to bin_dir
                 for (binary_path, (binary_name, _)) in
@@ -879,15 +934,16 @@ impl Downloader<'_> {
         let download_dir = self.output_dir.join("downloads");
         tokio::fs::create_dir_all(&download_dir).await?;
 
-        let checksums_path = self.versions_dir.join("maghemite_mgd_checksums");
-        let [mgd_sha2, mgd_linux_sha2] = get_values_from_file(
-            ["CIDL_SHA256", "MGD_LINUX_SHA256"],
-            &checksums_path,
+        let checksums =
+            KvFile::read(self.versions_dir.join("maghemite_mgd_checksums"))
+                .await?;
+        let mgd_sha2 = checksums.get_sha256_value("CIDL_SHA256")?;
+        let mgd_linux_sha2 = checksums.get_sha256_value("MGD_LINUX_SHA256")?;
+        let version = KvFile::read(
+            self.versions_dir.join("maghemite_mg_openapi_version"),
         )
         .await?;
-        let commit_path =
-            self.versions_dir.join("maghemite_mg_openapi_version");
-        let [commit] = get_values_from_file(["COMMIT"], &commit_path).await?;
+        let commit = version.get_git_commit_hash_value("COMMIT")?;
 
         let repo = "oxidecomputer/maghemite";
         let base_url = format!("{BUILDOMAT_URL}/{repo}/image/{commit}");
@@ -898,8 +954,7 @@ impl Downloader<'_> {
             &self.log,
             &tarball_path,
             &format!("{base_url}/{filename}"),
-            ChecksumAlgorithm::Sha2,
-            &mgd_sha2,
+            mgd_sha2,
         )
         .await?;
         unpack_tarball(&self.log, &tarball_path, &download_dir).await?;
@@ -924,8 +979,7 @@ impl Downloader<'_> {
                     &format!(
                         "{BUILDOMAT_URL}/{repo}/linux/{commit}/{filename}"
                     ),
-                    ChecksumAlgorithm::Sha2,
-                    &mgd_linux_sha2,
+                    mgd_linux_sha2,
                 )
                 .await?;
                 set_permissions(&path, 0o755).await?;
@@ -936,9 +990,8 @@ impl Downloader<'_> {
 
                 let binaries = [("mgd", &["--no-default-features"][..])];
 
-                let built_binaries = self
-                    .build_from_git("maghemite", &commit, &binaries)
-                    .await?;
+                let built_binaries =
+                    self.build_from_git("maghemite", commit, &binaries).await?;
 
                 // Copy built binary to binary_dir
                 let dest = binary_dir.join("mgd");
@@ -955,15 +1008,17 @@ impl Downloader<'_> {
         let download_dir = self.output_dir.join("downloads");
         tokio::fs::create_dir_all(&download_dir).await?;
 
-        let checksums_path = self.versions_dir.join("maghemite_mgd_checksums");
-        let [mg_ddm_sha2, ddmd_linux_sha2] = get_values_from_file(
-            ["MG_DDM_SHA256", "DDMD_LINUX_SHA256"],
-            &checksums_path,
+        let checksums =
+            KvFile::read(self.versions_dir.join("maghemite_mgd_checksums"))
+                .await?;
+        let mg_ddm_sha2 = checksums.get_sha256_value("MG_DDM_SHA256")?;
+        let ddmd_linux_sha2 =
+            checksums.get_sha256_value("DDMD_LINUX_SHA256")?;
+        let version = KvFile::read(
+            self.versions_dir.join("maghemite_ddm_openapi_version"),
         )
         .await?;
-        let commit_path =
-            self.versions_dir.join("maghemite_ddm_openapi_version");
-        let [commit] = get_values_from_file(["COMMIT"], &commit_path).await?;
+        let commit = version.get_git_commit_hash_value("COMMIT")?;
 
         let repo = "oxidecomputer/maghemite";
         let base_url = format!("{BUILDOMAT_URL}/{repo}/image/{commit}");
@@ -974,8 +1029,7 @@ impl Downloader<'_> {
             &self.log,
             &tarball_path,
             &format!("{base_url}/{filename}"),
-            ChecksumAlgorithm::Sha2,
-            &mg_ddm_sha2,
+            mg_ddm_sha2,
         )
         .await?;
         unpack_tarball(&self.log, &tarball_path, &download_dir).await?;
@@ -1000,8 +1054,7 @@ impl Downloader<'_> {
                     &format!(
                         "{BUILDOMAT_URL}/{repo}/linux/{commit}/{filename}"
                     ),
-                    ChecksumAlgorithm::Sha2,
-                    &ddmd_linux_sha2,
+                    ddmd_linux_sha2,
                 )
                 .await?;
                 set_permissions(&path, 0o755).await?;
@@ -1015,9 +1068,8 @@ impl Downloader<'_> {
 
                 let binaries = [("ddmd", &["--no-default-features"][..])];
 
-                let built_binaries = self
-                    .build_from_git("maghemite", &commit, &binaries)
-                    .await?;
+                let built_binaries =
+                    self.build_from_git("maghemite", commit, &binaries).await?;
 
                 let dest = binary_dir.join("ddmd");
                 tokio::fs::copy(&built_binaries[0], &dest).await?;
@@ -1033,9 +1085,10 @@ impl Downloader<'_> {
         let destination_dir = self.output_dir.join("npuzone");
         tokio::fs::create_dir_all(&destination_dir).await?;
 
-        let checksums_path = self.versions_dir.join("softnpu_version");
-        let [commit, sha2] =
-            get_values_from_file(["COMMIT", "SHA2"], &checksums_path).await?;
+        let checksums =
+            KvFile::read(self.versions_dir.join("softnpu_version")).await?;
+        let commit = checksums.get_git_commit_hash_value("COMMIT")?;
+        let sha2 = checksums.get_sha256_value("SHA2")?;
 
         let repo = "oxidecomputer/softnpu";
 
@@ -1044,14 +1097,7 @@ impl Downloader<'_> {
         let artifact_url = format!("{base_url}/{filename}");
 
         let path = destination_dir.join(filename);
-        download_file_and_verify(
-            &self.log,
-            &path,
-            &artifact_url,
-            ChecksumAlgorithm::Sha2,
-            &sha2,
-        )
-        .await?;
+        download_file_and_verify(&self.log, &path, &artifact_url, sha2).await?;
         set_permissions(&path, 0o755).await?;
 
         Ok(())
@@ -1062,11 +1108,11 @@ impl Downloader<'_> {
         let download_dir = self.output_dir.join("downloads");
         tokio::fs::create_dir_all(&download_dir).await?;
 
-        let [commit, sha2] = get_values_from_file(
-            ["COMMIT", "CIDL_SHA256_ILLUMOS"],
-            &self.versions_dir.join("transceiver_control_version"),
-        )
-        .await?;
+        let version =
+            KvFile::read(self.versions_dir.join("transceiver_control_version"))
+                .await?;
+        let commit = version.get_git_commit_hash_value("COMMIT")?;
+        let sha2 = version.get_sha256_value("CIDL_SHA256_ILLUMOS")?;
 
         let repo = "oxidecomputer/transceiver-control";
         let base_url = format!("{BUILDOMAT_URL}/{repo}/bins/{commit}");
@@ -1078,8 +1124,7 @@ impl Downloader<'_> {
             &self.log,
             &gzip_path,
             &format!("{base_url}/{filename_gz}"),
-            ChecksumAlgorithm::Sha2,
-            &sha2,
+            sha2,
         )
         .await?;
 
@@ -1111,5 +1156,69 @@ impl Downloader<'_> {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn example_path() -> Utf8PathBuf {
+        Utf8PathBuf::from("tools/example_checksums")
+    }
+
+    #[test]
+    fn kv_file_rejects_malformed_files() {
+        let err =
+            KvFile::parse(example_path(), "COMMIT=\"abc\"\n\nnot a pair\n")
+                .expect_err("line without `=` is rejected");
+        assert_eq!(
+            format!("{err:#}"),
+            "tools/example_checksums:3: expected KEY=\"value\", \
+             found \"not a pair\"",
+        );
+
+        let err =
+            KvFile::parse(example_path(), "COMMIT=\"abc\"\nCOMMIT=\"def\"\n")
+                .expect_err("duplicate key is rejected");
+        assert_eq!(
+            format!("{err:#}"),
+            "tools/example_checksums:2: key \"COMMIT\" is already set \
+             earlier in the file",
+        );
+    }
+
+    #[test]
+    fn kv_file_errors_name_key_and_file() {
+        let file =
+            KvFile::parse(example_path(), "CIDL_SHA256_LINUX=\"abc123\"\n")
+                .expect("parsed example file");
+
+        let err = file
+            .get_sha256_value("CIDL_SHA256_LINUX")
+            .expect_err("truncated checksum is rejected");
+        assert_eq!(
+            format!("{err:#}"),
+            "Invalid SHA-256 checksum \"abc123\" for CIDL_SHA256_LINUX in \
+             tools/example_checksums: expected 64 hex characters, got 6",
+        );
+
+        let err = file
+            .get_git_commit_hash_value("CIDL_SHA256_LINUX")
+            .expect_err("abbreviated commit is rejected");
+        assert_eq!(
+            format!("{err:#}"),
+            "Invalid git commit hash \"abc123\" for CIDL_SHA256_LINUX in \
+             tools/example_checksums: expected 40 hex characters, got 6",
+        );
+
+        let err = file
+            .get_string_value("COMMIT")
+            .expect_err("missing key is rejected");
+        assert_eq!(
+            format!("{err:#}"),
+            "Could not find key \"COMMIT\" in tools/example_checksums, \
+             which sets [\"CIDL_SHA256_LINUX\"]",
+        );
     }
 }
