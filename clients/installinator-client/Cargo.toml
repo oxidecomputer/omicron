@@ -10,6 +10,7 @@ workspace = true
 [dependencies]
 omicron-uuid-kinds.workspace = true
 progenitor.workspace = true
+progenitor-extras = { workspace = true, features = ["slog"] }
 regress.workspace = true
 reqwest = { workspace = true, features = ["rustls", "stream"] }
 schemars.workspace = true
