@@ -475,6 +475,7 @@ cfg-if = "1.0"
 chrono = { version = "0.4", features = [ "serde" ] }
 chrono-tz = { version = "0.10.4", features = [ "serde" ] }
 ciborium = "0.2.2"
+ciborium-ll = "0.2.2"
 clap = { version = "4.6", features = ["cargo", "derive", "env", "wrap_help"] }
 clickana = { path = "dev-tools/clickana" }
 clickhouse-admin-api = { path = "clickhouse-admin/api" }
@@ -806,7 +807,6 @@ secrecy = "0.10.3"
 semver = { version = "1.0.26", features = ["std", "serde"] }
 seq-macro = "0.3.6"
 serde = { version = "1.0", default-features = false, features = [ "derive", "rc" ] }
-serde_cbor = "0.11.2"
 serde_json = "1.0.145"
 serde_tokenstream = "0.2"
 serde_urlencoded = "0.7.1"

@@ -422,7 +422,7 @@ pub struct Ereport {
     pub task_gen: u32,
     pub uptime: u64,
     #[serde(flatten)]
-    pub data: BTreeMap<String, serde_cbor::Value>,
+    pub data: BTreeMap<String, ciborium::Value>,
 }
 
 #[cfg(test)]
