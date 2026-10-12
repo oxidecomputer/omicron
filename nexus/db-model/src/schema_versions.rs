@@ -28,6 +28,7 @@ pub static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
+        KnownVersion::new(308, "inv-power-shelf-psu"),
         KnownVersion::new(307, "add-rack-id-to-inv-sled-agent"),
         KnownVersion::new(306, "inv-service-processor-rack-id"),
         KnownVersion::new(305, "lookup-sled-by-bp-availability"),
