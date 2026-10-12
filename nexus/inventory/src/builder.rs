@@ -849,7 +849,7 @@ impl CollectionBuilder {
             // again. Overwrite it if the subsequent attempt was not a read
             // error, otherwise, do nothing..
             id_ord_map::Entry::Occupied(mut previous)
-                if !previous.get().identity().is_error() =>
+                if previous.get().identity().is_error() =>
             {
                 // Note that we overwrite it with *any* value that does not
                 // contain an identity read error. We may have previously failed
@@ -1815,5 +1815,107 @@ mod test {
         // reflects that the swap occurred.
         assert_eq!(collection.sps[&old_psc].sp_slot, 0);
         assert_eq!(collection.sps[&new_psc].sp_slot, 0);
+    }
+
+    // Tests that a PSU whose VPD could not be read can be re-reported (as the
+    // collector does when querying another MGS), and that the retry replaces
+    // the earlier error unless it also failed. Also tests that a PSU which was
+    // already collected successfully cannot be reported again.
+    #[test]
+    fn test_psu_vpd_retry() {
+        let mut builder = CollectionBuilder::new("test_psu_vpd_retry");
+        let mgs_1 = "fake MGS 1";
+        let mgs_2 = "fake MGS 2";
+        let psu_device = ExamplePsuKind::Mwocp68;
+        let psc = builder
+            .found_sp_state(mgs_1, RACK_UUID, SpType::Power, 0, sp_state("psc"))
+            .unwrap();
+
+        // The first MGS inventories all six PSU slots, but fails to read the
+        // VPD of three of the PSUs.
+        let first_psus = examples::power_shelf_psus(
+            mgs_1,
+            psu_device,
+            [
+                Some(Ok("LL2111Q9002T")),
+                Some(Err("lol it broke")),
+                Some(Ok("LL2111Q9013T")),
+                Some(Err("lol it broke again")),
+                Some(Err("this one also didnt work")),
+                None,
+            ],
+        );
+        for psu in &first_psus {
+            assert!(
+                builder.found_psu(&psc, 0, psu.clone()).unwrap(),
+                "first report of a PSU should be inserted"
+            );
+        }
+        // A VPD read error means we should try to collect it again.
+        assert!(!builder.found_all_psus_already(&psc));
+
+        // The second MGS inventories all six PSU slots again. Of the PSUs that
+        // previously failed to report their identities:
+        //
+        // - PSU1's VPD is read successfully, replacing the error.
+        // - PSU3's VPD read fails again, so the earlier error is kept.
+        // - PSU4 is no longer present. That also replaces the error, since we
+        //   may have failed to read its VPD because it was being removed.
+        let second_psus = examples::power_shelf_psus(
+            mgs_2,
+            psu_device,
+            [
+                Some(Ok("LL2111Q9002T")),
+                Some(Ok("LL2111Q9003T")),
+                Some(Ok("LL2111Q9013T")),
+                Some(Err("i accidentally the entire PSU")),
+                None,
+                None,
+            ],
+        );
+        // Like the collector, only report PSUs we haven't already found.
+        let mut retried = Vec::new();
+        for psu in &second_psus {
+            if builder.found_psu_already(&psc, psu.slot) {
+                continue;
+            }
+            let updated = builder.found_psu(&psc, 0, psu.clone()).unwrap();
+            retried.push((psu.slot, updated));
+        }
+        assert_eq!(
+            retried,
+            [
+                (PsuSlot::Psu1, true),
+                (PsuSlot::Psu3, false),
+                (PsuSlot::Psu4, true)
+            ],
+            "only PSUs with VPD read errors should be retried, and a retry \
+             should replace the earlier result unless it also failed",
+        );
+        assert!(!builder.found_all_psus_already(&psc));
+
+        // Reporting a PSU which was already found is a bug, and must not
+        // replace what was found.
+        for psu in &second_psus {
+            if builder.found_psu_already(&psc, psu.slot) {
+                builder
+                    .found_psu(&psc, 0, psu.clone())
+                    .expect_err("reporting a found PSU again should fail");
+            }
+        }
+
+        let collection = builder.build();
+        let shelf = collection.power_shelves.get(&(&RACK_UUID, 0)).unwrap();
+        assert_eq!(
+            shelf.psus.iter().cloned().collect::<Vec<_>>(),
+            [
+                first_psus[0].clone(),
+                second_psus[1].clone(),
+                first_psus[2].clone(),
+                first_psus[3].clone(),
+                second_psus[4].clone(),
+                first_psus[5].clone(),
+            ],
+        );
     }
 }
