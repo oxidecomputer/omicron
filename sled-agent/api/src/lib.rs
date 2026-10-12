@@ -264,7 +264,8 @@ pub trait SledAgentApi {
     /// Otherwise, an error is returned.
     #[endpoint {
         method = POST,
-        path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}/finalize"
+        path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}/finalize",
+        versions = VERSION_ARTIFACT_HASH_SCHEMA..,
     }]
     async fn support_bundle_finalize(
         rqctx: RequestContext<Self::Context>,
@@ -276,6 +277,29 @@ pub trait SledAgentApi {
         HttpResponseCreated<latest::support_bundle::SupportBundleMetadata>,
         HttpError,
     >;
+
+    #[endpoint {
+        method = POST,
+        path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}/finalize",
+        versions = ..VERSION_ARTIFACT_HASH_SCHEMA,
+    }]
+    async fn support_bundle_finalize_v1(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v1::support_bundle::SupportBundlePathParam>,
+        query_params: Query<
+            v1::support_bundle::SupportBundleFinalizeQueryParams,
+        >,
+    ) -> Result<
+        HttpResponseCreated<v1::support_bundle::SupportBundleMetadata>,
+        HttpError,
+    > {
+        Self::support_bundle_finalize(
+            rqctx,
+            path_params,
+            query_params.map(Into::into),
+        )
+        .await
+    }
 
     /// Fetch a support bundle from a particular dataset
     #[endpoint {

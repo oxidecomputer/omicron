@@ -257,12 +257,12 @@ pub mod sled {
 pub mod support_bundle {
     pub use crate::v1::support_bundle::RangeRequestHeaders;
     pub use crate::v1::support_bundle::SupportBundleFilePathParam;
-    pub use crate::v1::support_bundle::SupportBundleFinalizeQueryParams;
     pub use crate::v1::support_bundle::SupportBundleListPathParam;
     pub use crate::v1::support_bundle::SupportBundleMetadata;
     pub use crate::v1::support_bundle::SupportBundlePathParam;
     pub use crate::v1::support_bundle::SupportBundleState;
     pub use crate::v1::support_bundle::SupportBundleTransferQueryParams;
+    pub use crate::v55::support_bundle::SupportBundleFinalizeQueryParams;
 }
 
 pub mod system_networking {
