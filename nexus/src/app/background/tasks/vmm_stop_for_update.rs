@@ -5,6 +5,7 @@
 //! Background task that stops VMMs that have been marked as needing to be
 //! stopped for a sled update.
 
+use crate::Nexus;
 use crate::app::background::BackgroundTask;
 use crate::app::instance::SledAgentInstanceError;
 use futures::future::BoxFuture;
@@ -13,6 +14,9 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
 use nexus_db_queries::db::pagination::Paginator;
+use nexus_types::instance::SledVmmState;
+use nexus_types::instance::VmmRuntimeState;
+use nexus_types::instance::VmmState;
 use nexus_types::internal_api::background::VmmStopForUpdateStatus;
 use nexus_types::internal_api::background::VmmsBySled;
 use omicron_common::api::external::Error;
@@ -21,9 +25,6 @@ use omicron_uuid_kinds::PropolisUuid;
 use serde_json::json;
 use sled_agent_client::types::VmmPutStateBody;
 use sled_agent_client::types::VmmStateRequested;
-use sled_agent_types::instance::SledVmmState;
-use sled_agent_types::instance::VmmRuntimeState;
-use sled_agent_types::instance::VmmState;
 use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
 
@@ -70,11 +71,12 @@ impl VmmStopForUpdateResult {
 
 pub struct VmmStopForUpdate {
     datastore: Arc<DataStore>,
+    nexus: Arc<Nexus>,
 }
 
 impl VmmStopForUpdate {
-    pub fn new(datastore: Arc<DataStore>) -> Self {
-        Self { datastore }
+    pub fn new(datastore: Arc<DataStore>, nexus: Arc<Nexus>) -> Self {
+        Self { datastore, nexus }
     }
 
     /// Retrieves a list of VMMs marked to be stopped for update by sled, and
@@ -168,7 +170,7 @@ impl VmmStopForUpdate {
                     )
                     .await
                 {
-                    Ok(res) => res.into_inner().updated_runtime,
+                    Ok(res) => res.into_inner().updated_runtime.map(Into::into),
                     Err(e) => {
                         let err = SledAgentInstanceError(e);
 
@@ -204,12 +206,37 @@ impl VmmStopForUpdate {
                             "vmm_id" => %id
                         );
                     }
-                    Some(vmm) => {
+                    Some(sled_vmm_state) => {
+                        // We attempt to notify Nexus that the VMM has been
+                        // updated. This will reduce the time it takes for an
+                        // instance to be reported as `Stopped`.
+                        if let Err(err) = self
+                            .nexus
+                            .notify_vmm_updated(opctx, *id, &sled_vmm_state)
+                            .await
+                        {
+                            // Sled agent will attempt to publish the new state
+                            // to Nexus when the VMM process exits, and we also
+                            // have the instance watcher background task which
+                            // is constantly trying to read instances' states.
+                            // So, it's not a huge deal if we fail to notify
+                            // Nexus here. The instance state will be updated
+                            // eventually.
+                            slog::warn!(
+                                opctx.log,
+                                "Failed to notify Nexus that an instance has been updated";
+                                "sled_id" => %sled_id,
+                                "vmm_id" => %id,
+                                InlineErrorChain::new(&err),
+                            );
+                            result.errors.push(err);
+                        };
+
                         let SledVmmState {
                             vmm_state,
                             migration_in: _,
                             migration_out: _,
-                        } = vmm;
+                        } = sled_vmm_state;
 
                         let VmmRuntimeState { state, generation, time_updated } =
                             vmm_state;
@@ -261,13 +288,15 @@ impl VmmStopForUpdate {
                             // created VMM. The VMM is reported as Failed. It's
                             // not necessary to stop it anymore, so we don't add
                             // it to the `vmms_failed_by_sled` list.
-                            VmmState::Failed => {
+                            VmmState::Failed(reason) => {
+                                let description = reason.description();
                                 slog::info!(
                                     opctx.log,
                                     "Unable to find VMM, possibly due to a \
                                     restart. No need to stop it";
                                     "sled_id" => %sled_id,
                                     "vmm_id" => %id,
+                                    "reason" => description,
                                     "state" => ?state,
                                     "vmm_generation" => ?generation,
                                     "time_updated" => ?time_updated,
@@ -276,7 +305,9 @@ impl VmmStopForUpdate {
                             VmmState::Migrating
                             | VmmState::Rebooting
                             | VmmState::Starting
-                            | VmmState::Running => {
+                            | VmmState::Running
+                            | VmmState::Creating
+                            | VmmState::SagaUnwound => {
                                 slog::error!(
                                     opctx.log,
                                     "Failed to mark VMM as Stopped, \
@@ -614,6 +645,7 @@ mod tests {
         let client = &cptestctx.external_client;
         let datastore =
             cptestctx.server.server_context().nexus.datastore().clone();
+        let nexus = cptestctx.server.server_context().nexus.clone();
         let opctx = test_opctx(&cptestctx);
         let sled_a = cptestctx.first_sled_id();
         let sled_b = cptestctx.second_sled_id();
@@ -757,7 +789,7 @@ mod tests {
         }
 
         // Run the task.
-        let mut task = VmmStopForUpdate::new(datastore.clone());
+        let mut task = VmmStopForUpdate::new(datastore.clone(), nexus);
         let status = task.actually_activate(&opctx).await;
 
         // We stopped the VMMs we expected to stop
