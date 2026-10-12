@@ -1526,13 +1526,9 @@ fn print_task_vmm_stop_for_update(details: &serde_json::Value) {
             vmms_failed_by_sled,
             error_messages,
         }) => {
-            const STOPPED: &str = "VMMs stopped for sled evacuation:";
-            const ERROR: &str = "error:";
-            const WIDTH: usize = const_max_len(&[STOPPED, ERROR]) + 1;
-
             let total: usize =
                 vmms_stopped_by_sled.iter().map(|s| s.vmm_ids.len()).sum();
-            println!("    {STOPPED:<WIDTH$}{total} total");
+            println!("    VMMs stopped for sled evacuation: {total} total");
             for sled in vmms_stopped_by_sled {
                 println!(
                     "      sled_id={} n_stopped={}",
@@ -1541,23 +1537,26 @@ fn print_task_vmm_stop_for_update(details: &serde_json::Value) {
                 );
             }
             if !vmms_failed_by_sled.is_empty() {
+                let total_failed: usize =
+                    vmms_failed_by_sled.iter().map(|s| s.vmm_ids.len()).sum();
+                println!("    VMMs that failed to stop: {total_failed} total");
                 for sled in vmms_failed_by_sled {
                     println!(
                         "      sled_id={} n_failed={}",
                         sled.sled_id,
                         sled.vmm_ids.len()
                     );
-                    println!("      vmms that failed to stop:");
                     for vmm in sled.vmm_ids {
-                        println!("        {}", vmm);
+                        println!("        vmm_id={}", vmm);
                     }
                 }
             }
 
             if !error_messages.is_empty() {
-                println!("      errors:");
+                let total_err = error_messages.len();
+                println!("    Error messages: {total_err} total");
                 for error in error_messages {
-                    println!("        {error}");
+                    println!("      {error}");
                 }
             }
         }
