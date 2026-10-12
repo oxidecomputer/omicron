@@ -958,6 +958,8 @@ pub struct InvSledAgent {
 
     instance_manager_update_disposition: Option<DbInvSledUpdateDisposition>,
     instance_manager_num_registered_vmms: SqlU32,
+
+    pub rack_id: DbTypedUuid<RackKind>,
 }
 
 /// Helper for breaking an [`InstanceManagerStatus`] up into its DB columns.
@@ -1390,6 +1392,7 @@ impl InvSledAgent {
         ledgered_sled_config: Option<OmicronSledConfigUuid>,
         reconciler_status: InvConfigReconcilerStatus,
         file_source_resolver: InvOmicronFileSourceResolver,
+        rack_id: DbTypedUuid<RackKind>,
     ) -> Result<InvSledAgent, anyhow::Error> {
         // It's irritating to have to check this case at runtime.  The challenge
         // is that if this sled agent does have a baseboard id, we don't know
@@ -1438,6 +1441,7 @@ impl InvSledAgent {
                 file_source_resolver,
                 instance_manager_update_disposition,
                 instance_manager_num_registered_vmms,
+                rack_id,
             })
         }
     }

@@ -524,6 +524,7 @@ impl BackgroundTasksInitializer {
                 &nexus_id.to_string(),
                 config.inventory.nkeep,
                 config.inventory.disable_collect,
+                rack_id,
             );
             let inventory_watcher = collector.watcher();
             driver.register(TaskDefinition {

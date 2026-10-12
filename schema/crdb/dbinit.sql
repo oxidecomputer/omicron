@@ -4605,6 +4605,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     -- Number of VMMs currently registered with the instance manager.
     instance_manager_num_registered_vmms INT8 NOT NULL CHECK (instance_manager_num_registered_vmms >= 0),
 
+    -- ID of the row in the `rack` table that corresponds to this sled's rack
+    rack_id UUID NOT NULL,
+
     CONSTRAINT reconciler_status_sled_config_present_if_running CHECK (
         (reconciler_status_kind = 'running'
             AND reconciler_status_sled_config IS NOT NULL)
@@ -9564,7 +9567,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '306.0.0', NULL)
+    (TRUE, NOW(), NOW(), '307.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
