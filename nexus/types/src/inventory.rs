@@ -540,6 +540,27 @@ impl Psu {
             }
         }
     }
+
+    /// Returns the result of reading the PSU's firmware revisions, or
+    /// [`PsuIdentityResult::NotPresent`] if the SP indicated that no PSU is
+    /// present in this slot.
+    pub fn firmware_revs(&self) -> PsuIdentityResult<'_, PsuFirmwareRevisions> {
+        match self.state {
+            None => PsuIdentityResult::NotPresent,
+            Some(PsuState {
+                identity: Ok(PsuIdentity { firmware_revs: Ok(ref revs), .. }),
+                ..
+            }) => PsuIdentityResult::Present(revs),
+
+            Some(PsuState {
+                identity: Ok(PsuIdentity { firmware_revs: Err(ref err), .. }),
+                ..
+            }) => PsuIdentityResult::ReadError(err),
+            Some(PsuState { identity: Err(ref error), .. }) => {
+                PsuIdentityResult::ReadError(error)
+            }
+        }
+    }
 }
 
 impl IdOrdItem for Psu {
@@ -612,22 +633,22 @@ pub struct PsuState {
 
 /// Values returned by [`Psu::identity`].
 #[derive(Copy, Clone, Debug, Eq, PartialOrd, PartialEq)]
-pub enum PsuIdentityResult<'psu> {
+pub enum PsuIdentityResult<'psu, T = PsuIdentity> {
     /// The VPD identity of the PSU was not read because no PSU was present in
     /// this slot.
     NotPresent,
     /// The VPD identity of the PSU was successfully read.
-    Present(&'psu PsuIdentity),
+    Present(&'psu T),
     /// The PSU was not determined to be not present, but an error occurred
     /// while reading its VPD identity.
     ReadError(&'psu str),
 }
 
-impl<'psu> PsuIdentityResult<'psu> {
+impl<'psu, T> PsuIdentityResult<'psu, T> {
     /// Returns [`Some`]`(`[`PsuIdentity`]`)` if the PSU was present and its VPD
     /// identity was read successfully, or [`None`] if no PSU was present or an
     /// error occurred while reading its VPD identity.
-    pub fn ok(self) -> Option<&'psu PsuIdentity> {
+    pub fn ok(self) -> Option<&'psu T> {
         match self {
             PsuIdentityResult::Present(identity) => Some(identity),
             _ => None,
@@ -659,15 +680,74 @@ pub struct PsuIdentity {
     /// `MFR_REVISION` (PMBus command 0x9B).
     ///
     /// Note that muRata uses this command to represent the *firmware revision*
-    /// of the PSU, rather than a hardware revision, so we rename this field to
-    /// keep that obvious.
-    pub firmware_rev: String,
+    /// of the PSU, rather than a hardware revision.
+    pub mfr_revision: String,
     /// `MFR_LOCATION` (PMBus command 0x9C).
     pub mfr_location: String,
     /// `MFR_DATE` (PMBus command 0x9D).
     pub mfr_date: String,
     /// `MFR_SERIAL` (PMBus command 0x9E).
     pub mfr_serial: String,
+
+    /// The PSU's firmware revisions, as parsed from its PMBus `MFR_REVISION`
+    /// response, or an error describing why it could not be parsed.
+    pub firmware_revs: Result<PsuFirmwareRevisions, String>,
+}
+
+/// The firmware revisions of a muRata PSU.
+///
+/// The combination of `mfr_model` and `mfr_serial` identifies the PSU.
+#[derive(Clone, Debug, Eq, PartialOrd, PartialEq, Deserialize, Serialize)]
+pub struct PsuFirmwareRevisions {
+    /// The firmware revision on the primary MCU (AC input side).
+    pub primary: String,
+    /// The firmware revision on the secondary MCU (DC output side).
+    pub secondary: String,
+}
+
+impl std::str::FromStr for PsuFirmwareRevisions {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // Per muRata's documentation in ACAN-114 and ACAN-157, the response to
+        // the PMBus `MFR_REVISION` command is expected to be of the format:
+        //
+        //     XXXX-YYYY-0000
+        //
+        // Where XXXX is the firmware revision on the primary MCU (AC input
+        // side) and YYYY is the firmware revision on the secondary MCU (DC
+        // output side). See also:
+        // https://github.com/oxidecomputer/hubris/blob/929f0d3709025c33cd3ad51c09df6c2fbb55047d/drv/i2c-devices/src/mwocp6x.rs#L202-L209
+
+        let mut parts = s.split("-");
+        let primary = parts
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("missing primary revision"))?;
+        anyhow::ensure!(
+            primary.len() == 4,
+            "expected primary MCU firmware revision to be 4 characters, but \
+             found: {primary:?}"
+        );
+        let secondary = parts
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("missing secondary revision"))?;
+        anyhow::ensure!(
+            secondary.len() == 4,
+            "expected secondary MCU firmware revision to be 4 characters, but \
+             found: {secondary:?}"
+        );
+        let zeroes = parts.next().ok_or_else(|| {
+            anyhow::anyhow!("expected firmware revision to end with 0000")
+        })?;
+        anyhow::ensure!(
+            zeroes == "0000",
+            "expected \"0000\" but found: {zeroes:?}"
+        );
+        Ok(Self {
+            primary: primary.to_string(),
+            secondary: secondary.to_string(),
+        })
+    }
 }
 
 /// Describes the root of trust state found (from a service processor) during

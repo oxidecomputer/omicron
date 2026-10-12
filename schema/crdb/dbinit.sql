@@ -5641,15 +5641,31 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_power_shelf_psu (
     -- if the PSU is not present.
     mfr_id TEXT,
     mfr_model TEXT,
-    firmware_rev TEXT,
     mfr_location TEXT,
+    -- the value of the PMBus "MFR_REVISION" command. This is used by Murata to
+    -- represent the PSU's MCU firmware revisions, which are parsed into the
+    -- `primary_fw_rev` and `secondary_fw_rev` fields.
+    --
+    -- see: https://github.com/oxidecomputer/hubris/blob/929f0d3709025c33cd3ad51c09df6c2fbb55047d/drv/i2c-devices/src/mwocp6x.rs#L202-L209
+    mfr_revision TEXT,
     mfr_date TEXT,
     mfr_serial TEXT,
+
+    -- the firmware revision of the primary MCU (AC input side), as defined in
+    -- ACAN-114 and ACAN-157.
+    primary_fw_rev TEXT(4),
+    -- the firmware revision of the secondary MCU (DC output side), as defined in
+    -- ACAN-114 and ACAN-157.
+    secondary_fw_rev TEXT(4),
 
     -- an error that occurred while reading PMBus VPD. this is NULL if the VPD
     -- fields are present or if the PSU is not present, and is set if the
     -- VPD fields are NULL because an attempt to read the VPD failed.
     vpd_error TEXT,
+
+    -- an error that occurred while parsing the PSU's firmware revision from the
+    -- `mfr_revision` field.
+    fw_rev_error TEXT,
 
     CONSTRAINT vpd_result_valid CHECK (
         (
