@@ -19,6 +19,7 @@ use omicron_common::api::internal::shared::{
 use sled_agent_types_versions::{
     latest, v1, v11, v14, v18, v20, v22, v24, v25, v26, v28, v29, v30, v31,
     v32, v33, v34, v37, v39, v40, v41, v42, v43, v46, v47, v48, v49, v50, v51,
+    v52,
 };
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 use slog_error_chain::InlineErrorChain;
@@ -35,6 +36,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (55, ARTIFACT_HASH_SCHEMA),
     (54, ADD_LOG_TIME_RANGE),
     (53, ADD_INSTANCE_MANAGER_STATUS_TO_INVENTORY),
     (52, TYPED_ARTIFACT_CONFIG_GENERATION),
@@ -625,7 +627,7 @@ pub trait SledAgentApi {
     #[endpoint {
         method = POST,
         path = "/artifacts/{sha256}/copy-from-depot",
-        versions = VERSION_TYPED_ARTIFACT_CONFIG_GENERATION..,
+        versions = VERSION_ARTIFACT_HASH_SCHEMA..,
     }]
     async fn artifact_copy_from_depot(
         rqctx: RequestContext<Self::Context>,
@@ -636,6 +638,29 @@ pub trait SledAgentApi {
         HttpResponseAccepted<latest::artifact::ArtifactCopyFromDepotResponse>,
         HttpError,
     >;
+
+    #[endpoint {
+        method = POST,
+        path = "/artifacts/{sha256}/copy-from-depot",
+        versions = VERSION_TYPED_ARTIFACT_CONFIG_GENERATION..VERSION_ARTIFACT_HASH_SCHEMA,
+    }]
+    async fn artifact_copy_from_depot_v52(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v1::artifact::ArtifactPathParam>,
+        query_params: Query<v52::artifact::ArtifactQueryParam>,
+        body: TypedBody<v1::artifact::ArtifactCopyFromDepotBody>,
+    ) -> Result<
+        HttpResponseAccepted<v1::artifact::ArtifactCopyFromDepotResponse>,
+        HttpError,
+    > {
+        Self::artifact_copy_from_depot(
+            rqctx,
+            path_params.map(Into::into),
+            query_params,
+            body,
+        )
+        .await
+    }
 
     #[endpoint {
         operation_id = "artifact_copy_from_depot",
@@ -652,7 +677,7 @@ pub trait SledAgentApi {
         HttpResponseAccepted<v1::artifact::ArtifactCopyFromDepotResponse>,
         HttpError,
     > {
-        Self::artifact_copy_from_depot(
+        Self::artifact_copy_from_depot_v52(
             rqctx,
             path_params,
             query_params.map(Into::into),
@@ -665,7 +690,7 @@ pub trait SledAgentApi {
         method = PUT,
         path = "/artifacts/{sha256}",
         request_body_max_bytes = UPDATE_ARTIFACT_MAX_BYTES,
-        versions = VERSION_TYPED_ARTIFACT_CONFIG_GENERATION..,
+        versions = VERSION_ARTIFACT_HASH_SCHEMA..,
     }]
     async fn artifact_put(
         rqctx: RequestContext<Self::Context>,
@@ -673,6 +698,28 @@ pub trait SledAgentApi {
         query_params: Query<latest::artifact::ArtifactQueryParam>,
         body: StreamingBody,
     ) -> Result<HttpResponseOk<latest::artifact::ArtifactPutResponse>, HttpError>;
+
+    #[endpoint {
+        method = PUT,
+        path = "/artifacts/{sha256}",
+        request_body_max_bytes = UPDATE_ARTIFACT_MAX_BYTES,
+        versions = VERSION_TYPED_ARTIFACT_CONFIG_GENERATION..VERSION_ARTIFACT_HASH_SCHEMA,
+    }]
+    async fn artifact_put_v52(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v1::artifact::ArtifactPathParam>,
+        query_params: Query<v52::artifact::ArtifactQueryParam>,
+        body: StreamingBody,
+    ) -> Result<HttpResponseOk<v1::artifact::ArtifactPutResponse>, HttpError>
+    {
+        Self::artifact_put(
+            rqctx,
+            path_params.map(Into::into),
+            query_params,
+            body,
+        )
+        .await
+    }
 
     #[endpoint {
         operation_id = "artifact_put",
@@ -688,7 +735,7 @@ pub trait SledAgentApi {
         body: StreamingBody,
     ) -> Result<HttpResponseOk<v1::artifact::ArtifactPutResponse>, HttpError>
     {
-        Self::artifact_put(
+        Self::artifact_put_v52(
             rqctx,
             path_params,
             query_params.map(Into::into),

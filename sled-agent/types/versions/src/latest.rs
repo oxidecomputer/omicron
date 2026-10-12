@@ -7,8 +7,8 @@
 pub mod artifact {
     pub use crate::v1::artifact::ArtifactCopyFromDepotBody;
     pub use crate::v1::artifact::ArtifactCopyFromDepotResponse;
-    pub use crate::v1::artifact::ArtifactPathParam;
     pub use crate::v1::artifact::ArtifactPutResponse;
+    pub use crate::v55::artifact::ArtifactPathParam;
 
     pub use crate::v52::artifact::ArtifactConfig;
     pub use crate::v52::artifact::ArtifactListResponse;

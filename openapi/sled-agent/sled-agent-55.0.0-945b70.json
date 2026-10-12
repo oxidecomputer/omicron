@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "54.0.0"
+    "version": "55.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -42,8 +42,15 @@
             "name": "sha256",
             "required": true,
             "schema": {
+              "x-rust-type": {
+                "crate": "byte-wrapper",
+                "path": "byte_wrapper::HexArray::<32>",
+                "version": "0.1.0"
+              },
               "type": "string",
-              "format": "hex string (32 bytes)"
+              "pattern": "^[0-9a-fA-F]{64}$",
+              "minLength": 64,
+              "maxLength": 64
             }
           },
           {
@@ -95,8 +102,15 @@
             "name": "sha256",
             "required": true,
             "schema": {
+              "x-rust-type": {
+                "crate": "byte-wrapper",
+                "path": "byte_wrapper::HexArray::<32>",
+                "version": "0.1.0"
+              },
               "type": "string",
-              "format": "hex string (32 bytes)"
+              "pattern": "^[0-9a-fA-F]{64}$",
+              "minLength": 64,
+              "maxLength": 64
             }
           },
           {
