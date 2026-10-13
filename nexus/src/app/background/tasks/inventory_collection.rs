@@ -17,6 +17,7 @@ use nexus_networking::GatewayClient;
 use nexus_types::deployment::SledFilter;
 use nexus_types::inventory::Collection;
 use omicron_cockroach_metrics::CockroachClusterAdminClient;
+use omicron_common::http_client::internal_http_client;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::RackUuid;
 use serde_json::json;
@@ -161,7 +162,11 @@ async fn inventory_activate(
                 let log = opctx
                     .log
                     .new(o!("clickhouse_admin_keeper_url" => url.clone()));
-                clickhouse_admin_keeper_client::Client::new(&url, log)
+                clickhouse_admin_keeper_client::Client::new_with_client(
+                    &url,
+                    internal_http_client(),
+                    log,
+                )
             })
             .collect::<Vec<_>>(),
         // When DNS resolution fails because no clickhouse-keeper-admin

@@ -97,6 +97,7 @@ use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
 };
 use omicron_common::disk::DatasetKind;
+use omicron_common::http_client::internal_http_client;
 use omicron_ddm_admin_client::DdmError;
 use omicron_generation_kinds::{
     Generation, GenericGeneration, SledConfigGeneration,
@@ -637,8 +638,9 @@ impl ServiceInner {
         for ip_addr in dns_server_ips {
             let log = log.new(o!("dns_config_addr" => ip_addr.to_string()));
             info!(log, "Configuring DNS server");
-            let dns_config_client = dns_service_client::Client::new(
+            let dns_config_client = dns_service_client::Client::new_with_client(
                 &format!("http://{}", ip_addr),
+                internal_http_client(),
                 log.clone(),
             );
 

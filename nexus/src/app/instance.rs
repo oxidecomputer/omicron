@@ -42,6 +42,7 @@ use nexus_db_queries::db::model::InstanceStateComputer;
 use nexus_types::external_api::disk;
 use nexus_types::external_api::external_ip;
 use nexus_types::external_api::instance;
+use omicron_common::http_client::internal_http_client;
 // We'll use `InstanceState` frequently, and the code that uses it is already
 // subtle enough: break from the pattern of external API types being referenced
 // by `topic::Name` to help legibility and keep line wrapping under control..
@@ -2216,7 +2217,10 @@ impl super::Nexus {
             .await?;
         Ok((
             vmm,
-            propolis_client::Client::new(&format!("http://{}", client_addr)),
+            propolis_client::Client::new_with_client(
+                &format!("http://{}", client_addr),
+                internal_http_client(),
+            ),
         ))
     }
 
