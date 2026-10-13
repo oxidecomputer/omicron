@@ -222,7 +222,7 @@ pub(crate) async fn unassign_producer(
 
         let address =
             SocketAddr::new(oximeter_info.ip.ip(), *oximeter_info.port);
-        let client = build_oximeter_client(&log, &id, address);
+        let client = build_oximeter_client(&log, &id, address)?;
         if let Err(e) = client.producer_delete(&id).await {
             error!(
                 log,
@@ -275,11 +275,17 @@ fn build_oximeter_client(
     log: &slog::Logger,
     id: &Uuid,
     address: SocketAddr,
-) -> OximeterClient {
+) -> Result<OximeterClient, Error> {
     let client_log = log.new(o!("oximeter-collector" => id.to_string()));
+    let http_client = internal_http_client().map_err(|e| {
+        Error::internal_error(&format!(
+            "failed to build oximeter client: {}",
+            InlineErrorChain::new(&e)
+        ))
+    })?;
     let client = OximeterClient::new_with_client(
         &format!("http://{}", address),
-        internal_http_client(),
+        http_client,
         client_log,
     );
     info!(
@@ -287,5 +293,5 @@ fn build_oximeter_client(
         "registered oximeter collector client";
         "id" => id.to_string(),
     );
-    client
+    Ok(client)
 }

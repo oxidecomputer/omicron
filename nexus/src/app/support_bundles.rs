@@ -24,6 +24,7 @@ use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use range_requests::PotentialRange;
+use slog_error_chain::InlineErrorChain;
 use uuid::Uuid;
 
 /// Describes the type of access to the support bundle
@@ -116,7 +117,12 @@ impl super::Nexus {
             // willing to keep transferring the bundle for a while longer.
             .timeout(long_timeout)
             .build()
-            .expect("Failed to build reqwest Client");
+            .map_err(|e| {
+                Error::internal_error(&format!(
+                    "failed to build sled agent client: {}",
+                    InlineErrorChain::new(&e)
+                ))
+            })?;
         let client = self.sled_client_ext(&sled_id, client).await?;
 
         let range = if let Some(potential_range) = &range {

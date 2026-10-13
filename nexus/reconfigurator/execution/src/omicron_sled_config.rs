@@ -49,11 +49,20 @@ pub(crate) async fn deploy_sled_configs(
                 }
             };
 
-            let client = nexus_networking::sled_client_from_address(
+            let client = match nexus_networking::sled_client_from_address(
                 *sled_id,
                 db_sled.sled_agent_address(),
                 &log,
-            );
+            ) {
+                Ok(client) => client,
+                Err(error) => {
+                    let err = anyhow::Error::new(error).context(format!(
+                        "Failed to build client for sled {sled_id}"
+                    ));
+                    warn!(log, "{err:#}");
+                    return Some(err);
+                }
+            };
 
             let config = config.clone().into_in_service_sled_config();
             let result =

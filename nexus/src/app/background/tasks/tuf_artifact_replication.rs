@@ -574,24 +574,25 @@ impl ArtifactReplication {
     }
 
     async fn list_sleds(&self, opctx: &OpContext) -> Result<Vec<Sled>> {
-        Ok(self
-            .datastore
+        self.datastore
             .sled_list_all_batched(&opctx, SledFilter::TufArtifactReplication)
             .await?
             .into_iter()
-            .map(|sled| Sled {
-                id: sled.id(),
-                client: sled_client_from_address(
-                    sled.id(),
-                    sled.address(),
-                    &opctx.log,
-                ),
-                depot_base_url: format!(
-                    "http://{}",
-                    sled.address_with_port(sled.repo_depot_port.into())
-                ),
+            .map(|sled| {
+                Ok(Sled {
+                    id: sled.id(),
+                    client: sled_client_from_address(
+                        sled.id(),
+                        sled.address(),
+                        &opctx.log,
+                    )?,
+                    depot_base_url: format!(
+                        "http://{}",
+                        sled.address_with_port(sled.repo_depot_port.into())
+                    ),
+                })
             })
-            .collect())
+            .collect()
     }
 
     /// Put `config` to `sled`, then query `sled` for a list of its artifacts.

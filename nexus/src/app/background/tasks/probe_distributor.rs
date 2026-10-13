@@ -92,8 +92,25 @@ impl BackgroundTask for ProbeDistributor {
                     }
                 };
 
-                let client =
-                    sled_client_from_address(sled.id(), sled.address(), &log);
+                let client = match sled_client_from_address(
+                    sled.id(),
+                    sled.address(),
+                    &log,
+                ) {
+                    Ok(client) => client,
+                    Err(e) => {
+                        const MSG: &str = "failed to build sled-agent client";
+                        let ec = InlineErrorChain::new(&e);
+                        let msg = format!("{MSG}: {ec}");
+                        error!(log, "{MSG}"; "error" => ec);
+                        status.errors.push(ProbeError {
+                            sled_id: sled.id(),
+                            sled_ip: *sled.address().ip(),
+                            error: msg,
+                        });
+                        continue;
+                    }
+                };
 
                 // PUT the entire set of probes on the sled-agent.
                 //

@@ -41,7 +41,7 @@ async fn get_region_from_agent(
 ) -> Result<Region> {
     let url = format!("http://{}", agent_address);
     let client =
-        CrucibleAgentClient::new_with_client(&url, internal_http_client());
+        CrucibleAgentClient::new_with_client(&url, internal_http_client()?);
 
     let result = client.region_get(&RegionId(region_id.to_string())).await?;
 

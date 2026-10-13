@@ -1246,9 +1246,20 @@ impl Nexus {
             self.resolver().lookup_all_socket_v6(ServiceName::Mgd).await?;
         let mut clients = HashMap::new();
         for addr in mgd_addrs {
+            let http_client = match internal_http_client() {
+                Ok(http_client) => http_client,
+                Err(e) => {
+                    warn!(
+                        self.log, "failed to build mgd client";
+                        "addr" => %addr,
+                        "error" => %InlineErrorChain::new(&e),
+                    );
+                    continue;
+                }
+            };
             let client = mg_admin_client::Client::new_with_client(
                 &format!("http://{addr}"),
-                internal_http_client(),
+                http_client,
                 self.log.clone(),
             );
             let switch_slot = match client.switch_identifiers().await {
@@ -1362,7 +1373,7 @@ pub(crate) async fn dpd_clients(
 
     let clients: Vec<(SocketAddrV6, dpd_client::Client)> = dpd_socketaddrs
         .iter()
-        .map(|socket_addr| {
+        .filter_map(|socket_addr| {
             let client_state = dpd_client::ClientState {
                 tag: String::from("nexus"),
                 log: log.new(o!(
@@ -1370,13 +1381,25 @@ pub(crate) async fn dpd_clients(
                 )),
             };
 
+            let http_client = match internal_http_client() {
+                Ok(http_client) => http_client,
+                Err(e) => {
+                    error!(
+                        log,
+                        "failed to build dendrite client";
+                        "error" => %InlineErrorChain::new(&e),
+                        "addr" => %socket_addr,
+                    );
+                    return None;
+                }
+            };
             let client = dpd_client::Client::new_with_client(
                 &format!("http://{socket_addr}"),
-                internal_http_client(),
+                http_client,
                 client_state,
             );
 
-            (*socket_addr, client)
+            Some((*socket_addr, client))
         })
         .collect();
 
@@ -1429,13 +1452,25 @@ pub(crate) async fn lldpd_clients(
     let port = lldpd_client::default_port();
     let clients: HashMap<SwitchSlot, lldpd_client::Client> = mappings
         .iter()
-        .map(|(location, addr)| {
+        .filter_map(|(location, addr)| {
+            let http_client = match internal_http_client() {
+                Ok(http_client) => http_client,
+                Err(e) => {
+                    error!(
+                        log,
+                        "failed to build lldpd client";
+                        "error" => %InlineErrorChain::new(&e),
+                        "addr" => %addr,
+                    );
+                    return None;
+                }
+            };
             let lldpd_client = lldpd_client::Client::new_with_client(
                 &format!("http://[{addr}]:{port}"),
-                internal_http_client(),
+                http_client,
                 log.clone(),
             );
-            (*location, lldpd_client)
+            Some((*location, lldpd_client))
         })
         .collect();
     Ok(clients)
@@ -1512,9 +1547,21 @@ async fn map_switch_zone_addrs(
             }
         };
 
+        let http_client = match internal_http_client() {
+            Ok(http_client) => http_client,
+            Err(e) => {
+                error!(
+                    log,
+                    "failed to build MGS client for switch zone";
+                    "zone_address" => #?addr,
+                    "reason" => %InlineErrorChain::new(&e),
+                );
+                continue;
+            }
+        };
         let mgs_client = MgsClient::new_with_client(
             &format!("http://[{}]:{}", addr, port),
-            internal_http_client(),
+            http_client,
             log.new(o!("component" => "MgsClient")),
         );
 

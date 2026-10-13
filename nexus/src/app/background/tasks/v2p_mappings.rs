@@ -59,13 +59,23 @@ impl BackgroundTask for V2PManager {
             // Map sled db records to sled-agent clients
             let sled_clients: Vec<(Sled, sled_agent_client::Client)> = sleds
                 .into_iter()
-                .map(|sled| {
-                    let client = sled_client_from_address(
+                .filter_map(|sled| {
+                    match sled_client_from_address(
                         sled.id(),
                         sled.address(),
                         &log,
-                    );
-                    (sled, client)
+                    ) {
+                        Ok(client) => Some((sled, client)),
+                        Err(e) => {
+                            error!(
+                                &log,
+                                "unable to build sled-agent client";
+                                "sled" => sled.serial_number(),
+                                "error" => ?e
+                            );
+                            None
+                        }
+                    }
                 })
                 .collect();
 

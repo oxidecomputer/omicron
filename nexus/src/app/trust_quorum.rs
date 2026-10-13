@@ -13,6 +13,7 @@ use omicron_common::api::external::Error;
 use omicron_common::http_client::internal_http_client_builder;
 use omicron_uuid_kinds::RackUuid;
 use sled_hardware_types::BaseboardId;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeSet;
 use std::time::Duration;
 use trust_quorum_types::types::Epoch;
@@ -353,7 +354,12 @@ impl super::Nexus {
             .connect_timeout(timeout)
             .timeout(timeout)
             .build()
-            .unwrap();
+            .map_err(|e| {
+                Error::internal_error(&format!(
+                    "failed to build sled agent client: {}",
+                    InlineErrorChain::new(&e)
+                ))
+            })?;
 
         Ok(sled_agent_client::Client::new_with_client(
             &url,

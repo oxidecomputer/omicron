@@ -163,6 +163,8 @@ impl SpComponentUpdate {
 pub enum ApplyUpdateError {
     #[error("found no MGS backends in DNS")]
     NoMgsBackends,
+    #[error("failed to build MGS client")]
+    MgsClient(#[source] reqwest::Error),
     #[error("failed to fetch artifact")]
     FetchArtifact(#[from] ArtifactCacheError),
     #[error("preconditions were not met")]
@@ -197,29 +199,35 @@ pub enum ApplyUpdateError {
 }
 
 /// Construct a set of MGS clients.
-fn make_mgs_clients(backends: &AllBackends, log: &slog::Logger) -> MgsClients {
-    MgsClients::from_clients(backends.iter().map(|(backend_name, backend)| {
-        // MGS has its own timeouts it applies to communications on our behalf
-        // to SPs. The longest of these timeouts is currently set to 60 seconds
-        // (specifically: MGS will wait up to 60 seconds for devices to reset,
-        // because we've seen sidecars take 20+ seconds to reset). We should
-        // therefore wait at least as long as its timeouts; we'll add a buffer
-        // here to leave plenty of time for minor weather between us and MGS.
-        let client = internal_http_client_builder()
-            .connect_timeout(Duration::from_secs(75))
-            .timeout(Duration::from_secs(75))
-            .build()
-            .unwrap();
+fn make_mgs_clients(
+    backends: &AllBackends,
+    log: &slog::Logger,
+) -> Result<MgsClients, reqwest::Error> {
+    let clients = backends
+        .iter()
+        .map(|(backend_name, backend)| {
+            // MGS has its own timeouts it applies to communications on our behalf
+            // to SPs. The longest of these timeouts is currently set to 60 seconds
+            // (specifically: MGS will wait up to 60 seconds for devices to reset,
+            // because we've seen sidecars take 20+ seconds to reset). We should
+            // therefore wait at least as long as its timeouts; we'll add a buffer
+            // here to leave plenty of time for minor weather between us and MGS.
+            let client = internal_http_client_builder()
+                .connect_timeout(Duration::from_secs(75))
+                .timeout(Duration::from_secs(75))
+                .build()?;
 
-        gateway_client::Client::new_with_client(
-            &format!("http://{}", backend.address),
-            client,
-            log.new(o!(
-                "mgs_backend_name" => backend_name.0.to_string(),
-                "mgs_backend_addr" => backend.address.to_string(),
-            )),
-        )
-    }))
+            Ok(gateway_client::Client::new_with_client(
+                &format!("http://{}", backend.address),
+                client,
+                log.new(o!(
+                    "mgs_backend_name" => backend_name.0.to_string(),
+                    "mgs_backend_addr" => backend.address.to_string(),
+                )),
+            ))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(MgsClients::from_clients(clients))
 }
 
 /// Makes one complete attempt to apply the specified software update to an SP
@@ -261,7 +269,7 @@ pub(crate) async fn apply_update(
         if backends.is_empty() {
             return Err(ApplyUpdateError::NoMgsBackends);
         }
-        make_mgs_clients(&backends, log)
+        make_mgs_clients(&backends, log).map_err(ApplyUpdateError::MgsClient)?
 
         // It's important that `backends` is dropped at this point.  Otherwise,
         // we'll hold the watch channel lock while we do the long-running
@@ -724,7 +732,8 @@ async fn wait_for_update_done(
             //   sled-agent, and must be done before we pass precheck)
             // * non-empty pending_persistent_boot_preference (RoT only)
             // * non-empty transient_boot_preference (RoT only)
-            // * failure to fetch inventory from sled-agent (host OS only)
+            // * failure to build a sled-agent client or fetch inventory from
+            //   sled-agent (host OS only)
             // * failure to determine an active slot artifact
             // * failure to communicate with the RoT
             //
@@ -737,6 +746,7 @@ async fn wait_for_update_done(
             | Err(PrecheckError::WrongActiveRotSlot { .. })
             | Err(PrecheckError::WrongActiveHostPhase1Slot { .. })
             | Err(PrecheckError::EphemeralRotBootPreferenceSet)
+            | Err(PrecheckError::SledAgentClient { .. })
             | Err(PrecheckError::SledAgentInventory { .. })
             | Err(PrecheckError::SledAgentInventoryMissingLastReconciliation)
             | Err(PrecheckError::MismatchedHostOsActiveSlot { .. })

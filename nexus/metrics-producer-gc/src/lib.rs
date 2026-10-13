@@ -49,6 +49,12 @@ pub enum Error {
         #[source]
         err: DbError,
     },
+    #[error("failed to build client for Oximeter {id}")]
+    OximeterClient {
+        id: Uuid,
+        #[source]
+        err: reqwest::Error,
+    },
 }
 
 /// Make one garbage collection pass over the metrics producers.
@@ -176,7 +182,9 @@ impl ExpiredProducers {
             let address = SocketAddr::new(info.ip.ip(), *info.port);
             let client = OximeterClient::new_with_client(
                 &format!("http://{address}"),
-                internal_http_client(),
+                internal_http_client().map_err(|err| {
+                    Error::OximeterClient { id: info.id, err }
+                })?,
                 client_log,
             );
             entry.insert(client);

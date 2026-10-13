@@ -530,14 +530,17 @@ impl<'a> Collector<'a> {
                 let url = format!("http://{addr}");
                 let log = self.log.new(o!("ntp_admin_url" => url.clone()));
 
-                (
-                    cfg.id,
-                    ntp_admin_client::Client::new_with_client(
-                        &url,
-                        internal_http_client(),
-                        log,
-                    ),
-                )
+                let client = internal_http_client()
+                    .map(|client| {
+                        ntp_admin_client::Client::new_with_client(
+                            &url, client, log,
+                        )
+                    })
+                    .with_context(|| {
+                        format!("NTP admin {url:?}: building client")
+                    })
+                    .map_err(InventoryError::from);
+                (cfg.id, client)
             })
             .collect();
 
@@ -550,7 +553,12 @@ impl<'a> Collector<'a> {
         {
             let log = self.log.clone();
             let task = async move {
-                let result = collect_one_timesync(&log, zone_id, &client).await;
+                let result = match client {
+                    Ok(client) => {
+                        collect_one_timesync(&log, zone_id, &client).await
+                    }
+                    Err(error) => Err(error),
+                };
                 (idx, zone_id, result)
             };
             if let Some(result) = tasks.spawn(task).await {
@@ -666,14 +674,16 @@ impl<'a> Collector<'a> {
                 let url = format!("http://{http_address}");
                 let log = self.log.new(o!("internal_dns_url" => url.clone()));
 
-                (
-                    cfg.id,
-                    dns_service_client::Client::new_with_client(
-                        &url,
-                        internal_http_client(),
-                        log,
-                    ),
-                )
+                let client = internal_http_client()
+                    .map(|client| {
+                        dns_service_client::Client::new_with_client(
+                            &url, client, log,
+                        )
+                    })
+                    .with_context(|| {
+                        format!("DNS server {url:?}: building client")
+                    });
+                (cfg.id, client)
             })
             .collect();
 
@@ -686,8 +696,12 @@ impl<'a> Collector<'a> {
         {
             let log = self.log.clone();
             let task = async move {
-                let result =
-                    collect_one_dns_generation(&log, zone_id, &client).await;
+                let result = match client {
+                    Ok(client) => {
+                        collect_one_dns_generation(&log, zone_id, &client).await
+                    }
+                    Err(error) => Err(error),
+                };
                 (idx, zone_id, result)
             };
             if let Some(result) = tasks.spawn(task).await {
@@ -729,7 +743,7 @@ async fn collect_one_sled_agent(
         .connect_timeout(SLED_AGENT_TIMEOUT)
         .timeout(SLED_AGENT_TIMEOUT)
         .build()
-        .unwrap();
+        .with_context(|| format!("Sled Agent {:?}: building client", url))?;
     let client =
         sled_agent_client::Client::new_with_client(url, reqwest_client, log);
 

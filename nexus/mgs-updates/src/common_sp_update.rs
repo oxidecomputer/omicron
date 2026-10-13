@@ -156,6 +156,13 @@ pub enum PrecheckError {
     #[error("communicating with RoT: {message:?}")]
     RotCommunicationFailed { message: String },
 
+    #[error("building client for sled-agent at {address}")]
+    SledAgentClient {
+        address: SocketAddrV6,
+        #[source]
+        err: reqwest::Error,
+    },
+
     #[error("fetching inventory from sled-agent at {address}")]
     SledAgentInventory {
         address: SocketAddrV6,
