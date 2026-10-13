@@ -53,6 +53,7 @@ use crate::app::db::datastore::ReplacementTarget;
 use crate::app::db::datastore::VolumeReplaceResult;
 use crate::app::db::datastore::VolumeToDelete;
 use crate::app::db::datastore::VolumeWithTarget;
+use crate::app::sagas::common_storage::pantry_client;
 use crate::app::sagas::declare_saga_actions;
 use crate::app::{authn, authz, db};
 use nexus_db_lookup::LookupPath;
@@ -61,7 +62,6 @@ use nexus_db_model::VmmState;
 use nexus_types::identity::Asset;
 use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::Error;
-use omicron_common::http_client::internal_http_client;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::VolumeUuid;
 use serde::Deserialize;
@@ -616,14 +616,12 @@ async fn notify_pantry_upstairs(
     };
 
     let endpoint = format!("http://{}", pantry_address);
-    let http_client = internal_http_client().map_err(|e| {
+    let client = pantry_client(&endpoint).map_err(|e| {
         saga_action_failed(Error::internal_error(&format!(
             "failed to build pantry client: {}",
             InlineErrorChain::new(&e)
         )))
     })?;
-    let client =
-        crucible_pantry_client::Client::new_with_client(&endpoint, http_client);
 
     let replace_request = crucible_pantry_client::types::ReplaceRequest {
         volume_construction_request,

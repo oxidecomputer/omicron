@@ -146,6 +146,7 @@ use crate::app::crucible::propolis_client_upstairs_health;
 use crate::app::db::datastore::CrucibleDisk;
 use crate::app::db::datastore::InstanceAndActiveVmm;
 use crate::app::sagas::common_storage::get_pantry_address;
+use crate::app::sagas::common_storage::pantry_client;
 use crate::app::sagas::declare_saga_actions;
 use crate::app::{authn, authz, db};
 use chrono::DateTime;
@@ -154,7 +155,6 @@ use nexus_db_lookup::LookupPath;
 use nexus_db_model::VmmState;
 use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::Error;
-use omicron_common::http_client::internal_http_client;
 use omicron_uuid_kinds::VolumeUuid;
 use propolis_client::types::ReplaceResult;
 use serde::Deserialize;
@@ -655,14 +655,12 @@ async fn check_from_previous_pantry_step(
     // requested activation in a background job. Is it finished?
 
     let endpoint = format!("http://{}", pantry_address);
-    let http_client = internal_http_client().map_err(|e| {
+    let client = pantry_client(&endpoint).map_err(|e| {
         saga_action_failed(Error::internal_error(&format!(
             "failed to build pantry client: {}",
             InlineErrorChain::new(&e)
         )))
     })?;
-    let client =
-        crucible_pantry_client::Client::new_with_client(&endpoint, http_client);
 
     match client.is_job_finished(&job_id.to_string()).await {
         Ok(status) => {
@@ -1333,14 +1331,12 @@ async fn execute_pantry_drive_action(
     // hang on the activation.
 
     let endpoint = format!("http://{}", pantry_address);
-    let http_client = internal_http_client().map_err(|e| {
+    let client = pantry_client(&endpoint).map_err(|e| {
         saga_action_failed(Error::internal_error(&format!(
             "failed to build pantry client: {}",
             InlineErrorChain::new(&e)
         )))
     })?;
-    let client =
-        crucible_pantry_client::Client::new_with_client(&endpoint, http_client);
 
     // Check pantry first, to see if this volume is attached already. This can
     // occur if:

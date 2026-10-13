@@ -44,6 +44,14 @@ pub(crate) async fn get_pantry_address(
     Ok(client.address())
 }
 
+/// Builds a Crucible Pantry client for the pantry at `endpoint`.
+pub(crate) fn pantry_client(
+    endpoint: &str,
+) -> Result<crucible_pantry_client::Client, reqwest::Error> {
+    let http_client = internal_http_client()?;
+    Ok(crucible_pantry_client::Client::new_with_client(endpoint, http_client))
+}
+
 // Helper function for attach/detach below: we retry as long as the pantry isn't
 // gone, and we detect "gone" by seeing whether the pantry address we've chosen
 // is still present when we resolve all the crucible pantry records in DNS.
@@ -54,23 +62,6 @@ pub(crate) async fn get_pantry_address(
 // something is wrong with DNS, we can't go back and choose another pantry
 // anyway, so we'll just keep retrying until DNS comes back. All that to say: a
 // failure to resolve DNS is treated as "the pantry is not gone".
-/// Builds a Crucible Pantry client, for use within an operation retried by
-/// `retry_operation_while_indefinitely`.
-///
-/// Failing to build the client is reported as a communication error, which
-/// the retry loop treats as transient: we retry rather than failing the saga
-/// action (or, in an undo action, leaving the saga stuck).
-pub(crate) fn pantry_client_for_retry(
-    endpoint: &str,
-) -> Result<
-    crucible_pantry_client::Client,
-    crucible_pantry_client::Error<CruciblePantryClientError>,
-> {
-    let http_client = internal_http_client()
-        .map_err(crucible_pantry_client::Error::CommunicationError)?;
-    Ok(crucible_pantry_client::Client::new_with_client(endpoint, http_client))
-}
-
 pub(crate) async fn is_pantry_gone(
     nexus: &Nexus,
     pantry_address: SocketAddrV6,
@@ -151,7 +142,10 @@ pub(crate) async fn call_pantry_attach_for_volume(
     };
 
     let attach_operation = || async {
-        pantry_client_for_retry(&endpoint)?
+        // Report a failure to build the client as a communication error, so
+        // that the retry loop treats it as transient.
+        pantry_client(&endpoint)
+            .map_err(crucible_pantry_client::Error::CommunicationError)?
             .attach(&attach_id.to_string(), &attach_request)
             .await
     };
@@ -205,7 +199,12 @@ pub(crate) async fn call_pantry_detach(
     info!(log, "sending detach for {attach_id} to endpoint {endpoint}");
 
     let detach_operation = || async {
-        pantry_client_for_retry(&endpoint)?.detach(&attach_id.to_string()).await
+        // Report a failure to build the client as a communication error, so
+        // that the retry loop treats it as transient.
+        pantry_client(&endpoint)
+            .map_err(crucible_pantry_client::Error::CommunicationError)?
+            .detach(&attach_id.to_string())
+            .await
     };
 
     let gone_check = || async {
