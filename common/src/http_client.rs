@@ -2,15 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Construction of HTTP clients for talking to other control plane services.
+//! Centralized configuration for HTTP clients used to communicate with other
+//! control plane services.
 //!
-//! By default, building a [`reqwest::Client`] loads the system's TLS root
-//! certificates from disk, and fails if none can be read (for example, if the
-//! process has run out of file descriptors). Services within the control plane
-//! talk to each other over plain HTTP, so they have no use for those
-//! certificates.
-//!
-//! See <https://github.com/oxidecomputer/omicron/issues/10871>.
+//! Clients for internal services should be built with the functions in this
+//! module (rather than [`reqwest::ClientBuilder::new`] or a
+//! progenitor-generated `Client::new`), so that they share a common
+//! configuration.
 
 use std::time::Duration;
 
@@ -22,9 +20,19 @@ const PROGENITOR_DEFAULT_TIMEOUT: Duration = Duration::from_secs(15);
 /// other control plane services.
 ///
 /// The resulting client trusts no TLS root certificates: requests to `https`
-/// URLs will fail certificate verification. Clients that need to speak TLS
-/// (e.g., to services outside the rack) should not use this builder.
+/// URLs will fail certificate verification. This builder is not suitable for
+/// requests to services outside the rack; in Nexus, use the `external_client`
+/// module (`nexus/src/app/external_client.rs`) for those, which applies
+/// additional configuration for talking to external services, including
+/// protection against server-side request forgery.
 pub fn internal_http_client_builder() -> reqwest::ClientBuilder {
+    // By default, building a `reqwest::Client` loads the system's TLS root
+    // certificates from disk, and fails if none can be read (for example, if
+    // the process has run out of file descriptors). Services within the
+    // control plane talk to each other over plain HTTP, so they have no use
+    // for those certificates: trust none, so building a client does no I/O.
+    //
+    // See <https://github.com/oxidecomputer/omicron/issues/10871>.
     reqwest::ClientBuilder::new().tls_certs_only([])
 }
 
@@ -39,7 +47,10 @@ pub fn internal_http_client() -> reqwest::Client {
         .connect_timeout(PROGENITOR_DEFAULT_TIMEOUT)
         .timeout(PROGENITOR_DEFAULT_TIMEOUT)
         .build()
-        .expect("building a client without TLS roots does no I/O")
+        .expect(
+            "because building a client without TLS roots does no I/O, it will \
+             only return an error in the event of a programmer error",
+        )
 }
 
 #[cfg(test)]
