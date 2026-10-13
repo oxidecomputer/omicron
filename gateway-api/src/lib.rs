@@ -568,11 +568,28 @@ pub trait GatewayApi {
     #[endpoint {
         method = GET,
         path = "/sp/{type}/{slot}/host-phase2-progress",
+        versions = VERSION_ARTIFACT_HASH_SCHEMA..,
     }]
     async fn sp_host_phase2_progress_get(
         rqctx: RequestContext<Self::Context>,
         path: Path<latest::component::PathSp>,
     ) -> Result<HttpResponseOk<latest::update::HostPhase2Progress>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/sp/{type}/{slot}/host-phase2-progress",
+        versions = ..VERSION_ARTIFACT_HASH_SCHEMA,
+    }]
+    async fn sp_host_phase2_progress_get_v1(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<v1::component::PathSp>,
+    ) -> Result<HttpResponseOk<v1::update::HostPhase2Progress>, HttpError> {
+        Self::sp_host_phase2_progress_get(rqctx, path).await.map(
+            |HttpResponseOk(progress)| {
+                HttpResponseOk(v1::update::HostPhase2Progress::from(progress))
+            },
+        )
+    }
 
     /// Clear the most recent host phase2 request we've seen from the target SP.
     #[endpoint {
@@ -594,6 +611,7 @@ pub trait GatewayApi {
         method = POST,
         path = "/recovery/host-phase2",
         request_body_max_bytes = HOST_PHASE2_MAX_BYTES,
+        versions = VERSION_ARTIFACT_HASH_SCHEMA..,
     }]
     async fn recovery_host_phase2_upload(
         rqctx: RequestContext<Self::Context>,
@@ -602,6 +620,26 @@ pub trait GatewayApi {
         HttpResponseOk<latest::update::HostPhase2RecoveryImageId>,
         HttpError,
     >;
+
+    #[endpoint {
+        method = POST,
+        path = "/recovery/host-phase2",
+        request_body_max_bytes = HOST_PHASE2_MAX_BYTES,
+        versions = ..VERSION_ARTIFACT_HASH_SCHEMA,
+    }]
+    async fn recovery_host_phase2_upload_v1(
+        rqctx: RequestContext<Self::Context>,
+        body: UntypedBody,
+    ) -> Result<HttpResponseOk<v1::update::HostPhase2RecoveryImageId>, HttpError>
+    {
+        Self::recovery_host_phase2_upload(rqctx, body).await.map(
+            |HttpResponseOk(image_id)| {
+                HttpResponseOk(v1::update::HostPhase2RecoveryImageId::from(
+                    image_id,
+                ))
+            },
+        )
+    }
 
     /// Get the identifier for the switch this MGS instance is connected to.
     ///
