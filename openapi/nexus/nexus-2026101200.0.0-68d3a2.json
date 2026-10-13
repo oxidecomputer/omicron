@@ -15818,7 +15818,7 @@
           "revision": {
             "description": "The current revision number of this Active Problem.\n\nThe revision number is incremented each time the Active Problem is updated. Changes to an Active Problem's impact list, description, and relationships with other Active Problems all increment the revision number.",
             "type": "integer",
-            "format": "uint32",
+            "format": "uint64",
             "minimum": 0
           },
           "state": {
