@@ -361,9 +361,14 @@ async fn resolve_nexus_and_register(
         debug!(log, "will register with Nexus at {}", address);
 
         // Register as a metric producer.
+        let reqwest_client = internal_http_client().map_err(|e| {
+            BackoffError::transient(Either::Right(
+                nexus_client::Error::CommunicationError(e),
+            ))
+        })?;
         let client = nexus_client::Client::new_with_client(
             &format!("http://{}", address),
-            internal_http_client(),
+            reqwest_client,
             log.clone(),
         );
         client

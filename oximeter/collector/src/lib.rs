@@ -134,6 +134,9 @@ pub enum Error {
 
     #[error("No registered producer with id '{id}'")]
     NoSuchProducer { id: Uuid },
+
+    #[error("Error building HTTP client")]
+    HttpClient(#[source] reqwest::Error),
 }
 
 impl From<Error> for HttpError {
@@ -238,9 +241,14 @@ impl backend::Connector for NexusConnector {
         &self,
         backend: &backend::Backend,
     ) -> Result<Self::Connection, backend::Error> {
+        let client = internal_http_client().map_err(|e| {
+            backend::Error::Other(
+                anyhow::Error::new(e).context("building Nexus client"),
+            )
+        })?;
         Ok(nexus_client::Client::new_with_client(
             &format!("http://{}", backend.address),
-            internal_http_client(),
+            client,
             self.log.clone(),
         ))
     }

@@ -37,6 +37,7 @@ omicron-uuid-kinds.workspace = true
 proptest = { workspace = true, optional = true }
 rand.workspace = true
 regex.workspace = true
+reqwest.workspace = true
 secrecy.workspace = true
 serde.workspace = true
 sha2.workspace = true

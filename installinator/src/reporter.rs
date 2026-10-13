@@ -621,7 +621,7 @@ impl ReportProgressImpl for HttpProgressBackend {
         update_id: MupdateUuid,
         report: EventReport,
     ) -> Result<(), ClientError> {
-        let artifact_client = ArtifactClient::new(peer.address(), &self.log);
+        let artifact_client = ArtifactClient::new(peer.address(), &self.log)?;
         artifact_client.report_progress(update_id, report).await
     }
 }

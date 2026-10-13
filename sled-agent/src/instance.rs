@@ -72,6 +72,9 @@ pub enum Error {
     #[error("Failure from Propolis Client")]
     Propolis(#[from] PropolisClientError),
 
+    #[error("Failed to build Propolis client")]
+    PropolisClient(#[source] reqwest::Error),
+
     // TODO: Remove this error; prefer to retry notifications.
     #[error("Notifying Nexus failed")]
     Notification(#[source] nexus_client::Error<nexus_client::types::Error>),
@@ -2549,7 +2552,9 @@ impl InstanceRunner {
             ),
         }
 
-        let reqwest_client = internal_http_client_builder().build().unwrap();
+        let reqwest_client = internal_http_client_builder()
+            .build()
+            .map_err(Error::PropolisClient)?;
         let client = Arc::new(PropolisClient::new_with_client(
             &format!("http://{}", self.propolis_addr),
             reqwest_client,
@@ -2909,7 +2914,8 @@ mod tests {
                 &log,
                 resolver,
                 _nexus_server.local_addr().port(),
-            );
+            )
+            .unwrap();
 
             Self { nexus_client, _nexus_server, state_rx, _dns_server }
         }

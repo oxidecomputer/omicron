@@ -294,7 +294,7 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
     ) -> Result<HttpResponseOk<RackSetupStatus>, HttpError> {
         let ctx = rqctx.context();
 
-        let client = ba_lockstep_client(ctx);
+        let client = ba_lockstep_client(ctx)?;
 
         let op_status = client
             .rack_initialization_status()
@@ -425,7 +425,7 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
         let ctx = rqctx.context();
         let log = &rqctx.log;
 
-        let client = ba_lockstep_client(ctx);
+        let client = ba_lockstep_client(ctx)?;
 
         let request = {
             let mut guard = ctx.rss_or_multirack_join_config.lock().unwrap();
@@ -458,7 +458,7 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
     ) -> Result<HttpResponseOk<RunMultirackJoinResponse>, HttpError> {
         let ctx = rqctx.context();
 
-        let client = ba_lockstep_client(ctx);
+        let client = ba_lockstep_client(ctx)?;
         let MultirackJoinRequest { trust_quorum_peers, rack_network_config } =
             body.into_inner();
 

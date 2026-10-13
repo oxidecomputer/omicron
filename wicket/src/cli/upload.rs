@@ -52,7 +52,8 @@ impl UploadArgs {
                 &log,
                 commission_addr,
                 WICKETD_UPLOAD_TIMEOUT,
-            );
+            )
+            .context("failed to create wicketd client")?;
 
             let body = Body::wrap_stream(futures::stream::iter(
                 repo_bytes.into_iter().map(Ok::<_, Infallible>),

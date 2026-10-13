@@ -51,7 +51,8 @@ impl PreflightArgs {
         log: Logger,
         wicketd_addr: SocketAddrV6,
     ) -> Result<()> {
-        let client = create_wicketd_client(&log, wicketd_addr, WICKETD_TIMEOUT);
+        let client = create_wicketd_client(&log, wicketd_addr, WICKETD_TIMEOUT)
+            .context("failed to create wicketd client")?;
 
         match self {
             Self::Uplink { query_dns } => {

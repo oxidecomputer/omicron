@@ -223,21 +223,22 @@ struct CollectionResponse {
     time_collecting: Duration,
 }
 
+/// Build the HTTP client used by collection tasks to contact producers.
+pub(crate) fn collection_http_client() -> Result<reqwest::Client, reqwest::Error>
+{
+    internal_http_client_builder().timeout(COLLECTION_TIMEOUT).build()
+}
+
 /// Task that actually performs collections from the producer.
 async fn collection_loop(
     log: Logger,
+    client: reqwest::Client,
     mut shutdown: oneshot::Receiver<()>,
     mut producer_info_rx: watch::Receiver<ProducerEndpoint>,
     mut forced_collection_rx: mpsc::Receiver<ForcedCollectionRequest>,
     mut timer_collection_rx: mpsc::Receiver<CollectionStartTimes>,
     result_tx: mpsc::Sender<CollectionResponse>,
 ) {
-    let client = internal_http_client_builder()
-        .timeout(COLLECTION_TIMEOUT)
-        .build()
-        // Safety: `build()` only fails if TLS couldn't be initialized or the
-        // system DNS configuration could not be loaded.
-        .unwrap();
     loop {
         // Wait for notification that we have a collection to perform, from
         // either the forced- or timer-collection queue.
@@ -381,12 +382,13 @@ impl CollectionTaskHandle {
     /// `inbox` field.
     pub fn new(
         log: &Logger,
+        client: reqwest::Client,
         collector: self_stats::OximeterCollector,
         producer: ProducerEndpoint,
         outbox: CollectionTaskSenderWrapper,
     ) -> Self {
         let (task, notifiers) =
-            CollectionTask::new(log, collector, producer, outbox);
+            CollectionTask::new(log, client, collector, producer, outbox);
         tokio::spawn(task.run());
         let log = log.new(o!(
             "component" => "collection-task-handle",
@@ -555,6 +557,7 @@ impl CollectionTask {
     // for talking to this task and the inner task.
     fn new(
         log: &Logger,
+        client: reqwest::Client,
         collector: self_stats::OximeterCollector,
         producer: ProducerEndpoint,
         outbox: CollectionTaskSenderWrapper,
@@ -607,6 +610,7 @@ impl CollectionTask {
         // Task running the actual collections in a loop.
         tokio::task::spawn(collection_loop(
             log.clone(),
+            client,
             shutdown_rx,
             producer_info_rx.clone(),
             forced_collection_rx,

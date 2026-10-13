@@ -348,7 +348,7 @@ impl FetchArtifactImpl for HttpFetchBackend {
         id: ArtifactLookupId,
     ) -> Result<(u64, FetchReceiver), HttpError> {
         // TODO: be able to fetch from sled-agent clients as well
-        let artifact_client = ArtifactClient::new(peer.address(), &self.log);
+        let artifact_client = ArtifactClient::new(peer.address(), &self.log)?;
         artifact_client.fetch(id).await
     }
 }

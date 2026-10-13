@@ -26,7 +26,7 @@ pub(crate) type NexusClient = nexus_client::Client;
 pub(crate) fn make_nexus_client(
     log: &Logger,
     resolver: Arc<Resolver>,
-) -> NexusClient {
+) -> Result<NexusClient, reqwest::Error> {
     make_nexus_client_with_port(log, resolver, NEXUS_INTERNAL_PORT)
 }
 
@@ -34,18 +34,16 @@ pub(crate) fn make_nexus_client_with_port(
     log: &Logger,
     resolver: Arc<Resolver>,
     port: u16,
-) -> NexusClient {
-    let client = internal_http_client_builder()
-        .dns_resolver(resolver)
-        .build()
-        .expect("Failed to build client");
+) -> Result<NexusClient, reqwest::Error> {
+    let client =
+        internal_http_client_builder().dns_resolver(resolver).build()?;
 
     let dns_name = ServiceName::Nexus.srv_name();
-    NexusClient::new_with_client(
+    Ok(NexusClient::new_with_client(
         &format!("http://{dns_name}:{port}"),
         client,
         log.new(o!("component" => "NexusClient")),
-    )
+    ))
 }
 
 // Although it is a bit awkward to define these conversions here, it frees us

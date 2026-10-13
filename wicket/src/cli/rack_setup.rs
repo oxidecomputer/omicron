@@ -93,9 +93,11 @@ impl SetupArgs {
         global_opts: GlobalOpts,
     ) -> Result<()> {
         let client =
-            create_wicketd_client(&log, addrs.wicketd, WICKETD_TIMEOUT);
+            create_wicketd_client(&log, addrs.wicketd, WICKETD_TIMEOUT)
+                .context("failed to create wicketd client")?;
         let commission_client =
-            create_commission_client(&log, addrs.commission, WICKETD_TIMEOUT);
+            create_commission_client(&log, addrs.commission, WICKETD_TIMEOUT)
+                .context("failed to create wicketd client")?;
 
         match self {
             SetupArgs::GetConfig => {

@@ -167,7 +167,8 @@ impl Server {
             compression: dropshot::CompressionConfig::None,
         };
 
-        let mgs_manager = MgsManager::new(&log, args.mgs_address);
+        let mgs_manager = MgsManager::new(&log, args.mgs_address)
+            .context("failed to create MGS manager")?;
         let mgs_handle = mgs_manager.get_handle();
         tokio::spawn(async move {
             mgs_manager.run().await;
@@ -183,12 +184,15 @@ impl Server {
             crate::installinator_progress::new(&log);
 
         let store = WicketdArtifactStore::new(&log);
-        let update_tracker = Arc::new(UpdateTracker::new(
-            args.mgs_address,
-            &log,
-            store.clone(),
-            ipr_update_tracker.clone(),
-        ));
+        let update_tracker = Arc::new(
+            UpdateTracker::new(
+                args.mgs_address,
+                &log,
+                store.clone(),
+                ipr_update_tracker.clone(),
+            )
+            .context("failed to create update tracker")?,
+        );
 
         let bootstrap_peers = BootstrapPeersFromDdm::new(
             &log,
@@ -219,7 +223,8 @@ impl Server {
             anyhow!(err).context("failed to start Nexus TCP proxy")
         })?;
 
-        let mgs_client = make_mgs_client(log.clone(), args.mgs_address);
+        let mgs_client = make_mgs_client(log.clone(), args.mgs_address)
+            .context("failed to create MGS client")?;
 
         let preflight_checker = PreflightCheckerHandler::new(&log);
 
