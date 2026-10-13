@@ -11,7 +11,7 @@ use anyhow::{Context, bail};
 use camino::Utf8PathBuf;
 use clap::{Args, Parser, Subcommand};
 use daft::Diffable;
-use omicron_repl_utils::run_repl_on_stdin_customized;
+use omicron_repl_utils::{parsed, run_repl_on_stdin_customized};
 use reconfigurator_cli::LogCapture;
 use reedline::{
     ColumnarMenu, DefaultCompleter, DefaultPrompt, DefaultPromptSegment, Emacs,
@@ -187,9 +187,9 @@ impl TqdbRepl {
         run_repl_on_stdin_customized(
             ed,
             &prompt,
-            &mut |cmd: TopLevelArgs, _| {
+            parsed(|cmd: TopLevelArgs| {
                 process_command(&mut tqdb, cmd, &log_capture)
-            },
+            }),
         )
     }
 

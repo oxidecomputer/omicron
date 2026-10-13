@@ -61,6 +61,7 @@ use omicron_common::update::OmicronInstallManifestSource;
 use omicron_generation_kinds::{
     Generation, NexusGeneration, TargetReleaseGeneration,
 };
+use omicron_repl_utils::parsed;
 use omicron_repl_utils::run_repl_from_file;
 use omicron_repl_utils::run_repl_on_stdin;
 use omicron_uuid_kinds::GenericUuid;
@@ -394,13 +395,16 @@ impl CmdReconfiguratorSim {
         }
 
         if let Some(input_file) = &self.input_file {
-            run_repl_from_file(input_file, &mut |cmd: TopLevelArgs, _| {
-                process_command(&mut sim, cmd, &log_capture)
-            })
+            run_repl_from_file(
+                input_file,
+                parsed(|cmd: TopLevelArgs| {
+                    process_command(&mut sim, cmd, &log_capture)
+                }),
+            )
         } else {
-            run_repl_on_stdin(&mut |cmd: TopLevelArgs, _| {
+            run_repl_on_stdin(parsed(|cmd: TopLevelArgs| {
                 process_command(&mut sim, cmd, &log_capture)
-            })
+            }))
         }
     }
 }

@@ -5,7 +5,6 @@
 //! helpers for running a REPL with reedline
 
 use anyhow::Context;
-use anyhow::anyhow;
 use camino::Utf8Path;
 use clap::Parser;
 use reedline::Prompt;
@@ -18,12 +17,31 @@ use std::io::Write;
 use std::str::CharIndices;
 use subprocess::Exec;
 
-/// The callback that runs one parsed command.
+/// Adapts a callback that takes a parsed `C` into a line handler.
 ///
-/// The callback receives the parsed command, along with the raw input it was
-/// parsed from (excluding a trailing comment or pipe).
-pub type RunOne<'a, C> =
-    dyn FnMut(C, &str) -> anyhow::Result<Option<String>> + 'a;
+/// The returned handler splits the line with shell-style quoting, parses the
+/// words as a `C` (a `clap::Parser`, used in multicall mode so the first word
+/// is a subcommand rather than a program name), and calls the given `run_one`
+/// callback with the result.
+pub fn parsed<C: Parser>(
+    mut run_one: impl FnMut(C) -> anyhow::Result<Option<String>>,
+) -> impl FnMut(&str) -> anyhow::Result<String> {
+    move |text: &str| {
+        let words = shell_words::split(text)?;
+
+        C::command()
+            .multicall(true)
+            .try_get_matches_from(words)
+            .and_then(|matches| C::from_arg_matches(&matches))
+            .map_or_else(
+                // Print the usage message the way clap wants it printed (help
+                // goes to stdout, errors to stderr). If even that fails,
+                // report it like any other error on the line.
+                |error| Ok(error.print().map(|()| String::new())?),
+                |command| run_one(command).map(Option::unwrap_or_default),
+            )
+    }
+}
 
 /// Runs the same kind of REPL as `run_repl_on_stdin()`, but reads commands from
 /// a file
@@ -33,9 +51,9 @@ pub type RunOne<'a, C> =
 /// This is useful for expectorate tests.  You can define a file of input
 /// commands and check it against known output.  The output has the commands in
 /// it so that it's easier to verify.
-pub fn run_repl_from_file<C: Parser>(
+pub fn run_repl_from_file(
     input_file: &Utf8Path,
-    run_one: &mut RunOne<'_, C>,
+    mut run_line: impl FnMut(&str) -> anyhow::Result<String>,
 ) -> anyhow::Result<()> {
     let file = File::open(&input_file)
         .with_context(|| format!("open {:?}", input_file))?;
@@ -79,10 +97,7 @@ pub fn run_repl_from_file<C: Parser>(
             println!("> {}", line);
         }
 
-        match process_entry(&line, run_one) {
-            LoopResult::Continue => (),
-            LoopResult::Bail(error) => return Err(error),
-        }
+        process_entry(&line, &mut run_line);
         println!();
     }
     Ok(())
@@ -92,55 +107,50 @@ pub fn run_repl_from_file<C: Parser>(
 ///
 /// Behavior:
 ///
-/// - Each input line is tokenized into an array of arguments, following a few
+/// - Each input line is scanned for a comment and a pipe, following a few
 ///   rules:
 ///   - We use shell-style quoting (single quotes, double quotes, backslash
-///     escapes), so arguments can include spaces and special characters.
-///   - An unquoted `#` character marks the beginning of a comment, which will
-///     be ignored in the tokenized output.
+///     escapes), so a quoted `#` or `!` is an ordinary character.
+///   - An unquoted `#` character marks the beginning of a comment, which is
+///     ignored.
 ///   - An unquoted `!` character is a pipe, indicating that the output of the
-///     parsed command (described below) should be postprocessed by a given
-///     shell command. With no command before it, the shell command runs with no
+///     command (described below) should be postprocessed by a given shell
+///     command. With no command before it, the shell command runs with no
 ///     input.
 ///
-/// - The tokenized arguments are treated as a REPL command.  They are parsed as
-///   a `C`, which implements `clap::Parser`. In other words: you use `clap` to
-///   define the commands supported in your REPL.
-/// - On failure to parse each line as a `C` command, a usage message is
-///   printed.
+/// - The remaining text is handed to `run_line`, which has been stripped of
+///   surrounding whitespace and of any trailing comment or shell pipe. The
+///   handler parses it itself. Use [`parsed`] to have it split into words and
+///   parsed as a `clap::Parser` first.
 ///
-/// - `run_one` is invoked for each successfully parsed command.
-///   - On success with `Some(string)`, the string is printed, followed by a
-///     newline.
-///   - On success with `None`, nothing is printed.
+/// - `run_line` is invoked for each non-empty line.
+///   - On success, the output is printed, followed by a newline, unless it is
+///     empty, in which case nothing is printed.
 ///   - On failure, the error and its cause chain are printed.
-pub fn run_repl_on_stdin<C: Parser>(
-    run_one: &mut RunOne<'_, C>,
+pub fn run_repl_on_stdin(
+    run_line: impl FnMut(&str) -> anyhow::Result<String>,
 ) -> anyhow::Result<()> {
     let ed = Reedline::create();
     let prompt = reedline::DefaultPrompt::new(
         reedline::DefaultPromptSegment::Empty,
         reedline::DefaultPromptSegment::Empty,
     );
-    run_repl_on_stdin_customized(ed, &prompt, run_one)
+    run_repl_on_stdin_customized(ed, &prompt, run_line)
 }
 
 /// Runs a REPL using stdin/stdout with a customized `Reedline` and `Prompt`
 ///
 /// See docs for [`run_repl_on_stdin`]
-pub fn run_repl_on_stdin_customized<C: Parser>(
+pub fn run_repl_on_stdin_customized(
     mut ed: Reedline,
     prompt: &dyn Prompt,
-    run_one: &mut RunOne<'_, C>,
+    mut run_line: impl FnMut(&str) -> anyhow::Result<String>,
 ) -> anyhow::Result<()> {
     // Ensure new Signal variants would trigger a compile error.
     #[allow(clippy::while_let_loop)]
     loop {
         match ed.read_line(prompt).context("unexpected error")? {
-            Signal::Success(buffer) => match process_entry(&buffer, run_one) {
-                LoopResult::Continue => (),
-                LoopResult::Bail(error) => return Err(error),
-            },
+            Signal::Success(buffer) => process_entry(&buffer, &mut run_line),
             Signal::CtrlD | Signal::CtrlC => break,
         }
     }
@@ -148,64 +158,33 @@ pub fn run_repl_on_stdin_customized<C: Parser>(
     Ok(())
 }
 
-fn process_entry<C: Parser>(
+fn process_entry(
     entry: &str,
-    run_one: &mut RunOne<'_, C>,
-) -> LoopResult {
+    run_line: &mut dyn FnMut(&str) -> anyhow::Result<String>,
+) {
     let (text, shell_cmd) = split_markers(entry);
 
     // If no input was provided, take another lap (print the prompt and accept
-    // another line).  This gets handled specially because otherwise clap would
-    // treat this as a usage error and print a help message, which isn't what we
-    // want here.  If there was no clap command but a pipe was present, run the
+    // another line). If there was no command but a pipe was present, run the
     // shell command with no input.
     if text.is_empty() {
         if let Some(shell_cmd) = shell_cmd {
             pipe_into_shell(shell_cmd, "");
         }
-        return LoopResult::Continue;
+        return;
     }
 
-    let words = match shell_words::split(text) {
-        Ok(words) => words,
-        Err(error) => {
-            println!("error: {error}");
-            return LoopResult::Continue;
-        }
-    };
-
-    let parsed_command = C::command()
-        .multicall(true)
-        .try_get_matches_from(words)
-        .and_then(|matches| C::from_arg_matches(&matches));
-    let command = match parsed_command {
-        Err(error) => {
-            // We failed to parse the command.  Print the error.
-            return match error.print() {
-                // Assuming that worked, just take another lap.
-                Ok(_) => LoopResult::Continue,
-                // If we failed to even print the error, that itself is a fatal
-                // error.
-                Err(error) => LoopResult::Bail(
-                    anyhow!(error).context("printing previous error"),
-                ),
-            };
-        }
-        Ok(cmd) => cmd,
-    };
-
-    match (run_one(command, text), shell_cmd) {
+    match (run_line(text), shell_cmd) {
         (Err(error), _) => println!("error: {:#}", error),
         // The shell command runs whenever the command succeeds, with whatever
         // output it produced, possibly none.
-        (Ok(output), Some(shell_cmd)) => {
-            pipe_into_shell(shell_cmd, output.as_deref().unwrap_or(""))
+        (Ok(output), Some(shell_cmd)) => pipe_into_shell(shell_cmd, &output),
+        (Ok(output), None) => {
+            if !output.is_empty() {
+                println!("{output}");
+            }
         }
-        (Ok(Some(output)), None) => println!("{output}"),
-        (Ok(None), None) => (),
     }
-
-    LoopResult::Continue
 }
 
 /// Runs `shell_cmd` with `input` on its stdin, and waits for it to exit.
@@ -284,55 +263,51 @@ fn skip_double_quoted(chars: &mut CharIndices<'_>) {
     }
 }
 
-/// Describes next steps after evaluating one "line" of user input
-///
-/// This could just be `Result`, but it's easy to misuse that here because
-/// _commands_ might fail all the time without needing to bail out of the REPL.
-/// We use a separate type for clarity about what success/failure actually
-/// means.
-enum LoopResult {
-    /// Show the prompt and accept another command
-    Continue,
-
-    /// Exit the REPL with a fatal error
-    Bail(anyhow::Error),
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     /// Test clap command that just contains a list of arguments. This lets us
-    /// test that our tokenization (using shell_words::split), and our handling
-    /// of comments and pipes, are doing what we expect.
+    /// test that `parsed`'s splitting (using shell_words::split) and
+    /// `process_entry`'s handling of comments and pipes are doing what we
+    /// expect.
     #[derive(Debug, Parser)]
     enum Command {
         Noop { args: Vec<String> },
     }
 
-    struct RunResult {
-        args: Vec<String>,
-        stripped: String,
-    }
-
-    /// Sends a line of input through `process_entry`, and returns the parsed
-    /// command args and the stripped input text.
-    ///
-    /// Note that `process_entry` swallows parse errors and returns
-    /// `LoopResult::Continue` on failure, so we can't differentiate between an
-    /// error and an empty result; we return `None` either way.
-    fn run(entry: &str) -> Option<RunResult> {
+    /// Sends a line of input through `process_entry` with a handler that
+    /// records the stripped text it was given. Returns `None` if the handler
+    /// was not called.
+    fn run_line(entry: &str) -> Option<String> {
         let mut captured = None;
-        let result = process_entry(entry, &mut |cmd: Command, text: &str| {
-            let Command::Noop { args } = cmd;
-            captured = Some(RunResult { args, stripped: text.to_string() });
-            Ok(None)
+        process_entry(entry, &mut |text: &str| {
+            captured = Some(text.to_string());
+            Ok(String::new())
         });
-        assert!(matches!(result, LoopResult::Continue));
         captured
     }
 
-    fn run_ok(entry: &str) -> RunResult {
+    /// Sends a line of input through `process_entry` and the `parsed`
+    /// adapter, and returns the parsed command's args.
+    ///
+    /// Note that `parsed` prints split and parse errors and continues, so we
+    /// can't differentiate between an error and an empty result; we return
+    /// `None` either way.
+    fn run(entry: &str) -> Option<Vec<String>> {
+        let mut captured = None;
+        process_entry(
+            entry,
+            &mut parsed(|cmd: Command| {
+                let Command::Noop { args } = cmd;
+                captured = Some(args);
+                Ok(None)
+            }),
+        );
+        captured
+    }
+
+    fn run_ok(entry: &str) -> Vec<String> {
         run(entry).expect("command should parse")
     }
 
@@ -343,29 +318,36 @@ mod tests {
     #[test]
     fn quoted_arguments_are_single_words() {
         assert_eq!(
-            run_ok(r#"noop a 'b c' "d e" f\ g"#).args,
+            run_ok(r#"noop a 'b c' "d e" f\ g"#),
             ["a", "b c", "d e", "f g"]
         );
     }
 
     #[test]
-    fn callback_receives_command_text() {
-        assert_eq!(run_ok("  noop a 'b c'  ").stripped, "noop a 'b c'");
-        assert_eq!(run_ok("noop a # comment").stripped, "noop a");
-        assert_eq!(run_ok("noop a ! true").stripped, "noop a");
+    fn line_handler_receives_stripped_text() {
+        assert_eq!(run_line("  noop a 'b c'  ").unwrap(), "noop a 'b c'");
+        assert_eq!(run_line("noop a # comment").unwrap(), "noop a");
+        assert_eq!(run_line("noop a ! true").unwrap(), "noop a");
+        // The handler is not called for a blank line.
+        assert_eq!(run_line("   "), None);
     }
 
     #[test]
     fn empty_words_and_trailing_backslashes_are_preserved() {
-        assert_eq!(run_ok("noop ''").args, [""]);
-        assert_eq!(run_ok(r"noop a\").args, [r"a\"]);
+        assert_eq!(run_ok("noop ''"), [""]);
+        assert_eq!(run_ok(r"noop a\"), [r"a\"]);
     }
 
     #[test]
     fn quoted_markers_are_ordinary_characters() {
-        let result = run_ok(r#"noop 'a!b' "c#d" e\!f # 'comment"#);
-        assert_eq!(result.args, ["a!b", "c#d", "e!f"]);
-        assert_eq!(result.stripped, r#"noop 'a!b' "c#d" e\!f"#);
+        assert_eq!(
+            run_ok(r#"noop 'a!b' "c#d" e\!f # 'comment"#),
+            ["a!b", "c#d", "e!f"]
+        );
+        assert_eq!(
+            run_line(r#"noop 'a!b' "c#d" e\!f # 'comment"#).unwrap(),
+            r#"noop 'a!b' "c#d" e\!f"#
+        );
     }
 
     #[test]
@@ -404,8 +386,8 @@ mod tests {
     fn bare_pipe_runs_shell_command_with_no_input() {
         let dir = camino_tempfile::tempdir().unwrap();
         let path = dir.path().join("out");
-        // The callback is never invoked, but the shell command runs.
-        run_err(&format!("! cat > {path}"));
+        // The handler is never invoked, but the shell command runs.
+        assert_eq!(run_line(&format!("! cat > {path}")), None);
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "");
     }
 
@@ -417,6 +399,30 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "hello\nworld\n");
     }
 
+    /// The handler's output, when there is some, is what the pipe receives.
+    #[test]
+    fn pipe_receives_the_handler_output() {
+        let dir = camino_tempfile::tempdir().unwrap();
+        let path = dir.path().join("out");
+        process_entry(&format!("noop ! cat > {path}"), &mut |_: &str| {
+            Ok("hello".to_string())
+        });
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "hello");
+    }
+
+    /// A handler that fails has no output to pipe, so the shell command does
+    /// not run at all.
+    #[test]
+    fn a_failing_handler_does_not_run_its_pipe() {
+        let dir = camino_tempfile::tempdir().unwrap();
+        let path = dir.path().join("out");
+        process_entry(&format!("noop ! cat > {path}"), &mut |_: &str| {
+            Err(anyhow::anyhow!("nope"))
+        });
+        // `cat > path` would have created the file even with no input.
+        assert!(!path.exists());
+    }
+
     /// A child that exits without reading closes the pipe; writing to it
     /// must return rather than panic or hang.
     #[test]
@@ -424,10 +430,35 @@ mod tests {
         pipe_into_shell("true", &"x".repeat(1 << 20));
     }
 
+    /// `parsed` does not call the callback on a split error or a parse error.
     #[test]
-    fn lines_that_skip_the_callback() {
-        run_err("   "); // blank line
+    fn parsed_skips_the_callback_on_split_and_parse_errors() {
         run_err("bogus"); // fails to parse as a command
-        run_err("noop 'a b"); // fails to parse due to unclosed quote
+        run_err("noop 'a b"); // fails to split due to unclosed quote
+    }
+
+    /// An unclosed quote is an error the handler returns, not one it prints.
+    #[test]
+    fn an_unclosed_quote_is_the_handlers_error() {
+        let mut handler = parsed(|cmd: Command| {
+            let Command::Noop { .. } = cmd;
+            Ok(None)
+        });
+        assert!(handler("noop 'a b").is_err());
+    }
+
+    /// A line that does not parse still runs its pipe, on empty input.
+    #[test]
+    fn a_line_that_does_not_parse_still_runs_its_pipe() {
+        let dir = camino_tempfile::tempdir().unwrap();
+        let path = dir.path().join("out");
+        process_entry(
+            &format!("bogus ! cat > {path}"),
+            &mut parsed(|cmd: Command| {
+                let Command::Noop { .. } = cmd;
+                Ok(None)
+            }),
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "");
     }
 }
