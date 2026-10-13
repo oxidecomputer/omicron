@@ -33,7 +33,7 @@ pub struct ActiveProblem {
     /// updated. Changes to an Active Problem's impact list, description, and
     /// relationships with other Active Problems all increment the revision
     /// number.
-    pub revision: u32,
+    pub revision: u64,
     /// The problem code describing this Active Problem.
     ///
     /// Problem codes are opaque numeric identifiers that indicate the nature of

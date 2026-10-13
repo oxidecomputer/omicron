@@ -21,6 +21,7 @@ use chrono::{DateTime, Utc};
 use db_macros::Asset;
 use nexus_db_schema::schema::{active_problem, active_problem_revision};
 use nexus_types::external_api::active_problem as api;
+use nexus_types::fm::active_problem::ProblemCode;
 use nexus_types::identity::Asset;
 use omicron_common::api::external::Error;
 use omicron_generation_kinds::ActiveProblemGeneration;
@@ -76,7 +77,7 @@ pub struct ActiveProblemView {
     pub time_deleted: Option<DateTime<Utc>>,
     pub revision: ActiveProblemGeneration,
     pub state: api::ActiveProblemState,
-    pub code: u32,
+    pub code: ProblemCode,
     pub summary: String,
     pub description: String,
     pub action_required: String,
@@ -102,7 +103,10 @@ impl TryFrom<(ActiveProblem, ActiveProblemRevision)> for ActiveProblemView {
         } = rev;
         let id = identity.id;
 
-        // If the caller is
+        let code = ProblemCode::try_from(u32::from(code))?;
+
+        // If the caller is trying to glue a revision of a totally unrelated
+        // problem onto this problem, well, that's a bug!
         if identity.id != problem_id {
             return Err(Error::InternalError {
                 internal_message: format!(
@@ -112,6 +116,7 @@ impl TryFrom<(ActiveProblem, ActiveProblemRevision)> for ActiveProblemView {
             });
         }
 
+        // Is this the revision we were supposed to have queried?
         if revision != current_revision {
             return Err(Error::InternalError {
                 internal_message: format!(
@@ -131,7 +136,7 @@ impl TryFrom<(ActiveProblem, ActiveProblemRevision)> for ActiveProblemView {
             identity,
             revision: revision.into(),
             state,
-            code: code.into(),
+            code,
             time_deleted,
             summary,
             description,
@@ -158,16 +163,29 @@ impl Asset for ActiveProblemView {
 
 impl Into<api::ActiveProblem> for ActiveProblemView {
     fn into(self) -> api::ActiveProblem {
+        let identity = self.identity();
         let Self {
-            identity,
+            identity: _identity,
             revision,
             state,
             code,
-            time_deleted,
+            time_deleted: _,
             summary,
             description,
             action_required,
         } = self;
-        todo!("eliza: draw the rest of the owl")
+        api::ActiveProblem {
+            identity,
+            revision: revision.as_u64(),
+            state,
+            code: code.into(),
+            class: code.description().class.to_string(),
+            summary,
+            description,
+            action_required,
+            // TODO(eliza): implement causes and causing!
+            causes: Vec::new(),
+            causing: Vec::new(),
+        }
     }
 }
