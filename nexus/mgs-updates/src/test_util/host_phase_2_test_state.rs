@@ -9,6 +9,7 @@ use anyhow::Context as _;
 use dropshot::ConfigDropshot;
 use dropshot::HttpServer;
 use dropshot::ServerBuilder;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use sled_agent_types::disk::M2Slot;
 use sled_agent_types::inventory::SledRole;
@@ -158,6 +159,7 @@ struct HostPhase2SledAgentContext {
     id: SledUuid,
     role: SledRole,
     baseboard: BaseboardId,
+    rack_id: RackUuid,
 }
 
 impl HostPhase2SledAgentContext {
@@ -173,6 +175,7 @@ impl HostPhase2SledAgentContext {
                 part_number: "test".to_string(),
                 serial_number: "test".to_string(),
             },
+            rack_id: RackUuid::new_v4(),
         }
     }
 }
@@ -359,6 +362,7 @@ mod api_impl {
                 sled_agent_address,
                 sled_role: ctx.role,
                 baseboard_id: ctx.baseboard.clone(),
+                rack_id: ctx.rack_id,
                 usable_hardware_threads: 64,
                 usable_physical_ram: (1 << 30).into(),
                 reservoir_size: (1 << 29).into(),

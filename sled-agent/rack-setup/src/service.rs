@@ -1668,6 +1668,7 @@ mod test {
 
     fn make_sled_info(
         sled_id: SledUuid,
+        rack_id: RackUuid,
         subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
         u2_count: usize,
     ) -> SledInfo {
@@ -1684,6 +1685,7 @@ mod test {
                     part_number: "test".to_string(),
                     serial_number: "test".to_string(),
                 },
+                rack_id,
                 usable_hardware_threads: 32,
                 usable_physical_ram: ByteCount::from_gibibytes_u32(16),
                 cpu_family: SledCpuFamily::AmdMilan,
@@ -1722,9 +1724,11 @@ mod test {
     }
 
     fn make_fake_sleds() -> Vec<SledInfo> {
+        let rack_id = RackUuid::new_v4();
         vec![
             make_sled_info(
                 SledUuid::new_v4(),
+                rack_id,
                 Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(
                     "fd00:1122:3344:101::1".parse().unwrap(),
                 ),
@@ -1732,6 +1736,7 @@ mod test {
             ),
             make_sled_info(
                 SledUuid::new_v4(),
+                rack_id,
                 Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(
                     "fd00:1122:3344:102::1".parse().unwrap(),
                 ),
@@ -1739,6 +1744,7 @@ mod test {
             ),
             make_sled_info(
                 SledUuid::new_v4(),
+                rack_id,
                 Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(
                     "fd00:1122:3344:103::1".parse().unwrap(),
                 ),
