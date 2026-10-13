@@ -59,6 +59,11 @@ pub struct ActiveProblem {
     ///
     /// This may change as the problem progresses.
     pub description: String,
+    /// A description of any actions an operator should take in response to this
+    /// Active Problem.
+    ///
+    /// This may change as the problem progresses.
+    pub action_required: String,
     /// Other Active Problems which cause this problem.
     pub causes: Vec<RelatedActiveProblem>,
     /// Other Active Problems caused by this problem.
