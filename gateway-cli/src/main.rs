@@ -481,16 +481,16 @@ async fn main_impl() -> Result<()> {
             } else {
                 // clap guarantees these are not `None` when `clear` is false.
                 let update_id = update_id.unwrap();
-                let host_phase_2 = host_phase_2.unwrap().to_string();
-                let control_plane = control_plane.unwrap().to_string();
+                let host_phase_2 = host_phase_2.unwrap();
+                let control_plane = control_plane.unwrap();
                 client
                     .sp_installinator_image_id_set(
                         &sp.typ,
                         sp.slot,
                         &InstallinatorImageId {
                             update_id,
-                            host_phase_2,
-                            control_plane,
+                            host_phase_2: host_phase_2.0.into(),
+                            control_plane: control_plane.0.into(),
                         },
                     )
                     .await?;

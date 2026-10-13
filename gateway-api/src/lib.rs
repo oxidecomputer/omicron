@@ -24,6 +24,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (6, ARTIFACT_HASH_SCHEMA),
     (5, RACK_ID),
     (4, COMPONENT_VPD),
     (3, NEWTYPE_UUID_BUMP),
@@ -526,12 +527,27 @@ pub trait GatewayApi {
     #[endpoint {
         method = PUT,
         path = "/sp/{type}/{slot}/ipcc/installinator-image-id",
+        versions = VERSION_ARTIFACT_HASH_SCHEMA..,
     }]
     async fn sp_installinator_image_id_set(
         rqctx: RequestContext<Self::Context>,
         path: Path<latest::component::PathSp>,
         body: TypedBody<latest::update::InstallinatorImageId>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        method = PUT,
+        path = "/sp/{type}/{slot}/ipcc/installinator-image-id",
+        versions = ..VERSION_ARTIFACT_HASH_SCHEMA,
+    }]
+    async fn sp_installinator_image_id_set_v1(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<v1::component::PathSp>,
+        body: TypedBody<v1::update::InstallinatorImageId>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::sp_installinator_image_id_set(rqctx, path, body.map(Into::into))
+            .await
+    }
 
     /// Clear any previously-set installinator image ID on the target sled.
     #[endpoint {
