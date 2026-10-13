@@ -180,6 +180,11 @@ OPERATION ID                             METHOD   URL PATH
 subnet_pool_list                         GET      /v1/subnet-pools
 subnet_pool_view                         GET      /v1/subnet-pools/{pool}
 
+API operations found with tag "system/active-problems"
+OPERATION ID                             METHOD   URL PATH
+active_problem_list                      GET      /v1/system/active-problems
+active_problem_view                      GET      /v1/system/active-problems/{problem_id}
+
 API operations found with tag "system/alerts"
 OPERATION ID                             METHOD   URL PATH
 alert_class_list                         GET      /v1/alert-classes
