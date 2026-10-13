@@ -138,8 +138,6 @@ pub mod inventory {
     pub use crate::v1::inventory::ConfigReconcilerInventoryResult;
     pub use crate::v1::inventory::InventoryDataset;
     pub use crate::v1::inventory::InventoryDisk;
-    pub use crate::v1::inventory::ManifestBootInventory;
-    pub use crate::v1::inventory::ManifestInventory;
     pub use crate::v1::inventory::ManifestNonBootInventory;
     pub use crate::v1::inventory::MupdateOverrideBootInventory;
     pub use crate::v1::inventory::MupdateOverrideInventory;
@@ -151,7 +149,6 @@ pub mod inventory {
     pub use crate::v1::inventory::RemoveMupdateOverrideInventory;
     pub use crate::v1::inventory::SledCpuFamily;
     pub use crate::v1::inventory::SledRole;
-    pub use crate::v1::inventory::ZoneArtifactInventory;
     pub use crate::v1::inventory::ZoneKind;
 
     pub use crate::v10::inventory::NetworkInterface;
@@ -163,7 +160,6 @@ pub mod inventory {
 
     pub use crate::v12::inventory::HealthMonitorInventory;
 
-    pub use crate::v14::inventory::OmicronFileSourceResolverInventory;
     pub use crate::v14::inventory::ReconciledSingleMeasurement;
 
     pub use crate::v16::inventory::SingleMeasurementInventory;
@@ -208,11 +204,15 @@ pub mod inventory {
     pub use crate::v55::inventory::HostPhase2DesiredContents;
     pub use crate::v55::inventory::HostPhase2DesiredSlots;
     pub use crate::v55::inventory::Inventory;
+    pub use crate::v55::inventory::ManifestBootInventory;
+    pub use crate::v55::inventory::ManifestInventory;
+    pub use crate::v55::inventory::OmicronFileSourceResolverInventory;
     pub use crate::v55::inventory::OmicronSingleMeasurement;
     pub use crate::v55::inventory::OmicronSledConfig;
     pub use crate::v55::inventory::OmicronZoneConfig;
     pub use crate::v55::inventory::OmicronZoneImageSource;
     pub use crate::v55::inventory::OmicronZonesConfig;
+    pub use crate::v55::inventory::ZoneArtifactInventory;
 
     pub use crate::impls::inventory::FmdHostCaseDisplay;
     pub use crate::impls::inventory::FmdInventoryDisplay;

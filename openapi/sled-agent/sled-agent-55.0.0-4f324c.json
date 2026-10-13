@@ -10924,8 +10924,15 @@
         "properties": {
           "expected_hash": {
             "description": "The expected digest of the file's contents.",
+            "x-rust-type": {
+              "crate": "byte-wrapper",
+              "path": "byte_wrapper::HexArray::<32>",
+              "version": "0.1.0"
+            },
             "type": "string",
-            "format": "hex string (32 bytes)"
+            "pattern": "^[0-9a-fA-F]{64}$",
+            "minLength": 64,
+            "maxLength": 64
           },
           "expected_size": {
             "description": "The expected size of the file, in bytes.",

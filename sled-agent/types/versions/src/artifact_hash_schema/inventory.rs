@@ -7,6 +7,7 @@ use std::collections::BTreeSet;
 use std::net::SocketAddrV6;
 use std::time::Duration;
 
+use camino::Utf8PathBuf;
 use chrono::DateTime;
 use chrono::Utc;
 use daft::Diffable;
@@ -16,6 +17,7 @@ use iddqd::id_upcast;
 use omicron_common::api::external::ByteCount;
 use omicron_common::snake_case_result;
 use omicron_common::snake_case_result::SnakeCaseResult;
+use omicron_common::update::OmicronInstallManifestSource;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_generation_kinds::Generation;
 use omicron_generation_kinds::SledConfigGeneration;
@@ -26,6 +28,9 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use schemars::JsonSchema;
+use schemars::SchemaGenerator;
+use schemars::schema::Schema;
+use schemars::schema::SchemaObject;
 use serde::Deserialize;
 use serde::Serialize;
 use sled_hardware_types::BaseboardId;
@@ -40,11 +45,12 @@ use crate::v1::inventory::BootImageHeader;
 use crate::v1::inventory::ConfigReconcilerInventoryResult;
 use crate::v1::inventory::InventoryDataset;
 use crate::v1::inventory::InventoryDisk;
+use crate::v1::inventory::ManifestNonBootInventory;
+use crate::v1::inventory::MupdateOverrideInventory;
 use crate::v1::inventory::OrphanedDataset;
 use crate::v1::inventory::RemoveMupdateOverrideInventory;
 use crate::v1::inventory::SledRole;
 use crate::v14;
-use crate::v14::inventory::OmicronFileSourceResolverInventory;
 use crate::v16::inventory::SingleMeasurementInventory;
 use crate::v24::inventory::InventoryZpool;
 use crate::v40::inventory::FmdInventory;
@@ -102,7 +108,7 @@ impl From<Inventory> for v53::inventory::Inventory {
             reconciler_status: value.reconciler_status.into(),
             last_reconciliation: value.last_reconciliation.map(Into::into),
             instance_manager_status: value.instance_manager_status,
-            file_source_resolver: value.file_source_resolver,
+            file_source_resolver: value.file_source_resolver.into(),
             smf_services_enabled_not_online: value
                 .smf_services_enabled_not_online,
             reference_measurements: value.reference_measurements,
@@ -567,4 +573,148 @@ impl From<BootPartitionDetails> for v1::inventory::BootPartitionDetails {
             artifact_size: value.artifact_size,
         }
     }
+}
+
+/// Inventory representation of zone image resolver and measurement resolver
+/// status and health. Previously known as `ZoneImageResolverInventory`
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+pub struct OmicronFileSourceResolverInventory {
+    /// The zone manifest status.
+    pub zone_manifest: ManifestInventory,
+
+    /// The measurement manifest status.
+    pub measurement_manifest: ManifestInventory,
+
+    pub mupdate_override: MupdateOverrideInventory,
+}
+
+impl From<OmicronFileSourceResolverInventory>
+    for v14::inventory::OmicronFileSourceResolverInventory
+{
+    fn from(value: OmicronFileSourceResolverInventory) -> Self {
+        Self {
+            zone_manifest: value.zone_manifest.into(),
+            measurement_manifest: value.measurement_manifest.into(),
+            mupdate_override: value.mupdate_override,
+        }
+    }
+}
+
+/// Inventory representation of a manifest.
+///
+/// Part of [`ZoneImageResolverInventory`].
+///
+/// A manifest is used for both zones and reference measurements.
+/// A zone manifest is a listing of all the zones present in a system's install
+/// dataset. A measurement manifset is a listing of all the reference measurements
+/// present in a system's install dataset. This struct contains information
+/// about the install dataset gathered from a system.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+pub struct ManifestInventory {
+    /// The full path to the zone manifest file on the boot disk.
+    #[schemars(schema_with = "path_schema")]
+    pub boot_disk_path: Utf8PathBuf,
+
+    /// The manifest read from the boot disk, and whether the manifest is valid.
+    #[serde(with = "snake_case_result")]
+    #[schemars(
+        schema_with = "SnakeCaseResult::<ManifestBootInventory, String>::json_schema"
+    )]
+    pub boot_inventory: Result<ManifestBootInventory, String>,
+
+    /// Information about the install dataset on non-boot disks.
+    pub non_boot_status: IdOrdMap<ManifestNonBootInventory>,
+}
+
+impl From<ManifestInventory> for v1::inventory::ManifestInventory {
+    fn from(value: ManifestInventory) -> Self {
+        Self {
+            boot_disk_path: value.boot_disk_path,
+            boot_inventory: value.boot_inventory.map(Into::into),
+            non_boot_status: value.non_boot_status,
+        }
+    }
+}
+
+/// Inventory representation of zone artifacts on the boot disk.
+///
+/// Part of [`ManifestInventory`].
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+pub struct ManifestBootInventory {
+    /// The manifest source.
+    ///
+    /// In production this is [`OmicronInstallManifestSource::Installinator`], but
+    /// in some development and testing flows Sled Agent synthesizes zone
+    /// manifests. In those cases, the source is
+    /// [`OmicronInstallManifestSource::SledAgent`].
+    pub source: OmicronInstallManifestSource,
+
+    /// The artifacts on disk.
+    pub artifacts: IdOrdMap<ZoneArtifactInventory>,
+}
+
+impl From<ManifestBootInventory> for v1::inventory::ManifestBootInventory {
+    fn from(value: ManifestBootInventory) -> Self {
+        Self {
+            source: value.source,
+            artifacts: value.artifacts.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+/// Inventory representation of a single zone artifact on a boot disk.
+///
+/// Part of [`ManifestBootInventory`].
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+pub struct ZoneArtifactInventory {
+    /// The name of the zone file on disk, for example `nexus.tar.gz`. Zone
+    /// files are always ".tar.gz".
+    pub file_name: String,
+
+    /// The full path to the zone file.
+    #[schemars(schema_with = "path_schema")]
+    pub path: Utf8PathBuf,
+
+    /// The expected size of the file, in bytes.
+    pub expected_size: u64,
+
+    /// The expected digest of the file's contents.
+    pub expected_hash: ArtifactHash,
+
+    /// The status of the artifact.
+    ///
+    /// This is `Ok(())` if the artifact is present and matches the expected
+    /// size and digest, or an error message if it is missing or does not match.
+    #[serde(with = "snake_case_result")]
+    #[schemars(schema_with = "SnakeCaseResult::<(), String>::json_schema")]
+    pub status: Result<(), String>,
+}
+
+impl IdOrdItem for ZoneArtifactInventory {
+    type Key<'a> = &'a str;
+    fn key(&self) -> Self::Key<'_> {
+        &self.file_name
+    }
+
+    id_upcast!();
+}
+
+impl From<ZoneArtifactInventory> for v1::inventory::ZoneArtifactInventory {
+    fn from(value: ZoneArtifactInventory) -> Self {
+        Self {
+            file_name: value.file_name,
+            path: value.path,
+            expected_size: value.expected_size,
+            expected_hash: value.expected_hash,
+            status: value.status,
+        }
+    }
+}
+
+// Used for schemars to be able to be used with camino:
+// See https://github.com/camino-rs/camino/issues/91#issuecomment-2027908513
+fn path_schema(generator: &mut SchemaGenerator) -> Schema {
+    let mut schema: SchemaObject = <String>::json_schema(generator).into();
+    schema.format = Some("Utf8PathBuf".to_owned());
+    schema.into()
 }
