@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026102100.0.0"
+    "version": "2026102200.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -7320,6 +7320,104 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SiloSubnetPool"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/active-problems": {
+      "get": {
+        "tags": [
+          "system/active-problems"
+        ],
+        "summary": "List Active Problems",
+        "operationId": "active_problem_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActiveProblemResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
+    "/v1/system/active-problems/{problem_id}": {
+      "get": {
+        "tags": [
+          "system/active-problems"
+        ],
+        "summary": "Fetch Active Problem",
+        "operationId": "active_problem_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "problem_id",
+            "description": "ID of the Active Problem",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActiveProblem"
                 }
               }
             }
@@ -15874,6 +15972,169 @@
   },
   "components": {
     "schemas": {
+      "ActiveProblem": {
+        "description": "An Active Problem.\n\nActive Problems describe conditions detected by the fault management subsystem in which some aspect of the system's operation is degraded. This includes both ongoing problems and historical data describing resolved problems.\n\nThe `time_created` field records when the problem was detected, and the `time_modified` field records the time of its most recent revision.",
+        "type": "object",
+        "properties": {
+          "causes": {
+            "description": "Other Active Problems which cause this problem.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RelatedActiveProblem"
+            }
+          },
+          "causing": {
+            "description": "Other Active Problems caused by this problem.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RelatedActiveProblem"
+            }
+          },
+          "class": {
+            "description": "The class of component affected by this problem.\n\nProblem classes are dot-separated strings, such as `hardware.power_shelf`, in which each segment is more specific than the last. The class is determined by the problem code.",
+            "type": "string"
+          },
+          "code": {
+            "description": "The problem code describing this Active Problem.\n\nProblem codes are opaque numeric identifiers that indicate the nature of the issue an Active Problem represents. They may be used to reference documentation and service instructions for that particular kind of problem, and to communicate with Oxide support. The problem code may change if the diagnosis of the problem is refined, which creates a new revision.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "description": {
+            "description": "A longer human-readable description of the problem.\n\nThis may change as the problem progresses.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "description": "The current revision number of this Active Problem.\n\nThe revision number is incremented each time the Active Problem is updated. Changes to an Active Problem's impact list, description, and relationships with other Active Problems all increment the revision number.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "state": {
+            "description": "The current state of this Active Problem.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ActiveProblemState"
+              }
+            ]
+          },
+          "summary": {
+            "description": "A brief, human-readable summary of the problem.\n\nThis is short enough to be used as a title. It is intended for display to humans, and is not a stable identifier. For a machine-consumable identifier, use the problem code field.",
+            "type": "string"
+          },
+          "time_created": {
+            "description": "Timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "Timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "causes",
+          "causing",
+          "class",
+          "code",
+          "description",
+          "id",
+          "revision",
+          "state",
+          "summary",
+          "time_created",
+          "time_modified"
+        ]
+      },
+      "ActiveProblemResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActiveProblem"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "ActiveProblemState": {
+        "description": "The state of an Active Problem.",
+        "oneOf": [
+          {
+            "description": "The condition represented by the Active Problem still exists.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "active"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "The system has determined that the problem no longer exists.\n\nA resolved Active Problem never becomes active again. If the same condition is detected again, a new Active Problem with a new ID is created.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "resolved"
+                ]
+              },
+              "time_resolved": {
+                "description": "The time at which the problem was resolved.",
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "state",
+              "time_resolved"
+            ]
+          },
+          {
+            "description": "The Active Problem was manually dismissed, because it was believed to have been detected in error.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "dismissed"
+                ]
+              },
+              "time_dismissed": {
+                "description": "The time at which the problem was dismissed.",
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "state",
+              "time_dismissed"
+            ]
+          }
+        ]
+      },
       "Address": {
         "description": "An address tied to an address lot.",
         "type": "object",
@@ -27055,6 +27316,32 @@
           "items"
         ]
       },
+      "RelatedActiveProblem": {
+        "description": "A reference to an Active Problem related to another Active Problem",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "ID of the related Active Problem",
+            "type": "string",
+            "format": "uuid"
+          },
+          "reason": {
+            "description": "A human-readable summary of why the problems are related.",
+            "type": "string"
+          },
+          "revision_added": {
+            "description": "The revision of the referencing Active Problem in which this relationship was added.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "id",
+          "reason",
+          "revision_added"
+        ]
+      },
       "Route": {
         "description": "A route to a destination network through a gateway address.",
         "type": "object",
@@ -32659,6 +32946,13 @@
       "description": "Subnet pools are collections of external subnets that can be allocated and attached to instances.",
       "externalDocs": {
         "url": "http://docs.oxide.computer/api/subnet-pools"
+      }
+    },
+    {
+      "name": "system/active-problems",
+      "description": "Problems detected by the fault management subsystem.",
+      "externalDocs": {
+        "url": "http://docs.oxide.computer/api/active-problems"
       }
     },
     {

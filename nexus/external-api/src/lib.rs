@@ -88,6 +88,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_10_22_00, ACTIVE_PROBLEMS),
     (2026_10_21_00, BYTE_WRAPPER_0_2_BUMP),
     (2026_10_15_00, SYSTEM_CERTIFICATES),
     (2026_10_13_00, ARTIFACT_HASH_SCHEMA),
@@ -338,6 +339,13 @@ const PUT_UPDATE_REPOSITORY_MAX_BYTES: usize = 4 * GIB;
                 description = "Virtual Private Clouds (VPCs) provide isolated network environments for managing and deploying services.",
                 external_docs = {
                     url = "http://docs.oxide.computer/api/vpcs"
+                }
+            },
+            "system/active-problems" = {
+                description = "Problems detected by the fault management \
+                 subsystem.",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/active-problems"
                 }
             },
             "system/alerts" = {
@@ -9532,6 +9540,35 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         params: TypedBody<latest::device_params::DeviceAccessTokenRequest>,
     ) -> Result<Response<Body>, HttpError>;
+
+    // Active Problems
+
+    /// List Active Problems
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/active-problems",
+        tags = ["system/active-problems"],
+        versions = VERSION_ACTIVE_PROBLEMS..,
+    }]
+    async fn active_problem_list(
+        rqctx: RequestContext<Self::Context>,
+        pagination: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::active_problem::ActiveProblem>>,
+        HttpError,
+    >;
+
+    /// Fetch Active Problem
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/active-problems/{problem_id}",
+        tags = ["system/active-problems"],
+        versions = VERSION_ACTIVE_PROBLEMS..,
+    }]
+    async fn active_problem_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::active_problem::ActiveProblemSelector>,
+    ) -> Result<HttpResponseOk<latest::active_problem::ActiveProblem>, HttpError>;
 
     // Alerts
 
