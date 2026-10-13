@@ -16,6 +16,7 @@ use omicron_common::http_client::internal_http_client_builder;
 use parallel_task_set::ParallelTaskSet;
 use serde::{Deserialize, Serialize};
 use slog::{Logger, debug, warn};
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -205,7 +206,7 @@ impl CockroachClusterAdminClient {
                             self.log,
                             "Failed to build CockroachDB admin client";
                             "address" => %addr,
-                            "error" => %err,
+                            InlineErrorChain::new(&err),
                         );
                     }
                 }

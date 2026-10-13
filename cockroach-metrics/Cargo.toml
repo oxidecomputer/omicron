@@ -15,6 +15,7 @@ parallel-task-set.workspace = true
 reqwest.workspace = true
 serde_json.workspace = true
 slog.workspace = true
+slog-error-chain.workspace = true
 serde.workspace = true
 strum.workspace = true
 tokio.workspace = true

@@ -8949,6 +8949,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "strum 0.27.2",
  "tokio",
 ]

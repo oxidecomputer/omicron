@@ -9,6 +9,7 @@ use omicron_common::http_client::internal_http_client;
 use sled_hardware_types::BaseboardId;
 use slog::Logger;
 use slog::warn;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
@@ -72,7 +73,7 @@ async fn scan_for_peers(
             Err(err) => {
                 warn!(
                     log, "Failed to build bootstrap agent client";
-                    "err" => #%err,
+                    InlineErrorChain::new(&err),
                 );
                 tokio::time::sleep(SLEEP_BETWEEN_REFRESH).await;
                 continue;

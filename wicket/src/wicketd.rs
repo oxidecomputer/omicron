@@ -6,6 +6,7 @@
 
 use omicron_common::http_client::internal_http_client_builder;
 use slog::{Logger, o, warn};
+use slog_error_chain::InlineErrorChain;
 use std::convert::From;
 use std::net::SocketAddrV6;
 use tokio::sync::mpsc::{self, Sender, UnboundedSender};
@@ -176,7 +177,9 @@ impl WicketdManager {
             let response = async {
                 let update_client =
                     create_wicketd_client(&log, addr, WICKETD_TIMEOUT)
-                        .map_err(|error| error.to_string())?;
+                        .map_err(|error| {
+                            InlineErrorChain::new(&error).to_string()
+                        })?;
                 match update_client.post_start_update(&params).await {
                     Ok(_) => Ok(()),
                     Err(error) => Err(error.to_string()),
@@ -209,7 +212,9 @@ impl WicketdManager {
             let response = async {
                 let update_client =
                     create_wicketd_client(&log, addr, WICKETD_TIMEOUT)
-                        .map_err(|error| error.to_string())?;
+                        .map_err(|error| {
+                            InlineErrorChain::new(&error).to_string()
+                        })?;
                 match update_client
                     .post_abort_update(&sp.typ, sp.slot, &options)
                     .await
@@ -248,7 +253,9 @@ impl WicketdManager {
             let response = async {
                 let update_client =
                     create_wicketd_client(&log, addr, WICKETD_TIMEOUT)
-                        .map_err(|error| error.to_string())?;
+                        .map_err(|error| {
+                            InlineErrorChain::new(&error).to_string()
+                        })?;
                 match update_client.post_clear_update_state(&params).await {
                     Ok(_) => Ok(()),
                     Err(error) => Err(error.to_string()),
@@ -288,7 +295,7 @@ impl WicketdManager {
                             log,
                             "Failed to create client for ignition command";
                             "component_id" => %component_id,
-                            "error" => %error,
+                            InlineErrorChain::new(&error),
                         );
                         return;
                     }
@@ -320,7 +327,9 @@ impl WicketdManager {
             let response = async {
                 let client =
                     create_commission_client(&log, addr, WICKETD_TIMEOUT)
-                        .map_err(|error| error.to_string())?;
+                        .map_err(|error| {
+                            InlineErrorChain::new(&error).to_string()
+                        })?;
                 match client.post_run_rack_setup().await {
                     Ok(_) => Ok(()),
                     Err(error) => Err(error.to_string()),
@@ -591,7 +600,7 @@ async fn build_client_with_retry<C>(
             Err(err) => {
                 warn!(
                     log, "failed to build wicketd client";
-                    "err" => #%err,
+                    InlineErrorChain::new(&err),
                 );
                 ticker.tick().await;
             }
