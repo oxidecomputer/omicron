@@ -690,7 +690,6 @@ fn display_power_shelf(
     shelf: Option<&PowerShelf>,
     f: &mut dyn fmt::Write,
 ) -> fmt::Result {
-    use super::PsuIdentity;
     use super::PsuIdentityResult;
     use super::PsuSlot;
 
@@ -704,65 +703,69 @@ fn display_power_shelf(
         slot: PsuSlot,
         presence: String,
         device: &'a str,
-        mfr_model: &'a str,
-        mfr_serial: &'a str,
-        primary_fw_rev: &'a str,
-        secondary_fw_rev: &'a str,
-        mfr_id: &'a str,
-        mfr_location: &'a str,
-        mfr_date: &'a str,
+        #[tabled(display_with = "option_str_or_dash")]
+        mfr_model: Option<&'a str>,
+        #[tabled(display_with = "option_str_or_dash")]
+        mfr_serial: Option<&'a str>,
+        #[tabled(display_with = "option_str_or_dash")]
+        primary_fw_rev: Option<&'a str>,
+        #[tabled(display_with = "option_str_or_dash")]
+        secondary_fw_rev: Option<&'a str>,
+        #[tabled(display_with = "option_str_or_dash")]
+        mfr_id: Option<&'a str>,
+        #[tabled(display_with = "option_str_or_dash")]
+        mfr_location: Option<&'a str>,
+        #[tabled(display_with = "option_str_or_dash")]
+        mfr_date: Option<&'a str>,
     }
 
     writeln!(f, "    PSUs:")?;
-    let rows = shelf.psus.iter().map(|psu| {
-        let vpd = psu.identity().ok();
-        let fw_revs = psu.firmware_revs().ok();
-        PsuRow {
-            slot: psu.slot,
-            presence: format!("{:?}", psu.presence()),
-            device: psu.hubris_device_type.as_str(),
-            mfr_id: vpd.map(|vpd| vpd.mfr_id.as_str()).unwrap_or("-"),
-            mfr_model: vpd.map(|vpd| vpd.mfr_model.as_str()).unwrap_or("-"),
-            primary_fw_rev: fw_revs
-                .map(|revs| revs.primary.as_str())
-                .unwrap_or("-"),
-            secondary_fw_rev: fw_revs
-                .map(|revs| revs.secondary.as_str())
-                .unwrap_or("-"),
-            mfr_location: vpd
-                .map(|vpd| vpd.mfr_location.as_str())
-                .unwrap_or("-"),
-            mfr_date: vpd.map(|vpd| vpd.mfr_date.as_str()).unwrap_or("-"),
-            mfr_serial: vpd.map(|vpd| vpd.mfr_serial.as_str()).unwrap_or("-"),
-        }
-    });
+    let mut errors = Vec::new();
+    let rows = shelf
+        .psus
+        .iter()
+        .map(|psu| {
+            let vpd = match psu.identity() {
+                PsuIdentityResult::Present(vpd) => Some(vpd),
+                PsuIdentityResult::Error(error) => {
+                    errors.push((psu.slot, error.to_owned()));
+                    None
+                }
+                PsuIdentityResult::NotPresent => None,
+            };
+            let fw_revs = vpd.and_then(|vpd| match vpd.firmware_revs() {
+                Ok(revs) => Some(revs),
+                Err(error) => {
+                    errors.push((psu.slot, format!("{error:#}")));
+                    None
+                }
+            });
+            PsuRow {
+                slot: psu.slot,
+                presence: format!("{:?}", psu.presence()),
+                device: psu.hubris_device_type.as_str(),
+                mfr_id: vpd.map(|vpd| vpd.mfr_id.as_str()),
+                mfr_model: vpd.map(|vpd| vpd.mfr_model.as_str()),
+                primary_fw_rev: fw_revs.as_ref().map(|revs| revs.primary),
+                secondary_fw_rev: fw_revs.as_ref().map(|revs| revs.secondary),
+                mfr_location: vpd.map(|vpd| vpd.mfr_location.as_str()),
+                mfr_date: vpd.map(|vpd| vpd.mfr_date.as_str()),
+                mfr_serial: vpd.map(|vpd| vpd.mfr_serial.as_str()),
+            }
+        })
+        .collect::<Vec<_>>();
+
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())
         .with(tabled::settings::Padding::new(0, 1, 0, 0))
         .to_string();
     writeln!(f, "{}", textwrap::indent(&table, "        "))?;
 
-    let mut wrote_errors_header = false;
-    for psu in &shelf.psus {
-        let error = match psu.identity() {
-            PsuIdentityResult::Error(error) => error.to_owned(),
-            PsuIdentityResult::Present(PsuIdentity {
-                mfr_revision,
-                firmware_revs: Err(error),
-                ..
-            }) => format!(
-                "failed to parse firmware revisions from MFR_REVISION \
-                 {mfr_revision:?}: {error}"
-            ),
-            PsuIdentityResult::Present(_) | PsuIdentityResult::NotPresent => {
-                continue;
-            }
-        };
-        if !wrote_errors_header {
-            writeln!(f, "    PSU VPD errors:")?;
-            wrote_errors_header = true;
+    if !errors.is_empty() {
+        writeln!(f, "    PSU VPD errors:")?;
+        for (slot, error) in errors {
+            writeln!(f, "      - {slot}: {error}")?;
         }
-        writeln!(f, "      - {}: {error}", psu.slot)?;
     }
 
     Ok(())
@@ -1684,12 +1687,19 @@ fn option_impl_display<T: fmt::Display>(t: &Option<T>) -> String {
     }
 }
 
+fn option_str_or_dash<T: AsRef<str>>(t: &Option<T>) -> &str {
+    match t {
+        Some(v) => v.as_ref(),
+        None => "-",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::display_power_shelf;
     use crate::inventory::PowerShelf;
     use crate::inventory::Psu;
-    use crate::inventory::PsuFirmwareRevisions;
+
     use crate::inventory::PsuIdentity;
     use crate::inventory::PsuSlot;
     use crate::inventory::PsuState;
@@ -1711,9 +1721,6 @@ mod tests {
                 mfr_location: String::from("China"),
                 mfr_date: date.to_owned(),
                 mfr_serial: serial.to_owned(),
-                firmware_revs: fw_rev
-                    .parse::<PsuFirmwareRevisions>()
-                    .map_err(|e| format!("{e:#}")),
             }
         }
 

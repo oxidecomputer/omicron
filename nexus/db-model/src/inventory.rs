@@ -2439,23 +2439,12 @@ impl From<InvPsuSlot> for PsuSlot {
 /// This record may represent one of the following possible states:
 ///
 /// 1. `presence` is `NotPresent`, in which case, all the PMBus VPD fields *and*
-///    `vpd_error` will be `None`, (indicating that the inventory collector did
-///     not attempt to read the device's VPD because it was not present), and
-///     both the firmware revision fields and `fw_rev_error` will also be `None`
-///     (since no MFR_REVISION string was read from the device, there was
-///     nothing to attempt to parse)
+///    `vpd_error` will be `None` (indicating that the inventory collector did
+///    not attempt to read the device's VPD because it was not present),
 /// 2. the PMBus VPD was read successfully, in which case the VPD fields will be
-///   `Some`, and `vpd_error` will be `None`,
-///     a. the `MFR_REVISION` field was parsed successfully, in which case,
-///        the `primary_fw_rev` and `secondary_fw_rev` fields will be `Some`,
-///        and `fw_rev_error` will be `None`,
-///     b. the `MFR_REVISION` field was not in the expected format for a muRata
-///        PSU's firmware revisions, in which case, the `primary_fw_rev` and
-///        `secondary_fw_rev` fields will be `None`, and `fw_rev_error` will be
-///        `Some`.
+///    `Some`, and `vpd_error` will be `None`,
 /// 3. the PSU was not `NotPresent`, but reading the PMBus VPD failed, in which
-///    case, the VPD fields will be `None` and `vpd_error` will be `Some`, and
-///    both the firmware revision fields and `fw_rev_error` will also be `None`
+///    case, the VPD fields will be `None` and `vpd_error` will be `Some`.
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_power_shelf_psu)]
 pub struct InvPowerShelfPsu {
@@ -2483,18 +2472,9 @@ pub struct InvPowerShelfPsu {
     pub mfr_date: Option<String>,
     pub mfr_serial: Option<String>,
 
-    // Firmware revisions parsed from `mfr_revision`.
-    pub primary_fw_rev: Option<String>,
-    pub secondary_fw_rev: Option<String>,
-
     /// `Some` if the inventory collector requested PMBus VPD from this PSU and
     /// the request failed. If this is `Some`, the VPD fields will be `None`.
     pub vpd_error: Option<String>,
-
-    /// `Some` if the PSU's VPD was read, but its firmware revisions could not
-    /// be parsed from `mfr_revision`. If this is `Some`, the firmware revision
-    /// fields will be `None`.
-    pub fw_rev_error: Option<String>,
 }
 
 impl TryFrom<InvPowerShelfPsu> for inventory::Psu {
@@ -2515,31 +2495,9 @@ impl TryFrom<InvPowerShelfPsu> for inventory::Psu {
             mfr_revision,
             mfr_date,
             mfr_serial,
-            primary_fw_rev,
-            secondary_fw_rev,
             vpd_error,
-            fw_rev_error,
         } = row;
         let slot = PsuSlot::from(location);
-
-        // This is `None` if the firmware revision fields are all unset, which
-        // is valid only if the VPD was not read (checked below).
-        let firmware_revs =
-            match (primary_fw_rev, secondary_fw_rev, fw_rev_error) {
-                (Some(primary), Some(secondary), None) => {
-                    Some(Ok(inventory::PsuFirmwareRevisions {
-                        primary,
-                        secondary,
-                    }))
-                }
-                (None, None, Some(error)) => Some(Err(error)),
-                (None, None, None) => None,
-                _ => bail!(
-                    "inv_power_shelf_psu row for PSC {psc_baseboard_id} \
-                     {slot} violates fw_rev_result_valid constraint: firmware \
-                     revision fields and fw_rev_error are partially populated",
-                ),
-            };
 
         let identity = match (
             mfr_id,
@@ -2549,7 +2507,6 @@ impl TryFrom<InvPowerShelfPsu> for inventory::Psu {
             mfr_date,
             mfr_serial,
             vpd_error,
-            firmware_revs,
         ) {
             (
                 Some(mfr_id),
@@ -2559,7 +2516,6 @@ impl TryFrom<InvPowerShelfPsu> for inventory::Psu {
                 Some(mfr_date),
                 Some(mfr_serial),
                 None,
-                Some(firmware_revs),
             ) => Some(Ok(inventory::PsuIdentity {
                 mfr_id,
                 mfr_model,
@@ -2567,31 +2523,11 @@ impl TryFrom<InvPowerShelfPsu> for inventory::Psu {
                 mfr_location,
                 mfr_date,
                 mfr_serial,
-                firmware_revs,
             })),
-            (
-                Some(_),
-                Some(_),
-                Some(_),
-                Some(_),
-                Some(_),
-                Some(_),
-                None,
-                None,
-            ) => bail!(
-                "inv_power_shelf_psu row for PSC {psc_baseboard_id} {slot} \
-                 violates fw_rev_result_valid constraint: VPD is present, but \
-                 neither firmware revisions nor fw_rev_error are present",
-            ),
-            (None, None, None, None, None, None, _, Some(_)) => bail!(
-                "inv_power_shelf_psu row for PSC {psc_baseboard_id} {slot} \
-                 violates fw_rev_result_valid constraint: firmware revisions \
-                 or fw_rev_error are present, but mfr_revision is not",
-            ),
-            (None, None, None, None, None, None, Some(error), None) => {
+            (None, None, None, None, None, None, Some(error)) => {
                 Some(Err(error))
             }
-            (None, None, None, None, None, None, None, None) => None,
+            (None, None, None, None, None, None, None) => None,
             _ => bail!(
                 "inv_power_shelf_psu row for PSC {psc_baseboard_id} {slot} \
                  violates vpd_result_valid constraint: VPD fields and \

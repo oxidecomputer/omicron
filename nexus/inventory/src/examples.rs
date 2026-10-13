@@ -19,7 +19,6 @@ use iddqd::id_ord_map;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::InternalDnsGenerationStatus;
 use nexus_types::inventory::Psu;
-use nexus_types::inventory::PsuFirmwareRevisions;
 use nexus_types::inventory::PsuIdentity;
 use nexus_types::inventory::PsuSlot;
 use nexus_types::inventory::PsuState;
@@ -893,10 +892,6 @@ pub fn psu_identity(
 
 /// Constructs a realistic-looking PSU identity for a muRata PSU, with the given
 /// `MFR_REVISION` value.
-///
-/// The firmware revisions are parsed from `mfr_revision` in the same way as
-/// they are when collecting inventory, so passing a malformed revision
-/// simulates a PSU whose firmware revisions could not be parsed.
 pub fn psu_identity_with_revision(
     kind: ExamplePsuKind,
     serial: impl ToString,
@@ -915,18 +910,13 @@ pub fn psu_identity_with_revision(
         .filter(|date| date.chars().all(|c| c.is_numeric()))
         .unwrap_or("2111")
         .to_string();
-    let mfr_revision = mfr_revision.to_string();
-    let firmware_revs = mfr_revision
-        .parse::<PsuFirmwareRevisions>()
-        .map_err(|e| format!("{e:#}"));
     PsuIdentity {
         mfr_id: String::from("Murata-PS"),
         mfr_model,
-        mfr_revision,
+        mfr_revision: mfr_revision.to_string(),
         mfr_location: String::from("China"),
         mfr_date,
         mfr_serial,
-        firmware_revs,
     }
 }
 

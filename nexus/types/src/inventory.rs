@@ -541,29 +541,29 @@ impl Psu {
         }
     }
 
-    /// Returns the result of reading the PSU's firmware revisions, or
-    /// [`PsuIdentityResult::NotPresent`] if the SP indicated that no PSU is
-    /// present in this slot.
+    /// Parses the [`PsuFirmwareRevisions`] from this PSU's VPD identity, if a
+    /// PSU is present in this slot.
     ///
-    /// This returns [`PsuIdentityResult::Error`] both if the PSU's identity
-    /// could not be read, and if it was read but its firmware revisions could
-    /// not be parsed from it. To distinguish between those cases, use
-    /// [`Psu::identity`] and [`PsuIdentity::firmware_revs`].
-    pub fn firmware_revs(&self) -> PsuIdentityResult<'_, PsuFirmwareRevisions> {
-        match self.state {
-            None => PsuIdentityResult::NotPresent,
-            Some(PsuState {
-                identity: Ok(PsuIdentity { firmware_revs: Ok(ref revs), .. }),
-                ..
-            }) => PsuIdentityResult::Present(revs),
-
-            Some(PsuState {
-                identity: Ok(PsuIdentity { firmware_revs: Err(ref err), .. }),
-                ..
-            }) => PsuIdentityResult::Error(err),
-            Some(PsuState { identity: Err(ref error), .. }) => {
-                PsuIdentityResult::Error(error)
+    /// # Returns
+    ///
+    /// - [`None`] if no PSU is present in this slot.
+    /// - [`Some`]`(`[`Ok`]`(`[`PsuFirmwareRevisions`]`))` if the `MFR_REVISION`
+    ///   string was read sucessfully and the firmware revisions could be
+    ///   parsed.
+    /// - [`Some`]`(`[`Err`]`(`[`anyhow::Error`]`))` if they could not, either
+    ///   because the PSU's `MFR_REVISION` was not read successfully, or because
+    ///   it did not contain a valid muRata firmware revision string.
+    pub fn firmware_revs(
+        &self,
+    ) -> Option<Result<PsuFirmwareRevisions<'_>, anyhow::Error>> {
+        match self.identity() {
+            PsuIdentityResult::NotPresent => None,
+            PsuIdentityResult::Present(identity) => {
+                Some(identity.firmware_revs())
             }
+            PsuIdentityResult::Error(err) => Some(Err(anyhow::anyhow!(
+                "no MFR_REVISION was read from this PSU: {err}"
+            ))),
         }
     }
 }
@@ -636,22 +636,24 @@ pub struct PsuState {
     pub identity: Result<PsuIdentity, String>,
 }
 
-/// Values returned by [`Psu::identity`] and [`Psu::firmware_revs`].
+/// Values returned by [`Psu::identity`].
 #[derive(Copy, Clone, Debug, Eq, PartialOrd, PartialEq)]
-pub enum PsuIdentityResult<'psu, T = PsuIdentity> {
-    /// The value was not read because no PSU was present in this slot.
+pub enum PsuIdentityResult<'psu> {
+    /// The VPD identity of the PSU was not read because no PSU was present in
+    /// this slot.
     NotPresent,
-    /// The value was successfully determined.
-    Present(&'psu T),
+    /// The VPD identity of the PSU was successfully read.
+    Present(&'psu PsuIdentity),
     /// The PSU was not determined to be not present, but an error occurred
-    /// while determining the value.
+    /// while reading its VPD identity.
     Error(&'psu str),
 }
 
-impl<'psu, T> PsuIdentityResult<'psu, T> {
-    /// Returns [`Some`] if the PSU was present and the value was determined
-    /// successfully, or [`None`] if no PSU was present or an error occurred.
-    pub fn ok(self) -> Option<&'psu T> {
+impl<'psu> PsuIdentityResult<'psu> {
+    /// Returns [`Some`]`(`[`PsuIdentity`]`)` if the PSU was present and its VPD
+    /// identity was read successfully, or [`None`] if no PSU was present or an
+    /// error occurred while reading its VPD identity.
+    pub fn ok(self) -> Option<&'psu PsuIdentity> {
         match self {
             PsuIdentityResult::Present(identity) => Some(identity),
             _ => None,
@@ -691,27 +693,34 @@ pub struct PsuIdentity {
     pub mfr_date: String,
     /// `MFR_SERIAL` (PMBus command 0x9E).
     pub mfr_serial: String,
+}
 
-    /// The PSU's firmware revisions, as parsed from its PMBus `MFR_REVISION`
-    /// response, or an error describing why it could not be parsed.
-    pub firmware_revs: Result<PsuFirmwareRevisions, String>,
+impl PsuIdentity {
+    /// Attempt to parse this PSU's [firmware revision
+    /// numbers](PsuFirmwareRevisions) from its [`PsuIdentity::mfr_revision`]
+    /// string.
+    pub fn firmware_revs(
+        &self,
+    ) -> Result<PsuFirmwareRevisions<'_>, anyhow::Error> {
+        PsuFirmwareRevisions::try_from(self.mfr_revision.as_str())
+    }
 }
 
 /// The firmware revisions of a muRata PSU.
 ///
 /// These are parsed from the PSU's [`PsuIdentity::mfr_revision`].
 #[derive(Clone, Debug, Eq, PartialOrd, PartialEq, Deserialize, Serialize)]
-pub struct PsuFirmwareRevisions {
+pub struct PsuFirmwareRevisions<'rev> {
     /// The firmware revision on the primary MCU (AC input side).
-    pub primary: String,
+    pub primary: &'rev str,
     /// The firmware revision on the secondary MCU (DC output side).
-    pub secondary: String,
+    pub secondary: &'rev str,
 }
 
-impl std::str::FromStr for PsuFirmwareRevisions {
-    type Err = anyhow::Error;
+impl<'rev> TryFrom<&'rev str> for PsuFirmwareRevisions<'rev> {
+    type Error = anyhow::Error;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn try_from(s: &'rev str) -> Result<Self, Self::Error> {
         // Per muRata's documentation in ACAN-114 and ACAN-157, the response to
         // the PMBus `MFR_REVISION` command is expected to be of the format:
         //
@@ -721,42 +730,42 @@ impl std::str::FromStr for PsuFirmwareRevisions {
         // side) and YYYY is the firmware revision on the secondary MCU (DC
         // output side). See also:
         // https://github.com/oxidecomputer/hubris/blob/929f0d3709025c33cd3ad51c09df6c2fbb55047d/drv/i2c-devices/src/mwocp6x.rs#L202-L209
+        let cx = format_args!(
+            "failed to parse firmware revisions from MFR_REVISION {s:?}:"
+        );
 
         let mut parts = s.split("-");
         let primary = parts
             .next()
-            .ok_or_else(|| anyhow::anyhow!("missing primary revision"))?;
+            .ok_or_else(|| anyhow::anyhow!("{cx} missing primary revision"))?;
         anyhow::ensure!(
             primary.len() == 4,
-            "expected primary MCU firmware revision to be 4 characters, but \
-             found: {primary:?}"
+            "{cx} expected primary MCU firmware revision to be 4 characters, \
+             but found: {primary:?}"
         );
-        let secondary = parts
-            .next()
-            .ok_or_else(|| anyhow::anyhow!("missing secondary revision"))?;
+        let secondary = parts.next().ok_or_else(|| {
+            anyhow::anyhow!("{cx} missing secondary revision")
+        })?;
         anyhow::ensure!(
             secondary.len() == 4,
-            "expected secondary MCU firmware revision to be 4 characters, but \
-             found: {secondary:?}"
+            "{cx} expected secondary MCU firmware revision to be 4 characters, \
+             but found: {secondary:?}"
         );
         let zeroes = parts.next().ok_or_else(|| {
-            anyhow::anyhow!("expected firmware revision to end with 0000")
+            anyhow::anyhow!("{cx} expected firmware revision to end with 0000")
         })?;
         anyhow::ensure!(
             zeroes == "0000",
-            "expected \"0000\" but found: {zeroes:?}"
+            "{cx} expected \"0000\" but found: {zeroes:?}"
         );
         let rest = parts.collect::<Vec<_>>();
         anyhow::ensure!(
             rest.is_empty(),
-            "expected firmware revision to end after \"0000\", but found \
+            "{cx} expected firmware revision to end after \"0000\", but found \
              trailing {:?}",
             rest.join("-"),
         );
-        Ok(Self {
-            primary: primary.to_string(),
-            secondary: secondary.to_string(),
-        })
+        Ok(Self { primary, secondary })
     }
 }
 
@@ -1126,13 +1135,10 @@ mod test {
     #[test]
     fn test_parse_psu_firmware_revisions() {
         // This is the `MFR_REVISION` value reported by a real MWOCP68.
-        let revs = "0762-0701-0000".parse::<PsuFirmwareRevisions>().unwrap();
+        let revs = PsuFirmwareRevisions::try_from("0762-0701-0000").unwrap();
         assert_eq!(
             revs,
-            PsuFirmwareRevisions {
-                primary: String::from("0762"),
-                secondary: String::from("0701"),
-            }
+            PsuFirmwareRevisions { primary: "0762", secondary: "0701" }
         );
 
         // Values that are not of the form `XXXX-YYYY-0000` must be rejected,
@@ -1149,7 +1155,7 @@ mod test {
             "07620701-0000",
         ] {
             assert!(
-                invalid.parse::<PsuFirmwareRevisions>().is_err(),
+                PsuFirmwareRevisions::try_from(invalid).is_err(),
                 "{invalid:?} should not parse as PSU firmware revisions",
             );
         }

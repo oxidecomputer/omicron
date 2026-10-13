@@ -1896,10 +1896,7 @@ table! {
         mfr_revision -> Nullable<Text>,
         mfr_date -> Nullable<Text>,
         mfr_serial -> Nullable<Text>,
-        primary_fw_rev -> Nullable<Text>,
-        secondary_fw_rev -> Nullable<Text>,
         vpd_error -> Nullable<Text>,
-        fw_rev_error -> Nullable<Text>,
     }
 }
 
