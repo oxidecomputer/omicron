@@ -12,6 +12,7 @@ use libc::SIGINT;
 use nexus_config::NexusConfig;
 use nexus_test_interface::NexusServer;
 use nexus_test_utils::resource_helpers::DiskTest;
+use omicron_common::address::BGP_LISTEN_PORT;
 use signal_hook_tokio::Signals;
 use sled_agent_types::early_networking::SwitchSlot;
 use slog::{Drain, o};
@@ -24,6 +25,11 @@ use std::{
 
 const DEFAULT_NEXUS_CONFIG: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/../../nexus/examples/config.toml");
+
+/// Autonomous System Number used for BGP configuration.
+/// We will increment this number for each BGP router participating in
+/// a unique BGP Autonomous System.
+const BGP_BASE_ASN: u32 = 65100;
 
 fn main() -> anyhow::Result<()> {
     oxide_tokio_rt::run(async {
@@ -228,7 +234,7 @@ impl RunAllArgs {
         assert_eq!(caught_signal.unwrap(), SIGINT);
         eprintln!(
             "omicron-dev: caught signal, shutting down and removing \
-             temporary directory"
+            temporary directory"
         );
 
         cptestctx.teardown().await;
@@ -361,8 +367,10 @@ impl JborArgs {
         ));
 
         for n in 0..self.peer_routers.0 {
-            let mgd_bgp_addr =
-                SocketAddr::new(Ipv4Addr::new(100, 64, 0, n + 1).into(), 1049);
+            let mgd_bgp_addr = SocketAddr::new(
+                Ipv4Addr::new(100, 64, 0, n + 1).into(),
+                BGP_LISTEN_PORT,
+            );
 
             // Allocate the loopback IP for this peer router's BGP listener.
             // Unlike 127.x.x.x, these addresses (100.64.x.x) are not present
@@ -411,8 +419,8 @@ impl JborArgs {
             );
 
             let router = mg_api_types::bgp::config::Router {
-                asn: 65100 + u32::from(n),
-                id: 65100 + u32::from(n),
+                asn: BGP_BASE_ASN + u32::from(n),
+                id: BGP_BASE_ASN + u32::from(n),
                 graceful_shutdown: true,
                 listen: mgd.bgp_dispatcher_addr.to_string(),
             };

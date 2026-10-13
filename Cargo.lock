@@ -9087,6 +9087,7 @@ dependencies = [
  "nexus-config",
  "nexus-test-interface",
  "nexus-test-utils",
+ "omicron-common",
  "omicron-dev-lib",
  "omicron-nexus",
  "omicron-rpaths",

@@ -257,6 +257,8 @@ pub const CRUCIBLE_PANTRY_PORT: u16 = 17000;
 pub const TFPORTD_PORT: u16 = 12231;
 pub const NEXUS_INTERNAL_PORT: u16 = 12221;
 pub const NEXUS_LOCKSTEP_PORT: u16 = 12232;
+/// The standard BGP port (179) requires privilege escalation
+/// so we use a port greater than 1024 here
 pub const BGP_LISTEN_PORT: u16 = 1049;
 
 /// The port on which Nexus exposes its external API on the underlay network.
