@@ -602,7 +602,7 @@ impl From<OmicronFileSourceResolverInventory>
 
 /// Inventory representation of a manifest.
 ///
-/// Part of [`ZoneImageResolverInventory`].
+/// Part of [`OmicronFileSourceResolverInventory`].
 ///
 /// A manifest is used for both zones and reference measurements.
 /// A zone manifest is a listing of all the zones present in a system's install
