@@ -80,12 +80,6 @@ pub enum ActiveProblemState {
         /// The time at which the problem was resolved.
         time_resolved: DateTime<Utc>,
     },
-    /// The Active Problem was manually dismissed, because it was believed to
-    /// have been detected in error.
-    Dismissed {
-        /// The time at which the problem was dismissed.
-        time_dismissed: DateTime<Utc>,
-    },
 }
 
 /// A reference to an Active Problem related to another Active Problem
