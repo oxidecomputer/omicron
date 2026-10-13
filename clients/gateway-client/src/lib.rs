@@ -62,6 +62,7 @@ progenitor::generate_api!(
         UpdatePreparationProgress = { derives = [PartialEq, Hash, Eq] },
     },
     crates = {
+        "byte-wrapper" = "*",
         "omicron-uuid-kinds" = "*",
     },
 
