@@ -161,10 +161,10 @@ impl Asset for ActiveProblemView {
     }
 }
 
-impl Into<api::ActiveProblem> for ActiveProblemView {
-    fn into(self) -> api::ActiveProblem {
-        let identity = self.identity();
-        let Self {
+impl From<ActiveProblemView> for api::ActiveProblem {
+    fn from(view: ActiveProblemView) -> Self {
+        let identity = view.identity();
+        let ActiveProblemView {
             identity: _identity,
             revision,
             state,
@@ -173,8 +173,8 @@ impl Into<api::ActiveProblem> for ActiveProblemView {
             summary,
             description,
             action_required,
-        } = self;
-        api::ActiveProblem {
+        } = view;
+        Self {
             identity,
             revision: revision.as_u64(),
             state,
