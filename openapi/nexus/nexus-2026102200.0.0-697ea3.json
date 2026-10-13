@@ -16111,27 +16111,6 @@
               "state",
               "time_resolved"
             ]
-          },
-          {
-            "description": "The Active Problem was manually dismissed, because it was believed to have been detected in error.",
-            "type": "object",
-            "properties": {
-              "state": {
-                "type": "string",
-                "enum": [
-                  "dismissed"
-                ]
-              },
-              "time_dismissed": {
-                "description": "The time at which the problem was dismissed.",
-                "type": "string",
-                "format": "date-time"
-              }
-            },
-            "required": [
-              "state",
-              "time_dismissed"
-            ]
           }
         ]
       },
