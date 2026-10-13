@@ -565,22 +565,26 @@ impl UpdatesRequired {
                     if active_vmm.state == VmmState::Failed {
                         active_vmm_failed = true;
                     } else if snapshot.instance.intended_state
-                        == InstanceIntendedState::Running
-                        && snapshot.migration.is_none()
-                    {
-                        // Did the active VMM shut itself down, when it was
-                        // intended to be running *and* we were not migrating
-                        // out? If so, update the instance's intended state to
-                        // indicate that it stopped itself.
-                        new_intent = Some(InstanceIntendedState::GuestShutdown);
-                        info!(
-                            log,
-                            "instance update (active VMM destroyed): guest shut \
-                             itself down";
-                            "instance_id" => %instance_id,
-                            "propolis_id" => %active_vmm.id,
-                        );
-                    }
+                    == InstanceIntendedState::Running
+                    && snapshot.migration.is_none()
+                    && active_vmm
+                        .stop_for_update_disposition_generation
+                        .is_none()
+                {
+                    // Did the active VMM shut itself down, when it was
+                    // intended to be running *and* we were not migrating
+                    // out, or destroying it intentionally for an update?
+                    // If so, update the instance's intended state to
+                    // indicate that it stopped itself.
+                    new_intent = Some(InstanceIntendedState::GuestShutdown);
+                    info!(
+                        log,
+                        "instance update (active VMM destroyed): guest shut \
+                         itself down";
+                        "instance_id" => %instance_id,
+                        "propolis_id" => %active_vmm.id,
+                    );
+                }
 
                     Some(id)
                 } else {
@@ -740,7 +744,11 @@ impl UpdatesRequired {
             // We no longer have a VMM.
             new_runtime.nexus_state = if active_vmm_failed {
                 InstanceState::Failed
-            } else {
+            }
+            // TODO-K: Here I need to decide to put it in a new instance state
+            // or set some other setting. Maybe a new InstanceState::NoVmmPendingRestart
+            // or something like that
+            else {
                 InstanceState::NoVmm
             };
             // If the active VMM was destroyed and the instance has not migrated
