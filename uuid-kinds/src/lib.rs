@@ -39,6 +39,7 @@ impl_typed_uuid_kinds! {
     },
     kinds = {
         AccessToken = {},
+        ActiveProblem = {},
         AffinityGroup = {},
         Alert = {},
         AlertReceiver = {},
