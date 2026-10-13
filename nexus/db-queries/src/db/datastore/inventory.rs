@@ -4982,6 +4982,7 @@ impl DataStore {
                 source: s.source,
                 sled_id,
                 baseboard_id,
+                rack_id: s.rack_id,
                 sled_agent_address: std::net::SocketAddrV6::new(
                     std::net::Ipv6Addr::from(s.sled_agent_ip),
                     u16::from(s.sled_agent_port),
