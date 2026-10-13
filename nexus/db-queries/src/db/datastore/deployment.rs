@@ -598,6 +598,7 @@ impl DataStore {
                     match DebugLogBlueprintPlanning::new(
                         blueprint_id,
                         report.clone(),
+                        &self.git_version,
                     ) {
                         Ok(debug_log) => {
                             use nexus_db_schema::schema::debug_log_blueprint_planning::dsl;

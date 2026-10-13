@@ -17,6 +17,7 @@ pub mod component_details;
 pub mod component_vpd;
 pub mod host;
 pub mod ignition;
+pub mod local;
 pub mod rot;
 pub mod sensor;
 pub mod task_dump;

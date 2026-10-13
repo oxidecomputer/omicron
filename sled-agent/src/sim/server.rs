@@ -51,6 +51,7 @@ use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use oxnet::Ipv6Net;
 use rand::seq::IndexedRandom;
@@ -66,6 +67,7 @@ use sled_agent_types::inventory::NetworkInterface;
 use sled_agent_types::inventory::NetworkInterfaceKind;
 use sled_agent_types::inventory::OmicronZoneDataset;
 use slog::{Drain, Logger, info};
+use slog_error_chain::InlineErrorChain;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
@@ -318,22 +320,26 @@ impl Server {
 async fn handoff_to_nexus(
     log: &Logger,
     nexus_lockstep_address: SocketAddr,
+    rack_id: RackUuid,
     request: &RackInitializationRequest,
 ) -> Result<(), anyhow::Error> {
     let nexus_client = nexus_lockstep_client::Client::new(
         &format!("http://{}", nexus_lockstep_address),
         log.new(o!("component" => "NexusLockstepClient")),
     );
-    let rack_id = uuid::uuid!("c19a698f-c6f9-4a17-ae30-20d711b8f7dc");
 
     let notify_nexus = || async {
         nexus_client
-            .rack_initialization_complete(&rack_id, &request)
+            .rack_initialization_complete(
+                &rack_id.into_untyped_uuid(),
+                &request,
+            )
             .await
             .map_err(BackoffError::transient)
     };
     let log_failure = |err, _| {
-        info!(log, "Failed to handoff to nexus: {err}");
+        info!(log, "Failed to handoff to nexus";
+            InlineErrorChain::new(&err));
     };
     retry_notify(
         retry_policy_internal_service_aggressive(),
@@ -746,7 +752,13 @@ pub async fn run_standalone_server(
 
     let mut nexus_lockstep_address = config.nexus_address;
     nexus_lockstep_address.set_port(nexus_lockstep_port);
-    handoff_to_nexus(&log, nexus_lockstep_address, &rack_init_request).await?;
+    handoff_to_nexus(
+        &log,
+        nexus_lockstep_address,
+        config.rack_id,
+        &rack_init_request,
+    )
+    .await?;
     info!(log, "Handoff to Nexus is complete");
 
     server.wait_for_finish().await

@@ -1123,6 +1123,7 @@ mod test {
                     sled_role: SledRole::Gimlet,
                     sled_agent_address: "[::1]:56792".parse().unwrap(),
                     sled_id: sled.id(),
+                    rack_id: sled.rack_id(),
                     usable_hardware_threads: 10,
                     usable_physical_ram: ByteCount::from(1024 * 1024),
                     cpu_family: SledCpuFamily::AmdMilan,

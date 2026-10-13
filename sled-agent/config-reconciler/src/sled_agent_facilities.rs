@@ -7,7 +7,6 @@
 
 use illumos_utils::dladm::EtherstubVnic;
 use illumos_utils::running_zone::RunningZone;
-use illumos_utils::zpool::PathInPool;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_uuid_kinds::MupdateOverrideUuid;
@@ -18,6 +17,7 @@ use std::future::Future;
 use tufaceous_artifact::ArtifactHash;
 
 use crate::InternalDisks;
+use crate::PathInPool;
 
 pub trait SledAgentFacilities: Send + Sync + 'static {
     /// The underlay VNIC interface in the global zone.

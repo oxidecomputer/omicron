@@ -160,7 +160,7 @@ async fn cmd_db_blueprint_planner_report_show(
     args: &ShowPlannerReportArgs,
 ) -> anyhow::Result<()> {
     use nexus_db_schema::schema::debug_log_blueprint_planning::dsl;
-    use omicron_git_version::GitVersion;
+    use omicron_git_version_types::GitVersion;
 
     let blueprint_id = args
         .blueprint_id
@@ -210,7 +210,7 @@ async fn cmd_db_blueprint_planner_report_show(
         return Ok(());
     };
 
-    let our_git_commit = GitVersion::current();
+    let our_git_commit = omicron_git_version::current();
     if our_git_commit != log_git_commit {
         eprintln!(
             "WARNING: planner report debug log was produced by a Nexus \

@@ -55,6 +55,19 @@ impl ZoneSafetyChecks {
         ZoneSafetyChecksBuilder::new(blueprint, inventory, input).build()
     }
 
+    #[cfg(test)]
+    pub(crate) fn new_for_test(
+        unsafe_zones: impl IntoIterator<
+            Item = (SledUuid, OmicronZoneUuid, ZoneUnsafeToShutdown),
+        >,
+    ) -> Self {
+        let mut checks = Self::empty();
+        for (sled_id, zone_id, reason) in unsafe_zones {
+            checks.insert(sled_id, zone_id, reason);
+        }
+        checks
+    }
+
     pub fn empty() -> Self {
         Self {
             sleds_with_unsafe_zones: BTreeMap::new(),

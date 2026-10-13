@@ -262,6 +262,9 @@
          requires these to live in the users config, not the main config. -->
     <users_config>users-and-roles.xml</users_config>
 
+    <!-- Disallow tables and functions with external URLs. -->
+    <remote_url_allow_hosts />
+
     <!-- Default profile of settings. -->
     <default_profile>default</default_profile>
 

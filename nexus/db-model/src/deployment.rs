@@ -71,6 +71,7 @@ use omicron_generation_kinds::{
     NexusGenerationKind, SledConfigGenerationKind, TargetReleaseGenerationKind,
     UpdateDispositionGenerationKind,
 };
+use omicron_git_version_types::GitVersion;
 use omicron_uuid_kinds::{
     BlueprintKind, BlueprintUuid, DatasetKind, ExternalIpKind, GenericUuid,
     MupdateOverrideKind, OmicronZoneKind, OmicronZoneUuid, PhysicalDiskKind,
@@ -1935,6 +1936,7 @@ impl DebugLogBlueprintPlanning {
     pub fn new(
         blueprint_id: BlueprintUuid,
         report: Arc<PlanningReport>,
+        git_commit: &GitVersion,
     ) -> Result<Self, serde_json::Error> {
         let report = serde_json::to_value(report)?;
 
@@ -1943,7 +1945,7 @@ impl DebugLogBlueprintPlanning {
         // should only be useful to humans, potentially via omdb, and they (and
         // omdb) can duplicate these fields to understand it.
         let debug_blob = serde_json::json!({
-            "git-commit": omicron_git_version::GitVersion::current(),
+            "git-commit": git_commit,
             "report": report,
         });
 

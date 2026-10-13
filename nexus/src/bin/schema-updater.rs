@@ -88,7 +88,11 @@ async fn main_impl() -> anyhow::Result<()> {
 
     // We use the unchecked constructor of the datastore because we
     // don't want to block on someone else applying an upgrade.
-    let datastore = DataStore::new_unchecked(log.clone(), pool);
+    let datastore = DataStore::new_unchecked(
+        log.clone(),
+        pool,
+        omicron_git_version::current(),
+    );
 
     match args.cmd {
         Cmd::List => {

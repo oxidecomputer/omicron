@@ -8,7 +8,6 @@
 //! sure you're only breaking what you intend.
 
 use dropshot::Method;
-use expectorate::assert_contents;
 use gateway_client::ClientInfo as _;
 use http::StatusCode;
 use nexus_db_model::DnsGroup;
@@ -22,12 +21,14 @@ use nexus_test_utils_macros::nexus_test;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::UnstableReconfiguratorState;
+use omicron_test_utils::dev::test_cmds::EXIT_FAILURE;
+use omicron_test_utils::dev::test_cmds::OutputSnapshot;
 use omicron_test_utils::dev::test_cmds::Redactor;
+use omicron_test_utils::dev::test_cmds::assert_exit_code;
 use omicron_test_utils::dev::test_cmds::path_to_executable;
 use omicron_test_utils::dev::test_cmds::run_command;
 use sled_agent_types::early_networking::SwitchSlot;
 use slog_error_chain::InlineErrorChain;
-use std::fmt::Write;
 use std::net::IpAddr;
 use std::path::Path;
 use std::time::Duration;
@@ -70,7 +71,7 @@ fn assert_oximeter_list_producers_output(
 async fn test_omdb_usage_errors() {
     clear_omdb_env();
     let cmd_path = path_to_executable(CMD_OMDB);
-    let mut output = String::new();
+    let mut output = OutputSnapshot::new();
     let invocations: &[&[&'static str]] = &[
         // No arguments
         &[],
@@ -153,7 +154,7 @@ async fn test_omdb_usage_errors() {
         do_run(&mut output, |exec| exec, &cmd_path, args).await;
     }
 
-    assert_contents("tests/usage_errors.out", &output);
+    output.assert_contents("tests/usage_errors.out");
 }
 
 #[tokio::test]
@@ -280,7 +281,7 @@ async fn test_omdb_success_cases() {
         .await
         .unwrap();
 
-    let mut output = String::new();
+    let mut output = OutputSnapshot::new();
 
     let invocations: &[&[&str]] = &[
         &["db", "db-metadata", "ls-nexus"],
@@ -372,6 +373,9 @@ async fn test_omdb_success_cases() {
         &["nexus", "blueprints", "diff", &initial_blueprint_id],
         // reconfigurator config: show and set
         &["nexus", "reconfigurator-config", "show", "current"],
+        // An explicit version that does not exist is an error, unlike something
+        // like "current" on a rack that has never had a config.
+        &["nexus", "reconfigurator-config", "show", "4294967295"],
         &["nexus", "update-status"],
         &["nexus", "update-status", "--details"],
         // NOTE: Enabling the planner here _may_ cause Nexus to start creating
@@ -567,7 +571,7 @@ async fn test_omdb_success_cases() {
         .await;
     }
 
-    assert_contents("tests/successes.out", &output);
+    output.assert_contents("tests/successes.out");
 
     // The `reconfigurator-save` output is not easy to compare as a string.  But
     // let's make sure we can at least parse it and that it looks broadly like
@@ -617,7 +621,7 @@ async fn test_omdb_success_cases() {
         "--reason",
         "integration test",
     ];
-    let mut bundle_output = String::new();
+    let mut bundle_output = OutputSnapshot::new();
     let p = postgres_url.clone();
     let dns = cptestctx
         .internal_dns
@@ -635,8 +639,9 @@ async fn test_omdb_success_cases() {
     let zip_file = std::fs::File::open(&bundle_path).unwrap_or_else(|err| {
         panic!(
             "bundle zip not produced at {bundle_path}: {}\n\
-             omdb output was:\n{bundle_output}",
+             omdb output was:\n{}",
             InlineErrorChain::new(&err),
+            bundle_output.as_str(),
         )
     });
     let mut archive =
@@ -714,7 +719,7 @@ async fn test_omdb_success_cases() {
     }
 
     let ox_invocation = &["oximeter", "list-producers"];
-    let mut ox_output = String::new();
+    let mut ox_output = OutputSnapshot::new();
     let ox = ox_url.clone();
 
     wait_for_producer(
@@ -730,7 +735,7 @@ async fn test_omdb_success_cases() {
     )
     .await;
     assert_oximeter_list_producers_output(
-        &ox_output,
+        ox_output.as_str(),
         &ox_url,
         ox_test_producer,
     );
@@ -763,7 +768,7 @@ async fn test_omdb_env_settings(cptestctx: &ControlPlaneTestContext) {
         .dns_server
         .sole_local_address()
         .expect("exactly one internal DNS address");
-    let mut output = String::new();
+    let mut output = OutputSnapshot::new();
 
     // The blueprint_rendezvous task needs an inventory collection to run.
     cptestctx
@@ -877,13 +882,13 @@ async fn test_omdb_env_settings(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
 
-    assert_contents("tests/env.out", &output);
+    output.assert_contents("tests/env.out");
 
     // Oximeter URL
     // Case 1: specified on the command line.
     // Case 2: is covered by the success tests above.
     let ox_args1 = &["oximeter", "--oximeter-url", &ox_url, "list-producers"];
-    let mut ox_output1 = String::new();
+    let mut ox_output1 = OutputSnapshot::new();
     wait_for_producer(
         &cptestctx.oximeter,
         PRODUCER_UUID.parse::<Uuid>().unwrap(),
@@ -897,14 +902,14 @@ async fn test_omdb_env_settings(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
     assert_oximeter_list_producers_output(
-        &ox_output1,
+        ox_output1.as_str(),
         &ox_url,
         ox_test_producer,
     );
 }
 
 async fn do_run<F>(
-    output: &mut String,
+    output: &mut OutputSnapshot,
     modexec: F,
     cmd_path: &Path,
     args: &[&str],
@@ -915,7 +920,7 @@ async fn do_run<F>(
 }
 
 async fn do_run_no_redactions<F>(
-    output: &mut String,
+    output: &mut OutputSnapshot,
     modexec: F,
     cmd_path: &Path,
     args: &[&str],
@@ -926,7 +931,7 @@ async fn do_run_no_redactions<F>(
 }
 
 async fn do_run_extra<F>(
-    output: &mut String,
+    output: &mut OutputSnapshot,
     modexec: F,
     cmd_path: &Path,
     args: &[&str],
@@ -934,13 +939,11 @@ async fn do_run_extra<F>(
 ) where
     F: FnOnce(Exec) -> Exec + Send + 'static,
 {
-    write!(
-        output,
-        "EXECUTING COMMAND: {} {:?}\n",
+    let command_line = format!(
+        "EXECUTING COMMAND: {} {:?}",
         cmd_path.file_name().expect("missing command").to_string_lossy(),
         args.iter().map(|r| redactor.do_redact(r)).collect::<Vec<_>>()
-    )
-    .unwrap();
+    );
 
     // Using `subprocess`, the child process will be spawned synchronously.  In
     // some cases it then tries to make an HTTP request back into this process.
@@ -971,16 +974,51 @@ async fn do_run_extra<F>(
         .await
         .unwrap();
 
-    write!(output, "termination: {:?}\n", exit_status).unwrap();
-    write!(output, "---------------------------------------------\n").unwrap();
-    write!(output, "stdout:\n").unwrap();
-    output.push_str(&redactor.do_redact(&stdout_text));
+    output.push(
+        format_args!("{command_line}\ntermination: {exit_status:?}"),
+        redactor.do_redact(&stdout_text),
+        redactor.do_redact(&stderr_text),
+    );
+}
 
-    write!(output, "---------------------------------------------\n").unwrap();
-    write!(output, "stderr:\n").unwrap();
-    output.push_str(&redactor.do_redact(&stderr_text));
+#[test]
+fn test_omdb_unreachable_nexus_exits_nonzero() {
+    clear_omdb_env();
+    let cmd_path = path_to_executable(CMD_OMDB);
+    // Nothing can listen on port 1 (it is privileged and unassigned), so every
+    // request to this URL is refused immediately.
+    const UNREACHABLE_NEXUS: &str = "http://127.0.0.1:1/";
 
-    write!(output, "=============================================\n").unwrap();
+    let invocations: &[(&[&str], &str)] = &[
+        (
+            &["nexus", "clickhouse-policy", "get"],
+            "Error: retrieving clickhouse policy",
+        ),
+        (
+            &["nexus", "oximeter-read-policy", "get"],
+            "Error: retrieving oximeter read policy",
+        ),
+        (
+            &["nexus", "reconfigurator-config", "show", "current"],
+            "Error: retrieving reconfigurator config",
+        ),
+    ];
+
+    for &(invocation, expected_error) in invocations {
+        let exec = Exec::cmd(&cmd_path)
+            .args(invocation)
+            .env("OMDB_NEXUS_URL", UNREACHABLE_NEXUS);
+        let (exit_status, stdout_text, stderr_text) = run_command(exec);
+        assert_exit_code(exit_status, EXIT_FAILURE, &stderr_text);
+        assert_eq!(
+            stdout_text, "",
+            "{invocation:?} should print nothing on stdout"
+        );
+        assert!(
+            stderr_text.lines().any(|line| line == expected_error),
+            "{invocation:?}: missing {expected_error:?} in stderr:\n{stderr_text}"
+        );
+    }
 }
 
 // We're testing behavior that can be affected by OMDB-related environment

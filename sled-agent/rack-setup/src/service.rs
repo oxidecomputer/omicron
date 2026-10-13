@@ -97,6 +97,8 @@ use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
 };
 use omicron_common::disk::DatasetKind;
+use omicron_common::http_client::internal_http_client;
+use omicron_common::http_client::internal_http_client_builder;
 use omicron_ddm_admin_client::DdmError;
 use omicron_generation_kinds::{
     Generation, GenericGeneration, SledConfigGeneration,
@@ -342,7 +344,7 @@ impl ServiceInner {
         sled_config: OmicronSledConfig,
     ) -> Result<(), SetupServiceError> {
         let dur = std::time::Duration::from_secs(60);
-        let client = reqwest::ClientBuilder::new()
+        let client = internal_http_client_builder()
             .connect_timeout(dur)
             .build()
             .map_err(SetupServiceError::HttpClient)?;
@@ -420,7 +422,7 @@ impl ServiceInner {
         generation: SledConfigGeneration,
     ) -> Result<(), SetupServiceError> {
         let dur = std::time::Duration::from_secs(60);
-        let client = reqwest::ClientBuilder::new()
+        let client = internal_http_client_builder()
             .connect_timeout(dur)
             .build()
             .map_err(SetupServiceError::HttpClient)?;
@@ -637,8 +639,9 @@ impl ServiceInner {
         for ip_addr in dns_server_ips {
             let log = log.new(o!("dns_config_addr" => ip_addr.to_string()));
             info!(log, "Configuring DNS server");
-            let dns_config_client = dns_service_client::Client::new(
+            let dns_config_client = dns_service_client::Client::new_with_client(
                 &format!("http://{}", ip_addr),
+                internal_http_client(),
                 log.clone(),
             );
 
@@ -757,7 +760,7 @@ impl ServiceInner {
         );
 
         const CLIENT_TIMEOUT: Duration = Duration::from_secs(60);
-        let client = reqwest::Client::builder()
+        let client = internal_http_client_builder()
             .connect_timeout(CLIENT_TIMEOUT)
             .timeout(CLIENT_TIMEOUT)
             .build()
@@ -918,7 +921,8 @@ impl ServiceInner {
                 .map_err(BackoffError::transient)
         };
         let log_failure = |err, _| {
-            info!(self.log, "Failed to handoff to nexus: {err}");
+            info!(self.log, "Failed to handoff to nexus";
+                InlineErrorChain::new(&err));
         };
 
         retry_notify(
@@ -955,7 +959,7 @@ impl ServiceInner {
             })
             .expect("Should not create service plans without CockroachDb");
         let dur = std::time::Duration::from_secs(60);
-        let client = reqwest::ClientBuilder::new()
+        let client = internal_http_client_builder()
             .connect_timeout(dur)
             .build()
             .map_err(SetupServiceError::HttpClient)?;
@@ -1255,7 +1259,7 @@ impl ServiceInner {
                 .into_iter()
                 .map(|address| {
                     let dur = std::time::Duration::from_secs(60);
-                    let client = reqwest::ClientBuilder::new()
+                    let client = internal_http_client_builder()
                         .connect_timeout(dur)
                         .timeout(dur)
                         .build()
@@ -1632,6 +1636,7 @@ mod test {
     };
     use iddqd::IdOrdMap;
     use nexus_reconfigurator_blippy::{Blippy, BlippyReportSortKey};
+    use nexus_test_utils::RACK_UUID;
     use omicron_common::{
         address::{
             AZ_PREFIX_LENGTH, IpRange, Ipv6Subnet, RACK_PREFIX_LENGTH,
@@ -1668,6 +1673,7 @@ mod test {
 
     fn make_sled_info(
         sled_id: SledUuid,
+        rack_id: RackUuid,
         subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
         u2_count: usize,
     ) -> SledInfo {
@@ -1684,6 +1690,7 @@ mod test {
                     part_number: "test".to_string(),
                     serial_number: "test".to_string(),
                 },
+                rack_id,
                 usable_hardware_threads: 32,
                 usable_physical_ram: ByteCount::from_gibibytes_u32(16),
                 cpu_family: SledCpuFamily::AmdMilan,
@@ -1725,6 +1732,7 @@ mod test {
         vec![
             make_sled_info(
                 SledUuid::new_v4(),
+                RACK_UUID,
                 Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(
                     "fd00:1122:3344:101::1".parse().unwrap(),
                 ),
@@ -1732,6 +1740,7 @@ mod test {
             ),
             make_sled_info(
                 SledUuid::new_v4(),
+                RACK_UUID,
                 Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(
                     "fd00:1122:3344:102::1".parse().unwrap(),
                 ),
@@ -1739,6 +1748,7 @@ mod test {
             ),
             make_sled_info(
                 SledUuid::new_v4(),
+                RACK_UUID,
                 Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(
                     "fd00:1122:3344:103::1".parse().unwrap(),
                 ),

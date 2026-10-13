@@ -50,7 +50,6 @@ use illumos_utils::smf_helper::Service as _;
 use illumos_utils::smf_helper::SmfHelper;
 use illumos_utils::zfs::ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT;
 use illumos_utils::zone::AddressRequest;
-use illumos_utils::zpool::{PathInPool, ZpoolName, ZpoolOrRamdisk};
 use illumos_utils::{PFEXEC, execute};
 use internal_dns_resolver::Resolver;
 use internal_dns_types::names::BOUNDARY_NTP_DNS_NAME;
@@ -80,6 +79,7 @@ use omicron_ddm_admin_client::DdmError;
 use omicron_generation_kinds::Generation;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::RackUuid;
+use sled_agent_config_reconciler::PathInPool;
 use sled_agent_resolvable_files::{
     ZoneImageSourceResolver, ramdisk_file_source,
 };
@@ -245,19 +245,6 @@ pub enum Error {
     #[error("Error migrating old-format services ledger")]
     ServicesMigration(#[source] anyhow::Error),
 
-    #[error(
-        "Invalid filesystem_pool in new zone config: \
-         for zone {zone_id}, expected pool {expected_pool} but got {got_pool}"
-    )]
-    InvalidFilesystemPoolZoneConfig {
-        zone_id: OmicronZoneUuid,
-        expected_pool: ZpoolName,
-        got_pool: ZpoolName,
-    },
-
-    #[error("Unexpected zone config: zone {zone_id} is running on ramdisk ?!")]
-    ZoneIsRunningOnRamdisk { zone_id: OmicronZoneUuid },
-
     #[error("failed to read mupdate override info, not starting zones")]
     MupdateOverrideRead(#[source] MupdateOverrideReadError),
 
@@ -289,17 +276,12 @@ impl Error {
 impl From<Error> for omicron_common::api::external::Error {
     fn from(err: Error) -> Self {
         match err {
-            Error::RequestedConfigConflicts(_)
-            | Error::InvalidFilesystemPoolZoneConfig { .. }
-            | Error::ZoneIsRunningOnRamdisk { .. } => {
+            Error::RequestedConfigConflicts(_) => {
                 omicron_common::api::external::Error::invalid_request(
-                    // InlineErrorChain is not strictly necessary here, but use it in case that
-                    // changes later on.
                     &InlineErrorChain::new(&err).to_string(),
                 )
             }
             Error::RequestedZoneConfigOutdated { .. } => {
-                // InlineErrorChain also isn't strictly necessary here.
                 omicron_common::api::external::Error::conflict(
                     InlineErrorChain::new(&err).to_string(),
                 )
@@ -459,7 +441,7 @@ enum SwitchService {
     Pumpkind { asic: DendriteAsic },
     Tfport { pkt_source: String, asic: DendriteAsic },
     Uplink,
-    MgDdm { mode: String },
+    MgDdm { mode: String, baseboard: Baseboard },
     Mgd,
     SpSim,
 }
@@ -1201,7 +1183,7 @@ impl ServiceManager {
     async fn initialize_zone(
         &self,
         request: ZoneArgs<'_>,
-        zone_root_path: PathInPool,
+        zone_root_path: Utf8PathBuf,
         filesystems: &[zone::Fs],
         data_links: &[String],
     ) -> Result<RunningZone, Error> {
@@ -2889,12 +2871,21 @@ impl ServiceManager {
                             .add_property_group(mgd_config),
                     );
                 }
-                SwitchService::MgDdm { mode } => {
+                SwitchService::MgDdm { mode, baseboard } => {
                     info!(self.inner.log, "Setting up mg-ddm service");
 
                     let mut mg_ddm_config = PropertyGroupBuilder::new("config")
                         .add_property("mode", "astring", mode)
-                        .add_property("dendrite", "astring", "true");
+                        .add_property("dendrite", "astring", "true")
+                        // We must bind to "::" so the ddmd scrimlet reconciler
+                        // in the global zone can reach the ddm-admin port in
+                        // the switch zone via the underlay network.
+                        .add_property("admin_host", "astring", "::")
+                        .add_property(
+                            "router_id",
+                            "astring",
+                            &switch_zone_ddm_router_id(&baseboard),
+                        );
 
                     if let Some(i) = info {
                         mg_ddm_config = mg_ddm_config
@@ -2936,11 +2927,6 @@ impl ServiceManager {
                                 // all rear ports, which is what
                                 // we're directing ddmd to listen
                                 // for advertisements on.
-                                //
-                                // This may grow in a multi-rack
-                                // future to include a subset of
-                                // "front" ports too, when racks are
-                                // cabled together.
                                 AddrObject::new(
                                     &format!("tfportrear{}_0", i),
                                     IPV6_LINK_LOCAL_ADDROBJ_NAME,
@@ -3038,7 +3024,7 @@ impl ServiceManager {
         let runtime = self
             .initialize_zone(
                 ZoneArgs::Omicron(zone),
-                zone_root_path,
+                zone_root_path.into_path(),
                 // filesystems=
                 &[],
                 // data_links=
@@ -3135,7 +3121,10 @@ impl ServiceManager {
                     SwitchService::Uplink,
                     SwitchService::Wicketd { baseboard: baseboard.clone() },
                     SwitchService::Mgd,
-                    SwitchService::MgDdm { mode: "transit".to_string() },
+                    SwitchService::MgDdm {
+                        mode: "transit".to_string(),
+                        baseboard: baseboard.clone(),
+                    },
                 ]
             }
 
@@ -3150,7 +3139,10 @@ impl ServiceManager {
                     SwitchService::Uplink,
                     SwitchService::Wicketd { baseboard: baseboard.clone() },
                     SwitchService::Mgd,
-                    SwitchService::MgDdm { mode: "transit".to_string() },
+                    SwitchService::MgDdm {
+                        mode: "transit".to_string(),
+                        baseboard: baseboard.clone(),
+                    },
                     SwitchService::Tfport {
                         pkt_source: "vioif0".to_string(),
                         asic,
@@ -3181,7 +3173,10 @@ impl ServiceManager {
                     SwitchService::Uplink,
                     SwitchService::Wicketd { baseboard: baseboard.clone() },
                     SwitchService::Mgd,
-                    SwitchService::MgDdm { mode: "transit".to_string() },
+                    SwitchService::MgDdm {
+                        mode: "transit".to_string(),
+                        baseboard: baseboard.clone(),
+                    },
                     SwitchService::Tfport {
                         pkt_source: "tfpkt0".to_string(),
                         asic,
@@ -3598,7 +3593,7 @@ impl ServiceManager {
                                 "refreshed mgd service with new configuration"
                             )
                         }
-                        SwitchService::MgDdm { mode } => {
+                        SwitchService::MgDdm { mode, baseboard } => {
                             info!(self.inner.log, "configuring mg-ddm service");
                             smfh.delpropvalue_default_instance(
                                 "config/mode",
@@ -3607,6 +3602,15 @@ impl ServiceManager {
                             smfh.addpropvalue_type_default_instance(
                                 "config/mode",
                                 &mode,
+                                "astring",
+                            )?;
+                            smfh.delpropvalue_default_instance(
+                                "config/router_id",
+                                "*",
+                            )?;
+                            smfh.addpropvalue_type_default_instance(
+                                "config/router_id",
+                                &switch_zone_ddm_router_id(&baseboard),
                                 "astring",
                             )?;
                             if let Some(info) = self.inner.sled_info.get() {
@@ -3735,9 +3739,8 @@ impl ServiceManager {
         // switch zone were on a U.2 device we would not be able to run RSS, as
         // we could not create the U.2 disks due to lack of encryption. To break
         // the cycle we put the switch zone root fs on the ramdisk.
-        let root = Utf8PathBuf::from(ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT);
         let zone_root_path =
-            PathInPool { pool: ZpoolOrRamdisk::Ramdisk, path: root.clone() };
+            Utf8PathBuf::from(ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT);
         let zone_args = ZoneArgs::Switch(&request);
         info!(self.inner.log, "Starting switch zone");
         let zone = self
@@ -3862,6 +3865,21 @@ impl ServiceManager {
 
 fn internal_dns_addrobj_name(gz_address_index: u32) -> String {
     format!("internaldns{gz_address_index}")
+}
+
+// DDM does path breaking based on router ID. Distinct routers need distinct
+// router IDs. For DDM routers running in the global zone, the router ID comes
+// from the hostname which is a regular baseboard identifier. For DDM routers
+// running in the switch zone, the baseboard identifier of the scrimlet is
+// used with the `sw` prefix to distinguish them from routers with the same
+// baseboard identifier in the global zone.
+//
+// The `sw` prefix itself is somewhat arbitrary and stands for "switch". Any
+// other unique prefix could have been chosen as long as its concatination with
+// the baseboard identifier did not collide with a baseboard identifier used by
+// ddmd elsewhere.
+fn switch_zone_ddm_router_id(baseboard: &Baseboard) -> String {
+    format!("sw{}", baseboard.identifier())
 }
 
 #[cfg(test)]

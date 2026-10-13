@@ -15,7 +15,6 @@ use crate::link::{Link, VnicAllocator};
 use crate::opte::{Port, PortInfo, PortTicket};
 use crate::zone::Zones;
 use crate::zone::{AddressRequest, ROUTE};
-use crate::zpool::{PathInPool, ZpoolOrRamdisk};
 use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::Utf8TempDir;
 use debug_ignore::DebugIgnore;
@@ -147,11 +146,6 @@ impl RunningZone {
     /// Returns the filesystem path to the zone's root in the GZ.
     pub fn root(&self) -> Utf8PathBuf {
         self.inner.root()
-    }
-
-    /// Returns the zpool on which the filesystem path has been placed.
-    pub fn root_zpool(&self) -> &ZpoolOrRamdisk {
-        &self.inner.zonepath.pool
     }
 
     /// Returns the zone's image path.
@@ -620,7 +614,7 @@ pub struct InstalledZone {
     log: Logger,
 
     // Filesystem path of the zone
-    zonepath: PathInPool,
+    zonepath: Utf8PathBuf,
 
     // The path to the zone's image source.
     image_path: Utf8PathBuf,
@@ -665,7 +659,7 @@ impl InstalledZone {
 
     /// Returns the filesystem path to the zonepath
     pub fn zonepath(&self) -> &Utf8Path {
-        &self.zonepath.path
+        &self.zonepath
     }
 
     pub fn site_profile_xml_path(&self) -> Utf8PathBuf {
@@ -690,7 +684,7 @@ impl InstalledZone {
 
     /// Returns the filesystem path to the zone's root in the GZ.
     pub fn root(&self) -> Utf8PathBuf {
-        self.zonepath.path.join(Self::ROOT_FS_PATH)
+        self.zonepath.join(Self::ROOT_FS_PATH)
     }
 
     /// Return a reference to the links for this zone.
@@ -766,7 +760,7 @@ pub struct ZoneBuilder<'a> {
     /// Allocates the NIC used for control plane communication.
     underlay_vnic_allocator: Option<&'a VnicAllocator<Etherstub>>,
     /// Filesystem path at which the installed zone will reside.
-    zone_root_path: Option<PathInPool>,
+    zone_root_path: Option<Utf8PathBuf>,
     /// The file source.
     file_source: Option<&'a ResolvableFileSource>,
     /// The name of the type of zone being created (e.g. "propolis-server")
@@ -820,7 +814,7 @@ impl<'a> ZoneBuilder<'a> {
     }
 
     /// Filesystem path at which the installed zone will reside.
-    pub fn with_zone_root_path(mut self, root_path: PathInPool) -> Self {
+    pub fn with_zone_root_path(mut self, root_path: Utf8PathBuf) -> Self {
         self.zone_root_path = Some(root_path);
         self
     }
@@ -916,10 +910,9 @@ impl<'a> ZoneBuilder<'a> {
                 zone_type,
                 self.unique_name,
             );
-            let mut zonepath = self.zone_root_path?;
-            zonepath.path = temp_dir
+            let zonepath = temp_dir
                 .join(
-                    zonepath.path.strip_prefix("/").unwrap()
+                    self.zone_root_path?.strip_prefix("/").unwrap()
                 )
                 .join(&full_zone_name);
             let iz = InstalledZone {
@@ -1007,7 +1000,7 @@ impl<'a> ZoneBuilder<'a> {
         net_device_names.sort();
         net_device_names.dedup();
 
-        zone_root_path.path = zone_root_path.path.join(&full_zone_name);
+        zone_root_path.push(&full_zone_name);
 
         let zones_api = self.zones_api.take().unwrap();
         zones_api

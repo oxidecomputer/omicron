@@ -24,6 +24,7 @@ use semver::Version;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 
+mod add_rack_id_to_inv_sled_agent;
 mod add_rendezvous_sled_bp_availability;
 mod add_sled_update_disposition;
 mod bgp_unnumbered_peer_cleanup;
@@ -35,11 +36,13 @@ mod ereport_trim_serial_trailing_nulls;
 mod ereporter_restart_latest_ereport;
 mod ereporter_restart_order_v2;
 mod ereporter_restart_rack_id;
+mod inv_service_processor_rack_id;
 mod inventory_zone_multiple_external_ips;
 mod normalize_service_external_ips;
 mod prune_service_nat_entries;
 mod rename_default_igw_ip_pool;
 mod sled_resource_vmm_state;
+mod support_bundle_time_range;
 mod tufaceous_v2;
 mod vmm_failure_reason_if_failed;
 
@@ -84,6 +87,9 @@ pub(crate) fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     register!(inventory_zone_multiple_external_ips);
     register!(blueprint_zone_multiple_external_ips);
     register!(vmm_failure_reason_if_failed);
+    register!(support_bundle_time_range);
+    register!(inv_service_processor_rack_id);
+    register!(add_rack_id_to_inv_sled_agent);
 
     map
 }

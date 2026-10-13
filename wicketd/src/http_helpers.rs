@@ -8,6 +8,7 @@
 //! `http_entrypoints.rs`) and the stable commission API (defined in the
 //! `commission` module).
 
+use omicron_common::http_client::internal_http_client;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
@@ -60,8 +61,9 @@ pub(crate) fn shutdown_to_http(_err: ShutdownInProgress) -> HttpError {
 pub(crate) fn ba_lockstep_client(
     ctx: &ServerContext,
 ) -> bootstrap_agent_lockstep_client::Client {
-    bootstrap_agent_lockstep_client::Client::new(
+    bootstrap_agent_lockstep_client::Client::new_with_client(
         &format!("http://{}", ctx.bootstrap_agent_lockstep_address),
+        internal_http_client(),
         ctx.log.new(slog::o!("component" => "bootstrap lockstep client")),
     )
 }
@@ -92,6 +94,9 @@ pub(crate) fn ba_lockstep_error_to_http(
     >,
     operation: &str,
 ) -> HttpError {
+    // XXX This mirrors wicket's commission_error and has a workaround for the
+    // same reason. We should consider fixing this in progenitor (or
+    // progenitor-extras?).
     use bootstrap_agent_lockstep_client::Error as BaError;
 
     let (status_code, error_code, message) = match &err {

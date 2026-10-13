@@ -39,6 +39,7 @@ pub(crate) use mgs::{MgsHandle, MgsManager};
 use nexus_proxy::NexusTcpProxy;
 use omicron_common::FileKv;
 use omicron_common::address::{AZ_PREFIX_LENGTH, Ipv6Subnet};
+use omicron_common::http_client::internal_http_client_builder;
 use oxide_update_engine_types::spec::merge_anyhow_list;
 use preflight_check::PreflightCheckerHandler;
 use sled_hardware_types::BaseboardId;
@@ -408,7 +409,7 @@ impl Server {
         const SLEEP_BETWEEN_RETRIES: Duration = Duration::from_secs(10);
         const NUM_RETRIES: usize = 3;
 
-        let client = reqwest::Client::builder()
+        let client = internal_http_client_builder()
             .connect_timeout(CLIENT_TIMEOUT)
             .timeout(CLIENT_TIMEOUT)
             .build()

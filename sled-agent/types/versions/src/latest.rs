@@ -7,8 +7,8 @@
 pub mod artifact {
     pub use crate::v1::artifact::ArtifactCopyFromDepotBody;
     pub use crate::v1::artifact::ArtifactCopyFromDepotResponse;
-    pub use crate::v1::artifact::ArtifactPathParam;
     pub use crate::v1::artifact::ArtifactPutResponse;
+    pub use crate::v55::artifact::ArtifactPathParam;
 
     pub use crate::v52::artifact::ArtifactConfig;
     pub use crate::v52::artifact::ArtifactListResponse;
@@ -28,30 +28,25 @@ pub mod bootstore {
 }
 
 pub mod dataset {
-    pub use crate::v9::dataset::LocalStoragePathParam;
     pub use crate::v17::dataset::LocalStorageDatasetDeleteRequest;
     pub use crate::v17::dataset::LocalStorageDatasetEnsureRequest;
 }
 
 pub mod debug {
-    pub use crate::v1::debug::ChickenSwitchDestroyOrphanedDatasets;
-
     pub use crate::v3::debug::OperatorSwitchZonePolicy;
 }
 
 pub mod diagnostics {
     pub use crate::v1::diagnostics::SledDiagnosticsLogsDownloadPathParam;
     pub use crate::v1::diagnostics::SledDiagnosticsLogsDownloadPathParm;
-    pub use crate::v1::diagnostics::SledDiagnosticsLogsDownloadQueryParam;
+
+    pub use crate::v54::diagnostics::SledDiagnosticsLogsDownloadQueryParam;
 }
 
 pub mod disk {
     pub use crate::v1::disk::CompressionAlgorithm;
     pub use crate::v1::disk::DatasetConfig;
-    pub use crate::v1::disk::DiskEnsureBody;
     pub use crate::v1::disk::DiskIdentity;
-    pub use crate::v1::disk::DiskPathParam;
-    pub use crate::v1::disk::DiskStateRequested;
     pub use crate::v1::disk::DiskVariant;
     pub use crate::v1::disk::GzipLevel;
     pub use crate::v1::disk::M2Slot;
@@ -140,28 +135,20 @@ pub mod instance {
 pub mod inventory {
     pub use crate::v1::inventory::Baseboard;
     pub use crate::v1::inventory::BootImageHeader;
-    pub use crate::v1::inventory::BootPartitionContents;
-    pub use crate::v1::inventory::BootPartitionDetails;
     pub use crate::v1::inventory::ConfigReconcilerInventoryResult;
-    pub use crate::v1::inventory::HostPhase2DesiredContents;
-    pub use crate::v1::inventory::HostPhase2DesiredSlots;
     pub use crate::v1::inventory::InventoryDataset;
     pub use crate::v1::inventory::InventoryDisk;
-    pub use crate::v1::inventory::ManifestBootInventory;
-    pub use crate::v1::inventory::ManifestInventory;
     pub use crate::v1::inventory::ManifestNonBootInventory;
     pub use crate::v1::inventory::MupdateOverrideBootInventory;
     pub use crate::v1::inventory::MupdateOverrideInventory;
     pub use crate::v1::inventory::MupdateOverrideNonBootInventory;
     pub use crate::v1::inventory::NetworkInterfaceKind;
     pub use crate::v1::inventory::OmicronZoneDataset;
-    pub use crate::v1::inventory::OmicronZoneImageSource;
     pub use crate::v1::inventory::OrphanedDataset;
     pub use crate::v1::inventory::RemoveMupdateOverrideBootSuccessInventory;
     pub use crate::v1::inventory::RemoveMupdateOverrideInventory;
     pub use crate::v1::inventory::SledCpuFamily;
     pub use crate::v1::inventory::SledRole;
-    pub use crate::v1::inventory::ZoneArtifactInventory;
     pub use crate::v1::inventory::ZoneKind;
 
     pub use crate::v10::inventory::NetworkInterface;
@@ -173,8 +160,6 @@ pub mod inventory {
 
     pub use crate::v12::inventory::HealthMonitorInventory;
 
-    pub use crate::v14::inventory::OmicronFileSourceResolverInventory;
-    pub use crate::v14::inventory::OmicronSingleMeasurement;
     pub use crate::v14::inventory::ReconciledSingleMeasurement;
 
     pub use crate::v16::inventory::SingleMeasurementInventory;
@@ -201,22 +186,34 @@ pub mod inventory {
 
     pub use crate::v49::inventory::OmicronSledUpdateDisposition;
 
-    pub use crate::v51::inventory::ConfigReconcilerInventory;
-    pub use crate::v51::inventory::ConfigReconcilerInventoryStatus;
     pub use crate::v51::inventory::ExternalDnsAddrs;
     pub use crate::v51::inventory::MAX_ZONE_EXTERNAL_IPS;
     pub use crate::v51::inventory::NexusExternalIps;
-    pub use crate::v51::inventory::OmicronSledConfig;
-    pub use crate::v51::inventory::OmicronZoneConfig;
     pub use crate::v51::inventory::OmicronZoneType;
-    pub use crate::v51::inventory::OmicronZonesConfig;
     pub use crate::v51::inventory::ZoneExternalAddrsError;
     pub use crate::v51::inventory::ZoneSnatConfig;
     pub use crate::v51::inventory::check_external_ip_count;
 
     pub use crate::v53::inventory::CurrentUpdateDisposition;
     pub use crate::v53::inventory::InstanceManagerStatus;
-    pub use crate::v53::inventory::Inventory;
+
+    pub use crate::v55::inventory::BootPartitionContents;
+    pub use crate::v55::inventory::BootPartitionDetails;
+    pub use crate::v55::inventory::ConfigReconcilerInventory;
+    pub use crate::v55::inventory::ConfigReconcilerInventoryStatus;
+    pub use crate::v55::inventory::HostPhase2DesiredContents;
+    pub use crate::v55::inventory::HostPhase2DesiredSlots;
+    pub use crate::v55::inventory::ManifestBootInventory;
+    pub use crate::v55::inventory::ManifestInventory;
+    pub use crate::v55::inventory::OmicronFileSourceResolverInventory;
+    pub use crate::v55::inventory::OmicronSingleMeasurement;
+    pub use crate::v55::inventory::OmicronSledConfig;
+    pub use crate::v55::inventory::OmicronZoneConfig;
+    pub use crate::v55::inventory::OmicronZoneImageSource;
+    pub use crate::v55::inventory::OmicronZonesConfig;
+    pub use crate::v55::inventory::ZoneArtifactInventory;
+
+    pub use crate::v57::inventory::Inventory;
 
     pub use crate::impls::inventory::FmdHostCaseDisplay;
     pub use crate::impls::inventory::FmdInventoryDisplay;
@@ -262,12 +259,12 @@ pub mod sled {
 pub mod support_bundle {
     pub use crate::v1::support_bundle::RangeRequestHeaders;
     pub use crate::v1::support_bundle::SupportBundleFilePathParam;
-    pub use crate::v1::support_bundle::SupportBundleFinalizeQueryParams;
     pub use crate::v1::support_bundle::SupportBundleListPathParam;
     pub use crate::v1::support_bundle::SupportBundleMetadata;
     pub use crate::v1::support_bundle::SupportBundlePathParam;
     pub use crate::v1::support_bundle::SupportBundleState;
     pub use crate::v1::support_bundle::SupportBundleTransferQueryParams;
+    pub use crate::v55::support_bundle::SupportBundleFinalizeQueryParams;
 }
 
 pub mod system_networking {

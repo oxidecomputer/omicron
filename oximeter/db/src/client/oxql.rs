@@ -418,7 +418,7 @@ impl Client {
         let Some(schema) = self.schema_for_timeseries(name).await? else {
             return Err(Error::TimeseriesNotFound(name.to_string()));
         };
-        debug!(
+        trace!(
             query_log,
             "running flat OxQL query";
             "query" => ?query,
@@ -430,14 +430,14 @@ impl Client {
         // that apply to this timeseries in particular. We also need to merge
         // them in with the predicates passed in from a possible outer query.
         let preds = query.coalesced_predicates(outer_predicates.clone());
-        debug!(
+        trace!(
             query_log,
             "coalesced predicates from flat query";
             "outer_predicates" => ?&outer_predicates,
             "coalesced" => ?&preds,
         );
         let limit = query.coalesced_limits(outer_limit);
-        debug!(
+        trace!(
             query_log,
             "coalesced limit operations from flat query";
             "outer_limit" => ?&outer_limit,
@@ -478,7 +478,7 @@ impl Client {
         // groups for the measurement queries.
         let disjoint_predicates = if let Some(preds) = preds.as_ref() {
             let simplified = preds.simplify_to_dnf()?;
-            debug!(
+            trace!(
                 query_log,
                 "simplified filtering predicates to disjunctive normal form";
                 "original" => %preds,
@@ -502,7 +502,7 @@ impl Client {
         let mut query_summaries =
             Vec::with_capacity(1 + disjoint_predicates.len());
         for predicates in disjoint_predicates.into_iter() {
-            debug!(
+            trace!(
                 query_log,
                 "running disjoint query predicate";
                 "predicate" => predicates.as_ref().map(|s| s.to_string()).unwrap_or("none".into()),
@@ -512,7 +512,7 @@ impl Client {
             let (summary, consistent_keys) = self
                 .select_matching_timeseries_info(&all_fields_query, &schema)
                 .await?;
-            debug!(
+            trace!(
                 query_log,
                 "fetched information for matching timeseries keys";
                 "n_keys" => consistent_keys.len(),
@@ -570,7 +570,7 @@ impl Client {
         )?];
 
         let transformations = query.transformations();
-        debug!(
+        trace!(
             query_log,
             "constructed OxQL table, starting transformation pipeline";
             "name" => tables[0].name(),
@@ -673,7 +673,7 @@ impl Client {
                 n_measurements += 1;
             }
         }
-        debug!(
+        trace!(
             query_log,
             "fetched measurements for OxQL query";
             "n_keys" => measurements_by_key.len(),
@@ -730,7 +730,7 @@ impl Client {
                 oxql_types::point::Points::gauge_from_gauge(&measurements)?
             };
             timeseries.points = points;
-            debug!(
+            trace!(
                 query_log,
                 "inserted new OxQL timeseries";
                 "key" => key,

@@ -152,7 +152,9 @@ nexus-reconfigurator-preparation.workspace = true
 nexus-reconfigurator-rendezvous.workspace = true
 nexus-types.workspace = true
 nexus-types-versions.workspace = true
+omicron-certificates.workspace = true
 omicron-common.workspace = true
+omicron-git-version.workspace = true
 omicron-passwords.workspace = true
 oxide-tokio-rt.workspace = true
 oximeter.workspace = true
@@ -161,7 +163,6 @@ oximeter-producer.workspace = true
 raw-cpuid = { workspace = true, features = ["std"] }
 rustix = { workspace = true, features = ["fs"] }
 rustls = { workspace = true }
-rustls-pemfile = { workspace = true }
 scim2-rs.workspace = true
 support-bundle-collection.workspace = true
 oxide-update-engine.workspace = true

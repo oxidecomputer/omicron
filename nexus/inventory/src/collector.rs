@@ -7,6 +7,7 @@
 use crate::SledAgentEnumerator;
 use crate::builder::CollectionBuilder;
 use crate::builder::InventoryError;
+use crate::builder::now_db_precision;
 use anyhow::Context;
 use anyhow::anyhow;
 use clickhouse_admin_keeper_client::ClientInfo as _;
@@ -18,22 +19,30 @@ use itertools::Itertools;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::InternalDnsGenerationStatus;
+use nexus_types::inventory::Psu;
+use nexus_types::inventory::PsuState;
+use nexus_types::inventory::PsuStatus;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageWhich;
 use nexus_types::inventory::SpType;
 use nexus_types::inventory::TimeSync;
 use omicron_cockroach_metrics::CockroachClusterAdminClient;
 use omicron_common::address::NTP_ADMIN_PORT;
+use omicron_common::http_client::internal_http_client;
+use omicron_common::http_client::internal_http_client_builder;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use parallel_task_set::ParallelTaskSet;
 use sled_agent_types::disk::M2Slot;
 use sled_agent_types::inventory::Inventory;
 use sled_agent_types::inventory::OmicronZoneType;
 use sled_agent_types::inventory::ZoneKind;
+use sled_hardware_types::BaseboardId;
 use slog::Logger;
 use slog::o;
 use slog::{debug, error};
+use slog_error_chain::InlineErrorChain;
 use std::net::SocketAddrV6;
+use std::sync::Arc;
 use std::time::Duration;
 use strum::IntoEnumIterator;
 use tufaceous_artifact::ArtifactHash;
@@ -127,9 +136,26 @@ impl<'a> Collector<'a> {
             "mgs_url" => client.baseurl()
         );
 
-        // First, see which SPs MGS can see via Ignition.
+        // First, determine the gateway's rack ID.
+        let rack_id = client.rack_id_get().await.with_context(|| {
+            format!("MGS {:?}: determining gateway's rack ID", client.baseurl())
+        });
+        let rack_id = match rack_id {
+            Ok(id) => id.into_inner().rack_id,
+            Err(e) => {
+                in_progress.found_error(InventoryError::from(e));
+                return;
+            }
+        };
+
+        let log = log.new(o!("rack_id" => rack_id.to_string()));
+
+        // Next, see which SPs MGS can see via Ignition.
         let ignition_result = client.ignition_list().await.with_context(|| {
-            format!("MGS {:?}: listing ignition targets", client.baseurl())
+            format!(
+                "MGS {:?} (rack {rack_id}): listing ignition targets",
+                client.baseurl()
+            )
         });
 
         // Select only the SPs that appear powered on.
@@ -168,7 +194,7 @@ impl<'a> Collector<'a> {
             let result =
                 client.sp_get(&sp.typ, sp.slot).await.with_context(|| {
                     format!(
-                        "MGS {:?}: fetching state of SP {:?}",
+                        "MGS {:?} (rack {rack_id}): fetching state of SP {:?}",
                         client.baseurl(),
                         sp
                     )
@@ -184,6 +210,7 @@ impl<'a> Collector<'a> {
             // Record the state that we found.
             let Some(baseboard_id) = in_progress.found_sp_state(
                 client.baseurl(),
+                rack_id,
                 sp.typ,
                 sp.slot,
                 sp_state,
@@ -211,7 +238,8 @@ impl<'a> Collector<'a> {
                         .await
                         .with_context(|| {
                             format!(
-                                "MGS {:?}: SP {sp:?}: phase 1 active slot",
+                                "MGS {:?} (rack {rack_id}): SP {sp:?}: phase 1 \
+                                 active slot",
                                 client.baseurl(),
                             )
                         })
@@ -219,7 +247,7 @@ impl<'a> Collector<'a> {
                             M2Slot::from_mgs_firmware_slot(response.slot)
                                 .ok_or_else(|| {
                                     anyhow!(
-                                        "MGS {:?}: SP {sp:?}: \
+                                        "MGS {:?} (rack {rack_id}): SP {sp:?}: \
                                          invalid host phase 1 slot {}",
                                         client.baseurl(),
                                         response.slot
@@ -276,7 +304,8 @@ impl<'a> Collector<'a> {
                         .await
                         .with_context(|| {
                             format!(
-                                "MGS {:?}: SP {sp:?}: phase 1 slot {slot:?}",
+                                "MGS {:?} (rack {rack_id}): SP {sp:?}: phase 1 \
+                                 slot {slot:?}",
                                 client.baseurl(),
                             )
                         });
@@ -306,6 +335,27 @@ impl<'a> Collector<'a> {
                 }
             }
 
+            // For power shelf controller SPs, collect an inventory of PSUs in
+            // the power shelf.
+            if matches!(sp.typ, SpType::Power)
+                // Skip collecting this SP's PSUs if we have already collected
+                // them. In general, this will be true for the second MGS, but
+                // if there were transient errors, this gives us a second try.
+                && !in_progress.found_all_psus_already(&baseboard_id)
+            {
+                if let Err(e) = collect_one_psc(
+                    &log,
+                    &client,
+                    in_progress,
+                    &baseboard_id,
+                    &sp,
+                )
+                .await
+                {
+                    in_progress.found_error(InventoryError::from(e));
+                }
+            }
+
             // For each kind of caboose that we care about, if it hasn't been
             // fetched already, fetch it and record it.  Generally, we'd only
             // get here for the first MGS client.  Assuming that one succeeds,
@@ -329,7 +379,7 @@ impl<'a> Collector<'a> {
                     .await
                     .with_context(|| {
                         format!(
-                            "MGS {:?}: SP {:?}: caboose {:?}",
+                            "MGS {:?} (rack {rack_id}): SP {:?}: caboose {:?}",
                             client.baseurl(),
                             sp,
                             which
@@ -405,7 +455,7 @@ impl<'a> Collector<'a> {
                 }
                 .with_context(|| {
                     format!(
-                        "MGS {:?}: SP {:?}: rot page {:?}",
+                        "MGS {:?} (rack {rack_id}): SP {:?}: rot page {:?}",
                         client.baseurl(),
                         sp,
                         which
@@ -508,7 +558,14 @@ impl<'a> Collector<'a> {
                 let url = format!("http://{addr}");
                 let log = self.log.new(o!("ntp_admin_url" => url.clone()));
 
-                (cfg.id, ntp_admin_client::Client::new(&url, log))
+                (
+                    cfg.id,
+                    ntp_admin_client::Client::new_with_client(
+                        &url,
+                        internal_http_client(),
+                        log,
+                    ),
+                )
             })
             .collect();
 
@@ -637,7 +694,14 @@ impl<'a> Collector<'a> {
                 let url = format!("http://{http_address}");
                 let log = self.log.new(o!("internal_dns_url" => url.clone()));
 
-                (cfg.id, dns_service_client::Client::new(&url, log))
+                (
+                    cfg.id,
+                    dns_service_client::Client::new_with_client(
+                        &url,
+                        internal_http_client(),
+                        log,
+                    ),
+                )
             })
             .collect();
 
@@ -689,7 +753,7 @@ async fn collect_one_sled_agent(
         "sled_agent_url" => url
     );
 
-    let reqwest_client = reqwest::ClientBuilder::new()
+    let reqwest_client = internal_http_client_builder()
         .connect_timeout(SLED_AGENT_TIMEOUT)
         .timeout(SLED_AGENT_TIMEOUT)
         .build()
@@ -769,19 +833,241 @@ async fn collect_one_dns_generation(
     })
 }
 
+/// Collect inventory from one power shelf controller.
+async fn collect_one_psc(
+    log: &slog::Logger,
+    client: &gateway_client::Client,
+    in_progress: &mut CollectionBuilder,
+    psc_baseboard_id: &Arc<BaseboardId>,
+    sp: &gateway_types::component::SpIdentifier,
+) -> Result<(), anyhow::Error> {
+    use gateway_types::component_vpd::ComponentVpd;
+    use gateway_types::component_vpd::PmbusDevice;
+    use nexus_types::inventory::PsuIdentity;
+    use nexus_types::inventory::PsuSlot;
+
+    fn convert_psu_vpd(
+        ctx: impl Fn() -> String,
+        in_progress: &mut CollectionBuilder,
+        vpd: PmbusDevice,
+    ) -> PsuIdentity {
+        let mut expect_string =
+            |command: &'static str, value: Option<Vec<u8>>| {
+                let bytes = match value {
+                    Some(bytes) => bytes,
+                    None => {
+                        let err = anyhow!(
+                            "expected the PSU to implement PMBus command \
+                             {command}"
+                        )
+                        .context(ctx());
+                        in_progress.found_error(InventoryError::from(err));
+                        return String::from("<command not implemented>");
+                    }
+                };
+                // Ultimately, we will convert the received bytes to a string
+                // using `String::from_utf8_lossy`. However, we expect that the
+                // string value *should* be valid UTF-8, so first check whether
+                // the conversion will be lossy or not
+                let s = str::from_utf8(&bytes[..])
+                    .map_err(|e| {
+                        anyhow!(
+                            "PMBus {command} should return ASCII bytes: {e}"
+                        )
+                    })
+                    .with_context(&ctx);
+                match s {
+                    Ok(s) => s.to_owned(),
+                    Err(e) => {
+                        in_progress.found_error(InventoryError::from(e));
+                        String::from_utf8_lossy(&bytes[..]).into_owned()
+                    }
+                }
+            };
+
+        let PmbusDevice {
+            mfr_id,
+            mfr_model,
+            mfr_revision,
+            mfr_location,
+            mfr_date,
+            mfr_serial,
+            // muRata PSUs do not implement the IC_DEVICE_ID or IC_DEVICE_REV
+            // PMbus commands, and Hubris will not try to read them, but if
+            // we encounter them unexpectedly, just ignore them.
+            ic_device_id: _,
+            ic_device_rev: _,
+        } = vpd;
+
+        PsuIdentity {
+            mfr_id: expect_string("MFR_ID", mfr_id),
+            mfr_model: expect_string("MFR_MODEL", mfr_model),
+            // muRata uses the PMBus `MFR_REVISION` command to represent the
+            // PSU's *firmware* revisions, rather than a hardware revision. See
+            // `PsuIdentity::firmware_revs`.
+            mfr_revision: expect_string("MFR_REVISION", mfr_revision),
+            mfr_location: expect_string("MFR_LOCATION", mfr_location),
+            mfr_date: expect_string("MFR_DATE", mfr_date),
+            mfr_serial: expect_string("MFR_SERIAL", mfr_serial),
+        }
+    }
+
+    let components = client
+        .sp_component_list(&sp.typ, sp.slot)
+        .await
+        .with_context(|| {
+            format!(
+                "MGS {:?}: SP {sp:?} ({psc_baseboard_id:?}): component list",
+                client.baseurl()
+            )
+        })?
+        .into_inner()
+        .components;
+    let mut changed_psus = 0;
+    let mut total_psus = 0;
+    for component in components {
+        let id = &component.component;
+        let dev_type = component.device.as_str();
+
+        // Don't type this out every time we might construct an error...
+        let ctx = || {
+            format!(
+                "MGS {:?}: SP {sp:?} ({psc_baseboard_id:?}): component {id:?}",
+                client.baseurl()
+            )
+        };
+
+        let slot = match id.parse::<PsuSlot>() {
+            Ok(slot) => slot,
+
+            // well, huh! this thing is one of the hubris device driver types we
+            // believe represent PSUs, but its component ID doesn't match any of
+            // the ones we expect the PSUs to have! report an error and
+            // continue.
+            Err(_) if matches!(dev_type, "mwocp68" | "mwocp67") => {
+                let err = anyhow!(
+                    "device type {dev_type:?} seems to be a PSU, but this is \
+                     not a component ID we expect a PSU to have",
+                );
+                in_progress
+                    .found_error(InventoryError::from(err.context(ctx())));
+                continue;
+            }
+
+            // if neither the component ID nor the device type strings look
+            // PSU-ish, this is definitely not a PSU and we can quietly skip it.
+            Err(_) => continue,
+        };
+
+        total_psus += 1;
+
+        // Okay, have we already inventoried this thing?
+        if in_progress.found_psu_already(&psc_baseboard_id, slot) {
+            continue;
+        }
+
+        // If the PSU is present (or might be present), try to read its
+        // identity.
+        let presence = component.presence;
+        let state =
+            if let Some(status) = PsuStatus::from_presence(presence) {
+                let identity = client
+                .sp_component_vpd_get(&sp.typ, sp.slot, &id)
+                .await
+                .with_context(|| {
+                    format!(
+                        "reading VPD for PSU component {id:?} (component is \
+                        {presence:?})",
+                    )
+                })
+                .and_then(|response| {
+                    let vpd = match response.into_inner() {
+                        ComponentVpd::Pmbus(vpd) => vpd,
+                        other => return Err(anyhow!(
+                            "expected a PSU to report PMBus VPD, but got \
+                            {other:?} instead",
+                        )),
+                    };
+                    Ok(convert_psu_vpd(&ctx, in_progress, vpd))
+                })
+                .map_err(|error| {
+                    let error = InlineErrorChain::new(&*error);
+                    slog::warn!(
+                        log,
+                        "failed to read VPD identity for PSC component {id:?}";
+                        "error" => &error,
+                        "psc_baseboard_id" => ?psc_baseboard_id,
+                        "psc_slot" => %sp.slot,
+                        "psu_slot" => %slot,
+                        "psu_hubris_device_type" => ?dev_type,
+                        "psu_presence" => ?presence,
+                        "mgs_url" => client.baseurl(),
+                    );
+                    error.to_string()
+                });
+                Some(PsuState { status, identity })
+            } else {
+                None
+            };
+
+        let psu = Psu {
+            time_collected: now_db_precision(),
+            source: client.baseurl().to_owned(),
+            slot,
+            hubris_device_type: dev_type.to_string(),
+            state,
+        };
+        match in_progress.found_psu(&psc_baseboard_id, sp.slot, psu) {
+            Ok(true) => changed_psus += 1,
+            Ok(false) => (), // unchanged after retrying VPD
+            Err(error) => {
+                error!(
+                    log,
+                    "error reporting power shelf PSU";
+                    "error" => InlineErrorChain::new(&error),
+                    "psc_baseboard_id" => ?psc_baseboard_id,
+                    "psc_slot" => %sp.slot,
+                    "psu_slot" => %slot,
+                    "psu_hubris_device_type" => ?dev_type,
+                    "psu_presence" => ?presence,
+                    "mgs_url" => client.baseurl(),
+                );
+            }
+        }
+    }
+
+    debug!(
+        log,
+        "found {total_psus} PSUs from power shelf controller \
+         ({changed_psus} new or updated)";
+        "psc_baseboard_id" => ?psc_baseboard_id,
+        "psc_slot" => %sp.slot,
+        "mgs_url" => client.baseurl(),
+    );
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod test {
     use super::Collector;
     use crate::StaticSledAgentEnumerator;
+    use crate::examples::RACK_UUID;
     use gateway_messages::SpPort;
     use iddqd::IdOrdMap;
     use iddqd::id_ord_map;
     use nexus_types::inventory::Collection;
+    use nexus_types::inventory::PowerShelf;
+    use nexus_types::inventory::PsuFirmwareRevisions;
+    use nexus_types::inventory::PsuIdentity;
+    use nexus_types::inventory::PsuIdentityResult;
     use omicron_cockroach_metrics::CockroachClusterAdminClient;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_generation_kinds::SledConfigGeneration;
     use omicron_sled_agent::sim;
+    use omicron_test_utils::dev::test_cmds::Redactor;
     use omicron_uuid_kinds::OmicronZoneUuid;
+    use omicron_uuid_kinds::RackUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
@@ -899,16 +1185,16 @@ mod test {
         }
 
         // All we really need to check here is that we're reporting the right
-        // SPs, RoTs, and cabooses.  The actual SP data, RoT data, and caboose
-        // data comes straight from MGS.  And proper handling of that data is
-        // tested in the builder.
+        // SPs, RoTs, and cabooses. The component data comes straight from MGS,
+        // and proper handling of that data is tested in the builder.
         swrite!(s, "\nSPs:\n");
-        for (bb, _) in &collection.sps {
+        for (bb, sp) in &collection.sps {
             swrite!(
                 s,
-                "    baseboard part {:?} serial {:?}\n",
+                "    baseboard part {:?} serial {:?} rack {}\n",
                 bb.part_number,
                 bb.serial_number,
+                sp.rack_id,
             );
         }
 
@@ -955,9 +1241,10 @@ mod test {
         for sled_info in &collection.sled_agents {
             swrite!(
                 s,
-                "  sled {} ({:?})\n",
+                "  sled {} ({:?}) rack: {}\n",
                 sled_info.sled_id,
-                sled_info.sled_role
+                sled_info.sled_role,
+                sled_info.rack_id,
             );
             swrite!(s, "    baseboard {:?}\n", sled_info.baseboard_id);
 
@@ -1001,6 +1288,79 @@ mod test {
             }
         }
 
+        swrite!(s, "\npower shelves found:\n");
+        // When the simulated SP simulates a VPD read error, MGS returns it to
+        // Nexus as an HTTP error, which gets formatted with timestamps, IP
+        // addresses, and UUIDs in its formatted representation, so don't let
+        // those make it into the snapshot file.
+        let error_redactor = {
+            let mut r = Redactor::noop();
+            r.basic(true).uuids(true);
+            r
+        };
+        for PowerShelf { rack_id, slot, psc_baseboard_id, psus } in
+            &collection.power_shelves
+        {
+            swriteln!(
+                s,
+                "    rack {rack_id} shelf {slot}, PSC baseboard part {:?} \
+                 serial {:?}",
+                psc_baseboard_id.part_number,
+                psc_baseboard_id.serial_number,
+            );
+            for psu in psus {
+                swriteln!(
+                    s,
+                    "        {}: presence {:?} hubris_device {}",
+                    psu.slot,
+                    psu.presence(),
+                    psu.hubris_device_type,
+                );
+                match psu.identity() {
+                    PsuIdentityResult::Present(
+                        identity @ PsuIdentity {
+                            mfr_id,
+                            mfr_model,
+                            mfr_revision,
+                            mfr_location,
+                            mfr_date,
+                            mfr_serial,
+                        },
+                    ) => {
+                        swriteln!(
+                            s,
+                            "            VPD: mfr_model {mfr_model:?} \
+                              mfr_serial {mfr_serial:?} \
+                              mfr_revision {mfr_revision:?} \
+                              mfr_id {mfr_id:?} \
+                              mfr_location {mfr_location:?} \
+                              mfr_date {mfr_date:?}"
+                        );
+                        match identity.firmware_revs() {
+                            Ok(PsuFirmwareRevisions { primary, secondary }) => {
+                                swriteln!(
+                                    s,
+                                    "            firmware: primary \
+                                     {primary:?} secondary {secondary:?}"
+                                );
+                            }
+                            Err(error) => {
+                                swriteln!(
+                                    s,
+                                    "            firmware: error: {error:#}"
+                                );
+                            }
+                        }
+                    }
+                    PsuIdentityResult::Error(error) => {
+                        let error = error_redactor.do_redact(error);
+                        swriteln!(s, "            VPD: error: {error}");
+                    }
+                    PsuIdentityResult::NotPresent => {}
+                }
+            }
+        }
+
         swrite!(s, "\nerrors:\n");
         let os_error_re = regex::Regex::new(r"os error \d+").unwrap();
         let comm_error_re =
@@ -1027,12 +1387,14 @@ mod test {
     async fn sim_sled_agent(
         log: slog::Logger,
         sled_id: SledUuid,
+        rack_id: RackUuid,
         zone_id: OmicronZoneUuid,
         simulated_upstairs: &Arc<sim::SimulatedUpstairs>,
     ) -> sim::Server {
         // Start a simulated sled agent.
         let config = sim::Config::for_testing(
             sled_id,
+            rack_id,
             sim::SimMode::Auto,
             None,
             sim::ZpoolConfig::None,
@@ -1166,6 +1528,7 @@ mod test {
         let sled1 = sim_sled_agent(
             log.clone(),
             "9cb9b78f-5614-440c-b66d-e8e81fab69b0".parse().unwrap(),
+            RACK_UUID,
             "5125277f-0988-490b-ac01-3bba20cc8f07".parse().unwrap(),
             &simulated_upstairs,
         )
@@ -1174,6 +1537,7 @@ mod test {
         let sled2 = sim_sled_agent(
             log.clone(),
             "03265caf-da7d-46c7-b1c2-39fa90ce5c65".parse().unwrap(),
+            RACK_UUID,
             "8b88a56f-3eb6-4d80-ba42-75d867bc427d".parse().unwrap(),
             &simulated_upstairs,
         )
@@ -1243,6 +1607,7 @@ mod test {
         let sled1 = sim_sled_agent(
             log.clone(),
             "9cb9b78f-5614-440c-b66d-e8e81fab69b0".parse().unwrap(),
+            RACK_UUID,
             "5125277f-0988-490b-ac01-3bba20cc8f07".parse().unwrap(),
             &simulated_upstairs,
         )
@@ -1251,6 +1616,7 @@ mod test {
         let sled2 = sim_sled_agent(
             log.clone(),
             "03265caf-da7d-46c7-b1c2-39fa90ce5c65".parse().unwrap(),
+            RACK_UUID,
             "8b88a56f-3eb6-4d80-ba42-75d867bc427d".parse().unwrap(),
             &simulated_upstairs,
         )
@@ -1361,6 +1727,7 @@ mod test {
         let sled1 = sim_sled_agent(
             log.clone(),
             "9cb9b78f-5614-440c-b66d-e8e81fab69b0".parse().unwrap(),
+            RACK_UUID,
             "5125277f-0988-490b-ac01-3bba20cc8f07".parse().unwrap(),
             &simulated_upstairs,
         )
