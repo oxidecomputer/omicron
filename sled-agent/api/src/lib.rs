@@ -380,12 +380,24 @@ pub trait SledAgentApi {
     #[endpoint {
         method = PUT,
         path = "/omicron-config",
-        versions = VERSION_MULTIPLE_ZONE_EXTERNAL_IPS..,
+        versions = VERSION_ARTIFACT_HASH_SCHEMA..,
     }]
     async fn omicron_config_put(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<latest::inventory::OmicronSledConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        method = PUT,
+        path = "/omicron-config",
+        versions = VERSION_MULTIPLE_ZONE_EXTERNAL_IPS..VERSION_ARTIFACT_HASH_SCHEMA,
+    }]
+    async fn omicron_config_put_v51(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v51::inventory::OmicronSledConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::omicron_config_put(rqctx, body.map(Into::into)).await
+    }
 
     #[endpoint {
         method = PUT,
@@ -396,7 +408,7 @@ pub trait SledAgentApi {
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<v50::inventory::OmicronSledConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        Self::omicron_config_put(rqctx, body.map(Into::into)).await
+        Self::omicron_config_put_v51(rqctx, body.map(Into::into)).await
     }
 
     #[endpoint {

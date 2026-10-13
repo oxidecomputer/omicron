@@ -136,8 +136,6 @@ pub mod inventory {
     pub use crate::v1::inventory::Baseboard;
     pub use crate::v1::inventory::BootImageHeader;
     pub use crate::v1::inventory::ConfigReconcilerInventoryResult;
-    pub use crate::v1::inventory::HostPhase2DesiredContents;
-    pub use crate::v1::inventory::HostPhase2DesiredSlots;
     pub use crate::v1::inventory::InventoryDataset;
     pub use crate::v1::inventory::InventoryDisk;
     pub use crate::v1::inventory::ManifestBootInventory;
@@ -194,11 +192,9 @@ pub mod inventory {
 
     pub use crate::v49::inventory::OmicronSledUpdateDisposition;
 
-    pub use crate::v51::inventory::ConfigReconcilerInventoryStatus;
     pub use crate::v51::inventory::ExternalDnsAddrs;
     pub use crate::v51::inventory::MAX_ZONE_EXTERNAL_IPS;
     pub use crate::v51::inventory::NexusExternalIps;
-    pub use crate::v51::inventory::OmicronSledConfig;
     pub use crate::v51::inventory::OmicronZoneConfig;
     pub use crate::v51::inventory::OmicronZoneType;
     pub use crate::v51::inventory::OmicronZonesConfig;
@@ -212,7 +208,11 @@ pub mod inventory {
     pub use crate::v55::inventory::BootPartitionContents;
     pub use crate::v55::inventory::BootPartitionDetails;
     pub use crate::v55::inventory::ConfigReconcilerInventory;
+    pub use crate::v55::inventory::ConfigReconcilerInventoryStatus;
+    pub use crate::v55::inventory::HostPhase2DesiredContents;
+    pub use crate::v55::inventory::HostPhase2DesiredSlots;
     pub use crate::v55::inventory::Inventory;
+    pub use crate::v55::inventory::OmicronSledConfig;
 
     pub use crate::impls::inventory::FmdHostCaseDisplay;
     pub use crate::impls::inventory::FmdInventoryDisplay;
