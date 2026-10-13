@@ -81,6 +81,10 @@ mod test {
         // On these platforms, reqwest's default client loads TLS roots from
         // disk, so it should fail to build. If this starts succeeding, the
         // test above no longer demonstrates anything about TLS roots.
+        //
+        // This check is skipped on macOS, where building the default client
+        // does no I/O: the platform verifier consults the system trust store
+        // only when verifying a certificate.
         #[cfg(any(target_os = "linux", target_os = "illumos"))]
         reqwest::ClientBuilder::new().build().expect_err(
             "expected a default reqwest client to fail to build without \
