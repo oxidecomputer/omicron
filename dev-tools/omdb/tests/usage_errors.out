@@ -690,6 +690,7 @@ Usage: omdb db inventory collections show [OPTIONS] <ID_OR_LATEST> [COMMAND]
 Commands:
   all                show all information from the collection
   sp                 show information about service processors (baseboard)
+  racks              show all information collected from the rack(s) with the given UUID(s)
   orphaned-datasets  show orphaned datasets
   help               Print this message or the help of the given subcommand(s)
 

@@ -1743,6 +1743,8 @@ table! {
         baseboard_revision -> Int8,
         hubris_archive_id -> Text,
         power_state -> crate::enums::HwPowerStateEnum,
+
+        rack_id -> Uuid,
     }
 }
 
@@ -1919,6 +1921,8 @@ table! {
 
         instance_manager_update_disposition -> Nullable<crate::enums::InvSledUpdateDispositionEnum>,
         instance_manager_num_registered_vmms -> Int8,
+
+        rack_id -> Uuid,
     }
 }
 

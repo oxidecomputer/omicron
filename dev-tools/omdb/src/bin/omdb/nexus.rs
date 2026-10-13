@@ -3598,8 +3598,9 @@ fn print_task_sp_ereport_ingester(details: &serde_json::Value) {
         println!("\n    service processors:");
         for SpEreporterStatus { sp_type, slot, status, ignition_type } in &sps {
             println!(
-                "    - {sp_type:<6} {slot:02}: {:>NUM_WIDTH$} ereports",
-                status.ereports_received
+                "    - rack {}, {sp_type:<6} {slot:02}: {:>NUM_WIDTH$} \
+                 ereports",
+                status.rack_id, status.ereports_received
             );
             println!("      ignition type: {ignition_type:?}",);
             println!(
@@ -3624,16 +3625,24 @@ fn print_task_sp_ereport_ingester(details: &serde_json::Value) {
     }
 }
 
-struct EreporterStatusTotalsDisplay<'a>(Vec<&'a EreporterStatus>);
-
-impl<'a> EreporterStatusTotalsDisplay<'a> {
-    fn new(statuses: impl IntoIterator<Item = &'a EreporterStatus>) -> Self {
-        Self(statuses.into_iter().collect())
-    }
+struct EreporterStatusTotalsDisplay {
+    total_received: usize,
+    total_new: usize,
+    total_reqs: usize,
+    total_errors: usize,
+    total_racks: usize,
+    total_reporters: usize,
+    reporters_with_ereports: usize,
+    reporters_without_ereports: usize,
+    reporters_with_errors: usize,
+    reporters_without_errors: usize,
 }
 
-impl fmt::Display for EreporterStatusTotalsDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl EreporterStatusTotalsDisplay {
+    fn new<'a>(
+        statuses: impl IntoIterator<Item = &'a EreporterStatus>,
+    ) -> Self {
+        let mut racks = std::collections::HashSet::new();
         let mut total_received = 0;
         let mut total_new = 0;
         let mut total_reqs = 0;
@@ -3643,13 +3652,15 @@ impl fmt::Display for EreporterStatusTotalsDisplay<'_> {
         let mut reporters_with_errors = 0;
         let mut reporters_without_errors = 0;
 
-        for &&EreporterStatus {
+        for &EreporterStatus {
+            rack_id,
             ereports_received,
             new_ereports,
             requests,
             ref errors,
-        } in &self.0
+        } in statuses
         {
+            racks.insert(rack_id);
             total_received += ereports_received;
             total_new += new_ereports;
             total_reqs += requests;
@@ -3667,8 +3678,39 @@ impl fmt::Display for EreporterStatusTotalsDisplay<'_> {
         }
         let total_reporters =
             reporters_with_ereports + reporters_without_ereports;
+        let total_racks = racks.len();
+        Self {
+            total_received,
+            total_new,
+            total_reqs,
+            total_errors,
+            total_racks,
+            total_reporters,
+            reporters_with_ereports,
+            reporters_without_ereports,
+            reporters_with_errors,
+            reporters_without_errors,
+        }
+    }
+}
 
+impl fmt::Display for EreporterStatusTotalsDisplay {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self {
+            total_received,
+            total_new,
+            total_reqs,
+            total_errors,
+            total_racks,
+            total_reporters,
+            reporters_with_ereports,
+            reporters_without_ereports,
+            reporters_with_errors,
+            reporters_without_errors,
+        } = self;
         use ereporter_status_fields::*;
+
+        writeln!(f, "    {TOTAL_RACKS:<WIDTH$}{total_racks:>NUM_WIDTH$}")?;
         writeln!(
             f,
             "    {EREPORTS_RECEIVED:<WIDTH$}{total_received:>NUM_WIDTH$}"
@@ -3705,6 +3747,7 @@ impl fmt::Display for EreporterStatusTotalsDisplay<'_> {
 }
 
 mod ereporter_status_fields {
+    pub const TOTAL_RACKS: &str = "total racks:";
     pub const EREPORTS_RECEIVED: &str = "total ereports received:";
     pub const NEW_EREPORTS: &str = "  new ereports ingested:";
     pub const HTTP_REQUESTS: &str = "total HTTP requests sent:";
@@ -3718,6 +3761,7 @@ mod ereporter_status_fields {
     pub const SPS_FOUND: &str = "SPs found via ignition:";
     pub const SPS_NOT_PRESENT: &str = "SPs not present:";
     pub const WIDTH: usize = super::const_max_len(&[
+        TOTAL_RACKS,
         EREPORTS_RECEIVED,
         NEW_EREPORTS,
         HTTP_REQUESTS,
@@ -6027,6 +6071,7 @@ mod tests {
     use nexus_types::external_api::alert::WebhookDeliveryAttemptResult;
     use nexus_types::internal_api::background::WebhookDeliveryFailure;
     use omicron_uuid_kinds::AlertUuid;
+    use omicron_uuid_kinds::RackUuid;
     use omicron_uuid_kinds::WebhookDeliveryUuid;
     use std::collections::BTreeMap;
 
@@ -6036,27 +6081,46 @@ mod tests {
         // and without received ereports.
         //
         // Also have one of the reporters contain multiple errors to distinguish
-        // the error count from the count of affected reporters.
+        // the error count from the count of affected reporters. And throw in
+        // two rack IDs to see how that part looks.
+        let rack1 = RackUuid::from_u128(0x6174c6ce_9bb1_4ce8_afc3_97fc1e6aa450);
+        let rack2 = RackUuid::from_u128(0xaaf68b01_1fa2_4665_ad2d_cf43f7c3f378);
         let statuses = [
             EreporterStatus {
+                rack_id: rack1,
                 ereports_received: 12,
                 new_ereports: 7,
                 requests: 4,
                 errors: vec![],
             },
             EreporterStatus {
+                rack_id: rack1,
                 ereports_received: 3,
                 new_ereports: 2,
                 requests: 5,
                 errors: vec!["error one".into(), "error two".into()],
             },
-            EreporterStatus { requests: 2, ..Default::default() },
             EreporterStatus {
-                requests: 1,
-                errors: vec!["error three".into()],
-                ..Default::default()
+                rack_id: rack2,
+                requests: 2,
+                ereports_received: 0,
+                new_ereports: 0,
+                errors: Vec::new(),
             },
-            EreporterStatus::default(),
+            EreporterStatus {
+                rack_id: rack2,
+                requests: 1,
+                ereports_received: 0,
+                new_ereports: 0,
+                errors: vec!["error three".into()],
+            },
+            EreporterStatus {
+                rack_id: rack1,
+                ereports_received: 0,
+                new_ereports: 0,
+                requests: 0,
+                errors: Vec::new(),
+            },
         ];
         expectorate::assert_contents(
             "tests/output/ereporter-status-totals.txt",

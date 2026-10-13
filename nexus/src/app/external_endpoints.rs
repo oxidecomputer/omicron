@@ -48,6 +48,8 @@ use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::bail_unless;
 use openssl::pkey::PKey;
 use openssl::x509::X509;
+use rustls::pki_types::PrivateKeyDer;
+use rustls::pki_types::pem::PemObject;
 use rustls::sign::CertifiedKey;
 use serde::Serialize;
 use serde_with::SerializeDisplay;
@@ -431,10 +433,9 @@ impl TryFrom<Certificate> for TlsCertificate {
 
         // Assemble a rustls CertifiedKey with both the certificate and the key.
         let certified_key = {
-            let mut cursor = std::io::Cursor::new(db_cert.key.clone());
-            let rustls_private_key = rustls_pemfile::private_key(&mut cursor)
-                .expect("parsing private key PEM")
-                .expect("no private keys found");
+            let rustls_private_key =
+                PrivateKeyDer::from_pem_slice(&db_cert.key)
+                    .context("parsing private key PEM for rustls")?;
             let rustls_signing_key =
                 rustls::crypto::aws_lc_rs::sign::any_supported_type(
                     &rustls_private_key,

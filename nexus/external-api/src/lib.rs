@@ -9269,11 +9269,12 @@ pub trait NexusExternalApi {
 
     #[endpoint {
         method = GET,
-        path = "/images",
+        path = "/images/{path:.*}",
         unpublished = true,
     }]
     async fn console_silo_images(
         rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::console::RestPathParam>,
     ) -> Result<Response<Body>, HttpError>;
 
     #[endpoint {
@@ -9292,6 +9293,26 @@ pub trait NexusExternalApi {
     }]
     async fn console_silo_access(
         rqctx: RequestContext<Self::Context>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/users/{path:.*}",
+        unpublished = true,
+    }]
+    async fn console_silo_users(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::console::RestPathParam>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/groups/{path:.*}",
+        unpublished = true,
+    }]
+    async fn console_silo_groups(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::console::RestPathParam>,
     ) -> Result<Response<Body>, HttpError>;
 
     /// Serve a static asset

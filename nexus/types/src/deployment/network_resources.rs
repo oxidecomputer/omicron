@@ -284,8 +284,6 @@ impl IdOrdItem for OmicronZoneExternalFloatingIp {
     Copy,
     PartialEq,
     Eq,
-    Ord,
-    PartialOrd,
     JsonSchema,
     Serialize,
     Deserialize,
@@ -345,8 +343,6 @@ pub struct OmicronZoneExternalSnatIp {
     Clone,
     Copy,
     Hash,
-    PartialOrd,
-    Ord,
     PartialEq,
     Eq,
     JsonSchema,
@@ -378,8 +374,6 @@ impl From<OmicronZoneExternalSnatIpv4> for OmicronZoneExternalSnatIp {
     Clone,
     Copy,
     Hash,
-    PartialOrd,
-    Ord,
     PartialEq,
     Eq,
     JsonSchema,
@@ -423,18 +417,6 @@ pub struct OmicronZoneExternalFloatingIps(
     ))]
     IdOrdMap<OmicronZoneExternalFloatingIp>,
 );
-
-impl std::cmp::PartialOrd for OmicronZoneExternalFloatingIps {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl std::cmp::Ord for OmicronZoneExternalFloatingIps {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.0.iter().cmp(other.0.iter())
-    }
-}
 
 fn check_external_ip_ids<'a>(
     ids: impl Iterator<Item = &'a Uuid>,
@@ -528,18 +510,6 @@ pub struct OmicronZoneExternalFloatingAddrs(
     IdOrdMap<OmicronZoneExternalFloatingAddr>,
 );
 
-impl std::cmp::PartialOrd for OmicronZoneExternalFloatingAddrs {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl std::cmp::Ord for OmicronZoneExternalFloatingAddrs {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.0.iter().cmp(other.0.iter())
-    }
-}
-
 impl OmicronZoneExternalFloatingAddrs {
     /// Construct from a set of external addresses, validating the count and
     /// that all IPs and IDs are unique.
@@ -616,8 +586,6 @@ impl From<OmicronZoneExternalFloatingAddrs>
     Copy,
     Eq,
     PartialEq,
-    Ord,
-    PartialOrd,
     JsonSchema,
     Serialize,
     Deserialize,
@@ -750,9 +718,7 @@ pub enum ZoneExternalSnatError {
 }
 
 /// The private IP address(es) of an Omicron zone's network interface.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "type", content = "value")]
 pub enum OmicronZoneNicIp {
     /// The interface has only an IPv4 address.
@@ -825,9 +791,7 @@ impl std::fmt::Display for OmicronZoneNicIp {
 ///
 /// This is a slimmer `nexus_db_model::ServiceNetworkInterface` that only stores
 /// the fields necessary for blueprint planning.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OmicronZoneNic {
     pub id: VnicUuid,
     pub mac: MacAddr,
@@ -867,9 +831,7 @@ impl BiHashItem for OmicronZoneExternalIpEntry {
 /// A pair of an Omicron zone ID and a network interface.
 ///
 /// Part of [`OmicronZoneNetworkResources`].
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize,
-)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct OmicronZoneNicEntry {
     pub zone_id: OmicronZoneUuid,
     pub nic: OmicronZoneNic,

@@ -34,6 +34,33 @@ use queries::*;
 /// Max number of ptool commands to run in parallel
 const MAX_PTOOL_PARALLELISM: usize = 50;
 
+/// Configures whether or not the calling process's PID should be filtered out
+/// by [`contract::find_oxide_pids`].
+#[derive(Copy, Clone, Debug)]
+enum PidFilter {
+    #[allow(dead_code)] // may be used later
+    All,
+    Skip(libc::pid_t),
+}
+
+impl PidFilter {
+    // This is only actually used on illumos, since `find_oxide_pids` falls back
+    // to a stub implementation elsewhere.
+    #[cfg_attr(not(target_os = "illumos"), allow(dead_code))]
+    fn should_include_pid(&self, pid: libc::pid_t) -> bool {
+        match self {
+            PidFilter::All => true,
+            PidFilter::Skip(skipped) => *skipped != pid,
+        }
+    }
+
+    /// Returns a [`PidFilter::Skip`] filter that skips the calling process's
+    /// PID.
+    fn skip_me() -> Self {
+        PidFilter::Skip(std::process::id() as libc::pid_t)
+    }
+}
+
 /// List all zones on a sled.
 pub async fn zoneadm_info()
 -> Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError> {
@@ -90,10 +117,15 @@ pub async fn nvmeadm_info()
 pub async fn pargs_oxide_processes(
     log: &Logger,
 ) -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
+    // `pargs`, like `pstack` and `pfiles`, may stop the process, which could
+    // cause problems when the timeout on the command fires if we are `pargs`ing
+    // ourself. So, skip this process' PID when determining which pids to invoke
+    // `pargs` with.
+    let pid_filter = PidFilter::skip_me();
     // In a diagnostics context we care about looping over every pid we find,
     // but on failure we should just return a single error in a vec that
     // represents the entire failed operation.
-    let pids = match contract::find_oxide_pids(log) {
+    let pids = match contract::find_oxide_pids(log, pid_filter) {
         Ok(pids) => pids,
         Err(e) => return vec![Err(e.into())],
     };
@@ -120,10 +152,19 @@ pub async fn pargs_oxide_processes(
 pub async fn pstack_oxide_processes(
     log: &Logger,
 ) -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
+    // There's currently a bug where sled-agent running `pstack` or `pfiles`
+    // with its own PID may cause it to crash, possibly due to an interaction
+    // between the timeout we set for the command, the agent LWP, and `fork`ing.
+    // See https://github.com/oxidecomputer/stlouis/issues/1083 for more
+    // details.
+    //
+    // Therefore, as a workaround, exclude this process' PID until this no
+    // longer causes us to crash.
+    let pid_filter = PidFilter::skip_me();
     // In a diagnostics context we care about looping over every pid we find,
     // but on failure we should just return a single error in a vec that
     // represents the entire failed operation.
-    let pids = match contract::find_oxide_pids(log) {
+    let pids = match contract::find_oxide_pids(log, pid_filter) {
         Ok(pids) => pids,
         Err(e) => return vec![Err(e.into())],
     };
@@ -149,10 +190,12 @@ pub async fn pstack_oxide_processes(
 pub async fn pfiles_oxide_processes(
     log: &Logger,
 ) -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
+    // Don't pfiles yourself! You'll go blind!
+    let pid_filter = PidFilter::skip_me();
     // In a diagnostics context we care about looping over every pid we find,
     // but on failure we should just return a single error in a vec that
     // represents the entire failed operation.
-    let pids = match contract::find_oxide_pids(log) {
+    let pids = match contract::find_oxide_pids(log, pid_filter) {
         Ok(pids) => pids,
         Err(e) => return vec![Err(e.into())],
     };

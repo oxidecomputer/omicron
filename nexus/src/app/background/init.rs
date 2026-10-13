@@ -524,6 +524,7 @@ impl BackgroundTasksInitializer {
                 &nexus_id.to_string(),
                 config.inventory.nkeep,
                 config.inventory.disable_collect,
+                rack_id,
             );
             let inventory_watcher = collector.watcher();
             driver.register(TaskDefinition {
@@ -794,7 +795,7 @@ impl BackgroundTasksInitializer {
                 producer_registry,
                 resolver.clone(),
                 inventory_load_watcher.clone(),
-                instance_watcher::WatcherIdentity { nexus_id, rack_id },
+                nexus_id,
             );
             driver.register(TaskDefinition {
                 name: "instance_watcher",
@@ -1117,7 +1118,6 @@ impl BackgroundTasksInitializer {
                 datastore.clone(),
                 resolver.clone(),
                 nexus_id,
-                rack_id,
                 task_fm_analysis.clone(),
                 config.sp_ereport_ingester.disable,
             )),

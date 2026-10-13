@@ -7256,10 +7256,11 @@ pub(in crate::db::datastore) mod test {
                     name: external::Name::try_from(format!("local-{i}-{n}"))
                         .unwrap(),
 
-                    // 64 instances per sled, total provisionable size is 1024 -
-                    // 250 = 774, so roughly 12 G disks, minus overhead of about
-                    // 780M = drop to 10G
-                    size: external::ByteCount::from_gibibytes_u32(10),
+                    // 64 instances per sled, each with a disk on every U.2. The
+                    // provisionable size of each U.2 is (1024 - 250) G = 774 G,
+                    // less overhead (4 MiB per GiB) = ~771.0 G, so ~12.05 G per
+                    // disk: use 12 G.
+                    size: external::ByteCount::from_gibibytes_u32(12),
                 });
             }
 

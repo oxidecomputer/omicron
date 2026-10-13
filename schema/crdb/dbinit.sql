@@ -4304,6 +4304,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_service_processor (
     hubris_archive_id TEXT NOT NULL,
     power_state omicron.public.hw_power_state NOT NULL,
 
+    -- the rack ID that this SP was found in (determined based on which MGS
+    -- reported it)
+    rack_id UUID NOT NULL,
+
     PRIMARY KEY (inv_collection_id, hw_baseboard_id)
 );
 
@@ -4600,6 +4604,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     instance_manager_update_disposition omicron.public.inv_sled_update_disposition,
     -- Number of VMMs currently registered with the instance manager.
     instance_manager_num_registered_vmms INT8 NOT NULL CHECK (instance_manager_num_registered_vmms >= 0),
+
+    -- ID of the row in the `rack` table that corresponds to this sled's rack
+    rack_id UUID NOT NULL,
 
     CONSTRAINT reconciler_status_sled_config_present_if_running CHECK (
         (reconciler_status_kind = 'running'
@@ -9560,7 +9567,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '305.0.0', NULL)
+    (TRUE, NOW(), NOW(), '307.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
