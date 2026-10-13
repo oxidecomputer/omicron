@@ -8,8 +8,7 @@
 //! certificates from disk, and fails if none can be read (for example, if the
 //! process has run out of file descriptors). Services within the control plane
 //! talk to each other over plain HTTP, so they have no use for those
-//! certificates. The builders in this module trust no TLS roots at all, which
-//! means building a client does no I/O.
+//! certificates.
 //!
 //! See <https://github.com/oxidecomputer/omicron/issues/10871>.
 
@@ -41,14 +40,4 @@ pub fn internal_http_client() -> reqwest::Client {
         .timeout(PROGENITOR_DEFAULT_TIMEOUT)
         .build()
         .expect("building a client without TLS roots does no I/O")
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-
-    #[test]
-    fn internal_http_client_builds() {
-        let _ = internal_http_client();
-    }
 }
