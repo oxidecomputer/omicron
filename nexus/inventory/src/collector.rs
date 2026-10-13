@@ -25,6 +25,7 @@ use nexus_types::inventory::TimeSync;
 use omicron_cockroach_metrics::CockroachClusterAdminClient;
 use omicron_common::address::NTP_ADMIN_PORT;
 use omicron_common::http_client::internal_http_client;
+use omicron_common::http_client::internal_http_client_builder;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use parallel_task_set::ParallelTaskSet;
 use sled_agent_types::disk::M2Slot;
@@ -724,7 +725,7 @@ async fn collect_one_sled_agent(
         "sled_agent_url" => url
     );
 
-    let reqwest_client = reqwest::ClientBuilder::new()
+    let reqwest_client = internal_http_client_builder()
         .connect_timeout(SLED_AGENT_TIMEOUT)
         .timeout(SLED_AGENT_TIMEOUT)
         .build()

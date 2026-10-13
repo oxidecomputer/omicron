@@ -14,6 +14,7 @@ use crate::metrics::MetricsRequestQueue;
 use crate::nexus::NexusClient;
 use crate::profile::*;
 use crate::zone_bundle::ZoneBundler;
+use omicron_common::http_client::internal_http_client_builder;
 
 use chrono::Utc;
 use iddqd::IdOrdMap;
@@ -2548,7 +2549,7 @@ impl InstanceRunner {
             ),
         }
 
-        let reqwest_client = reqwest::ClientBuilder::new().build().unwrap();
+        let reqwest_client = internal_http_client_builder().build().unwrap();
         let client = Arc::new(PropolisClient::new_with_client(
             &format!("http://{}", self.propolis_addr),
             reqwest_client,

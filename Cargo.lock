@@ -8940,6 +8940,7 @@ dependencies = [
  "cockroach-admin-client",
  "cockroach-admin-types",
  "futures",
+ "omicron-common",
  "omicron-workspace-hack",
  "parallel-task-set",
  "proptest",

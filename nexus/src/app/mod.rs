@@ -37,6 +37,7 @@ use omicron_common::address::UnderlaySubnets;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Error;
 use omicron_common::http_client::internal_http_client;
+use omicron_common::http_client::internal_http_client_builder;
 use omicron_debug_dropbox::DebugDropbox;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::RackUuid;
@@ -447,7 +448,7 @@ impl Nexus {
         let (tuf_artifact_replication_tx, tuf_artifact_replication_rx) =
             mpsc::channel(16);
 
-        let reqwest_client = reqwest::ClientBuilder::new()
+        let reqwest_client = internal_http_client_builder()
             .connect_timeout(std::time::Duration::from_secs(15))
             .timeout(std::time::Duration::from_secs(15))
             .build()

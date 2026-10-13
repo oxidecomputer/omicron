@@ -98,6 +98,7 @@ use omicron_common::backoff::{
 };
 use omicron_common::disk::DatasetKind;
 use omicron_common::http_client::internal_http_client;
+use omicron_common::http_client::internal_http_client_builder;
 use omicron_ddm_admin_client::DdmError;
 use omicron_generation_kinds::{
     Generation, GenericGeneration, SledConfigGeneration,
@@ -343,7 +344,7 @@ impl ServiceInner {
         sled_config: OmicronSledConfig,
     ) -> Result<(), SetupServiceError> {
         let dur = std::time::Duration::from_secs(60);
-        let client = reqwest::ClientBuilder::new()
+        let client = internal_http_client_builder()
             .connect_timeout(dur)
             .build()
             .map_err(SetupServiceError::HttpClient)?;
@@ -421,7 +422,7 @@ impl ServiceInner {
         generation: SledConfigGeneration,
     ) -> Result<(), SetupServiceError> {
         let dur = std::time::Duration::from_secs(60);
-        let client = reqwest::ClientBuilder::new()
+        let client = internal_http_client_builder()
             .connect_timeout(dur)
             .build()
             .map_err(SetupServiceError::HttpClient)?;
@@ -759,7 +760,7 @@ impl ServiceInner {
         );
 
         const CLIENT_TIMEOUT: Duration = Duration::from_secs(60);
-        let client = reqwest::Client::builder()
+        let client = internal_http_client_builder()
             .connect_timeout(CLIENT_TIMEOUT)
             .timeout(CLIENT_TIMEOUT)
             .build()
@@ -957,7 +958,7 @@ impl ServiceInner {
             })
             .expect("Should not create service plans without CockroachDb");
         let dur = std::time::Duration::from_secs(60);
-        let client = reqwest::ClientBuilder::new()
+        let client = internal_http_client_builder()
             .connect_timeout(dur)
             .build()
             .map_err(SetupServiceError::HttpClient)?;
@@ -1257,7 +1258,7 @@ impl ServiceInner {
                 .into_iter()
                 .map(|address| {
                     let dur = std::time::Duration::from_secs(60);
-                    let client = reqwest::ClientBuilder::new()
+                    let client = internal_http_client_builder()
                         .connect_timeout(dur)
                         .timeout(dur)
                         .build()
