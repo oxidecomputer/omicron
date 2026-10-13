@@ -288,6 +288,11 @@ impl VmmStopForUpdate {
                             // created VMM. The VMM is reported as Failed. It's
                             // not necessary to stop it anymore, so we don't add
                             // it to the `vmms_failed_by_sled` list.
+                            //
+                            // While a `VmmState::Failed` could also be due to a
+                            // sled agent or sled restart, `vmm_put_state` would
+                            // report those cases as an `Error`, so we don't
+                            // need to handle those specific cases here.
                             VmmState::Failed(reason) => {
                                 let description = reason.description();
                                 slog::info!(
