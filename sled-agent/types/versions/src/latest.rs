@@ -135,8 +135,6 @@ pub mod instance {
 pub mod inventory {
     pub use crate::v1::inventory::Baseboard;
     pub use crate::v1::inventory::BootImageHeader;
-    pub use crate::v1::inventory::BootPartitionContents;
-    pub use crate::v1::inventory::BootPartitionDetails;
     pub use crate::v1::inventory::ConfigReconcilerInventoryResult;
     pub use crate::v1::inventory::HostPhase2DesiredContents;
     pub use crate::v1::inventory::HostPhase2DesiredSlots;
@@ -196,7 +194,6 @@ pub mod inventory {
 
     pub use crate::v49::inventory::OmicronSledUpdateDisposition;
 
-    pub use crate::v51::inventory::ConfigReconcilerInventory;
     pub use crate::v51::inventory::ConfigReconcilerInventoryStatus;
     pub use crate::v51::inventory::ExternalDnsAddrs;
     pub use crate::v51::inventory::MAX_ZONE_EXTERNAL_IPS;
@@ -211,7 +208,11 @@ pub mod inventory {
 
     pub use crate::v53::inventory::CurrentUpdateDisposition;
     pub use crate::v53::inventory::InstanceManagerStatus;
-    pub use crate::v53::inventory::Inventory;
+
+    pub use crate::v55::inventory::BootPartitionContents;
+    pub use crate::v55::inventory::BootPartitionDetails;
+    pub use crate::v55::inventory::ConfigReconcilerInventory;
+    pub use crate::v55::inventory::Inventory;
 
     pub use crate::impls::inventory::FmdHostCaseDisplay;
     pub use crate::impls::inventory::FmdInventoryDisplay;
