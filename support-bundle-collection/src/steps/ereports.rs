@@ -5,13 +5,12 @@
 //! Collect ereports for support bundles
 
 use crate::collection::BundleCollection;
+use crate::output::BundleOutput;
 use crate::step::CollectionStepOutput;
 use nexus_types::fm::ereport::EreportFilters;
 use nexus_types::support_bundle::BundleTimeRange;
 
 use anyhow::Context;
-use camino::Utf8Path;
-use camino::Utf8PathBuf;
 use dropshot::PaginationOrder;
 use nexus_db_queries::db::datastore;
 use nexus_db_queries::db::pagination::Paginator;
@@ -25,7 +24,7 @@ use slog_error_chain::InlineErrorChain;
 
 pub async fn collect(
     collection: &BundleCollection,
-    dir: &Utf8Path,
+    output: &BundleOutput,
 ) -> anyhow::Result<CollectionStepOutput> {
     let log = collection.log();
     let ereport_filters = collection.data_selection().ereport_filters();
@@ -35,7 +34,7 @@ pub async fn collect(
         return Ok(CollectionStepOutput::Skipped);
     };
     let time_range = collection.data_selection().time_range().clone();
-    let ereports_dir = dir.join("ereports");
+    let ereports_dir = output.join("ereports");
     let mut status = SupportBundleEreportStatus::default();
     if let Err(err) = save_ereports(
         collection,
@@ -65,13 +64,13 @@ pub async fn collect(
 //
 // # Cancel safety
 //
-// Cancel-**unsafe**: writes to the filesystem via `tokio::fs`.
+// Cancel-**unsafe**: writes to the bundle.
 // DB queries are eagerly cancelled via `select!`.
 async fn save_ereports(
     collection: &BundleCollection,
     filters: EreportFilters,
     time_range: BundleTimeRange,
-    dir: Utf8PathBuf,
+    dir: BundleOutput,
     status: &mut SupportBundleEreportStatus,
 ) -> anyhow::Result<()> {
     let (log, opctx, datastore) =
@@ -81,7 +80,7 @@ async fn save_ereports(
     while let Some(p) = paginator.next() {
         let pagparams = p.current_pagparams();
         let ereports = tokio::select! {
-            _ = collection.cancelled() => return Ok(()),
+            _ = collection.stopped() => return Ok(()),
             result = datastore.ereport_fetch_matching(
                 &opctx, &filters, &time_range, &pagparams
             ) => {
@@ -125,7 +124,10 @@ async fn save_ereports(
     Ok(())
 }
 
-async fn write_ereport(ereport: Ereport, dir: &Utf8Path) -> anyhow::Result<()> {
+async fn write_ereport(
+    ereport: Ereport,
+    dir: &BundleOutput,
+) -> anyhow::Result<()> {
     // Here's where we construct the file path for each ereport JSON file,
     // given the top-level ereport directory path.  Each ereport is stored in a
     // subdirectory for the part and serial numbers of the system that produced
@@ -160,22 +162,20 @@ async fn write_ereport(ereport: Ereport, dir: &Utf8Path) -> anyhow::Result<()> {
         .unwrap_or("unknown_serial");
     let id = &ereport.id;
 
-    let dir = dir
-        .join(format!("{pn}-{sn}"))
+    let file_path = format!(
+        "{pn}-{sn}/{}/{}.json",
         // N.B. that we call `into_untyped_uuid()` here, as the `Display`
         // implementation for a typed UUID appends " (ereporter_restart)", which
         // we don't want.
-        .join(id.restart_id.into_untyped_uuid().to_string());
-    tokio::fs::create_dir_all(&dir)
-        .await
-        .with_context(|| format!("failed to create directory '{dir}'"))?;
-    let file_path = dir.join(format!("{}.json", id.ena));
+        id.restart_id.into_untyped_uuid(),
+        id.ena,
+    );
     let json = serde_json::to_vec(&ereport).with_context(|| {
         format!("failed to serialize ereport {pn}:{sn}/{id}")
     })?;
-    tokio::fs::write(&file_path, json)
+    dir.write(&file_path, json)
         .await
-        .with_context(|| format!("failed to write '{file_path}'"))
+        .with_context(|| format!("failed to write ereport '{file_path}'"))
 }
 
 fn is_fs_safe_single_path_component(s: &str) -> bool {

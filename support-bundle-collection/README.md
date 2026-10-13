@@ -24,6 +24,21 @@ called `all()`. Some of these steps may themselves spawn additional steps,
 such as `STEP_SPAWN_SLEDS`, which spawns a per-sled step to query the sled
 host OS itself.
 
+### Writing data, and the size limit
+
+Steps write their data through the `BundleOutput` they are given, rather than
+to the filesystem directly. Every byte written that way is charged against the
+bundle's size limit. Once a write would take the bundle past its limit, the
+write is refused with a `SizeLimitExceeded` error, and collection stops: steps
+in flight are stopped through the `BundleCollection::stop_token`, and steps not
+yet started never run. The bundle keeps whatever was written before then, and
+records what was left out in `meta/report.json` and `SIZE_LIMIT_EXCEEDED.txt`.
+
+Steps don't need to do anything special to support this, beyond what they do
+for cancellation: stop promptly once the stop token is cancelled. A step that
+gets `SizeLimitExceeded` can return it as an error; the framework reports the
+step as cut short by the size limit, rather than as failed.
+
 ### Tracing
 
 **Steps** are automatically instrumented, and their durations are emitted to an

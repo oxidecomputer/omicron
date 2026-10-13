@@ -3137,6 +3137,37 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
                         println!("{}", textwrap::indent(&pretty, "        "));
                     }
                 }
+                if let Some(exceeded) = &collection.size_limit_exceeded {
+                    println!(
+                        "      Bundle reached its size limit, and collection \
+                         stopped early:"
+                    );
+                    println!(
+                        "        limit:            {} bytes",
+                        exceeded.limit_bytes
+                    );
+                    println!(
+                        "        collected:        {} bytes",
+                        exceeded.used_bytes
+                    );
+                    println!(
+                        "        reached at:       {}",
+                        exceeded.exceeded_at
+                    );
+                    println!(
+                        "        left out:         {}",
+                        exceeded.exceeded_by_path
+                    );
+                    for (title, steps) in [
+                        ("incomplete steps", &exceeded.incomplete_steps),
+                        ("skipped steps", &exceeded.skipped_steps),
+                    ] {
+                        println!("        {title}: {}", steps.len());
+                        for step in steps {
+                            println!("          {step}");
+                        }
+                    }
+                }
                 println!(
                     "      Bundle was activated in the database: {activated_in_db_ok}"
                 );

@@ -35,6 +35,7 @@ use std::io::Write;
 use std::sync::Arc;
 use support_bundle_collection::BundleCollection;
 use support_bundle_collection::BundleInfo;
+use support_bundle_collection::SIZE_LIMIT_EXCEEDED_FILE;
 use support_bundle_collection::zip::bundle_to_stream;
 use support_bundle_collection::zip::bundle_to_writer;
 
@@ -90,6 +91,11 @@ struct CollectArgs {
     /// that span this bound are included in full.
     #[clap(long, value_parser = humantime::parse_duration)]
     until: Option<std::time::Duration>,
+
+    /// Stop collecting once the bundle reaches this many bytes, keeping what
+    /// was collected up to that point. By default, bundles are unlimited.
+    #[clap(long)]
+    size_limit_bytes: Option<u64>,
 }
 
 impl CollectArgs {
@@ -191,14 +197,17 @@ impl CollectArgs {
             BundleDataSelection::DEFAULT_LOOKBACK,
         );
 
-        let collection = Arc::new(BundleCollection::new(
-            datastore,
-            resolver,
-            bundle_log,
-            opctx,
-            data_selection,
-            bundle,
-        ));
+        let collection = Arc::new(
+            BundleCollection::new(
+                datastore,
+                resolver,
+                bundle_log,
+                opctx,
+                data_selection,
+                bundle,
+            )
+            .with_size_limit(self.size_limit_bytes),
+        );
 
         // Wire Ctrl-C to cancel the in-flight collection.
         let cancel_handle = tokio::spawn({
@@ -256,6 +265,14 @@ impl CollectArgs {
                     .unwrap_or_else(|_| details.to_string());
                 eprintln!("{}", textwrap::indent(&pretty, "      "));
             }
+        }
+        if let Some(exceeded) = &report.size_limit_exceeded {
+            eprintln!(
+                "Bundle reached its size limit of {} bytes, so collection \
+                 stopped early. See {SIZE_LIMIT_EXCEEDED_FILE} in the bundle \
+                 for what was left out.",
+                exceeded.limit_bytes,
+            );
         }
         Ok(())
     }

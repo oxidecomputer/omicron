@@ -5,8 +5,9 @@
 //! Support bundle collection step execution framework
 
 use crate::collection::BundleCollection;
+use crate::output::BundleOutput;
+use crate::output::SizeLimitExceeded;
 
-use camino::Utf8Path;
 use chrono::DateTime;
 use chrono::Utc;
 use futures::future::BoxFuture;
@@ -21,14 +22,15 @@ use std::sync::Arc;
 //
 // - All steps have access to the "BundleCollection", which includes
 // tools for actually acquiring data.
-// - All steps have access to an output directory where they can store
-// serialized data to a file.
+// - All steps have access to the bundle's output directory, where they can
+// store serialized data to files. Everything written there is charged against
+// the bundle's size limit.
 // - Finally, all steps can emit a "CollectionStepOutput", which can either
 // update the collection report, or generate more steps.
 pub type CollectionStepFn = Box<
     dyn for<'b> FnOnce(
             &'b Arc<BundleCollection>,
-            &'b Utf8Path,
+            &'b BundleOutput,
         )
             -> BoxFuture<'b, anyhow::Result<CollectionStepOutput>>
         + Send,
@@ -47,26 +49,43 @@ impl CollectionStep {
     pub async fn run(
         self,
         collection: &Arc<BundleCollection>,
-        output: &Utf8Path,
+        output: &BundleOutput,
         log: &slog::Logger,
     ) -> CompletedCollectionStep {
         let start = Utc::now();
 
-        let output = (self.step_fn)(collection, output)
-            .await
-            .inspect_err(|err| {
+        let output = match (self.step_fn)(collection, output).await {
+            Ok(output) => output,
+            // Running out of space is not a failure of the step: the
+            // scheduler reports it, for every step it cut short.
+            Err(err) if err.downcast_ref::<SizeLimitExceeded>().is_some() => {
+                CollectionStepOutput::None
+            }
+            Err(err) => {
                 warn!(
                     log,
                     "Step failed";
                     "step" => &self.name,
                     InlineErrorChain::new(err.as_ref()),
                 );
-            })
-            .unwrap_or_else(|err| CollectionStepOutput::Failed(err));
+                CollectionStepOutput::Failed(err)
+            }
+        };
 
         let end = Utc::now();
 
-        CompletedCollectionStep { name: self.name, start, end, output }
+        // A step still running once the size limit was exceeded may have been
+        // stopped before collecting everything it would have otherwise.
+        let stopped_by_size_limit = collection.size_budget().is_exceeded()
+            && !matches!(output, CollectionStepOutput::Skipped);
+
+        CompletedCollectionStep {
+            name: self.name,
+            start,
+            end,
+            output,
+            stopped_by_size_limit,
+        }
     }
 }
 
@@ -75,17 +94,26 @@ pub struct CompletedCollectionStep {
     pub start: DateTime<Utc>,
     pub end: DateTime<Utc>,
     pub output: CollectionStepOutput,
+    pub stopped_by_size_limit: bool,
 }
 
 impl CompletedCollectionStep {
     // Updates the collection report based on the output of a collection step,
     // and possibly extends the set of all steps to be executed.
+    //
+    // If the step was stopped by the bundle's size limit, its name is added to
+    // `incomplete_steps`.
     pub fn process(
         self,
         report: &mut SupportBundleCollectionReport,
         steps: &mut Vec<CollectionStep>,
+        incomplete_steps: &mut Vec<String>,
     ) {
         use SupportBundleCollectionStepStatus as Status;
+
+        if self.stopped_by_size_limit {
+            incomplete_steps.push(self.name.clone());
+        }
 
         let mut details = None;
         let status = match self.output {

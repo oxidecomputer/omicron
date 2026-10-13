@@ -620,6 +620,26 @@ pub struct SupportBundleCollectorConfig {
     /// Default: Off
     #[serde(default)]
     pub disable: bool,
+
+    /// The size, in bytes, at which collection of a support bundle stops.
+    ///
+    /// A bundle that reaches this size keeps what was collected up to that
+    /// point, along with a record of what was left out.
+    ///
+    /// Default: [`SupportBundleCollectorConfig::DEFAULT_SIZE_LIMIT_BYTES`]
+    #[serde(
+        default = "SupportBundleCollectorConfig::default_size_limit_bytes"
+    )]
+    pub size_limit_bytes: u64,
+}
+
+impl SupportBundleCollectorConfig {
+    /// The default size limit for support bundles: 16 GiB.
+    pub const DEFAULT_SIZE_LIMIT_BYTES: u64 = 16 << 30;
+
+    fn default_size_limit_bytes() -> u64 {
+        Self::DEFAULT_SIZE_LIMIT_BYTES
+    }
 }
 
 #[serde_as]
@@ -1570,6 +1590,8 @@ mod test {
                             SupportBundleCollectorConfig {
                                 period_secs: Duration::from_secs(30),
                                 disable: false,
+                                size_limit_bytes:
+                                    SupportBundleCollectorConfig::DEFAULT_SIZE_LIMIT_BYTES,
                             },
                         physical_disk_adoption: PhysicalDiskAdoptionConfig {
                             period_secs: Duration::from_secs(30),

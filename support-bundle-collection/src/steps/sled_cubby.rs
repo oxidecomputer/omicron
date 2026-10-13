@@ -6,11 +6,11 @@
 
 use crate::cache::Cache;
 use crate::collection::BundleCollection;
+use crate::output::BundleOutput;
 use crate::step::CollectionStepOutput;
 
 use anyhow::Context;
 use anyhow::bail;
-use camino::Utf8Path;
 use gateway_client::Client as MgsClient;
 use gateway_types::component::SpIdentifier;
 use gateway_types::component::SpType;
@@ -26,7 +26,7 @@ use uuid::Uuid;
 pub async fn collect(
     collection: &BundleCollection,
     cache: &Cache,
-    dir: &Utf8Path,
+    output: &BundleOutput,
 ) -> anyhow::Result<CollectionStepOutput> {
     let log = collection.log();
 
@@ -35,7 +35,7 @@ pub async fn collect(
     }
 
     let (mgs_client_option, nexus_sleds) = tokio::select! {
-        _ = collection.cancelled() => return Ok(CollectionStepOutput::None),
+        _ = collection.stopped() => return Ok(CollectionStepOutput::None),
         result = async {
             let mgs = cache.get_or_initialize_mgs_client(&collection).await;
             let sleds = cache.get_or_initialize_all_sleds(&collection).await;
@@ -48,7 +48,7 @@ pub async fn collect(
         bail!("Could not initialize MGS client");
     };
 
-    write_sled_cubby_info(collection, log, mgs_client, nexus_sleds, dir)
+    write_sled_cubby_info(collection, log, mgs_client, nexus_sleds, output)
         .await?;
 
     Ok(CollectionStepOutput::None)
@@ -58,14 +58,14 @@ pub async fn collect(
 //
 // # Cancel safety
 //
-// Cancel-**unsafe**: writes to the filesystem via `tokio::fs`.
+// Cancel-**unsafe**: writes to the bundle.
 // HTTP requests to MGS are eagerly cancelled via `select!`.
 async fn write_sled_cubby_info(
     collection: &BundleCollection,
     log: &Logger,
     mgs_client: &MgsClient,
     nexus_sleds: &[Sled],
-    dir: &Utf8Path,
+    output: &BundleOutput,
 ) -> anyhow::Result<()> {
     #[derive(Serialize)]
     struct SledInfo {
@@ -133,13 +133,13 @@ async fn write_sled_cubby_info(
         Ok::<_, anyhow::Error>(sled_info)
     };
     let sled_info = tokio::select! {
-        _ = collection.cancelled() => return Ok(()),
+        _ = collection.stopped() => return Ok(()),
         result = sled_info_collection => result?,
     };
 
     let json = serde_json::to_string_pretty(&sled_info)
         .context("failed to serialize sled info to JSON")?;
-    tokio::fs::write(dir.join("sled_info.json"), json).await?;
+    output.write("sled_info.json", json).await?;
 
     Ok(())
 }

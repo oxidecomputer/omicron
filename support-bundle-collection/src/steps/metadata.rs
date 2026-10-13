@@ -5,19 +5,15 @@
 //! Collects metadata about the bundle itself
 
 use crate::collection::BundleCollection;
+use crate::output::BundleOutput;
 use crate::step::CollectionStepOutput;
-use camino::Utf8Path;
 
 /// Writes the bundle ID to a file
 pub async fn collect_bundle_id(
     collection: &BundleCollection,
-    dir: &Utf8Path,
+    output: &BundleOutput,
 ) -> anyhow::Result<CollectionStepOutput> {
-    tokio::fs::write(
-        dir.join("bundle_id.txt"),
-        collection.bundle().id.to_string(),
-    )
-    .await?;
+    output.write("bundle_id.txt", collection.bundle().id.to_string()).await?;
 
     Ok(CollectionStepOutput::None)
 }
@@ -25,16 +21,14 @@ pub async fn collect_bundle_id(
 /// Writes the reason for creation to the meta directory
 pub async fn collect_reason_for_creation(
     collection: &BundleCollection,
-    dir: &Utf8Path,
+    output: &BundleOutput,
 ) -> anyhow::Result<CollectionStepOutput> {
-    let meta_dir = dir.join("meta");
-    tokio::fs::create_dir_all(&meta_dir).await?;
-
-    tokio::fs::write(
-        meta_dir.join("reason_for_creation.txt"),
-        &collection.bundle().reason_for_creation,
-    )
-    .await?;
+    output
+        .write(
+            "meta/reason_for_creation.txt",
+            &collection.bundle().reason_for_creation,
+        )
+        .await?;
 
     Ok(CollectionStepOutput::None)
 }
