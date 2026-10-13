@@ -1863,10 +1863,17 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
                         .unwrap_or_else(|| panic!("start_mgd() must be called for {slot:?} before starting a scrimlet sled"))
                         .address()
                         .into();
+                    let ddmd_addr: SocketAddr = builder
+                        .ddm
+                        .get(&slot)
+                        .unwrap_or_else(|| panic!("start_ddm() must be called for {slot:?} before starting a scrimlet sled"))
+                        .address()
+                        .into();
                     let mode = ScrimletReconcilersMode::Test {
                         mgs_addr,
                         dpd_addr,
                         mgd_addr,
+                        ddmd_addr,
                         bgp_socket_config: BgpSocketConfig::for_test(mgd_addr),
                     };
                     builder
@@ -1909,10 +1916,17 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
                             .unwrap_or_else(|| panic!("start_mgd() must be called for {slot:?} before starting a scrimlet sled"))
                             .address()
                             .into();
+                        let ddmd_addr: SocketAddr = builder
+                            .ddm
+                            .get(&slot)
+                            .unwrap_or_else(|| panic!("start_ddm() must be called for {slot:?} before starting a scrimlet sled"))
+                            .address()
+                            .into();
                         let mode = ScrimletReconcilersMode::Test {
                             mgs_addr,
                             dpd_addr,
                             mgd_addr,
+                            ddmd_addr,
                             bgp_socket_config: BgpSocketConfig::for_test(mgd_addr),
                         };
                         builder

@@ -1743,6 +1743,8 @@ table! {
         baseboard_revision -> Int8,
         hubris_archive_id -> Text,
         power_state -> crate::enums::HwPowerStateEnum,
+
+        rack_id -> Uuid,
     }
 }
 
@@ -1919,6 +1921,8 @@ table! {
 
         instance_manager_update_disposition -> Nullable<crate::enums::InvSledUpdateDispositionEnum>,
         instance_manager_num_registered_vmms -> Int8,
+
+        rack_id -> Uuid,
     }
 }
 
@@ -2777,6 +2781,7 @@ table! {
 
 allow_tables_to_appear_in_same_query!(instance, migration);
 allow_tables_to_appear_in_same_query!(migration, vmm);
+allow_tables_to_appear_in_same_query!(vmm, rendezvous_sled_bp_availability);
 joinable!(instance -> migration (migration_id));
 
 allow_tables_to_appear_in_same_query!(subnet_pool, subnet_pool_silo_link, silo);

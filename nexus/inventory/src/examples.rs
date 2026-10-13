@@ -30,6 +30,7 @@ use omicron_common::disk::DatasetName;
 use omicron_generation_kinds::{GenericGeneration, SledConfigGeneration};
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use sled_agent_resolvable_files_examples::BOOT_PATHS;
@@ -96,6 +97,15 @@ use strum::IntoEnumIterator;
 use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
+/// The rack ID used for example and test data.
+///
+/// This is also the rack ID used by the test database setup in
+/// `nexus-db-queries` and `nexus-test-utils`, so test inventory collections
+/// built from these examples will refer to the same rack as the rest of the
+/// test environment.
+pub const RACK_UUID: RackUuid =
+    RackUuid::from_u128(0xc19a698f_c6f9_4a17_ae30_20d711b8f7dc);
+
 /// Returns an example Collection used for testing
 ///
 /// This collection is intended to cover a variety of possible inventory data,
@@ -115,6 +125,7 @@ pub fn representative() -> Representative {
     let sled1_bb = builder
         .found_sp_state(
             "fake MGS 1",
+            RACK_UUID,
             SpType::Sled,
             3,
             SpState {
@@ -140,6 +151,7 @@ pub fn representative() -> Representative {
     let sled2_bb = builder
         .found_sp_state(
             "fake MGS 2",
+            RACK_UUID,
             SpType::Sled,
             4,
             SpState {
@@ -167,6 +179,7 @@ pub fn representative() -> Representative {
     let switch1_bb = builder
         .found_sp_state(
             "fake MGS 2",
+            RACK_UUID,
             SpType::Switch,
             0,
             SpState {
@@ -194,6 +207,7 @@ pub fn representative() -> Representative {
     let psc_bb = builder
         .found_sp_state(
             "fake MGS 1",
+            RACK_UUID,
             SpType::Power,
             1,
             SpState {
@@ -219,6 +233,7 @@ pub fn representative() -> Representative {
     let sled3_bb = builder
         .found_sp_state(
             "fake MGS 1",
+            RACK_UUID,
             SpType::Sled,
             5,
             SpState {

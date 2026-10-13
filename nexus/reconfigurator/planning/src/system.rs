@@ -1031,6 +1031,7 @@ impl SystemDescription {
                 builder
                     .found_sp_state(
                         "fake MGS 1",
+                        nexus_inventory::examples::RACK_UUID,
                         SpType::Sled,
                         *slot,
                         sp_state.clone(),

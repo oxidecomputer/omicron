@@ -74,6 +74,7 @@ use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::OmicronSledConfigKind;
 use omicron_uuid_kinds::OmicronSledConfigUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::RackKind;
 use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SvcEnabledNotOnlineKind;
@@ -670,6 +671,8 @@ pub struct InvServiceProcessor {
     pub baseboard_revision: BaseboardRevision,
     pub hubris_archive_id: String,
     pub power_state: HwPowerState,
+
+    pub rack_id: DbTypedUuid<RackKind>,
 }
 
 impl From<InvServiceProcessor> for nexus_types::inventory::ServiceProcessor {
@@ -682,6 +685,7 @@ impl From<InvServiceProcessor> for nexus_types::inventory::ServiceProcessor {
             baseboard_revision: **row.baseboard_revision,
             hubris_archive: row.hubris_archive_id,
             power_state: PowerState::from(row.power_state),
+            rack_id: row.rack_id.into(),
         }
     }
 }
@@ -954,6 +958,8 @@ pub struct InvSledAgent {
 
     instance_manager_update_disposition: Option<DbInvSledUpdateDisposition>,
     instance_manager_num_registered_vmms: SqlU32,
+
+    pub rack_id: DbTypedUuid<RackKind>,
 }
 
 /// Helper for breaking an [`InstanceManagerStatus`] up into its DB columns.
@@ -1386,6 +1392,7 @@ impl InvSledAgent {
         ledgered_sled_config: Option<OmicronSledConfigUuid>,
         reconciler_status: InvConfigReconcilerStatus,
         file_source_resolver: InvOmicronFileSourceResolver,
+        rack_id: DbTypedUuid<RackKind>,
     ) -> Result<InvSledAgent, anyhow::Error> {
         // It's irritating to have to check this case at runtime.  The challenge
         // is that if this sled agent does have a baseboard id, we don't know
@@ -1434,6 +1441,7 @@ impl InvSledAgent {
                 file_source_resolver,
                 instance_manager_update_disposition,
                 instance_manager_num_registered_vmms,
+                rack_id,
             })
         }
     }

@@ -686,8 +686,8 @@ macro_rules! impl_int_sample {
                     ensure_finite(value)?;
 
                     if self.n_samples == 0 {
-                        self.min = <$type>::max_value();
-                        self.max = <$type>::min_value();
+                        self.min = <$type>::MAX;
+                        self.max = <$type>::MIN;
                     }
 
                     // For squared mean (M2) calculation, before we update the

@@ -1,3 +1,4 @@
+    total racks:                  0
     total ereports received:      0
       new ereports ingested:      0
     total HTTP requests sent:     0

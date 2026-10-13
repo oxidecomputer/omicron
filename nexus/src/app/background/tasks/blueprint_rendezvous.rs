@@ -29,6 +29,7 @@ pub struct BlueprintRendezvous {
     datastore: Arc<DataStore>,
     rx_blueprint: watch::Receiver<Option<LoadedTargetBlueprint>>,
     rx_inventory: watch::Receiver<Option<Arc<Collection>>>,
+    tx: watch::Sender<usize>,
 }
 
 impl BlueprintRendezvous {
@@ -37,7 +38,12 @@ impl BlueprintRendezvous {
         rx_blueprint: watch::Receiver<Option<LoadedTargetBlueprint>>,
         rx_inventory: watch::Receiver<Option<Arc<Collection>>>,
     ) -> Self {
-        Self { datastore, rx_blueprint, rx_inventory }
+        let (tx, _rx) = watch::channel(0);
+        Self { datastore, rx_blueprint, rx_inventory, tx }
+    }
+
+    pub fn watcher(&self) -> watch::Receiver<usize> {
+        self.tx.subscribe()
     }
 
     /// Implementation for `BackgroundTask::activate` for `BlueprintRendezvous`,
@@ -132,6 +138,9 @@ impl BlueprintRendezvous {
                 }
             }
         };
+
+        // Trigger anything waiting on this task to run.
+        self.tx.send_modify(|count| *count = *count + 1);
 
         json!(BlueprintRendezvousStatus {
             blueprint_id: blueprint.id,
