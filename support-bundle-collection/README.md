@@ -32,7 +32,8 @@ bundle's size limit. Once a write would take the bundle past its limit, the
 write is refused with a `SizeLimitExceeded` error, and collection stops: steps
 in flight are stopped through the `BundleCollection::stop_token`, and steps not
 yet started never run. The bundle keeps whatever was written before then, and
-records what was left out in `meta/report.json` and `SIZE_LIMIT_EXCEEDED.txt`.
+records what was left out in `meta/report.json` and
+`meta/SIZE_LIMIT_EXCEEDED.txt`.
 
 Steps don't need to do anything special to support this, beyond what they do
 for cancellation: stop promptly once the stop token is cancelled. A step that

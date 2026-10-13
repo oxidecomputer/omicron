@@ -23,8 +23,8 @@
 //! - The bundle reaches its size limit (see
 //!   [`BundleCollection::with_size_limit`]). Collection stops, but the bundle
 //!   keeps whatever was collected before then, along with a record of what was
-//!   left out: in the collection report, and in a file at the root of the
-//!   bundle named [`SIZE_LIMIT_EXCEEDED_FILE`].
+//!   left out: in the collection report, and in the file
+//!   [`SIZE_LIMIT_EXCEEDED_FILE`].
 //!
 //! Either way, steps observe the same signal: the
 //! [`BundleCollection::stop_token`].
@@ -54,11 +54,11 @@ use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
-/// The name of the file, at the root of a bundle, which describes what was left
-/// out of a bundle that reached its size limit.
+/// The path of the file, relative to the root of a bundle, which describes what
+/// was left out of a bundle that reached its size limit.
 ///
 /// This file is only present in bundles that reached their limit.
-pub const SIZE_LIMIT_EXCEEDED_FILE: &str = "SIZE_LIMIT_EXCEEDED.txt";
+pub const SIZE_LIMIT_EXCEEDED_FILE: &str = "meta/SIZE_LIMIT_EXCEEDED.txt";
 
 /// Minimal bundle metadata needed by the mechanism layer.
 ///
@@ -376,6 +376,11 @@ impl BundleCollection {
         exceeded: &SupportBundleSizeLimitExceeded,
     ) -> anyhow::Result<()> {
         let path = output.path().join(SIZE_LIMIT_EXCEEDED_FILE);
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent).await.with_context(|| {
+                format!("failed to create directory {parent}")
+            })?;
+        }
         let mut contents = format!(
             "This support bundle is incomplete. Collection stopped when the \
              bundle reached\n\
