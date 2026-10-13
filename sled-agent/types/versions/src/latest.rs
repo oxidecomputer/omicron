@@ -146,7 +146,6 @@ pub mod inventory {
     pub use crate::v1::inventory::MupdateOverrideNonBootInventory;
     pub use crate::v1::inventory::NetworkInterfaceKind;
     pub use crate::v1::inventory::OmicronZoneDataset;
-    pub use crate::v1::inventory::OmicronZoneImageSource;
     pub use crate::v1::inventory::OrphanedDataset;
     pub use crate::v1::inventory::RemoveMupdateOverrideBootSuccessInventory;
     pub use crate::v1::inventory::RemoveMupdateOverrideInventory;
@@ -194,9 +193,7 @@ pub mod inventory {
     pub use crate::v51::inventory::ExternalDnsAddrs;
     pub use crate::v51::inventory::MAX_ZONE_EXTERNAL_IPS;
     pub use crate::v51::inventory::NexusExternalIps;
-    pub use crate::v51::inventory::OmicronZoneConfig;
     pub use crate::v51::inventory::OmicronZoneType;
-    pub use crate::v51::inventory::OmicronZonesConfig;
     pub use crate::v51::inventory::ZoneExternalAddrsError;
     pub use crate::v51::inventory::ZoneSnatConfig;
     pub use crate::v51::inventory::check_external_ip_count;
@@ -213,6 +210,9 @@ pub mod inventory {
     pub use crate::v55::inventory::Inventory;
     pub use crate::v55::inventory::OmicronSingleMeasurement;
     pub use crate::v55::inventory::OmicronSledConfig;
+    pub use crate::v55::inventory::OmicronZoneConfig;
+    pub use crate::v55::inventory::OmicronZoneImageSource;
+    pub use crate::v55::inventory::OmicronZonesConfig;
 
     pub use crate::impls::inventory::FmdHostCaseDisplay;
     pub use crate::impls::inventory::FmdInventoryDisplay;

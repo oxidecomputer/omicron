@@ -9,10 +9,15 @@ use std::time::Duration;
 
 use chrono::DateTime;
 use chrono::Utc;
+use daft::Diffable;
+use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
+use iddqd::id_upcast;
 use omicron_common::api::external::ByteCount;
 use omicron_common::snake_case_result;
 use omicron_common::snake_case_result::SnakeCaseResult;
+use omicron_common::zpool_name::ZpoolName;
+use omicron_generation_kinds::Generation;
 use omicron_generation_kinds::SledConfigGeneration;
 use omicron_ledger::Ledgerable;
 use omicron_uuid_kinds::DatasetUuid;
@@ -47,7 +52,7 @@ use crate::v40::inventory::FmdInventoryError;
 use crate::v46::inventory::SvcsEnabledNotOnlineResult;
 use crate::v49::inventory::OmicronSledUpdateDisposition;
 use crate::v51;
-use crate::v51::inventory::OmicronZoneConfig;
+use crate::v51::inventory::OmicronZoneType;
 use crate::v53;
 use crate::v53::inventory::InstanceManagerStatus;
 
@@ -150,7 +155,7 @@ impl From<OmicronSledConfig> for v51::inventory::OmicronSledConfig {
             generation: value.generation,
             disks: value.disks,
             datasets: value.datasets,
-            zones: value.zones,
+            zones: value.zones.into_iter().map(Into::into).collect(),
             remove_mupdate_override: value.remove_mupdate_override,
             host_phase_2: value.host_phase_2.into(),
             measurements: value
@@ -169,7 +174,7 @@ impl From<v51::inventory::OmicronSledConfig> for OmicronSledConfig {
             generation: value.generation,
             disks: value.disks,
             datasets: value.datasets,
-            zones: value.zones,
+            zones: value.zones.into_iter().map(Into::into).collect(),
             remove_mupdate_override: value.remove_mupdate_override,
             host_phase_2: value.host_phase_2.into(),
             measurements: value
@@ -178,6 +183,153 @@ impl From<v51::inventory::OmicronSledConfig> for OmicronSledConfig {
                 .map(Into::into)
                 .collect(),
             update_disposition: value.update_disposition,
+        }
+    }
+}
+
+/// Describes the set of Omicron-managed zones running on a sled
+#[derive(
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+)]
+pub struct OmicronZonesConfig {
+    /// generation number of this configuration
+    ///
+    /// This generation number is owned by the control plane (i.e., RSS or
+    /// Nexus, depending on whether RSS-to-Nexus handoff has happened).  It
+    /// should not be bumped within Sled Agent.
+    ///
+    /// Sled Agent rejects attempts to set the configuration to a generation
+    /// older than the one it's currently running.
+    pub generation: Generation,
+
+    /// list of running zones
+    pub zones: Vec<OmicronZoneConfig>,
+}
+
+impl From<v51::inventory::OmicronZonesConfig> for OmicronZonesConfig {
+    fn from(value: v51::inventory::OmicronZonesConfig) -> Self {
+        Self {
+            generation: value.generation,
+            zones: value.zones.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+/// Describes one Omicron-managed zone running on a sled
+#[derive(
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+)]
+pub struct OmicronZoneConfig {
+    pub id: OmicronZoneUuid,
+
+    /// The pool on which we'll place this zone's root filesystem.
+    ///
+    /// Note that the root filesystem is transient -- the sled agent is
+    /// permitted to destroy this dataset each time the zone is initialized.
+    pub filesystem_pool: Option<ZpoolName>,
+    pub zone_type: OmicronZoneType,
+    // Use `InstallDataset` if this field is not present in a deserialized
+    // blueprint or ledger.
+    #[serde(default = "OmicronZoneImageSource::deserialize_default")]
+    pub image_source: OmicronZoneImageSource,
+}
+
+impl IdOrdItem for OmicronZoneConfig {
+    type Key<'a> = OmicronZoneUuid;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.id
+    }
+
+    id_upcast!();
+}
+
+impl From<OmicronZoneConfig> for v51::inventory::OmicronZoneConfig {
+    fn from(value: OmicronZoneConfig) -> Self {
+        Self {
+            id: value.id,
+            filesystem_pool: value.filesystem_pool,
+            zone_type: value.zone_type,
+            image_source: value.image_source.into(),
+        }
+    }
+}
+
+impl From<v51::inventory::OmicronZoneConfig> for OmicronZoneConfig {
+    fn from(value: v51::inventory::OmicronZoneConfig) -> Self {
+        Self {
+            id: value.id,
+            filesystem_pool: value.filesystem_pool,
+            zone_type: value.zone_type,
+            image_source: value.image_source.into(),
+        }
+    }
+}
+
+/// Where Sled Agent should get the image for a zone.
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Diffable,
+)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum OmicronZoneImageSource {
+    /// This zone's image source is whatever happens to be on the sled's
+    /// "install" dataset.
+    ///
+    /// This is whatever was put in place at the factory or by the latest
+    /// MUPdate. The image used here can vary by sled and even over time (if the
+    /// sled gets MUPdated again).
+    ///
+    /// Historically, this was the only source for zone images. In an system
+    /// with automated control-plane-driven update we expect to only use this
+    /// variant in emergencies where the system had to be recovered via MUPdate.
+    InstallDataset,
+    /// This zone's image source is the artifact matching this hash from the TUF
+    /// artifact store (aka "TUF repo depot").
+    ///
+    /// This originates from TUF repos uploaded to Nexus which are then
+    /// replicated out to all sleds.
+    Artifact { hash: ArtifactHash },
+}
+
+impl OmicronZoneImageSource {
+    // See `OmicronZoneConfig`. This is a separate function instead of being
+    // `impl Default` because we don't want to accidentally use this default
+    // outside of `serde(default)`.
+    pub fn deserialize_default() -> Self {
+        OmicronZoneImageSource::InstallDataset
+    }
+}
+
+impl From<OmicronZoneImageSource> for v1::inventory::OmicronZoneImageSource {
+    fn from(value: OmicronZoneImageSource) -> Self {
+        match value {
+            OmicronZoneImageSource::InstallDataset => Self::InstallDataset,
+            OmicronZoneImageSource::Artifact { hash } => {
+                Self::Artifact { hash }
+            }
+        }
+    }
+}
+
+impl From<v1::inventory::OmicronZoneImageSource> for OmicronZoneImageSource {
+    fn from(value: v1::inventory::OmicronZoneImageSource) -> Self {
+        match value {
+            v1::inventory::OmicronZoneImageSource::InstallDataset => {
+                Self::InstallDataset
+            }
+            v1::inventory::OmicronZoneImageSource::Artifact { hash } => {
+                Self::Artifact { hash }
+            }
         }
     }
 }
