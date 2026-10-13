@@ -829,6 +829,7 @@ impl JsonSchema for Hostname {
 )]
 #[display(style = "kebab-case")]
 pub enum ResourceType {
+    ActiveProblem,
     AddressLot,
     AddressLotBlock,
     AffinityGroup,
