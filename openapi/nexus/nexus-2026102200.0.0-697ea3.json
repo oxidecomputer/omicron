@@ -15976,6 +15976,10 @@
         "description": "An Active Problem.\n\nActive Problems describe conditions detected by the fault management subsystem in which some aspect of the system's operation is degraded. This includes both ongoing problems and historical data describing resolved problems.\n\nThe `time_created` field records when the problem was detected, and the `time_modified` field records the time of its most recent revision.",
         "type": "object",
         "properties": {
+          "action_required": {
+            "description": "A description of any actions an operator should take in response to this Active Problem.\n\nThis may change as the problem progresses.",
+            "type": "string"
+          },
           "causes": {
             "description": "Other Active Problems which cause this problem.",
             "type": "array",
@@ -16039,6 +16043,7 @@
           }
         },
         "required": [
+          "action_required",
           "causes",
           "causing",
           "class",
