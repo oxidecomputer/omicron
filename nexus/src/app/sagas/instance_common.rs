@@ -4,6 +4,7 @@
 
 //! Common helper functions for instance-related sagas.
 
+use slog_error_chain::InlineErrorChain;
 use std::net::{IpAddr, Ipv6Addr};
 
 use super::NexusActionContext;
@@ -424,10 +425,11 @@ pub(super) async fn send_subnet_attachment_to_opte(
         .nexus()
         .sled_client(&sled_id)
         .await
-        .map_err(|_| {
-            saga_action_failed(Error::unavail(
-                "sled agent client went away mid-attach/detach",
-            ))
+        .map_err(|e| {
+            saga_action_failed(Error::unavail(&format!(
+                "failed to get sled agent client: {}",
+                InlineErrorChain::new(&e)
+            )))
         })?
         .vmm_post_attached_subnet(&propolis_id, &request)
         .await;
@@ -465,10 +467,11 @@ pub(super) async fn delete_subnet_attachment_from_opte(
         .nexus()
         .sled_client(&sled_id)
         .await
-        .map_err(|_| {
-            saga_action_failed(Error::unavail(
-                "sled agent client went away mid-attach/detach",
-            ))
+        .map_err(|e| {
+            saga_action_failed(Error::unavail(&format!(
+                "failed to get sled agent client: {}",
+                InlineErrorChain::new(&e)
+            )))
         })?
         .vmm_delete_attached_subnet(&propolis_id, &subnet.subnet.into())
         .await
@@ -611,10 +614,11 @@ pub(super) async fn instance_ip_add_opte(
         .nexus()
         .sled_client(&sled_id)
         .await
-        .map_err(|_| {
-            saga_action_failed(Error::unavail(
-                "sled agent client went away mid-attach/detach",
-            ))
+        .map_err(|e| {
+            saga_action_failed(Error::unavail(&format!(
+                "failed to get sled agent client: {}",
+                InlineErrorChain::new(&e)
+            )))
         })?
         .vmm_put_external_ip(&propolis_id, &sled_agent_body)
         .await
@@ -667,10 +671,11 @@ pub(super) async fn instance_ip_remove_opte(
         .nexus()
         .sled_client(&sled_id)
         .await
-        .map_err(|_| {
-            saga_action_failed(Error::unavail(
-                "sled agent client went away mid-attach/detach",
-            ))
+        .map_err(|e| {
+            saga_action_failed(Error::unavail(&format!(
+                "failed to get sled agent client: {}",
+                InlineErrorChain::new(&e)
+            )))
         })?
         .vmm_delete_external_ip(&propolis_id, &sled_agent_body)
         .await

@@ -54,6 +54,23 @@ pub(crate) async fn get_pantry_address(
 // something is wrong with DNS, we can't go back and choose another pantry
 // anyway, so we'll just keep retrying until DNS comes back. All that to say: a
 // failure to resolve DNS is treated as "the pantry is not gone".
+/// Builds a Crucible Pantry client, for use within an operation retried by
+/// `retry_operation_while_indefinitely`.
+///
+/// Failing to build the client is reported as a communication error, which
+/// the retry loop treats as transient: we retry rather than failing the saga
+/// action (or, in an undo action, leaving the saga stuck).
+pub(crate) fn pantry_client_for_retry(
+    endpoint: &str,
+) -> Result<
+    crucible_pantry_client::Client,
+    crucible_pantry_client::Error<CruciblePantryClientError>,
+> {
+    let http_client = internal_http_client()
+        .map_err(crucible_pantry_client::Error::CommunicationError)?;
+    Ok(crucible_pantry_client::Client::new_with_client(endpoint, http_client))
+}
+
 pub(crate) async fn is_pantry_gone(
     nexus: &Nexus,
     pantry_address: SocketAddrV6,
@@ -129,17 +146,14 @@ pub(crate) async fn call_pantry_attach_for_volume(
 
     info!(log, "sending attach request for {attach_id} to {pantry_address}");
 
-    let client = crucible_pantry_client::Client::new_with_client(
-        &endpoint,
-        internal_http_client(),
-    );
-
     let attach_request = crucible_pantry_client::types::AttachRequest {
         volume_construction_request,
     };
 
     let attach_operation = || async {
-        client.attach(&attach_id.to_string(), &attach_request).await
+        pantry_client_for_retry(&endpoint)?
+            .attach(&attach_id.to_string(), &attach_request)
+            .await
     };
 
     let gone_check = || async {
@@ -190,13 +204,9 @@ pub(crate) async fn call_pantry_detach(
 
     info!(log, "sending detach for {attach_id} to endpoint {endpoint}");
 
-    let client = crucible_pantry_client::Client::new_with_client(
-        &endpoint,
-        internal_http_client(),
-    );
-
-    let detach_operation =
-        || async { client.detach(&attach_id.to_string()).await };
+    let detach_operation = || async {
+        pantry_client_for_retry(&endpoint)?.detach(&attach_id.to_string()).await
+    };
 
     let gone_check = || async {
         let result = match is_pantry_gone(nexus, pantry_address, log).await {

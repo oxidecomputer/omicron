@@ -160,6 +160,7 @@ use propolis_client::types::ReplaceResult;
 use serde::Deserialize;
 use serde::Serialize;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::net::SocketAddrV6;
 use steno::ActionError;
 use steno::Node;
@@ -654,10 +655,14 @@ async fn check_from_previous_pantry_step(
     // requested activation in a background job. Is it finished?
 
     let endpoint = format!("http://{}", pantry_address);
-    let client = crucible_pantry_client::Client::new_with_client(
-        &endpoint,
-        internal_http_client(),
-    );
+    let http_client = internal_http_client().map_err(|e| {
+        saga_action_failed(Error::internal_error(&format!(
+            "failed to build pantry client: {}",
+            InlineErrorChain::new(&e)
+        )))
+    })?;
+    let client =
+        crucible_pantry_client::Client::new_with_client(&endpoint, http_client);
 
     match client.is_job_finished(&job_id.to_string()).await {
         Ok(status) => {
@@ -1328,10 +1333,14 @@ async fn execute_pantry_drive_action(
     // hang on the activation.
 
     let endpoint = format!("http://{}", pantry_address);
-    let client = crucible_pantry_client::Client::new_with_client(
-        &endpoint,
-        internal_http_client(),
-    );
+    let http_client = internal_http_client().map_err(|e| {
+        saga_action_failed(Error::internal_error(&format!(
+            "failed to build pantry client: {}",
+            InlineErrorChain::new(&e)
+        )))
+    })?;
+    let client =
+        crucible_pantry_client::Client::new_with_client(&endpoint, http_client);
 
     // Check pantry first, to see if this volume is attached already. This can
     // occur if:

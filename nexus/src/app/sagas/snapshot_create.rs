@@ -93,7 +93,7 @@ use super::{
     SagaInitError,
     common_storage::{
         call_pantry_attach_for_disk, call_pantry_detach, get_pantry_address,
-        is_pantry_gone,
+        is_pantry_gone, pantry_client_for_retry,
     },
 };
 use crate::app::sagas::declare_saga_actions;
@@ -106,7 +106,6 @@ use nexus_db_queries::db::identity::{Asset, Resource};
 use nexus_types::external_api::{disk, snapshot};
 use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::Error;
-use omicron_common::http_client::internal_http_client;
 use omicron_common::{
     api::external, backoff::backon_retry_policy_internal_service,
 };
@@ -1226,13 +1225,8 @@ async fn ssc_call_pantry_snapshot_for_disk(
         endpoint,
     );
 
-    let client = crucible_pantry_client::Client::new_with_client(
-        &endpoint,
-        internal_http_client(),
-    );
-
     let snapshot_operation = || async {
-        client
+        pantry_client_for_retry(&endpoint)?
             .snapshot(
                 &params.disk.id().to_string(),
                 &crucible_pantry_client::types::SnapshotRequest {
