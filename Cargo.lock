@@ -491,17 +491,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "atty"
-version = "0.2.14"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d9b39be18770d11421cdb1b9947a45dd3f37e93092cbf377614828a319d5fee8"
-dependencies = [
- "hermit-abi 0.1.19",
- "libc",
- "winapi",
-]
-
-[[package]]
 name = "authz-macros"
 version = "0.1.0"
 dependencies = [
@@ -666,7 +655,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=9da09f63ba10c232bd1e3dc2327195de3a081df1#9da09f63ba10c232bd1e3dc2327195de3a081df1"
+source = "git+https://github.com/oxidecomputer/propolis?rev=3b60af56ed99c4497f02ac9fe014c76adfcf978b#3b60af56ed99c4497f02ac9fe014c76adfcf978b"
 dependencies = [
  "bhyve_api_sys",
  "libc",
@@ -676,7 +665,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=9da09f63ba10c232bd1e3dc2327195de3a081df1#9da09f63ba10c232bd1e3dc2327195de3a081df1"
+source = "git+https://github.com/oxidecomputer/propolis?rev=3b60af56ed99c4497f02ac9fe014c76adfcf978b#3b60af56ed99c4497f02ac9fe014c76adfcf978b"
 dependencies = [
  "libc",
  "strum 0.26.3",
@@ -927,7 +916,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
- "progenitor 0.15.1",
+ "progenitor",
  "progenitor-extras",
  "regress 0.10.5",
  "reqwest",
@@ -1487,7 +1476,7 @@ dependencies = [
  "clickhouse-admin-types",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "progenitor 0.15.1",
+ "progenitor",
  "progenitor-extras",
  "reqwest",
  "schemars 0.8.22",
@@ -1503,7 +1492,7 @@ dependencies = [
  "clickhouse-admin-types",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "progenitor 0.15.1",
+ "progenitor",
  "progenitor-extras",
  "reqwest",
  "schemars 0.8.22",
@@ -1519,7 +1508,7 @@ dependencies = [
  "clickhouse-admin-types",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "progenitor 0.15.1",
+ "progenitor",
  "progenitor-extras",
  "reqwest",
  "schemars 0.8.22",
@@ -1606,7 +1595,7 @@ dependencies = [
 [[package]]
 name = "client-common"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=389016069197dc8ca611f4b1dc63dfafbe634b7c#389016069197dc8ca611f4b1dc63dfafbe634b7c"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=dd5689bc7092fdc63cc762d4862d05e0005953c5#dd5689bc7092fdc63cc762d4862d05e0005953c5"
 
 [[package]]
 name = "clipboard-win"
@@ -1660,7 +1649,7 @@ dependencies = [
  "chrono",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "progenitor 0.15.1",
+ "progenitor",
  "progenitor-extras",
  "reqwest",
  "schemars 0.8.22",
@@ -1715,7 +1704,7 @@ version = "3.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "faf9468729b8cbcea668e36183cb69d317348c2e08e994829fb56ebfdfbaac34"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -1731,10 +1720,11 @@ dependencies = [
 [[package]]
 name = "common"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dendrite?branch=main#cc0c307c617f2988aafdca4e3bd35ea178b64801"
+source = "git+https://github.com/oxidecomputer/dendrite?branch=main#4448f2eaa804b65b6c2dfadc4f761a89bb6b2a36"
 dependencies = [
  "anyhow",
  "chrono",
+ "dpd-types 0.1.0 (git+https://github.com/oxidecomputer/dendrite?branch=main)",
  "oxnet",
  "rand 0.9.2",
  "schemars 0.8.22",
@@ -1745,18 +1735,18 @@ dependencies = [
  "slog-bunyan",
  "slog-term",
  "smf 0.10.0",
- "thiserror 1.0.69",
+ "thiserror 2.0.18",
  "tokio",
 ]
 
 [[package]]
 name = "common"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dendrite?rev=e577a94678bf0a8d64d719acd3e19edd965f66a3#e577a94678bf0a8d64d719acd3e19edd965f66a3"
+source = "git+https://github.com/oxidecomputer/dendrite?rev=4448f2eaa804b65b6c2dfadc4f761a89bb6b2a36#4448f2eaa804b65b6c2dfadc4f761a89bb6b2a36"
 dependencies = [
  "anyhow",
  "chrono",
- "dpd-types",
+ "dpd-types 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=4448f2eaa804b65b6c2dfadc4f761a89bb6b2a36)",
  "oxnet",
  "rand 0.9.2",
  "schemars 0.8.22",
@@ -2168,17 +2158,30 @@ dependencies = [
 [[package]]
 name = "crucible-agent-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=f85cf0dc3631e2f0c13384787efb0efc1b642162#f85cf0dc3631e2f0c13384787efb0efc1b642162"
+source = "git+https://github.com/oxidecomputer/crucible?rev=9fd704598504acb5fe03091a6ea44c53205158c6#9fd704598504acb5fe03091a6ea44c53205158c6"
 dependencies = [
  "anyhow",
  "chrono",
  "crucible-workspace-hack",
  "percent-encoding",
- "progenitor 0.15.1",
+ "progenitor",
  "reqwest",
  "schemars 0.8.22",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "crucible-client-types"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/crucible?rev=9fd704598504acb5fe03091a6ea44c53205158c6#9fd704598504acb5fe03091a6ea44c53205158c6"
+dependencies = [
+ "base64 0.23.1",
+ "crucible-workspace-hack",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "uuid",
 ]
 
 [[package]]
@@ -2195,25 +2198,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "crucible-client-types"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=f85cf0dc3631e2f0c13384787efb0efc1b642162#f85cf0dc3631e2f0c13384787efb0efc1b642162"
-dependencies = [
- "base64 0.23.1",
- "crucible-workspace-hack",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "uuid",
-]
-
-[[package]]
 name = "crucible-common"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=f85cf0dc3631e2f0c13384787efb0efc1b642162#f85cf0dc3631e2f0c13384787efb0efc1b642162"
+source = "git+https://github.com/oxidecomputer/crucible?rev=9fd704598504acb5fe03091a6ea44c53205158c6#9fd704598504acb5fe03091a6ea44c53205158c6"
 dependencies = [
  "anyhow",
- "atty",
  "crucible-workspace-hack",
  "dropshot",
  "nix 0.31.2",
@@ -2240,13 +2229,13 @@ dependencies = [
 [[package]]
 name = "crucible-pantry-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=f85cf0dc3631e2f0c13384787efb0efc1b642162#f85cf0dc3631e2f0c13384787efb0efc1b642162"
+source = "git+https://github.com/oxidecomputer/crucible?rev=9fd704598504acb5fe03091a6ea44c53205158c6#9fd704598504acb5fe03091a6ea44c53205158c6"
 dependencies = [
  "anyhow",
  "chrono",
  "crucible-workspace-hack",
  "percent-encoding",
- "progenitor 0.15.1",
+ "progenitor",
  "reqwest",
  "schemars 0.8.22",
  "serde",
@@ -2257,11 +2246,11 @@ dependencies = [
 [[package]]
 name = "crucible-smf"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=f85cf0dc3631e2f0c13384787efb0efc1b642162#f85cf0dc3631e2f0c13384787efb0efc1b642162"
+source = "git+https://github.com/oxidecomputer/crucible?rev=9fd704598504acb5fe03091a6ea44c53205158c6#9fd704598504acb5fe03091a6ea44c53205158c6"
 dependencies = [
  "crucible-workspace-hack",
  "libc",
- "num-derive",
+ "num-derive 0.5.1",
  "num-traits",
  "thiserror 2.0.18",
 ]
@@ -2656,11 +2645,11 @@ dependencies = [
 [[package]]
 name = "ddm-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=389016069197dc8ca611f4b1dc63dfafbe634b7c#389016069197dc8ca611f4b1dc63dfafbe634b7c"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=dd5689bc7092fdc63cc762d4862d05e0005953c5#dd5689bc7092fdc63cc762d4862d05e0005953c5"
 dependencies = [
  "ddm-api-types-versions",
  "oxnet",
- "progenitor 0.14.0",
+ "progenitor",
  "reqwest",
  "serde",
  "slog",
@@ -2670,7 +2659,7 @@ dependencies = [
 [[package]]
 name = "ddm-api-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=389016069197dc8ca611f4b1dc63dfafbe634b7c#389016069197dc8ca611f4b1dc63dfafbe634b7c"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=dd5689bc7092fdc63cc762d4862d05e0005953c5#dd5689bc7092fdc63cc762d4862d05e0005953c5"
 dependencies = [
  "ddm-api-types-versions",
 ]
@@ -2678,7 +2667,7 @@ dependencies = [
 [[package]]
 name = "ddm-api-types-versions"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=389016069197dc8ca611f4b1dc63dfafbe634b7c#389016069197dc8ca611f4b1dc63dfafbe634b7c"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=dd5689bc7092fdc63cc762d4862d05e0005953c5#dd5689bc7092fdc63cc762d4862d05e0005953c5"
 dependencies = [
  "ddm-protocol",
  "oxnet",
@@ -2691,7 +2680,7 @@ dependencies = [
 [[package]]
 name = "ddm-protocol"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=389016069197dc8ca611f4b1dc63dfafbe634b7c#389016069197dc8ca611f4b1dc63dfafbe634b7c"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=dd5689bc7092fdc63cc762d4862d05e0005953c5#dd5689bc7092fdc63cc762d4862d05e0005953c5"
 dependencies = [
  "oxnet",
  "schemars 0.8.22",
@@ -3187,7 +3176,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oxide-tokio-rt",
  "pretty-hex",
- "progenitor 0.15.1",
+ "progenitor",
  "progenitor-extras",
  "reqwest",
  "schemars 0.8.22",
@@ -3225,7 +3214,7 @@ dependencies = [
  "http",
  "internal-dns-types-versions",
  "omicron-workspace-hack",
- "progenitor 0.15.1",
+ "progenitor",
  "progenitor-extras",
  "reqwest",
  "schemars 0.8.22",
@@ -3303,7 +3292,7 @@ checksum = "117240f60069e65410b3ae1bb213295bd828f707b5bec6596a1afc8793ce0cbc"
 [[package]]
 name = "dpd-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dendrite?branch=main#cc0c307c617f2988aafdca4e3bd35ea178b64801"
+source = "git+https://github.com/oxidecomputer/dendrite?branch=main#4448f2eaa804b65b6c2dfadc4f761a89bb6b2a36"
 dependencies = [
  "async-trait",
  "chrono",
@@ -3312,8 +3301,9 @@ dependencies = [
  "futures",
  "http",
  "oxnet",
- "progenitor 0.13.0",
- "regress 0.10.5",
+ "progenitor",
+ "progenitor-extras",
+ "regress 0.11.1",
  "reqwest",
  "schemars 0.8.22",
  "serde",
@@ -3327,16 +3317,17 @@ dependencies = [
 [[package]]
 name = "dpd-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dendrite?rev=e577a94678bf0a8d64d719acd3e19edd965f66a3#e577a94678bf0a8d64d719acd3e19edd965f66a3"
+source = "git+https://github.com/oxidecomputer/dendrite?rev=4448f2eaa804b65b6c2dfadc4f761a89bb6b2a36#4448f2eaa804b65b6c2dfadc4f761a89bb6b2a36"
 dependencies = [
  "async-trait",
  "chrono",
- "common 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=e577a94678bf0a8d64d719acd3e19edd965f66a3)",
+ "common 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=4448f2eaa804b65b6c2dfadc4f761a89bb6b2a36)",
  "crc8",
  "futures",
  "http",
  "oxnet",
- "progenitor 0.14.0",
+ "progenitor",
+ "progenitor-extras",
  "regress 0.11.1",
  "reqwest",
  "schemars 0.8.22",
@@ -3351,15 +3342,39 @@ dependencies = [
 [[package]]
 name = "dpd-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dendrite?rev=e577a94678bf0a8d64d719acd3e19edd965f66a3#e577a94678bf0a8d64d719acd3e19edd965f66a3"
+source = "git+https://github.com/oxidecomputer/dendrite?branch=main#4448f2eaa804b65b6c2dfadc4f761a89bb6b2a36"
 dependencies = [
- "dpd-types-versions",
+ "dpd-types-versions 0.1.0 (git+https://github.com/oxidecomputer/dendrite?branch=main)",
+]
+
+[[package]]
+name = "dpd-types"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/dendrite?rev=4448f2eaa804b65b6c2dfadc4f761a89bb6b2a36#4448f2eaa804b65b6c2dfadc4f761a89bb6b2a36"
+dependencies = [
+ "dpd-types-versions 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=4448f2eaa804b65b6c2dfadc4f761a89bb6b2a36)",
 ]
 
 [[package]]
 name = "dpd-types-versions"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dendrite?rev=e577a94678bf0a8d64d719acd3e19edd965f66a3#e577a94678bf0a8d64d719acd3e19edd965f66a3"
+source = "git+https://github.com/oxidecomputer/dendrite?branch=main#4448f2eaa804b65b6c2dfadc4f761a89bb6b2a36"
+dependencies = [
+ "chrono",
+ "dropshot",
+ "omicron-common",
+ "oxnet",
+ "rand 0.9.2",
+ "schemars 0.8.22",
+ "serde",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
+name = "dpd-types-versions"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/dendrite?rev=4448f2eaa804b65b6c2dfadc4f761a89bb6b2a36#4448f2eaa804b65b6c2dfadc4f761a89bb6b2a36"
 dependencies = [
  "chrono",
  "dropshot",
@@ -3857,7 +3872,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4341,7 +4356,7 @@ dependencies = [
  "gateway-types",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "progenitor 0.15.1",
+ "progenitor",
  "progenitor-extras",
  "rand 0.9.2",
  "reqwest",
@@ -4891,15 +4906,6 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
 name = "hermit-abi"
-version = "0.1.19"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62b467343b94ba476dcb2500d242dadbb39557df889310ac77c5d99100aaac33"
-dependencies = [
- "libc",
-]
-
-[[package]]
-name = "hermit-abi"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc0fef456e4baa96da950455cd02c081ca953b141298e41db3fc7e36b1da849c"
@@ -5419,7 +5425,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.3",
+ "socket2 0.5.10",
  "system-configuration",
  "tokio",
  "tower-layer",
@@ -5903,7 +5909,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxide-update-engine-types",
- "progenitor 0.15.1",
+ "progenitor",
  "progenitor-extras",
  "regress 0.10.5",
  "reqwest",
@@ -5992,7 +5998,7 @@ dependencies = [
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "progenitor 0.15.1",
+ "progenitor",
  "progenitor-extras",
  "qorb",
  "reqwest",
@@ -6104,9 +6110,9 @@ version = "0.4.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
- "hermit-abi 0.5.2",
+ "hermit-abi",
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6579,7 +6585,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0d7bd6cfd9b5d32738cebd83a1b68060d96b1ca10d88bf9a5cb10dfac0f1cdf"
 dependencies = [
  "libc",
- "num-derive",
+ "num-derive 0.4.2",
  "num-traits",
 ]
 
@@ -6705,13 +6711,14 @@ dependencies = [
 [[package]]
 name = "lldpd-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/lldp?rev=54b266174d4de9628bca9c97b0db176e16f12154#54b266174d4de9628bca9c97b0db176e16f12154"
+source = "git+https://github.com/oxidecomputer/lldp?rev=fa7363d0f3338f4fdc1642fd849f3aaac255f6af#fa7363d0f3338f4fdc1642fd849f3aaac255f6af"
 dependencies = [
  "chrono",
  "futures",
  "lldpd-common",
  "lldpd-types-versions",
- "progenitor 0.13.0",
+ "progenitor",
+ "progenitor-extras",
  "protocol",
  "reqwest",
  "schemars 0.8.22",
@@ -6724,7 +6731,7 @@ dependencies = [
 [[package]]
 name = "lldpd-common"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/lldp?rev=54b266174d4de9628bca9c97b0db176e16f12154#54b266174d4de9628bca9c97b0db176e16f12154"
+source = "git+https://github.com/oxidecomputer/lldp?rev=fa7363d0f3338f4fdc1642fd849f3aaac255f6af#fa7363d0f3338f4fdc1642fd849f3aaac255f6af"
 dependencies = [
  "anyhow",
  "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?branch=main)",
@@ -6741,7 +6748,7 @@ dependencies = [
 [[package]]
 name = "lldpd-types-versions"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/lldp?rev=54b266174d4de9628bca9c97b0db176e16f12154#54b266174d4de9628bca9c97b0db176e16f12154"
+source = "git+https://github.com/oxidecomputer/lldp?rev=fa7363d0f3338f4fdc1642fd849f3aaac255f6af#fa7363d0f3338f4fdc1642fd849f3aaac255f6af"
 dependencies = [
  "chrono",
  "protocol",
@@ -6956,14 +6963,14 @@ dependencies = [
 [[package]]
 name = "mg-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=389016069197dc8ca611f4b1dc63dfafbe634b7c#389016069197dc8ca611f4b1dc63dfafbe634b7c"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=dd5689bc7092fdc63cc762d4862d05e0005953c5#dd5689bc7092fdc63cc762d4862d05e0005953c5"
 dependencies = [
  "chrono",
  "client-common",
  "colored 3.1.1",
  "mg-api-types-versions",
  "oxnet",
- "progenitor 0.14.0",
+ "progenitor",
  "reqwest",
  "schemars 0.8.22",
  "serde",
@@ -6976,7 +6983,7 @@ dependencies = [
 [[package]]
 name = "mg-api-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=389016069197dc8ca611f4b1dc63dfafbe634b7c#389016069197dc8ca611f4b1dc63dfafbe634b7c"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=dd5689bc7092fdc63cc762d4862d05e0005953c5#dd5689bc7092fdc63cc762d4862d05e0005953c5"
 dependencies = [
  "mg-api-types-versions",
 ]
@@ -6984,7 +6991,7 @@ dependencies = [
 [[package]]
 name = "mg-api-types-versions"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=389016069197dc8ca611f4b1dc63dfafbe634b7c#389016069197dc8ca611f4b1dc63dfafbe634b7c"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=dd5689bc7092fdc63cc762d4862d05e0005953c5#dd5689bc7092fdc63cc762d4862d05e0005953c5"
 dependencies = [
  "chrono",
  "nom 8.0.0",
@@ -7317,7 +7324,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
- "progenitor 0.15.1",
+ "progenitor",
  "progenitor-extras",
  "regress 0.10.5",
  "reqwest",
@@ -7787,7 +7794,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
- "progenitor 0.15.1",
+ "progenitor",
  "progenitor-extras",
  "regress 0.10.5",
  "reqwest",
@@ -8269,7 +8276,7 @@ dependencies = [
  "chrono",
  "crucible-agent-client",
  "dns-service-client",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=e577a94678bf0a8d64d719acd3e19edd965f66a3)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=4448f2eaa804b65b6c2dfadc4f761a89bb6b2a36)",
  "dropshot",
  "fmd-adm-sys",
  "futures",
@@ -8556,7 +8563,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "omicron-workspace-hack",
- "progenitor 0.15.1",
+ "progenitor",
  "progenitor-extras",
  "reqwest",
  "schemars 0.8.22",
@@ -8587,7 +8594,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -8656,6 +8663,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "num-derive"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e4e98dc3b890f6c23a0f9d3d491a2823d0dea0fa656302a13dd225fa924112a8"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.3",
 ]
 
 [[package]]
@@ -8981,7 +8999,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oxnet",
  "parse-display",
- "progenitor-client 0.15.1",
+ "progenitor-client",
  "progenitor-extras",
  "proptest",
  "rand 0.9.2",
@@ -9013,7 +9031,7 @@ dependencies = [
  "omicron-common",
  "omicron-workspace-hack",
  "oxnet",
- "progenitor-client 0.15.1",
+ "progenitor-client",
  "reqwest",
  "serde",
  "sled-hardware-types",
@@ -9303,7 +9321,7 @@ dependencies = [
  "display-error-chain",
  "dns-server",
  "dns-service-client",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=e577a94678bf0a8d64d719acd3e19edd965f66a3)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=4448f2eaa804b65b6c2dfadc4f761a89bb6b2a36)",
  "dropshot",
  "ereport-types",
  "expectorate",
@@ -9404,7 +9422,7 @@ dependencies = [
  "petgraph 0.8.3",
  "pq-sys",
  "pretty_assertions",
- "progenitor-client 0.15.1",
+ "progenitor-client",
  "progenitor-extras",
  "propolis-client",
  "qorb",
@@ -9815,7 +9833,7 @@ dependencies = [
  "clap",
  "clickhouse-admin-types",
  "crucible-agent-client",
- "crucible-client-types 0.1.0 (git+https://github.com/oxidecomputer/crucible?rev=f85cf0dc3631e2f0c13384787efb0efc1b642162)",
+ "crucible-client-types 0.1.0 (git+https://github.com/oxidecomputer/crucible?rev=9fd704598504acb5fe03091a6ea44c53205158c6)",
  "derive_more 0.99.20",
  "dice-verifier 0.3.0-pre0 (git+https://github.com/oxidecomputer/dice-util?rev=ff9f27aa0d6ef6fb64c349890b6e3c242ea3d8fc)",
  "display-error-chain",
@@ -9865,7 +9883,7 @@ dependencies = [
  "oximeter-producer",
  "oxnet",
  "pretty_assertions",
- "progenitor 0.15.1",
+ "progenitor",
  "propolis-client",
  "propolis-mock-server",
  "propolis_api_types",
@@ -10071,7 +10089,6 @@ dependencies = [
  "ipnet",
  "ipnetwork",
  "itertools 0.13.0",
- "itertools 0.15.0",
  "jiff",
  "lalrpop-util",
  "lazy_static",
@@ -10400,8 +10417,8 @@ dependencies = [
  "hyper",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "progenitor 0.15.1",
- "progenitor-client 0.15.1",
+ "progenitor",
+ "progenitor-client",
  "rand 0.9.2",
  "regress 0.10.5",
  "reqwest",
@@ -10556,7 +10573,7 @@ dependencies = [
  "futures",
  "omicron-common",
  "omicron-workspace-hack",
- "progenitor 0.15.1",
+ "progenitor",
  "progenitor-extras",
  "reqwest",
  "serde",
@@ -11338,7 +11355,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9cd31dcfdbbd7431a807ef4df6edd6473228e94d5c805e8cf671227a21bad068"
 dependencies = [
  "anyhow",
- "itertools 0.15.0",
+ "itertools 0.12.1",
  "proc-macro2",
  "quote",
  "rand 0.8.6",
@@ -11594,7 +11611,7 @@ dependencies = [
  "anyhow",
  "convert_case 0.4.0",
  "libm",
- "num-derive",
+ "num-derive 0.4.2",
  "num-traits",
  "ron",
  "serde",
@@ -11937,65 +11954,13 @@ dependencies = [
 
 [[package]]
 name = "progenitor"
-version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d36315275b213c64c68dff684477ea7118a0f630832f737b550796a368f9962c"
-dependencies = [
- "progenitor-client 0.13.0",
- "progenitor-impl 0.13.0",
- "progenitor-macro 0.13.0",
-]
-
-[[package]]
-name = "progenitor"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d8ba1d77160e6d5c95bdf0792527f76bf528791093fa83015bc2908a0ba9d076"
-dependencies = [
- "progenitor-client 0.14.0",
- "progenitor-impl 0.14.0",
- "progenitor-macro 0.14.0",
-]
-
-[[package]]
-name = "progenitor"
 version = "0.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "15bd395aa613c6491be9233fae4a870a35cd611655c0ef1cbaae7aa9e1c4c0e6"
 dependencies = [
- "progenitor-client 0.15.1",
- "progenitor-impl 0.15.1",
- "progenitor-macro 0.15.1",
-]
-
-[[package]]
-name = "progenitor-client"
-version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3999c302f5f2a42b7ca1cc39ad9e612c74cf2910ef6e58f869e45f3068b9659f"
-dependencies = [
- "bytes",
- "futures-core",
- "percent-encoding",
- "reqwest",
- "serde",
- "serde_json",
- "serde_urlencoded",
-]
-
-[[package]]
-name = "progenitor-client"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4e8a874cf25a33cac7a01b9c1de87bcfbc8aea93f3156d09dcc3bee516a78926"
-dependencies = [
- "bytes",
- "futures-core",
- "percent-encoding",
- "reqwest",
- "serde",
- "serde_json",
- "serde_urlencoded",
+ "progenitor-client",
+ "progenitor-impl",
+ "progenitor-macro",
 ]
 
 [[package]]
@@ -12021,54 +11986,10 @@ checksum = "2fea8ab690a2c33f34256e93127c01803c3db4bdd6533572b5d68b937b973068"
 dependencies = [
  "backon",
  "http",
- "progenitor-client 0.15.1",
+ "progenitor-client",
  "reqwest",
  "slog",
  "tokio",
-]
-
-[[package]]
-name = "progenitor-impl"
-version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "de362a0477182f45accdbad4d43cd89a95a1db0a518a7c1ddf3e525e6896f0f0"
-dependencies = [
- "heck 0.5.0",
- "http",
- "indexmap 2.14.0",
- "openapiv3",
- "proc-macro2",
- "quote",
- "regex",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "syn 2.0.117",
- "thiserror 2.0.18",
- "typify 0.6.2",
- "unicode-ident",
-]
-
-[[package]]
-name = "progenitor-impl"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f6e349eed84b9a1a6a5dbe478d335e3df73d32a93c5eefe571c9b8cb298aab5d"
-dependencies = [
- "heck 0.5.0",
- "http",
- "indexmap 2.14.0",
- "openapiv3",
- "proc-macro2",
- "quote",
- "regex",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "syn 2.0.117",
- "thiserror 2.0.18",
- "typify 0.6.2",
- "unicode-ident",
 ]
 
 [[package]]
@@ -12089,44 +12010,8 @@ dependencies = [
  "serde_json",
  "syn 3.0.3",
  "thiserror 2.0.18",
- "typify 0.8.0",
+ "typify",
  "unicode-ident",
-]
-
-[[package]]
-name = "progenitor-macro"
-version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c98aeaaab266bf848a602c78e039e7d62c80ba36303ae4092ec65f17e7fd0eaa"
-dependencies = [
- "openapiv3",
- "proc-macro2",
- "progenitor-impl 0.13.0",
- "quote",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "serde_tokenstream 0.2.3",
- "serde_yaml",
- "syn 2.0.117",
-]
-
-[[package]]
-name = "progenitor-macro"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "efa969a1349979c5f64347f204e794781a86d738206d75672e6c9493f5910002"
-dependencies = [
- "openapiv3",
- "proc-macro2",
- "progenitor-impl 0.14.0",
- "quote",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "serde_tokenstream 0.2.3",
- "serde_yaml",
- "syn 2.0.117",
 ]
 
 [[package]]
@@ -12137,7 +12022,7 @@ checksum = "dccde5096e96f6a57e16af4a4ac575755d5973f0c1bd4e6b7b86808932a33408"
 dependencies = [
  "openapiv3",
  "proc-macro2",
- "progenitor-impl 0.15.1",
+ "progenitor-impl",
  "quote",
  "schemars 0.8.22",
  "serde",
@@ -12150,7 +12035,7 @@ dependencies = [
 [[package]]
 name = "propolis-api-types-versions"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=9da09f63ba10c232bd1e3dc2327195de3a081df1#9da09f63ba10c232bd1e3dc2327195de3a081df1"
+source = "git+https://github.com/oxidecomputer/propolis?rev=3b60af56ed99c4497f02ac9fe014c76adfcf978b#3b60af56ed99c4497f02ac9fe014c76adfcf978b"
 dependencies = [
  "crucible-client-types 0.1.0 (git+https://github.com/oxidecomputer/crucible?rev=bd62980710dd3d6d3524aa7f6617127942b75002)",
  "propolis_types",
@@ -12163,14 +12048,14 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=9da09f63ba10c232bd1e3dc2327195de3a081df1#9da09f63ba10c232bd1e3dc2327195de3a081df1"
+source = "git+https://github.com/oxidecomputer/propolis?rev=3b60af56ed99c4497f02ac9fe014c76adfcf978b#3b60af56ed99c4497f02ac9fe014c76adfcf978b"
 dependencies = [
  "async-trait",
  "base64 0.21.7",
  "crucible-client-types 0.1.0 (git+https://github.com/oxidecomputer/crucible?rev=bd62980710dd3d6d3524aa7f6617127942b75002)",
  "futures",
- "progenitor 0.14.0",
- "progenitor-client 0.14.0",
+ "progenitor",
+ "progenitor-client",
  "propolis-api-types-versions",
  "rand 0.9.2",
  "reqwest",
@@ -12187,7 +12072,7 @@ dependencies = [
 [[package]]
 name = "propolis-mock-server"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=9da09f63ba10c232bd1e3dc2327195de3a081df1#9da09f63ba10c232bd1e3dc2327195de3a081df1"
+source = "git+https://github.com/oxidecomputer/propolis?rev=3b60af56ed99c4497f02ac9fe014c76adfcf978b#3b60af56ed99c4497f02ac9fe014c76adfcf978b"
 dependencies = [
  "anyhow",
  "base64 0.21.7",
@@ -12195,7 +12080,7 @@ dependencies = [
  "dropshot",
  "futures",
  "hyper",
- "progenitor 0.14.0",
+ "progenitor",
  "propolis-api-types-versions",
  "propolis_api_types",
  "propolis_types",
@@ -12219,7 +12104,7 @@ dependencies = [
 [[package]]
 name = "propolis_api_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=9da09f63ba10c232bd1e3dc2327195de3a081df1#9da09f63ba10c232bd1e3dc2327195de3a081df1"
+source = "git+https://github.com/oxidecomputer/propolis?rev=3b60af56ed99c4497f02ac9fe014c76adfcf978b#3b60af56ed99c4497f02ac9fe014c76adfcf978b"
 dependencies = [
  "crucible-client-types 0.1.0 (git+https://github.com/oxidecomputer/crucible?rev=bd62980710dd3d6d3524aa7f6617127942b75002)",
  "propolis-api-types-versions",
@@ -12228,7 +12113,7 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=9da09f63ba10c232bd1e3dc2327195de3a081df1#9da09f63ba10c232bd1e3dc2327195de3a081df1"
+source = "git+https://github.com/oxidecomputer/propolis?rev=3b60af56ed99c4497f02ac9fe014c76adfcf978b#3b60af56ed99c4497f02ac9fe014c76adfcf978b"
 dependencies = [
  "schemars 0.8.22",
  "serde",
@@ -12256,7 +12141,7 @@ dependencies = [
 [[package]]
 name = "protocol"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/lldp?rev=54b266174d4de9628bca9c97b0db176e16f12154#54b266174d4de9628bca9c97b0db176e16f12154"
+source = "git+https://github.com/oxidecomputer/lldp?rev=fa7363d0f3338f4fdc1642fd849f3aaac255f6af#fa7363d0f3338f4fdc1642fd849f3aaac255f6af"
 dependencies = [
  "anyhow",
  "schemars 0.8.22",
@@ -12340,7 +12225,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.6.3",
+ "socket2 0.5.10",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -12379,9 +12264,9 @@ dependencies = [
  "cfg_aliases 0.2.1",
  "libc",
  "once_cell",
- "socket2 0.6.3",
+ "socket2 0.5.10",
  "tracing",
- "windows-sys 0.60.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -12946,7 +12831,7 @@ name = "repo-depot-client"
 version = "0.1.0"
 dependencies = [
  "omicron-workspace-hack",
- "progenitor 0.15.1",
+ "progenitor",
  "progenitor-extras",
  "reqwest",
  "schemars 0.8.22",
@@ -13304,7 +13189,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -13371,7 +13256,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -14364,7 +14249,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
- "progenitor 0.15.1",
+ "progenitor",
  "progenitor-extras",
  "propolis-client",
  "regress 0.10.5",
@@ -14634,7 +14519,7 @@ dependencies = [
  "daft",
  "ddm-admin-client",
  "ddm-api-types",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=e577a94678bf0a8d64d719acd3e19edd965f66a3)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=4448f2eaa804b65b6c2dfadc4f761a89bb6b2a36)",
  "dropshot",
  "either",
  "futures",
@@ -15096,7 +14981,7 @@ version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c1c97747dbf44bb1ca44a561ece23508e99cb592e862f22222dcf42f51d1e451"
 dependencies = [
- "heck 0.5.0",
+ "heck 0.4.1",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -15732,6 +15617,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tabled"
+version = "0.22.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2d2596a104db1900b943f97d793a6c99addca918c4525c999f751a0f17d472eb"
+dependencies = [
+ "papergrid 0.18.0",
+ "testing_table",
+]
+
+[[package]]
 name = "tabled_derive"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -15815,7 +15710,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -15835,7 +15730,7 @@ version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d8c27177b12a6399ffc08b98f76f7c9a1f4fe9fc967c784c5a071fa8d93cf7e1"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -16627,7 +16522,7 @@ dependencies = [
 [[package]]
 name = "transceiver-controller"
 version = "0.1.1"
-source = "git+https://github.com/oxidecomputer/transceiver-control?branch=main#03a79a895871f9eca5400fac1556ed8526e031b7"
+source = "git+https://github.com/oxidecomputer/transceiver-control?branch=main#8d47e5bec3a2c1158d5751fb85c749e0b0d2d3e6"
 dependencies = [
  "anyhow",
  "clap",
@@ -16639,7 +16534,7 @@ dependencies = [
  "slog",
  "slog-async",
  "slog-term",
- "tabled 0.21.0",
+ "tabled 0.22.0",
  "thiserror 2.0.18",
  "tokio",
  "transceiver-decode 0.1.0 (git+https://github.com/oxidecomputer/transceiver-control?branch=main)",
@@ -16675,7 +16570,7 @@ dependencies = [
 [[package]]
 name = "transceiver-decode"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/transceiver-control?branch=main#03a79a895871f9eca5400fac1556ed8526e031b7"
+source = "git+https://github.com/oxidecomputer/transceiver-control?branch=main#8d47e5bec3a2c1158d5751fb85c749e0b0d2d3e6"
 dependencies = [
  "schemars 0.8.22",
  "serde",
@@ -16699,7 +16594,7 @@ dependencies = [
 [[package]]
 name = "transceiver-messages"
 version = "0.1.1"
-source = "git+https://github.com/oxidecomputer/transceiver-control?branch=main#03a79a895871f9eca5400fac1556ed8526e031b7"
+source = "git+https://github.com/oxidecomputer/transceiver-control?branch=main#8d47e5bec3a2c1158d5751fb85c749e0b0d2d3e6"
 dependencies = [
  "bitflags 2.11.0",
  "clap",
@@ -17085,11 +16980,11 @@ dependencies = [
 
 [[package]]
 name = "twox-hash"
-version = "2.1.2"
+version = "2.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9ea3136b675547379c4bd395ca6b938e5ad3c3d20fad76e7fe85f9e0d011419c"
+checksum = "86a801b3cea342a06d468c8710662aa29e5e05e4f5c0d62f00bbb7f2ad7941c2"
 dependencies = [
- "rand 0.9.2",
+ "rand 0.10.1",
 ]
 
 [[package]]
@@ -17124,42 +17019,12 @@ checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
 
 [[package]]
 name = "typify"
-version = "0.6.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc0b89f47309feaeb23c4509c15c9a04234f7deccef6f96c3bfe95319819a304"
-dependencies = [
- "typify-impl 0.6.2",
- "typify-macro 0.6.2",
-]
-
-[[package]]
-name = "typify"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "71187d2e983363e9a6ca884f7b061620bc6da4316902058e74bbc9d61c347696"
 dependencies = [
- "typify-impl 0.8.0",
- "typify-macro 0.8.0",
-]
-
-[[package]]
-name = "typify-impl"
-version = "0.6.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa7b026f540b148b81043c720889dbb942b08659aa8a43f624ac4f04dbfc1861"
-dependencies = [
- "heck 0.5.0",
- "log",
- "proc-macro2",
- "quote",
- "regress 0.11.1",
- "schemars 0.8.22",
- "semver 1.0.28",
- "serde",
- "serde_json",
- "syn 2.0.117",
- "thiserror 2.0.18",
- "unicode-ident",
+ "typify-impl",
+ "typify-macro",
 ]
 
 [[package]]
@@ -17184,23 +17049,6 @@ dependencies = [
 
 [[package]]
 name = "typify-macro"
-version = "0.6.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "39ed96c57f06ae0839416b986921a98f18b220da63bbb243a8570a00c8492183"
-dependencies = [
- "proc-macro2",
- "quote",
- "schemars 0.8.22",
- "semver 1.0.28",
- "serde",
- "serde_json",
- "serde_tokenstream 0.2.3",
- "syn 2.0.117",
- "typify-impl 0.6.2",
-]
-
-[[package]]
-name = "typify-macro"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b3a7f8d08ec85254fb8b383a6c66fe43b81f7f6b288fa71eb365f0867fc8f3a6"
@@ -17213,7 +17061,7 @@ dependencies = [
  "serde_json",
  "serde_tokenstream 0.3.0",
  "syn 3.0.3",
- "typify-impl 0.8.0",
+ "typify-impl",
 ]
 
 [[package]]
@@ -17906,7 +17754,7 @@ name = "wicket-common"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=e577a94678bf0a8d64d719acd3e19edd965f66a3)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=4448f2eaa804b65b6c2dfadc4f761a89bb6b2a36)",
  "dropshot",
  "gateway-client",
  "gateway-types",
@@ -17974,7 +17822,7 @@ dependencies = [
  "clap",
  "debug-ignore",
  "display-error-chain",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=e577a94678bf0a8d64d719acd3e19edd965f66a3)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=4448f2eaa804b65b6c2dfadc4f761a89bb6b2a36)",
  "dropshot",
  "either",
  "expectorate",
@@ -18086,7 +17934,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxide-update-engine-types",
- "progenitor 0.15.1",
+ "progenitor",
  "progenitor-extras",
  "regress 0.10.5",
  "reqwest",
@@ -18124,7 +17972,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
- "progenitor 0.15.1",
+ "progenitor",
  "progenitor-extras",
  "regress 0.10.5",
  "reqwest",
@@ -18196,7 +18044,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
