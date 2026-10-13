@@ -82,10 +82,10 @@ use omicron_common::api::external::Disk;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InstanceNetworkInterface;
 use omicron_common::api::external::InternalContext;
-use omicron_common::api::external::LookupType;
+
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::Probe;
-use omicron_common::api::external::ResourceType;
+
 use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::ServiceIcmpConfig;
@@ -8961,14 +8961,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let nexus = &apictx.context.nexus;
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
-            let active_problem::ActiveProblemSelector { problem_id } =
-                path_params.into_inner();
-            let not_found = LookupType::by_id(problem_id)
-                .into_not_found(ResourceType::ActiveProblem);
-            Err(nexus
-                .unimplemented_todo(&opctx, Unimpl::ProtectedLookup(not_found))
-                .await
-                .into())
+            let selector = path_params.into_inner();
+            let problem_lookup =
+                nexus.active_problem_lookup(&opctx, selector)?;
+            let problem =
+                nexus.active_problem_view(&opctx, &problem_lookup).await?;
+            Ok(HttpResponseOk(problem.into()))
         };
         apictx
             .context
