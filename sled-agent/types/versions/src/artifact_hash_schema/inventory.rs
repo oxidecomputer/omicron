@@ -38,8 +38,8 @@ use crate::v1::inventory::InventoryDisk;
 use crate::v1::inventory::OrphanedDataset;
 use crate::v1::inventory::RemoveMupdateOverrideInventory;
 use crate::v1::inventory::SledRole;
+use crate::v14;
 use crate::v14::inventory::OmicronFileSourceResolverInventory;
-use crate::v14::inventory::OmicronSingleMeasurement;
 use crate::v16::inventory::SingleMeasurementInventory;
 use crate::v24::inventory::InventoryZpool;
 use crate::v40::inventory::FmdInventory;
@@ -153,7 +153,11 @@ impl From<OmicronSledConfig> for v51::inventory::OmicronSledConfig {
             zones: value.zones,
             remove_mupdate_override: value.remove_mupdate_override,
             host_phase_2: value.host_phase_2.into(),
-            measurements: value.measurements,
+            measurements: value
+                .measurements
+                .into_iter()
+                .map(Into::into)
+                .collect(),
             update_disposition: value.update_disposition,
         }
     }
@@ -168,7 +172,11 @@ impl From<v51::inventory::OmicronSledConfig> for OmicronSledConfig {
             zones: value.zones,
             remove_mupdate_override: value.remove_mupdate_override,
             host_phase_2: value.host_phase_2.into(),
-            measurements: value.measurements,
+            measurements: value
+                .measurements
+                .into_iter()
+                .map(Into::into)
+                .collect(),
             update_disposition: value.update_disposition,
         }
     }
@@ -240,6 +248,50 @@ impl From<HostPhase2DesiredSlots> for v1::inventory::HostPhase2DesiredSlots {
 impl From<v1::inventory::HostPhase2DesiredSlots> for HostPhase2DesiredSlots {
     fn from(value: v1::inventory::HostPhase2DesiredSlots) -> Self {
         Self { slot_a: value.slot_a.into(), slot_b: value.slot_b.into() }
+    }
+}
+
+/// Represents a single measurement artfact from the TUF artifact
+/// store (aka "TUF repo depot"). The fully resolved measurement
+/// set is used with trust quorum.
+///
+/// Measurements may also come from outside the TUF repo depot
+/// via the install dataset from MUPdate but are not represented here
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+)]
+pub struct OmicronSingleMeasurement {
+    /// Measurements are the artifacts matching the hashes from the TUF
+    /// artifact store (aka "TUF repo depot")
+    ///
+    /// Measurements may also come from outside the TUF repo depot
+    /// via the install dataset from MUPdate but are not explicitly
+    /// tracked here
+    pub hash: ArtifactHash,
+}
+
+impl From<OmicronSingleMeasurement>
+    for v14::inventory::OmicronSingleMeasurement
+{
+    fn from(value: OmicronSingleMeasurement) -> Self {
+        Self { hash: value.hash }
+    }
+}
+
+impl From<v14::inventory::OmicronSingleMeasurement>
+    for OmicronSingleMeasurement
+{
+    fn from(value: v14::inventory::OmicronSingleMeasurement) -> Self {
+        Self { hash: value.hash }
     }
 }
 

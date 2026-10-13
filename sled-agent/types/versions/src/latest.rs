@@ -165,7 +165,6 @@ pub mod inventory {
     pub use crate::v12::inventory::HealthMonitorInventory;
 
     pub use crate::v14::inventory::OmicronFileSourceResolverInventory;
-    pub use crate::v14::inventory::OmicronSingleMeasurement;
     pub use crate::v14::inventory::ReconciledSingleMeasurement;
 
     pub use crate::v16::inventory::SingleMeasurementInventory;
@@ -212,6 +211,7 @@ pub mod inventory {
     pub use crate::v55::inventory::HostPhase2DesiredContents;
     pub use crate::v55::inventory::HostPhase2DesiredSlots;
     pub use crate::v55::inventory::Inventory;
+    pub use crate::v55::inventory::OmicronSingleMeasurement;
     pub use crate::v55::inventory::OmicronSledConfig;
 
     pub use crate::impls::inventory::FmdHostCaseDisplay;

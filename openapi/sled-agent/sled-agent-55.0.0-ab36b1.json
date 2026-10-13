@@ -7681,8 +7681,15 @@
         "properties": {
           "hash": {
             "description": "Measurements are the artifacts matching the hashes from the TUF artifact store (aka \"TUF repo depot\")\n\nMeasurements may also come from outside the TUF repo depot via the install dataset from MUPdate but are not explicitly tracked here",
+            "x-rust-type": {
+              "crate": "byte-wrapper",
+              "path": "byte_wrapper::HexArray::<32>",
+              "version": "0.1.0"
+            },
             "type": "string",
-            "format": "hex string (32 bytes)"
+            "pattern": "^[0-9a-fA-F]{64}$",
+            "minLength": 64,
+            "maxLength": 64
           }
         },
         "required": [
