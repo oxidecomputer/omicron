@@ -6,6 +6,7 @@
 
 use crate::ControlPlaneStarter;
 use crate::ControlPlaneTestContextSledAgent;
+use crate::RACK_UUID;
 use crate::starter::PopulateCrdb;
 use crate::starter::SledIndexAllocator;
 use crate::starter::setup_with_config_impl;
@@ -338,6 +339,7 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
             )),
             nexus_address,
             sled_id,
+            RACK_UUID,
             sled_index,
             sim_mode,
             cpu_family,

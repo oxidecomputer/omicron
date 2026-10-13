@@ -18,6 +18,7 @@ use omicron_sled_agent::sim::{
     Config, ConfigHardware, ConfigStorage, ConfigZpool, SimMode, ZpoolConfig,
     run_standalone_server,
 };
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use sled_agent_types::inventory::ZpoolHealth;
 use sled_hardware_types::{Baseboard, SledCpuFamily};
@@ -54,6 +55,18 @@ struct Args {
 
     #[clap(action)]
     nexus_lockstep_port: u16,
+
+    #[clap(
+        long = "rack-id",
+        name = "RACK_UUID",
+        default_value = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc",
+        action
+    )]
+    /// Rack ID that the simulated sled-agent acts as though it belongs to.
+    ///
+    /// The default matches a hardcoded value we use in a variety of existing
+    /// test cases.
+    rack_id: RackUuid,
 
     #[clap(long, name = "NEXUS_EXTERNAL_IP:PORT", action)]
     /// If specified, when the simulated sled agent initializes the rack, it
@@ -125,6 +138,7 @@ async fn do_run() -> Result<(), CmdError> {
         },
         ..Config::for_testing(
             args.uuid,
+            args.rack_id,
             args.sim_mode,
             Some(args.nexus_addr),
             ZpoolConfig::TenVirtualU2s,

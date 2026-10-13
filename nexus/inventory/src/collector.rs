@@ -793,6 +793,7 @@ async fn collect_one_dns_generation(
 mod test {
     use super::Collector;
     use crate::StaticSledAgentEnumerator;
+    use crate::examples::RACK_UUID;
     use gateway_messages::SpPort;
     use iddqd::IdOrdMap;
     use iddqd::id_ord_map;
@@ -802,6 +803,7 @@ mod test {
     use omicron_generation_kinds::SledConfigGeneration;
     use omicron_sled_agent::sim;
     use omicron_uuid_kinds::OmicronZoneUuid;
+    use omicron_uuid_kinds::RackUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
@@ -1048,12 +1050,14 @@ mod test {
     async fn sim_sled_agent(
         log: slog::Logger,
         sled_id: SledUuid,
+        rack_id: RackUuid,
         zone_id: OmicronZoneUuid,
         simulated_upstairs: &Arc<sim::SimulatedUpstairs>,
     ) -> sim::Server {
         // Start a simulated sled agent.
         let config = sim::Config::for_testing(
             sled_id,
+            rack_id,
             sim::SimMode::Auto,
             None,
             sim::ZpoolConfig::None,
@@ -1187,6 +1191,7 @@ mod test {
         let sled1 = sim_sled_agent(
             log.clone(),
             "9cb9b78f-5614-440c-b66d-e8e81fab69b0".parse().unwrap(),
+            RACK_UUID,
             "5125277f-0988-490b-ac01-3bba20cc8f07".parse().unwrap(),
             &simulated_upstairs,
         )
@@ -1195,6 +1200,7 @@ mod test {
         let sled2 = sim_sled_agent(
             log.clone(),
             "03265caf-da7d-46c7-b1c2-39fa90ce5c65".parse().unwrap(),
+            RACK_UUID,
             "8b88a56f-3eb6-4d80-ba42-75d867bc427d".parse().unwrap(),
             &simulated_upstairs,
         )
@@ -1264,6 +1270,7 @@ mod test {
         let sled1 = sim_sled_agent(
             log.clone(),
             "9cb9b78f-5614-440c-b66d-e8e81fab69b0".parse().unwrap(),
+            RACK_UUID,
             "5125277f-0988-490b-ac01-3bba20cc8f07".parse().unwrap(),
             &simulated_upstairs,
         )
@@ -1272,6 +1279,7 @@ mod test {
         let sled2 = sim_sled_agent(
             log.clone(),
             "03265caf-da7d-46c7-b1c2-39fa90ce5c65".parse().unwrap(),
+            RACK_UUID,
             "8b88a56f-3eb6-4d80-ba42-75d867bc427d".parse().unwrap(),
             &simulated_upstairs,
         )
@@ -1382,6 +1390,7 @@ mod test {
         let sled1 = sim_sled_agent(
             log.clone(),
             "9cb9b78f-5614-440c-b66d-e8e81fab69b0".parse().unwrap(),
+            RACK_UUID,
             "5125277f-0988-490b-ac01-3bba20cc8f07".parse().unwrap(),
             &simulated_upstairs,
         )
