@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "54.0.0"
+    "version": "55.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -6315,6 +6315,9 @@
               }
             ]
           },
+          "rack_id": {
+            "$ref": "#/components/schemas/RackUuid"
+          },
           "reconciler_status": {
             "$ref": "#/components/schemas/ConfigReconcilerInventoryStatus"
           },
@@ -6374,6 +6377,7 @@
           "file_source_resolver",
           "fmd",
           "instance_manager_status",
+          "rack_id",
           "reconciler_status",
           "reference_measurements",
           "reservoir_size",
