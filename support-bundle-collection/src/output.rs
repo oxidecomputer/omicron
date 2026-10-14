@@ -237,6 +237,11 @@ impl BundleOutput {
         const BUF_SIZE: usize = 64 * 1024;
 
         let (path, rel) = self.resolve(name.as_ref());
+        // Refuse upfront if the bundle has already reached its limit. Without
+        // this, a stream would only be refused at its first charge: after
+        // creating its file, and waiting for data, and an empty stream would
+        // never be refused at all.
+        self.budget.charge(&rel, 0)?;
         let mut charged = 0;
         let result = async {
             create_parent_dir(&path).await?;
@@ -290,6 +295,10 @@ impl BundleOutput {
         F: FnOnce(&mut dyn Write) -> anyhow::Result<()> + Send + 'static,
     {
         let (path, rel) = self.resolve(name.as_ref());
+        // As in `write_stream`, refuse upfront if the bundle has already
+        // reached its limit, so that `f` doesn't run, and a file it writes
+        // nothing to isn't added to a bundle that has stopped.
+        self.budget.charge(&rel, 0)?;
         let budget = self.budget.clone();
         let log = self.log.clone();
         tokio::task::spawn_blocking(move || {
@@ -613,6 +622,34 @@ mod test {
         tokio_util::io::StreamReader::new(futures::stream::iter(chunks))
     }
 
+    // Once the bundle has reached its limit, a stream is refused before its
+    // file is created or its reader is read, even if the stream is empty.
+    #[tokio::test]
+    async fn test_write_stream_after_limit_exceeded() {
+        let (dir, output, _stop) = output_with_limit(Some(1));
+        assert_size_limit_exceeded(
+            &output.write("big", "12").await.unwrap_err(),
+        );
+
+        let err = output
+            .join("sub")
+            .write_stream("empty", tokio::io::empty())
+            .await
+            .unwrap_err();
+        assert_size_limit_exceeded(&err);
+        assert!(!dir.path().join("sub").exists());
+
+        // A reader which would fail the test if it were read.
+        let err = output
+            .write_stream("never", failing_reader(b"", "reader was read"))
+            .await
+            .unwrap_err();
+        assert_size_limit_exceeded(&err);
+        assert!(!dir.path().join("never").exists());
+        assert_eq!(output.budget.used(), 0);
+        assert_eq!(output.budget.exceeded().unwrap().path, "big");
+    }
+
     #[tokio::test]
     async fn test_write_with() {
         let (dir, output, _stop) = output_with_limit(Some(100));
@@ -689,6 +726,26 @@ mod test {
         assert!(!dir.path().join("file").exists());
         assert_eq!(output.budget.used(), 0);
         assert!(stop.is_cancelled());
+    }
+
+    // Once the bundle has reached its limit, `write_with` is refused without
+    // running `f`, even if `f` would write nothing.
+    #[tokio::test]
+    async fn test_write_with_after_limit_exceeded() {
+        let (dir, output, _stop) = output_with_limit(Some(1));
+        assert_size_limit_exceeded(
+            &output.write("big", "12").await.unwrap_err(),
+        );
+
+        let err = output
+            .join("sub")
+            .write_with("empty", |_w| panic!("f should not run"))
+            .await
+            .unwrap_err();
+        assert_size_limit_exceeded(&err);
+        assert!(!dir.path().join("sub").exists());
+        assert_eq!(output.budget.used(), 0);
+        assert_eq!(output.budget.exceeded().unwrap().path, "big");
     }
 
     #[tokio::test]
