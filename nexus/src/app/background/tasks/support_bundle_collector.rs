@@ -493,8 +493,9 @@ impl SupportBundleCollector {
         // files as they're added means `dir` and the zip, both in `TEMPDIR`,
         // never hold two full copies of the bundle at once, and `dir` is gone
         // before the upload starts.
+        let zip_log = log.clone();
         let zipfile = tokio::task::spawn_blocking(move || {
-            bundle_to_zipfile(dir, Utf8Path::new(TEMPDIR))
+            bundle_to_zipfile(dir, Utf8Path::new(TEMPDIR), &zip_log)
         })
         .await
         .with_context(|| "Zipping the support bundle panicked")??;
@@ -2121,7 +2122,8 @@ mod test {
             .unwrap();
         std::fs::write(dir.path().join("file-b"), "more data").unwrap();
 
-        let zipfile = bundle_to_zipfile(dir, tempdir_for_zip.path())
+        let log = slog::Logger::root(slog::Discard, slog::o!());
+        let zipfile = bundle_to_zipfile(dir, tempdir_for_zip.path(), &log)
             .expect("Should have been able to bundle zipfile");
         let archive = zip::read::ZipArchive::new(zipfile).unwrap();
 

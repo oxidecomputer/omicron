@@ -43,6 +43,9 @@ use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use camino_tempfile::Utf8TempDir;
 use camino_tempfile::tempfile_in;
+use slog::Logger;
+use slog::warn;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeSet;
 use std::io::Write;
 
@@ -86,29 +89,43 @@ pub fn bundle_to_stream<W: Write>(dir: &Utf8TempDir, writer: W) -> Result<()> {
 /// `tempdir` share a filesystem, this keeps the space used by both together
 /// close to the size of `dir` alone, rather than up to double it.
 ///
+/// Removing files only saves space: the zip is complete either way. A file
+/// that cannot be removed is logged to `log` and left for the removal of `dir`
+/// to retry, rather than failing the bundle.
+///
 /// See the [module documentation](self#bundle-contents) for how `dir` maps to
 /// the zip's entries.
 pub fn bundle_to_zipfile(
     dir: Utf8TempDir,
     tempdir: &Utf8Path,
+    log: &Logger,
 ) -> Result<std::fs::File> {
     let mut tempfile = tempfile_in(tempdir)?;
-    write_zip(&dir, ZipWriter::new(&mut tempfile), RemoveSources::Yes)?;
-    dir.close()?;
+    write_zip(&dir, ZipWriter::new(&mut tempfile), RemoveSources::Yes(log))?;
+    let dir_path = dir.path().to_owned();
+    if let Err(err) = dir.close() {
+        warn!(
+            log,
+            "failed to remove support bundle directory after zipping it";
+            "path" => %dir_path,
+            InlineErrorChain::new(&err),
+        );
+    }
     Ok(tempfile)
 }
 
-/// Whether files in the bundle directory are removed once added to the zip.
+/// Whether files in the bundle directory are removed once added to the zip,
+/// and if so, where to log the files that cannot be.
 #[derive(Clone, Copy)]
-enum RemoveSources {
+enum RemoveSources<'a> {
     No,
-    Yes,
+    Yes(&'a Logger),
 }
 
 fn write_zip<W: Write + std::io::Seek>(
     dir: &Utf8TempDir,
     zip: ZipWriter<W>,
-    remove_sources: RemoveSources,
+    remove_sources: RemoveSources<'_>,
 ) -> Result<()> {
     let mut bundle = BundleZip::new(zip, remove_sources);
     recursively_add_directory_to_zipfile(&mut bundle, dir.path(), dir.path())?;
@@ -122,7 +139,7 @@ fn write_zip<W: Write + std::io::Seek>(
 /// collide with each other or with files on disk. Writing every entry through
 /// this type keeps the first entry of a name and skips later ones, rather than
 /// failing to build the bundle.
-struct BundleZip<W: Write + std::io::Seek> {
+struct BundleZip<'a, W: Write + std::io::Seek> {
     zip: ZipWriter<W>,
     // Names of the entries in `zip`, with directories ending in `/`.
     // `ZipWriter` tracks these too, but does not expose them.
@@ -131,7 +148,7 @@ struct BundleZip<W: Write + std::io::Seek> {
     // is written to `zip`, so that this set agrees with `ZipWriter` on which
     // names are duplicates.
     names: BTreeSet<String>,
-    remove_sources: RemoveSources,
+    remove_sources: RemoveSources<'a>,
 }
 
 /// Splits `path` into the components of its zip entry name, resolving `.` and
@@ -152,18 +169,27 @@ fn name_components(path: &Utf8Path) -> Vec<&str> {
     components
 }
 
-impl<W: Write + std::io::Seek> BundleZip<W> {
-    fn new(zip: ZipWriter<W>, remove_sources: RemoveSources) -> Self {
+impl<'a, W: Write + std::io::Seek> BundleZip<'a, W> {
+    fn new(zip: ZipWriter<W>, remove_sources: RemoveSources<'a>) -> Self {
         Self { zip, names: BTreeSet::new(), remove_sources }
     }
 
     /// Removes `src`, a file in the bundle directory whose contents have been
     /// added to the zip, if this bundle removes its sources.
-    fn done_with_source(&self, src: &Utf8Path) -> Result<()> {
-        match self.remove_sources {
-            RemoveSources::No => Ok(()),
-            RemoveSources::Yes => std::fs::remove_file(src)
-                .with_context(|| format!("failed to remove {src}")),
+    ///
+    /// A failure is logged rather than returned: the file's contents are
+    /// already in the zip, and the bundle directory's own removal retries it.
+    fn done_with_source(&self, src: &Utf8Path) {
+        let RemoveSources::Yes(log) = self.remove_sources else {
+            return;
+        };
+        if let Err(err) = std::fs::remove_file(src) {
+            warn!(
+                log,
+                "failed to remove support bundle file after zipping it";
+                "path" => %src,
+                InlineErrorChain::new(&err),
+            );
         }
     }
 
@@ -244,7 +270,7 @@ impl<W: Write + std::io::Seek> BundleZip<W> {
 
 /// Adds the contents of `dir_path` to `bundle`.
 fn recursively_add_directory_to_zipfile<W: Write + std::io::Seek>(
-    bundle: &mut BundleZip<W>,
+    bundle: &mut BundleZip<'_, W>,
     root_path: &Utf8Path,
     dir_path: &Utf8Path,
 ) -> Result<()> {
@@ -265,10 +291,10 @@ fn recursively_add_directory_to_zipfile<W: Write + std::io::Seek>(
         {
             let dst_dir = dst.parent().unwrap_or(Utf8Path::new(""));
             merge_zip_entries(bundle, entry.path(), dst_dir)?;
-            bundle.done_with_source(entry.path())?;
+            bundle.done_with_source(entry.path());
         } else if file_type.is_file() {
             bundle.add_file(dst, entry.path())?;
-            bundle.done_with_source(entry.path())?;
+            bundle.done_with_source(entry.path());
         }
         if file_type.is_dir() {
             bundle.add_dir_all(dst)?;
@@ -296,7 +322,7 @@ fn recursively_add_directory_to_zipfile<W: Write + std::io::Seek>(
 /// [module documentation](self#bundle-contents).
 /// An error is returned only if writing to the bundle fails.
 fn merge_zip_entries<W: Write + std::io::Seek>(
-    bundle: &mut BundleZip<W>,
+    bundle: &mut BundleZip<'_, W>,
     src: &Utf8Path,
     dst_dir: &Utf8Path,
 ) -> Result<()> {
@@ -391,6 +417,10 @@ mod test {
     use camino_tempfile::tempdir;
     use std::io::Cursor;
 
+    fn test_log() -> Logger {
+        Logger::root(slog::Discard, slog::o!())
+    }
+
     fn make_sample_bundle() -> Utf8TempDir {
         let dir = tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("dir-a")).unwrap();
@@ -475,7 +505,9 @@ mod test {
         let dir = make_sample_bundle();
         let dir_path = dir.path().to_owned();
         let tempdir_for_zip = tempdir().unwrap();
-        let zipfile = bundle_to_zipfile(dir, tempdir_for_zip.path()).unwrap();
+        let zipfile =
+            bundle_to_zipfile(dir, tempdir_for_zip.path(), &test_log())
+                .unwrap();
         let archive = ::zip::read::ZipArchive::new(zipfile).unwrap();
         assert_expected_entries(archive);
         assert!(!dir_path.exists(), "{dir_path} should have been removed");
@@ -496,7 +528,9 @@ mod test {
         .unwrap();
 
         let mut buf = Cursor::new(Vec::new());
-        write_zip(&dir, ZipWriter::new(&mut buf), RemoveSources::Yes).unwrap();
+        let log = test_log();
+        write_zip(&dir, ZipWriter::new(&mut buf), RemoveSources::Yes(&log))
+            .unwrap();
 
         fn files_in(dir: &Utf8Path) -> Vec<Utf8PathBuf> {
             let mut files = Vec::new();
@@ -519,6 +553,40 @@ mod test {
         {
             assert!(archive.by_name(name).is_ok(), "missing {name}");
         }
+    }
+
+    // Ensure that a file which cannot be removed after zipping does not fail
+    // the bundle: removal only saves space, and the zip is still complete.
+    #[test]
+    fn test_bundle_to_zipfile_removal_failure() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = make_sample_bundle();
+        let dir_path = dir.path().to_owned();
+        let locked = dir_path.join("dir-a");
+        // Without write permission on its directory, "dir-a/file-a" cannot be
+        // removed (unless we're root, in which case this test proves less but
+        // still passes).
+        std::fs::set_permissions(
+            &locked,
+            std::fs::Permissions::from_mode(0o555),
+        )
+        .unwrap();
+
+        let tempdir_for_zip = tempdir().unwrap();
+        let result =
+            bundle_to_zipfile(dir, tempdir_for_zip.path(), &test_log());
+
+        // Clean up what the bundle directory's removal could not.
+        std::fs::set_permissions(
+            &locked,
+            std::fs::Permissions::from_mode(0o755),
+        )
+        .unwrap();
+        let _ = std::fs::remove_dir_all(&dir_path);
+
+        let archive = ::zip::read::ZipArchive::new(result.unwrap()).unwrap();
+        assert_expected_entries(archive);
     }
 
     // Ensure that the non-consuming writers leave the bundle directory alone.
