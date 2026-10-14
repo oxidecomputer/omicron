@@ -5570,8 +5570,8 @@ mod test {
     use nexus_db_model::InvOmicronSledConfigZoneNic;
     use nexus_db_model::to_db_typed_uuid;
     use nexus_db_schema::schema;
-    use nexus_inventory::examples::Representative;
     use nexus_inventory::examples::representative;
+    use nexus_inventory::examples::{RACK_UUID, Representative};
     use nexus_inventory::now_db_precision;
     use nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL;
     use nexus_types::inventory::CabooseWhich;
@@ -5591,7 +5591,7 @@ mod test {
     use omicron_uuid_kinds::OmicronSledConfigUuid;
     use omicron_uuid_kinds::{
         CollectionUuid, DatasetUuid, OmicronZoneUuid, PhysicalDiskUuid,
-        RackUuid, ZpoolUuid,
+        ZpoolUuid,
     };
     use pretty_assertions::assert_eq;
     use sled_agent_types::disk::M2Slot;
@@ -5696,7 +5696,7 @@ mod test {
         let builder = nexus_inventory::CollectionBuilder::new("test");
         let collection1 = builder.build();
         datastore
-            .inventory_insert_collection(&opctx, &collection1, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection1, RACK_UUID)
             .await
             .expect("failed to insert collection");
 
@@ -5723,7 +5723,7 @@ mod test {
         let Representative { builder, .. } = representative();
         let collection2 = builder.build();
         datastore
-            .inventory_insert_collection(&opctx, &collection2, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection2, RACK_UUID)
             .await
             .expect("failed to insert collection");
         let collection_read = datastore
@@ -5767,7 +5767,7 @@ mod test {
         let Representative { builder, .. } = representative();
         let collection3 = builder.build();
         datastore
-            .inventory_insert_collection(&opctx, &collection3, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection3, RACK_UUID)
             .await
             .expect("failed to insert collection");
         let collection_read = datastore
@@ -5823,7 +5823,7 @@ mod test {
             .unwrap();
         let collection4 = builder.build();
         datastore
-            .inventory_insert_collection(&opctx, &collection4, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection4, RACK_UUID)
             .await
             .expect("failed to insert collection");
         let collection_read = datastore
@@ -5852,7 +5852,7 @@ mod test {
         let Representative { builder, .. } = representative();
         let collection5 = builder.build();
         datastore
-            .inventory_insert_collection(&opctx, &collection5, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection5, RACK_UUID)
             .await
             .expect("failed to insert collection");
         let collection_read = datastore
@@ -5873,7 +5873,7 @@ mod test {
 
         // Try to insert the same collection again and make sure it fails.
         let error = datastore
-            .inventory_insert_collection(&opctx, &collection5, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection5, RACK_UUID)
             .await
             .expect_err("unexpectedly succeeded in inserting collection");
         assert!(
@@ -5968,7 +5968,7 @@ mod test {
             collection6.id, collection6.time_started
         );
         datastore
-            .inventory_insert_collection(&opctx, &collection6, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection6, RACK_UUID)
             .await
             .expect("failed to insert collection");
         assert_eq!(
@@ -6020,7 +6020,7 @@ mod test {
             collection7.id, collection7.time_started
         );
         datastore
-            .inventory_insert_collection(&opctx, &collection7, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection7, RACK_UUID)
             .await
             .expect("failed to insert collection");
         datastore
@@ -6341,7 +6341,7 @@ mod test {
 
         // Write it and read it back.
         datastore
-            .inventory_insert_collection(&opctx, &collection, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection, RACK_UUID)
             .await
             .expect("failed to insert collection");
         let read = datastore
@@ -6426,7 +6426,7 @@ mod test {
 
         // Write and read back; the shared IP must round-trip.
         datastore
-            .inventory_insert_collection(&opctx, &collection, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection, RACK_UUID)
             .await
             .expect("collection with a shared SNAT IP inserts");
         let collection_read = datastore
@@ -6471,7 +6471,7 @@ mod test {
         let Representative { builder, .. } = representative();
         let collection = builder.build();
         datastore
-            .inventory_insert_collection(&opctx, &collection, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection, RACK_UUID)
             .await
             .expect("failed to insert collection");
 
@@ -6518,7 +6518,7 @@ mod test {
         let Representative { builder, .. } = representative();
         let collection = builder.build();
         datastore
-            .inventory_insert_collection(&opctx, &collection, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection, RACK_UUID)
             .await
             .expect("failed to insert collection");
 
@@ -6568,7 +6568,7 @@ mod test {
 
         // Write it to the db; read it back and check it survived.
         datastore
-            .inventory_insert_collection(&opctx, &collection, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection, RACK_UUID)
             .await
             .expect("failed to insert collection");
         let collection_read = datastore
@@ -6706,7 +6706,7 @@ mod test {
 
         // Write it to the db; read it back and check it survived.
         datastore
-            .inventory_insert_collection(&opctx, &collection, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection, RACK_UUID)
             .await
             .expect("failed to insert collection");
         let collection_read = datastore
@@ -6772,7 +6772,7 @@ mod test {
 
         // Write it to the db; read it back and check it survived.
         datastore
-            .inventory_insert_collection(&opctx, &collection, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection, RACK_UUID)
             .await
             .expect("failed to insert collection");
         let collection_read = datastore
@@ -6814,7 +6814,7 @@ mod test {
         let collection_id = collection.id;
 
         datastore
-            .inventory_insert_collection(&opctx, &collection, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection, RACK_UUID)
             .await
             .expect("failed to insert collection");
 
