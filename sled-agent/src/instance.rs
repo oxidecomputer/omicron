@@ -27,6 +27,7 @@ use illumos_utils::opte::{
 };
 use illumos_utils::running_zone::{RunningZone, ZoneBuilderFactory};
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
+use illumos_utils::zpool::PathInPool;
 use omicron_common::api::internal::shared::{DelegatedZvol, SledIdentifiers};
 use omicron_common::backoff;
 use omicron_common::backoff::BackoffError;
@@ -2504,20 +2505,19 @@ impl InstanceRunner {
         let zname = propolis_zone_name(&self.propolis_id);
         let mut rng = rand::rngs::StdRng::from_os_rng();
 
-        let root = self
+        let PathInPool { pool: filesystem_zpool, path: zone_root_path } = self
             .available_datasets_rx
             .all_mounted_zone_root_datasets()
             .into_iter()
             .choose(&mut rng)
             .ok_or_else(|| Error::U2NotFound)?;
-        let filesystem_zpool = root.pool;
 
         let installed_zone = self
             .zone_builder_factory
             .builder()
             .with_log(self.log.clone())
             .with_underlay_vnic_allocator(&self.vnic_allocator)
-            .with_zone_root_path(root.into())
+            .with_zone_root_path(zone_root_path)
             .with_file_source(&ramdisk_file_source("propolis-server"))
             .with_zone_type("propolis-server")
             .with_unique_name(OmicronZoneUuid::from_untyped_uuid(

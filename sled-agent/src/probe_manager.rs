@@ -15,6 +15,7 @@ use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::{DhcpCfg, PortCreateParams, PortManager};
 use illumos_utils::running_zone::{RunningZone, ZoneBuilderFactory};
+use illumos_utils::zpool::PathInPool;
 use illumos_utils::zpool::ZpoolName;
 use omicron_common::api::external::{
     VpcFirewallRuleAction, VpcFirewallRuleDirection, VpcFirewallRulePriority,
@@ -320,13 +321,12 @@ impl ProbeManagerInner {
     /// boots the probe zone.
     async fn add_probe(&mut self, probe: &ProbeState) -> Result<()> {
         let mut rng = rand::rngs::StdRng::from_os_rng();
-        let zone_root_path = self
+        let PathInPool { pool: zpool, path: zone_root_path } = self
             .available_datasets_rx
             .all_mounted_zone_root_datasets()
             .into_iter()
             .choose(&mut rng)
             .ok_or_else(|| anyhow!("u2 not found"))?;
-        let zpool = zone_root_path.pool;
 
         let nic = probe
             .interface
@@ -385,7 +385,7 @@ impl ProbeManagerInner {
             .builder()
             .with_log(self.log.clone())
             .with_underlay_vnic_allocator(&self.vnic_allocator)
-            .with_zone_root_path(zone_root_path.into())
+            .with_zone_root_path(zone_root_path)
             .with_file_source(&ramdisk_file_source("probe"))
             .with_zone_type("probe")
             .with_unique_name(OmicronZoneUuid::from_untyped_uuid(

@@ -18,7 +18,6 @@ use crate::ExecutionError;
 use crate::addrobj::AddrObject;
 use crate::dladm::{EtherstubVnic, VNIC_PREFIX_BOOTSTRAP, VNIC_PREFIX_CONTROL};
 use crate::route::Route;
-use crate::zpool::PathInPoolOrRamdisk;
 use crate::{PFEXEC, execute_async};
 use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::backoff;
@@ -322,7 +321,7 @@ pub trait Api: Send + Sync {
     async fn install_omicron_zone(
         &self,
         log: &Logger,
-        zone_root_path: &PathInPoolOrRamdisk,
+        zone_root_path: &Utf8Path,
         zone_name: &str,
         zone_image: &Utf8Path,
         datasets: &[zone::Dataset],
@@ -361,7 +360,7 @@ pub trait Api: Send + Sync {
         );
         cfg.get_global()
             .set_brand("omicron1")
-            .set_path(&zone_root_path.path)
+            .set_path(zone_root_path)
             .set_autoboot(false)
             .set_ip_type(zone::IpType::Exclusive);
         if !limit_priv.is_empty() {

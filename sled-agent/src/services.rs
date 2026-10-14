@@ -1284,7 +1284,7 @@ impl ServiceManager {
         let installed_zone = zone_builder
             .with_log(self.inner.log.clone())
             .with_underlay_vnic_allocator(&self.inner.underlay_vnic_allocator)
-            .with_zone_root_path(zone_root_path)
+            .with_zone_root_path(zone_root_path.path)
             .with_zone_type(zone_type_str)
             .with_file_source(&file_source)
             .with_datasets(datasets.as_slice())
