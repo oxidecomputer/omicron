@@ -153,7 +153,7 @@ impl MgsHandle {
 pub fn make_mgs_client(
     log: Logger,
     mgs_addr: SocketAddrV6,
-) -> gateway_client::Client {
+) -> Result<gateway_client::Client, reqwest::Error> {
     // TODO-correctness Do all users of this client (including both direct API
     // calls by `UpdatePlanner` and polling by `MgsManager`) want the same
     // timeout?
@@ -162,10 +162,9 @@ pub fn make_mgs_client(
     let client = internal_http_client_builder()
         .connect_timeout(MGS_TIMEOUT)
         .timeout(MGS_TIMEOUT)
-        .build()
-        .unwrap();
+        .build()?;
 
-    gateway_client::Client::new_with_client(&endpoint, client, log)
+    Ok(gateway_client::Client::new_with_client(&endpoint, client, log))
 }
 
 /// The entity responsible for interacting with MGS
@@ -204,11 +203,14 @@ pub struct MgsManager {
 }
 
 impl MgsManager {
-    pub fn new(log: &Logger, mgs_addr: SocketAddrV6) -> MgsManager {
+    pub fn new(
+        log: &Logger,
+        mgs_addr: SocketAddrV6,
+    ) -> Result<MgsManager, reqwest::Error> {
         let log = log.new(o!("component" => "wicketd MgsManager"));
         let (tx, rx) = mpsc::channel(CHANNEL_CAPACITY);
-        let mgs_client = make_mgs_client(log.clone(), mgs_addr);
-        MgsManager {
+        let mgs_client = make_mgs_client(log.clone(), mgs_addr)?;
+        Ok(MgsManager {
             log,
             tx,
             rx,
@@ -216,7 +218,7 @@ impl MgsManager {
             records: IdOrdMap::new(),
             last_ignition_fetch_error: None,
             waiting_for_update: Vec::new(),
-        }
+        })
     }
 
     pub fn get_handle(&self) -> MgsHandle {
@@ -613,7 +615,7 @@ mod tests {
     fn dummy_manager() -> MgsManager {
         let log = Logger::root(slog::Discard, o!());
         let addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0);
-        MgsManager::new(&log, addr)
+        MgsManager::new(&log, addr).unwrap()
     }
 
     fn sled(slot: u16) -> SpIdentifier {

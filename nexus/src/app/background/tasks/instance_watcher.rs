@@ -697,13 +697,29 @@ impl BackgroundTask for InstanceWatcher {
                         // Otherwise, if we've moved on to a new sled, refresh
                         // the client.
                         ref mut curr => {
-                            let client = nexus_networking::sled_client_from_address(
+                            match nexus_networking::sled_client_from_address(
                                 sled.id(),
                                 sled.address(),
                                 &opctx.log,
-                            );
-                            *curr = Some((sled.id(), client.clone()));
-                            client
+                            ) {
+                                Ok(client) => {
+                                    *curr = Some((sled.id(), client.clone()));
+                                    client
+                                }
+                                Err(e) => {
+                                    slog::warn!(
+                                        opctx.log,
+                                        "failed to build sled-agent client";
+                                        "sled_id" => %sled.id(),
+                                        "error" => InlineErrorChain::new(&e),
+                                    );
+                                    total += 1;
+                                    *check_errors
+                                        .entry(Incomplete::ClientError.as_str().into_owned())
+                                        .or_default() += 1;
+                                    continue;
+                                }
+                            }
                         },
                     };
 

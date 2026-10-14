@@ -80,19 +80,22 @@ async fn create_mgs_client(
     collection: &BundleCollection,
 ) -> anyhow::Result<MgsClient> {
     let log = collection.log();
-    collection
+    let sockaddr = collection
         .resolver()
         .lookup_socket_v6(ServiceName::ManagementGatewayService)
         .await
-        .map(|sockaddr| {
-            let url = format!("http://{}", sockaddr);
-            gateway_client::Client::new_with_client(
-                &url,
-                internal_http_client(),
-                log.clone(),
-            )
-        }).map_err(|e| {
-            error!(log, "failed to resolve MGS address"; "error" => InlineErrorChain::new(&e));
-            e.into()
-        })
+        .inspect_err(|e| {
+            error!(
+                log, "failed to resolve MGS address";
+                "error" => InlineErrorChain::new(e),
+            );
+        })?;
+    let url = format!("http://{}", sockaddr);
+    let http_client = internal_http_client().inspect_err(|e| {
+        error!(
+            log, "failed to build MGS client";
+            "error" => InlineErrorChain::new(e),
+        );
+    })?;
+    Ok(gateway_client::Client::new_with_client(&url, http_client, log.clone()))
 }

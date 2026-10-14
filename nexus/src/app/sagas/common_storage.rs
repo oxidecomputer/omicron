@@ -44,6 +44,14 @@ pub(crate) async fn get_pantry_address(
     Ok(client.address())
 }
 
+/// Builds a Crucible Pantry client for the pantry at `endpoint`.
+pub(crate) fn pantry_client(
+    endpoint: &str,
+) -> Result<crucible_pantry_client::Client, reqwest::Error> {
+    let http_client = internal_http_client()?;
+    Ok(crucible_pantry_client::Client::new_with_client(endpoint, http_client))
+}
+
 // Helper function for attach/detach below: we retry as long as the pantry isn't
 // gone, and we detect "gone" by seeing whether the pantry address we've chosen
 // is still present when we resolve all the crucible pantry records in DNS.
@@ -129,17 +137,17 @@ pub(crate) async fn call_pantry_attach_for_volume(
 
     info!(log, "sending attach request for {attach_id} to {pantry_address}");
 
-    let client = crucible_pantry_client::Client::new_with_client(
-        &endpoint,
-        internal_http_client(),
-    );
-
     let attach_request = crucible_pantry_client::types::AttachRequest {
         volume_construction_request,
     };
 
     let attach_operation = || async {
-        client.attach(&attach_id.to_string(), &attach_request).await
+        // Report a failure to build the client as a communication error, so
+        // that the retry loop treats it as transient.
+        pantry_client(&endpoint)
+            .map_err(crucible_pantry_client::Error::CommunicationError)?
+            .attach(&attach_id.to_string(), &attach_request)
+            .await
     };
 
     let gone_check = || async {
@@ -190,13 +198,14 @@ pub(crate) async fn call_pantry_detach(
 
     info!(log, "sending detach for {attach_id} to endpoint {endpoint}");
 
-    let client = crucible_pantry_client::Client::new_with_client(
-        &endpoint,
-        internal_http_client(),
-    );
-
-    let detach_operation =
-        || async { client.detach(&attach_id.to_string()).await };
+    let detach_operation = || async {
+        // Report a failure to build the client as a communication error, so
+        // that the retry loop treats it as transient.
+        pantry_client(&endpoint)
+            .map_err(crucible_pantry_client::Error::CommunicationError)?
+            .detach(&attach_id.to_string())
+            .await
+    };
 
     let gone_check = || async {
         let result = match is_pantry_gone(nexus, pantry_address, log).await {

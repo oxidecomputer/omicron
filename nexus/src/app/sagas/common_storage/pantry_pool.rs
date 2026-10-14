@@ -54,9 +54,14 @@ impl backend::Connector for PantryConnector {
                 )));
             }
         };
+        let http_client = internal_http_client().map_err(|e| {
+            backend::Error::Other(
+                anyhow::Error::new(e).context("building pantry client"),
+            )
+        })?;
         let client = crucible_pantry_client::Client::new_with_client(
             &format!("http://{address}"),
-            internal_http_client(),
+            http_client,
         );
         let mut conn = PooledPantryClient { client, address };
         self.is_valid(&mut conn).await?;

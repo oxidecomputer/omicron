@@ -162,13 +162,14 @@ async fn inventory_activate(
                 let log = opctx
                     .log
                     .new(o!("clickhouse_admin_keeper_url" => url.clone()));
-                clickhouse_admin_keeper_client::Client::new_with_client(
-                    &url,
-                    internal_http_client(),
-                    log,
-                )
+                let client = internal_http_client().with_context(|| {
+                    format!("building clickhouse-admin-keeper client for {url}")
+                })?;
+                Ok(clickhouse_admin_keeper_client::Client::new_with_client(
+                    &url, client, log,
+                ))
             })
-            .collect::<Vec<_>>(),
+            .collect::<anyhow::Result<Vec<_>>>()?,
         // When DNS resolution fails because no clickhouse-keeper-admin
         // servers have been found, we allow this and move on. This is
         // because multi-node clickhouse may not be enabled, and therefore

@@ -281,7 +281,11 @@ async fn decommission_cockroachdb_node<R: CleanupResolver>(
         let log = log.new(slog::o!("admin_url" => admin_url.clone()));
         let client = cockroach_admin_client::Client::new_with_client(
             &admin_url,
-            internal_http_client(),
+            internal_http_client().with_context(|| {
+                format!(
+                    "failed to build cockroach admin client for {admin_url}"
+                )
+            })?,
             log.clone(),
         );
 

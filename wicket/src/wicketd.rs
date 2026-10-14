@@ -6,10 +6,11 @@
 
 use omicron_common::http_client::internal_http_client_builder;
 use slog::{Logger, o, warn};
+use slog_error_chain::InlineErrorChain;
 use std::convert::From;
 use std::net::SocketAddrV6;
 use tokio::sync::mpsc::{self, Sender, UnboundedSender};
-use tokio::time::{Duration, MissedTickBehavior, interval};
+use tokio::time::{Duration, Interval, MissedTickBehavior, interval};
 use wicket_common::WICKETD_TIMEOUT;
 use wicket_common::inventory::{SpIdentifier, SpType};
 use wicket_common::rack_update::{
@@ -169,17 +170,22 @@ impl WicketdManager {
         let addr = self.addrs.wicketd;
         let events_tx = self.events_tx.clone();
         tokio::spawn(async move {
-            let update_client =
-                create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
             let params = StartUpdateParams {
                 targets: UpdateTargets::single(component_id.into()),
                 options,
             };
-            let response = match update_client.post_start_update(&params).await
-            {
-                Ok(_) => Ok(()),
-                Err(error) => Err(error.to_string()),
-            };
+            let response = async {
+                let update_client =
+                    create_wicketd_client(&log, addr, WICKETD_TIMEOUT)
+                        .map_err(|error| {
+                            InlineErrorChain::new(&error).to_string()
+                        })?;
+                match update_client.post_start_update(&params).await {
+                    Ok(_) => Ok(()),
+                    Err(error) => Err(error.to_string()),
+                }
+            }
+            .await;
 
             slog::info!(
                 log,
@@ -202,16 +208,22 @@ impl WicketdManager {
         let addr = self.addrs.wicketd;
         let events_tx = self.events_tx.clone();
         tokio::spawn(async move {
-            let update_client =
-                create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
             let sp: SpIdentifier = component_id.into();
-            let response = match update_client
-                .post_abort_update(&sp.typ, sp.slot, &options)
-                .await
-            {
-                Ok(_) => Ok(()),
-                Err(error) => Err(error.to_string()),
-            };
+            let response = async {
+                let update_client =
+                    create_wicketd_client(&log, addr, WICKETD_TIMEOUT)
+                        .map_err(|error| {
+                            InlineErrorChain::new(&error).to_string()
+                        })?;
+                match update_client
+                    .post_abort_update(&sp.typ, sp.slot, &options)
+                    .await
+                {
+                    Ok(_) => Ok(()),
+                    Err(error) => Err(error.to_string()),
+                }
+            }
+            .await;
 
             slog::info!(
                 log,
@@ -234,17 +246,22 @@ impl WicketdManager {
         let addr = self.addrs.wicketd;
         let events_tx = self.events_tx.clone();
         tokio::spawn(async move {
-            let update_client =
-                create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
             let params = ClearUpdateStateParams {
                 targets: UpdateTargets::single(component_id.into()),
                 options,
             };
-            let response =
+            let response = async {
+                let update_client =
+                    create_wicketd_client(&log, addr, WICKETD_TIMEOUT)
+                        .map_err(|error| {
+                            InlineErrorChain::new(&error).to_string()
+                        })?;
                 match update_client.post_clear_update_state(&params).await {
                     Ok(_) => Ok(()),
                     Err(error) => Err(error.to_string()),
-                };
+                }
+            }
+            .await;
 
             slog::info!(
                 log,
@@ -270,7 +287,19 @@ impl WicketdManager {
         let log = self.log.clone();
         let addr = self.addrs.wicketd;
         tokio::spawn(async move {
-            let client = create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
+            let client =
+                match create_wicketd_client(&log, addr, WICKETD_TIMEOUT) {
+                    Ok(client) => client,
+                    Err(error) => {
+                        slog::warn!(
+                            log,
+                            "Failed to create client for ignition command";
+                            "component_id" => %component_id,
+                            InlineErrorChain::new(&error),
+                        );
+                        return;
+                    }
+                };
             let sp: SpIdentifier = component_id.into();
             let res =
                 client.post_ignition_command(&sp.typ, sp.slot, command).await;
@@ -295,11 +324,18 @@ impl WicketdManager {
         let addr = self.addrs.commission;
         let events_tx = self.events_tx.clone();
         tokio::spawn(async move {
-            let client = create_commission_client(&log, addr, WICKETD_TIMEOUT);
-            let response = match client.post_run_rack_setup().await {
-                Ok(_) => Ok(()),
-                Err(error) => Err(error.to_string()),
-            };
+            let response = async {
+                let client =
+                    create_commission_client(&log, addr, WICKETD_TIMEOUT)
+                        .map_err(|error| {
+                            InlineErrorChain::new(&error).to_string()
+                        })?;
+                match client.post_run_rack_setup().await {
+                    Ok(_) => Ok(()),
+                    Err(error) => Err(error.to_string()),
+                }
+            }
+            .await;
 
             slog::info!(log, "Start rack setup response: {:?}", response);
             _ = events_tx.send(Event::Term(Cmd::ShowPopup(
@@ -313,10 +349,13 @@ impl WicketdManager {
         let tx = self.events_tx.clone();
         let addr = self.addrs.wicketd;
         tokio::spawn(async move {
-            let client = create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
             let mut ticker = interval(WICKETD_POLL_INTERVAL * 2);
             let mut prev = None;
             ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+            let client = build_client_with_retry(&log, &mut ticker, || {
+                create_wicketd_client(&log, addr, WICKETD_TIMEOUT)
+            })
+            .await;
             loop {
                 ticker.tick().await;
                 // TODO: We should really be using ETAGs here
@@ -339,10 +378,13 @@ impl WicketdManager {
         let tx = self.events_tx.clone();
         let addr = self.addrs.commission;
         tokio::spawn(async move {
-            let client = create_commission_client(&log, addr, WICKETD_TIMEOUT);
             let mut ticker = interval(WICKETD_POLL_INTERVAL * 2);
             let mut prev = None;
             ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+            let client = build_client_with_retry(&log, &mut ticker, || {
+                create_commission_client(&log, addr, WICKETD_TIMEOUT)
+            })
+            .await;
             loop {
                 ticker.tick().await;
                 // TODO: We should really be using ETAGs here
@@ -397,10 +439,13 @@ impl WicketdManager {
         let tx = self.events_tx.clone();
         let addr = self.addrs.wicketd;
         tokio::spawn(async move {
-            let client = create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
             let mut ticker = interval(WICKETD_POLL_INTERVAL * 2);
             let mut prev = None;
             ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+            let client = build_client_with_retry(&log, &mut ticker, || {
+                create_wicketd_client(&log, addr, WICKETD_TIMEOUT)
+            })
+            .await;
             loop {
                 ticker.tick().await;
                 // TODO: We should really be using ETAGs here
@@ -430,9 +475,12 @@ impl WicketdManager {
         let tx = self.events_tx.clone();
         let addr = self.addrs.wicketd;
         tokio::spawn(async move {
-            let client = create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
             let mut ticker = interval(WICKETD_POLL_INTERVAL * 2);
             ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+            let client = build_client_with_retry(&log, &mut ticker, || {
+                create_wicketd_client(&log, addr, WICKETD_TIMEOUT)
+            })
+            .await;
             loop {
                 ticker.tick().await;
                 // TODO: We should really be using ETAGs here
@@ -460,9 +508,12 @@ impl WicketdManager {
         let addr = self.addrs.wicketd;
 
         tokio::spawn(async move {
-            let client = create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
             let mut ticker = interval(WICKETD_POLL_INTERVAL);
             ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+            let client = build_client_with_retry(&log, &mut ticker, || {
+                create_wicketd_client(&log, addr, WICKETD_TIMEOUT)
+            })
+            .await;
             loop {
                 let force_refresh = tokio::select! {
                     _ = ticker.tick() => Vec::new(),
@@ -503,24 +554,24 @@ pub(crate) fn create_wicketd_client(
     log: &Logger,
     wicketd_addr: SocketAddrV6,
     timeout: Duration,
-) -> wicketd_client::Client {
-    wicketd_client::Client::new_with_client(
+) -> Result<wicketd_client::Client, reqwest::Error> {
+    Ok(wicketd_client::Client::new_with_client(
         &api_endpoint(wicketd_addr),
-        http_client(timeout),
+        http_client(timeout)?,
         log.clone(),
-    )
+    ))
 }
 
 pub(crate) fn create_commission_client(
     log: &Logger,
     commission_addr: SocketAddrV6,
     timeout: Duration,
-) -> wicketd_commission_client::Client {
-    wicketd_commission_client::Client::new_with_client(
+) -> Result<wicketd_commission_client::Client, reqwest::Error> {
+    Ok(wicketd_commission_client::Client::new_with_client(
         &api_endpoint(commission_addr),
-        http_client(timeout),
+        http_client(timeout)?,
         log.clone(),
-    )
+    ))
 }
 
 fn api_endpoint(addr: SocketAddrV6) -> String {
@@ -529,10 +580,30 @@ fn api_endpoint(addr: SocketAddrV6) -> String {
 
 // Both of wicket's wicketd clients share one transport policy -- keep it in one
 // place so they don't drift.
-fn http_client(timeout: Duration) -> reqwest::Client {
+fn http_client(timeout: Duration) -> Result<reqwest::Client, reqwest::Error> {
     internal_http_client_builder()
         .connect_timeout(timeout)
         .timeout(timeout)
         .build()
-        .expect("built a reqwest client")
+}
+
+/// Builds a client with `make_client`, retrying on each tick of `ticker` until
+/// it succeeds.
+async fn build_client_with_retry<C>(
+    log: &Logger,
+    ticker: &mut Interval,
+    make_client: impl Fn() -> Result<C, reqwest::Error>,
+) -> C {
+    loop {
+        match make_client() {
+            Ok(client) => return client,
+            Err(err) => {
+                warn!(
+                    log, "failed to build wicketd client";
+                    InlineErrorChain::new(&err),
+                );
+                ticker.tick().await;
+            }
+        }
+    }
 }

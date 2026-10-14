@@ -2215,11 +2215,17 @@ impl super::Nexus {
         let (vmm, client_addr) = self
             .propolis_addr_for_instance(opctx, instance_lookup, action)
             .await?;
+        let http_client = internal_http_client().map_err(|e| {
+            Error::internal_error(&format!(
+                "failed to build propolis client: {}",
+                InlineErrorChain::new(&e)
+            ))
+        })?;
         Ok((
             vmm,
             propolis_client::Client::new_with_client(
                 &format!("http://{}", client_addr),
-                internal_http_client(),
+                http_client,
             ),
         ))
     }

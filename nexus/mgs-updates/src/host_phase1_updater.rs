@@ -346,9 +346,11 @@ impl ReconfiguratorHostPhase1Updater {
         log: &Logger,
     ) -> Result<BootPartitionContents, PrecheckError> {
         let address = self.details.sled_agent_address;
+        let client = internal_http_client()
+            .map_err(|err| PrecheckError::SledAgentClient { address, err })?;
         let sled_agent = SledAgentClient::new_with_client(
             &format!("http://{address}"),
-            internal_http_client(),
+            client,
             log.clone(),
         );
         let sled_inventory = sled_agent

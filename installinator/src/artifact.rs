@@ -89,7 +89,13 @@ pub(crate) struct ArtifactClient {
 }
 
 impl ArtifactClient {
-    pub(crate) fn new(addr: SocketAddr, log: &slog::Logger) -> Self {
+    /// Fails if the HTTP client cannot be built; this is reported as a
+    /// communication error, so that callers treat it like failing to reach the
+    /// peer.
+    pub(crate) fn new(
+        addr: SocketAddr,
+        log: &slog::Logger,
+    ) -> Result<Self, ClientError> {
         // NOTE: the production code path is always IPv6. IPv4 is supported for
         // testing only.
         let endpoint = match addr {
@@ -123,14 +129,14 @@ impl ArtifactClient {
             .connect_timeout(Duration::from_secs(5))
             .timeout(Duration::from_secs(5 * 60))
             .build()
-            .expect("installinator artifact client created");
+            .map_err(ClientError::CommunicationError)?;
         let client = installinator_client::Client::new_with_client(
             &endpoint,
             client,
             log.clone(),
         );
 
-        Self { log, client }
+        Ok(Self { log, client })
     }
 
     pub(crate) async fn fetch(

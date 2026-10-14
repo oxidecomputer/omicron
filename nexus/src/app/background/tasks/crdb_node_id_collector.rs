@@ -183,7 +183,9 @@ async fn ensure_node_id_known(
     let admin_url = format!("http://{admin_addr}");
     let admin_client = cockroach_admin_client::Client::new_with_client(
         &admin_url,
-        internal_http_client(),
+        internal_http_client().with_context(|| {
+            format!("failed to build client for {admin_url}")
+        })?,
         opctx.log.clone(),
     );
     let node = admin_client

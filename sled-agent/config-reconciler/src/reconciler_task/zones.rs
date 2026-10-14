@@ -77,6 +77,8 @@ pub enum TimeSyncError {
     NoRunningNtpZone,
     #[error("multiple running NTP zones - this should never happen!")]
     MultipleRunningNtpZones,
+    #[error("failed to build NTP admin client")]
+    NtpAdminClient(#[source] reqwest::Error),
     #[error("failed to communicate with NTP admin server")]
     NtpAdmin(#[from] ntp_admin_client::Error<ntp_admin_client::types::Error>),
     #[error("failed to execute chronyc within NTP zone")]
@@ -590,7 +592,7 @@ impl OmicronZones {
 
         let client = ntp_admin_client::Client::new_with_client(
             &format!("http://{ntp_admin_address}"),
-            internal_http_client(),
+            internal_http_client().map_err(TimeSyncError::NtpAdminClient)?,
             log.clone(),
         );
 

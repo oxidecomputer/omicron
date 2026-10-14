@@ -191,8 +191,7 @@ impl super::Nexus {
         &self,
         id: &SledUuid,
     ) -> Result<Arc<SledAgentClient>, Error> {
-        let client =
-            nexus_networking::default_reqwest_client_builder().build().unwrap();
+        let client = nexus_networking::default_reqwest_client()?;
         self.sled_client_ext(id, client).await
     }
 

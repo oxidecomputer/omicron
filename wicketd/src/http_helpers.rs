@@ -60,12 +60,18 @@ pub(crate) fn shutdown_to_http(_err: ShutdownInProgress) -> HttpError {
 
 pub(crate) fn ba_lockstep_client(
     ctx: &ServerContext,
-) -> bootstrap_agent_lockstep_client::Client {
-    bootstrap_agent_lockstep_client::Client::new_with_client(
+) -> Result<bootstrap_agent_lockstep_client::Client, HttpError> {
+    let http_client = internal_http_client().map_err(|err| {
+        HttpError::for_internal_error(format!(
+            "failed to build bootstrap agent client: {}",
+            InlineErrorChain::new(&err),
+        ))
+    })?;
+    Ok(bootstrap_agent_lockstep_client::Client::new_with_client(
         &format!("http://{}", ctx.bootstrap_agent_lockstep_address),
-        internal_http_client(),
+        http_client,
         ctx.log.new(slog::o!("component" => "bootstrap lockstep client")),
-    )
+    ))
 }
 
 /// Convert a [`bootstrap_agent_lockstep_client::Error`] to an [`HttpError`].

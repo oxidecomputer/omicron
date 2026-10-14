@@ -24,7 +24,6 @@ use illumos_utils::PFEXEC;
 use illumos_utils::zone::SVCCFG;
 use omicron_common::OMICRON_DPD_TAG;
 use omicron_common::address::DENDRITE_PORT;
-use omicron_common::http_client::internal_http_client;
 use oxnet::IpNet;
 use sled_agent_types::early_networking::LinkFec;
 use sled_agent_types::early_networking::LinkSpeed;
@@ -75,18 +74,20 @@ const CHRONYD: &str = "/usr/sbin/chronyd";
 const IPADM: &str = "/usr/sbin/ipadm";
 const ROUTE: &str = "/usr/sbin/route";
 
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn run_local_uplink_preflight_check(
     network_config: UserSpecifiedRackNetworkConfig,
     dns_servers: Vec<IpAddr>,
     ntp_servers: Vec<String>,
     our_switch_slot: SwitchSlot,
     dns_name_to_query: Option<String>,
+    http_client: reqwest::Client,
     event_buffer: Arc<Mutex<Option<EventBuffer>>>,
     log: &Logger,
 ) {
     let dpd_client = DpdClient::new_with_client(
         &format!("http://[::1]:{DENDRITE_PORT}"),
-        internal_http_client(),
+        http_client,
         DpdClientState {
             tag: WICKETD_TAG.to_string(),
             log: log.new(o!("component" => "DpdClient")),

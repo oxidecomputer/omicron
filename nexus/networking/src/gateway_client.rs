@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use anyhow::Context;
 use omicron_common::backoff::{self, BackoffError};
 use omicron_common::http_client::internal_http_client;
 use omicron_uuid_kinds::RackUuid;
@@ -28,16 +29,19 @@ pub enum RackIdError {
 type ClientError = gateway_client::Error<gateway_client::types::Error>;
 
 impl GatewayClient {
-    pub fn from_addr(log: &Logger, addr: SocketAddrV6) -> Self {
+    pub fn from_addr(
+        log: &Logger,
+        addr: SocketAddrV6,
+    ) -> Result<Self, reqwest::Error> {
         let url = format!("http://{addr}");
         let log = log
             .new(o!("gateway_url" => url.clone(), "addr" => addr.to_string()));
         let client = gateway_client::Client::new_with_client(
             &url,
-            internal_http_client(),
+            internal_http_client()?,
             log,
         );
-        GatewayClient { addr, client }
+        Ok(GatewayClient { addr, client })
     }
 
     pub async fn resolve_all_gateways<'l>(
@@ -52,7 +56,12 @@ impl GatewayClient {
 
         anyhow::ensure!(!addrs.is_empty(), "no MGS addresses resolved");
 
-        Ok(addrs.into_iter().map(move |addr| Self::from_addr(log, addr)))
+        let clients = addrs
+            .into_iter()
+            .map(|addr| Self::from_addr(log, addr))
+            .collect::<Result<Vec<_>, _>>()
+            .context("building MGS clients")?;
+        Ok(clients.into_iter())
     }
 
     /// Attempt to determine this gateway's rack ID. This method returns an

@@ -154,7 +154,9 @@ async fn dns_propagate_one(
     let log = log.new(o!("dns_server_url" => url.clone()));
     let client = dns_service_client::Client::new_with_client(
         &url,
-        internal_http_client(),
+        internal_http_client().with_context(|| {
+            format!("failed to build client for DNS server {}", server_addr)
+        })?,
         log.clone(),
     );
 

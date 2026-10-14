@@ -10,6 +10,7 @@ use crate::ProducerEndpoint;
 use crate::collection_task::CollectionTaskHandle;
 use crate::collection_task::CollectionTaskOutput;
 use crate::collection_task::ForcedCollectionError;
+use crate::collection_task::collection_http_client;
 use crate::probes;
 use crate::results_sink;
 use crate::self_stats;
@@ -61,6 +62,8 @@ pub struct OximeterAgent {
     // Wrapper of the two handles to the TX-side of the single-node and cluster
     // channels for collecting results from the collection tasks.
     result_sender: CollectionTaskSenderWrapper,
+    // HTTP client shared by all collection tasks to contact producers.
+    http_client: reqwest::Client,
     // Handle to each Tokio task collection from a single producer.
     collection_tasks: Arc<Mutex<BTreeMap<Uuid, CollectionTaskHandle>>>,
     // The interval on which we refresh our list of producers from Nexus.
@@ -195,6 +198,7 @@ impl OximeterAgent {
             log: log.clone(),
             collection_target,
             result_sender: collection_task_wrapper.wrapper_tx.clone(),
+            http_client: collection_http_client().map_err(Error::HttpClient)?,
             collection_tasks: Arc::new(Mutex::new(BTreeMap::new())),
             refresh_interval,
             refresh_task: Arc::new(Mutex::new(None)),
@@ -318,6 +322,7 @@ impl OximeterAgent {
             log,
             collection_target,
             result_sender: collection_task_wrapper.wrapper_tx,
+            http_client: collection_http_client().map_err(Error::HttpClient)?,
             collection_tasks: Arc::new(Mutex::new(BTreeMap::new())),
             refresh_interval,
             refresh_task: Arc::new(Mutex::new(None)),
@@ -358,6 +363,7 @@ impl OximeterAgent {
                 );
                 let handle = CollectionTaskHandle::new(
                     &self.log,
+                    self.http_client.clone(),
                     self.collection_target,
                     info,
                     self.result_sender.clone(),

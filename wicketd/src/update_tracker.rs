@@ -193,19 +193,19 @@ impl UpdateTracker {
         log: &Logger,
         artifact_store: WicketdArtifactStore,
         ipr_update_tracker: IprUpdateTracker,
-    ) -> Self {
+    ) -> Result<Self, reqwest::Error> {
         let log = log.new(o!("component" => "wicketd update planner"));
         let sp_update_data = Mutex::new(UpdateTrackerData::new(artifact_store));
-        let mgs_client = make_mgs_client(log.clone(), mgs_addr);
+        let mgs_client = make_mgs_client(log.clone(), mgs_addr)?;
         let upload_trampoline_phase_2_to_mgs = Mutex::default();
 
-        Self {
+        Ok(Self {
             mgs_client,
             sp_update_data,
             log,
             upload_trampoline_phase_2_to_mgs,
             ipr_update_tracker,
-        }
+        })
     }
 
     pub(crate) async fn start(

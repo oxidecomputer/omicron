@@ -41,16 +41,13 @@ pub fn internal_http_client_builder() -> reqwest::ClientBuilder {
 /// progenitor-generated `Client::new`.
 ///
 /// Pass this to a generated client's `new_with_client` in place of calling its
-/// `new`, which builds a client that loads TLS root certificates from disk.
-pub fn internal_http_client() -> reqwest::Client {
+/// `new`, which builds a client that loads TLS root certificates from disk
+/// and panics if that fails.
+pub fn internal_http_client() -> Result<reqwest::Client, reqwest::Error> {
     internal_http_client_builder()
         .connect_timeout(PROGENITOR_DEFAULT_TIMEOUT)
         .timeout(PROGENITOR_DEFAULT_TIMEOUT)
         .build()
-        .expect(
-            "because building a client without TLS roots does no I/O, it will \
-             only return an error in the event of a programmer error",
-        )
 }
 
 #[cfg(test)]
@@ -86,8 +83,8 @@ mod test {
             "expected to run out of file descriptors, got: {err}"
         );
 
-        // Panics if the client cannot be built.
-        let _ = internal_http_client();
+        internal_http_client()
+            .expect("internal client should build without file descriptors");
 
         // On these platforms, reqwest's default client loads TLS roots from
         // disk, so it should fail to build. If this starts succeeding, the

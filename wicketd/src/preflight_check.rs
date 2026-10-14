@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use omicron_common::http_client::internal_http_client;
 use sled_agent_types::early_networking::SwitchSlot;
 use slog::Logger;
 use slog::o;
@@ -46,7 +47,9 @@ impl PreflightCheckerHandler {
         ntp_servers: Vec<String>,
         our_switch_slot: SwitchSlot,
         dns_name_to_query: Option<String>,
-    ) -> Result<(), PreflightCheckerBusy> {
+    ) -> Result<(), PreflightCheckStartError> {
+        let http_client = internal_http_client()
+            .map_err(PreflightCheckStartError::HttpClient)?;
         let (check_started_tx, check_started_rx) = oneshot::channel();
 
         // Attempt to message the task running `preflight_task_main`.
@@ -61,9 +64,10 @@ impl PreflightCheckerHandler {
                 ntp_servers,
                 our_switch_slot,
                 dns_name_to_query,
+                http_client,
                 check_started_tx,
             })
-            .map_err(|_err| PreflightCheckerBusy)?;
+            .map_err(|_err| PreflightCheckStartError::Busy)?;
 
         // Don't return until the task tells us to: this allows it to create a
         // new, clear event report buffer, so if our client calls
@@ -85,8 +89,12 @@ impl PreflightCheckerHandler {
 }
 
 #[derive(Debug, thiserror::Error)]
-#[error("another preflight check is still running")]
-pub(crate) struct PreflightCheckerBusy;
+pub(crate) enum PreflightCheckStartError {
+    #[error("another preflight check is still running")]
+    Busy,
+    #[error("failed to build HTTP client")]
+    HttpClient(#[source] reqwest::Error),
+}
 
 #[derive(Debug)]
 enum PreflightCheck {
@@ -96,6 +104,7 @@ enum PreflightCheck {
         ntp_servers: Vec<String>,
         our_switch_slot: SwitchSlot,
         dns_name_to_query: Option<String>,
+        http_client: reqwest::Client,
         check_started_tx: oneshot::Sender<()>,
     },
 }
@@ -113,6 +122,7 @@ async fn preflight_task_main(
                 ntp_servers,
                 our_switch_slot,
                 dns_name_to_query,
+                http_client,
                 check_started_tx,
             } => {
                 // New preflight check: create a new event buffer.
@@ -131,6 +141,7 @@ async fn preflight_task_main(
                     ntp_servers,
                     our_switch_slot,
                     dns_name_to_query,
+                    http_client,
                     Arc::clone(&uplink_event_buffer),
                     &log,
                 )

@@ -102,12 +102,23 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 let scrimlet_clients = sleds
                     .into_iter()
                     .filter(|s| s.is_scrimlet())
-                    .map(|s| {
-                        sled_agent_client::Client::new_with_client(
-                            &format!("http://{}", s.address()),
-                            internal_http_client(),
-                            log.clone(),
-                        )
+                    .filter_map(|s| match internal_http_client() {
+                        Ok(http_client) => {
+                            Some(sled_agent_client::Client::new_with_client(
+                                &format!("http://{}", s.address()),
+                                http_client,
+                                log.clone(),
+                            ))
+                        }
+                        Err(e) => {
+                            error!(
+                                log,
+                                "error building scrimlet client";
+                                "sled_id" => %s.id(),
+                                "error" => %DisplayErrorChain::new(&e),
+                            );
+                            None
+                        }
                     });
 
                 //

@@ -5,6 +5,7 @@
 //! Deployment of Clickhouse keeper and server nodes via clickhouse-admin running in
 //! deployed clickhouse zones.
 
+use anyhow::Context;
 use anyhow::anyhow;
 use camino::Utf8PathBuf;
 use clickhouse_admin_keeper_client::Client as ClickhouseKeeperClient;
@@ -148,9 +149,15 @@ where
         let admin_url = format!("http://{admin_addr}");
         let log = log.new(slog::o!("admin_url" => admin_url.clone()));
         futs.push(Either::Left(async move {
+            let http_client = internal_http_client().with_context(|| {
+                format!(
+                    "failed to build clickhouse-admin-keeper client; \
+                     admin_url = {admin_url}"
+                )
+            })?;
             let client = ClickhouseKeeperClient::new_with_client(
                 &admin_url,
-                internal_http_client(),
+                http_client,
                 log.clone(),
             );
             client
@@ -181,9 +188,15 @@ where
         let admin_url = format!("http://{admin_addr}");
         let log = opctx.log.new(slog::o!("admin_url" => admin_url.clone()));
         futs.push(Either::Right(async move {
+            let http_client = internal_http_client().with_context(|| {
+                format!(
+                    "failed to build clickhouse-admin-server client; \
+                     admin_url = {admin_url}"
+                )
+            })?;
             let client = ClickhouseServerClient::new_with_client(
                 &admin_url,
-                internal_http_client(),
+                http_client,
                 log.clone(),
             );
             if let Err(e) = client
@@ -269,9 +282,15 @@ where
         ));
         let admin_url = format!("http://{admin_addr}");
         let log = opctx.log.new(slog::o!("admin_url" => admin_url.clone()));
+        let http_client = internal_http_client().with_context(|| {
+            format!(
+                "failed to build clickhouse-admin-single client; \
+                 admin_url = {admin_url}"
+            )
+        })?;
         let client = ClickhouseSingleClient::new_with_client(
             &admin_url,
-            internal_http_client(),
+            http_client,
             log.clone(),
         );
         client.init_db().await.map(|_| ()).map_err(|e| {

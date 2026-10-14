@@ -92,11 +92,9 @@ impl ArtifactCache {
             let addr = addresses[idx % addresses.len()];
             let url = format!("http://{}", addr.address);
             let log = self.log.new(o!("repo_depot_url" => url.clone()));
-            Ok(repo_depot_client::Client::new_with_client(
-                &url,
-                internal_http_client(),
-                log,
-            ))
+            let client =
+                internal_http_client().map_err(ArtifactCacheError::Client)?;
+            Ok(repo_depot_client::Client::new_with_client(&url, client, log))
         }
     }
 }
@@ -105,6 +103,9 @@ impl ArtifactCache {
 pub enum ArtifactCacheError {
     #[error("no repo depot clients available")]
     NoClients,
+
+    #[error("building repo depot client")]
+    Client(#[source] reqwest::Error),
 
     #[error("failed to fetch artifact")]
     Fetch(#[from] RepoDepotError),

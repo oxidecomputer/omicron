@@ -14,6 +14,7 @@ use crate::http_helpers::start_update;
 use crate::mgs::GetInventoryResponse as GetMgsInventoryResponse;
 use crate::mgs::records_to_mgs_inventory;
 use crate::multirack_config::CurrentMultirackJoinConfig;
+use crate::preflight_check::PreflightCheckStartError;
 use crate::transceivers::GetTransceiversResponse;
 use bootstrap_agent_lockstep_types::RackOperationStatus;
 use dropshot::ApiDescription;
@@ -26,6 +27,7 @@ use dropshot::TypedBody;
 use internal_dns_resolver::Resolver;
 use sled_agent_types::early_networking::SwitchSlot;
 use slog::o;
+use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
 use wicket_common::inventory::MgsV1InventorySnapshot;
 use wicket_common::inventory::RackV1Inventory;
@@ -181,7 +183,7 @@ impl WicketdApi for WicketdApiImpl {
     ) -> Result<HttpResponseOk<RackOperationStatus>, HttpError> {
         let ctx = rqctx.context();
 
-        let client = ba_lockstep_client(ctx);
+        let client = ba_lockstep_client(ctx)?;
         let op_status = client
             .rack_initialization_status()
             .await
@@ -441,11 +443,18 @@ impl WicketdApi for WicketdApiImpl {
             .await
         {
             Ok(()) => Ok(HttpResponseUpdatedNoContent {}),
-            Err(err) => Err(HttpError::for_client_error(
-                None,
-                dropshot::ClientErrorStatusCode::TOO_MANY_REQUESTS,
-                err.to_string(),
-            )),
+            Err(err @ PreflightCheckStartError::Busy) => {
+                Err(HttpError::for_client_error(
+                    None,
+                    dropshot::ClientErrorStatusCode::TOO_MANY_REQUESTS,
+                    err.to_string(),
+                ))
+            }
+            Err(err @ PreflightCheckStartError::HttpClient(_)) => {
+                Err(HttpError::for_internal_error(
+                    InlineErrorChain::new(&err).to_string(),
+                ))
+            }
         }
     }
 

@@ -143,7 +143,8 @@ impl StartRackUpdateArgs {
         output: CommandOutput<'_>,
     ) -> Result<()> {
         let client =
-            create_wicketd_client(&log, addrs.wicketd, WICKETD_TIMEOUT);
+            create_wicketd_client(&log, addrs.wicketd, WICKETD_TIMEOUT)
+                .context("failed to create wicketd client")?;
 
         let update_ids = self.component_ids.to_component_ids()?;
         let options = CreateStartUpdateOptions {
@@ -208,7 +209,8 @@ impl AttachArgs {
         output: CommandOutput<'_>,
     ) -> Result<()> {
         let client =
-            create_wicketd_client(&log, addrs.wicketd, WICKETD_TIMEOUT);
+            create_wicketd_client(&log, addrs.wicketd, WICKETD_TIMEOUT)
+                .context("failed to create wicketd client")?;
 
         let update_ids = self.component_ids.to_component_ids()?;
         do_attach_to_updates(log, client, update_ids, global_opts, output).await
@@ -369,7 +371,8 @@ impl StatusArgs {
             }
         } else {
             let client =
-                create_wicketd_client(&log, addrs.wicketd, WICKETD_TIMEOUT);
+                create_wicketd_client(&log, addrs.wicketd, WICKETD_TIMEOUT)
+                    .context("failed to create wicketd client")?;
             client
                 .get_artifacts_and_event_reports()
                 .await
@@ -655,7 +658,8 @@ impl ClearArgs {
         output: CommandOutput<'_>,
     ) -> Result<()> {
         let client =
-            create_wicketd_client(&log, addrs.wicketd, WICKETD_TIMEOUT);
+            create_wicketd_client(&log, addrs.wicketd, WICKETD_TIMEOUT)
+                .context("failed to create wicketd client")?;
 
         let update_ids = self.component_ids.to_component_ids()?;
         let response =
@@ -747,7 +751,8 @@ pub(crate) struct DumpArgs {
 impl DumpArgs {
     async fn exec(self, log: Logger, addrs: WicketdAddrs) -> Result<()> {
         let client =
-            create_wicketd_client(&log, addrs.wicketd, WICKETD_TIMEOUT);
+            create_wicketd_client(&log, addrs.wicketd, WICKETD_TIMEOUT)
+                .context("failed to create wicketd client")?;
 
         let response = client
             .get_artifacts_and_event_reports()

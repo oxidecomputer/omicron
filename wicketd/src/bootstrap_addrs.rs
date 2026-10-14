@@ -9,6 +9,7 @@ use omicron_common::http_client::internal_http_client;
 use sled_hardware_types::BaseboardId;
 use slog::Logger;
 use slog::warn;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
@@ -67,9 +68,20 @@ async fn scan_for_peers(
     let mut prev_sleds = None;
     loop {
         // Query the local bootstrap agent for all known peers
+        let http_client = match internal_http_client() {
+            Ok(http_client) => http_client,
+            Err(err) => {
+                warn!(
+                    log, "Failed to build bootstrap agent client";
+                    InlineErrorChain::new(&err),
+                );
+                tokio::time::sleep(SLEEP_BETWEEN_REFRESH).await;
+                continue;
+            }
+        };
         let client = bootstrap_agent_lockstep_client::Client::new_with_client(
             &format!("http://{bootstrap_agent_lockstep_address}"),
-            internal_http_client(),
+            http_client,
             log.clone(),
         );
 

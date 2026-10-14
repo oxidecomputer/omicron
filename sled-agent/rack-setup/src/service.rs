@@ -641,7 +641,7 @@ impl ServiceInner {
             info!(log, "Configuring DNS server");
             let dns_config_client = dns_service_client::Client::new_with_client(
                 &format!("http://{}", ip_addr),
-                internal_http_client(),
+                internal_http_client()?,
                 log.clone(),
             );
 

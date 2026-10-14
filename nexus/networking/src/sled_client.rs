@@ -17,6 +17,7 @@ use sled_agent_client::Client as SledAgentClient;
 use sled_hardware_types::BaseboardId;
 use slog::Logger;
 use slog::o;
+use slog_error_chain::InlineErrorChain;
 use std::net::SocketAddrV6;
 
 pub fn sled_lookup<'a>(
@@ -33,13 +34,23 @@ pub fn default_reqwest_client_builder() -> reqwest::ClientBuilder {
     internal_http_client_builder().connect_timeout(dur).timeout(dur)
 }
 
+/// Builds a client from [`default_reqwest_client_builder`].
+pub fn default_reqwest_client() -> Result<reqwest::Client, Error> {
+    default_reqwest_client_builder().build().map_err(|e| {
+        Error::internal_error(&format!(
+            "failed to build sled agent client: {}",
+            InlineErrorChain::new(&e)
+        ))
+    })
+}
+
 pub async fn sled_client(
     datastore: &DataStore,
     lookup_opctx: &OpContext,
     sled_id: SledUuid,
     log: &Logger,
 ) -> Result<SledAgentClient, Error> {
-    let client = default_reqwest_client_builder().build().unwrap();
+    let client = default_reqwest_client()?;
     sled_client_ext(datastore, lookup_opctx, sled_id, log, client).await
 }
 
@@ -71,7 +82,7 @@ pub async fn sled_client_by_baseboard_id_and_rack_id_if_commissioned(
     rack_id: RackUuid,
     log: &Logger,
 ) -> Result<Option<SledAgentClient>, Error> {
-    let client = default_reqwest_client_builder().build().unwrap();
+    let client = default_reqwest_client()?;
     sled_client_by_baseboard_id_and_rack_id_if_commissioned_ext(
         datastore,
         opctx,
@@ -114,9 +125,9 @@ pub fn sled_client_from_address(
     sled_id: SledUuid,
     address: SocketAddrV6,
     log: &Logger,
-) -> SledAgentClient {
-    let client = default_reqwest_client_builder().build().unwrap();
-    sled_client_from_address_ext(sled_id, address, log, client)
+) -> Result<SledAgentClient, Error> {
+    let client = default_reqwest_client()?;
+    Ok(sled_client_from_address_ext(sled_id, address, log, client))
 }
 
 pub fn sled_client_from_address_ext(

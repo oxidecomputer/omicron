@@ -19,6 +19,7 @@ use omicron_common::api::internal::shared::{
     RouterKind, RouterVersion,
 };
 use serde_json::json;
+use slog_error_chain::InlineErrorChain;
 use std::collections::hash_map::Entry;
 use std::{
     collections::{HashMap, HashSet},
@@ -79,13 +80,23 @@ impl BackgroundTask for VpcRouteManager {
 
             // Map sled db records to sled-agent clients
             let sled_clients: Vec<(Sled, sled_agent_client::Client)> = sleds
-                .map(|sled| {
-                    let client = sled_client_from_address(
+                .filter_map(|sled| {
+                    match sled_client_from_address(
                         sled.id(),
                         sled.address(),
                         &log,
-                    );
-                    (sled, client)
+                    ) {
+                        Ok(client) => Some((sled, client)),
+                        Err(e) => {
+                            warn!(
+                                log,
+                                "failed to build sled-agent client";
+                                "sled_id" => %sled.id(),
+                                InlineErrorChain::new(&e),
+                            );
+                            None
+                        }
+                    }
                 })
                 .collect();
 

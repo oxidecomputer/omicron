@@ -53,7 +53,8 @@ impl InventoryArgs {
         wicketd_addr: SocketAddrV6,
         mut output: CommandOutput<'_>,
     ) -> Result<()> {
-        let client = create_wicketd_client(&log, wicketd_addr, WICKETD_TIMEOUT);
+        let client = create_wicketd_client(&log, wicketd_addr, WICKETD_TIMEOUT)
+            .context("failed to create wicketd client")?;
 
         match self {
             InventoryArgs::ConfiguredBootstrapSleds { format } => {

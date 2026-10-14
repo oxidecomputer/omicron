@@ -292,6 +292,7 @@ impl From<Error> for dropshot::HttpError {
                     }
                     err @ (InstanceError::Timeout(_)
                     | InstanceError::VnicCreation(_)
+                    | InstanceError::PropolisClient(_)
                     | InstanceError::Notification(_)
                     | InstanceError::Migration(_)
                     | InstanceError::NicNotInPropolisSpec(_)

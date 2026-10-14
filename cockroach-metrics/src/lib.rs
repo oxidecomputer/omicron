@@ -16,6 +16,7 @@ use omicron_common::http_client::internal_http_client_builder;
 use parallel_task_set::ParallelTaskSet;
 use serde::{Deserialize, Serialize};
 use slog::{Logger, debug, warn};
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -36,12 +37,15 @@ impl CockroachAdminClient {
     /// Create a new CockroachDB HTTP client
     ///
     /// "timeout" is used as both a connection and request timeout duration.
-    fn new(log: Logger, address: SocketAddr, timeout: Duration) -> Self {
+    fn new(
+        log: Logger,
+        address: SocketAddr,
+        timeout: Duration,
+    ) -> Result<Self, reqwest::Error> {
         let reqwest_client = internal_http_client_builder()
             .connect_timeout(timeout)
             .timeout(timeout)
-            .build()
-            .expect("Failed to build HTTP client");
+            .build()?;
 
         let client = Client::new_with_client(
             &format!("http://{address}"),
@@ -49,7 +53,7 @@ impl CockroachAdminClient {
             log,
         );
 
-        Self { client }
+        Ok(Self { client })
     }
 
     /// Fetch Prometheus metrics from the /_status/vars endpoint
@@ -186,12 +190,26 @@ impl CockroachClusterAdminClient {
             if let std::collections::btree_map::Entry::Vacant(e) =
                 clients.entry(addr)
             {
-                e.insert(CockroachAdminClient::new(
+                // If we fail to build a client, leave this address out; we'll
+                // try again on the next update.
+                match CockroachAdminClient::new(
                     self.log.clone(),
                     addr,
                     self.timeout,
-                ));
-                added_count += 1;
+                ) {
+                    Ok(client) => {
+                        e.insert(client);
+                        added_count += 1;
+                    }
+                    Err(err) => {
+                        warn!(
+                            self.log,
+                            "Failed to build CockroachDB admin client";
+                            "address" => %addr,
+                            InlineErrorChain::new(&err),
+                        );
+                    }
+                }
             }
         }
 
