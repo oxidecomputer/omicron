@@ -6,6 +6,7 @@
 
 use crate::collection::BundleCollection;
 use crate::output::BundleOutput;
+use crate::output::SizeLimitExceeded;
 use crate::step::CollectionStepOutput;
 use nexus_types::fm::ereport::EreportFilters;
 use nexus_types::support_bundle::BundleTimeRange;
@@ -36,6 +37,8 @@ pub async fn collect(
     let time_range = collection.data_selection().time_range().clone();
     let ereports_dir = output.join("ereports");
     let mut status = SupportBundleEreportStatus::default();
+    // Running out of space is reported by the step framework, rather than as
+    // an error collecting ereports.
     if let Err(err) = save_ereports(
         collection,
         ereport_filters.clone(),
@@ -44,6 +47,7 @@ pub async fn collect(
         &mut status,
     )
     .await
+        && err.downcast_ref::<SizeLimitExceeded>().is_none()
     {
         warn!(
             log,
@@ -53,7 +57,7 @@ pub async fn collect(
             InlineErrorChain::new(err.as_ref())
         );
         status.errors.push(InlineErrorChain::new(err.as_ref()).to_string());
-    };
+    }
 
     let details = serde_json::to_value(&status)
         .context("failed to serialize ereport collection status")?;
