@@ -498,11 +498,11 @@ crossterm = { version = "0.29.0", features = ["event-stream"] }
 # NOTE: if you change the pinned revision of the `crucible` dependencies, you
 # must also update the references in package-manifest.toml to match the new
 # revision.
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "f85cf0dc3631e2f0c13384787efb0efc1b642162" }
-crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "f85cf0dc3631e2f0c13384787efb0efc1b642162" }
-crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "f85cf0dc3631e2f0c13384787efb0efc1b642162" }
-crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "f85cf0dc3631e2f0c13384787efb0efc1b642162" }
-crucible-client-types = { git = "https://github.com/oxidecomputer/crucible", rev = "f85cf0dc3631e2f0c13384787efb0efc1b642162" }
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "9fd704598504acb5fe03091a6ea44c53205158c6" }
+crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "9fd704598504acb5fe03091a6ea44c53205158c6" }
+crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "9fd704598504acb5fe03091a6ea44c53205158c6" }
+crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "9fd704598504acb5fe03091a6ea44c53205158c6" }
+crucible-client-types = { git = "https://github.com/oxidecomputer/crucible", rev = "9fd704598504acb5fe03091a6ea44c53205158c6" }
 # NOTE: See above!
 csv = "1.3.1"
 curve25519-dalek = "4"
@@ -523,7 +523,7 @@ digest = "0.10.7"
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
-dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "e577a94678bf0a8d64d719acd3e19edd965f66a3" }
+dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "4448f2eaa804b65b6c2dfadc4f761a89bb6b2a36" }
 dropshot = { version = "0.17.1", features = [ "usdt-probes" ] }
 dropshot-api-manager = "0.8.0"
 dropshot-api-manager-types = "0.8.0"
@@ -625,8 +625,8 @@ libipcc = { git = "https://github.com/oxidecomputer/ipcc-rs", rev = "524eb8f1250
 libnvme = { git = "https://github.com/oxidecomputer/libnvme", rev = "dd5bb221d327a1bc9287961718c3c10d6bd37da0" }
 linear-map = "1.2.0"
 live-tests-macros = { path = "live-tests/macros" }
-lldpd_client = { git = "https://github.com/oxidecomputer/lldp", rev = "54b266174d4de9628bca9c97b0db176e16f12154", package = "lldpd-client" }
-lldp_protocol = { git = "https://github.com/oxidecomputer/lldp", rev = "54b266174d4de9628bca9c97b0db176e16f12154", package = "protocol" }
+lldpd_client = { git = "https://github.com/oxidecomputer/lldp", rev = "fa7363d0f3338f4fdc1642fd849f3aaac255f6af", package = "lldpd-client" }
+lldp_protocol = { git = "https://github.com/oxidecomputer/lldp", rev = "fa7363d0f3338f4fdc1642fd849f3aaac255f6af", package = "protocol" }
 lpc55_areas = { git = "https://github.com/oxidecomputer/lpc55_support" }
 omicron-deployment-graph = { path = "dev-tools/omicron-deployment-graph" }
 macaddr = { version = "1.0.1", features = ["serde_std"] }
@@ -636,10 +636,10 @@ ntp-admin-api = { path = "ntp-admin/api" }
 ntp-admin-client = { path = "clients/ntp-admin-client" }
 ntp-admin-types = { path = "ntp-admin/types" }
 ntp-admin-types-versions = { path = "ntp-admin/types/versions" }
-mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "389016069197dc8ca611f4b1dc63dfafbe634b7c" }
-mg-api-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "389016069197dc8ca611f4b1dc63dfafbe634b7c" }
-ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "389016069197dc8ca611f4b1dc63dfafbe634b7c" }
-ddm-api-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "389016069197dc8ca611f4b1dc63dfafbe634b7c" }
+mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "1ad5148b1cbf46301cf0078ba1cfe34fa6b1f1e9" }
+mg-api-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "1ad5148b1cbf46301cf0078ba1cfe34fa6b1f1e9" }
+ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "1ad5148b1cbf46301cf0078ba1cfe34fa6b1f1e9" }
+ddm-api-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "1ad5148b1cbf46301cf0078ba1cfe34fa6b1f1e9" }
 multimap = "0.10.1"
 nexus-auth = { path = "nexus/auth" }
 nexus-background-task-interface = { path = "nexus/background-task-interface" }
@@ -763,11 +763,11 @@ progenitor-extras = "0.3.0"
 # NOTE: if you change the pinned revision of the `bhyve_api` and propolis
 # dependencies, you must also update the references in package-manifest.toml to
 # match the new revision.
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "9da09f63ba10c232bd1e3dc2327195de3a081df1" }
-propolis-api-types-versions = { git = "https://github.com/oxidecomputer/propolis", rev = "9da09f63ba10c232bd1e3dc2327195de3a081df1" }
-propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "9da09f63ba10c232bd1e3dc2327195de3a081df1" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "9da09f63ba10c232bd1e3dc2327195de3a081df1" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "9da09f63ba10c232bd1e3dc2327195de3a081df1" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "3b60af56ed99c4497f02ac9fe014c76adfcf978b" }
+propolis-api-types-versions = { git = "https://github.com/oxidecomputer/propolis", rev = "3b60af56ed99c4497f02ac9fe014c76adfcf978b" }
+propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "3b60af56ed99c4497f02ac9fe014c76adfcf978b" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "3b60af56ed99c4497f02ac9fe014c76adfcf978b" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "3b60af56ed99c4497f02ac9fe014c76adfcf978b" }
 # NOTE: see above!
 proptest = "1.11.0"
 qorb = "0.4.1"
@@ -1123,6 +1123,8 @@ opt-level = 3
 # progenitor = { path = "../progenitor/progenitor" }
 # progenitor-client = { path = "../progenitor/progenitor-client" }
 # steno = { path = "../steno" }
+progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "v0_next" }
+progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "v0_next" }
 
 # [patch."https://github.com/oxidecomputer/crucible"]
 # crucible-agent-client = { path = "../crucible/agent-client" }
