@@ -488,14 +488,13 @@ impl SupportBundleCollector {
     ) -> anyhow::Result<()> {
         // Create the zipfile as a temporary file.
         //
-        // Zipping compresses every file in the bundle, and dropping `dir`
-        // recursively deletes it, so both run on a blocking thread. Dropping
-        // `dir` here frees the uncompressed copy of the bundle before the
-        // upload starts.
+        // Zipping compresses every file in the bundle and removes each one
+        // once it has been added, so it runs on a blocking thread. Removing
+        // files as they're added means `dir` and the zip, both in `TEMPDIR`,
+        // never hold two full copies of the bundle at once, and `dir` is gone
+        // before the upload starts.
         let zipfile = tokio::task::spawn_blocking(move || {
-            let zipfile = bundle_to_zipfile(&dir, Utf8Path::new(TEMPDIR));
-            drop(dir);
-            zipfile
+            bundle_to_zipfile(dir, Utf8Path::new(TEMPDIR))
         })
         .await
         .with_context(|| "Zipping the support bundle panicked")??;
@@ -2122,7 +2121,7 @@ mod test {
             .unwrap();
         std::fs::write(dir.path().join("file-b"), "more data").unwrap();
 
-        let zipfile = bundle_to_zipfile(&dir, tempdir_for_zip.path())
+        let zipfile = bundle_to_zipfile(dir, tempdir_for_zip.path())
             .expect("Should have been able to bundle zipfile");
         let archive = zip::read::ZipArchive::new(zipfile).unwrap();
 
