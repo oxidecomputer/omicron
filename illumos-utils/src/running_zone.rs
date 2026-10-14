@@ -910,10 +910,9 @@ impl<'a> ZoneBuilder<'a> {
                 zone_type,
                 self.unique_name,
             );
-            let mut zonepath = self.zone_root_path?;
-            zonepath = temp_dir
+            let zonepath = temp_dir
                 .join(
-                    zonepath.strip_prefix("/").unwrap()
+                    self.zone_root_path?.strip_prefix("/").unwrap()
                 )
                 .join(&full_zone_name);
             let iz = InstalledZone {
