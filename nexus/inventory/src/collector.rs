@@ -978,9 +978,10 @@ mod test {
         for sled_info in &collection.sled_agents {
             swrite!(
                 s,
-                "  sled {} ({:?})\n",
+                "  sled {} ({:?}) rack: {}\n",
                 sled_info.sled_id,
-                sled_info.sled_role
+                sled_info.sled_role,
+                sled_info.rack_id,
             );
             swrite!(s, "    baseboard {:?}\n", sled_info.baseboard_id);
 
