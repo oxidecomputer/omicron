@@ -27,6 +27,11 @@ use tufaceous_artifact::ArtifactHash;
 api_versions!([
     // Do not create new versions of this client-side versioned API.
     // https://github.com/oxidecomputer/omicron/issues/9290
+    //
+    // Version 2 of this API is added so we can eventually remove
+    // `ArtifactHash::v1_json_schema`. It is being rolled out over multiple
+    // releases.
+    (2, REMOVE_ARTIFACT_KIND),
     (1, INITIAL),
 ]);
 
@@ -39,12 +44,26 @@ pub trait InstallinatorApi {
     /// Fetch an artifact by hash.
     #[endpoint {
         method = GET,
-        path = "/artifacts/by-hash/{kind}/{hash}",
+        path = "/artifacts/sha256/{hash}",
+        versions = VERSION_REMOVE_ARTIFACT_KIND..,
     }]
     async fn get_artifact_by_hash(
         rqctx: RequestContext<Self::Context>,
         path: Path<GetArtifactPathParams>,
     ) -> Result<HttpResponseHeaders<HttpResponseOk<FreeformBody>>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/artifacts/by-hash/{kind}/{hash}",
+        versions = ..VERSION_REMOVE_ARTIFACT_KIND,
+    }]
+    async fn get_artifact_by_hash_v1(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<GetArtifactPathParamsV1>,
+    ) -> Result<HttpResponseHeaders<HttpResponseOk<FreeformBody>>, HttpError>
+    {
+        Self::get_artifact_by_hash(rqctx, path.map(Into::into)).await
+    }
 
     /// Report progress and completion to the server.
     ///
@@ -66,6 +85,12 @@ pub trait InstallinatorApi {
 
 #[derive(Deserialize, JsonSchema)]
 pub struct GetArtifactPathParams {
+    /// The hash of the artifact.
+    pub hash: ArtifactHash,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct GetArtifactPathParamsV1 {
     /// This parameter is ignored and is present only to avoid needing a new
     /// API version. Recommend using "any".
     pub kind: String,
@@ -76,6 +101,12 @@ pub struct GetArtifactPathParams {
     // old schema in this API version.
     #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
     pub hash: ArtifactHash,
+}
+
+impl From<GetArtifactPathParamsV1> for GetArtifactPathParams {
+    fn from(value: GetArtifactPathParamsV1) -> Self {
+        Self { hash: value.hash }
+    }
 }
 
 /// Add a content length header to a response.

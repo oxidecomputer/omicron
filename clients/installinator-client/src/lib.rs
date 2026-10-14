@@ -5,7 +5,12 @@
 //! Interface for installinator to make API requests.
 
 progenitor::generate_api!(
-    spec = "../../openapi/installinator/installinator-1.0.0-c0ed87.json",
+    // We are rolling out v2 over multiple releases.
+    // spec = "../../openapi/installinator/installinator-2.0.0-863c36.json",
+    spec = {
+        path = "git-stub-vcs/openapi/installinator/installinator-1.0.0-c0ed87.json",
+        relative_to = OutDir,
+    },
     interface = Positional,
     inner_type = slog::Logger,
     hooks = Expected,

@@ -5902,6 +5902,7 @@ dependencies = [
 name = "installinator-client"
 version = "0.1.0"
 dependencies = [
+ "git-stub-vcs",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxide-update-engine-types",
@@ -12948,6 +12949,7 @@ dependencies = [
 name = "repo-depot-client"
 version = "0.1.0"
 dependencies = [
+ "git-stub-vcs",
  "omicron-workspace-hack",
  "progenitor 0.15.1",
  "progenitor-extras",
