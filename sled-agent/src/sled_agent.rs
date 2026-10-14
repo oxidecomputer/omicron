@@ -39,7 +39,6 @@ use illumos_utils::zfs::RemoveReservationError;
 use illumos_utils::zfs::RemoveReservationErrorInner;
 use illumos_utils::zfs::SizeDetails;
 use illumos_utils::zfs::Zfs;
-use illumos_utils::zpool::PathInPool;
 use itertools::Itertools as _;
 use omicron_common::address::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use omicron_common::address::{
@@ -61,6 +60,7 @@ use oxnet::IpNet;
 use sled_agent_bootstrap_common::sprockets::{
     SprocketsClient, SprocketsClientError,
 };
+use sled_agent_config_reconciler::PathInPool;
 use sled_agent_config_reconciler::{
     ConfigReconcilerHandle, ConfigReconcilerSpawnToken, InternalDisks,
     InternalDisksReceiver, LedgerNewConfigError, LedgerTaskError,

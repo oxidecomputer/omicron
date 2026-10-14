@@ -1290,6 +1290,7 @@ fn config_differs_only_by_image_source(
 mod tests {
     use super::*;
     use crate::InternalDisks;
+    use crate::PathInPool;
     use crate::dataset_serialization_task::DatasetEnsureError;
     use anyhow::anyhow;
     use assert_matches::assert_matches;
@@ -1300,7 +1301,6 @@ mod tests {
     use illumos_utils::dladm::EtherstubVnic;
     use illumos_utils::link::VnicAllocator;
     use illumos_utils::running_zone::ZoneBuilderFactory;
-    use illumos_utils::zpool::PathInPool;
     use illumos_utils::zpool::ZpoolName;
     use omicron_common::address::SLED_PREFIX_LENGTH;
     use omicron_common::disk::DatasetKind;

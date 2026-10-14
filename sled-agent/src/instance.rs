@@ -27,7 +27,6 @@ use illumos_utils::opte::{
 };
 use illumos_utils::running_zone::{RunningZone, ZoneBuilderFactory};
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
-use illumos_utils::zpool::PathInPool;
 use omicron_common::api::internal::shared::{DelegatedZvol, SledIdentifiers};
 use omicron_common::backoff;
 use omicron_common::backoff::BackoffError;
@@ -43,6 +42,7 @@ use rand::SeedableRng;
 use rand::prelude::IteratorRandom;
 use sled_agent_config_reconciler::AvailableDatasetsReceiver;
 use sled_agent_config_reconciler::CurrentlyManagedZpoolsReceiver;
+use sled_agent_config_reconciler::PathInPool;
 use sled_agent_resolvable_files::ramdisk_file_source;
 use sled_agent_types::attached_subnet::{AttachedSubnet, AttachedSubnets};
 use sled_agent_types::instance::*;

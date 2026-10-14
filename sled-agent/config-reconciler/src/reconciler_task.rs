@@ -9,7 +9,6 @@ use chrono::Utc;
 use either::Either;
 use futures::future;
 use iddqd::IdOrdMap;
-use illumos_utils::zpool::PathInPool;
 use key_manager::StorageKeyRequester;
 use omicron_common::disk::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
@@ -42,6 +41,7 @@ use tokio::sync::watch;
 use trust_quorum_types::types::Epoch;
 
 use crate::InternalDisksReceiver;
+use crate::PathInPool;
 use crate::SledAgentArtifactStore;
 use crate::TimeSyncConfig;
 use crate::dataset_serialization_task::DatasetRekeyInfo;

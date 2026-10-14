@@ -50,8 +50,7 @@ use illumos_utils::smf_helper::Service as _;
 use illumos_utils::smf_helper::SmfHelper;
 use illumos_utils::zfs::ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT;
 use illumos_utils::zone::AddressRequest;
-use illumos_utils::zpool::PathInPool;
-use illumos_utils::zpool::{PathInPoolOrRamdisk, ZpoolName, ZpoolOrRamdisk};
+use illumos_utils::zpool::ZpoolName;
 use illumos_utils::{PFEXEC, execute};
 use internal_dns_resolver::Resolver;
 use internal_dns_types::names::BOUNDARY_NTP_DNS_NAME;
@@ -81,6 +80,7 @@ use omicron_ddm_admin_client::DdmError;
 use omicron_generation_kinds::Generation;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::RackUuid;
+use sled_agent_config_reconciler::PathInPool;
 use sled_agent_resolvable_files::{
     ZoneImageSourceResolver, ramdisk_file_source,
 };
@@ -1195,7 +1195,7 @@ impl ServiceManager {
     async fn initialize_zone(
         &self,
         request: ZoneArgs<'_>,
-        zone_root_path: PathInPoolOrRamdisk,
+        zone_root_path: Utf8PathBuf,
         filesystems: &[zone::Fs],
         data_links: &[String],
     ) -> Result<RunningZone, Error> {
@@ -1284,7 +1284,7 @@ impl ServiceManager {
         let installed_zone = zone_builder
             .with_log(self.inner.log.clone())
             .with_underlay_vnic_allocator(&self.inner.underlay_vnic_allocator)
-            .with_zone_root_path(zone_root_path.path)
+            .with_zone_root_path(zone_root_path)
             .with_zone_type(zone_type_str)
             .with_file_source(&file_source)
             .with_datasets(datasets.as_slice())
@@ -3036,7 +3036,7 @@ impl ServiceManager {
         let runtime = self
             .initialize_zone(
                 ZoneArgs::Omicron(zone),
-                zone_root_path.into(),
+                zone_root_path.path,
                 // filesystems=
                 &[],
                 // data_links=
@@ -3751,11 +3751,8 @@ impl ServiceManager {
         // switch zone were on a U.2 device we would not be able to run RSS, as
         // we could not create the U.2 disks due to lack of encryption. To break
         // the cycle we put the switch zone root fs on the ramdisk.
-        let root = Utf8PathBuf::from(ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT);
-        let zone_root_path = PathInPoolOrRamdisk {
-            pool_or_ramdisk: ZpoolOrRamdisk::Ramdisk,
-            path: root.clone(),
-        };
+        let zone_root_path =
+            Utf8PathBuf::from(ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT);
         let zone_args = ZoneArgs::Switch(&request);
         info!(self.inner.log, "Starting switch zone");
         let zone = self

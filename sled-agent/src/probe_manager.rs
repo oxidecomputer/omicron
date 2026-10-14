@@ -15,7 +15,6 @@ use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::{DhcpCfg, PortCreateParams, PortManager};
 use illumos_utils::running_zone::{RunningZone, ZoneBuilderFactory};
-use illumos_utils::zpool::PathInPool;
 use illumos_utils::zpool::ZpoolName;
 use omicron_common::api::external::{
     VpcFirewallRuleAction, VpcFirewallRuleDirection, VpcFirewallRulePriority,
@@ -24,6 +23,7 @@ use omicron_common::api::external::{
 use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid, ProbeUuid};
 use rand::SeedableRng;
 use rand::prelude::IteratorRandom;
+use sled_agent_config_reconciler::PathInPool;
 use sled_agent_config_reconciler::{
     AvailableDatasetsReceiver, CurrentlyManagedZpools,
     CurrentlyManagedZpoolsReceiver,

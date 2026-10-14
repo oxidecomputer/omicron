@@ -12,6 +12,7 @@
 //! the live state of datasets directly from ZFS).
 
 use super::CurrentlyManagedZpools;
+use crate::PathInPool;
 use crate::dataset_serialization_task::DatasetEnsureError;
 use crate::dataset_serialization_task::DatasetEnsureResult;
 use crate::dataset_serialization_task::DatasetTaskError;
@@ -22,7 +23,6 @@ use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use illumos_utils::zone::OmicronZoneConfigExt;
-use illumos_utils::zpool::PathInPool;
 use omicron_common::disk::DatasetKind;
 use omicron_common::disk::DatasetName;
 use omicron_uuid_kinds::DatasetUuid;

@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use camino::Utf8PathBuf;
-use illumos_utils::zpool::PathInPool;
+use illumos_utils::zpool::ZpoolName;
 use key_manager::StorageKeyRequester;
 use omicron_common::disk::DatasetName;
 use sled_agent_types::artifact::ArtifactConfig;
@@ -28,8 +28,6 @@ use trust_quorum_types::types::Epoch;
 
 #[cfg(feature = "testing")]
 use camino_tempfile::Utf8TempDir;
-#[cfg(feature = "testing")]
-use illumos_utils::zpool::ZpoolName;
 #[cfg(feature = "testing")]
 use omicron_common::api::internal::shared::DatasetKind;
 #[cfg(feature = "testing")]
@@ -79,6 +77,21 @@ pub enum TimeSyncConfig {
     Normal,
     // Skips timesync unconditionally.
     Skip,
+}
+
+/// A path which exists within a zpool.
+//
+// This structure is very denormalized: a subset of `path` specifically points
+// to `pool`, so we could instead store `pool` plus the `path`-specific
+// information, then reconstruct `path` as needed. We don't do this mostly for
+// simplicity: production code would need to store both a prefix (coming from
+// `MountConfig`) and a suffix (the specific kind of `path`), and test code
+// would be more painful (it often supplies a nonexistent `zpool` and an
+// unrelated `path`; e.g., to a tempdir).
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct PathInPool {
+    pub pool: ZpoolName,
+    pub path: Utf8PathBuf,
 }
 
 #[derive(Debug)]
