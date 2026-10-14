@@ -107,6 +107,7 @@ impl CollectArgs {
                 BundleDataCategory::HostInfo => sel.with_all_sleds(),
                 BundleDataCategory::SledCubbyInfo => sel.with_sled_cubby_info(),
                 BundleDataCategory::SpDumps => sel.with_sp_dumps(),
+                BundleDataCategory::SpComponents => sel.with_sp_components(),
                 BundleDataCategory::Ereports => {
                     sel.with_ereports(EreportFilters::new())
                 }

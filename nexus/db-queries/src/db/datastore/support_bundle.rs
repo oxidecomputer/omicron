@@ -804,6 +804,7 @@ impl DataStore {
                 include_sled_cubby_info: data_selection
                     .contains_sled_cubby_info(),
                 include_sp_dumps: data_selection.contains_sp_dumps(),
+                include_sp_components: data_selection.contains_sp_components(),
             })
             .execute_async(conn)
             .await?;
@@ -821,7 +822,8 @@ impl DataStore {
             match data {
                 BundleData::Reconfigurator
                 | BundleData::SledCubbyInfo
-                | BundleData::SpDumps => {
+                | BundleData::SpDumps
+                | BundleData::SpComponents => {
                     // Handled by flags row above.
                 }
                 BundleData::HostInfo(sleds) => {

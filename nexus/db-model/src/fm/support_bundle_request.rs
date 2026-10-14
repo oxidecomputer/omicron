@@ -69,6 +69,7 @@ pub struct DataSelectionFlags {
     pub include_reconfigurator: bool,
     pub include_sled_cubby_info: bool,
     pub include_sp_dumps: bool,
+    pub include_sp_components: bool,
 }
 
 impl DataSelectionFlags {
@@ -83,6 +84,7 @@ impl DataSelectionFlags {
             include_reconfigurator: data_selection.contains_reconfigurator(),
             include_sled_cubby_info: data_selection.contains_sled_cubby_info(),
             include_sp_dumps: data_selection.contains_sp_dumps(),
+            include_sp_components: data_selection.contains_sp_components(),
         }
     }
 }
@@ -237,6 +239,9 @@ impl TryFrom<BundleDataSelection>
         }
         if row.flags.include_sp_dumps {
             selection.insert(BundleData::SpDumps);
+        }
+        if row.flags.include_sp_components {
+            selection.insert(BundleData::SpComponents);
         }
         if let Some(host_info) = row.host_info {
             selection.insert(host_info.into());

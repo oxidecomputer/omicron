@@ -654,12 +654,35 @@ async fn test_omdb_success_cases() {
         "sp_task_dumps/sled_1/dump-0.zip",
         "sp_task_dumps/switch_0/dump-0.zip",
         "sp_task_dumps/switch_1/dump-0.zip",
+        "sp_components/sled_0.json",
+        "sp_components/sled_1.json",
+        "sp_components/switch_0.json",
+        "sp_components/switch_1.json",
     ] {
         assert!(
             archive.by_name(required).is_ok(),
             "bundle zip is missing expected entry {required}",
         );
     }
+
+    // The simulated sled SP reports details for its components without
+    // error.
+    let sp_components: Vec<serde_json::Value> = serde_json::from_reader(
+        archive
+            .by_name("sp_components/sled_0.json")
+            .expect("bundle zip contains sled 0 SP components"),
+    )
+    .expect("SP components file is valid JSON");
+    assert!(
+        sp_components.iter().all(|c| c.get("error").is_none()),
+        "SP components should have no errors: {sp_components:#?}",
+    );
+    assert!(
+        sp_components.iter().any(|c| c["details"]
+            .as_array()
+            .is_some_and(|details| !details.is_empty())),
+        "SP components should include details: {sp_components:#?}",
+    );
 
     // Now exercise the stdout-streaming path: omit `--output` and
     // capture stdout as bytes. Verifies the data-descriptor zip variant
@@ -711,6 +734,10 @@ async fn test_omdb_success_cases() {
         "sp_task_dumps/sled_1/dump-0.zip",
         "sp_task_dumps/switch_0/dump-0.zip",
         "sp_task_dumps/switch_1/dump-0.zip",
+        "sp_components/sled_0.json",
+        "sp_components/sled_1.json",
+        "sp_components/switch_0.json",
+        "sp_components/switch_1.json",
     ] {
         assert!(
             archive.by_name(required).is_ok(),
