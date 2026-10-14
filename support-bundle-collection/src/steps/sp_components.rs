@@ -116,11 +116,11 @@ async fn save_sp_components(
     sp: SpIdentifier,
     sp_components_dir: &Utf8Path,
 ) -> anyhow::Result<()> {
+    let file_stem = format!("{}_{}", sp.typ, sp.slot);
     let fetch_components = async {
         let components = mgs_client
             .sp_component_list(&sp.typ, sp.slot)
-            .await
-            .context("failed to list SP components")?
+            .await?
             .into_inner()
             .components;
 
@@ -160,17 +160,32 @@ async fn save_sp_components(
             };
             output.push(SpComponentEntry { info, details, error });
         }
-        Ok::<_, anyhow::Error>((output, sp_error))
+        Ok::<_, gateway_client::Error<gateway_client::types::Error>>((
+            output, sp_error,
+        ))
     };
-    let (components, sp_error) = tokio::select! {
+    let result = tokio::select! {
         _ = collection.cancelled() => return Ok(()),
-        result = fetch_components => result?,
+        result = fetch_components => result,
+    };
+    let (components, sp_error) = match result {
+        Ok(fetched) => fetched,
+        Err(e) => {
+            let error = format!(
+                "failed to list SP components: {}",
+                InlineErrorChain::new(&e)
+            );
+            let error_path = sp_components_dir.join(format!("{file_stem}.err"));
+            tokio::fs::write(&error_path, &error).await.with_context(|| {
+                format!("failed to write SP component error to {error_path}")
+            })?;
+            bail!(error);
+        }
     };
 
     let json = serde_json::to_string_pretty(&components)
         .context("failed to serialize SP component details to JSON")?;
-    let output_path =
-        sp_components_dir.join(format!("{}_{}.json", sp.typ, sp.slot));
+    let output_path = sp_components_dir.join(format!("{file_stem}.json"));
     tokio::fs::write(&output_path, json).await.with_context(|| {
         format!("failed to write SP component details to {output_path}")
     })?;
