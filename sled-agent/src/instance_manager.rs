@@ -1086,18 +1086,19 @@ impl InstanceManagerRunner {
         Ok(())
     }
 
-    async fn use_only_currently_managed_zpools(&mut self) {
-        let current_zpools =
-            self.currently_managed_zpools_rx.current_and_update();
+    fn use_only_currently_managed_zpools(&mut self) {
         for (id, instance) in self.jobs.iter() {
             // Spawn a task for each instance, as we must wait for the zone to
             // be set up before checking if it is using an unknown zpool, and we
             // do not want to block the main instance-manager loop waiting for
             // all instances to finish having their Propolis zones set up.
-            let current_zpools = current_zpools.clone();
+            let mut current_zpools = self.currently_managed_zpools_rx.clone();
             // Since we must clone the logger anyway in order to spawn the task,
-            // we may as well jam the propolis ID in there...
-            let log = self.log.new(o!("propolis_id" => id.to_string()));
+            // we may as well jam the VMM and instance IDs in there...
+            let log = self.log.new(o!(
+                "propolis_id" => id.to_string(),
+                "instance_id" => instance.id().to_string(),
+            ));
             let instance = instance.clone();
             tokio::spawn(async move {
                 // Wait for the propolis zone to start, and consider its root
@@ -1105,10 +1106,16 @@ impl InstanceManagerRunner {
                 let Some(filesystem_pool) =
                     instance.wait_for_filesystem_zpool().await
                 else {
-                    // Zone is not on the ramdisk, so skip it.
+                    // Either the zone is on the ramdisk, or setting up the zone
+                    // failed, so it is not using a zpool. So skip it.
                     return;
                 };
-                if !current_zpools.contains(filesystem_pool) {
+                if !current_zpools
+                    // Grab the latest list of currently managed zpools only
+                    // after we have waited for the zone to do something.
+                    .current_and_update()
+                    .contains(filesystem_pool)
+                {
                     info!(
                         log,
                         "use_only_currently_managed_zpools: Terminating \
