@@ -4148,8 +4148,11 @@ dependencies = [
  "omicron-repl-utils",
  "omicron-test-utils",
  "omicron-workspace-hack",
+ "proptest",
+ "sapling-renderdag",
  "shell-words",
  "subprocess",
+ "test-strategy",
  "thiserror 2.0.18",
 ]
 

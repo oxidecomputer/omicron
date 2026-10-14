@@ -1,0 +1,28 @@
+# A new session has one state, the root.
+state log
+
+# Each command that changes the simulation adds a state.
+time advance 1m
+time advance 2m
+state log
+
+# A command that only reads adds nothing, and neither does one that fails.
+time show
+time advance 1000000years
+state log
+
+# `state switch` makes an earlier state current again. The next change then
+# grows a branch beside the old one.
+state switch 1
+time show
+time advance 5m
+state log
+
+# Every state stays reachable.
+state switch 2
+time show
+state log
+
+# States that don't exist.
+state switch 9
+state switch latest
