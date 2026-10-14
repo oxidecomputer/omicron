@@ -89,10 +89,6 @@ pub fn bundle_to_stream<W: Write>(dir: &Utf8TempDir, writer: W) -> Result<()> {
 /// `tempdir` share a filesystem, this keeps the space used by both together
 /// close to the size of `dir` alone, rather than up to double it.
 ///
-/// Removing files only saves space: the zip is complete either way. A file
-/// that cannot be removed is logged to `log` and left for the removal of `dir`
-/// to retry, rather than failing the bundle.
-///
 /// See the [module documentation](self#bundle-contents) for how `dir` maps to
 /// the zip's entries.
 pub fn bundle_to_zipfile(

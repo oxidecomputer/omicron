@@ -488,11 +488,8 @@ impl SupportBundleCollector {
     ) -> anyhow::Result<()> {
         // Create the zipfile as a temporary file.
         //
-        // Zipping compresses every file in the bundle and removes each one
-        // once it has been added, so it runs on a blocking thread. Removing
-        // files as they're added means `dir` and the zip, both in `TEMPDIR`,
-        // never hold two full copies of the bundle at once, and `dir` is gone
-        // before the upload starts.
+        // Zipping compresses every file in the bundle, so it runs on a
+        // blocking thread.
         let zip_log = log.clone();
         let zipfile = tokio::task::spawn_blocking(move || {
             bundle_to_zipfile(dir, Utf8Path::new(TEMPDIR), &zip_log)
