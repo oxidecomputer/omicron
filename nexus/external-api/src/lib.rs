@@ -9442,6 +9442,50 @@ pub trait NexusExternalApi {
         path_params: Path<latest::active_problem::ActiveProblemSelector>,
     ) -> Result<HttpResponseOk<latest::active_problem::ActiveProblem>, HttpError>;
 
+    /// List Active Problem's causes
+    ///
+    /// Returns any other Active Problems which are the causes of the
+    /// specified Active Problem. If the specified Active Problem has no causes,
+    /// this list may be empty.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/active-problems/{problem_id}/causes",
+        tags = ["system/active-problems"],
+        versions = VERSION_ACTIVE_PROBLEMS..,
+    }]
+    async fn active_problem_causes_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::active_problem::ActiveProblemSelector>,
+        pagination: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<latest::active_problem::RelatedActiveProblem>,
+        >,
+        HttpError,
+    >;
+
+    /// List Active Problem's consequences
+    ///
+    /// Returns any other Active Problems which are caused by the specified
+    /// Active Problem. If no other Active Problem is caused by the specified
+    /// Active Problem, then this list may be empty.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/active-problems/{problem_id}/consequences",
+        tags = ["system/active-problems"],
+        versions = VERSION_ACTIVE_PROBLEMS..,
+    }]
+    async fn active_problem_consequences_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::active_problem::ActiveProblemSelector>,
+        pagination: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<latest::active_problem::RelatedActiveProblem>,
+        >,
+        HttpError,
+    >;
+
     // Alerts
 
     /// List alerts
