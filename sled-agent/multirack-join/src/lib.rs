@@ -331,7 +331,11 @@ impl MultirackJoinServiceTask {
             blueprint_external_networking_config: None,
         };
 
-        info!(self.log, "Writing initial network configuration to bootstore");
+        info!(
+            self.log,
+            "Writing network configuration to bootstore";
+            "generation" => self.bootstore_generation
+        );
         self.ctx
             .bootstore_node_handle
             .update_network_config(

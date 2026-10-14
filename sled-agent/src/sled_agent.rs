@@ -403,11 +403,7 @@ impl From<Error> for dropshot::HttpError {
                 let err = omicron_common::api::external::Error::from(err);
                 err.into()
             }
-            Error::MultirackJoin(err) => HttpError::for_client_error(
-                Some("Conflict".to_string()),
-                ClientErrorStatusCode::CONFLICT,
-                InlineErrorChain::new(&err).to_string(),
-            ),
+            Error::MultirackJoin(err) => err.into(),
             err @ (Error::BootDiskNotFound
             | Error::Config(_)
             | Error::BackingFs(_)

@@ -326,6 +326,8 @@ impl RssAccess {
                 // a rack via RSS, but that seems harmless, and would only occur
                 // if Nexus sent the completion request to an RSS'd sled-agent,
                 // which it really should not do.
+                //
+                // See https://github.com/oxidecomputer/omicron/issues/11477
                 Ok(())
             }
             RssStatus::InitializationFailed { err, .. } => {
