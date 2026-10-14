@@ -455,31 +455,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "attest-data"
-version = "0.5.0"
-source = "git+https://github.com/oxidecomputer/dice-util?rev=ff9f27aa0d6ef6fb64c349890b6e3c242ea3d8fc#ff9f27aa0d6ef6fb64c349890b6e3c242ea3d8fc"
-dependencies = [
- "const-oid 0.9.6",
- "der 0.7.10",
- "getrandom 0.3.4",
- "hex",
- "hubpack",
- "rats-corim 0.1.0 (git+https://github.com/oxidecomputer/rats-corim)",
- "salty",
- "serde",
- "serde_with 3.21.0",
- "sha3 0.10.8",
- "static_assertions",
- "thiserror 2.0.18",
-]
-
-[[package]]
 name = "attest-mock"
 version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/dice-util?rev=4a39ef08d81e5177edee0bddb1146032aa21074d#4a39ef08d81e5177edee0bddb1146032aa21074d"
 dependencies = [
  "anyhow",
- "attest-data 0.5.0 (git+https://github.com/oxidecomputer/dice-util?rev=4a39ef08d81e5177edee0bddb1146032aa21074d)",
+ "attest-data",
  "clap",
  "hex",
  "hubpack",
@@ -2979,7 +2960,7 @@ source = "git+https://github.com/oxidecomputer/dice-util?rev=4a39ef08d81e5177ede
 dependencies = [
  "anyhow",
  "async-trait",
- "attest-data 0.5.0 (git+https://github.com/oxidecomputer/dice-util?rev=4a39ef08d81e5177edee0bddb1146032aa21074d)",
+ "attest-data",
  "camino",
  "const-oid 0.9.6",
  "ed25519-dalek 2.2.0",
@@ -2996,28 +2977,6 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
- "x509-cert",
-]
-
-[[package]]
-name = "dice-verifier"
-version = "0.3.0-pre0"
-source = "git+https://github.com/oxidecomputer/dice-util?rev=ff9f27aa0d6ef6fb64c349890b6e3c242ea3d8fc#ff9f27aa0d6ef6fb64c349890b6e3c242ea3d8fc"
-dependencies = [
- "attest-data 0.5.0 (git+https://github.com/oxidecomputer/dice-util?rev=ff9f27aa0d6ef6fb64c349890b6e3c242ea3d8fc)",
- "const-oid 0.9.6",
- "ed25519-dalek 2.2.0",
- "env_logger",
- "hex",
- "hubpack",
- "libipcc 0.1.0 (git+https://github.com/oxidecomputer/ipcc-rs?rev=7cdf2ab9c8d9e9267a8b366aa780c6c26f9a5ecf)",
- "log",
- "p384 0.13.1",
- "rats-corim 0.1.0 (git+https://github.com/oxidecomputer/rats-corim)",
- "sha3 0.10.8",
- "slog",
- "tempfile",
- "thiserror 2.0.18",
  "x509-cert",
 ]
 
@@ -9938,7 +9897,7 @@ dependencies = [
  "crucible-agent-client",
  "crucible-client-types 0.1.0 (git+https://github.com/oxidecomputer/crucible?rev=f85cf0dc3631e2f0c13384787efb0efc1b642162)",
  "derive_more 0.99.20",
- "dice-verifier 0.3.0-pre0 (git+https://github.com/oxidecomputer/dice-util?rev=ff9f27aa0d6ef6fb64c349890b6e3c242ea3d8fc)",
+ "dice-verifier",
  "display-error-chain",
  "dropshot 0.18.0",
  "expectorate",
@@ -15339,12 +15298,12 @@ version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/sprockets.git?rev=02c7e5414d97c0c85d629cb76d1f6beab73d960e#02c7e5414d97c0c85d629cb76d1f6beab73d960e"
 dependencies = [
  "anyhow",
- "attest-data 0.5.0 (git+https://github.com/oxidecomputer/dice-util?rev=4a39ef08d81e5177edee0bddb1146032aa21074d)",
+ "attest-data",
  "camino",
  "cfg-if",
  "clap",
  "dice-mfg-msgs",
- "dice-verifier 0.3.0-pre0 (git+https://github.com/oxidecomputer/dice-util?rev=4a39ef08d81e5177edee0bddb1146032aa21074d)",
+ "dice-verifier",
  "ed25519-dalek 2.2.0",
  "hubpack",
  "libipcc 0.1.0 (git+https://github.com/oxidecomputer/ipcc-rs?rev=524eb8f125003dff50b9703900c6b323f00f9e1b)",
