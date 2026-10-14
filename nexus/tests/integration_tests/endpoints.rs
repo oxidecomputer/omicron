@@ -1536,6 +1536,10 @@ pub static DEMO_ACTIVE_PROBLEM_CAUSES_URL: LazyLock<String> =
     LazyLock::new(|| format!("{DEMO_ACTIVE_PROBLEM_URL}/causes"));
 pub static DEMO_ACTIVE_PROBLEM_CONSEQUENCES_URL: LazyLock<String> =
     LazyLock::new(|| format!("{DEMO_ACTIVE_PROBLEM_URL}/consequences"));
+pub static DEMO_ACTIVE_PROBLEM_IMPACTS_URL: LazyLock<String> =
+    LazyLock::new(|| format!("{DEMO_ACTIVE_PROBLEM_URL}/impacts"));
+pub static DEMO_ACTIVE_PROBLEM_SUPPORT_BUNDLES_URL: LazyLock<String> =
+    LazyLock::new(|| format!("{DEMO_ACTIVE_PROBLEM_URL}/support-bundles"));
 
 // Alerts
 pub static ALERTS_URL: &'static str = "/v1/alerts";
@@ -3633,6 +3637,18 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
             },
             VerifyEndpoint {
                 url: &DEMO_ACTIVE_PROBLEM_CONSEQUENCES_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::GetNonexistent],
+            },
+            VerifyEndpoint {
+                url: &DEMO_ACTIVE_PROBLEM_IMPACTS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::GetNonexistent],
+            },
+            VerifyEndpoint {
+                url: &DEMO_ACTIVE_PROBLEM_SUPPORT_BUNDLES_URL,
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::GetNonexistent],

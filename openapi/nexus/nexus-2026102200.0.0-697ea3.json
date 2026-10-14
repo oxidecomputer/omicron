@@ -7571,6 +7571,144 @@
         }
       }
     },
+    "/v1/system/active-problems/{problem_id}/impacts": {
+      "get": {
+        "tags": [
+          "system/active-problems"
+        ],
+        "summary": "List resources impacted by Active Problem",
+        "operationId": "active_problem_impact_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "problem_id",
+            "description": "ID of the Active Problem",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActiveProblemImpactResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
+    "/v1/system/active-problems/{problem_id}/support-bundles": {
+      "get": {
+        "tags": [
+          "system/active-problems"
+        ],
+        "summary": "List support bundles attached to Active Problem",
+        "operationId": "active_problem_support_bundles_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "problem_id",
+            "description": "ID of the Active Problem",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/TimeAndIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupportBundleInfoResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
     "/v1/system/audit-log": {
       "get": {
         "tags": [
@@ -16181,6 +16319,56 @@
           "time_modified"
         ]
       },
+      "ActiveProblemImpact": {
+        "description": "A resource impacted by an Active Problem.",
+        "type": "object",
+        "properties": {
+          "reason": {
+            "description": "A human-readable summary of how this resource is impacted by the problem.",
+            "type": "string"
+          },
+          "resource": {
+            "description": "The impacted resource.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ImpactedResource"
+              }
+            ]
+          },
+          "revision_added": {
+            "description": "The revision of the Active Problem in which this impact was added.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "reason",
+          "resource",
+          "revision_added"
+        ]
+      },
+      "ActiveProblemImpactResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActiveProblemImpact"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
       "ActiveProblemResultsPage": {
         "description": "A single page of results",
         "type": "object",
@@ -23386,6 +23574,171 @@
             "required": [
               "id",
               "type"
+            ]
+          }
+        ]
+      },
+      "ImpactedResource": {
+        "description": "API resource types which may be impacted by an Active Problem.",
+        "oneOf": [
+          {
+            "description": "A sled.",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "resource_type": {
+                "type": "string",
+                "enum": [
+                  "sled"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "resource_type"
+            ]
+          },
+          {
+            "description": "A switch.",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "resource_type": {
+                "type": "string",
+                "enum": [
+                  "switch"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "resource_type"
+            ]
+          },
+          {
+            "description": "A switch port.",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "resource_type": {
+                "type": "string",
+                "enum": [
+                  "switch_port"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "resource_type"
+            ]
+          },
+          {
+            "description": "A physical disk.",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "resource_type": {
+                "type": "string",
+                "enum": [
+                  "physical_disk"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "resource_type"
+            ]
+          },
+          {
+            "description": "A virtual machine instance.",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "resource_type": {
+                "type": "string",
+                "enum": [
+                  "instance"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "resource_type"
+            ]
+          },
+          {
+            "description": "A virtual disk.",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "resource_type": {
+                "type": "string",
+                "enum": [
+                  "disk"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "resource_type"
+            ]
+          },
+          {
+            "description": "An image.",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "resource_type": {
+                "type": "string",
+                "enum": [
+                  "image"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "resource_type"
+            ]
+          },
+          {
+            "description": "A disk snapshot.",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "resource_type": {
+                "type": "string",
+                "enum": [
+                  "snapshot"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "resource_type"
             ]
           }
         ]

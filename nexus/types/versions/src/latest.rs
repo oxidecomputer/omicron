@@ -10,8 +10,10 @@
 
 pub mod active_problem {
     pub use crate::v2026_10_22_00::active_problem::ActiveProblem;
+    pub use crate::v2026_10_22_00::active_problem::ActiveProblemImpact;
     pub use crate::v2026_10_22_00::active_problem::ActiveProblemSelector;
     pub use crate::v2026_10_22_00::active_problem::ActiveProblemState;
+    pub use crate::v2026_10_22_00::active_problem::ImpactedResource;
     pub use crate::v2026_10_22_00::active_problem::RelatedActiveProblem;
 }
 
