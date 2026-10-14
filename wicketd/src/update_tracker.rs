@@ -1481,10 +1481,10 @@ impl UpdateDriver {
                         // A zeroed control plane image hash indicates that
                         // Installinator should fetch an Installinator document,
                         // with the hash stored as `host_phase_2`.
-                        control_plane: ArtifactHash([0; 32]).to_string(),
+                        control_plane: [0; 32].into(),
                         // The Installinator document hash, since
                         // `control_plane` is a zero hash.
-                        host_phase_2: hash.to_string(),
+                        host_phase_2: hash.0.into(),
                     };
 
                     update_cx

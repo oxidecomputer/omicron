@@ -153,7 +153,9 @@ pub struct SpComponentInfo {
     pub presence: SpComponentPresence,
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 /// Description of the presence or absence of a component.
 ///

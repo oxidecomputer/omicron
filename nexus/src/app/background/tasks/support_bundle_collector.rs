@@ -583,7 +583,7 @@ impl SupportBundleCollector {
                 &zpool,
                 &dataset,
                 &support_bundle,
-                &hash.to_string(),
+                &hash.0.into(),
             )
             .await
             .with_context(|| "Failed to finalize bundle")?;
