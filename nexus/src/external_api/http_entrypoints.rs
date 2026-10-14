@@ -9068,6 +9068,84 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    async fn active_problem_causes_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<active_problem::ActiveProblemSelector>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<active_problem::RelatedActiveProblem>>,
+        HttpError,
+    > {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let query = query_params.into_inner();
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let problem_lookup = nexus
+                .active_problem_lookup(&opctx, path_params.into_inner())?;
+            let causes = nexus
+                .active_problem_causes_list(
+                    &opctx,
+                    &problem_lookup,
+                    &pag_params,
+                )
+                .await?;
+            Ok(HttpResponseOk(ScanById::results_page(
+                &query,
+                causes,
+                &|_, related: &active_problem::RelatedActiveProblem| {
+                    related.id.into_untyped_uuid()
+                },
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn active_problem_consequences_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<active_problem::ActiveProblemSelector>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<active_problem::RelatedActiveProblem>>,
+        HttpError,
+    > {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let query = query_params.into_inner();
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let problem_lookup = nexus
+                .active_problem_lookup(&opctx, path_params.into_inner())?;
+            let consequences = nexus
+                .active_problem_consequences_list(
+                    &opctx,
+                    &problem_lookup,
+                    &pag_params,
+                )
+                .await?;
+            Ok(HttpResponseOk(ScanById::results_page(
+                &query,
+                consequences,
+                &|_, related: &active_problem::RelatedActiveProblem| {
+                    related.id.into_untyped_uuid()
+                },
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     async fn alert_list(
         rqctx: RequestContext<Self::Context>,
         pag_params: Query<PaginatedByTimeAndId<alert::AlertListParams>>,

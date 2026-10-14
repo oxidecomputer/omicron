@@ -7431,6 +7431,146 @@
         }
       }
     },
+    "/v1/system/active-problems/{problem_id}/causes": {
+      "get": {
+        "tags": [
+          "system/active-problems"
+        ],
+        "summary": "List Active Problem's causes",
+        "description": "Returns any other Active Problems which are the causes of the specified Active Problem. If the specified Active Problem has no causes, this list may be empty.",
+        "operationId": "active_problem_causes_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "problem_id",
+            "description": "ID of the Active Problem",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelatedActiveProblemResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
+    "/v1/system/active-problems/{problem_id}/consequences": {
+      "get": {
+        "tags": [
+          "system/active-problems"
+        ],
+        "summary": "List Active Problem's consequences",
+        "description": "Returns any other Active Problems which are caused by the specified Active Problem. If no other Active Problem is caused by the specified Active Problem, then this list may be empty.",
+        "operationId": "active_problem_consequences_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "problem_id",
+            "description": "ID of the Active Problem",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelatedActiveProblemResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
     "/v1/system/audit-log": {
       "get": {
         "tags": [
@@ -15980,20 +16120,6 @@
             "description": "A description of any actions an operator should take in response to this Active Problem.\n\nThis may change as the problem progresses.",
             "type": "string"
           },
-          "causes": {
-            "description": "Other Active Problems which cause this problem.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/RelatedActiveProblem"
-            }
-          },
-          "causing": {
-            "description": "Other Active Problems caused by this problem.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/RelatedActiveProblem"
-            }
-          },
           "class": {
             "description": "The class of component affected by this problem.\n\nProblem classes are dot-separated strings, such as `hardware.power_shelf`, in which each segment is more specific than the last. The class is determined by the problem code.",
             "type": "string"
@@ -16044,8 +16170,6 @@
         },
         "required": [
           "action_required",
-          "causes",
-          "causing",
           "class",
           "code",
           "description",
@@ -27301,7 +27425,7 @@
         ]
       },
       "RelatedActiveProblem": {
-        "description": "A reference to an Active Problem related to another Active Problem",
+        "description": "An Active Problem that is a cause or consequence of another Active Problem",
         "type": "object",
         "properties": {
           "id": {
@@ -27314,9 +27438,9 @@
             "type": "string"
           },
           "revision_added": {
-            "description": "The revision of the referencing Active Problem in which this relationship was added.",
+            "description": "The revision of the requested Active Problem in which this relationship was added.",
             "type": "integer",
-            "format": "uint32",
+            "format": "uint64",
             "minimum": 0
           }
         },
@@ -27324,6 +27448,27 @@
           "id",
           "reason",
           "revision_added"
+        ]
+      },
+      "RelatedActiveProblemResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RelatedActiveProblem"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
         ]
       },
       "Route": {
