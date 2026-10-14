@@ -42,6 +42,7 @@ use propolis_client::instance_spec::{Component, SpecKey};
 use rand::SeedableRng;
 use rand::prelude::IteratorRandom;
 use sled_agent_config_reconciler::AvailableDatasetsReceiver;
+use sled_agent_config_reconciler::CurrentlyManagedZpoolsReceiver;
 use sled_agent_resolvable_files::ramdisk_file_source;
 use sled_agent_types::attached_subnet::{AttachedSubnet, AttachedSubnets};
 use sled_agent_types::instance::*;
@@ -212,6 +213,19 @@ struct RunningState {
     client: Arc<PropolisClient>,
     // Handle to the zone.
     running_zone: RunningZone,
+    // Handle to the zpool monitor task, so that it may be aborted once the zone
+    // no longer exists.
+    zpool_monitor_handle: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl Drop for RunningState {
+    fn drop(&mut self) {
+        // Is your zpool monitor task running?
+        if let Some(ref task) = self.zpool_monitor_handle {
+            // Better go catch it!
+            task.abort();
+        }
+    }
 }
 
 // Named type for values returned during propolis zone creation
@@ -223,9 +237,6 @@ struct PropolisSetup {
 // Requests that can be made of instances
 #[derive(strum::Display)]
 enum InstanceRequest {
-    GetFilesystemPool {
-        tx: oneshot::Sender<Result<Option<ZpoolName>, ManagerError>>,
-    },
     CurrentState {
         tx: oneshot::Sender<Result<SledVmmState, ManagerError>>,
     },
@@ -305,9 +316,6 @@ impl InstanceRequest {
         };
 
         match this {
-            Self::GetFilesystemPool { tx } => tx
-                .send(Err(error.into()))
-                .map_err(|_| Error::FailedSendClientClosed),
             Self::CurrentState { tx } => tx
                 .send(Err(error.into()))
                 .map_err(|_| Error::FailedSendClientClosed),
@@ -356,7 +364,7 @@ impl InstanceRequest {
 /// publishing unwanted state updates if Nexus reclaims control of a VMM's
 /// state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum VmmStateOwner {
+enum VmmStateOwner {
     /// The [`InstanceRunner`] that manages the VMM is also responsible for
     /// updating its state.
     Runner,
@@ -519,10 +527,10 @@ struct InstanceMonitorMessage {
 /// Released in 1984 and starring Arnold Schwarzenegger and Linda Hamilton, _The
 /// Terminator_ is an American science fiction film used to request the forceful
 /// termination of a Propolis zone. This is used by the `ensure_unregistered`
-/// API request and by `InstanceManager::use_only_currently_managed_zpools` to
-/// signal that the [`InstanceRunner`] must immediately destroy the Propolis
-/// zone and shut itself down, *without* first sending a request to gracefully
-/// stop the VMM.
+/// API request, and by the [`zpool_monitor`] task in this module, to signal
+/// that the [`InstanceRunner`] must immediately destroy the Propolis zone and
+/// shut itself down, *without* first sending a request to gracefully stop the
+/// VMM.
 ///
 /// The termination signal is separate from the [`InstanceRunner`]'s normal
 /// request channel, because termination must take priority over currently in
@@ -550,6 +558,9 @@ struct InstanceMonitorMessage {
 /// do this. The VMM will terminate regardless of whether or not this future is
 /// awaited.
 pub(crate) struct Terminator {
+    // For logging.
+    instance_id: InstanceUuid,
+    propolis_id: PropolisUuid,
     /// Set when termination of the VMM is requested.
     signalled: SetOnce<VmmStateOwner>,
     /// Set with the final state of the VMM once termination has completed.
@@ -557,8 +568,10 @@ pub(crate) struct Terminator {
 }
 
 impl Terminator {
-    fn new() -> Arc<Self> {
+    fn new(instance_id: InstanceUuid, propolis_id: PropolisUuid) -> Arc<Self> {
         Arc::new(Terminator {
+            instance_id,
+            propolis_id,
             signalled: SetOnce::new(),
             completed: SetOnce::new(),
         })
@@ -596,6 +609,47 @@ impl Terminator {
     /// will always return the final [`SledVmmState`].
     pub(crate) async fn terminated(self: Arc<Self>) -> SledVmmState {
         self.completed.wait().await.clone()
+    }
+
+    /// Request that this instance's Propolis be rudely terminated (if it has
+    /// one). This signals to the [`InstanceRunner`] task that the instance
+    /// should transition to the `Failed` state and the Propolis zone should be
+    /// destroyed.
+    ///
+    /// Once this method returns, the termination signal has been sent
+    /// successfully, and the `InstanceRunner` will begin the process of
+    /// terminating the VMM. To await the *completion* of the termination
+    /// sequence, the caller *may* clone and await [`Terminator::terminated()`].
+    /// However, awaiting this future is *not* necessary to signal termination
+    /// and the VMM will be terminated regardless of whether or not
+    /// [`Terminator::terminated()`] is awaited.
+    ///
+    /// The provided [`VmmStateOwner`] determines whether or not the VMM's final
+    /// state is published to Nexus, based on whether termination was requested
+    /// *by* Nexus or triggered internally. The first call to this function
+    /// determines the state owner for the termination request.
+    fn request_termination(
+        &self,
+        log: &Logger,
+        new_state_owner: VmmStateOwner,
+    ) {
+        if self.signalled.set(new_state_owner).is_err() {
+            debug!(
+                log,
+                "Requested instance termination, but the instance is already \
+                 terminating...";
+                "instance_id" => %self.instance_id,
+                "propolis_id" => %self.propolis_id,
+            );
+        } else {
+            info!(
+                log,
+                "Requested instance termination";
+                "instance_id" => %self.instance_id,
+                "propolis_id" => %self.propolis_id,
+                "new_state_owner" => ?new_state_owner,
+            );
+        }
     }
 }
 
@@ -651,6 +705,12 @@ struct InstanceRunner {
 
     // Available datasets for choosing zone roots
     available_datasets_rx: AvailableDatasetsReceiver,
+
+    // The set of zpools currently managed by this sled-agent. We must watch for
+    // changes to the set of currently managed zpools, so that if this VMM's
+    // root filesystem is on a zpool that is removed from the set, we can
+    // terminate the propolis zone.
+    currently_managed_zpools_rx: CurrentlyManagedZpoolsReceiver,
 
     // Used to create propolis zones
     zone_builder_factory: ZoneBuilderFactory,
@@ -790,10 +850,6 @@ impl InstanceRunner {
                     // request from the termination  channel.
                     let op = async {
                         match request {
-                            GetFilesystemPool { tx } => {
-                                tx.send(Ok(self.get_filesystem_zpool()))
-                                    .map_err(|_| Error::FailedSendClientClosed)
-                            },
                             CurrentState{ tx } => {
                                 tx.send(Ok(self.current_state()))
                                     .map_err(|_| Error::FailedSendClientClosed)
@@ -951,7 +1007,6 @@ impl InstanceRunner {
             // instead of bailing out, since we still need to drain the rest of
             // the queue,
             let _ = match request {
-                GetFilesystemPool { tx } => tx.send(Ok(None)).map_err(|_| ()),
                 CurrentState { tx } => {
                     tx.send(Ok(self.current_state())).map_err(|_| ())
                 }
@@ -1350,7 +1405,7 @@ impl InstanceRunner {
     /// # Panics
     ///
     /// Panics if this routine is called more than once for a given Instance.
-    async fn install_running_state(
+    fn install_running_state(
         &mut self,
         PropolisSetup { client, running_zone }: PropolisSetup,
     ) {
@@ -1360,22 +1415,43 @@ impl InstanceRunner {
         // (either because the task observed a message from Propolis saying that
         // it exited or because the Propolis server was terminated by other
         // means).
+        let runner_log =
+            self.log.new(o!("instance_runner_task" => "instance_monitor"));
         let runner = InstanceMonitorRunner {
             zone_name: running_zone.name().to_string(),
             client: client.clone(),
             tx_monitor: self.tx_monitor.clone(),
             zones_api: self.zone_builder_factory.zones_api().clone(),
-            log: self.log.clone(),
+            log: runner_log.clone(),
         };
-        let log = self.log.clone();
         let monitor_handle = tokio::task::spawn(async move {
+            let log = runner_log;
             match runner.run().await {
                 Err(e) => warn!(log, "State monitoring task failed: {}", e),
                 Ok(()) => info!(log, "State monitoring task complete"),
             }
         });
+
+        // Spawn a task to monitor for whether the Propolis zone's zpool has
+        // gone away, if we are using a zpool for the zone root filesystem.
+        let zpool_monitor_handle = match running_zone.root_zpool() {
+            ZpoolOrRamdisk::Zpool(zpool_name) => {
+                let log = self.log.new(o!(
+                    "instance_runner_task" => "zpool_monitor",
+                    "zpool_name" => zpool_name.to_string(),
+                ));
+                Some(tokio::spawn(zpool_monitor(
+                    log,
+                    *zpool_name,
+                    self.currently_managed_zpools_rx.clone(),
+                    self.terminator.clone(),
+                )))
+            }
+            ZpoolOrRamdisk::Ramdisk => None,
+        };
         self.monitor_handle = Some(monitor_handle);
-        self.running_state = Some(RunningState { client, running_zone });
+        self.running_state =
+            Some(RunningState { client, running_zone, zpool_monitor_handle });
     }
 
     /// Immediately terminates this instance's Propolis zone and cleans up any
@@ -1939,6 +2015,7 @@ impl Instance {
             zone_builder_factory,
             metrics_queue,
             available_datasets_rx,
+            currently_managed_zpools_rx,
         } = services;
 
         let mut dhcp_config = DhcpCfg {
@@ -1976,7 +2053,7 @@ impl Instance {
         let (tx_monitor, rx_monitor) = mpsc::channel(1);
 
         // Construct the termination signal and response channel.
-        let terminator = Terminator::new();
+        let terminator = Terminator::new(id, propolis_id);
 
         let metadata = propolis_client::instance_spec::InstanceMetadata {
             project_id: metadata.project_id,
@@ -2020,6 +2097,7 @@ impl Instance {
             delegated_zvols: local_config.delegated_zvols,
             attached_subnets: IdOrdMap::new(),
             terminator: terminator.clone(),
+            currently_managed_zpools_rx,
         };
 
         let runner_handle = tokio::task::spawn(runner.run(ticket));
@@ -2034,15 +2112,6 @@ impl Instance {
 
     pub fn id(&self) -> InstanceUuid {
         self.id
-    }
-
-    pub fn get_filesystem_zpool(
-        &self,
-        tx: oneshot::Sender<Result<Option<ZpoolName>, ManagerError>>,
-    ) -> Result<(), Error> {
-        self.tx
-            .try_send(InstanceRequest::GetFilesystemPool { tx })
-            .or_else(InstanceRequest::fail_try_send)
     }
 
     pub fn current_state(
@@ -2076,7 +2145,8 @@ impl Instance {
     }
 
     /// Request that this instance's Propolis be rudely terminated (if it has
-    /// one). This signals to the [`InstanceRunner`] task that the instance
+    /// one), and await the completion of the termination sequence.
+    /// This signals to the [`InstanceRunner`] task that the instance
     /// should transition to the `Failed` state and the Propolis zone should be
     /// destroyed.
     ///
@@ -2087,24 +2157,8 @@ impl Instance {
     /// the termination sequence to complete. However, awaiting this future is
     /// *not* necessary to signal termination and the VMM will be terminated
     /// regardless of whether or not [`Terminator::terminated()`] is awaited.
-    ///
-    /// The provided [`VmmStateOwner`] determines whether or not the VMM's final
-    /// state is published to Nexus, based on whether termination was requested
-    /// *by* Nexus or triggered internally. The first call to this function
-    /// determines the state owner for the termination request.
-    pub fn request_termination(
-        &self,
-        log: &Logger,
-        new_state_owner: VmmStateOwner,
-    ) -> &Arc<Terminator> {
-        if self.terminator.signalled.set(new_state_owner).is_err() {
-            debug!(
-                log,
-                "Requested instance termination, but the instance is already \
-                 terminating...";
-                "instance_id" => %self.id,
-            );
-        }
+    pub fn request_termination(&self, log: &Logger) -> &Arc<Terminator> {
+        self.terminator.request_termination(log, VmmStateOwner::Nexus);
         &self.terminator
     }
 
@@ -2233,16 +2287,6 @@ impl Instance {
 // TODO: Move this implementation higher. I'm just keeping it here to make the
 // incremental diff smaller.
 impl InstanceRunner {
-    fn get_filesystem_zpool(&self) -> Option<ZpoolName> {
-        let Some(run_state) = &self.running_state else {
-            return None;
-        };
-        match run_state.running_zone.root_zpool() {
-            ZpoolOrRamdisk::Zpool(zpool_name) => Some(*zpool_name),
-            ZpoolOrRamdisk::Ramdisk => None,
-        }
-    }
-
     fn current_state(&self) -> SledVmmState {
         self.state.sled_instance_state()
     }
@@ -2296,7 +2340,7 @@ impl InstanceRunner {
         // Move ownership of the zone into the instance and set up state
         // monitoring. This prevents the zone from being shut down when this
         // routine returns.
-        self.install_running_state(setup).await;
+        self.install_running_state(setup);
         Ok(())
     }
 
@@ -2785,6 +2829,37 @@ impl InstanceRunner {
     }
 }
 
+async fn zpool_monitor(
+    log: Logger,
+    zpool_name: ZpoolName,
+    mut currently_managed_zpools_rx: CurrentlyManagedZpoolsReceiver,
+    terminator: Arc<Terminator>,
+) {
+    loop {
+        let current_zpools = currently_managed_zpools_rx.current_and_update();
+
+        // Is the sled-agent still managing the zpool on which this Propolis
+        // zone's root filesystem resides?
+        if !current_zpools.contains(&zpool_name) {
+            info!(
+                log,
+                "Propolis zone's root filesystem zpool is no longer managed, \
+                 terminating it!"
+            );
+            terminator.request_termination(&log, VmmStateOwner::Runner);
+
+            // We do not need to sit around and wait for the termination to
+            // complete once it has been signalled, and can exit immediately.
+            return;
+        }
+
+        if currently_managed_zpools_rx.changed().await.is_err() {
+            warn!(log, "currently-managed zpool receiver closed!");
+            return;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3166,6 +3241,8 @@ mod tests {
                 illumos_utils::fakes::zone::Zones::new(),
             ),
             metrics_queue,
+            currently_managed_zpools_rx:
+                CurrentlyManagedZpoolsReceiver::fake_static(std::iter::empty()),
         };
         (services, rx)
     }
@@ -3215,6 +3292,7 @@ mod tests {
                 zone_bundler,
                 zone_builder_factory,
                 metrics_queue,
+                currently_managed_zpools_rx,
             } = services;
 
             let vmm_reservoir_manager =
@@ -3225,9 +3303,7 @@ mod tests {
                     nexus_client,
                     vnic_allocator,
                     port_manager,
-                    CurrentlyManagedZpoolsReceiver::fake_static(
-                        std::iter::empty(),
-                    ),
+                    currently_managed_zpools_rx,
                     available_datasets_rx,
                     zone_bundler,
                     zone_builder_factory,
@@ -3970,8 +4046,10 @@ mod tests {
     }
 
     impl InstanceRunner {
+        #[allow(clippy::too_many_arguments)]
         fn new_for_test(
             log: &slog::Logger,
+            instance_id: InstanceUuid,
             propolis_id: PropolisUuid,
             initial_state: InstanceInitialState,
             services: InstanceManagerServices,
@@ -4016,12 +4094,18 @@ mod tests {
                 zone_bundler,
                 zone_builder_factory,
                 metrics_queue,
+                currently_managed_zpools_rx,
             } = services;
 
             let dhcp_config = DhcpCfg::default();
+            let log = log.new(o!(
+                "component" => "TestInstanceRunner",
+                "instance_id" => instance_id.to_string(),
+                "propolis_id" => propolis_id.to_string(),
+            ));
 
             Self {
-                log: log.new(o!("component" => "TestInstanceRunner")),
+                log,
                 rx: cmd_rx,
                 tx_monitor: monitor_tx,
                 rx_monitor: monitor_rx,
@@ -4052,8 +4136,9 @@ mod tests {
                 zone_bundler,
                 metrics_queue,
                 delegated_zvols: local_config.delegated_zvols,
+                currently_managed_zpools_rx,
                 attached_subnets: IdOrdMap::new(),
-                terminator: Terminator::new(),
+                terminator: Terminator::new(instance_id, propolis_id),
             }
         }
     }
@@ -4095,6 +4180,7 @@ mod tests {
             )
             .await;
             let propolis_id = PropolisUuid::new_v4();
+            let instance_id = InstanceUuid::new_v4();
             let propolis_addr = SocketAddr::V4(SocketAddrV4::new(
                 Ipv4Addr::new(127, 0, 0, 1),
                 12400,
@@ -4108,7 +4194,8 @@ mod tests {
             let ticket = InstanceTicket::new(propolis_id, remove_tx);
 
             let runner = InstanceRunner::new_for_test(
-                &log.new(o!("component" => "InstanceRunner")),
+                &log,
+                instance_id,
                 propolis_id,
                 initial_state,
                 services,
