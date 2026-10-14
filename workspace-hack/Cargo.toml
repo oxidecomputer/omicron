@@ -139,7 +139,7 @@ simd-adler32 = { version = "0.3.8", default-features = false, features = ["std"]
 similar = { version = "2.7.0", features = ["bytes", "inline", "unicode"] }
 slab = { version = "0.4.12" }
 slog = { version = "2.8.2", features = ["dynamic-keys", "max_level_trace", "release_max_level_debug", "release_max_level_trace"] }
-smallvec = { version = "1.15.1", default-features = false, features = ["const_new"] }
+smallvec = { version = "1.15.1", default-features = false, features = ["const_new", "union"] }
 spin = { version = "0.9.8" }
 spki = { version = "0.7.3", default-features = false, features = ["pem", "std"] }
 string_cache = { version = "0.8.9" }
@@ -299,7 +299,7 @@ simd-adler32 = { version = "0.3.8", default-features = false, features = ["std"]
 similar = { version = "2.7.0", features = ["bytes", "inline", "unicode"] }
 slab = { version = "0.4.12" }
 slog = { version = "2.8.2", features = ["dynamic-keys", "max_level_trace", "release_max_level_debug", "release_max_level_trace"] }
-smallvec = { version = "1.15.1", default-features = false, features = ["const_new"] }
+smallvec = { version = "1.15.1", default-features = false, features = ["const_new", "union"] }
 spin = { version = "0.9.8" }
 spki = { version = "0.7.3", default-features = false, features = ["pem", "std"] }
 string_cache = { version = "0.8.9" }
