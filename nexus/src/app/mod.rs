@@ -58,6 +58,7 @@ use uuid::Uuid;
 
 // The implementation of Nexus is large, and split into a number of submodules
 // by resource.
+mod active_problem;
 mod address_lot;
 mod affinity;
 mod alert;
