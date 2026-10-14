@@ -15,7 +15,7 @@ use crate::link::{Link, VnicAllocator};
 use crate::opte::{Port, PortInfo, PortTicket};
 use crate::zone::Zones;
 use crate::zone::{AddressRequest, ROUTE};
-use crate::zpool::{PathInPoolOrRamdisk, ZpoolOrRamdisk};
+use crate::zpool::PathInPoolOrRamdisk;
 use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::Utf8TempDir;
 use debug_ignore::DebugIgnore;
@@ -147,11 +147,6 @@ impl RunningZone {
     /// Returns the filesystem path to the zone's root in the GZ.
     pub fn root(&self) -> Utf8PathBuf {
         self.inner.root()
-    }
-
-    /// Returns the zpool on which the filesystem path has been placed.
-    pub fn root_zpool(&self) -> &ZpoolOrRamdisk {
-        &self.inner.zonepath.pool_or_ramdisk
     }
 
     /// Returns the zone's image path.

@@ -15,7 +15,7 @@ use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::{DhcpCfg, PortCreateParams, PortManager};
 use illumos_utils::running_zone::{RunningZone, ZoneBuilderFactory};
-use illumos_utils::zpool::ZpoolOrRamdisk;
+use illumos_utils::zpool::ZpoolName;
 use omicron_common::api::external::{
     VpcFirewallRuleAction, VpcFirewallRuleDirection, VpcFirewallRulePriority,
     VpcFirewallRuleStatus,
@@ -80,6 +80,13 @@ pub(crate) struct ProbeManager {
     expected_probes_tx: watch::Sender<IdHashMap<ProbeState>>,
 }
 
+// The handle to a probe's running zone, and a record of which zpool contains
+// its root filesystem.
+struct RunningProbe {
+    zone: RunningZone,
+    zpool: ZpoolName,
+}
+
 /// Worker object that actually reconciles the desired and actual probe zones.
 pub(crate) struct ProbeManagerInner {
     log: Logger,
@@ -87,7 +94,7 @@ pub(crate) struct ProbeManagerInner {
     port_manager: PortManager,
     metrics_queue: MetricsRequestQueue,
     // The set of probe zones we are actually running on this sled.
-    running_probes: HashMap<ProbeUuid, RunningZone>,
+    running_probes: HashMap<ProbeUuid, RunningProbe>,
     available_datasets_rx: AvailableDatasetsReceiver,
     zones_api: Arc<dyn illumos_utils::zone::Api>,
 }
@@ -285,19 +292,7 @@ impl ProbeManagerInner {
             .running_probes
             .iter()
             .filter_map(|(id, probe)| {
-                let probe_pool = match probe.root_zpool() {
-                    ZpoolOrRamdisk::Zpool(zpool_name) => zpool_name,
-                    ZpoolOrRamdisk::Ramdisk => {
-                        info!(
-                            self.log,
-                            "use_only_these_disks: removing probe on ramdisk";
-                            "id" => ?id,
-                        );
-                        return None;
-                    }
-                };
-
-                if !disks.contains(probe_pool) { Some(*id) } else { None }
+                if !disks.contains(&probe.zpool) { Some(*id) } else { None }
             })
             .collect::<Vec<_>>();
 
@@ -331,6 +326,7 @@ impl ProbeManagerInner {
             .into_iter()
             .choose(&mut rng)
             .ok_or_else(|| anyhow!("u2 not found"))?;
+        let zpool = zone_root_path.pool;
 
         let nic = probe
             .interface
@@ -430,7 +426,7 @@ impl ProbeManagerInner {
             ),
         }
 
-        self.running_probes.insert(probe.id, rz);
+        self.running_probes.insert(probe.id, RunningProbe { zone: rz, zpool });
 
         Ok(())
     }
@@ -450,7 +446,7 @@ impl ProbeManagerInner {
     /// network resources.
     async fn remove_probe(&mut self, id: ProbeUuid) {
         match self.running_probes.remove(&id) {
-            Some(mut running_zone) => {
+            Some(RunningProbe { zone: mut running_zone, zpool: _ }) => {
                 // TODO-correctness: There are no physical links in the zone, is
                 // this intended to delete the control VNIC?
                 for l in running_zone.links_mut() {
