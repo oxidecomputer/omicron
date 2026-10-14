@@ -9060,11 +9060,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let problem_lookup = nexus
                 .active_problem_lookup(&opctx, path_params.into_inner())?;
             let causes = nexus
-                .active_problem_causes_list(
-                    &opctx,
-                    &problem_lookup,
-                    &pag_params,
-                )
+                .active_problem_causes_list(&problem_lookup, &pag_params)
                 .await?;
             Ok(HttpResponseOk(ScanById::results_page(
                 &query,
@@ -9099,17 +9095,86 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let problem_lookup = nexus
                 .active_problem_lookup(&opctx, path_params.into_inner())?;
             let consequences = nexus
-                .active_problem_consequences_list(
-                    &opctx,
-                    &problem_lookup,
-                    &pag_params,
-                )
+                .active_problem_consequences_list(&problem_lookup, &pag_params)
                 .await?;
             Ok(HttpResponseOk(ScanById::results_page(
                 &query,
                 consequences,
                 &|_, related: &active_problem::RelatedActiveProblem| {
                     related.id.into_untyped_uuid()
+                },
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn active_problem_impact_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<active_problem::ActiveProblemSelector>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<active_problem::ActiveProblemImpact>>,
+        HttpError,
+    > {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let query = query_params.into_inner();
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let problem_lookup = nexus
+                .active_problem_lookup(&opctx, path_params.into_inner())?;
+            let impacts = nexus
+                .active_problem_impact_list(&problem_lookup, &pag_params)
+                .await?;
+            Ok(HttpResponseOk(ScanById::results_page(
+                &query,
+                impacts,
+                &|_, impact: &active_problem::ActiveProblemImpact| {
+                    impact.resource.id()
+                },
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn active_problem_support_bundles_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<active_problem::ActiveProblemSelector>,
+        query_params: Query<PaginatedByTimeAndId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<support_bundle::SupportBundleInfo>>,
+        HttpError,
+    > {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let query = query_params.into_inner();
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let problem_lookup = nexus
+                .active_problem_lookup(&opctx, path_params.into_inner())?;
+            let bundles = nexus
+                .active_problem_support_bundles_list(
+                    &problem_lookup,
+                    &pag_params,
+                )
+                .await?;
+            Ok(HttpResponseOk(ScanByTimeAndId::results_page(
+                &query,
+                bundles,
+                &|_, bundle: &support_bundle::SupportBundleInfo| {
+                    (bundle.time_created, bundle.id.into_untyped_uuid())
                 },
             )?))
         };

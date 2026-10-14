@@ -9614,6 +9614,40 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
+    /// List resources impacted by Active Problem
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/active-problems/{problem_id}/impacts",
+        tags = ["system/active-problems"],
+        versions = VERSION_ACTIVE_PROBLEMS..,
+    }]
+    async fn active_problem_impact_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::active_problem::ActiveProblemSelector>,
+        pagination: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<latest::active_problem::ActiveProblemImpact>,
+        >,
+        HttpError,
+    >;
+
+    /// List support bundles attached to Active Problem
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/active-problems/{problem_id}/support-bundles",
+        tags = ["system/active-problems"],
+        versions = VERSION_ACTIVE_PROBLEMS..,
+    }]
+    async fn active_problem_support_bundles_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::active_problem::ActiveProblemSelector>,
+        query_params: Query<PaginatedByTimeAndId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::support_bundle::SupportBundleInfo>>,
+        HttpError,
+    >;
+
     // Alerts
 
     /// List alerts
