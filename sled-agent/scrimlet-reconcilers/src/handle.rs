@@ -21,6 +21,7 @@ use omicron_common::address::DDMD_PORT;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::MGD_PORT;
 use omicron_common::address::MGS_PORT;
+use omicron_common::http_client::internal_http_client_builder;
 use sled_agent_types::sled::ThisSledSwitchZoneUnderlayIpAddr;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use slog::Logger;
@@ -111,7 +112,7 @@ impl ScrimletReconcilersMode {
                 //
                 // The 15 second connect and read timeout are consistent with
                 // progenitor's normal defaults.
-                reqwest::ClientBuilder::new()
+                internal_http_client_builder()
                     .connect_timeout(Duration::from_secs(15))
                     .pool_idle_timeout(Duration::from_secs(10))
                     .build()

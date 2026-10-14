@@ -17,6 +17,7 @@
 //! Operations that list or modify artifacts or the configuration are called by
 //! Nexus and handled by the Sled Agent API.
 
+use omicron_common::http_client::internal_http_client_builder;
 use std::convert::Infallible;
 use std::future::Future;
 use std::io::{ErrorKind, Write};
@@ -157,7 +158,7 @@ impl<T: DatasetsManager> ArtifactStore<T> {
 
         ArtifactStore {
             log,
-            reqwest_client: reqwest::ClientBuilder::new()
+            reqwest_client: internal_http_client_builder()
                 .connect_timeout(Duration::from_secs(15))
                 .build()
                 .unwrap(),

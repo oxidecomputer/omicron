@@ -12,6 +12,7 @@ use nexus_db_queries::db::DataStore;
 use nexus_types::external_api::metrics::ResourceMetrics;
 use omicron_common::api::external::{DataPageParams, Error, ListResultVec};
 use omicron_common::api::internal::nexus::{self, ProducerEndpoint};
+use omicron_common::http_client::internal_http_client;
 use oximeter_client::Client as OximeterClient;
 use oximeter_db::Measurement;
 use oximeter_db::query::Timestamp;
@@ -276,8 +277,11 @@ fn build_oximeter_client(
     address: SocketAddr,
 ) -> OximeterClient {
     let client_log = log.new(o!("oximeter-collector" => id.to_string()));
-    let client =
-        OximeterClient::new(&format!("http://{}", address), client_log);
+    let client = OximeterClient::new_with_client(
+        &format!("http://{}", address),
+        internal_http_client(),
+        client_log,
+    );
     info!(
         log,
         "registered oximeter collector client";
