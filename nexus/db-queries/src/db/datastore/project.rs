@@ -138,7 +138,7 @@ impl DataStore {
     }
 
     /// Create a project in the given silo.
-    async fn project_create_in_silo(
+    pub async fn project_create_in_silo(
         &self,
         opctx: &OpContext,
         project: Project,

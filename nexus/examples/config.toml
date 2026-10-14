@@ -146,6 +146,7 @@ region_replacement.period_secs = 30
 region_replacement_driver.period_secs = 30
 # How frequently to query the status of active instances.
 instance_watcher.period_secs = 30
+capacity_metrics.period_secs = 60
 # How frequently to schedule new instance update sagas.
 instance_updater.period_secs = 30
 # How frequently to attempt to restart Failed instances?

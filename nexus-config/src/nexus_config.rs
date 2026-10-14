@@ -447,6 +447,8 @@ pub struct BackgroundTaskConfig {
     pub region_replacement_driver: RegionReplacementDriverConfig,
     /// configuration for instance watcher task
     pub instance_watcher: InstanceWatcherConfig,
+    /// configuration for capacity metrics task
+    pub capacity_metrics: CapacityMetricsConfig,
     /// configuration for instance updater task
     pub instance_updater: InstanceUpdaterConfig,
     /// configuration for instance reincarnation task
@@ -762,6 +764,14 @@ pub struct RegionReplacementConfig {
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct InstanceWatcherConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct CapacityMetricsConfig {
     /// period (in seconds) for periodic activations of this background task
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
@@ -1381,6 +1391,7 @@ mod test {
             region_replacement.period_secs = 30
             region_replacement_driver.period_secs = 30
             instance_watcher.period_secs = 30
+            capacity_metrics.period_secs = 60
             instance_updater.period_secs = 30
             instance_updater.disable = false
             instance_reincarnation.period_secs = 67
@@ -1609,6 +1620,9 @@ mod test {
                         instance_watcher: InstanceWatcherConfig {
                             period_secs: Duration::from_secs(30),
                         },
+                        capacity_metrics: CapacityMetricsConfig {
+                            period_secs: Duration::from_secs(60),
+                        },
                         instance_updater: InstanceUpdaterConfig {
                             period_secs: Duration::from_secs(30),
                             disable: false,
@@ -1798,6 +1812,7 @@ mod test {
             region_replacement.period_secs = 30
             region_replacement_driver.period_secs = 30
             instance_watcher.period_secs = 30
+            capacity_metrics.period_secs = 60
             instance_updater.period_secs = 30
             instance_reincarnation.period_secs = 67
             service_firewall_propagation.period_secs = 300

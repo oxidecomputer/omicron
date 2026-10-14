@@ -1341,6 +1341,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         "instance_watcher" => {
             print_task_instance_watcher(details);
         }
+        "capacity_metrics" => {
+            print_task_capacity_metrics(details);
+        }
         "inventory_collection" => {
             print_task_inventory_collection(details);
         }
@@ -2230,6 +2233,24 @@ fn print_task_instance_updater(details: &serde_json::Value) {
     println!("    {SAGAS_STARTED:<WIDTH$}{sagas_started:>NUM_WIDTH$}");
     println!("    {SAGAS_COMPLETED:<WIDTH$}{sagas_completed:>NUM_WIDTH$}",);
     println!("    {SAGA_ERRORS:<WIDTH$}{:>NUM_WIDTH$}", saga_errors.len());
+}
+
+fn print_task_capacity_metrics(details: &serde_json::Value) {
+    #[derive(Deserialize)]
+    struct CapacityMetricsStatus {
+        /// Number of samples queued.
+        samples_queued: usize,
+    }
+
+    match serde_json::from_value::<CapacityMetricsStatus>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(status) => {
+            println!("    samples queued: {}", status.samples_queued);
+        }
+    }
 }
 
 fn print_task_instance_watcher(details: &serde_json::Value) {
