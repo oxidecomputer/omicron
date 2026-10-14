@@ -1301,6 +1301,7 @@ mod tests {
     use illumos_utils::link::VnicAllocator;
     use illumos_utils::running_zone::ZoneBuilderFactory;
     use illumos_utils::zpool::PathInPool;
+    use illumos_utils::zpool::PathInPoolOrRamdisk;
     use illumos_utils::zpool::ZpoolName;
     use illumos_utils::zpool::ZpoolOrRamdisk;
     use omicron_common::address::SLED_PREFIX_LENGTH;
@@ -1368,8 +1369,8 @@ mod tests {
                 .factory
                 .builder()
                 .with_zone_type(name)
-                .with_zone_root_path(PathInPool {
-                    pool: ZpoolOrRamdisk::Ramdisk,
+                .with_zone_root_path(PathInPoolOrRamdisk {
+                    pool_or_ramdisk: ZpoolOrRamdisk::Ramdisk,
                     path: "/test-zone-root".into(),
                 })
                 .with_underlay_vnic_allocator(&self.vnic_alloc)

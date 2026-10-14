@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::zone::Api;
-use crate::zpool::PathInPool;
+use crate::zpool::PathInPoolOrRamdisk;
 
 use camino::Utf8Path;
 use slog::Logger;
@@ -33,7 +33,7 @@ impl Api for Zones {
     async fn install_omicron_zone(
         &self,
         _log: &Logger,
-        _zone_root_path: &PathInPool,
+        _zone_root_path: &PathInPoolOrRamdisk,
         _zone_name: &str,
         _zone_image: &Utf8Path,
         _datasets: &[zone::Dataset],

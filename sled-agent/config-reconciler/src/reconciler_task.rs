@@ -10,7 +10,6 @@ use either::Either;
 use futures::future;
 use iddqd::IdOrdMap;
 use illumos_utils::zpool::PathInPool;
-use illumos_utils::zpool::ZpoolOrRamdisk;
 use key_manager::StorageKeyRequester;
 use omicron_common::disk::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
@@ -290,7 +289,7 @@ impl LatestReconciliationResult {
             .map(|config| {
                 let pool = *config.name.pool();
                 PathInPool {
-                    pool: ZpoolOrRamdisk::Zpool(pool),
+                    pool,
                     path: pool
                         .dataset_mountpoint(&mount_config.root, mountpoint),
                 }

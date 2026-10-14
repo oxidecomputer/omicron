@@ -156,13 +156,13 @@ impl FromStr for ZpoolInfo {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum ZpoolOrRamdisk {
     Zpool(ZpoolName),
     Ramdisk,
 }
 
-/// A path which exists within a pool.
+/// A path which exists within a zpool.
 ///
 /// By storing these types together, it's possible to answer
 /// whether or not a path exists on a particular device.
@@ -171,8 +171,27 @@ pub enum ZpoolOrRamdisk {
 // Rather Not.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct PathInPool {
-    pub pool: ZpoolOrRamdisk,
+    pub pool: ZpoolName,
     pub path: Utf8PathBuf,
+}
+
+/// A path which exists within a zpool or ramdisk.
+///
+/// By storing these types together, it's possible to answer
+/// whether or not a path exists on a particular device.
+// This is a "wider" version of `PathInPool`: it can represent everything
+// `PathInPool` can, plus a path in a ramdisk instead of on a zpool.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct PathInPoolOrRamdisk {
+    pub pool_or_ramdisk: ZpoolOrRamdisk,
+    pub path: Utf8PathBuf,
+}
+
+impl From<PathInPool> for PathInPoolOrRamdisk {
+    fn from(value: PathInPool) -> Self {
+        let PathInPool { pool, path } = value;
+        Self { pool_or_ramdisk: ZpoolOrRamdisk::Zpool(pool), path }
+    }
 }
 
 /// Wraps commands for interacting with ZFS pools.

@@ -31,8 +31,6 @@ use camino_tempfile::Utf8TempDir;
 #[cfg(feature = "testing")]
 use illumos_utils::zpool::ZpoolName;
 #[cfg(feature = "testing")]
-use illumos_utils::zpool::ZpoolOrRamdisk;
-#[cfg(feature = "testing")]
 use omicron_common::api::internal::shared::DatasetKind;
 #[cfg(feature = "testing")]
 use sled_storage::dataset::U2_DEBUG_DATASET;
@@ -612,7 +610,7 @@ pub struct AvailableDatasetsReceiver {
 
 impl AvailableDatasetsReceiver {
     #[cfg(feature = "testing")]
-    pub fn fake_in_tempdir_for_tests(zpool: ZpoolOrRamdisk) -> Self {
+    pub fn fake_in_tempdir_for_tests(zpool: ZpoolName) -> Self {
         let tempdir = Arc::new(Utf8TempDir::new().expect("created temp dir"));
         std::fs::create_dir_all(tempdir.path().join(U2_DEBUG_DATASET))
             .expect("created test debug dataset directory");
@@ -643,7 +641,7 @@ impl AvailableDatasetsReceiver {
             #[cfg(feature = "testing")]
             AvailableDatasetsReceiverInner::FakeTempDir { zpool, tempdir } => {
                 vec![PathInPool {
-                    pool: zpool.clone(),
+                    pool: *zpool,
                     path: tempdir.path().join(U2_DEBUG_DATASET),
                 }]
             }
@@ -651,7 +649,7 @@ impl AvailableDatasetsReceiver {
             AvailableDatasetsReceiverInner::FakeStatic(pools) => pools
                 .iter()
                 .map(|(pool, path)| PathInPool {
-                    pool: ZpoolOrRamdisk::Zpool(*pool),
+                    pool: *pool,
                     path: path.join(U2_DEBUG_DATASET),
                 })
                 .collect(),
@@ -666,7 +664,7 @@ impl AvailableDatasetsReceiver {
             #[cfg(feature = "testing")]
             AvailableDatasetsReceiverInner::FakeTempDir { zpool, tempdir } => {
                 vec![PathInPool {
-                    pool: zpool.clone(),
+                    pool: *zpool,
                     path: tempdir.path().join(ZONE_DATASET),
                 }]
             }
@@ -674,7 +672,7 @@ impl AvailableDatasetsReceiver {
             AvailableDatasetsReceiverInner::FakeStatic(pools) => pools
                 .iter()
                 .map(|(pool, path)| PathInPool {
-                    pool: ZpoolOrRamdisk::Zpool(*pool),
+                    pool: *pool,
                     path: path.join(ZONE_DATASET),
                 })
                 .collect(),
@@ -689,7 +687,7 @@ impl AvailableDatasetsReceiver {
             #[cfg(feature = "testing")]
             AvailableDatasetsReceiverInner::FakeTempDir { zpool, tempdir } => {
                 vec![PathInPool {
-                    pool: zpool.clone(),
+                    pool: *zpool,
                     path: tempdir
                         .path()
                         .join(DatasetKind::LocalStorage.to_string()),
@@ -699,7 +697,7 @@ impl AvailableDatasetsReceiver {
             AvailableDatasetsReceiverInner::FakeStatic(pools) => pools
                 .iter()
                 .map(|(pool, path)| PathInPool {
-                    pool: ZpoolOrRamdisk::Zpool(*pool),
+                    pool: *pool,
                     path: path.join(DatasetKind::LocalStorage.to_string()),
                 })
                 .collect(),
@@ -717,7 +715,7 @@ impl AvailableDatasetsReceiver {
             #[cfg(feature = "testing")]
             AvailableDatasetsReceiverInner::FakeTempDir { zpool, tempdir } => {
                 vec![PathInPool {
-                    pool: zpool.clone(),
+                    pool: *zpool,
                     path: tempdir
                         .path()
                         .join(DatasetKind::LocalStorage.to_string()),
@@ -727,7 +725,7 @@ impl AvailableDatasetsReceiver {
             AvailableDatasetsReceiverInner::FakeStatic(pools) => pools
                 .iter()
                 .map(|(pool, path)| PathInPool {
-                    pool: ZpoolOrRamdisk::Zpool(*pool),
+                    pool: *pool,
                     path: path.join(DatasetKind::LocalStorage.to_string()),
                 })
                 .collect(),
@@ -743,7 +741,7 @@ enum AvailableDatasetsReceiverInner {
     // Test path: allow tests to place datasets in a temp directory.
     #[cfg(feature = "testing")]
     FakeTempDir {
-        zpool: ZpoolOrRamdisk,
+        zpool: ZpoolName,
         tempdir: Arc<Utf8TempDir>,
     },
     // Test path: allow tests to specify their own directories.

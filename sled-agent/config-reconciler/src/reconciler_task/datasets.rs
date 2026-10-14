@@ -23,7 +23,6 @@ use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use illumos_utils::zone::OmicronZoneConfigExt;
 use illumos_utils::zpool::PathInPool;
-use illumos_utils::zpool::ZpoolOrRamdisk;
 use omicron_common::disk::DatasetKind;
 use omicron_common::disk::DatasetName;
 use omicron_uuid_kinds::DatasetUuid;
@@ -137,7 +136,7 @@ impl OmicronDatasets {
         }
 
         let zone_root_path = PathInPool {
-            pool: ZpoolOrRamdisk::Zpool(filesystem_pool),
+            pool: filesystem_pool,
             // TODO-cleanup Should we get this path from the dataset we found
             // above?
             path: filesystem_pool

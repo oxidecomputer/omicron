@@ -15,7 +15,7 @@ use crate::link::{Link, VnicAllocator};
 use crate::opte::{Port, PortInfo, PortTicket};
 use crate::zone::Zones;
 use crate::zone::{AddressRequest, ROUTE};
-use crate::zpool::{PathInPool, ZpoolOrRamdisk};
+use crate::zpool::{PathInPoolOrRamdisk, ZpoolOrRamdisk};
 use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::Utf8TempDir;
 use debug_ignore::DebugIgnore;
@@ -151,7 +151,7 @@ impl RunningZone {
 
     /// Returns the zpool on which the filesystem path has been placed.
     pub fn root_zpool(&self) -> &ZpoolOrRamdisk {
-        &self.inner.zonepath.pool
+        &self.inner.zonepath.pool_or_ramdisk
     }
 
     /// Returns the zone's image path.
@@ -620,7 +620,7 @@ pub struct InstalledZone {
     log: Logger,
 
     // Filesystem path of the zone
-    zonepath: PathInPool,
+    zonepath: PathInPoolOrRamdisk,
 
     // The path to the zone's image source.
     image_path: Utf8PathBuf,
@@ -766,7 +766,7 @@ pub struct ZoneBuilder<'a> {
     /// Allocates the NIC used for control plane communication.
     underlay_vnic_allocator: Option<&'a VnicAllocator<Etherstub>>,
     /// Filesystem path at which the installed zone will reside.
-    zone_root_path: Option<PathInPool>,
+    zone_root_path: Option<PathInPoolOrRamdisk>,
     /// The file source.
     file_source: Option<&'a ResolvableFileSource>,
     /// The name of the type of zone being created (e.g. "propolis-server")
@@ -820,7 +820,10 @@ impl<'a> ZoneBuilder<'a> {
     }
 
     /// Filesystem path at which the installed zone will reside.
-    pub fn with_zone_root_path(mut self, root_path: PathInPool) -> Self {
+    pub fn with_zone_root_path(
+        mut self,
+        root_path: PathInPoolOrRamdisk,
+    ) -> Self {
         self.zone_root_path = Some(root_path);
         self
     }
