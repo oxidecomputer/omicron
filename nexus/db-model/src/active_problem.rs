@@ -183,9 +183,6 @@ impl From<ActiveProblemView> for api::ActiveProblem {
             summary,
             description,
             action_required,
-            // TODO(eliza): implement causes and causing!
-            causes: Vec::new(),
-            causing: Vec::new(),
         }
     }
 }
