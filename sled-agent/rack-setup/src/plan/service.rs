@@ -45,6 +45,7 @@ use omicron_common::backoff::{
     BackoffError, retry_notify_ext, retry_policy_internal_service_aggressive,
 };
 use omicron_common::disk::{DatasetKind, DatasetName};
+use omicron_common::http_client::internal_http_client_builder;
 use omicron_common::policy::{
     BOUNDARY_NTP_REDUNDANCY, COCKROACHDB_REDUNDANCY,
     CRUCIBLE_PANTRY_REDUNDANCY, INTERNAL_DNS_REDUNDANCY, NEXUS_REDUNDANCY,
@@ -276,7 +277,7 @@ impl ServicePlan {
         address: SocketAddrV6,
     ) -> Result<Inventory, PlanError> {
         let dur = std::time::Duration::from_secs(60);
-        let client = reqwest::ClientBuilder::new()
+        let client = internal_http_client_builder()
             .connect_timeout(dur)
             .timeout(dur)
             .build()
