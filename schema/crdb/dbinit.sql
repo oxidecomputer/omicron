@@ -1315,7 +1315,13 @@ CREATE TYPE IF NOT EXISTS omicron.public.instance_state_v2 AS ENUM (
     'failed',
 
     /* The instance has been destroyed. */
-    'destroyed'
+    'destroyed',
+
+    /* 
+     * The instance has no active VMM due to a sled being evacutated.
+     * Corresponds to the "rebooting" external state.
+     */
+    'sled_evacuating'
 );
 
 CREATE TYPE IF NOT EXISTS omicron.public.vmm_state AS ENUM (
@@ -9567,7 +9573,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '307.0.0', NULL)
+    (TRUE, NOW(), NOW(), '308.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

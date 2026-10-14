@@ -30,6 +30,7 @@ impl_enum_type!(
     Vmm => b"vmm"
     Failed => b"failed"
     Destroyed => b"destroyed"
+    SledEvacuating => b"sled_evacuating"
 );
 
 impl InstanceState {
@@ -49,6 +50,7 @@ impl InstanceState {
             InstanceState::Vmm => "VMM",
             InstanceState::Failed => "failed",
             InstanceState::Destroyed => "destroyed",
+            InstanceState::SledEvacuating => "sled_evacuating",
         }
     }
 
@@ -71,6 +73,7 @@ impl From<InstanceState> for instance::InstanceState {
             InstanceState::Vmm => Output::Running,
             InstanceState::Failed => Output::Failed,
             InstanceState::Destroyed => Output::Destroyed,
+            InstanceState::SledEvacuating => Output::Rebooting,
         }
     }
 }
