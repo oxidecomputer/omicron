@@ -293,8 +293,15 @@ impl BundleOutput {
                     charged: &charged,
                     refused: &refused,
                 });
-                f(&mut w)?;
-                w.flush().with_context(|| format!("failed to flush {path}"))
+                let result = f(&mut w).and_then(|()| {
+                    w.flush().with_context(|| format!("failed to flush {path}"))
+                });
+                // Drop the writer without writing what it still holds, which
+                // `BufWriter`'s own `Drop` would do. After a failure the file
+                // is removed anyway, and writing it could exceed the size
+                // limit for nothing, hiding the real error.
+                let _ = w.into_parts();
+                result
             })();
             if let Err(err) = result {
                 if is_removed(std::fs::remove_file(&path)) {
@@ -561,6 +568,28 @@ mod test {
         assert_eq!(output.budget.used(), 0);
         assert!(stop.is_cancelled());
         assert_eq!(output.budget.exceeded().unwrap().path, "big.json");
+    }
+
+    // When `f` fails for reasons other than the size limit, the bytes it left
+    // buffered are discarded rather than written. Writing them could exceed
+    // the limit for a file that's about to be removed anyway, stopping the
+    // collection and hiding the real error.
+    #[tokio::test]
+    async fn test_write_with_error_discards_buffered_bytes() {
+        let (dir, output, stop) = output_with_limit(Some(50));
+        let err = output
+            .write_with("file", |w| {
+                // Fewer bytes than the writer buffers, but more than the limit.
+                w.write_all(&[0; 100])?;
+                anyhow::bail!("serialization failed")
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(other_error(err).to_string(), "serialization failed");
+        assert!(!dir.path().join("file").exists());
+        assert_eq!(output.budget.used(), 0);
+        assert!(!output.budget.is_exceeded());
+        assert!(!stop.is_cancelled());
     }
 
     #[tokio::test]
