@@ -223,9 +223,6 @@ struct PropolisSetup {
 // Requests that can be made of instances
 #[derive(strum::Display)]
 enum InstanceRequest {
-    GetFilesystemPool {
-        tx: oneshot::Sender<Result<Option<ZpoolName>, ManagerError>>,
-    },
     CurrentState {
         tx: oneshot::Sender<Result<SledVmmState, ManagerError>>,
     },
@@ -305,9 +302,6 @@ impl InstanceRequest {
         };
 
         match this {
-            Self::GetFilesystemPool { tx } => tx
-                .send(Err(error.into()))
-                .map_err(|_| Error::FailedSendClientClosed),
             Self::CurrentState { tx } => tx
                 .send(Err(error.into()))
                 .map_err(|_| Error::FailedSendClientClosed),
@@ -669,6 +663,10 @@ struct InstanceRunner {
 
     // Requests that the VMM terminate and publishes the result.
     terminator: Arc<Terminator>,
+
+    // Broadcasts the Propolis zone's root filesystem zpool once the zone has
+    // started.
+    root_fs_zpool: Arc<SetOnce<Option<ZpoolName>>>,
 }
 
 impl InstanceRunner {
@@ -790,10 +788,6 @@ impl InstanceRunner {
                     // request from the termination  channel.
                     let op = async {
                         match request {
-                            GetFilesystemPool { tx } => {
-                                tx.send(Ok(self.get_filesystem_zpool()))
-                                    .map_err(|_| Error::FailedSendClientClosed)
-                            },
                             CurrentState{ tx } => {
                                 tx.send(Ok(self.current_state()))
                                     .map_err(|_| Error::FailedSendClientClosed)
@@ -951,7 +945,6 @@ impl InstanceRunner {
             // instead of bailing out, since we still need to drain the rest of
             // the queue,
             let _ = match request {
-                GetFilesystemPool { tx } => tx.send(Ok(None)).map_err(|_| ()),
                 CurrentState { tx } => {
                     tx.send(Ok(self.current_state())).map_err(|_| ())
                 }
@@ -1350,7 +1343,7 @@ impl InstanceRunner {
     /// # Panics
     ///
     /// Panics if this routine is called more than once for a given Instance.
-    async fn install_running_state(
+    fn install_running_state(
         &mut self,
         PropolisSetup { client, running_zone }: PropolisSetup,
     ) {
@@ -1375,6 +1368,29 @@ impl InstanceRunner {
             }
         });
         self.monitor_handle = Some(monitor_handle);
+
+        // Publish the zone's root filesystem zpool along with installing the
+        // running state. We cannot do this until the running state has moved
+        // into the instance runner, because publishing it may result in a
+        // `use_only_currently_managed_zpools` call requesting that we terminate
+        // the VMM if it has selected a zpool that no longer exists. Thus, we
+        // must ensure that we are in a state in which we can actually terminate
+        // the zone before we allow ourself to be terminated.
+        //
+        // Note that even though we *technically* do this prior to moving the
+        // state into `self.running_state`, we cannot actually be interrupted
+        // between now and then, since this is not an `async fn` and it contains
+        // no await points.
+        let root_zpool = match running_zone.root_zpool() {
+            ZpoolOrRamdisk::Ramdisk => None,
+            ZpoolOrRamdisk::Zpool(zpool) => Some(*zpool),
+        };
+        if let Err(e) = self.root_fs_zpool.set(root_zpool) {
+            panic!(
+                "install_running_state called twice for one instance: \
+                 root_fs_zpool was already set: {e:?}"
+            );
+        }
         self.running_state = Some(RunningState { client, running_zone });
     }
 
@@ -1876,6 +1892,10 @@ pub struct Instance {
     /// Requests that the instance terminates and awaits termination.
     terminator: Arc<Terminator>,
 
+    /// The channel over which the VMM's root filesystem zpool is sent once the
+    /// zone has started.
+    root_fs_zpool: Arc<SetOnce<Option<ZpoolName>>>,
+
     /// This is reference-counted so that the `Instance` struct may be cloned.
     #[allow(dead_code)]
     runner_handle: Arc<tokio::task::JoinHandle<()>>,
@@ -1987,6 +2007,7 @@ impl Instance {
             sled_serial: sled_identifiers.serial,
         };
 
+        let root_fs_zpool = Arc::new(SetOnce::new());
         let runner = InstanceRunner {
             log: log.new(o!("instance_id" => id.to_string())),
             rx,
@@ -2020,6 +2041,7 @@ impl Instance {
             delegated_zvols: local_config.delegated_zvols,
             attached_subnets: IdOrdMap::new(),
             terminator: terminator.clone(),
+            root_fs_zpool: root_fs_zpool.clone(),
         };
 
         let runner_handle = tokio::task::spawn(runner.run(ticket));
@@ -2028,6 +2050,7 @@ impl Instance {
             id,
             tx,
             runner_handle: Arc::new(runner_handle),
+            root_fs_zpool,
             terminator,
         })
     }
@@ -2036,13 +2059,13 @@ impl Instance {
         self.id
     }
 
-    pub fn get_filesystem_zpool(
-        &self,
-        tx: oneshot::Sender<Result<Option<ZpoolName>, ManagerError>>,
-    ) -> Result<(), Error> {
-        self.tx
-            .try_send(InstanceRequest::GetFilesystemPool { tx })
-            .or_else(InstanceRequest::fail_try_send)
+    /// Borrow the name of the Propolis zone's root filesystem zpool, or wait
+    /// until a zone has been started, if one does not currently exist.
+    ///
+    /// This returns `None` if the zone is running but its root filesystem is on
+    /// the ramdisk rather than a zpool.
+    pub async fn wait_for_filesystem_zpool(&self) -> Option<&ZpoolName> {
+        self.root_fs_zpool.wait().await.as_ref()
     }
 
     pub fn current_state(
@@ -2233,16 +2256,6 @@ impl Instance {
 // TODO: Move this implementation higher. I'm just keeping it here to make the
 // incremental diff smaller.
 impl InstanceRunner {
-    fn get_filesystem_zpool(&self) -> Option<ZpoolName> {
-        let Some(run_state) = &self.running_state else {
-            return None;
-        };
-        match run_state.running_zone.root_zpool() {
-            ZpoolOrRamdisk::Zpool(zpool_name) => Some(*zpool_name),
-            ZpoolOrRamdisk::Ramdisk => None,
-        }
-    }
-
     fn current_state(&self) -> SledVmmState {
         self.state.sled_instance_state()
     }
@@ -2296,7 +2309,7 @@ impl InstanceRunner {
         // Move ownership of the zone into the instance and set up state
         // monitoring. This prevents the zone from being shut down when this
         // routine returns.
-        self.install_running_state(setup).await;
+        self.install_running_state(setup);
         Ok(())
     }
 
@@ -4054,6 +4067,7 @@ mod tests {
                 delegated_zvols: local_config.delegated_zvols,
                 attached_subnets: IdOrdMap::new(),
                 terminator: Terminator::new(),
+                root_fs_zpool: Arc::new(SetOnce::new()),
             }
         }
     }

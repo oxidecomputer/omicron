@@ -1090,31 +1090,39 @@ impl InstanceManagerRunner {
         let current_zpools =
             self.currently_managed_zpools_rx.current_and_update();
         for (id, instance) in self.jobs.iter() {
-            // If we can read the filesystem pool, consider it. Otherwise, move
-            // on, to prevent blocking the cleanup of other instances.
-            // TODO(eliza): clone each instance and spawn a task to handle it,
-            // so that a single misbehaving instance cannot block the instance
-            // manager's run loop...
-            let (tx, rx) = oneshot::channel();
-            // This will fail if the tx has been dropped, which we just...don't do.
-            let _ = instance.get_filesystem_zpool(tx);
-            let Ok(Ok(Some(filesystem_pool))) = rx.await else {
-                info!(self.log, "use_only_these_disks: Cannot read filesystem pool"; "instance_id" => ?id);
-                continue;
-            };
-            if !current_zpools.contains(&filesystem_pool) {
-                info!(
-                    self.log,
-                    "use_only_these_disks: Terminating instance";
-                    "instance_id" => ?id,
-                );
-                // Note that we do *not* need to await the completion of the
-                // termination request here. It has been successfully signalled,
-                // so the VMM will terminate eventually. We can now go on with
-                // our lives and terminate any other instances without awaiting
-                // the completion of the termination request.
-                instance.request_termination(&self.log, VmmStateOwner::Runner);
-            }
+            // Spawn a task for each instance, as we must wait for the zone to
+            // be set up before checking if it is using an unknown zpool, and we
+            // do not want to block the main instance-manager loop waiting for
+            // all instances to finish having their Propolis zones set up.
+            let current_zpools = current_zpools.clone();
+            // Since we must clone the logger anyway in order to spawn the task,
+            // we may as well jam the propolis ID in there...
+            let log = self.log.new(o!("propolis_id" => id.to_string()));
+            let instance = instance.clone();
+            tokio::spawn(async move {
+                // Wait for the propolis zone to start, and consider its root
+                // filesystem zpool, unless the zone is on the ramdisk.
+                let Some(filesystem_pool) =
+                    instance.wait_for_filesystem_zpool().await
+                else {
+                    // Zone is not on the ramdisk, so skip it.
+                    return;
+                };
+                if !current_zpools.contains(filesystem_pool) {
+                    info!(
+                        log,
+                        "use_only_currently_managed_zpools: Terminating \
+                         instance";
+                    );
+                    // Note that we do *not* need to await the completion of the
+                    // termination request here. It has been successfully
+                    // signalled, so the VMM will terminate eventually. We can
+                    // now go on with our lives and terminate any other
+                    // instances without awaiting the completion of the
+                    // termination request.
+                    instance.request_termination(&log, VmmStateOwner::Runner);
+                }
+            });
         }
     }
 
