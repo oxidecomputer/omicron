@@ -259,7 +259,7 @@ impl BundleOutput {
     /// The writer given to `f` is buffered. Bytes are charged as they are
     /// written, and once the bundle reaches its size limit, writes fail. This
     /// returns [`StepError::SizeLimitExceeded`] in that case, rather than
-    /// whatever error `f` made of it.
+    /// whatever error `f` made of it, and even if `f` ignored it.
     ///
     /// # Cancel safety
     ///
@@ -303,16 +303,17 @@ impl BundleOutput {
                 let _ = w.into_parts();
                 result
             })();
-            if let Err(err) = result {
-                if is_removed(std::fs::remove_file(&path)) {
-                    budget.refund(charged.get());
-                }
-                return Err(match refused.take() {
-                    Some(exceeded) => StepError::SizeLimitExceeded(exceeded),
-                    None => StepError::Other(err),
-                });
+            // A refused write fails the whole file, even if `f` ignored the
+            // error and returned Ok.
+            let err = match (refused.take(), result) {
+                (None, Ok(())) => return Ok(()),
+                (Some(exceeded), _) => StepError::SizeLimitExceeded(exceeded),
+                (None, Err(err)) => StepError::Other(err),
+            };
+            if is_removed(std::fs::remove_file(&path)) {
+                budget.refund(charged.get());
             }
-            Ok(())
+            Err(err)
         })
         .await
         .context("writing to the bundle panicked")?
@@ -590,6 +591,26 @@ mod test {
         assert_eq!(output.budget.used(), 0);
         assert!(!output.budget.is_exceeded());
         assert!(!stop.is_cancelled());
+    }
+
+    // A closure that ignores a refused write, and returns Ok, still has its
+    // write reported as refused, and its truncated file removed.
+    #[tokio::test]
+    async fn test_write_with_ignored_refusal() {
+        let (dir, output, stop) = output_with_limit(Some(1000));
+        let err = output
+            .write_with("file", |w| {
+                // Larger than the writer's buffer, so it goes straight to the
+                // budget, which refuses it.
+                let _ = w.write_all(&[0; 16 * 1024]);
+                Ok(())
+            })
+            .await
+            .unwrap_err();
+        assert_size_limit_exceeded(&err);
+        assert!(!dir.path().join("file").exists());
+        assert_eq!(output.budget.used(), 0);
+        assert!(stop.is_cancelled());
     }
 
     #[tokio::test]
