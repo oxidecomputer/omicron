@@ -103,3 +103,61 @@ pub struct ActiveProblemSelector {
     #[schemars(with = "Uuid")]
     pub problem_id: ActiveProblemUuid,
 }
+
+/// A resource impacted by an Active Problem.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ActiveProblemImpact {
+    /// The impacted resource.
+    pub resource: ImpactedResource,
+    /// The revision of the Active Problem in which this impact was added.
+    pub revision_added: u64,
+    /// A human-readable summary of how this resource is impacted by the
+    /// problem.
+    pub reason: String,
+}
+
+/// API resource types which may be impacted by an Active Problem.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "resource_type", rename_all = "snake_case")]
+pub enum ImpactedResource {
+    /// A sled.
+    Sled {
+        #[schemars(with = "Uuid")]
+        id: omicron_uuid_kinds::SledUuid,
+    },
+    /// A switch.
+    Switch {
+        // XXX(eliza): apparently we don't yet have a typed UUID for switches?
+        // They definitely have UUIDs in the API...
+        id: Uuid,
+    },
+    /// A switch port.
+    SwitchPort {
+        // XXX(eliza): apparently we don't yet have a typed UUID for switch
+        // ports? They definitely have UUIDs in the API...
+        id: Uuid,
+    },
+    /// A physical disk.
+    PhysicalDisk {
+        #[schemars(with = "Uuid")]
+        id: omicron_uuid_kinds::PhysicalDiskUuid,
+    },
+    /// A virtual machine instance.
+    Instance {
+        #[schemars(with = "Uuid")]
+        id: omicron_uuid_kinds::InstanceUuid,
+    },
+    /// A virtual disk.
+    Disk {
+        #[schemars(with = "Uuid")]
+        id: omicron_uuid_kinds::DiskUuid,
+    },
+    /// An image.
+    Image {
+        // XXX(eliza): apparently images and snapshots don't have typed UUIDs.
+        id: Uuid,
+    },
+    /// A disk snapshot.
+    Snapshot { id: Uuid },
+    // TODO: This list is incomplete! You can help by expanding it.
+}

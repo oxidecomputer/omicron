@@ -7,13 +7,16 @@
 //! [RFD 699]: https://rfd.shared.oxide.computer/rfd/0699
 
 use super::Nexus;
-use super::Unimpl;
+use chrono::DateTime;
+use chrono::Utc;
 use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::model::ActiveProblemView;
-use nexus_types::external_api::active_problem;
+use nexus_types::external_api::active_problem as api;
+use nexus_types::external_api::active_problem::ActiveProblemSelector;
+use nexus_types::external_api::support_bundle::SupportBundleInfo;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
@@ -23,7 +26,7 @@ impl Nexus {
     pub fn active_problem_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        active_problem::ActiveProblemSelector { problem_id }: active_problem::ActiveProblemSelector,
+        ActiveProblemSelector { problem_id }: ActiveProblemSelector,
     ) -> LookupResult<lookup::ActiveProblem<'a>> {
         let problem = LookupPath::new(opctx, &self.db_datastore)
             .active_problem_id(problem_id);
@@ -44,26 +47,49 @@ impl Nexus {
     /// Lists the Active Problems which cause the requested Active Problem.
     pub async fn active_problem_causes_list(
         &self,
-        opctx: &OpContext,
         problem_lookup: &lookup::ActiveProblem<'_>,
         _pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<active_problem::RelatedActiveProblem> {
+    ) -> ListResultVec<api::RelatedActiveProblem> {
         let (.., _authz_problem) =
             problem_lookup.lookup_for(authz::Action::ListChildren).await?;
         // TODO(eliza): finish this part
-        Err(self.unimplemented_todo(opctx, Unimpl::Public).await)
+        Ok(Vec::new())
     }
 
     /// Lists the Active Problems caused by the requested Active Problem.
     pub async fn active_problem_consequences_list(
         &self,
-        opctx: &OpContext,
         problem_lookup: &lookup::ActiveProblem<'_>,
         _pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<active_problem::RelatedActiveProblem> {
+    ) -> ListResultVec<api::RelatedActiveProblem> {
         let (.., _authz_problem) =
             problem_lookup.lookup_for(authz::Action::ListChildren).await?;
         // TODO(eliza): finish this part
-        Err(self.unimplemented_todo(opctx, Unimpl::Public).await)
+        Ok(Vec::new())
+    }
+
+    /// Lists the resources impacted by the requested Active Problem.
+    pub async fn active_problem_impact_list(
+        &self,
+        problem_lookup: &lookup::ActiveProblem<'_>,
+        _pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<api::ActiveProblemImpact> {
+        let (.., _authz_problem) =
+            problem_lookup.lookup_for(authz::Action::ListChildren).await?;
+        // TODO(eliza): actually implement impact lists
+        Ok(Vec::new())
+    }
+
+    /// Lists the support bundles attached to the requested Active Problem.
+    pub async fn active_problem_support_bundles_list(
+        &self,
+        problem_lookup: &lookup::ActiveProblem<'_>,
+        _pagparams: &DataPageParams<'_, (DateTime<Utc>, Uuid)>,
+    ) -> ListResultVec<SupportBundleInfo> {
+        let (.., _authz_problem) =
+            problem_lookup.lookup_for(authz::Action::ListChildren).await?;
+        // TODO(eliza): actually add a way to associate active problems and
+        // support bundles...
+        Ok(Vec::new())
     }
 }
