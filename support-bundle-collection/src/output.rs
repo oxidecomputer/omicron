@@ -96,9 +96,15 @@ impl SizeBudget {
         if self.is_exceeded() {
             return Err(SizeLimitExceeded { limit });
         }
-        let prev = self.used.fetch_add(n, Ordering::Relaxed);
-        if prev.saturating_add(n) > limit {
-            self.used.fetch_sub(n, Ordering::Relaxed);
+        // Add the bytes only if they fit, in one atomic step, so that `used`
+        // never counts a write that's refused. Otherwise, a concurrent write
+        // could see those bytes, and be refused, and blamed, in its place.
+        let fits = self.used.fetch_update(
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+            |used| used.checked_add(n).filter(|&total| total <= limit),
+        );
+        if fits.is_err() {
             let _ = self
                 .exceeded
                 .set(Exceeded { at: Utc::now(), path: path.to_owned() });
@@ -432,6 +438,51 @@ mod test {
         let err =
             other_error(other.with_context(|| "writing a file").unwrap_err());
         assert_eq!(format!("{err:#}"), "writing a file: the disk broke");
+    }
+
+    // Many threads charging the budget at once never take it past its limit,
+    // and it counts exactly the bytes it accepted. The write it blames for
+    // exceeding the limit is one it refused, rather than one it accepted.
+    #[test]
+    fn test_concurrent_charges() {
+        const LIMIT: u64 = 10_000;
+        const THREADS: u64 = 8;
+        const CHARGES_PER_THREAD: u64 = 1_000;
+
+        let budget = SizeBudget::new(Some(LIMIT), CancellationToken::new());
+        let results: Vec<(Utf8PathBuf, u64, bool)> = std::thread::scope(|s| {
+            let threads: Vec<_> = (0..THREADS)
+                .map(|t| {
+                    let budget = &budget;
+                    s.spawn(move || {
+                        let mut results = Vec::new();
+                        for i in 0..CHARGES_PER_THREAD {
+                            let path = Utf8PathBuf::from(format!("{t}/{i}"));
+                            // Vary the sizes, so that some writes fit where
+                            // others don't.
+                            let n = 1 + (t * 7 + i) % 13;
+                            let ok = budget.charge(&path, n).is_ok();
+                            assert!(budget.used() <= LIMIT);
+                            results.push((path, n, ok));
+                        }
+                        results
+                    })
+                })
+                .collect();
+            threads.into_iter().flat_map(|t| t.join().unwrap()).collect()
+        });
+
+        let accepted: u64 =
+            results.iter().filter(|(_, _, ok)| *ok).map(|(_, n, _)| n).sum();
+        assert_eq!(budget.used(), accepted);
+        assert!(accepted <= LIMIT);
+
+        let exceeded = budget.exceeded().expect("limit should be exceeded");
+        let blamed = results
+            .iter()
+            .find(|(path, _, _)| *path == exceeded.path)
+            .expect("blamed path should be one that was charged");
+        assert!(!blamed.2, "blamed {} for a write that was accepted", blamed.0);
     }
 
     #[tokio::test]
