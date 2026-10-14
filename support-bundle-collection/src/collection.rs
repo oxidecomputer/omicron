@@ -239,8 +239,11 @@ impl BundleCollection {
         mut steps: Vec<CollectionStep>,
     ) -> SupportBundleCollectionReport {
         let mut report = SupportBundleCollectionReport::new(self.bundle.id);
-        let bundle_output =
-            BundleOutput::new(output.path(), self.size_budget.clone());
+        let bundle_output = BundleOutput::new(
+            output.path(),
+            self.size_budget.clone(),
+            self.log.clone(),
+        );
         let mut incomplete_steps = vec![];
 
         const MAX_CONCURRENT_STEPS: usize = 16;

@@ -23,6 +23,9 @@ use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use chrono::DateTime;
 use chrono::Utc;
+use slog::Logger;
+use slog::warn;
+use slog_error_chain::InlineErrorChain;
 use std::cell::Cell;
 use std::io::Write;
 use std::sync::Arc;
@@ -125,6 +128,7 @@ impl SizeBudget {
 ///
 /// All writes are charged against the bundle's [`SizeBudget`]. A write that
 /// fails, for any reason, removes its partial file, and is not charged for it.
+/// A partial file that cannot be removed is logged, and stays charged.
 #[derive(Clone)]
 pub struct BundleOutput {
     // The root of the collected bundle directory.
@@ -132,15 +136,17 @@ pub struct BundleOutput {
     // The path of this directory, relative to `root`.
     dir: Utf8PathBuf,
     budget: Arc<SizeBudget>,
+    log: Logger,
 }
 
 impl BundleOutput {
     /// Returns the root directory of a bundle being collected in `root`.
-    pub fn new(root: &Utf8Path, budget: Arc<SizeBudget>) -> Self {
+    pub fn new(root: &Utf8Path, budget: Arc<SizeBudget>, log: Logger) -> Self {
         Self {
             root: Arc::new(root.to_owned()),
             dir: Utf8PathBuf::new(),
             budget,
+            log,
         }
     }
 
@@ -153,6 +159,7 @@ impl BundleOutput {
             root: self.root.clone(),
             dir: self.dir.join(path),
             budget: self.budget.clone(),
+            log: self.log.clone(),
         }
     }
 
@@ -203,7 +210,7 @@ impl BundleOutput {
         }
         .await
         .map_err(StepError::Other);
-        if result.is_err() && remove_partial_file(&path).await {
+        if result.is_err() && remove_partial_file(&self.log, &path).await {
             self.budget.refund(len);
         }
         result
@@ -253,7 +260,7 @@ impl BundleOutput {
             Ok::<_, StepError>(charged)
         }
         .await;
-        if result.is_err() && remove_partial_file(&path).await {
+        if result.is_err() && remove_partial_file(&self.log, &path).await {
             self.budget.refund(charged);
         }
         result
@@ -281,6 +288,7 @@ impl BundleOutput {
     {
         let (path, rel) = self.resolve(name.as_ref());
         let budget = self.budget.clone();
+        let log = self.log.clone();
         tokio::task::spawn_blocking(move || {
             let charged = Cell::new(0);
             let refused = Cell::new(None);
@@ -316,7 +324,7 @@ impl BundleOutput {
                 (Some(exceeded), _) => StepError::SizeLimitExceeded(exceeded),
                 (None, Err(err)) => StepError::Other(err),
             };
-            if is_removed(std::fs::remove_file(&path)) {
+            if is_removed(&log, &path, std::fs::remove_file(&path)) {
                 budget.refund(charged.get());
             }
             Err(err)
@@ -375,16 +383,31 @@ async fn create_parent_dir(path: &Utf8Path) -> anyhow::Result<()> {
 
 // Removes a file left by a failed write, returning true if it is gone.
 //
-// This is best-effort: a file that cannot be removed stays in the bundle, and
-// stays charged against its budget.
-async fn remove_partial_file(path: &Utf8Path) -> bool {
-    is_removed(tokio::fs::remove_file(path).await)
+// This is best-effort: a file that cannot be removed is logged, stays in the
+// bundle, and stays charged against its budget.
+async fn remove_partial_file(log: &Logger, path: &Utf8Path) -> bool {
+    is_removed(log, path, tokio::fs::remove_file(path).await)
 }
 
-fn is_removed(result: std::io::Result<()>) -> bool {
+// Returns true if `result`, of removing the partial file `path`, left it gone,
+// logging why not otherwise.
+fn is_removed(
+    log: &Logger,
+    path: &Utf8Path,
+    result: std::io::Result<()>,
+) -> bool {
     match result {
         Ok(()) => true,
-        Err(err) => err.kind() == std::io::ErrorKind::NotFound,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => true,
+        Err(err) => {
+            warn!(
+                log,
+                "failed to remove partial file from support bundle";
+                "path" => %path,
+                InlineErrorChain::new(&err),
+            );
+            false
+        }
     }
 }
 
@@ -401,7 +424,8 @@ mod test {
         let dir = tempdir().unwrap();
         let stop = CancellationToken::new();
         let budget = Arc::new(SizeBudget::new(limit, stop.clone()));
-        let output = BundleOutput::new(dir.path(), budget);
+        let log = Logger::root(slog::Discard, slog::o!());
+        let output = BundleOutput::new(dir.path(), budget, log);
         (dir, output, stop)
     }
 
