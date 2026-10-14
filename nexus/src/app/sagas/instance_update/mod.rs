@@ -545,6 +545,7 @@ impl UpdatesRequired {
 
         let mut update_required = false;
         let mut active_vmm_failed = false;
+        let mut active_vmm_update_disposition_gen = None;
         let mut network_config = None;
         let mut update_sled_reservations_for_migration_success = None;
 
@@ -564,17 +565,21 @@ impl UpdatesRequired {
                     // instance's new state to `Failed` rather than to `NoVmm`.
                     if active_vmm.state == VmmState::Failed {
                         active_vmm_failed = true;
+                    }
+                    // If the active VMM is marked as stopped for an update, its
+                    // sled is being evacuated. Move the instance's new state to
+                    // `SledEvacuating` rather than to `NoVmm`.
+                    else if let Some(generation) = active_vmm
+                    .stop_for_update_disposition_generation {
+                        active_vmm_update_disposition_gen = Some(generation);
+
                     } else if snapshot.instance.intended_state
                     == InstanceIntendedState::Running
                     && snapshot.migration.is_none()
-                    && active_vmm
-                        .stop_for_update_disposition_generation
-                        .is_none()
                 {
                     // Did the active VMM shut itself down, when it was
                     // intended to be running *and* we were not migrating
-                    // out, or destroying it intentionally for an update?
-                    // If so, update the instance's intended state to
+                    // out? If so, update the instance's intended state to
                     // indicate that it stopped itself.
                     new_intent = Some(InstanceIntendedState::GuestShutdown);
                     info!(
@@ -744,11 +749,17 @@ impl UpdatesRequired {
             // We no longer have a VMM.
             new_runtime.nexus_state = if active_vmm_failed {
                 InstanceState::Failed
-            }
-            // TODO-K: Here I need to decide to put it in a new instance state
-            // or set some other setting. Maybe a new InstanceState::NoVmmPendingRestart
-            // or something like that
-            else {
+            } else if let Some(g) = active_vmm_update_disposition_gen {
+                debug!(
+                    log,
+                    "instance update: VMM was stopped due to its sled being \
+                     evacuated for an update. Setting new runtime instance \
+                     state to SledEvacuating.";
+                    "instance_id" => %instance_id,
+                    "update_disposition_generation" => ?g
+                );
+                InstanceState::SledEvacuating
+            } else {
                 InstanceState::NoVmm
             };
             // If the active VMM was destroyed and the instance has not migrated
