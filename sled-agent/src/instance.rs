@@ -545,13 +545,16 @@ struct InstanceMonitorMessage {
 /// callers who all, fundamentally, are really just trying to communicate the
 /// same bit of information: "it's time for you to stop".
 ///
-/// Termination is requested by the [`Instance::request_termination`] method,
+/// Termination is requested by the [`Terminator::request_termination`] method,
 /// which takes a [`VmmStateOwner`] that determines whether the termination
 /// request came from Nexus or is internal to the sled-agent. The
 /// [`VmmStateOwner`] from the *first* request to terminate will determine
 /// whether a subsequent state update will be published to Nexus when the VMM
-/// finishes shutting down. Callers of [`Instance::request_termination`] receive
-/// an `&Arc<Terminator>` which they may `clone` and await
+/// finishes shutting down.
+///
+/// Termination initiated by a Nexus HTTP request
+/// [`Instance::request_termination`], whose callers receive an
+/// `&Arc<Terminator>` which they may `clone` and await
 /// [`Terminator::terminated`] to await the *completion* of the termination
 /// sequence and receive the final [`SledVmmState`]. Callers which do not need
 /// to await the completion of the termination sequence can simply choose not to
@@ -2145,9 +2148,9 @@ impl Instance {
     }
 
     /// Request that this instance's Propolis be rudely terminated (if it has
-    /// one), and await the completion of the termination sequence.
-    /// This signals to the [`InstanceRunner`] task that the instance
-    /// should transition to the `Failed` state and the Propolis zone should be
+    /// one), in response to a Nexus HTTP request to terminate the instance.
+    /// This signals to the [`InstanceRunner`] task that the instance should
+    /// transition to the `Failed` state and the Propolis zone should be
     /// destroyed.
     ///
     /// Once this method returns, the termination signal has been sent
