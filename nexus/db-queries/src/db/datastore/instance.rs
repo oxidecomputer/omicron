@@ -26,6 +26,7 @@ use crate::db::model::InstanceRuntimeState;
 use crate::db::model::InstanceState;
 use crate::db::model::InstanceStateComputer;
 use crate::db::model::InstanceUpdate;
+use crate::db::model::InstanceVirtualPlatform;
 use crate::db::model::Migration;
 use crate::db::model::MigrationState;
 use crate::db::model::Name;
@@ -177,6 +178,7 @@ impl TryFrom<InstanceAndActiveVmm> for instance_types::Instance {
                 .expect("found invalid hostname in the database"),
             boot_disk_id: value.instance.boot_disk_id,
             cpu_platform: value.instance.cpu_platform.map(Into::into),
+            virtual_platform: value.instance.virtual_platform.into(),
             runtime: instance_types::InstanceRuntimeState {
                 run_state: value.effective_state(),
                 time_run_state_updated,
@@ -1116,6 +1118,7 @@ impl DataStore {
                     ncpus,
                     memory,
                     cpu_platform,
+                    virtual_platform,
                     enable_jumbo_frames,
                     shutdown_policy_action,
                     shutdown_policy_timeout,
@@ -1161,6 +1164,7 @@ impl DataStore {
                         ncpus,
                         memory,
                         cpu_platform,
+                        virtual_platform,
                     )
                     .await?;
 
@@ -1345,6 +1349,7 @@ impl DataStore {
         ncpus: InstanceCpuCount,
         memory: ByteCount,
         cpu_platform: Option<InstanceCpuPlatform>,
+        virtual_platform: InstanceVirtualPlatform,
     ) -> Result<(), diesel::result::Error> {
         use nexus_db_schema::schema::instance::dsl as instance_dsl;
 
@@ -1362,14 +1367,16 @@ impl DataStore {
                     .ne(ncpus)
                     .or(instance_dsl::memory.ne(memory))
                     .or(instance_dsl::cpu_platform.ne(cpu_platform))
-                    .or(instance_dsl::cpu_platform.is_null()),
+                    .or(instance_dsl::cpu_platform.is_null())
+                    .or(instance_dsl::virtual_platform.ne(virtual_platform)),
             )
         } else {
             query.filter(
                 instance_dsl::ncpus
                     .ne(ncpus)
                     .or(instance_dsl::memory.ne(memory))
-                    .or(instance_dsl::cpu_platform.is_not_null()),
+                    .or(instance_dsl::cpu_platform.is_not_null())
+                    .or(instance_dsl::virtual_platform.ne(virtual_platform)),
             )
         };
 
@@ -1378,14 +1385,19 @@ impl DataStore {
                 instance_dsl::ncpus.eq(ncpus),
                 instance_dsl::memory.eq(memory),
                 instance_dsl::cpu_platform.eq(cpu_platform),
+                instance_dsl::virtual_platform.eq(virtual_platform),
             ))
             .check_if_exists::<Instance>(authz_instance.id())
             .execute_and_check(&conn)
             .await?;
         match r.status {
             UpdateStatus::NotUpdatedButExists => {
-                if (r.found.ncpus, r.found.memory, r.found.cpu_platform)
-                    == (ncpus, memory, cpu_platform)
+                if (
+                    r.found.ncpus,
+                    r.found.memory,
+                    r.found.cpu_platform,
+                    r.found.virtual_platform,
+                ) == (ncpus, memory, cpu_platform, virtual_platform)
                 {
                     // Not updated, because the update is no change..
                     return Ok(());
@@ -1408,6 +1420,7 @@ impl DataStore {
                     "new ncpus" => ?ncpus,
                     "new memory" => ?memory,
                     "new CPU platform" => ?cpu_platform,
+                    "new virtual platform" => ?virtual_platform,
                 );
                 return Err(err.bail(Error::internal_error(
                     "unable to change instance CPU or memory",
@@ -2439,6 +2452,8 @@ mod tests {
                         disks: Vec::new(),
                         boot_disk: None,
                         cpu_platform: None,
+                        virtual_platform:
+                            instance_types::InstanceVirtualPlatform::Generic,
                         ssh_public_keys: None,
                         start: false,
                         auto_restart_policy: Default::default(),

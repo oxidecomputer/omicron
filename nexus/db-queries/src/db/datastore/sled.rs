@@ -5981,6 +5981,8 @@ pub(in crate::db::datastore) mod test {
                         disks: Vec::new(),
                         boot_disk: None,
                         cpu_platform: None,
+                        virtual_platform:
+                            instance::InstanceVirtualPlatform::Generic,
                         ssh_public_keys: None,
                         start: false,
                         auto_restart_policy: Default::default(),

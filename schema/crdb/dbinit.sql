@@ -1553,6 +1553,18 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
      */
     shutdown_policy_action omicron.public.instance_shutdown_action NOT NULL,
 
+    /*
+     * The required virtual platform for this instance. This non-optional field
+     * describes aspects of a virtual machine's behavior across all of the
+     * interfaces guest code can directly operate.
+     *
+     * Unlike CPU platforms, there is not (yet) an Instance/VMM virtual platform
+     * split; this largely reflects the fact that the "most generic" virtual
+     * platform happens to be generic across much more hardware than the most
+     * generic CPU platform (which is simply a reduced "AMD Milan").
+     */
+    virtual_platform omicron.public.instance_virtual_platform NOT NULL,
+
     CONSTRAINT vmm_iff_active_propolis CHECK (
         ((state = 'vmm') AND (active_propolis_id IS NOT NULL)) OR
         ((state != 'vmm') AND (active_propolis_id IS NULL))

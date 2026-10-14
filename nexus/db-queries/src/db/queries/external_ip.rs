@@ -999,6 +999,7 @@ mod tests {
     use nexus_types::external_api::instance::InstanceCreate;
     use nexus_types::external_api::instance::InstanceNetworkInterfaceAttachment;
     use nexus_types::external_api::instance::InstanceShutdownPolicy;
+    use nexus_types::external_api::instance::InstanceVirtualPlatform;
     use omicron_common::address::IpRange;
     use omicron_common::address::NUM_SOURCE_NAT_PORTS;
     use omicron_common::api::external::Error;
@@ -1135,6 +1136,8 @@ mod tests {
                 disks: vec![],
                 boot_disk: None,
                 cpu_platform: None,
+                virtual_platform:
+                    instance::InstanceVirtualPlatform::Generic,
                 start: false,
                 auto_restart_policy: Default::default(),
                 anti_affinity_groups: Vec::new(),
@@ -2690,6 +2693,7 @@ mod tests {
             disks: vec![],
             boot_disk: None,
             cpu_platform: None,
+            virtual_platform: InstanceVirtualPlatform::Generic,
             start: false,
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),

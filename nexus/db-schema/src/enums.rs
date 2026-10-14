@@ -75,6 +75,7 @@ define_enums! {
     InstanceShutdownActionEnum => "instance_shutdown_action",
     InstanceStateEnum => "instance_state_v2",
     InstanceIntendedStateEnum => "instance_intended_state",
+    InstanceVirtualPlatformEnum => "instance_virtual_platform",
     InvConfigReconcilerStatusKindEnum => "inv_config_reconciler_status_kind",
     InvPsuSlotEnum => "inv_psu_slot",
     InvSledUpdateDispositionEnum => "inv_sled_update_disposition",

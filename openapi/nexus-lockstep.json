@@ -5861,6 +5861,14 @@
           "time_run_state_updated": {
             "type": "string",
             "format": "date-time"
+          },
+          "virtual_platform": {
+            "description": "The virtual platform for this instance.\n\nTODO: say more?",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceVirtualPlatform"
+              }
+            ]
           }
         },
         "required": [
@@ -5877,7 +5885,8 @@
           "shutdown_policy",
           "time_created",
           "time_modified",
-          "time_run_state_updated"
+          "time_run_state_updated",
+          "virtual_platform"
         ]
       },
       "InstanceAutoRestartPolicy": {
@@ -6094,6 +6103,14 @@
               "destroyed"
             ]
           }
+        ]
+      },
+      "InstanceVirtualPlatform": {
+        "description": "TODO: docs",
+        "type": "string",
+        "enum": [
+          "initial",
+          "generic"
         ]
       },
       "IpNet": {

@@ -3381,7 +3381,9 @@ mod tests {
     fn fake_instance_initial_state(
         propolis_addr: SocketAddr,
     ) -> InstanceInitialState {
-        use propolis_client::instance_spec::{Board, InstanceSpec};
+        use propolis_client::instance_spec::{
+            Board, CpuTopology, InstanceSpec,
+        };
         let spec = VmmSpec(InstanceSpec {
             board: Board {
                 cpus: 1,
@@ -3389,6 +3391,7 @@ mod tests {
                 chipset: Default::default(),
                 guest_hv_interface: Default::default(),
                 cpuid: None,
+                cpu_topology: CpuTopology::single_socket_smt(),
             },
             components: Default::default(),
             smbios: None,

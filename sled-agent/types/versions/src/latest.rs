@@ -125,14 +125,14 @@ pub mod instance {
     pub use crate::v32::instance::ExternalIpv4Config;
     pub use crate::v32::instance::ExternalIpv6Config;
 
-    pub use crate::v44::instance::VmmSpec;
-
-    pub use crate::v59::instance::InstanceEnsureBody;
     pub use crate::v59::instance::InstanceSledLocalConfig;
 
     pub use crate::v66::instance::InstanceShutdownPolicy;
     pub use crate::v66::instance::VmmPutStateBody;
     pub use crate::v66::instance::VmmStateRequested;
+
+    pub use crate::v67::instance::InstanceEnsureBody;
+    pub use crate::v67::instance::VmmSpec;
 }
 
 pub mod inventory {

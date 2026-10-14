@@ -58,7 +58,7 @@ use nexus_types::external_api::instance::PrivateIpStackCreate;
 use nexus_types::external_api::instance::PrivateIpv4StackCreate;
 use nexus_types::external_api::instance::PrivateIpv6StackCreate;
 use nexus_types::external_api::instance::{
-    Instance, InstanceAutoRestartPolicy, InstanceCpuCount, InstanceCpuPlatform,
+    Instance, InstanceAutoRestartPolicy, InstanceCpuCount, InstanceCpuPlatform, InstanceVirtualPlatform,
     InstanceState,
 };
 use nexus_types::external_api::ip_pool::{
@@ -5820,6 +5820,7 @@ async fn test_updating_missing_instance_is_not_found(
             boot_disk: Nullable(None),
             auto_restart_policy: Nullable(None),
             cpu_platform: Nullable(None),
+            virtual_platform: InstanceVirtualPlatform::Generic,
             ncpus: InstanceCpuCount::try_from(0).unwrap(),
             memory: ByteCount::from_gibibytes_u32(0),
             multicast_groups: None,
@@ -5846,6 +5847,7 @@ fn instance_compute_update(
         boot_disk: Nullable(unchanged_boot_disk),
         auto_restart_policy: Nullable(instance.auto_restart_status.policy),
         cpu_platform: Nullable(instance.cpu_platform),
+        virtual_platform: instance.virtual_platform,
         ncpus: instance.ncpus,
         memory: instance.memory,
         // "If not provided, the instance's multicast group membership will not

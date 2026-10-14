@@ -720,6 +720,7 @@ mod tests {
     use nexus_types::external_api::instance::InstanceShutdownPolicy;
     use nexus_types_versions::latest::instance::Instance;
     use nexus_types_versions::latest::instance::InstanceNetworkInterfaceAttachment;
+    use nexus_types_versions::latest::instance::InstanceVirtualPlatform;
     use nexus_types_versions::latest::instance::InstanceSelector;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -770,6 +771,8 @@ mod tests {
                 disks: Vec::new(),
                 boot_disk: None,
                 cpu_platform: None,
+                virtual_platform:
+                    InstanceVirtualPlatform::Generic,
                 ssh_public_keys: None,
                 start: true,
                 auto_restart_policy: None,

@@ -591,6 +591,7 @@ impl super::Nexus {
             auto_restart_policy,
             boot_disk,
             cpu_platform,
+            virtual_platform,
             multicast_groups,
             enable_jumbo_frames,
             shutdown_policy,
@@ -642,6 +643,7 @@ impl super::Nexus {
             *memory,
             **cpu_platform,
             *enable_jumbo_frames,
+            *virtual_platform,
             shutdown_policy.unwrap_or_default(),
         );
 
@@ -3248,6 +3250,7 @@ mod tests {
     use futures::{SinkExt, StreamExt};
     use instance::InstanceNetworkInterfaceAttachment;
     use instance::InstanceShutdownPolicy;
+    use instance::InstanceVirtualPlatform;
     use nexus_db_model::{
         Instance as DbInstance, InstanceState as DbInstanceState,
         VmmCpuPlatform, VmmState as DbVmmState,
@@ -3374,6 +3377,7 @@ mod tests {
             disks: vec![],
             boot_disk: None,
             cpu_platform: None,
+            virtual_platform: InstanceVirtualPlatform::Generic,
             ssh_public_keys: None,
             start: false,
             auto_restart_policy: Default::default(),
@@ -3734,6 +3738,7 @@ mod tests {
             disks: vec![],
             boot_disk: None,
             cpu_platform: None,
+            virtual_platform: InstanceVirtualPlatform::Generic,
             ssh_public_keys: None,
             start: false,
             auto_restart_policy: Default::default(),

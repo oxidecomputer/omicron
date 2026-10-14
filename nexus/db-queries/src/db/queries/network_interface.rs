@@ -1972,6 +1972,7 @@ mod tests {
     use nexus_types::external_api::instance::InstanceCreate;
     use nexus_types::external_api::instance::InstanceNetworkInterfaceAttachment;
     use nexus_types::external_api::instance::InstanceShutdownPolicy;
+    use nexus_types::external_api::instance::InstanceVirtualPlatform;
     use nexus_types::external_api::instance::Ipv4Assignment;
     use nexus_types::external_api::instance::PrivateIpStackCreate;
     use nexus_types::external_api::instance::PrivateIpv4StackCreate;
@@ -2020,6 +2021,8 @@ mod tests {
             disks: vec![],
             boot_disk: None,
             cpu_platform: None,
+            virtual_platform:
+                InstanceVirtualPlatform::Generic,
             start: true,
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),

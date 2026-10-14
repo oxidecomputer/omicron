@@ -2195,6 +2195,8 @@ mod test {
                     instance_types::InstanceNetworkInterfaceAttachment::None,
                 boot_disk,
                 cpu_platform: None,
+                virtual_platform:
+                    instance_types::InstanceVirtualPlatform::Generic,
                 disks: data_disks,
                 external_ips: vec![],
                 start: true,
