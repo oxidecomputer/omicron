@@ -57,6 +57,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{SetOnce, mpsc, oneshot};
+use tokio_util::task::AbortOnDropHandle;
 use uuid::Uuid;
 
 // The depth of the request queue for the instance.
@@ -213,19 +214,9 @@ struct RunningState {
     client: Arc<PropolisClient>,
     // Handle to the zone.
     running_zone: RunningZone,
-    // Handle to the zpool monitor task, so that it may be aborted once the zone
+    // Handle to the zpool monitor task, so that it is aborted once the zone
     // no longer exists.
-    zpool_monitor_handle: Option<tokio::task::JoinHandle<()>>,
-}
-
-impl Drop for RunningState {
-    fn drop(&mut self) {
-        // Is your zpool monitor task running?
-        if let Some(ref task) = self.zpool_monitor_handle {
-            // Better go catch it!
-            task.abort();
-        }
-    }
+    _zpool_monitor_handle: Option<AbortOnDropHandle<()>>,
 }
 
 // Named type for values returned during propolis zone creation
@@ -1443,18 +1434,25 @@ impl InstanceRunner {
                     "instance_runner_task" => "zpool_monitor",
                     "zpool_name" => zpool_name.to_string(),
                 ));
-                Some(tokio::spawn(zpool_monitor(
+                let task = tokio::spawn(zpool_monitor(
                     log,
                     *zpool_name,
                     self.currently_managed_zpools_rx.clone(),
                     self.terminator.clone(),
-                )))
+                ));
+                // Once the running zone is destroyed, the zpool monitor task
+                // will no longer be needed, so ensure that dropping the running
+                // zone aborts it rather than leaking it forever.
+                Some(AbortOnDropHandle::new(task))
             }
             ZpoolOrRamdisk::Ramdisk => None,
         };
         self.monitor_handle = Some(monitor_handle);
-        self.running_state =
-            Some(RunningState { client, running_zone, zpool_monitor_handle });
+        self.running_state = Some(RunningState {
+            client,
+            running_zone,
+            _zpool_monitor_handle: zpool_monitor_handle,
+        });
     }
 
     /// Immediately terminates this instance's Propolis zone and cleans up any
