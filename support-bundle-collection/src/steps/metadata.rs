@@ -7,12 +7,13 @@
 use crate::collection::BundleCollection;
 use crate::output::BundleOutput;
 use crate::step::CollectionStepOutput;
+use crate::step::StepError;
 
 /// Writes the bundle ID to a file
 pub async fn collect_bundle_id(
     collection: &BundleCollection,
     output: &BundleOutput,
-) -> anyhow::Result<CollectionStepOutput> {
+) -> Result<CollectionStepOutput, StepError> {
     output.write("bundle_id.txt", collection.bundle().id.to_string()).await?;
 
     Ok(CollectionStepOutput::None)
@@ -22,7 +23,7 @@ pub async fn collect_bundle_id(
 pub async fn collect_reason_for_creation(
     collection: &BundleCollection,
     output: &BundleOutput,
-) -> anyhow::Result<CollectionStepOutput> {
+) -> Result<CollectionStepOutput, StepError> {
     output
         .write(
             "meta/reason_for_creation.txt",

@@ -17,6 +17,7 @@
 //! stored in the zip as-is, and everything else is deflated, so the zip is no
 //! larger than the directory, other than a small header for each entry.
 
+use crate::step::StepError;
 use anyhow::Context;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
@@ -33,11 +34,8 @@ use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio_util::sync::CancellationToken;
 
-/// The error returned when a write is refused because the bundle has reached
-/// its size limit.
-///
-/// Callers can find this error with `anyhow::Error::downcast_ref`, even
-/// through added context.
+/// The reason a write is refused because the bundle has reached its size
+/// limit. Writes return it as [`StepError::SizeLimitExceeded`].
 #[derive(Debug, thiserror::Error)]
 #[error("bundle reached its size limit of {limit} bytes")]
 pub struct SizeLimitExceeded {
@@ -185,7 +183,7 @@ impl BundleOutput {
         &self,
         name: impl AsRef<Utf8Path>,
         contents: impl AsRef<[u8]>,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), StepError> {
         let (path, rel) = self.resolve(name.as_ref());
         let contents = contents.as_ref();
         let len = contents.len() as u64;
@@ -197,7 +195,8 @@ impl BundleOutput {
                 .await
                 .with_context(|| format!("failed to write {path}"))
         }
-        .await;
+        .await
+        .map_err(StepError::Other);
         if result.is_err() && remove_partial_file(&path).await {
             self.budget.refund(len);
         }
@@ -218,7 +217,7 @@ impl BundleOutput {
         &self,
         name: impl AsRef<Utf8Path>,
         mut reader: R,
-    ) -> anyhow::Result<u64> {
+    ) -> Result<u64, StepError> {
         const BUF_SIZE: usize = 256 * 1024;
 
         let (path, rel) = self.resolve(name.as_ref());
@@ -245,7 +244,7 @@ impl BundleOutput {
             file.flush()
                 .await
                 .with_context(|| format!("failed to flush {path}"))?;
-            Ok(charged)
+            Ok::<_, StepError>(charged)
         }
         .await;
         if result.is_err() && remove_partial_file(&path).await {
@@ -259,8 +258,8 @@ impl BundleOutput {
     ///
     /// The writer given to `f` is buffered. Bytes are charged as they are
     /// written, and once the bundle reaches its size limit, writes fail. This
-    /// returns [`SizeLimitExceeded`] in that case, rather than whatever error
-    /// `f` made of it.
+    /// returns [`StepError::SizeLimitExceeded`] in that case, rather than
+    /// whatever error `f` made of it.
     ///
     /// # Cancel safety
     ///
@@ -270,7 +269,7 @@ impl BundleOutput {
         &self,
         name: impl AsRef<Utf8Path>,
         f: F,
-    ) -> anyhow::Result<()>
+    ) -> Result<(), StepError>
     where
         F: FnOnce(&mut dyn Write) -> anyhow::Result<()> + Send + 'static,
     {
@@ -302,8 +301,8 @@ impl BundleOutput {
                     budget.refund(charged.get());
                 }
                 return Err(match refused.take() {
-                    Some(exceeded) => anyhow::Error::new(exceeded),
-                    None => err,
+                    Some(exceeded) => StepError::SizeLimitExceeded(exceeded),
+                    None => StepError::Other(err),
                 });
             }
             Ok(())
@@ -392,11 +391,39 @@ mod test {
         (dir, output, stop)
     }
 
-    fn assert_size_limit_exceeded(err: &anyhow::Error) {
+    fn assert_size_limit_exceeded(err: &StepError) {
         assert!(
-            err.downcast_ref::<SizeLimitExceeded>().is_some(),
-            "expected SizeLimitExceeded, got: {err:#}"
+            matches!(err, StepError::SizeLimitExceeded(_)),
+            "expected SizeLimitExceeded, got: {err:?}"
         );
+    }
+
+    fn other_error(err: StepError) -> anyhow::Error {
+        match err {
+            StepError::Other(err) => err,
+            StepError::SizeLimitExceeded(_) => {
+                panic!("expected an error other than SizeLimitExceeded")
+            }
+        }
+    }
+
+    // Adding context to a step's error keeps whether the bundle reached its
+    // size limit, and adds the context to any other error.
+    #[test]
+    fn test_context_keeps_size_limit_exceeded() {
+        use crate::step::StepResultExt;
+
+        let exceeded: Result<(), StepError> =
+            Err(SizeLimitExceeded { limit: 1 }.into());
+        assert_size_limit_exceeded(
+            &exceeded.context("writing a file").unwrap_err(),
+        );
+
+        let other: Result<(), StepError> =
+            Err(anyhow::anyhow!("the disk broke").into());
+        let err =
+            other_error(other.with_context(|| "writing a file").unwrap_err());
+        assert_eq!(format!("{err:#}"), "writing a file: the disk broke");
     }
 
     #[tokio::test]
@@ -477,8 +504,9 @@ mod test {
     async fn test_write_stream_read_error_removes_partial_file() {
         let (dir, output, stop) = output_with_limit(Some(1 << 20));
         let reader = failing_reader(b"some data", "the network broke");
-        let err = output.write_stream("stream", reader).await.unwrap_err();
-        assert!(err.downcast_ref::<SizeLimitExceeded>().is_none());
+        let err = other_error(
+            output.write_stream("stream", reader).await.unwrap_err(),
+        );
         assert!(
             format!("{err:#}").contains("the network broke"),
             "unexpected error: {err:#}"
@@ -545,7 +573,7 @@ mod test {
             })
             .await
             .unwrap_err();
-        assert_eq!(err.to_string(), "serialization failed");
+        assert_eq!(other_error(err).to_string(), "serialization failed");
         assert!(!dir.path().join("file").exists());
         assert_eq!(output.budget.used(), 0);
         assert!(!stop.is_cancelled());

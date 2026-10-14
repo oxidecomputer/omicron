@@ -8,9 +8,10 @@ use crate::cache::Cache;
 use crate::collection::BundleCollection;
 use crate::output::BundleOutput;
 use crate::step::CollectionStepOutput;
+use crate::step::StepError;
 
 use anyhow::Context;
-use anyhow::bail;
+use anyhow::anyhow;
 use gateway_client::Client as MgsClient;
 use gateway_types::component::SpIdentifier;
 use gateway_types::component::SpType;
@@ -27,7 +28,7 @@ pub async fn collect(
     collection: &BundleCollection,
     cache: &Cache,
     output: &BundleOutput,
-) -> anyhow::Result<CollectionStepOutput> {
+) -> Result<CollectionStepOutput, StepError> {
     let log = collection.log();
 
     if !collection.data_selection().contains_sled_cubby_info() {
@@ -45,7 +46,7 @@ pub async fn collect(
     let nexus_sleds = nexus_sleds.map_or(&[][..], |v| v.as_slice());
 
     let Some(mgs_client) = mgs_client_option else {
-        bail!("Could not initialize MGS client");
+        return Err(anyhow!("Could not initialize MGS client").into());
     };
 
     write_sled_cubby_info(collection, log, mgs_client, nexus_sleds, output)
@@ -66,7 +67,7 @@ async fn write_sled_cubby_info(
     mgs_client: &MgsClient,
     nexus_sleds: &[Sled],
     output: &BundleOutput,
-) -> anyhow::Result<()> {
+) -> Result<(), StepError> {
     #[derive(Serialize)]
     struct SledInfo {
         cubby: Option<u16>,

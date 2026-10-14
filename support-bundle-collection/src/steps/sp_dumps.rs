@@ -9,6 +9,8 @@ use crate::collection::BundleCollection;
 use crate::output::BundleOutput;
 use crate::step::CollectionStep;
 use crate::step::CollectionStepOutput;
+use crate::step::StepError;
+use crate::step::StepResultExt;
 use crate::steps;
 
 use anyhow::Context;
@@ -22,7 +24,7 @@ pub async fn spawn_collection_steps(
     collection: &BundleCollection,
     cache: &Cache,
     output: &BundleOutput,
-) -> anyhow::Result<CollectionStepOutput> {
+) -> Result<CollectionStepOutput, StepError> {
     if !collection.data_selection().contains_sp_dumps() {
         return Ok(CollectionStepOutput::Skipped);
     }
@@ -68,7 +70,7 @@ async fn collect_sp_dump(
     mgs_client: &MgsClient,
     sp: SpIdentifier,
     dir: &BundleOutput,
-) -> anyhow::Result<CollectionStepOutput> {
+) -> Result<CollectionStepOutput, StepError> {
     if !collection.data_selection().contains_sp_dumps() {
         return Ok(CollectionStepOutput::Skipped);
     }
@@ -91,7 +93,7 @@ async fn save_sp_dumps(
     mgs_client: &MgsClient,
     sp: SpIdentifier,
     sp_dumps_dir: &BundleOutput,
-) -> anyhow::Result<()> {
+) -> Result<(), StepError> {
     let fetch_dumps = async {
         let dump_count = mgs_client
             .sp_task_dump_count(&sp.typ, sp.slot)

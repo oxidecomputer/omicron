@@ -7,13 +7,14 @@
 use crate::cache::Cache;
 use crate::collection::BundleCollection;
 use crate::output::BundleOutput;
-use crate::output::SizeLimitExceeded;
 use crate::step::CollectionStep;
 use crate::step::CollectionStepOutput;
+use crate::step::StepError;
+use crate::step::StepResultExt;
 use crate::zip::MERGE_ZIP_SUFFIX;
 
 use anyhow::Context;
-use anyhow::bail;
+use anyhow::anyhow;
 use futures::FutureExt;
 use futures::StreamExt;
 use futures::future::Future;
@@ -35,7 +36,7 @@ const MAX_CONCURRENT_SLED_AGENT_REQUESTS: usize = 10;
 pub async fn spawn_query_all_sleds(
     collection: &BundleCollection,
     cache: &Cache,
-) -> anyhow::Result<CollectionStepOutput> {
+) -> Result<CollectionStepOutput, StepError> {
     let Some(sled_selection) = collection.data_selection().sled_selection()
     else {
         return Ok(CollectionStepOutput::Skipped);
@@ -48,7 +49,7 @@ pub async fn spawn_query_all_sleds(
     };
 
     let Some(all_sleds) = all_sleds else {
-        bail!("Could not read list of sleds");
+        return Err(anyhow!("Could not read list of sleds").into());
     };
 
     let mut extra_steps: Vec<CollectionStep> = vec![];
@@ -95,7 +96,7 @@ async fn collect_data_from_sled(
     sled: Sled,
     time_range: BundleTimeRange,
     output: &BundleOutput,
-) -> anyhow::Result<CollectionStepOutput> {
+) -> Result<CollectionStepOutput, StepError> {
     let (log, opctx, datastore) =
         (collection.log(), collection.opctx(), collection.datastore());
 
@@ -128,7 +129,7 @@ async fn collect_data_from_sled(
                 .await.with_context(|| {
                 format!("Failed to save 'error.txt' to bundle when recording error: {err}")
             })?;
-            bail!("Could not contact sled: {err}");
+            return Err(anyhow!("Could not contact sled: {err}").into());
         }
     };
 
@@ -226,9 +227,7 @@ async fn collect_data_from_sled(
         //
         // Running out of space is reported by the step framework, rather
         // than for each file that didn't fit.
-        if let Err(e) = result
-            && e.downcast_ref::<SizeLimitExceeded>().is_none()
-        {
+        if let Err(StepError::Other(e)) = result {
             error!(
                 log,
                 "failed to write diagnostic command output to \
@@ -239,7 +238,9 @@ async fn collect_data_from_sled(
 
     let zones = tokio::select! {
         _ = collection.stopped() => return Ok(CollectionStepOutput::None),
-        result = sled_client.support_logs() => result?.into_inner(),
+        result = sled_client.support_logs() => {
+            result.context("failed to list zone logs")?.into_inner()
+        }
     };
 
     // For each zone we fire off a request to its sled-agent to collect
@@ -270,9 +271,7 @@ async fn collect_data_from_sled(
     while let Some(log_collection_result) = log_futs.next().await {
         // We log any errors saving the zip file to disk and
         // continue on.
-        if let Err(e) = log_collection_result
-            && e.downcast_ref::<SizeLimitExceeded>().is_none()
-        {
+        if let Err(StepError::Other(e)) = log_collection_result {
             error!(
                 log,
                 "failed to write logs output";
@@ -296,7 +295,7 @@ async fn save_diag_cmd_output_or_error<F, S: serde::Serialize>(
     command: &str,
     future: F,
     cancellation_token: &CancellationToken,
-) -> anyhow::Result<()>
+) -> Result<(), StepError>
 where
     F: Future<
             Output = Result<
@@ -342,7 +341,7 @@ async fn save_zone_log_zip_or_error(
     path: &BundleOutput,
     time_range: &BundleTimeRange,
     cancellation_token: &CancellationToken,
-) -> anyhow::Result<()> {
+) -> Result<(), StepError> {
     // Bind with names so the positional Progenitor call below can't
     // accidentally swap start and end: query parameters are supplied in
     // alphabetical order, which is why "end time" comes before
@@ -369,7 +368,7 @@ async fn save_zone_log_zip_or_error(
                 // than a zip that could not be saved. A bundle that's out of
                 // space has no room for the error either, and records what it
                 // left out elsewhere.
-                if err.downcast_ref::<SizeLimitExceeded>().is_none() {
+                if let StepError::Other(err) = &err {
                     let err_string =
                         InlineErrorChain::new(err.as_ref()).to_string();
                     save_zone_log_error(log, zone, path, err_string).await;
@@ -404,7 +403,7 @@ async fn save_zone_log_error(
             "zone" => zone,
             "file" => %err_name,
             "error" => %err_string,
-            "write_error" => InlineErrorChain::new(write_err.as_ref()),
+            "write_error" => InlineErrorChain::new(write_err.as_error()),
         );
     }
 }
@@ -424,7 +423,7 @@ async fn save_zone_log_error(
 async fn save_zone_log_zip(
     bytestream: sled_agent_client::ByteStream,
     output_dir: &BundleOutput,
-) -> anyhow::Result<()> {
+) -> Result<(), StepError> {
     let stream = bytestream
         .into_inner()
         .map(|chunk| chunk.map_err(|e| std::io::Error::other(e)));

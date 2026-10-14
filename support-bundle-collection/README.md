@@ -36,9 +36,20 @@ records what was left out in `meta/report.json` and
 `meta/SIZE_LIMIT_EXCEEDED.txt`.
 
 Steps don't need to do anything special to support this, beyond what they do
-for cancellation: stop promptly once the stop token is cancelled. A step that
-gets `SizeLimitExceeded` can return it as an error; the framework reports the
-step as cut short by the size limit, rather than as failed.
+for cancellation: stop promptly once the stop token is cancelled.
+
+Steps, and writes to `BundleOutput`, return a `StepError`, which keeps
+`StepError::SizeLimitExceeded` apart from every other failure
+(`StepError::Other`). A step can return a refused write with `?`; the framework
+reports the step as cut short by the size limit, rather than as failed. A step
+that records its own errors, rather than returning them, should match on
+`StepError::Other`, so that running out of space isn't also reported as one of
+its errors.
+
+`StepError` does not implement `std::error::Error`, so that it cannot be turned
+into an `anyhow::Error` by mistake, losing the size limit variant. To add
+context to it, use `StepResultExt::context` or `StepResultExt::with_context`,
+rather than anyhow's.
 
 ### Tracing
 

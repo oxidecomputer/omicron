@@ -6,8 +6,9 @@
 
 use crate::collection::BundleCollection;
 use crate::output::BundleOutput;
-use crate::output::SizeLimitExceeded;
 use crate::step::CollectionStepOutput;
+use crate::step::StepError;
+use crate::step::StepResultExt;
 use nexus_types::fm::ereport::EreportFilters;
 use nexus_types::support_bundle::BundleTimeRange;
 
@@ -26,7 +27,7 @@ use slog_error_chain::InlineErrorChain;
 pub async fn collect(
     collection: &BundleCollection,
     output: &BundleOutput,
-) -> anyhow::Result<CollectionStepOutput> {
+) -> Result<CollectionStepOutput, StepError> {
     let log = collection.log();
     let ereport_filters = collection.data_selection().ereport_filters();
 
@@ -37,9 +38,7 @@ pub async fn collect(
     let time_range = collection.data_selection().time_range().clone();
     let ereports_dir = output.join("ereports");
     let mut status = SupportBundleEreportStatus::default();
-    // Running out of space is reported by the step framework, rather than as
-    // an error collecting ereports.
-    if let Err(err) = save_ereports(
+    match save_ereports(
         collection,
         ereport_filters.clone(),
         time_range,
@@ -47,16 +46,21 @@ pub async fn collect(
         &mut status,
     )
     .await
-        && err.downcast_ref::<SizeLimitExceeded>().is_none()
     {
-        warn!(
-            log,
-            "Support bundle: ereport collection failed \
-             ({} collected successfully)",
-             status.n_collected;
-            InlineErrorChain::new(err.as_ref())
-        );
-        status.errors.push(InlineErrorChain::new(err.as_ref()).to_string());
+        Ok(()) => {}
+        // Running out of space is reported by the step framework, rather than
+        // as an error collecting ereports.
+        Err(StepError::SizeLimitExceeded(_)) => {}
+        Err(StepError::Other(err)) => {
+            warn!(
+                log,
+                "Support bundle: ereport collection failed \
+                 ({} collected successfully)",
+                 status.n_collected;
+                InlineErrorChain::new(err.as_ref())
+            );
+            status.errors.push(InlineErrorChain::new(err.as_ref()).to_string());
+        }
     }
 
     let details = serde_json::to_value(&status)
@@ -76,7 +80,7 @@ async fn save_ereports(
     time_range: BundleTimeRange,
     dir: BundleOutput,
     status: &mut SupportBundleEreportStatus,
-) -> anyhow::Result<()> {
+) -> Result<(), StepError> {
     let (log, opctx, datastore) =
         (collection.log(), collection.opctx(), collection.datastore());
     let mut paginator =
@@ -88,9 +92,7 @@ async fn save_ereports(
             result = datastore.ereport_fetch_matching(
                 &opctx, &filters, &time_range, &pagparams
             ) => {
-                result.map_err(|e| {
-                    e.internal_context("failed to query for ereports")
-                })?
+                result.context("failed to query for ereports")?
             }
         };
         paginator = p.found_batch(&ereports, &|ereport| {
@@ -131,7 +133,7 @@ async fn save_ereports(
 async fn write_ereport(
     ereport: Ereport,
     dir: &BundleOutput,
-) -> anyhow::Result<()> {
+) -> Result<(), StepError> {
     // Here's where we construct the file path for each ereport JSON file,
     // given the top-level ereport directory path.  Each ereport is stored in a
     // subdirectory for the part and serial numbers of the system that produced

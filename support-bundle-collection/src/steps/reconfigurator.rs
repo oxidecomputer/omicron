@@ -7,6 +7,7 @@
 use crate::collection::BundleCollection;
 use crate::output::BundleOutput;
 use crate::step::CollectionStepOutput;
+use crate::step::StepError;
 
 use anyhow::Context;
 use nexus_reconfigurator_preparation::reconfigurator_state_load;
@@ -16,7 +17,7 @@ use slog::warn;
 pub async fn collect(
     collection: &BundleCollection,
     output: &BundleOutput,
-) -> anyhow::Result<CollectionStepOutput> {
+) -> Result<CollectionStepOutput, StepError> {
     let (log, opctx, datastore) =
         (collection.log(), collection.opctx(), collection.datastore());
 

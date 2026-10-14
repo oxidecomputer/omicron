@@ -16,7 +16,85 @@ use nexus_types::internal_api::background::SupportBundleCollectionStep;
 use nexus_types::internal_api::background::SupportBundleCollectionStepStatus;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
+use std::fmt::Display;
 use std::sync::Arc;
+
+/// The error returned by a collection step, and by writes to the bundle.
+///
+/// Running out of space is kept apart from other failures, so that the step
+/// framework can report a step that reached the bundle's size limit as cut
+/// short, rather than as failed.
+///
+/// This deliberately does not implement `std::error::Error`. If it did, `?`
+/// into an `anyhow::Result`, or anyhow's `Context`, would turn it into an
+/// `anyhow::Error`, and a later `?` would make that `StepError::Other`, losing
+/// the fact that the size limit was reached. Instead, the compiler rejects
+/// both, and [`StepResultExt`] adds context while keeping the variant.
+#[derive(Debug)]
+pub enum StepError {
+    /// A write was refused because the bundle reached its size limit.
+    SizeLimitExceeded(SizeLimitExceeded),
+    /// Any other failure.
+    Other(anyhow::Error),
+}
+
+impl StepError {
+    /// Returns this error as a `std::error::Error`, for logging.
+    pub fn as_error(&self) -> &(dyn std::error::Error + Send + Sync + 'static) {
+        match self {
+            StepError::SizeLimitExceeded(err) => err,
+            StepError::Other(err) => err.as_ref(),
+        }
+    }
+}
+
+impl From<SizeLimitExceeded> for StepError {
+    fn from(err: SizeLimitExceeded) -> Self {
+        StepError::SizeLimitExceeded(err)
+    }
+}
+
+impl From<anyhow::Error> for StepError {
+    fn from(err: anyhow::Error) -> Self {
+        StepError::Other(err)
+    }
+}
+
+/// Adds context to a [`StepError`], like anyhow's `Context`, without losing
+/// whether the bundle reached its size limit.
+///
+/// Context is added only to [`StepError::Other`]. Reaching the size limit is
+/// reported once for the whole bundle, rather than with each step's context.
+pub trait StepResultExt<T> {
+    fn context<C>(self, context: C) -> Result<T, StepError>
+    where
+        C: Display + Send + Sync + 'static;
+
+    fn with_context<C, F>(self, f: F) -> Result<T, StepError>
+    where
+        C: Display + Send + Sync + 'static,
+        F: FnOnce() -> C;
+}
+
+impl<T> StepResultExt<T> for Result<T, StepError> {
+    fn context<C>(self, context: C) -> Result<T, StepError>
+    where
+        C: Display + Send + Sync + 'static,
+    {
+        self.with_context(|| context)
+    }
+
+    fn with_context<C, F>(self, f: F) -> Result<T, StepError>
+    where
+        C: Display + Send + Sync + 'static,
+        F: FnOnce() -> C,
+    {
+        self.map_err(|err| match err {
+            StepError::Other(err) => StepError::Other(err.context(f())),
+            err @ StepError::SizeLimitExceeded(_) => err,
+        })
+    }
+}
 
 // This type describes a single step in the Support Bundle collection.
 //
@@ -32,7 +110,7 @@ pub type CollectionStepFn = Box<
             &'b Arc<BundleCollection>,
             &'b BundleOutput,
         )
-            -> BoxFuture<'b, anyhow::Result<CollectionStepOutput>>
+            -> BoxFuture<'b, Result<CollectionStepOutput, StepError>>
         + Send,
 >;
 
@@ -58,10 +136,8 @@ impl CollectionStep {
             Ok(output) => output,
             // Running out of space is not a failure of the step: the
             // scheduler reports it, for every step it cut short.
-            Err(err) if err.downcast_ref::<SizeLimitExceeded>().is_some() => {
-                CollectionStepOutput::None
-            }
-            Err(err) => {
+            Err(StepError::SizeLimitExceeded(_)) => CollectionStepOutput::None,
+            Err(StepError::Other(err)) => {
                 warn!(
                     log,
                     "Step failed";
