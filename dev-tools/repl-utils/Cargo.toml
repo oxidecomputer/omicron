@@ -12,5 +12,9 @@ anyhow.workspace = true
 camino.workspace = true
 clap.workspace = true
 reedline.workspace = true
+shell-words.workspace = true
 omicron-workspace-hack.workspace = true
 subprocess.workspace = true
+
+[dev-dependencies]
+camino-tempfile.workspace = true

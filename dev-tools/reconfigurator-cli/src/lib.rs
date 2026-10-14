@@ -394,11 +394,11 @@ impl CmdReconfiguratorSim {
         }
 
         if let Some(input_file) = &self.input_file {
-            run_repl_from_file(input_file, &mut |cmd: TopLevelArgs| {
+            run_repl_from_file(input_file, &mut |cmd: TopLevelArgs, _| {
                 process_command(&mut sim, cmd, &log_capture)
             })
         } else {
-            run_repl_on_stdin(&mut |cmd: TopLevelArgs| {
+            run_repl_on_stdin(&mut |cmd: TopLevelArgs, _| {
                 process_command(&mut sim, cmd, &log_capture)
             })
         }
