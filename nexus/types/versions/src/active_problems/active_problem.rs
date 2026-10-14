@@ -64,10 +64,6 @@ pub struct ActiveProblem {
     ///
     /// This may change as the problem progresses.
     pub action_required: String,
-    /// Other Active Problems which cause this problem.
-    pub causes: Vec<RelatedActiveProblem>,
-    /// Other Active Problems caused by this problem.
-    pub causing: Vec<RelatedActiveProblem>,
 }
 
 /// The state of an Active Problem.
@@ -87,7 +83,7 @@ pub enum ActiveProblemState {
     },
 }
 
-/// A reference to an Active Problem related to another Active Problem
+/// An Active Problem that is a cause or consequence of another Active Problem
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RelatedActiveProblem {
     /// ID of the related Active Problem
@@ -95,9 +91,9 @@ pub struct RelatedActiveProblem {
     pub id: ActiveProblemUuid,
     /// A human-readable summary of why the problems are related.
     pub reason: String,
-    /// The revision of the referencing Active Problem in which this
+    /// The revision of the requested Active Problem in which this
     /// relationship was added.
-    pub revision_added: u32,
+    pub revision_added: u64,
 }
 
 /// Path parameters to look up an Active Problem by its ID.
