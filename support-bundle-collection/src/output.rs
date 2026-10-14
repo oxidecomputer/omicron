@@ -102,7 +102,7 @@ impl SizeBudget {
         // Add the bytes only if they fit, in one atomic step, so that `used`
         // never counts a write that's refused. Otherwise, a concurrent write
         // could see those bytes, and be refused, and blamed, in its place.
-        let fits = self.used.fetch_update(
+        let fits = self.used.try_update(
             Ordering::Relaxed,
             Ordering::Relaxed,
             |used| used.checked_add(n).filter(|&total| total <= limit),
