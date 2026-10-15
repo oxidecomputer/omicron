@@ -368,8 +368,11 @@ async fn test_system_certificates_crud(cptestctx: &ControlPlaneTestContext) {
         error.message
     );
 
-    // Create a certificate in the other silo.
-    let chain = CertificateChain::new(cptestctx.wildcard_silo_dns_name());
+    // Create a certificate valid only for the other silo.
+    let chain = CertificateChain::new(format!(
+        "{other_silo_name}.sys.{}",
+        cptestctx.external_dns_zone_name
+    ));
     let params = CertificateCreate {
         cert: chain.cert_chain_as_pem(),
         key: chain.end_cert_private_key_as_pem(),
