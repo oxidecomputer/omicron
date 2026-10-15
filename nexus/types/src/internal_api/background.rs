@@ -326,6 +326,8 @@ impl SupportBundleCollectionStep {
     pub const STEP_SLED_CUBBY_INFO: &'static str = "sled cubby info";
     pub const STEP_SPAWN_SP_DUMPS: &'static str =
         "spawn steps to query all SP dumps";
+    pub const STEP_SPAWN_SP_COMPONENTS: &'static str =
+        "spawn steps to query all SP components";
     pub const STEP_SPAWN_SLEDS: &'static str = "spawn steps to query all sleds";
 }
 

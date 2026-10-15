@@ -43,6 +43,8 @@ pub enum BundleDataCategory {
     SledCubbyInfo,
     /// Saves task dumps from SPs.
     SpDumps,
+    /// Collects component details (including sensor readings) from SPs.
+    SpComponents,
     /// Collects ereports.
     Ereports,
 }
@@ -60,6 +62,7 @@ pub enum BundleData {
     HostInfo(SledSelection),
     SledCubbyInfo,
     SpDumps,
+    SpComponents,
     Ereports(EreportFilters),
 }
 
@@ -70,6 +73,7 @@ impl BundleData {
             Self::HostInfo(_) => BundleDataCategory::HostInfo,
             Self::SledCubbyInfo => BundleDataCategory::SledCubbyInfo,
             Self::SpDumps => BundleDataCategory::SpDumps,
+            Self::SpComponents => BundleDataCategory::SpComponents,
             Self::Ereports(_) => BundleDataCategory::Ereports,
         }
     }
@@ -96,6 +100,7 @@ impl fmt::Display for DisplayBundleData<'_> {
             }
             BundleData::SledCubbyInfo => write!(f, "sled_cubby_info"),
             BundleData::SpDumps => write!(f, "sp_dumps"),
+            BundleData::SpComponents => write!(f, "sp_components"),
             BundleData::Ereports(filters) => {
                 write!(f, "ereports({})", filters.display())
             }
@@ -207,6 +212,7 @@ impl BundleDataSelection {
             .with_all_sleds()
             .with_sled_cubby_info()
             .with_sp_dumps()
+            .with_sp_components()
             .with_ereports(EreportFilters::new())
     }
 
@@ -246,6 +252,12 @@ impl BundleDataSelection {
     /// Adds SP dump collection.
     pub fn with_sp_dumps(mut self) -> Self {
         self.insert(BundleData::SpDumps);
+        self
+    }
+
+    /// Adds SP component details collection.
+    pub fn with_sp_components(mut self) -> Self {
+        self.insert(BundleData::SpComponents);
         self
     }
 
@@ -313,6 +325,11 @@ impl BundleDataSelection {
     /// Returns `true` if SP dumps should be collected.
     pub fn contains_sp_dumps(&self) -> bool {
         self.data.contains_key(&BundleDataCategory::SpDumps)
+    }
+
+    /// Returns `true` if SP component details should be collected.
+    pub fn contains_sp_components(&self) -> bool {
+        self.data.contains_key(&BundleDataCategory::SpComponents)
     }
 
     /// Returns the ereport filters, or `None` if ereports are not in

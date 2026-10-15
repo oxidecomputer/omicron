@@ -174,6 +174,7 @@ pub struct DataSelectionFlags {
     pub include_reconfigurator: bool,
     pub include_sled_cubby_info: bool,
     pub include_sp_dumps: bool,
+    pub include_sp_components: bool,
 }
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
@@ -306,6 +307,9 @@ impl TryFrom<BundleDataSelection>
         }
         if row.flags.include_sp_dumps {
             selection.insert(BundleData::SpDumps);
+        }
+        if row.flags.include_sp_components {
+            selection.insert(BundleData::SpComponents);
         }
         if let Some(host_info) = row.host_info {
             selection.insert(host_info.into());
