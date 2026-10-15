@@ -94,7 +94,7 @@ impl TryFrom<(ActiveProblem, ActiveProblemRevision)> for ActiveProblemView {
         let ActiveProblemRevision {
             problem_id,
             revision,
-            time_created: _, // we don't care when the revision was deleted here.
+            time_created: _, // we don't care when the revision was created here.
             time_resolved,
             code,
             summary,
