@@ -480,19 +480,24 @@ impl RssAccess {
                         // After trust quorum initializes we no longer allow
                         // membership changes. Check for that here so we can
                         // error out early.
-                        if saved.trust_quorum_peers
-                            != request.trust_quorum_peers
-                            && !membership_change_still_possible
-                                .load(Ordering::Relaxed)
+                        //
+                        // At that point, we also no longer allow rack network
+                        // changes, so also error out if necessary.
+                        if !membership_change_still_possible
+                            .load(Ordering::Relaxed)
                         {
-                            invalid_membership_change = true;
-                            return false;
-                        }
-                        if saved.rack_network_config.rack_subnet
-                            != request.rack_network_config.rack_subnet
-                        {
-                            invalid_rack_subnet_change = true;
-                            return false;
+                            if saved.trust_quorum_peers
+                                != request.trust_quorum_peers
+                            {
+                                invalid_membership_change = true;
+                                return false;
+                            }
+                            if saved.rack_network_config.rack_subnet
+                                != request.rack_network_config.rack_subnet
+                            {
+                                invalid_rack_subnet_change = true;
+                                return false;
+                            }
                         }
                         *saved = request;
                         true
